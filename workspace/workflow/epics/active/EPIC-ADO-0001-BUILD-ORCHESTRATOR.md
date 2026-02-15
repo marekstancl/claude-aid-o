@@ -1,215 +1,228 @@
-# EPIC: ADO-0001 — Build AI Development Orchestrator
+# EPIC: ADO-0001 — Build AI Development Orchestrator (Marketplace Plugin)
 
 ## Kontext
 
 Existuje fungující single-agent framework (Agent Skills v4.0 pro C.I.C.E.R.O.)
 s 5 subagenty, 8 commands, 11 skills, session managementem a quality gates.
 
-Cílem je evoluce do Controller + Workers architektury, kde orchestrátor
-autonomně řídí 9 specializovaných agentů, kontroluje výstupy, provádí
-gates a eskaluje na PM přes Slack jen když si neví rady.
+Cílem je evoluce do Controller + Workers architektury jako **instalovatelný
+Claude Code plugin**, který lze použít na jakémkoliv projektu. Orchestrátor
+autonomně řídí 9 specializovaných agentů, kontroluje výstupy, provádí gates
+a eskaluje na PM přes Slack jen když si neví rady.
 
 Referenční dokumentace: `docs/MULTIAGENT_GUIDE.md`
 Zdrojové materiály: `_unzipped/ado_starter_kit/`, `_unzipped/ai_dev_orchestrator_docs/`
 
 ## Cíl
 
-Postavit plně funkční ADO, který:
-1. Vezme Epic soubor
-2. Vygeneruje Plan JSON (role, závislosti, paralelizace)
-3. Vytvoří Session detailed file
-4. Spustí pipeline: dispatche agenty po fázích
-5. Kontroluje výstupy po každé fázi (acceptance checks)
-6. Provede finální session gates
-7. Při problémech: retry (max 3), pak Slack escalation
-8. Archivuje evidenci
+Postavit marketplace s pluginem `ado-orchestrator`, který:
+1. Se nainstaluje přes `claude plugin install ado-orchestrator`
+2. Příkazem `/ado-init` vytvoří doporučenou workspace strukturu v projektu
+3. Vezme Epic soubor → vygeneruje Plan JSON → dispatche agenty → gates → evidence
+4. Funguje autonomně s Slack escalation pro PM
+
+## Výstupní struktura
+
+```
+ai-orchestrator/                       # Marketplace root
+  marketplace.json                     # Registr pluginů
+  plugins/
+    ado-orchestrator/                  # Plugin: AI Development Orchestrator
+      .claude-plugin/
+        plugin.json                    # Plugin manifest (name, version, ...)
+      agents/                          # 9 role-agents + 5 utility agents
+        architect.md
+        domain.md
+        backend.md
+        frontend.md
+        qa.md
+        security.md
+        observability.md
+        docs-writer.md
+        release.md
+        code-reviewer.md              # Přenesený z claude/
+        docs-reviewer.md              # Přenesený z claude/
+        quality-gates-runner.md        # Přenesený z claude/
+        session-validator.md           # Přenesený z claude/
+        lessons-extractor.md           # Přenesený z claude/
+      commands/
+        ado-init.md                    # Vytvoří workspace strukturu v projektu
+        plan-epic.md                   # Epic → Plan JSON + Session file
+        run-epic.md                    # Hlavní orchestrační loop
+        run-step.md                    # Manuální spuštění jednoho kroku
+        epic-status.md                 # Zobrazení stavu
+        quality-gates.md               # Přenesený z claude/
+        session-start.md               # Přenesený z claude/
+        session-end.md                 # Přenesený z claude/
+        handoff.md                     # Přenesený z claude/
+        audit.md                       # Přenesený z claude/
+        coding-standards.md            # Přenesený z claude/
+        testing.md                     # Přenesený z claude/
+        docs-protocol.md              # Přenesený z claude/
+      skills/
+        epic-orchestration.md          # Controller state machine
+        agent-core.md                  # Přenesený (zjednodušený)
+        quality-gates.md               # Přenesený (zjednodušený)
+        session-management.md          # Přenesený (zjednodušený)
+      defaults/                        # Výchozí soubory pro /ado-init
+        policies/
+          gates.yaml
+          decision-policies.yaml
+        templates/
+          epic.md
+          plan.schema.json
+        playbooks/
+          architect.md
+          domain.md
+          backend.md
+          frontend.md
+          qa.md
+          security.md
+          observability.md
+          docs.md
+          release.md
+      README.md
+```
+
+Co `/ado-init` vytvoří v cílovém projektu:
+
+```
+cílový-projekt/
+  workspace/
+    active-work.md
+    session-log.md
+    command-history.md
+    lessons-learned.md
+    bugs.md
+    sessions/{active,completed}/
+    workflow/epics/{active,completed}/
+    workflow/plans/
+  policies/                            # Zkopírováno z defaults/, přizpůsobitelné
+    gates.yaml
+    decision-policies.yaml
+  templates/                           # Zkopírováno z defaults/
+    epic.md
+    plan.schema.json
+  playbooks/                           # Zkopírováno z defaults/
+    architect.md, domain.md, ...
+  evidence/
+    .gitkeep
+```
 
 ## Scope
 
 ### Allowed files/paths
-- .claude/agents/
-- .claude/commands/
-- .claude/skills/epic-orchestration/
-- templates/
-- playbooks/
-- policies/
-- evidence/
-- workspace/
+- plugins/ado-orchestrator/
+- marketplace.json
 - docs/
+- workspace/
 
 ### Forbidden zones
-- Žádné (nový projekt, vše je v scope)
+- Žádné (nový projekt)
 
 ## Constraints
-- Žádný externí framework (vše nativně v Claude Code)
+- Žádný externí framework (vše nativně v Claude Code plugin systém)
 - Decision policies musí pokrývat 90%+ rozhodnutí bez PM
-- Evidence by design — každý run musí produkovat audit trail
-- Zpětná kompatibilita s existujícím claude/ setupem
+- Evidence by design
+- Plugin musí být self-contained (žádné externí závislosti)
+- Existující agenti/commands/skills z claude/ se přenesou do pluginu
 
 ## DoD Gates
+- Plugin se nainstaluje bez chyb
+- `/ado-init` vytvoří kompletní workspace strukturu
 - Dummy EPIC projede celým pipeline end-to-end
-- Všech 9 agentů funguje a produkuje výstupy
-- Gates engine vyhodnotí pass/fail
-- Retry loop funguje (záměrně failing gate → fix → pass)
-- Evidence store obsahuje kompletní audit trail
+- Všech 9 role-agentů funguje
+- Gates engine vyhodnotí pass/fail + retry
+- Evidence store kompletní
 - Dokumentace aktualizována
 
 ---
 
 ## Sessions
 
-### Session 1: Foundation + Controller State Machine (Phase 0 + A)
+### Session 1: Plugin Scaffold + Controller State Machine
 
-**Cíl:** Přenést existující claude/ setup, vytvořit orchestrační skill
-s Controller state machine a evidence store.
+**Cíl:** Vytvořit plugin strukturu, přenést existující setup,
+vytvořit orchestrační skill a decision policies.
 
 **Deliverables:**
-- .claude/ setup přenesený a funkční
-- `skills/epic-orchestration/instructions.md` — state machine logika
-- `policies/decision-policies.yaml` — rozhodovací pravidla orchestrátora
-- `policies/gates.yaml` — gates konfigurace
-- `templates/epic.md` — EPIC šablona
-- `templates/plan.schema.json` — Plan JSON schema
-- `evidence/` directory structure
-- CLAUDE.md pro projekt
+- marketplace.json
+- plugins/ado-orchestrator/.claude-plugin/plugin.json
+- Přenesené agents/, commands/, skills/ v plugin struktuře
+- skills/epic-orchestration.md — Controller state machine
+- defaults/policies/decision-policies.yaml
+- defaults/policies/gates.yaml
+- defaults/templates/epic.md + plan.schema.json
+- commands/ado-init.md
+- README.md
 
 **Acceptance:**
+- Plugin struktura kompletní
+- `/ado-init` vytvoří workspace v testovacím projektu
 - Orchestrační skill se načte bez chyb
-- Decision policies pokrývají: quality thresholds, arch principles,
-  escalation triggers, auto-decisions
 
 ---
 
-### Session 2: EPIC Runner Commands (Phase B)
+### Session 2: EPIC Runner Commands
 
-**Cíl:** Vytvořit 4 orchestrační commands.
-
-**Deliverables:**
-- `commands/plan-epic.md` — Epic → Plan JSON + Session file
-- `commands/run-epic.md` — hlavní orchestrační loop
-- `commands/run-step.md` — manuální spuštění jednoho kroku
-- `commands/epic-status.md` — zobrazení stavu
+**Cíl:** 4 orchestrační commands (plan-epic, run-epic, run-step, epic-status).
 
 **Acceptance:**
-- `/plan-epic` na dummy EPIC vytvoří validní Plan JSON
-- `/epic-status` zobrazí stav
+- `/plan-epic` vytvoří validní Plan JSON z dummy EPICu
 - `/run-step` spustí jeden krok s mock agentem
 
 ---
 
-### Session 3: Gates Engine + Retry (Phase C)
+### Session 3: Gates Engine + Retry
 
-**Cíl:** Gates runner, pass/fail reporting, retry loop.
-
-**Deliverables:**
-- Rozšíření quality-gates-runner agenta o gates.yaml parsing
-- Pass/fail report generace do evidence/
-- Retry loop logika v orchestrátoru (max 3 pokusy)
-- Fix instrukce generace pro failing gate
+**Cíl:** Gates runner, pass/fail report, retry loop (max 3).
 
 **Acceptance:**
-- Záměrně failing gate → retry → agent opraví → pass
-- Gates report uložen do evidence/
-- Po 3 failech: escalation (zatím print, Slack v Session 6)
+- Failing gate → retry → fix → pass
+- Evidence uložena
 
 ---
 
-### Session 4: Worker Agenti (Phase D)
+### Session 4: 9 Worker Agentů + Playbooks
 
-**Cíl:** 9 role-based agentů + playbooks.
-
-**Deliverables:**
-- `agents/architect.md` + `playbooks/architect.md`
-- `agents/domain.md` + `playbooks/domain.md`
-- `agents/backend.md` + `playbooks/backend.md`
-- `agents/frontend.md` + `playbooks/frontend.md`
-- `agents/qa.md` + `playbooks/qa.md`
-- `agents/security.md` + `playbooks/security.md`
-- `agents/observability.md` + `playbooks/observability.md`
-- `agents/docs-writer.md` + `playbooks/docs.md`
-- `agents/release.md` + `playbooks/release.md`
+**Cíl:** Všech 9 role-based agentů s detailními playbooks.
 
 **Acceptance:**
-- Každý agent se načte bez chyb
-- Dummy EPIC → dispatch každého agenta → každý vrátí smysluplný výstup
-- Scope enforcement funguje (agent nepíše mimo allowed paths)
+- Každý agent produkuje smysluplný výstup
+- Scope enforcement funguje
 
 ---
 
-### Session 5: Planner + Paralelizace (Phase E)
+### Session 5: Planner + Paralelizace
 
-**Cíl:** Automatická generace plánů a paralelní dispatch agentů.
-
-**Deliverables:**
-- Plan generator v `/plan-epic` — automaticky odvodí role, závislosti,
-  paralelní skupiny z EPIC constraints
-- Scheduler logika — branch per parallel agent, merge po dokončení
-- Plan JSON validace proti schema
+**Cíl:** Automatická generace plánů, paralelní dispatch, branch management.
 
 **Acceptance:**
-- EPIC bez hints → orchestrátor správně odvodí všechny role a pořadí
-- Paralelní kroky běží současně (branch per agent)
-- Merge proběhne bez konfliktů
 - Plan JSON validní dle schema
+- Paralelní kroky běží současně
 
 ---
 
-### Session 6: Slack Integrace + Autonomní Běh (Phase F)
+### Session 6: Slack + Autonomní Běh
 
-**Cíl:** Slack MCP server pro escalation, automatický pickup dalšího EPICu.
-
-**Deliverables:**
-- MCP server pro Slack (send_escalation, wait_for_reply, send_status)
-- Integrace escalation triggers z decision-policies.yaml
-- Epic queue — automatický pickup dalšího EPICu po dokončení
-- Timeout handling (co když PM neodpoví)
+**Cíl:** Slack MCP, escalation, epic queue.
 
 **Acceptance:**
-- Escalation → Slack zpráva přijde
-- PM odpověď → orchestrátor pokračuje
-- 2 EPICy v řadě bez manuálního zásahu (kromě Slack)
+- Slack escalation funguje
+- 2 EPICy v řadě bez manuálního zásahu
 
 ---
 
-### Session 7: End-to-End Test + Hardening
+### Session 7: E2E Test + Hardening
 
-**Cíl:** Reálný EPIC na reálném projektu, fix edge cases.
-
-**Deliverables:**
-- EPIC-ERP-0001 (reálný ERP modul) projede celým pipeline
-- Edge case handling (agent crashne, prázdný výstup, conflict)
-- Performance tuning (timeout per agent, paralelizace)
-- Finální dokumentace aktualizace
+**Cíl:** Reálný EPIC, edge cases, dokumentace.
 
 **Acceptance:**
-- Reálný EPIC: start → plan → 9 agentů → gates → evidence → done
-- Žádný manuální zásah (kromě initial APPROVE a Slack escalations)
-- Evidence store kompletní
-- docs/MULTIAGENT_GUIDE.md aktualizován
+- Reálný EPIC projede kompletně
+- Evidence kompletní
 
 ---
 
 ## Dependencies
 
-```
-Session 1 (foundation)
-    ↓
-Session 2 (commands)
-    ↓
-Session 3 (gates + retry)
-    ↓
-Session 4 (9 agentů)
-    ↓
-Session 5 (planner + parallel)
-    ↓
-Session 6 (slack + autonomie)
-    ↓
-Session 7 (E2E test)
-```
-
-Všechny sessions jsou sekvenční — každá staví na předchozí.
-
-## Hints
-- skip_roles: [frontend] (ADO nemá UI — Phase G optional)
-- Používat existující agenty z claude/ kde to dává smysl
-  (code-reviewer, quality-gates-runner, docs-reviewer)
+Všechny sessions sekvenční (každá staví na předchozí).
