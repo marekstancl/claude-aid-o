@@ -1,0 +1,121 @@
+# AID Decision Policies
+# Defines what the Controller decides autonomously vs. escalates to PM.
+# Goal: 90%+ decisions without PM intervention.
+
+# ─── Quality Thresholds ─────────────────────────────────────────────
+quality_thresholds:
+  min_test_coverage_percent: 80
+  min_review_score: 7          # out of 10 (code-reviewer agent score)
+  max_todo_count: 0            # no TODO/FIXME in committed code
+  max_security_findings_high: 0
+  max_security_findings_medium: 3
+
+# ─── Architecture Principles ────────────────────────────────────────
+architecture_principles:
+  - name: "contract-first"
+    description: "API/event contracts must be defined before implementation"
+    enforcement: "architect step must complete before backend/frontend steps"
+
+  - name: "YAGNI"
+    description: "Only implement what the EPIC requires, nothing more"
+    enforcement: "scope enforcement via allowed_paths in plan steps"
+
+  - name: "tenant-isolation"
+    description: "All data access must be tenant-scoped when EPIC.constraints.tenant_safe = true"
+    enforcement: "security agent validates tenant filtering"
+
+  - name: "atomic-commits"
+    description: "One logical change per commit"
+    enforcement: "git-workflow skill validates commit scope"
+
+  - name: "evidence-by-design"
+    description: "Every state transition produces evidence artifacts"
+    enforcement: "controller logs to evidence/ on every transition"
+
+# ─── Auto-Decisions (Controller decides without PM) ─────────────────
+auto_decisions:
+  # Steps & Execution
+  - condition: "all gate results = pass"
+    action: "proceed to PM_APPROVAL state"
+    reason: "all quality criteria met"
+
+  - condition: "gate fails AND retry_count < max_attempts"
+    action: "generate fix instructions, dispatch retry"
+    reason: "automatic retry within budget"
+
+  - condition: "step produces expected outputs"
+    action: "proceed to next step or parallel group"
+    reason: "step completed successfully"
+
+  - condition: "step has no dependencies blocking"
+    action: "schedule for execution"
+    reason: "dependency graph allows execution"
+
+  # Scope & Safety
+  - condition: "agent modifies only allowed_paths"
+    action: "accept changes"
+    reason: "within scope"
+
+  - condition: "agent modifies forbidden_paths"
+    action: "reject changes, re-dispatch with warning"
+    reason: "scope violation"
+
+  - condition: "LLM cost < budget.warn_at_percentage"
+    action: "continue execution"
+    reason: "within budget"
+
+# ─── Escalation Triggers (must ask PM) ──────────────────────────────
+escalation_triggers:
+  - trigger: "gate fails after max_attempts retries"
+    action: "HARD STOP — present failure details to PM"
+    options: ["fix manually", "skip gate (document why)", "abort EPIC"]
+
+  - trigger: "LLM cost exceeds budget.max_llm_cost_per_epic_usd"
+    action: "HARD STOP — present cost report to PM"
+    options: ["increase budget", "abort EPIC"]
+
+  - trigger: "agent produces no output or errors out"
+    action: "HARD STOP — present error to PM"
+    options: ["retry with different prompt", "skip step", "abort EPIC"]
+
+  - trigger: "conflicting outputs from parallel agents"
+    action: "HARD STOP — present both outputs to PM"
+    options: ["choose version A", "choose version B", "merge manually"]
+
+  - trigger: "EPIC acceptance criteria ambiguous"
+    action: "ASK PM for clarification before planning"
+    options: ["clarify criteria", "proceed with best interpretation"]
+
+  - trigger: "architecture decision with multiple valid options"
+    action: "present options with tradeoffs to PM"
+    options: ["option A", "option B", "custom"]
+
+  - trigger: "security finding classified as CRITICAL"
+    action: "HARD STOP — immediate PM notification"
+    options: ["fix before proceeding", "abort EPIC"]
+
+# ─── Acceptable Technical Debt ──────────────────────────────────────
+acceptable_debt:
+  - type: "TODO with issue reference"
+    example: "# TODO(AID-123): optimize query for large datasets"
+    allowed: true
+    condition: "tracked in backlog with severity and deadline"
+
+  - type: "missing edge case tests"
+    allowed: true
+    condition: "core happy path tested, edge cases documented in backlog"
+
+  - type: "placeholder error messages"
+    allowed: true
+    condition: "replaced before release session"
+
+# ─── NOT Acceptable (always block) ──────────────────────────────────
+not_acceptable:
+  - "TODO/FIXME without issue reference"
+  - "hardcoded credentials or API keys"
+  - "disabled security checks"
+  - "skipped tests without documented reason"
+  - "changes to forbidden paths"
+  - "breaking contract changes without migration plan"
+  - "console.log / print() in production code"
+  - "empty catch blocks"
