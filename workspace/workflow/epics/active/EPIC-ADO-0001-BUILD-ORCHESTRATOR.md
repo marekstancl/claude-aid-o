@@ -205,21 +205,37 @@ cílový-projekt/
 
 ### Session 2: EPIC Runner Commands + AID Commands
 
+**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260216-f47a-runtime-commands.md`
+
 **Cíl:** 4 orchestrační commands + 2 nové AID commands.
 
 **Deliverables:**
 - `commands/plan-epic.md` — Epic → Plan JSON + Session file
-- `commands/run-epic.md` — hlavní orchestrační loop
+- `commands/run-epic.md` — hlavní orchestrační loop (state machine)
 - `commands/run-step.md` — manuální spuštění jednoho kroku
-- `commands/epic-status.md` — zobrazení stavu
+- `commands/epic-status.md` — zobrazení stavu pipeline
 - `commands/aid-setup.md` — interaktivní onboarding (nový + existující projekt)
 - `commands/aid-help.md` — self-knowledge, příkazy, workflow
+- Aktualizace `plugin.json` — registrace 6 nových commands
+
+**Phases (7):**
+1. `/plan-epic` — EPIC Parser + Plan Generator
+2. `/run-epic` — Orchestrační Loop (state machine)
+3. `/run-step` — Manuální spuštění jednoho kroku
+4. `/epic-status` — Zobrazení stavu pipeline
+5. `/aid-setup` — Interaktivní onboarding
+6. `/aid-help` — Self-Knowledge
+7. Plugin Integration + Smoke Test
 
 **Acceptance:**
-- `/plan-epic` vytvoří validní Plan JSON z dummy EPICu
+- `/plan-epic` vytvoří validní Plan JSON z dummy EPICu (dle plan.schema.json)
+- `/run-epic` implementuje state machine loop z epic-orchestration.md
 - `/run-step` spustí jeden krok s mock agentem
+- `/epic-status` zobrazí pipeline stav (steps, gates, budget)
 - `/aid-setup` detekuje tech stack a nabídne setup
 - `/aid-help` vypíše kompletní přehled AID fungování
+- plugin.json registruje všech 15 commands
+- Smoke test s EPIC-TEST-0001-DUMMY.md prošel
 
 ---
 
