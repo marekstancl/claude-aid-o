@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "id": "aid-orchestrator",
+      "name": "AID — AI Development Orchestrator",
+      "description": "Controller + Workers orchestration for AI-driven software development. Manages EPICs, dispatches role-based agents, enforces quality gates, and maintains complete evidence trails.",
+      "version": "0.1.0",
+      "path": "plugins/aid-orchestrator",
+      "author": "Marek Stancl",
+      "tags": ["orchestration", "multi-agent", "quality-gates", "epic-management"],
+      "requires": {
+        "claude_code": ">=1.0.0"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "aid-orchestrator",
+  "version": "0.1.0",
+  "description": "AID — AI Development Orchestrator. Controller + Workers architecture for multi-agent software development. Takes an EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
+  "author": "Marek Stancl",
+  "license": "MIT",
+  "engines": {
+    "claude_code": ">=1.0.0"
+  },
+  "agents": [
+    { "name": "code-reviewer", "file": "agents/code-reviewer.md" },
+    { "name": "docs-reviewer", "file": "agents/docs-reviewer.md" },
+    { "name": "quality-gates-runner", "file": "agents/quality-gates-runner.md" },
+    { "name": "session-validator", "file": "agents/session-validator.md" },
+    { "name": "lessons-extractor", "file": "agents/lessons-extractor.md" }
+  ],
+  "commands": [
+    { "name": "aid-init", "file": "commands/aid-init.md", "description": "Initialize .aid-o/ workspace in target project" },
+    { "name": "quality-gates", "file": "commands/quality-gates.md", "description": "Run 6-gate pre-commit quality protocol" },
+    { "name": "session-start", "file": "commands/session-start.md", "description": "Start a new tracked session" },
+    { "name": "session-end", "file": "commands/session-end.md", "description": "Complete and archive current session" },
+    { "name": "handoff", "file": "commands/handoff.md", "description": "Create handoff block for next AI session" },
+    { "name": "audit", "file": "commands/audit.md", "description": "Run project health audit" },
+    { "name": "coding-standards", "file": "commands/coding-standards.md", "description": "Load project coding standards" },
+    { "name": "testing", "file": "commands/testing.md", "description": "Load testing workflow and standards" },
+    { "name": "docs-protocol", "file": "commands/docs-protocol.md", "description": "Load documentation protocol" }
+  ],
+  "skills": [
+    { "name": "epic-orchestration", "file": "skills/epic-orchestration.md", "description": "Controller state machine for EPIC orchestration" },
+    { "name": "agent-core", "file": "skills/agent-core.md", "description": "Core agent behavior, roles, and workflow routing" },
+    { "name": "quality-gates", "file": "skills/quality-gates.md", "description": "6-gate pre-commit quality protocol" },
+    { "name": "session-management", "file": "skills/session-management.md", "description": "Session lifecycle, handoffs, and epic tracking" }
+  ],
+  "defaults": {
+    "policies": [
+      "defaults/policies/gates.yaml",
+      "defaults/policies/decision-policies.yaml"
+    ],
+    "templates": [
+      "defaults/templates/plan.md",
+      "defaults/templates/epic.md",
+      "defaults/templates/plan.schema.json",
+      "defaults/templates/session-bug-fix.md",
+      "defaults/templates/session-new-feature.md",
+      "defaults/templates/session-refactoring.md",
+      "defaults/templates/session-exploration.md"
+    ],
+    "playbooks": [
+      "defaults/playbooks/architect.md",
+      "defaults/playbooks/domain.md",
+      "defaults/playbooks/backend.md",
+      "defaults/playbooks/frontend.md",
+      "defaults/playbooks/qa.md",
+      "defaults/playbooks/security.md",
+      "defaults/playbooks/observability.md",
+      "defaults/playbooks/docs.md",
+      "defaults/playbooks/release.md"
+    ]
+  }
+}
