@@ -6,11 +6,23 @@
 
 ## Current Focus
 
-**None** — Session 1 completed, waiting for PM to start Session 2.
+**None** — Session 2 completed, waiting for PM to start Session 3.
 
 ---
 
 ## Recent Work
+
+### 2026-02-16 — Session 2: EPIC Runner Commands + AID Commands
+- **Session:** [S-20260216-f47a](sessions/completed/S-20260216-f47a-runtime-commands.md)
+- **Epic:** EPIC-ADO-0001 (Session 2 of 8)
+- **Branch:** `session/S-20260216-f47a-runtime-commands`
+- **Summary:** 6 new commands implementing the runtime layer: `/plan-epic` (EPIC→Plan JSON), `/run-epic` (11-state Controller loop), `/run-step` (manual dispatch), `/epic-status` (pipeline status), `/aid-setup` (onboarding), `/aid-help` (self-knowledge). Plugin.json updated to 15 commands.
+- **Files created:** 7 | **Lines:** +1,745 (commands)
+- **Key artifacts:**
+  - `plugins/aid-orchestrator/commands/run-epic.md` — Controller state machine loop (449 lines)
+  - `plugins/aid-orchestrator/commands/plan-epic.md` — EPIC parser + Plan JSON generator (216 lines)
+  - `plugins/aid-orchestrator/commands/aid-setup.md` — Tech stack detection + onboarding (269 lines)
+  - `plugins/aid-orchestrator/commands/aid-help.md` — Self-knowledge, 7 topics (493 lines)
 
 ### 2026-02-15 / 2026-02-16 — Session 1: Plugin Scaffold + Controller State Machine
 - **Session:** [S-20260215-a1f0](sessions/completed/S-20260215-a1f0-foundation-controller.md)
@@ -28,13 +40,12 @@
 
 ## Next Steps
 
-1. **Session 2:** Implement runtime commands (`/plan-epic`, `/run-epic`, `/run-step`, `/epic-status`, `/aid-setup`, `/aid-help`)
-2. **Session 3:** Agent dispatch + parallel execution
-3. **Session 4:** Quality gates runtime
-4. **Session 5:** Curator agent (post-session improvements)
-5. **Session 6:** Auditor agent (post-EPIC audit)
-6. **Session 7:** Project Scanner agent (onboarding + deep analysis)
-7. **Session 8:** Memory system (MCP Qdrant + file-based)
+1. **Session 3:** Gates Engine + Retry (gates.yaml parsing, pass/fail reports, retry loop)
+2. **Session 4:** Worker Agents + Curator + Auditor + Scanner (9 role agents + 3 new specialists)
+3. **Session 5:** Planner + Parallelization (auto plan generation, parallel dispatch, branches)
+4. **Session 6:** Slack + Autonomous Run (MCP Slack, escalation, epic queue)
+5. **Session 7:** E2E Test + Hardening (real EPIC, edge cases, documentation)
+6. **Session 8:** Memory MCP (Qdrant vector DB, semantic search)
 
 ---
 
@@ -54,3 +65,4 @@ None.
 | 2026-02-16 | `.aid-o/` with numbered prefixes | `01-plans/`, `02-epics/`, `03-config/`, `04-engine/` |
 | 2026-02-16 | 3 new agents: Curator, Auditor, Scanner | Post-session improvement, post-EPIC audit, onboarding |
 | 2026-02-16 | MCP Qdrant for memory | Long-term memory via vector DB + file-based active memory |
+| 2026-02-16 | Commands = markdown prompt engineering | Not executable code — Claude reads and follows instructions |

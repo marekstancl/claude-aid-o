@@ -16,6 +16,12 @@
   ],
   "commands": [
     { "name": "aid-init", "file": "commands/aid-init.md", "description": "Initialize .aid-o/ workspace in target project" },
+    { "name": "aid-setup", "file": "commands/aid-setup.md", "description": "Interactive project onboarding — detect tech stack, configure AID" },
+    { "name": "aid-help", "file": "commands/aid-help.md", "description": "Show AID documentation — commands, workflow, agents, FAQ" },
+    { "name": "plan-epic", "file": "commands/plan-epic.md", "description": "Parse EPIC → generate Plan JSON + session file" },
+    { "name": "run-epic", "file": "commands/run-epic.md", "description": "Run Controller state machine for full EPIC orchestration" },
+    { "name": "run-step", "file": "commands/run-step.md", "description": "Manually run one step from an existing plan" },
+    { "name": "epic-status", "file": "commands/epic-status.md", "description": "Show EPIC pipeline status — steps, gates, budget" },
     { "name": "quality-gates", "file": "commands/quality-gates.md", "description": "Run 6-gate pre-commit quality protocol" },
     { "name": "session-start", "file": "commands/session-start.md", "description": "Start a new tracked session" },
     { "name": "session-end", "file": "commands/session-end.md", "description": "Complete and archive current session" },
