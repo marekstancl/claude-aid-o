@@ -1,4 +1,4 @@
-# EPIC: ADO-0001 — Build AI Development Orchestrator (Marketplace Plugin)
+# EPIC: ADO-0001 — Build AID Orchestrator (Marketplace Plugin)
 
 ## Kontext
 
@@ -6,31 +6,36 @@ Existuje fungující single-agent framework (Agent Skills v4.0 pro C.I.C.E.R.O.)
 s 5 subagenty, 8 commands, 11 skills, session managementem a quality gates.
 
 Cílem je evoluce do Controller + Workers architektury jako **instalovatelný
-Claude Code plugin**, který lze použít na jakémkoliv projektu. Orchestrátor
-autonomně řídí 9 specializovaných agentů, kontroluje výstupy, provádí gates
-a eskaluje na PM přes Slack jen když si neví rady.
+Claude Code plugin** (`aid-orchestrator`), který lze použít na jakémkoliv projektu.
+Orchestrátor autonomně řídí specializované agenty, kontroluje výstupy, provádí
+gates a eskaluje na PM přes Slack jen když si neví rady.
 
 Referenční dokumentace: `docs/MULTIAGENT_GUIDE.md`
 Zdrojové materiály: `_unzipped/ado_starter_kit/`, `_unzipped/ai_dev_orchestrator_docs/`
+Design plan: `workspace/workflow/plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md`
 
 ## Cíl
 
-Postavit marketplace s pluginem `ado-orchestrator`, který:
-1. Se nainstaluje přes `claude plugin install ado-orchestrator`
-2. Příkazem `/ado-init` vytvoří doporučenou workspace strukturu v projektu
-3. Vezme Epic soubor → vygeneruje Plan JSON → dispatche agenty → gates → evidence
-4. Funguje autonomně s Slack escalation pro PM
+Postavit marketplace s pluginem `aid-orchestrator`, který:
+1. Se nainstaluje přes `claude plugin install aid-orchestrator`
+2. Příkazem `/aid-init` vytvoří `.aid-o/` strukturu v projektu
+3. `/aid-setup` provede onboarding (nový i existující projekt)
+4. Vezme Epic → vygeneruje Plan → dispatche agenty → gates → evidence
+5. Curator sbírá postřehy → Orchestrátor validuje → PM přes Slack
+6. Audit agent po každém Epicu → trend tracking
+7. Qdrant MCP pro dlouhodobou vektorovou paměť
 
-## Výstupní struktura
+## Výstupní struktura — Plugin
 
 ```
 ai-orchestrator/                       # Marketplace root
   marketplace.json                     # Registr pluginů
   plugins/
-    ado-orchestrator/                  # Plugin: AI Development Orchestrator
+    aid-orchestrator/                  # Plugin: AID Orchestrator
       .claude-plugin/
-        plugin.json                    # Plugin manifest (name, version, ...)
-      agents/                          # 9 role-agents + 5 utility agents
+        plugin.json                    # Plugin manifest
+      agents/
+        # 9 role-agents
         architect.md
         domain.md
         backend.md
@@ -40,79 +45,105 @@ ai-orchestrator/                       # Marketplace root
         observability.md
         docs-writer.md
         release.md
-        code-reviewer.md              # Přenesený z claude/
-        docs-reviewer.md              # Přenesený z claude/
-        quality-gates-runner.md        # Přenesený z claude/
-        session-validator.md           # Přenesený z claude/
-        lessons-extractor.md           # Přenesený z claude/
+        # 5 utility agents (přenesené z claude/)
+        code-reviewer.md
+        docs-reviewer.md
+        quality-gates-runner.md
+        session-validator.md
+        lessons-extractor.md
+        # 3 noví agenti
+        curator.md                     # NOVÝ: sbírá postřehy, navrhuje vylepšení
+        auditor.md                     # NOVÝ: milestone audit po Epicu
+        project-scanner.md             # NOVÝ: quick/deep analýza projektu
       commands/
-        ado-init.md                    # Vytvoří workspace strukturu v projektu
+        # Nové AID commands
+        aid-init.md                    # Vytvoří .aid-o/ strukturu
+        aid-setup.md                   # NOVÝ: interaktivní onboarding
+        aid-help.md                    # NOVÝ: self-knowledge, jak AID funguje
         plan-epic.md                   # Epic → Plan JSON + Session file
         run-epic.md                    # Hlavní orchestrační loop
         run-step.md                    # Manuální spuštění jednoho kroku
         epic-status.md                 # Zobrazení stavu
-        quality-gates.md               # Přenesený z claude/
-        session-start.md               # Přenesený z claude/
-        session-end.md                 # Přenesený z claude/
-        handoff.md                     # Přenesený z claude/
-        audit.md                       # Přenesený z claude/
-        coding-standards.md            # Přenesený z claude/
-        testing.md                     # Přenesený z claude/
-        docs-protocol.md              # Přenesený z claude/
+        # Přenesené z claude/
+        quality-gates.md
+        session-start.md
+        session-end.md
+        handoff.md
+        audit.md
+        coding-standards.md
+        testing.md
+        docs-protocol.md
       skills/
         epic-orchestration.md          # Controller state machine
+        improvement-proposals.md       # NOVÝ: standardní format pro improvement_notes
         agent-core.md                  # Přenesený (zjednodušený)
         quality-gates.md               # Přenesený (zjednodušený)
         session-management.md          # Přenesený (zjednodušený)
-      defaults/                        # Výchozí soubory pro /ado-init
+      defaults/                        # Výchozí soubory pro /aid-init
         policies/
           gates.yaml
           decision-policies.yaml
         templates/
+          plan.md                      # NOVÝ: plan template
           epic.md
           plan.schema.json
+          session-bug-fix.md           # Přenesené z existujících
+          session-new-feature.md
+          session-refactoring.md
+          session-exploration.md
         playbooks/
-          architect.md
-          domain.md
-          backend.md
-          frontend.md
-          qa.md
-          security.md
-          observability.md
-          docs.md
-          release.md
+          architect.md ... release.md  # 9 role playbooks
       README.md
 ```
 
-Co `/ado-init` vytvoří v cílovém projektu:
+## Výstupní struktura — Co `/aid-init` vytvoří v projektu
 
 ```
 cílový-projekt/
-  workspace/
-    active-work.md
-    session-log.md
-    command-history.md
-    lessons-learned.md
-    bugs.md
-    sessions/{active,completed}/
-    workflow/epics/{active,completed}/
-    workflow/plans/
-  policies/                            # Zkopírováno z defaults/, přizpůsobitelné
-    gates.yaml
-    decision-policies.yaml
-  templates/                           # Zkopírováno z defaults/
-    epic.md
-    plan.schema.json
-  playbooks/                           # Zkopírováno z defaults/
-    architect.md, domain.md, ...
-  evidence/
-    .gitkeep
+  .aid-o/
+    01-plans/                          # PM + AI brainstorming
+      archive/
+    02-epics/                          # PM + AI detailní zadání
+      archive/
+    03-config/                         # PM-customizable
+      policies/
+        gates.yaml
+        decision-policies.yaml
+      templates/
+        plan.md
+        epic.md
+        plan.schema.json
+        session-bug-fix.md
+        session-new-feature.md
+        session-refactoring.md
+        session-exploration.md
+      playbooks/
+        architect.md ... release.md
+    04-engine/                         # AI interní
+      sessions/
+        archive/
+      memory/
+        active-work.md
+        project-profile.yaml
+        decisions.yaml
+      backlog.md
+      lessons-learned.md
+      command-history.md
+      evidence/
 ```
+
+## Naming konvence
+
+| Typ | Format | Příklad |
+|-----|--------|---------|
+| Plan | `P-{YYYYMMDD}-{4char-hash}-{topic}.md` | `P-20260216-b3a1-mvp-roadmap.md` |
+| Epic | `E-{YYYYMMDD}-{4char-hash}-{topic}.md` | `E-20260216-c2d1-user-auth.md` |
+| Session | `S-{YYYYMMDD}-{4char-hash}-{topic}.md` | `S-20260216-a1f0-foundation.md` |
 
 ## Scope
 
 ### Allowed files/paths
-- plugins/ado-orchestrator/
+- plugins/aid-orchestrator/
 - marketplace.json
 - docs/
 - workspace/
@@ -123,53 +154,72 @@ cílový-projekt/
 ## Constraints
 - Žádný externí framework (vše nativně v Claude Code plugin systém)
 - Decision policies musí pokrývat 90%+ rozhodnutí bez PM
-- Evidence by design
-- Plugin musí být self-contained (žádné externí závislosti)
+- Evidence by design — každý run produkuje audit trail
+- Plugin musí být self-contained (žádné externí závislosti kromě Qdrant MCP)
 - Existující agenti/commands/skills z claude/ se přenesou do pluginu
+- Plan + Epic = PM + AI spolupráce; Session a dál = AI autonomně
+- Vše prochází Orchestrátorem před PM
+- Vše na PM jde přes Slack (i zamítnutí = info)
 
 ## DoD Gates
 - Plugin se nainstaluje bez chyb
-- `/ado-init` vytvoří kompletní workspace strukturu
+- `/aid-init` vytvoří kompletní `.aid-o/` strukturu
+- `/aid-setup` provede onboarding (nový + existující projekt)
 - Dummy EPIC projede celým pipeline end-to-end
-- Všech 9 role-agentů funguje
+- Všech 9 role-agentů funguje + improvement_notes
+- Curator flow: postřehy → Orchestrátor → PM
+- Audit agent: post-Epic audit report
 - Gates engine vyhodnotí pass/fail + retry
 - Evidence store kompletní
+- Qdrant MCP memory funguje
 - Dokumentace aktualizována
 
 ---
 
 ## Sessions
 
-### Session 1: Plugin Scaffold + Controller State Machine
+### Session 1: Plugin Scaffold + Controller State Machine ✅ (+ doplnění)
 
-**Cíl:** Vytvořit plugin strukturu, přenést existující setup,
-vytvořit orchestrační skill a decision policies.
+**Stav:** Hotová. Nutné doplnit rename ADO → AID a novou `.aid-o/` strukturu.
 
-**Deliverables:**
-- marketplace.json
-- plugins/ado-orchestrator/.claude-plugin/plugin.json
-- Přenesené agents/, commands/, skills/ v plugin struktuře
-- skills/epic-orchestration.md — Controller state machine
-- defaults/policies/decision-policies.yaml
-- defaults/policies/gates.yaml
-- defaults/templates/epic.md + plan.schema.json
-- commands/ado-init.md
-- README.md
+**Původní deliverables (DONE):**
+- marketplace.json, plugin.json, agents/, commands/, skills/
+- epic-orchestration.md (500 lines, 11 states)
+- policies, templates, playbooks
+- ado-init.md, README.md, CLAUDE.md
 
-**Acceptance:**
-- Plugin struktura kompletní
-- `/ado-init` vytvoří workspace v testovacím projektu
-- Orchestrační skill se načte bez chyb
+**Doplnění (z Plan P-20260216-b3a1):**
+- [ ] Rename `ado-orchestrator` → `aid-orchestrator` (všechny soubory + reference)
+- [ ] Rename `/ado-init` → `/aid-init`
+- [ ] Aktualizovat `/aid-init` pro novou `.aid-o/` strukturu
+- [ ] Přidat `defaults/templates/plan.md` (chybějící plan template)
+- [ ] Přidat session templates do defaults/templates/
+- [ ] Aktualizovat marketplace.json, plugin.json, CLAUDE.md
+
+**Acceptance doplnění:**
+- Všechny reference na "ado" přejmenovány na "aid"
+- `/aid-init` vytvoří `.aid-o/` strukturu (01-plans, 02-epics, 03-config, 04-engine)
+- Plan template existuje
 
 ---
 
-### Session 2: EPIC Runner Commands
+### Session 2: EPIC Runner Commands + AID Commands
 
-**Cíl:** 4 orchestrační commands (plan-epic, run-epic, run-step, epic-status).
+**Cíl:** 4 orchestrační commands + 2 nové AID commands.
+
+**Deliverables:**
+- `commands/plan-epic.md` — Epic → Plan JSON + Session file
+- `commands/run-epic.md` — hlavní orchestrační loop
+- `commands/run-step.md` — manuální spuštění jednoho kroku
+- `commands/epic-status.md` — zobrazení stavu
+- `commands/aid-setup.md` — interaktivní onboarding (nový + existující projekt)
+- `commands/aid-help.md` — self-knowledge, příkazy, workflow
 
 **Acceptance:**
 - `/plan-epic` vytvoří validní Plan JSON z dummy EPICu
 - `/run-step` spustí jeden krok s mock agentem
+- `/aid-setup` detekuje tech stack a nabídne setup
+- `/aid-help` vypíše kompletní přehled AID fungování
 
 ---
 
@@ -177,18 +227,35 @@ vytvořit orchestrační skill a decision policies.
 
 **Cíl:** Gates runner, pass/fail report, retry loop (max 3).
 
+**Deliverables:**
+- Rozšíření quality-gates-runner o gates.yaml parsing
+- Pass/fail report generace do evidence/
+- Retry loop logika (max 3, pak escalation)
+
 **Acceptance:**
 - Failing gate → retry → fix → pass
 - Evidence uložena
+- Po 3 failech: escalation (Slack v Session 6)
 
 ---
 
-### Session 4: 9 Worker Agentů + Playbooks
+### Session 4: Worker Agenti + Curator + Auditor + Scanner
 
-**Cíl:** Všech 9 role-based agentů s detailními playbooks.
+**Cíl:** 9 role-agentů + 3 noví specialisté.
+
+**Deliverables:**
+- 9 role agents: architect, domain, backend, frontend, qa, security, observability, docs-writer, release
+- Curator agent + brainstorming flow
+- Auditor agent + 5 typů auditu
+- Project Scanner agent (quick + deep)
+- `skills/improvement-proposals.md`
+- Playbooks: přidat `improvement_notes` sekci
 
 **Acceptance:**
-- Každý agent produkuje smysluplný výstup
+- Každý role-agent produkuje výstup + improvement_notes
+- Curator sbírá postřehy, deduplikuje, navrhuje
+- Auditor generuje audit report
+- Project Scanner vytvoří project-profile.yaml
 - Scope enforcement funguje
 
 ---
@@ -199,7 +266,8 @@ vytvořit orchestrační skill a decision policies.
 
 **Acceptance:**
 - Plan JSON validní dle schema
-- Paralelní kroky běží současně
+- Paralelní kroky běží současně (branch per agent)
+- Merge bez konfliktů
 
 ---
 
@@ -207,8 +275,15 @@ vytvořit orchestrační skill a decision policies.
 
 **Cíl:** Slack MCP, escalation, epic queue.
 
+**Deliverables:**
+- MCP server pro Slack (send_escalation, wait_for_reply, send_status)
+- Integrace: Curator→Orchestrator→Slack PM
+- Integrace: Auditor→Orchestrator→Slack PM
+- Epic queue — automatický pickup
+
 **Acceptance:**
-- Slack escalation funguje
+- Slack escalation funguje (včetně Curator proposals a Audit summaries)
+- PM odpověď → orchestrátor pokračuje
 - 2 EPICy v řadě bez manuálního zásahu
 
 ---
@@ -219,10 +294,47 @@ vytvořit orchestrační skill a decision policies.
 
 **Acceptance:**
 - Reálný EPIC projede kompletně
+- Curator flow end-to-end (postřehy → backlog → PM)
+- Audit report po Epicu
 - Evidence kompletní
 
 ---
 
+### Session 8: Memory MCP (Qdrant)
+
+**Cíl:** Dlouhodobá vektorová paměť přes sessions.
+
+**Deliverables:**
+- Qdrant MCP server setup
+- Vector memory integration do orchestrátoru
+- Semantické vyhledávání
+- Auto-indexing: decisions, lessons, code patterns
+
+**Acceptance:**
+- "Jak jsme řešili autentizaci?" → relevantní výsledky z historie
+- Memory roste s každou session
+- Backward compatible (file-based memory stále funguje jako fallback)
+
+---
+
 ## Dependencies
+
+```
+Session 1 (scaffold + rename AID)
+    ↓
+Session 2 (commands + aid-setup + aid-help)
+    ↓
+Session 3 (gates + retry)
+    ↓
+Session 4 (9 agentů + curator + auditor + scanner)
+    ↓
+Session 5 (planner + parallel)
+    ↓
+Session 6 (slack + autonomie)
+    ↓
+Session 7 (E2E test)
+    ↓
+Session 8 (memory MCP — Qdrant)
+```
 
 Všechny sessions sekvenční (každá staví na předchozí).
