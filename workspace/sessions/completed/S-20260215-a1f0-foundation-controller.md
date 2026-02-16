@@ -1,7 +1,7 @@
 ---
 id: S-20260215-a1f0
 type: new-feature
-status: active
+status: completed
 priority: high
 started: 2026-02-15
 epic_id: ADO-0001
@@ -260,14 +260,14 @@ Na konci session musí:
 - Aktualizovat EPIC-TEST-0001-DUMMY.md (pokud odkazuje na staré cesty)
 
 **Acceptance:**
-- [ ] Žádný soubor neobsahuje "ado-orchestrator" (všude "aid-orchestrator")
-- [ ] `/aid-init` vytvoří `.aid-o/` strukturu (01-plans, 02-epics, 03-config, 04-engine)
-- [ ] `defaults/templates/plan.md` existuje
-- [ ] 4 session templates existují v defaults/templates/
-- [ ] marketplace.json + plugin.json aktualizovány
-- [ ] Smoke test: `/aid-init` v testovacím projektu vytvoří správnou strukturu
+- [x] Žádný soubor neobsahuje "ado-orchestrator" (všude "aid-orchestrator")
+- [x] `/aid-init` vytvoří `.aid-o/` strukturu (01-plans, 02-epics, 03-config, 04-engine)
+- [x] `defaults/templates/plan.md` existuje
+- [x] 4 session templates existují v defaults/templates/
+- [x] marketplace.json + plugin.json aktualizovány
+- [x] Smoke test: `/aid-init` v testovacím projektu vytvoří správnou strukturu
 
-**Status:** pending
+**Status:** done
 
 ---
 
@@ -280,7 +280,7 @@ Na konci session musí:
 - [x] Decision policies kompletní (7 auto-decisions, 7 escalation triggers, 5 principles)
 - [x] Orchestrační skill se načte bez chyb (500 lines, 11 states)
 - [x] Smoke test prošel (E2E simulation, DAG valid, all states visited)
-- [ ] Dokumentace aktualizována — N/A pro tuto session (docs/ zatím prázdné, aktualizace až v Session 2+)
+- [x] Dokumentace aktualizována — N/A pro tuto session (docs/ zatím prázdné), WORKFLOWS.md vytvořen
 
 ## Session Log
 
@@ -295,6 +295,38 @@ Na konci session musí:
 | 2026-02-16 | Brainstorming: Plan P-20260216-b3a1 schválen — rename ADO→AID, .aid-o/ struktura, Curator/Auditor/Scanner agenti, MCP memory |
 | 2026-02-16 | Phase 5 přidána: rename ADO→AID + nová .aid-o/ struktura + chybějící templates |
 | 2026-02-16 | EPIC aktualizován: 8 sessions (přidána Session 8: Memory MCP), nové deliverables |
+| 2026-02-16 | Phase 5 done: ADO→AID rename complete, .aid-o/ structure, plan.md + 4 session templates |
+| 2026-02-16 | WORKFLOWS.md vytvořen: 13 workflows, Mermaid diagramy, RACI matice, interconnection matrix |
+| 2026-02-16 | **SESSION COMPLETED** |
+
+## Commits
+
+| Hash | Message |
+|------|---------|
+| `4876ac0` | docs: add comprehensive multi-agent orchestration guide |
+| `f772e02` | feat: add workspace structure and EPIC-ADO-0001 for building ADO |
+| `dcf7eff` | feat: add Session 1 file for foundation + controller state machine |
+| `04f9ec8` | update Epic + Session 1 for marketplace/plugin structure |
+| `a17d2a1` | docs: add AID v2 design plan, update EPIC and Session 1 |
+| `8a89ebd` | feat: rename ADO→AID, rewrite aid-init for .aid-o/ structure |
+| `164c4ca` | docs: add comprehensive workflow catalog with visualizations |
+
+## Completion Summary
+
+- **Duration:** 2026-02-15 – 2026-02-16 (2 days, 3 conversations)
+- **Commits:** 7
+- **Files changed:** 45 (+6,133 lines)
+- **Phases completed:** 5/5 (Phase 1-4 + Phase 5 rename)
+- **What was accomplished:**
+  - Plugin scaffold `aid-orchestrator` — complete marketplace plugin structure
+  - 5 utility agents, 9 commands, 4 skills migrated from C.I.C.E.R.O.
+  - Controller State Machine (11 states, 500 lines) — heart of the system
+  - Decision policies, gates, 9 role playbooks, plan JSON schema
+  - `/aid-init` command creating `.aid-o/` workspace structure
+  - ADO→AID rebrand complete
+  - Plan `P-20260216-b3a1` (AID v2 design) documented
+  - 13 workflows catalog with Mermaid diagrams + RACI matrices
+  - Smoke test: E2E validation of all components
 
 ## Notes
 
