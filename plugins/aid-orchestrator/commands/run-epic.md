@@ -189,6 +189,59 @@ Implement the following loop. On each state transition, append to `stage_log.jso
       - CRITICAL = blocks further work. HIGH = should be addressed. MEDIUM/INFO = nice to know.
       - Only report genuine issues — do not pad this section.
    ```
+
+**Re-dispatch prompt (when acceptance validation fails or reviewer rejects):**
+
+If PHASE_CHECK determines the step must be re-dispatched (acceptance not met or reviewer rejected), use this extended prompt instead of the base prompt:
+
+   ```
+   ## Context
+   You are the {role} agent working on EPIC {epic_id}.
+   **THIS IS A RE-DISPATCH.** Your previous output did not meet acceptance criteria.
+
+   ## Your Playbook
+   {content of playbooks/{role}.md}
+
+   ## EPIC Goal
+   {EPIC goal section}
+
+   ## Your Task
+   **Step:** {step.id}
+   **Objective:** {step.objective}
+   **Inputs:** {step.inputs}
+   **Expected Outputs:** {step.outputs}
+   **Constraints:** {step.constraints}
+
+   ## Scope
+   **Allowed paths:** {step.allowed_paths}
+   **Forbidden paths:** {step.forbidden_paths}
+   **IMPORTANT:** Do NOT modify files outside allowed paths.
+
+   ## Previous Step Outputs
+   {Read and include outputs from dependency steps in evidence/steps/}
+
+   ## Feedback from Previous Attempt
+   **Attempt:** {cycle_number} of {max_review_fix_cycles}
+   **Reason for re-dispatch:** {acceptance_not_met | reviewer_rejected}
+
+   ### What went wrong:
+   {If acceptance_not_met: list specific criteria that were NOT met, with evidence}
+   {If reviewer_rejected: include full reviewer feedback from review evidence file}
+
+   ### Previous attempts:
+   {For cycle > 1:}
+   - Attempt 1: {summary of what agent did} → {why it was rejected}
+   - Attempt 2: {summary} → {outcome}
+
+   ## Deliverables
+   Produce the following:
+   1. **Fix the specific issues listed above** — address each piece of feedback
+   2. Output summary (what you changed, how you addressed each issue)
+   3. (Optional) `## DISCOVERED ISSUES` section (same format as base prompt)
+
+   **IMPORTANT:** Focus on fixing the identified issues. Do not redo work that was already accepted.
+   ```
+
 5. Dispatch agent using the Task tool:
    ```
    Task(subagent_type="general-purpose", prompt="{agent prompt}")
