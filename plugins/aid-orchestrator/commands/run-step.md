@@ -6,7 +6,8 @@ Use this to execute one specific agent step without running the full orchestrati
 
 ```
 /run-step <epic-id> <step-id>
-/run-step <epic-id> --list          # list available steps
+/run-step <epic-id> --list                              # list available steps
+/run-step <epic-id> --analysis-group <group-id>         # run analysis group manually
 ```
 
 **Examples:**
@@ -14,6 +15,7 @@ Use this to execute one specific agent step without running the full orchestrati
 /run-step TEST-0001 step_1_architect
 /run-step E-20260216-c2d1 step_3_backend
 /run-step TEST-0001 --list
+/run-step TEST-0001 --analysis-group analysis_1_security_review
 ```
 
 ## Prerequisites
@@ -155,14 +157,77 @@ Next: /run-step {epic_id} {next_available_step}
       or /run-epic {epic_id} to continue full orchestration
 ```
 
+## Analysis Group Mode (`--analysis-group`)
+
+> **Reference:** Read `skills/parallel-dispatch.md` Section 2 and `skills/analysis-merge.md`.
+
+When `--analysis-group` is provided, run a multi-perspective analysis instead of a step:
+
+### Flow
+
+1. **Load context:** same as Step 1, but find analysis group by `group-id` in `plan.json.analysis_groups`
+2. **Validate target:** check `plan_progress.json` — target step MUST be "done"
+   ```
+   If target step not "done":
+     ERROR: Cannot run analysis — target step "{target}" is not completed yet.
+     Status: {status}
+     Complete the target step first: /run-step {epic_id} {target}
+   ```
+3. **Dispatch analysis agents** (per `skills/parallel-dispatch.md` analysis protocol):
+   - Load target step output: `evidence/steps/{target}/output.md`
+   - Load target step diff: `evidence/steps/{target}/diff.patch`
+   - Prepare analysis prompts per agent (mode, strategy, playbook)
+   - Dispatch ALL analysis agents in parallel (Task tool)
+4. **Merge results** (per `skills/analysis-merge.md`):
+   - Apply `merge_strategy` from the analysis group definition
+   - Generate `analysis_report`
+5. **Save evidence:**
+   - Raw outputs: `evidence/analysis/{group_id}/raw_{agent}.yaml`
+   - Merged report: `evidence/analysis/{group_id}/analysis_report.yaml`
+6. **Present result:**
+   ```
+   Analysis Complete: {group_id}
+   ============================
+   Target: {target_step_id} ({target_role})
+   Agents: {comma-separated list}
+   Mode: {mode}
+   Strategy: {merge_strategy}
+
+   Findings: {total_count}
+     Critical: {N}  High: {N}  Medium: {N}  Low: {N}  Info: {N}
+
+   Top findings:
+     1. [{severity}] {finding} — {agent} ({location})
+     2. [{severity}] {finding} — {agent} ({location})
+     3. [{severity}] {finding} — {agent} ({location})
+
+   Action items: {count}
+   Consensus rate: {N}%  (only for consensus strategy)
+
+   Evidence:
+     .aid-o/04-engine/evidence/{epic_id}/{run_id}/analysis/{group_id}/
+
+   Full report: analysis_report.yaml
+   ```
+
+**If `--list` with analysis groups present:**
+```
+Analysis groups:
+  analysis_1_security_review → step_3_backend [security] (auto, union)
+  analysis_2_db_validation → step_3_backend [backend, security] (auto, consensus)
+```
+
 ## Reference Files
 
 - `skills/epic-orchestration.md` — Section "4. EXECUTING" + "5. PHASE_CHECK" (dispatch protocol, scope check)
+- `skills/parallel-dispatch.md` — Parallel dispatch protocol (branch strategy, analysis dispatch)
+- `skills/analysis-merge.md` — Analysis merge strategies (union, consensus, weighted)
 - `.aid-o/03-config/playbooks/{role}.md` — Agent playbook for the step's role
 
 ## Important
 
 - **Does NOT run gates** — this is single-step only. Use `/run-epic` for full pipeline including gates.
 - **Does NOT create branches** — operates on the current branch. Branch management is `/run-epic`'s job.
+- **Analysis groups are read-only** — they produce reports, not code changes.
 - If the step was already "done" in plan_progress.json → ask: "Step already completed. Re-run? (Y/N)"
 - Re-running a step overwrites its evidence (prompt, output, diff)

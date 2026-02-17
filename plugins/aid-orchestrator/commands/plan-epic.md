@@ -47,7 +47,9 @@ This command is the entry point to orchestration — it reads an EPIC, analyzes 
    - `E-20260216-c2d1-user-auth.md` → `E-20260216-c2d1`
    - Fallback: use full filename without `.md`
 
-### Step 2: Analyze Steps and Dependencies
+### Step 2: Analyze Steps, Dependencies, and Parallel Groups
+
+> **Reference:** Read `skills/planner.md` for the complete algorithm (dependency graph, parallel groups, ordering rules).
 
 1. Find the **Steps** section in the EPIC (may be called "Steps", "Steps (Role Pipeline)", or "Sessions")
 2. For each step, extract:
@@ -58,7 +60,17 @@ This command is the entry point to orchestration — it reads an EPIC, analyzes 
 3. If EPIC has explicit steps table → use it directly
 4. If EPIC has only Sessions section → extract roles from session descriptions, apply default ordering
 
-**Default Ordering Rules** (from `epic-orchestration.md`):
+**Dependency Graph Construction** (per `skills/planner.md` Section 1):
+1. Parse steps into (step_id, role, objective, depends_on[])
+2. Build adjacency list (before → after)
+3. Validate: no cycles (topological sort must succeed), all refs exist, no self-deps
+
+**Parallel Group Detection** (per `skills/planner.md` Section 2):
+1. Topological sort → level assignment (Level 0 = no deps, Level N = all deps at lower levels)
+2. Steps at same level with no inter-dependencies → parallel group
+3. Single-step levels → sequential (no parallel_groups entry)
+
+**Default Ordering Rules** (per `skills/planner.md` Section 3):
 - Architect ALWAYS first (contracts before implementation)
 - Domain after Architect (needs contracts)
 - Backend + Frontend in parallel (both depend on contracts)
@@ -67,6 +79,24 @@ This command is the entry point to orchestration — it reads an EPIC, analyzes 
 - Release last (needs all gates to pass)
 
 If the EPIC explicitly defines a different order → respect it (EPIC overrides defaults).
+
+### Step 2.5: Generate Analysis Groups
+
+> **Reference:** Read `skills/planner.md` Section 4 for auto-trigger rules.
+
+After building steps + dependencies + parallel_groups, generate analysis groups:
+
+1. **Apply auto-trigger rules** to each step:
+   - **Security-relevant:** step objective mentions auth/token/encryption/SQL/injection/etc → add `security` review (union)
+   - **High complexity:** step has 5+ outputs or mentions refactor/migrate/redesign → add `architect` review (weighted)
+   - **Database changes:** step mentions migration/schema/database/model → add `backend` + `security` validation (consensus)
+   - **API contract changes:** step role is architect, outputs include OpenAPI/contract/ADR → add `backend` + `frontend` validation (union)
+
+2. **Check EPIC for manual analysis_groups** — the EPIC may explicitly define analysis groups
+3. **Merge auto + manual:** manual groups take precedence on conflict (same target + same agents → keep manual)
+4. **Assign IDs:** `analysis_{N}_{purpose}` (e.g., `analysis_1_security_review`)
+5. **Validate:** all targets reference existing steps, all agents are valid roles, agents != target step's own role
+6. Add `analysis_groups` array to Plan JSON (empty array `[]` if no triggers matched)
 
 ### Step 3: Build Plan JSON
 
@@ -101,6 +131,16 @@ Generate a Plan JSON object with these fields:
   "parallel_groups": [
     ["step_3_backend", "step_4_frontend"]
   ],
+  "analysis_groups": [
+    {
+      "id": "analysis_1_security_review",
+      "target": "step_3_backend",
+      "agents": ["security"],
+      "mode": "review",
+      "merge_strategy": "union",
+      "trigger": "auto"
+    }
+  ],
   "gates": ["{from EPIC DoD Gates}"],
   "budget": {
     "max_llm_cost_usd": "{from EPIC Constraints, default 50}",
@@ -108,6 +148,8 @@ Generate a Plan JSON object with these fields:
   }
 }
 ```
+
+**Note:** `analysis_groups` may be an empty array `[]` if no auto-trigger rules matched and EPIC didn't specify any. This is valid — plans without analysis groups work normally.
 
 **Step ID format:** `step_{N}_{role}` where N is sequential (1, 2, 3...).
 
@@ -117,13 +159,19 @@ Generate a Plan JSON object with these fields:
 - QA/Security: inputs include implementation outputs
 - Docs: inputs include all previous outputs
 
-**Self-validation:** After generating, verify:
+**Self-validation** (per `skills/planner.md` Section 6): After generating, verify:
 - All `step.id` values are unique
 - All `step.role` values are valid enum values
 - All dependency `before`/`after` reference existing step IDs
 - All parallel_groups reference existing step IDs
 - No circular dependencies (DAG validation)
-- gates values are valid enum values from schema
+- Gates values are valid enum values from schema
+- All `analysis_groups[].target` reference existing step IDs
+- All `analysis_groups[].agents` are valid role enum values
+- All `analysis_groups[].merge_strategy` are: union|consensus|weighted
+- All `analysis_groups[].mode` are: review|audit|validation
+- No duplicate analysis_group IDs
+- Analysis group agents != target step's agent role (no self-review)
 
 If validation fails → fix and regenerate (do not present invalid plan).
 
@@ -175,6 +223,7 @@ Plan Generated for EPIC: {epic_id}
 ====================================
 Steps: {count}
 Parallel groups: {count}
+Analysis groups: {count}
 Dependencies: {count}
 Roles: {comma-separated list}
 Gates: {comma-separated list}
@@ -189,6 +238,10 @@ Step sequence:
   6. [security] {objective} (depends on: step 3) ← parallel group 2
   7. [docs] {objective} (depends on: step 3)
 
+Analysis groups:
+  - analysis_1_security_review: [security] → step_3_backend (auto, union)
+  - analysis_2_db_validation: [backend, security] → step_3_backend (auto, consensus)
+
 Files created:
   - Plan: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
   - Progress: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan_progress.json
@@ -199,10 +252,13 @@ Next: Run `/run-epic {epic_id}` to start execution
       or `/run-step {epic_id} step_1_architect` for manual step execution
 ```
 
+If no analysis groups were generated, omit the "Analysis groups" section from output.
+
 ## Reference Files
 
+- **`skills/planner.md`** — Planner skill: dependency graph, parallel groups, auto-triggers, analysis groups generation
 - `skills/epic-orchestration.md` — Section "2. PLANNING" (plan generation rules, evidence structure)
-- `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema
+- `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema (includes `analysis_groups`)
 - `.aid-o/03-config/templates/session-new-feature.md` — Session file template
 - `.aid-o/03-config/policies/decision-policies.yaml` — Architecture principles for step ordering
 - `.aid-o/03-config/policies/gates.yaml` — Available gates

@@ -52,7 +52,10 @@
     { "name": "session-management", "file": "skills/session-management.md", "description": "Session lifecycle, handoffs, and epic tracking" },
     { "name": "gates-engine", "file": "skills/gates-engine.md", "description": "Post-EPIC gates execution — YAML parsing, command/rule gates, reporting" },
     { "name": "retry-engine", "file": "skills/retry-engine.md", "description": "Gate failure retry loop — analysis, fix dispatch, escalation" },
-    { "name": "improvement-proposals", "file": "skills/improvement-proposals.md", "description": "Standard format for improvement notes, collection protocol, deduplication, backlog management" }
+    { "name": "improvement-proposals", "file": "skills/improvement-proposals.md", "description": "Standard format for improvement notes, collection protocol, deduplication, backlog management" },
+    { "name": "planner", "file": "skills/planner.md", "description": "Plan generation from EPIC — dependency graph, parallel groups, auto-trigger rules, analysis groups" },
+    { "name": "parallel-dispatch", "file": "skills/parallel-dispatch.md", "description": "Parallel agent dispatch — branch strategy, concurrent execution, conflict detection, merge protocol" },
+    { "name": "analysis-merge", "file": "skills/analysis-merge.md", "description": "Multi-perspective analysis merge — union, consensus, weighted strategies, analysis report format" }
   ],
   "defaults": {
     "policies": [

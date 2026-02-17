@@ -275,7 +275,9 @@ cílový-projekt/
 
 ---
 
-### Session 4: Worker Agenti + Curator + Auditor + Scanner
+### Session 4: Worker Agenti + Curator + Auditor + Scanner ✅
+
+**Stav:** Hotová. Session file: `workspace/sessions/completed/S-20260217-e7b3-worker-agents-curator-auditor-scanner.md`
 
 **Cíl:** 9 role-agentů + 3 noví specialisté.
 
@@ -298,15 +300,33 @@ cílový-projekt/
 
 ### Session 5: Planner + Paralelizace + Multi-Perspective Analysis
 
+**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260217-1ffa-planner-parallelization.md`
+
 **Cíl:** Automatická generace plánů, paralelní dispatch, branch management, multi-perspective analysis.
 
 **Deliverables:**
-- Auto plan generation z EPIC → Plan JSON (dependency graph, parallel groups)
-- `analysis_groups` v Plan JSON — více agentů analyzuje stejný target z různých perspektiv
-- Auto-trigger pravidla (security-relevant → security review, DB changes → backend+security review)
-- 3 merge strategie: `union` (sbírej vše), `consensus` (2+ agenti), `weighted` (váhy dle role)
-- Controller EXECUTING rozšíření: dispatch + merge logic pro analysis_groups
-- Branch management: branch per agent, merge bez konfliktů
+- `skills/planner.md` — Planner skill (dependency graph, parallel groups, auto-triggers, analysis groups)
+- `skills/parallel-dispatch.md` — Paralelní dispatch protocol (branch strategy, fork/merge, conflict detection)
+- `skills/analysis-merge.md` — Analysis merge skill (3 strategie: union, consensus, weighted)
+- Update `defaults/templates/plan.schema.json` — `analysis_groups` schema (backward compatible)
+- Update `commands/plan-epic.md` — integrace Planner skill + analysis_groups generace
+- Update `commands/run-epic.md` — analysis_groups dispatch v EXECUTING, merge v PHASE_CHECK
+- Update `commands/run-step.md` — `--analysis-group` parametr
+- Update `skills/epic-orchestration.md` — EXECUTING + PHASE_CHECK rozšíření
+- Update `plugin.json` — 18 agents, 16 commands, 10 skills (3 nové)
+- Update `commands/aid-help.md` — Planning + Parallelization + Analysis Groups
+
+**Phases (10):**
+1. Planner Skill — dependency graph, parallel groups, auto-triggers, analysis groups
+2. Parallel Dispatch Skill — branch strategy, dispatch protocol, conflict detection
+3. Analysis Merge Skill — 3 merge strategie + analysis_report format
+4. Plan Schema Update — analysis_groups v plan.schema.json
+5. Plan-Epic Command Update — integrace Planner skill
+6. Run-Epic Command Update — analysis_groups dispatch + merge
+7. Epic-Orchestration Skill Update — EXECUTING + PHASE_CHECK rozšíření
+8. Run-Step Command Update — --analysis-group parametr
+9. Plugin Integration + Cross-references
+10. Smoke Test
 
 **Acceptance:**
 - Plan JSON validní dle schema (včetně `analysis_groups`)
@@ -314,7 +334,8 @@ cílový-projekt/
 - `analysis_groups` dispatch: N agentů analyzuje stejný target → konsolidovaný `analysis_report`
 - Merge strategie fungují (`union`, `consensus`, `weighted`)
 - Auto-trigger pravidla v Planneru správně detekují security/complexity/DB kroky
-- Merge bez konfliktů
+- Branch management: sequential merge chain, parallel fork+merge, analysis read-only
+- Backward compatible — Plan JSON bez analysis_groups zůstává validní
 
 ---
 
