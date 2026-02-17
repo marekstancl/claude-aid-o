@@ -78,9 +78,11 @@ Create at: `workspace/sessions/active/YYYY-MM-DD-{type}-{topic}.md`
 
 Before presenting to PM, verify the session file:
 - [ ] Objective: 3+ sentences (not a one-liner)
+- [ ] Context: references to previous work or "greenfield" statement
 - [ ] Scope: IN (3+ items) and OUT (2+ items)
 - [ ] Phases: each has all 6 subsections (Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
 - [ ] Dependencies: present (even if "No inter-phase dependencies")
+- [ ] Quality Gates: at least one gate listed
 - [ ] Session Log: initialized
 
 ### Step 6: Ask PM for Approval
