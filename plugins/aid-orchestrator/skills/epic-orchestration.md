@@ -224,6 +224,7 @@ Key context to pass:
         - Max `max_review_fix_cycles` (default 2) → then ESCALATION
       - Any criterion clearly NOT met → re-dispatch agent with specific feedback (max 2 cycles → ESCALATION)
    e. Evidence: save review to `evidence/{epic_id}/{run_id}/reviews/step_{N}_{role}_review_{cycle}.md`
+   f. Update `plan_progress.json`: increment `steps[step_id].review_cycles`, set `steps[step_id].last_review` to review result summary
 6. **Discovered Issues Triage** (per `decision-policies.yaml` → `discovered_issues`):
    a. Parse `## DISCOVERED ISSUES` section from agent's `output.md` (if present)
    b. If no section → skip (no issues reported)
@@ -252,7 +253,9 @@ review_fix_cycles_exhausted → ESCALATION
 ### 6. NEXT_PHASE
 
 **Actions:**
-1. Update `plan_progress.json` (mark step complete)
+1. Update `plan_progress.json`:
+   - Set `steps[step_id].status` to "done"
+   - Record final `review_cycles` count and timestamp
 2. Check dependency graph for next available step(s)
 3. If more steps: transition to EXECUTING
 4. If all steps done: transition to GATES
