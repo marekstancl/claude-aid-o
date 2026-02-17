@@ -202,6 +202,28 @@ When using `subagent-driven-development` or `dispatching-parallel-agents` superp
    - Report results clearly (what changed, what to test)
    - Do NOT commit independently
    - Do NOT modify session file or workspace files
+   - Report discovered issues using `## DISCOVERED ISSUES` section in output (if any found):
+     ```
+     ## DISCOVERED ISSUES
+
+     - **[CRITICAL]** {description}
+       - Impact: {what breaks or is blocked}
+       - Recommendation: {fix now / defer / escalate}
+
+     - **[HIGH]** {description}
+       - Impact: {consequence if not addressed}
+       - Recommendation: {fix now / add to backlog / notify PM}
+
+     - **[MEDIUM]** {description}
+       - Impact: {technical debt or minor risk}
+       - Recommendation: {improvement suggestion}
+
+     - **[INFO]** {description}
+       - Impact: {informational only}
+       - Recommendation: {for awareness}
+     ```
+     Severities: CRITICAL (blocks step), HIGH (backlog + PM), MEDIUM/INFO (improvement_notes).
+     Only report genuine issues found during work — do not pad.
 
 ### Workflow
 
