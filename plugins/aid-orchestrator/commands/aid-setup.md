@@ -65,6 +65,20 @@ Scan the project root for indicator files. For each found, extract key informati
 | `.prettierrc.*` | Prettier |
 | `[tool.mypy]` | mypy |
 
+**Docs Platform Detection:**
+
+| Indicator File | Platform | Format | Build Command |
+|---------------|----------|--------|---------------|
+| `docusaurus.config.js` or `docusaurus.config.ts` | `docusaurus` | `mdx` | `npm run build` |
+| `mkdocs.yml` | `mkdocs` | `md` | `mkdocs build` |
+| `conf.py` + `index.rst` | `sphinx` | `rst` | `make html` |
+| `.vitepress/config.js` or `.vitepress/config.ts` | `vitepress` | `md` | `vitepress build` |
+| `book.toml` | `mdbook` | `md` | `mdbook build` |
+| `docs/` exists, none of above | `generic-markdown` | `md` | _(none)_ |
+| No `docs/` directory | `none` | — | — |
+
+Search for indicator files in project root first, then inside `docs/` directory.
+
 ### Step 2: Detect Project Type
 
 Based on scan results, classify:
@@ -94,6 +108,7 @@ Tech Stack:
   Lint:       {ESLint, Ruff, ...}
   Build:      {npm run build, cargo build, ...}
   CI/CD:      {GitHub Actions, GitLab CI, none}
+  Docs:       {platform} ({format}) — build: {build_command}
   Database:   {PostgreSQL, MongoDB, ... (from docker-compose or deps)}
 
 Structure:
@@ -180,6 +195,12 @@ Proceed with recommended? (Y/N/select numbers, e.g., "1,2,3,5")
     docs: "{path if detected}"
     tests: "{path if detected}"
   databases: [{detected from docker-compose or deps}]
+  docs:
+    platform: "{detected platform or 'none'}"
+    path: "{detected docs root directory}"
+    format: "{mdx|md|rst}"
+    build_command: "{platform-specific build command or null}"
+    frontmatter_required: true|false
   ci_cd: "{GitHub Actions | GitLab CI | none}"
   git:
     default_branch: "{branch}"
