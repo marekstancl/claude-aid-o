@@ -64,6 +64,35 @@ auto_decisions:
     action: "continue execution"
     reason: "within budget"
 
+  # Content Quality (acceptance validation after each step)
+  - condition: "step output meets all acceptance criteria from plan"
+    action: "proceed to next step"
+    reason: "content quality verified"
+
+  - condition: "acceptance criteria unclear, step is high-complexity"
+    action: "dispatch code-reviewer for detailed review"
+    reason: "orchestrator cannot verify domain-specific criteria"
+
+  - condition: "acceptance criteria clearly NOT met after 2 fix cycles"
+    action: "escalate to PM"
+    reason: "automated fix attempts exhausted"
+
+# ─── Content Quality Rules ─────────────────────────────────────────
+content_quality:
+  auto_accept_when:
+    - all acceptance criteria verifiable from output.md
+    - step role is: docs, config, release
+    - step has <= 3 acceptance criteria
+
+  review_required_when:
+    - step role is: architect, backend, frontend, security
+    - step has 5+ acceptance criteria
+    - step is target of analysis_group
+    - orchestrator cannot determine if criterion is met
+
+  review_agent: code-reviewer
+  max_review_fix_cycles: 2
+
 # ─── Escalation Triggers (must ask PM) ──────────────────────────────
 escalation_triggers:
   - trigger: "gate fails after max_attempts retries"
@@ -93,6 +122,37 @@ escalation_triggers:
   - trigger: "security finding classified as CRITICAL"
     action: "HARD STOP — immediate PM notification"
     options: ["fix before proceeding", "abort EPIC"]
+
+  - trigger: "agent reports CRITICAL discovered issue"
+    action: "HARD STOP — triage discovered issue"
+    options: ["auto-fix (dispatch appropriate agent)", "skip (document risk)", "abort EPIC"]
+
+# ─── Discovered Issues Triage ──────────────────────────────────────
+discovered_issues:
+  critical:
+    auto_fix_patterns:
+      - pattern: "migration.*fail"
+        dispatch: backend
+      - pattern: "dependency.*conflict"
+        dispatch: backend
+      - pattern: "security.*critical"
+        dispatch: security
+    default_action: escalate_to_pm
+    blocks_current_step: true
+
+  high:
+    forward_to_later_step: true
+    create_backlog_entry: true
+    pm_notification: true
+    blocks_current_step: false
+
+  medium:
+    log_to_improvement_notes: true
+    blocks_current_step: false
+
+  info:
+    log_to_improvement_notes: true
+    blocks_current_step: false
 
 # ─── Acceptable Technical Debt ──────────────────────────────────────
 acceptable_debt:
