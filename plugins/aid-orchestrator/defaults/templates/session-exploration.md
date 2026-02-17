@@ -10,18 +10,36 @@ ai_agent: {AI_NAME}
 epic_id: {epic-id} (if epic session)
 epic_session: {N} of {M} (if epic session)
 epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+plan_ref: {path to plan.json or plan file} (if exists)
+orchestrated: true|false (if orchestrated by Controller)
 ---
 
-# Exploration: {Title}
+# Exploration: {Research Question Title}
 
 > **Multi-Session Work?** If exploration findings suggest 3+ sessions for implementation, consider creating an **Epic Breakdown** using `.aid-o/03-config/templates/epic.md`.
 
 ## Research Question
-> Clear, answerable question this exploration aims to resolve
+<!-- MIN: 3-5 sentences. State WHAT you're investigating, WHY the question arose, and what a GOOD ANSWER looks like.
+     Bad:  "Should we use GraphQL?"
+     Good: "Evaluate whether migrating from REST to GraphQL would reduce frontend data fetching
+            complexity for the dashboard views. Currently each dashboard widget makes 2-3 separate
+            REST calls, leading to waterfall loading and over-fetching. A successful exploration
+            will quantify the reduction in network requests, identify migration effort, and produce
+            a clear go/no-go recommendation with estimated implementation cost." -->
 
-## Time Budget & Scope
+## Context
+<!-- What preceded this exploration. Reference previous sessions, known pain points, stakeholder requests.
+     For orchestrated sessions: which EPIC session is this, what was discovered before.
+     For non-orchestrated: what triggered this investigation, any related ongoing work. -->
 
-**Budget:**
+**Previous work:** {reference prior sessions or "N/A — new investigation"}
+**Current state:** {what exists now that prompted this exploration}
+**Trigger:** {why this exploration is needed now — user request, performance issue, tech debt, etc.}
+
+## Scope
+
+### Time Budget
+
 | Phase | Planned | Actual |
 |-------|---------|--------|
 | Research | 1h | - |
@@ -30,13 +48,19 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 | Documentation | 30m | - |
 | **Total** | 3.5h | - |
 
-**In Scope:**
-- [ ] {Specific thing to investigate}
+### In Scope
+<!-- MIN: 3 items. Be specific — name technologies, components, questions to answer. -->
+- {Specific thing to investigate}
+- {Specific thing to investigate}
+- {Specific thing to investigate}
 
-**Out of Scope:**
+### Out of Scope
+<!-- MIN: 2 items. Explicitly exclude related areas you will NOT investigate in this session. -->
+- {What we're NOT investigating}
 - {What we're NOT investigating}
 
-## Success Criteria
+### Success Criteria
+<!-- MIN: 3 items. What makes this exploration "done"? These are referenced by Completion Criteria below. -->
 - [ ] Understand tradeoffs between at least 2-3 options
 - [ ] Have clear recommendation with reasoning
 - [ ] Document findings for future reference
@@ -46,8 +70,12 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 
 ## Research Phase
 
+<!-- Record everything you discover. Even negative results are valuable — they prevent re-investigation.
+     Cite sources, link to docs, reference code paths. Future sessions will rely on this section. -->
+
 ### Existing Knowledge
-{What do we already know? Check previous sessions, docs, code}
+<!-- What do we already know? Check previous sessions, project docs, codebase. -->
+{What is already known from prior work, existing docs, or codebase analysis}
 
 ### External Sources
 | Source | Key Insight | Relevance |
@@ -55,17 +83,23 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 | [Link](url) | {Main takeaway} | High/Medium/Low |
 
 ### Key Learnings
+<!-- MIN: 3 items. Concrete, actionable findings from the research. -->
 1. {Learning 1}
 2. {Learning 2}
+3. {Learning 3}
 
 ---
 
 ## Options Analysis
 
+<!-- Every exploration MUST include a baseline (do nothing) and at least 2 real alternatives.
+     Be honest about cons — the goal is informed decision-making, not selling a preferred option.
+     Include effort estimates even if rough — they drive prioritization. -->
+
 ### Option 0: Do Nothing (Baseline)
 **What:** Keep current approach unchanged
 **Pros:** No effort, no regression risk
-**Cons:** {Cons}
+**Cons:** {Cons — why the status quo is insufficient}
 
 ### Option 1: {Option Name}
 **What:** {Description}
@@ -75,39 +109,148 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 **Risk:** {Low/Medium/High}
 
 ### Option 2: {Option Name}
-{Repeat structure from Option 1}
+**What:** {Description}
+**Pros:** {list}
+**Cons:** {list}
+**Effort:** {X hours/days}
+**Risk:** {Low/Medium/High}
+
+<!-- Add more options as needed. -->
 
 ---
 
-## Prototype (If Needed)
+## Phases
 
-### Goals
-- {Goal 1}
+<!-- Each phase = one research stage. Exploration sessions follow a research progression:
+     literature review → analysis → prototype → recommendation.
+     Not all phases are required — skip Prototype if the question can be answered without code.
+     Every phase MUST have all 6 subsections below. Do not skip any. -->
 
-### Implementation
-```
-# Show prototype code here
-```
+### Phase 1: Literature Review
 
-### Results
-- **Findings:** {list}
-- **Performance:** {metrics}
-- **Limitations:** {list}
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the exploration context. -->
+{Gather existing knowledge from project docs, codebase, external sources, and prior sessions. Establish what is already known and identify gaps that need deeper investigation. This phase prevents redundant work and ensures the analysis builds on solid foundations.}
+
+**Agent / Role:** researcher
+
+**Inputs:**
+<!-- Files, context, or prior knowledge that this phase needs. -->
+- {project docs, prior session references, external documentation}
+
+**Outputs:**
+<!-- Artifacts produced. Include expected file paths or section references. -->
+- Populated "Research Phase" section above (Existing Knowledge, External Sources, Key Learnings)
+
+**Constraints:**
+<!-- Time limits, source restrictions, scope boundaries. -->
+- {constraint — e.g., "Stay within time budget for Research phase"}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] Existing Knowledge section filled with current state
+- [ ] At least 3 external sources reviewed and documented
+- [ ] Key Learnings contain actionable findings
+
+### Phase 2: Options Analysis
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters. -->
+{Evaluate the viable approaches identified during research. Structure each option with consistent criteria (pros, cons, effort, risk) to enable fair comparison. The baseline (do nothing) must always be included to justify any change.}
+
+**Agent / Role:** analyst
+
+**Inputs:**
+- Key Learnings from Phase 1
+- {codebase constraints, performance requirements, team capabilities}
+
+**Outputs:**
+- Populated "Options Analysis" section above with all options compared
+
+**Constraints:**
+- {constraint — e.g., "Minimum 2 real alternatives beyond baseline"}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] Baseline (Option 0) documented with honest cons
+- [ ] At least 2 alternative options fully analyzed
+- [ ] Effort and risk estimated for each option
+
+### Phase 3: Prototype (If Needed)
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters. -->
+{Build a minimal proof-of-concept to validate assumptions that cannot be answered through analysis alone. The prototype targets the highest-uncertainty aspect of the leading option. Skip this phase if the research question can be answered without code.}
+
+**Agent / Role:** prototyper
+
+**Inputs:**
+- Leading option(s) from Phase 2
+- {relevant codebase files, APIs, libraries}
+
+**Outputs:**
+- Prototype code (disposable — not production quality)
+- Measured results (performance, feasibility, complexity)
+
+**Constraints:**
+- {constraint — e.g., "Stay within prototype time budget", "Disposable code only — not for production"}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] Prototype addresses the key uncertainty
+- [ ] Results measured and documented
+- [ ] Limitations clearly stated
+
+### Phase 4: Recommendation
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters. -->
+{Synthesize all findings into a clear, actionable recommendation. The recommendation must reference evidence from previous phases and include an implementation plan if proceeding. This is the primary deliverable of the exploration session.}
+
+**Agent / Role:** analyst
+
+**Inputs:**
+- All findings from Phases 1-3
+- Success Criteria from Scope section
+
+**Outputs:**
+- Written recommendation with rationale
+- Implementation plan with effort estimate (if proceeding)
+- Follow-up session or epic creation (if needed)
+
+**Constraints:**
+- {constraint — e.g., "Recommendation must address all Success Criteria"}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] Clear go/no-go recommendation stated
+- [ ] Rationale references evidence from research and analysis
+- [ ] Implementation plan with effort estimate provided (if go)
 
 ---
 
-## Recommendations
+## Dependencies
 
-### Recommended Approach
-**Option:** {Option Name}
-**Rationale:** {reasons}
+<!-- Which phases depend on which and why. -->
 
-### Implementation Plan (If Proceeding)
-1. {Step 1}
-2. {Step 2}
+| Phase | Depends On | Reason |
+|-------|-----------|--------|
+| Phase 2 | Phase 1 | Needs research findings to identify viable options |
+| Phase 3 | Phase 2 | Needs leading option identified for prototyping |
+| Phase 4 | Phase 1, 2, 3 | Synthesizes all prior findings into recommendation |
 
-**Estimated Effort:** {X hours/days}
-**Estimated Sessions:** {N sessions}
+---
+
+## Completion Criteria
+
+<!-- Exploration sessions don't have automated quality gates. Instead, verify that all
+     Success Criteria from the Scope section are met. Reference each criterion explicitly. -->
+
+- [ ] All Success Criteria from Scope section are satisfied
+- [ ] Research question has a clear, evidence-backed answer
+- [ ] Findings are documented well enough for a different agent to act on them
+- [ ] If recommending implementation: effort estimate and session plan provided
+- [ ] If recommending no action: rationale documented for future reference
 
 ---
 
@@ -115,6 +258,7 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 
 - [ ] Research document created
 - [ ] Architecture decision documented (if applicable)
+- [ ] `CHANGELOG.md` entry added (if prototype committed)
 
 **See:** `skills/coding-standards.md` for documentation dependency tables
 
@@ -138,9 +282,9 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 
 ### Pre-Completion:
 - [ ] Research question answered
-- [ ] Options analyzed
-- [ ] Recommendations provided
-- [ ] Findings documented
+- [ ] Options analyzed with evidence
+- [ ] Recommendation provided with rationale
+- [ ] Findings documented for future reference
 
 ### Session Closure:
 - [ ] Commit messages follow conventions
@@ -153,12 +297,12 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 ## Next Steps
 
 **For Human Review:**
-- Review recommendations
+- Review recommendations and evidence
 - Decide on implementation approach
 
 **For AI (if session continues):**
 - Implement recommended approach
-- Create epic breakdown for implementation
+- Create epic breakdown for implementation (if multi-session)
 
 ---
 
