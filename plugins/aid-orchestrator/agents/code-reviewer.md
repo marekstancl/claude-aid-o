@@ -94,6 +94,40 @@ PLAN ALIGNMENT:
 OVERALL: APPROVE | REQUEST CHANGES | NEEDS DISCUSSION
 ```
 
+### Step Acceptance Review Output
+
+When dispatched by the Controller for step acceptance validation (PHASE_CHECK), use this format:
+
+```
+STEP ACCEPTANCE REVIEW
+======================
+Step: {step_id}
+Role: {role}
+Review cycle: {cycle_number} of {max_review_fix_cycles}
+
+ACCEPTANCE CRITERIA:
+  1. [PASS|FAIL] {criterion from plan.json} — {evidence or reason}
+  2. [PASS|FAIL] {criterion} — {evidence or reason}
+  ...
+
+OVERALL: APPROVED | REJECTED
+
+{If REJECTED:}
+FEEDBACK FOR RE-DISPATCH:
+  - {Specific, actionable feedback item 1}
+  - {Specific, actionable feedback item 2}
+  - ...
+
+REVIEWER NOTES:
+  {Any additional context for the Controller — e.g., "criterion 3 is ambiguous, consider clarifying in plan"}
+```
+
+**Rules for step reviews:**
+- Be specific — "test coverage is 72%, criterion requires 80%" not "insufficient coverage"
+- Each FAIL must have actionable feedback the agent can act on
+- Do NOT reject for issues outside the step's acceptance criteria
+- If a criterion is ambiguous, mark as PASS with a note, do not auto-fail
+
 ## Important
 
 - Always acknowledge what was done well BEFORE listing issues
