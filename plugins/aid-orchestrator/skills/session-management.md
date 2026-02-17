@@ -17,7 +17,7 @@
 7. **ARCHIVE completed sessions** to `{project.paths.sessions_completed}/`
 8. **FOLLOW lifecycle protocols** at each transition (brainstorming-end, session-start, phase-end, session-end)
 9. **PHASE-END = HARD STOP** — zastav se, shrn co bylo udelano, cekej na PM GO
-10. **UPDATE Docusaurus docs** at session-end (mandatory impact analysis before final commit)
+10. **UPDATE project docs** at session-end (mandatory impact analysis per `playbooks/docs-{project.docs.platform}.md`)
 11. **UPDATE workspace files** at session-end (command-history, lessons-learned, backlog)
 12. **MONITOR context window** after each phase — warn PM if getting large
 13. **REMIND yourself** of these rules periodically during long sessions
@@ -180,11 +180,13 @@ Phases are defined in the session file (from plan or epic). They can be adjusted
 ### Phase 3: Session-End Protocol
 
 1. Final quality gates (tests pass, no TODO/FIXME, no debug statements)
-2. **UPDATE Docusaurus project documentation (docs/)** — THIS IS MANDATORY:
+2. **UPDATE project documentation** — THIS IS MANDATORY:
    - Run documentation impact analysis against ALL changes in this session
-   - Update affected docs in `{project.paths.docs}` directory
-   - If docs changed: verify `npm run build` in docs/
+   - Update affected docs in `{project.docs.path}` directory
+   - Load platform playbook: `playbooks/docs-{project.docs.platform}.md`
+   - If docs changed: verify build with `{project.docs.build_command}` (skip if null/none)
    - If no docs affected: document why not in session file
+   - If `project.docs.platform == none`: skip docs update, note in session file
 3. Update session file: Status = Completed, all commits listed, all files listed
 4. Update active-work.md (see Active-Work Protocol)
 5. Write final summary (duration, commits, files changed, what was accomplished)
@@ -435,7 +437,7 @@ Located in: `{project.paths.templates}`
 | Not archiving | Move to completed/ + update session-log.md |
 | Skipping Phase-End HARD STOP | **MUST stop and wait for PM GO** — this is not optional |
 | Continuing without PM approval | NEVER proceed to next phase without explicit GO |
-| Skipping Docusaurus docs at session-end | ALWAYS run impact analysis before final commit |
+| Skipping project docs at session-end | ALWAYS run impact analysis before final commit (per docs platform playbook) |
 | Auto-handoff without PM consent | Only WARN about context window, PM decides |
 | Committing without PM asking | Always ask PM before commit and PR/merge |
 | Saving plans outside workspace/workflow/plans/ | **ONLY** `workspace/workflow/plans/` — no other location, ever |
