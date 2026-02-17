@@ -1,7 +1,7 @@
 # AID Orchestrator — Workflow Catalog
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-16
+**Version:** 0.2.0
+**Last Updated:** 2026-02-17
 
 Living document. All AID workflows — new and carried-over from the single-agent framework.
 
@@ -72,7 +72,8 @@ graph LR
 | Origin | Workflows | Notes |
 |--------|-----------|-------|
 | **NEW** (AID multi-agent) | WF-01, WF-02, WF-03, WF-08, WF-09, WF-10, WF-11, WF-12, WF-13 | Designed for Controller + Workers |
-| **Carried over** (single-agent) | WF-04, WF-05, WF-06, WF-07 | Adapted from C.I.C.E.R.O. v4.0 |
+| **Carried over** (single-agent) | WF-04, WF-06, WF-07 | Adapted from C.I.C.E.R.O. v4.0 |
+| **Hybrid** | WF-05 | Pre-commit gates carried over + NEW AID Gates Engine (post-EPIC) |
 
 ---
 
@@ -180,6 +181,8 @@ flowchart TD
 **Origin:** NEW
 **Purpose:** Autonomous execution of an EPIC through role-based agents, managed by the Controller.
 **Ref:** `plugins/aid-orchestrator/skills/epic-orchestration.md` (full specification)
+**Ref:** `plugins/aid-orchestrator/skills/gates-engine.md` (GATES state protocol)
+**Ref:** `plugins/aid-orchestrator/skills/retry-engine.md` (GATE_RETRY + escalation)
 
 ```mermaid
 stateDiagram-v2
@@ -228,12 +231,14 @@ stateDiagram-v2
 | Execute step work | — | I | **R** | — | — |
 | Phase check (auto-decision) | — | **R** | — | — | — |
 | Run quality gates | — | **R** | — | — | — |
-| Retry gate fixes | — | **R** | A | — | — |
+| Retry gate fixes | — | **R** | A² | — | — |
 | Escalate to PM | **R** | A | — | — | — |
 | Final approval | **R** | A | — | — | — |
 | Post-session curation | — | I | — | **R** | — |
 | Post-EPIC audit | — | I | — | — | **R** |
 | Merge + archive | — | **R** | — | — | — |
+
+² Gate fixes are dispatched to the **gate-fixer** utility agent (`agents/gate-fixer.md`), not role agents.
 
 ### Handoff Points
 
@@ -283,6 +288,7 @@ stateDiagram-v2
   steps/step_{N}_{role}/output.md
   steps/step_{N}_{role}/diff.patch
   gates/{gate_name}.txt
+  gates/retry_{gate_name}_{attempt}.md
 ```
 
 ---
@@ -370,8 +376,24 @@ flowchart TD
 
 ## WF-05: Quality Gates
 
-**Origin:** Carried over from C.I.C.E.R.O. v4.0
-**Purpose:** 6-gate pre-commit quality protocol. Mandatory before EVERY commit.
+**Origin:** Carried over from C.I.C.E.R.O. v4.0, **extended in Session 3** with AID Gates Engine
+**Purpose:** Two gate systems ensuring quality at different levels.
+
+> **Key decision (Session 3):** Two gate systems coexist — C.I.C.E.R.O. (pre-commit, per-session) and AID Gates Engine (post-EPIC-steps, configurable).
+
+### Two Gate Systems
+
+| Aspect | C.I.C.E.R.O. Pre-Commit Gates | AID Gates Engine |
+|--------|-------------------------------|------------------|
+| **When** | Before every commit | After all EPIC steps complete |
+| **Scope** | Single commit / session | Entire EPIC output |
+| **Command** | `/quality-gates` | `/run-gates` |
+| **Config** | Hardcoded in skill | `.aid-o/03-config/policies/gates.yaml` |
+| **Retry** | Manual fix + re-run | Automated: gate-fixer agent, max 3 attempts |
+| **Escalation** | PM via chat | PM via chat (or Slack in Session 6) |
+| **Ref** | `skills/quality-gates.md` | `skills/gates-engine.md`, `skills/retry-engine.md` |
+
+### 5A: C.I.C.E.R.O. Pre-Commit Gates (per commit)
 
 ```mermaid
 flowchart TD
@@ -397,7 +419,7 @@ flowchart TD
     OK((All Pass)) --> COMMIT[Commit<br>→ WF-06]
 ```
 
-### Gate Details
+#### Gate Details
 
 | # | Gate | Severity | Checks |
 |---|------|----------|--------|
@@ -408,24 +430,93 @@ flowchart TD
 | 5 | Commit Message | MEDIUM | `type(scope): desc (YYYY-MM-DD HH:MM TZ)` format |
 | 6 | Testing | MEDIUM | All existing pass, new code has tests, >80% coverage |
 
+### 5B: AID Gates Engine (post-EPIC)
+
+```mermaid
+flowchart TD
+    A[All EPIC steps<br>complete] --> B[Parse gates.yaml]
+    B --> C[Run required gates]
+
+    subgraph "Required Gates"
+        R1[tests_pass]
+        R2[lint_pass]
+        R3[security_scan_pass]
+        R4[docs_updated]
+    end
+
+    subgraph "Conditional Gates"
+        C1[type_check<br>if frontend changed]
+        C2[build_pass<br>if frontend changed]
+    end
+
+    C --> R1 & R2 & R3 & R4
+    C --> C1 & C2
+
+    R1 & R2 & R3 & R4 & C1 & C2 --> D{All pass?}
+    D -->|Yes| E[PM Approval<br>→ WF-03]
+    D -->|No| F[Gate-fixer agent<br>auto-fix + retry]
+    F --> G{Fixed?}
+    G -->|Yes| H[Re-check ALL gates]
+    H --> D
+    G -->|Max retries| I[Escalation<br>→ PM decides]
+```
+
+#### AID Gate Details
+
+| Gate | Type | Command | Pass Criteria |
+|------|------|---------|---------------|
+| tests_pass | command | `pytest -q --tb=short` | exit code 0 |
+| lint_pass | command | `ruff check . && ruff format --check .` | exit code 0 |
+| security_scan_pass | command | `bandit -q -r . -ll` | exit code 0, no HIGH/CRITICAL |
+| docs_updated | rule | — | docs updated if public API changed |
+| type_check | command (conditional) | `npx tsc --noEmit` | exit code 0 |
+| build_pass | command (conditional) | `npm run build` | exit code 0 |
+
+#### Retry Logic
+
+- Max 3 attempts per gate (configurable in `gates.yaml`)
+- Failure analysis classifies error type (logic, import, style, security, etc.)
+- Gate-fixer agent dispatches targeted fix based on classification
+- After fix: re-run failed gate, then re-check ALL gates (fix may cause regressions)
+- After max retries: escalate to PM with options (skip / manual fix / abort)
+
 ### RACI
 
-| Activity | PM | AI Agent | QG Runner Agent |
-|----------|:--:|:--------:|:---------------:|
-| Trigger gates | — | **R** | — |
-| Execute gates | — | I | **R** |
-| Fix failures | — | **R** | — |
-| Escalate uncertainty | **R** | A | — |
-| Approve skip (docs-only) | **R** | A | — |
+| Activity | PM | AI Agent | QG Runner | Gate-Fixer |
+|----------|:--:|:--------:|:---------:|:----------:|
+| Trigger pre-commit gates | — | **R** | — | — |
+| Execute pre-commit gates | — | I | **R** | — |
+| Trigger AID gates | — | **R**¹ | — | — |
+| Execute AID gates | — | **R**¹ | — | — |
+| Analyze gate failure | — | **R**¹ | — | — |
+| Fix gate failure | — | — | — | **R** |
+| Fix pre-commit failure | — | **R** | — | — |
+| Escalate (max retries) | **R** | A | — | — |
+| Approve skip | **R** | A | — | — |
+
+¹ In AID Gates Engine context, "AI Agent" = Orchestrator (via `/run-epic` or `/run-gates`)
 
 ### Handoff Points
 
 | From | To | What is handed off |
 |------|----|--------------------|
-| WF-04 (Session) | WF-05 | Changes to validate |
-| WF-05 | WF-06 | Validated changes ready for commit |
+| WF-04 (Session) | WF-05 (pre-commit) | Changes to validate before commit |
+| WF-03 (all steps done) | WF-05 (AID gates) | Full EPIC output to validate |
+| WF-05 (pre-commit) | WF-06 | Validated changes ready for commit |
+| WF-05 (AID gates, pass) | WF-03 (PM_APPROVAL) | All gates pass → merge approval |
+| WF-05 (AID gates, fail) | Gate-Fixer | Failure analysis + fix prompt |
+| Gate-Fixer | WF-05 (AID gates) | Fix applied → re-run gate |
 | WF-05 (Gate 2) | Docs | List of docs to update |
 | WF-05 (Gate 3) | Backlog | TODOs extracted from code |
+
+### Artifacts
+
+| Artifact | Location | System |
+|----------|----------|--------|
+| gates_report.json | `.aid-o/04-engine/evidence/{epic_id}/{run_id}/` | AID Gates Engine |
+| gates/{gate_name}.txt | `.aid-o/04-engine/evidence/{epic_id}/{run_id}/gates/` | AID Gates Engine |
+| gates/retry_{gate_name}_{attempt}.md | `.aid-o/04-engine/evidence/{epic_id}/{run_id}/gates/` | AID Gates Engine |
+| pm_decision.json | `.aid-o/04-engine/evidence/{epic_id}/{run_id}/` | AID Gates Engine (escalation) |
 
 ---
 
@@ -927,37 +1018,39 @@ How each workflow connects to others:
 
 All workflows, all roles, all key activities:
 
-| Activity | PM | Orchestrator | Role Agents | Curator | Auditor | Scanner |
-|----------|:--:|:------------:|:-----------:|:-------:|:-------:|:-------:|
-| **Planning Phase** | | | | | | |
-| Brainstorm idea | **R** | — | — | — | — | — |
-| Write Plan doc | C | — | **R**¹ | — | — | — |
-| Approve Plan | **R** | — | — | — | — | — |
-| Write EPIC | C | — | **R**¹ | — | — | — |
-| Approve EPIC | **R** | — | — | — | — | — |
-| **Orchestration Phase** | | | | | | |
-| Generate execution plan | — | **R** | — | — | — | — |
-| Approve execution plan | **R** | A | — | — | — | — |
-| Dispatch agents | — | **R** | I | — | — | — |
-| Execute step | — | I | **R** | — | — | — |
-| Phase check (auto) | — | **R** | — | — | — | — |
-| Run quality gates | — | **R** | — | — | — | — |
-| Retry gate fixes | — | **R** | A | — | — | — |
-| Escalate | **R** | A | — | — | — | — |
-| Approve merge | **R** | A | — | — | — | — |
-| **Post-Execution Phase** | | | | | | |
-| Record improvement_notes | — | — | **R** | — | — | — |
-| Collect + deduplicate | — | — | — | **R** | — | — |
-| Validate proposals | — | **R** | — | A | — | — |
-| Decide on proposals | **R** | I | — | I | — | — |
-| Execute audit | — | I | — | — | **R** | — |
-| Validate audit findings | — | **R** | — | — | A | — |
-| Process findings → backlog | — | — | — | **R** | — | — |
-| **Infrastructure** | | | | | | |
-| Project scan | I | — | — | — | — | **R** |
-| Index to memory | — | **R** | — | — | — | — |
-| Query memory | — | I | **R** | **R** | **R** | — |
-| Send Slack messages | I | **R** | — | I | I | — |
+| Activity | PM | Orchestrator | Role Agents | Gate-Fixer | Curator | Auditor | Scanner |
+|----------|:--:|:------------:|:-----------:|:----------:|:-------:|:-------:|:-------:|
+| **Planning Phase** | | | | | | | |
+| Brainstorm idea | **R** | — | — | — | — | — | — |
+| Write Plan doc | C | — | **R**¹ | — | — | — | — |
+| Approve Plan | **R** | — | — | — | — | — | — |
+| Write EPIC | C | — | **R**¹ | — | — | — | — |
+| Approve EPIC | **R** | — | — | — | — | — | — |
+| **Orchestration Phase** | | | | | | | |
+| Generate execution plan | — | **R** | — | — | — | — | — |
+| Approve execution plan | **R** | A | — | — | — | — | — |
+| Dispatch agents | — | **R** | I | — | — | — | — |
+| Execute step | — | I | **R** | — | — | — | — |
+| Phase check (auto) | — | **R** | — | — | — | — | — |
+| Run AID quality gates | — | **R** | — | — | — | — | — |
+| Analyze gate failure | — | **R** | — | — | — | — | — |
+| Fix gate failure | — | I | — | **R** | — | — | — |
+| Escalate (max retries) | **R** | A | — | — | — | — | — |
+| Run pre-commit gates | — | **R** | — | — | — | — | — |
+| Approve merge | **R** | A | — | — | — | — | — |
+| **Post-Execution Phase** | | | | | | | |
+| Record improvement_notes | — | — | **R** | — | — | — | — |
+| Collect + deduplicate | — | — | — | — | **R** | — | — |
+| Validate proposals | — | **R** | — | — | A | — | — |
+| Decide on proposals | **R** | I | — | — | I | — | — |
+| Execute audit | — | I | — | — | — | **R** | — |
+| Validate audit findings | — | **R** | — | — | — | A | — |
+| Process findings → backlog | — | — | — | — | **R** | — | — |
+| **Infrastructure** | | | | | | | |
+| Project scan | I | — | — | — | — | — | **R** |
+| Index to memory | — | **R** | — | — | — | — | — |
+| Query memory | — | I | **R** | — | **R** | **R** | — |
+| Send Slack messages | I | **R** | — | — | I | I | — |
 
 ¹ In Plan/EPIC phase, "Role Agent" = the single AI collaborating with PM (not yet dispatched workers)
 
@@ -998,4 +1091,4 @@ flowchart LR
 
 ---
 
-**Last Updated:** 2026-02-16
+**Last Updated:** 2026-02-17
