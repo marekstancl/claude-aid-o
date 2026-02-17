@@ -1,7 +1,7 @@
 ---
 id: S-20260217-e7b3
 type: new-feature
-status: active
+status: completed
 priority: high
 started: 2026-02-17
 epic_id: ADO-0001
@@ -921,6 +921,7 @@ agents/project-scanner.md output:
 ## Completion Summary
 
 - **Duration:** 2026-02-17 (1 conversation)
+- **Commits:** 2 (`bd0208e`, `0f7872a`)
 - **Files created:** 13 (9 role agents + 3 specialist agents + 1 skill)
 - **Files modified:** 13 (9 playbooks + plugin.json + aid-help.md + epic-orchestration.md + session file)
 - **Total new lines:** ~3,500 (core deliverables)
