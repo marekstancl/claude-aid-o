@@ -1,0 +1,23 @@
+{
+  "name": "claude-aid-o",
+  "owner": {
+    "name": "Marek Stancl"
+  },
+  "metadata": {
+    "description": "AID — AI Development Orchestrator for Claude Code. Controller + Workers architecture for multi-agent software development.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "aid-orchestrator",
+      "source": "./plugins/aid-orchestrator",
+      "description": "Controller + Workers orchestration for AI-driven software development. Manages EPICs, dispatches role-based agents, enforces quality gates, and maintains complete evidence trails.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Marek Stancl"
+      },
+      "category": "development",
+      "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management"]
+    }
+  ]
+}
