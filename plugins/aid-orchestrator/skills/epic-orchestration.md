@@ -107,6 +107,8 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 3. Identify parallel groups (steps that can run concurrently)
 4. Generate Plan JSON conforming to `.aid-o/03-config/templates/plan.schema.json`
 5. Validate Plan JSON against schema
+6. Generate session file following Session Creation Protocol (`commands/plan-epic.md` Step 5)
+7. Validate session file completeness (see Session File Quality Check below)
 
 **Plan Generation Rules:**
 - Architect always runs first (contracts before implementation)
@@ -116,7 +118,16 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 - Docs runs after implementation steps
 - Release runs last (needs all gates to pass)
 
-**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json`
+**Session File Quality Check:**
+Before transitioning to PLAN_REVIEW, verify the session file passes ALL checks:
+- Objective: 3+ sentences with success criteria (not a one-liner)
+- Scope: explicit IN (3+ items) and OUT (2+ items) lists
+- Phases: each phase has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+ items)
+- Dependencies: table present (or "No inter-phase dependencies" statement)
+- Quality Gates: at least one gate listed
+If any check fails, fix the session file before proceeding.
+
+**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json` + session file
 
 ### 3. PLAN_REVIEW
 
@@ -538,12 +549,28 @@ auto-starts the next queued EPIC if available.
 
 ## Integration with Session Management
 
-The Controller creates a session file for each EPIC run:
-1. On PLANNING: create session file from EPIC (auto-generated phases from plan steps)
-2. On each PHASE_CHECK: update session file (step status, commit hash)
-3. On analysis complete: log analysis_report summary to session file
-4. On GATES: update session file (gate results)
-5. On DONE: complete session file, archive
+The Controller creates and maintains a session file for each EPIC run:
+
+1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/plan-epic.md` Step 5):
+   - Read sources: EPIC, Plan JSON, plan file, previous session, source code, decision policies
+   - Map plan.json steps → session phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
+   - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Session Log
+   - Validate completeness before proceeding to PLAN_REVIEW
+
+2. **On each PHASE_CHECK:** Update session file:
+   - Mark completed phase acceptance items as checked
+   - Add step status + commit hash to Session Log
+
+3. **On analysis complete:** Log analysis_report summary to Session Log
+
+4. **On GATES:** Update session file:
+   - Add gate results to Quality Gates section (pass/fail per gate)
+   - Update Session Log
+
+5. **On DONE:** Complete session file:
+   - Set `status: completed` in frontmatter
+   - Final Session Log entry
+   - Archive to completed/
 
 Session file frontmatter:
 ```yaml
@@ -551,6 +578,7 @@ id: S-{YYYYMMDD}-{hash}
 type: new-feature
 status: active
 epic_id: {epic_id}
+plan_ref: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
 orchestrated: true  # marks this as Controller-managed
 ```
 
