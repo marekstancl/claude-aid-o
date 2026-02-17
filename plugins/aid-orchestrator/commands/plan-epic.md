@@ -198,23 +198,78 @@ If validation fails → fix and regenerate (do not present invalid plan).
    ```
 5. Copy EPIC to evidence: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
 
-### Step 5: Generate Session File
+### Step 5: Generate Session File (Session Creation Protocol)
+
+The session file is the human-readable operational document for this EPIC run.
+It must be **detailed enough** that any agent reading it understands the full scope,
+their role, inputs/outputs, and acceptance criteria — without needing to parse plan.json.
+
+#### 5a. Gather Sources
+
+Before creating the session file, read ALL of the following:
+
+1. **EPIC file** (already loaded from Step 1) — goal, scope, constraints, affected areas
+2. **Plan JSON** (generated in Step 3) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
+3. **Plan file** (`.aid-o/01-plans/` or `workspace/workflow/plans/` if referenced in EPIC) — broader project context
+4. **Previous session** (if `epic_session > 1`) — what was delivered, lessons learned
+5. **Relevant source code** — scan inputs/outputs from plan steps, read key files to understand current state
+6. **Decision policies** (`.aid-o/03-config/policies/decision-policies.yaml`) — auto_decisions, escalation_triggers
+
+#### 5b. Create Session File
 
 1. Generate session ID: `S-{YYYYMMDD}-{4char-hash}`
-2. Use template from `.aid-o/03-config/templates/session-new-feature.md`
+2. Use template from `.aid-o/03-config/templates/session-new-feature.md` (or type-appropriate template)
 3. Fill in frontmatter:
    ```yaml
    id: S-{YYYYMMDD}-{hash}
    type: new-feature
    status: active
-   priority: high
+   priority: {from EPIC}
    started: {YYYY-MM-DD}
    epic_id: {epic_id}
-   epic_session: 1
+   epic_session: {N}
+   plan_ref: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
    orchestrated: true
    ```
-4. Generate phases from plan steps — each step becomes a phase in the session file
-5. Save to: `.aid-o/04-engine/sessions/S-{YYYYMMDD}-{hash}-{topic}.md`
+
+#### 5c. Map Plan JSON to Session Phases
+
+For EACH step in plan.json, create a Phase in the session file:
+
+1. `step.objective` → **Phase Goal** — expand the objective into a full paragraph explaining what the phase accomplishes and why
+2. `step.role` → **Agent / Role** — the agent role that will execute this phase
+3. `step.inputs` → **Inputs** — translate file paths to readable descriptions with paths
+4. `step.outputs` → **Outputs** — describe expected deliverables with file paths
+5. `step.constraints` → **Constraints** — list as bullet points
+6. `step.allowed_paths` + `step.forbidden_paths` → add to Constraints as scope boundaries
+7. Check `analysis_groups` — if this step is the target of an analysis group, add to the phase: "Post-phase review: {agent roles} will perform {mode} analysis (merge strategy: {merge_strategy})"
+8. Create **Acceptance** checklist from outputs (each output = one checkbox) + constraints that can be verified
+
+#### 5d. Fill Remaining Sections
+
+- **Objective:** 3-5 sentences from EPIC goal + scope. Include success criteria.
+- **Context:** Reference previous sessions (if epic_session > 1), current code state, what was delivered before.
+- **Scope:** IN list from EPIC scope (min 3 items), OUT list from EPIC constraints/exclusions (min 2 items).
+- **Dependencies:** Table from plan.json `dependencies` array — "Phase X depends on Phase Y because Z".
+- **Quality Gates:** List from plan.json `gates` array + relevant entries from decision-policies.yaml.
+- **Session Log:** Initialize with `| {date} | Session created from EPIC {epic_id}, {step_count} phases planned |`
+
+#### 5e. Quality Check
+
+Before saving, verify the session file contains:
+- [ ] Objective: 3+ sentences (not just a one-liner)
+- [ ] Context: references to previous work or "greenfield" statement
+- [ ] Scope: IN list (3+ items) and OUT list (2+ items)
+- [ ] Phases: each phase has all 6 subsections (Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
+- [ ] Dependencies: table with at least one entry (or "No inter-phase dependencies" for single-step plans)
+- [ ] Quality Gates: at least one gate listed
+- [ ] Session Log: initialized
+
+If any check fails, fix before proceeding.
+
+#### 5f. Save
+
+Save to: `.aid-o/04-engine/sessions/S-{YYYYMMDD}-{hash}-{topic}.md`
 
 ### Step 6: Present Output
 
