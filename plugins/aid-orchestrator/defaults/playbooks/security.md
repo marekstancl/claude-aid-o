@@ -51,3 +51,35 @@
 - **DO** patch clear security issues directly
 - **DO** escalate CRITICAL findings immediately (triggers PM escalation)
 - **DO** document all findings even if patched
+
+---
+
+## Improvement Notes
+
+During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.
+
+**Format:** (see `skills/improvement-proposals.md` for full specification)
+
+```yaml
+improvement_notes:
+  - type: refactoring|performance|security|architecture|dx
+    area: "path/to/affected/module"
+    observation: "What you observed — be specific"
+    suggestion: "Concrete, actionable suggestion"
+    priority: low|medium|high
+    source_agent: "{your_role}"
+    source_step: "{step_id}"
+```
+
+**Record when you see:**
+- OWASP Top 10 violations in any code you review
+- Hardcoded secrets or credentials (even in test fixtures)
+- Missing input validation on user-facing endpoints
+- Weak authentication or authorization patterns
+- Dependencies with known CVEs
+- Missing security headers or misconfigured CORS
+
+**Do NOT record:**
+- Issues you are actively fixing in your current task
+- Style preferences without objective backing
+- Suggestions requiring complete rewrites with unclear benefit

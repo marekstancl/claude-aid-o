@@ -301,57 +301,88 @@ Tips:
 #### Topic: agents
 
 ```
-AID Agent Roles
+AID Agents — 18 Total (9 Role + 3 Specialist + 6 Utility)
 ====================================
 
-9 specialized agents, each with a playbook:
+ROLE AGENTS (9) — dispatched per-step during EPIC execution:
 
-  ARCHITECT (.aid-o/03-config/playbooks/architect.md)
+  ARCHITECT (agents/architect.md, playbook: architect.md)
     Designs API contracts, ADRs, system architecture.
     Runs FIRST. Does NOT implement — only designs.
     Outputs: OpenAPI specs, ADR documents, architecture diagrams.
 
-  DOMAIN (.aid-o/03-config/playbooks/domain.md)
+  DOMAIN (agents/domain.md, playbook: domain.md)
     Defines domain models, entities, business rules.
     Runs after Architect. Uses contracts to define models.
     Outputs: Entity definitions, invariants, domain events.
 
-  BACKEND (.aid-o/03-config/playbooks/backend.md)
+  BACKEND (agents/backend.md, playbook: backend.md)
     Implements server-side code, APIs, services.
     Can run in parallel with Frontend.
     Outputs: Endpoint implementations, services, migrations.
 
-  FRONTEND (.aid-o/03-config/playbooks/frontend.md)
+  FRONTEND (agents/frontend.md, playbook: frontend.md)
     Implements UI components, pages, client-side logic.
     Can run in parallel with Backend.
     Outputs: Components, pages, styles, client utilities.
 
-  QA (.aid-o/03-config/playbooks/qa.md)
+  QA (agents/qa.md, playbook: qa.md)
     Writes tests — unit, integration, e2e.
     Does NOT implement features — only tests.
     Outputs: Test files, test fixtures, coverage reports.
 
-  SECURITY (.aid-o/03-config/playbooks/security.md)
+  SECURITY (agents/security.md, playbook: security.md)
     Reviews code for vulnerabilities (OWASP, secrets, etc.).
     Can patch simple findings directly.
     Outputs: Security review, patches, recommendations.
 
-  OBSERVABILITY (.aid-o/03-config/playbooks/observability.md)
+  OBSERVABILITY (agents/observability.md, playbook: observability.md)
     Adds logging, metrics, tracing, health checks.
     Outputs: Logging setup, metric definitions, dashboards.
 
-  DOCS (.aid-o/03-config/playbooks/docs.md)
+  DOCS-WRITER (agents/docs-writer.md, playbook: docs.md)
     Updates documentation — API docs, guides, changelogs.
     Runs after implementation steps.
     Outputs: Updated docs, API references, changelog entries.
 
-  RELEASE (.aid-o/03-config/playbooks/release.md)
+  RELEASE (agents/release.md, playbook: release.md)
     Handles versioning, changelog, release notes.
     Runs LAST (after gates pass).
     Outputs: Version bump, release notes, deployment config.
 
+  Every role agent produces improvement_notes in their output
+  (observations about code outside their scope → Curator collects).
+
 Default Execution Order:
   Architect → Domain → (Backend + Frontend) → (QA + Security + Obs) → Docs → Release
+
+SPECIALIST AGENTS (3) — triggered by specific events:
+
+  CURATOR (agents/curator.md)
+    Triggered: after session-end (POST_PROCESSING)
+    Collects improvement_notes from all role agents, deduplicates
+    against backlog, analyzes patterns, proposes improvements.
+    Flow: collect → deduplicate → analyze → propose → Orchestrator → PM
+    Output: curator_report + backlog.md updates
+    See: skills/improvement-proposals.md
+
+  AUDITOR (agents/auditor.md)
+    Triggered: after Epic DONE (post-merge)
+    Runs 5 audit types: Code, Security, Documentation,
+    Frontend (conditional), Database (conditional).
+    Scores project health (0-100), tracks trends vs previous audit.
+    Output: audit_report (YAML + Markdown) in evidence/
+
+  PROJECT-SCANNER (agents/project-scanner.md)
+    Triggered: /aid-setup (quick scan) or on-demand (deep analysis)
+    Quick scan: tech stack, structure, conventions → project-profile.yaml
+    Deep analysis: + quality metrics, dependencies, tech debt
+    Output: .aid-o/04-engine/memory/project-profile.yaml
+
+UTILITY AGENTS (6) — support functions:
+
+  code-reviewer, docs-reviewer, quality-gates-runner,
+  session-validator, lessons-extractor, gate-fixer
 ```
 
 ---

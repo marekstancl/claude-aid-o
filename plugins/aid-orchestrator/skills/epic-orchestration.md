@@ -80,7 +80,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 | **GATE_RETRY** | Generate fix instructions from gate failure, re-dispatch | Fix applied, re-run gate | Retry entry in `gates_report.json` |
 | **ESCALATION** | Present failure to PM with options | PM decides (fix/skip/abort) | `pm_decision.json` |
 | **PM_APPROVAL** | Present final results + evidence to PM | PM approves merge | `pm_decision.json` |
-| **DONE** | Merge branch, archive evidence, update session | — | `final_report.md` |
+| **DONE** | Merge branch, archive evidence, run Curator + Auditor, update session | — | `final_report.md`, `audit-report.md`, `curator_report.json` |
 
 ---
 
@@ -330,6 +330,15 @@ if gate_fails:
    c. Archive session file to `.aid-o/04-engine/sessions/archive/`
    d. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
+3. **POST-PROCESSING:**
+   a. Dispatch **Curator agent** (`agents/curator.md`) — collects `improvement_notes`
+      from all step outputs, deduplicates vs backlog, proposes improvements.
+      Protocol: `skills/improvement-proposals.md`
+   b. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
+      (code, security, docs, frontend, database), scores project health,
+      tracks trend vs previous audit. Report → `evidence/{epic_id}/audit-report.md`
+   c. Curator proposals → Orchestrator evaluates → approved proposals to PM
+   d. Auditor findings → Orchestrator validates → Curator processes into backlog
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/final_report.md`:
 ```markdown

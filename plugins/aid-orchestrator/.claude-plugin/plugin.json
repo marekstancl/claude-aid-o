@@ -13,7 +13,19 @@
     { "name": "quality-gates-runner", "file": "agents/quality-gates-runner.md" },
     { "name": "session-validator", "file": "agents/session-validator.md" },
     { "name": "lessons-extractor", "file": "agents/lessons-extractor.md" },
-    { "name": "gate-fixer", "file": "agents/gate-fixer.md" }
+    { "name": "gate-fixer", "file": "agents/gate-fixer.md" },
+    { "name": "architect", "file": "agents/architect.md" },
+    { "name": "domain", "file": "agents/domain.md" },
+    { "name": "backend", "file": "agents/backend.md" },
+    { "name": "frontend", "file": "agents/frontend.md" },
+    { "name": "qa", "file": "agents/qa.md" },
+    { "name": "security", "file": "agents/security.md" },
+    { "name": "observability", "file": "agents/observability.md" },
+    { "name": "docs-writer", "file": "agents/docs-writer.md" },
+    { "name": "release", "file": "agents/release.md" },
+    { "name": "curator", "file": "agents/curator.md" },
+    { "name": "auditor", "file": "agents/auditor.md" },
+    { "name": "project-scanner", "file": "agents/project-scanner.md" }
   ],
   "commands": [
     { "name": "aid-init", "file": "commands/aid-init.md", "description": "Initialize .aid-o/ workspace in target project" },
@@ -39,7 +51,8 @@
     { "name": "quality-gates", "file": "skills/quality-gates.md", "description": "6-gate pre-commit quality protocol" },
     { "name": "session-management", "file": "skills/session-management.md", "description": "Session lifecycle, handoffs, and epic tracking" },
     { "name": "gates-engine", "file": "skills/gates-engine.md", "description": "Post-EPIC gates execution — YAML parsing, command/rule gates, reporting" },
-    { "name": "retry-engine", "file": "skills/retry-engine.md", "description": "Gate failure retry loop — analysis, fix dispatch, escalation" }
+    { "name": "retry-engine", "file": "skills/retry-engine.md", "description": "Gate failure retry loop — analysis, fix dispatch, escalation" },
+    { "name": "improvement-proposals", "file": "skills/improvement-proposals.md", "description": "Standard format for improvement notes, collection protocol, deduplication, backlog management" }
   ],
   "defaults": {
     "policies": [

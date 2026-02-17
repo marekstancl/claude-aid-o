@@ -46,3 +46,34 @@
 - **DO NOT** implement API endpoints or database queries
 - **DO** keep domain logic pure (no framework dependencies)
 - **DO** define what happens on invalid state transitions
+
+---
+
+## Improvement Notes
+
+During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.
+
+**Format:** (see `skills/improvement-proposals.md` for full specification)
+
+```yaml
+improvement_notes:
+  - type: refactoring|performance|security|architecture|dx
+    area: "path/to/affected/module"
+    observation: "What you observed — be specific"
+    suggestion: "Concrete, actionable suggestion"
+    priority: low|medium|high
+    source_agent: "{your_role}"
+    source_step: "{step_id}"
+```
+
+**Record when you see:**
+- Domain logic leaking into infrastructure/presentation layers
+- Business rules implemented inconsistently across modules
+- Missing or unclear ubiquitous language terms
+- Anemic domain models (logic in services instead of entities)
+- Domain events that should exist but don't
+
+**Do NOT record:**
+- Issues you are actively fixing in your current task
+- Style preferences without objective backing
+- Suggestions requiring complete rewrites with unclear benefit
