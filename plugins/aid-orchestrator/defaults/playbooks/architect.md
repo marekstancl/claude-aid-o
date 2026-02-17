@@ -22,7 +22,7 @@
 
 | Artifact | Format | Location |
 |----------|--------|----------|
-| ADR | Markdown | `docs/adr/ADR-XXXX-{title}.md` |
+| ADR | Markdown | `{project.docs.path}/adr/ADR-XXXX-{title}.md` |
 | API contract | OpenAPI YAML | `contracts/openapi/{module}.yaml` |
 | Event schema | JSON Schema | `contracts/events/{event}.schema.json` |
 | Boundary diagram | Mermaid | Embedded in ADR |

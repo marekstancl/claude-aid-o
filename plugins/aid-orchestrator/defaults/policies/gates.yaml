@@ -27,7 +27,7 @@ gates:
   docs_updated:
     description: "Documentation updated for all changed APIs/models"
     required: true
-    rule: "docs/ or CHANGELOG.md must be updated if code changes affect public API"
+    rule: "{project.docs.path} or CHANGELOG.md must be updated if code changes affect public API"
     pass_criteria: "manual or automated check that relevant docs are current"
 
   type_check:

@@ -21,10 +21,10 @@
 
 | Artifact | Format | Location |
 |----------|--------|----------|
-| Domain model | Markdown + code | `docs/domain/{module}.md` |
+| Domain model | Markdown + code | `{project.docs.path}/domain/{module}.md` |
 | Entity definitions | Python/TypeScript | `backend/app/models/` |
 | State machine | Mermaid diagram | Embedded in domain doc |
-| Business rules | Documented invariants | `docs/domain/{module}.md` |
+| Business rules | Documented invariants | `{project.docs.path}/domain/{module}.md` |
 
 ## Process
 

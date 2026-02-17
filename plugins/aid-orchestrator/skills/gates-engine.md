@@ -41,7 +41,7 @@ tests_pass:
 **Rule gate** — has a `rule` field. Evaluate via logic/inspection.
 ```yaml
 docs_updated:
-  rule: "docs/ or CHANGELOG.md must be updated if code changes affect public API"
+  rule: "{project.docs.path} or CHANGELOG.md must be updated if code changes affect public API"
   pass_criteria: "manual or automated check that relevant docs are current"
 ```
 
@@ -137,10 +137,10 @@ For each rule gate:
       - New/modified model files (schemas, entities)
       - New/modified config that changes behavior
    c. If public API changed:
-      - Check if docs/ or CHANGELOG.md is also in the changed files
+      - Check if `{project.docs.path}` or CHANGELOG.md is also in the changed files
       - If docs updated → PASS
       - If docs NOT updated → FAIL with justification:
-        "API changes detected in {files} but docs/ and CHANGELOG.md not updated"
+        "API changes detected in {files} but {project.docs.path} and CHANGELOG.md not updated"
    d. If no public API changes → PASS with justification:
       "No public API changes detected"
 
@@ -225,7 +225,7 @@ After all gates execute, generate `gates_report.json`:
       "type": "rule",
       "required": true,
       "status": "pass",
-      "rule": "docs/ or CHANGELOG.md must be updated if public API changed",
+      "rule": "{project.docs.path} or CHANGELOG.md must be updated if public API changed",
       "justification": "No public API changes detected",
       "output_file": "gates/docs_updated.txt",
       "duration_seconds": 0.5,

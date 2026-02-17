@@ -123,7 +123,7 @@ MANUAL QA NEEDED (Playwright unavailable):
 4. Verify examples/links still valid
 5. Stage docs: `git add {project.paths.docs}/...`
 
-**MDX/Docusaurus projects:** Escape `<`, `>`, `{`, `}` in text. Test build: `npm run build` in docs/.
+**If `project.docs.format == mdx`:** Escape `<`, `>`, `{`, `}` in text. Test build: `{project.docs.build_command}` in `{project.docs.path}`.
 
 **If uncertain which docs need updating:** Escalate to PM with list of changed files + potentially affected docs. Do NOT guess.
 

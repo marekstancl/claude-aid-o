@@ -81,7 +81,7 @@ REQUIRED GATES:
      Pass: exit code 0, no HIGH or CRITICAL findings
 
   4. docs_updated
-     Rule: docs/ or CHANGELOG.md updated if public API changed
+     Rule: {project.docs.path} or CHANGELOG.md updated if public API changed
      Pass: manual or automated check
 
 CONDITIONAL GATES (will evaluate conditions first):
