@@ -1,14 +1,14 @@
 Load project coding standards and quality rules.
 
-Read `.claude/skills/coding-standards/instructions.md` and follow the standards.
+Read `.aid-o/04-engine/memory/project-profile.yaml` for detected tech stack and conventions.
+Read `skills/agent-core.md` for core coding behavior and standards.
 
 Covers:
-- Python standards (naming, structure, patterns, anti-patterns)
-- TypeScript/React standards (components, hooks, state management)
-- Common patterns and anti-patterns with examples
-- Project-specific conventions
+- Language-specific standards (naming, structure, patterns, anti-patterns)
+- Project-specific conventions (detected by `/aid-setup`)
+- Common patterns and anti-patterns
+- Architecture rules (separation of concerns, layering)
 
-Templates: `.claude/skills/coding-standards/templates/`
-Examples: `.claude/skills/coding-standards/examples/`
+Standards are derived from the project profile and apply to all role agents during EPIC execution.
 
 $ARGUMENTS — optional focus area (e.g., "python", "typescript", "naming").

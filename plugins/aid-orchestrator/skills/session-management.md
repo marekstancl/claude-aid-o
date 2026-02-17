@@ -122,10 +122,10 @@ Testing/QA only? → Verification session
 ### Phase 1: Initialization (→ Session Start Protocol v4.0)
 
 1. Read `{project.paths.active_work}` for context
-2. Read `workspace/command-history.md` for known working commands
-3. Read `workspace/lessons-learned.md` for gotchas and past lessons
-4. Read `.claude/project.json` for paths and conventions
-5. Check `.claude/project-context/` — if missing or >7 days old, run project-context-detection
+2. Read `.aid-o/04-engine/command-history.md` for known working commands
+3. Read `.aid-o/04-engine/lessons-learned.md` for gotchas and past lessons
+4. Read `.aid-o/04-engine/memory/project-profile.yaml` for paths and conventions
+5. Check `.aid-o/04-engine/memory/project-profile.yaml` — if missing or >7 days old, run `/aid-setup`
 6. Determine: NEW session or CONTINUATION of existing?
 7. If NEW:
    a. **Assess complexity first:** Could this require 3+ sessions? If yes → suggest Epic workflow to PM before proceeding. PM decides.
@@ -401,7 +401,7 @@ Session files for epic sessions are stored in the standard `{project.paths.sessi
 
 ## Project Context Detection
 
-On first session with a project, check if `.claude/project-context/` exists. If not, load `project-context-detection` skill and run detection protocol. See that skill for details.
+On first session with a project, check if `.aid-o/04-engine/memory/project-profile.yaml` exists. If not, run `/aid-setup` to detect project context. See `commands/aid-setup.md` for details.
 
 ---
 
@@ -440,41 +440,43 @@ Located in: `{project.paths.templates}`
 | Skipping project docs at session-end | ALWAYS run impact analysis before final commit (per docs platform playbook) |
 | Auto-handoff without PM consent | Only WARN about context window, PM decides |
 | Committing without PM asking | Always ask PM before commit and PR/merge |
-| Saving plans outside workspace/workflow/plans/ | **ONLY** `workspace/workflow/plans/` — no other location, ever |
+| Saving plans outside .aid-o/01-plans/ | **ONLY** `.aid-o/01-plans/` — no other location, ever |
 | Confusing Plan/Epic/Session | Plan = idea, Epic = context, Session = detailed work plan |
 
 ---
 
 ## Configuration
 
-From `.claude/project.json`:
-```json
-{
-  "paths": {
-    "workspace": "workspace/",
-    "sessions": "workspace/sessions/",
-    "sessions_active": "workspace/sessions/active/",
-    "sessions_completed": "workspace/sessions/completed/",
-    "templates": ".claude/skills/session-management/templates/",
-    "epics": "workspace/workflow/epics/",
-    "epics_active": "workspace/workflow/epics/active/",
-    "epics_completed": "workspace/workflow/epics/completed/",
-    "plans": "workspace/workflow/plans/",
-    "bugs": "workspace/bugs.md",
-    "session_log": "workspace/session-log.md",
-    "active_work": "workspace/active-work.md",
-    "command_history": "workspace/command-history.md",
-    "lessons_learned": "workspace/lessons-learned.md",
-    "backlog": "workspace/backlog.md"
-  },
-  "conventions": {
-    "session_file_format": "{id}-{topic}.md",
-    "session_id_format": "S-{YYYYMMDD}-{4char-hash}",
-    "epic_id_format": "E-{YYYYMMDD}-{4char-hash}",
-    "branch_format": "session/{id}-{topic}"
-  }
-}
+Standard `.aid-o/` paths (created by `/aid-init`):
+
 ```
+.aid-o/
+  01-plans/                          # Plans
+    archive/
+  02-epics/                          # EPICs
+    archive/
+  03-config/                         # PM-customizable config
+    policies/                        # gates.yaml, decision-policies.yaml, slack-config.yaml
+    templates/                       # session templates, plan template, epic template
+    playbooks/                       # role playbooks, docs playbooks
+  04-engine/                         # AI internal
+    sessions/                        # Active session files
+      archive/                       # Completed sessions
+    memory/
+      active-work.md                 # Current state, recent work
+      project-profile.yaml           # Project config (from /aid-setup)
+      decisions.yaml                 # Key decisions log
+    backlog.md                       # Improvement backlog
+    lessons-learned.md               # Lessons from sessions
+    command-history.md               # Known working commands
+    evidence/                        # EPIC execution evidence
+```
+
+**Conventions:**
+- Session file: `{id}-{topic}.md` (e.g., `S-20260211-1f8c-user-auth.md`)
+- Session ID: `S-{YYYYMMDD}-{4char-hash}`
+- Epic ID: `E-{YYYYMMDD}-{4char-hash}`
+- Branch: `session/{id}-{topic}`
 
 ---
 

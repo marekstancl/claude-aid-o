@@ -5,7 +5,7 @@ Version: 1.0.0 — Post-EPIC-steps quality validation engine.
 **Purpose:** Parse `gates.yaml`, execute quality gates (command-based and rule-based),
 generate structured `gates_report.json` with retry history, store evidence.
 
-> **Not to be confused with** `quality-gates.md` — the C.I.C.E.R.O. pre-commit 6-gate protocol.
+> **Not to be confused with** `quality-gates.md` — the pre-commit 6-gate protocol.
 > This engine runs **after EPIC steps complete** (State 7: GATES in the Controller state machine).
 
 ---

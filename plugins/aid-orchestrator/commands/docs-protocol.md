@@ -1,16 +1,16 @@
 Load documentation protocol for this project.
 
-Read `.claude/skills/documentation-protocol/instructions.md` and follow the documentation rules.
+Read `.aid-o/04-engine/memory/project-profile.yaml` to determine `project.docs.platform`.
+Read the appropriate platform playbook: `defaults/playbooks/docs-{project.docs.platform}.md`.
+
+If no docs platform detected, read `defaults/playbooks/docs-generic.md`.
 
 Covers:
-- MDX escaping rules (critical for Docusaurus builds)
-- Sidebar configuration
-- YAML frontmatter requirements
+- Platform-specific formatting rules (MDX escaping for Docusaurus, RST for Sphinx, etc.)
+- Navigation/sidebar configuration
+- Frontmatter requirements
 - Mermaid diagram syntax
 - Documentation impact analysis (which code changes affect which docs)
 - Common build errors and fixes
-
-Templates: `.claude/skills/documentation-protocol/templates/`
-Examples: `.claude/skills/documentation-protocol/examples/`
 
 $ARGUMENTS — optional context about what documentation to create/update.

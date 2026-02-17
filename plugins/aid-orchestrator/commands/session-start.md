@@ -1,6 +1,6 @@
 Start a new tracked session.
 
-Read `.claude/skills/session-management/instructions.md` and follow the Initialization protocol (if it exists).
+Read `skills/session-management.md` and follow the Initialization protocol.
 
 ## Session Creation Protocol
 
@@ -8,24 +8,24 @@ Read `.claude/skills/session-management/instructions.md` and follow the Initiali
 
 Before creating the session file, read ALL available sources:
 
-1. **`workspace/active-work.md`** — current project state, recent sessions, next steps
-2. **EPIC file** (if exists — `.aid-o/02-epics/` or `workspace/workflow/epics/`) — provides scope and goal. If an EPIC exists for this work, use it as primary source.
-3. **Plan file** (if exists — `.aid-o/01-plans/` or `workspace/workflow/plans/`) — broader project context
+1. **`active-work.md`** (`.aid-o/04-engine/memory/active-work.md`) — current project state, recent sessions, next steps
+2. **EPIC file** (if exists — `.aid-o/02-epics/`) — provides scope and goal. If an EPIC exists for this work, use it as primary source.
+3. **Plan file** (if exists — `.aid-o/01-plans/`) — broader project context
 4. **$ARGUMENTS or task description** — what PM wants done
 5. **Relevant source code** — read key files mentioned in the task to understand current state
-6. **Previous sessions** (if relevant — `workspace/sessions/`) — what was done before, lessons learned
+6. **Previous sessions** (if relevant — `.aid-o/04-engine/sessions/`) — what was done before, lessons learned
 
 ### Step 2: Determine Session Type
 
 Based on $ARGUMENTS or task description:
-- `bug-fix` → use `templates/session-bug-fix.md`
-- `new-feature` → use `templates/session-new-feature.md`
-- `refactoring` → use `templates/session-refactoring.md`
-- `exploration` → use `templates/session-exploration.md`
+- `bug-fix` → use `.aid-o/03-config/templates/session-bug-fix.md`
+- `new-feature` → use `.aid-o/03-config/templates/session-new-feature.md`
+- `refactoring` → use `.aid-o/03-config/templates/session-refactoring.md`
+- `exploration` → use `.aid-o/03-config/templates/session-exploration.md`
 
 ### Step 3: Create Session File
 
-Create at: `workspace/sessions/active/YYYY-MM-DD-{type}-{topic}.md`
+Create at: `.aid-o/04-engine/sessions/S-{YYYYMMDD}-{4char-hash}-{topic}.md`
 
 ### Step 4: Fill Session File with Detail
 
@@ -90,4 +90,4 @@ Before presenting to PM, verify the session file:
 Present the session file to PM. Wait for approval before starting implementation.
 If PM requests changes, update the session file and re-present.
 
-Templates: `{project.paths.templates}`
+Templates: `.aid-o/03-config/templates/`

@@ -87,4 +87,4 @@ ISSUES:
 
 ## Reference
 
-Read `.claude/skills/documentation-protocol/instructions.md` for full documentation standards if needed.
+Read `defaults/playbooks/docs-{project.docs.platform}.md` for platform-specific documentation standards if needed.

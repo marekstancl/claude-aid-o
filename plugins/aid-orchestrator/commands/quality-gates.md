@@ -1,6 +1,6 @@
 Run the 6-gate pre-commit quality protocol before committing.
 
-Read `.claude/skills/quality-gates/instructions.md` and follow it step by step.
+Read `skills/quality-gates.md` and follow it step by step.
 
 The 6 gates (run in order):
 1. **Log Analysis** (CRITICAL) — start dev servers, verify no runtime errors
@@ -14,5 +14,3 @@ ANY gate fails → fix → re-run from Gate 1.
 ALL gates pass → commit allowed.
 
 Document results in session file (if active session).
-
-Quick reference: `.claude/skills/quality-gates/checklist.md`

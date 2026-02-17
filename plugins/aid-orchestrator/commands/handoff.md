@@ -1,6 +1,6 @@
 Create a handoff block for the next AI session.
 
-Read `.claude/skills/session-management/instructions.md` and follow the Handoff protocol.
+Read `skills/session-management.md` and follow the Handoff protocol.
 
 The handoff must be **self-contained** — next AI shouldn't need to ask questions.
 
@@ -15,5 +15,5 @@ Required sections:
 
 Write handoff to:
 1. Session file (Handoff Notes section)
-2. `workspace/active-work.md` (Context for Next AI section)
+2. `.aid-o/04-engine/memory/active-work.md` (Context for Next AI section)
 3. Epic file (if epic session) + plan file (if exists)

@@ -1,120 +1,173 @@
 # AID — AI Development Orchestrator
 
-A Claude Code plugin implementing **Controller + Workers** architecture for AI-driven software development.
+A Claude Code plugin implementing **Controller + Workers** architecture for multi-agent software development.
 
 ## What It Does
 
 1. Takes an **EPIC** specification (feature description with scope, constraints, acceptance criteria)
-2. Generates a structured **Plan JSON** (steps, dependencies, parallel groups)
+2. Generates a structured **Plan JSON** (steps, dependencies, parallel groups, analysis groups)
 3. **Dispatches role-based agents** (Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release)
-4. **Enforces quality gates** (tests, lint, security scan, docs) with retry logic
-5. Maintains a complete **evidence trail** for every decision and action
-
-## Installation
-
-```bash
-claude plugin install aid-orchestrator
-```
+4. **Enforces quality gates** (tests, lint, security scan, docs) with auto-fix retry logic
+5. **Communicates with PM** via Slack MCP (or chat fallback) at key checkpoints
+6. Maintains a complete **evidence trail** for every decision and action
+7. **Queues EPICs** for autonomous sequential execution
 
 ## Quick Start
 
 ```bash
-# Initialize .aid-o/ workspace in your project
-/aid-init
+# 1. Initialize and configure for your project
+/aid-setup
 
-# Create an EPIC from template
-# Edit .aid-o/03-config/templates/epic.md with your feature spec
+# 2. Create an EPIC (or copy the example template)
+# Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
 
-# Plan the EPIC (generates Plan JSON)
+# 3. Generate execution plan
 /plan-epic .aid-o/02-epics/my-epic.md
 
-# Execute the EPIC
-/run-epic .aid-o/02-epics/my-epic.md
+# 4. Run the orchestrator
+/run-epic
 ```
 
-## Plugin Structure
+## Commands (17)
+
+| Command | Description |
+|---------|-------------|
+| `/aid-init` | Initialize `.aid-o/` workspace with default config |
+| `/aid-setup` | Interactive project onboarding — detect tech stack, configure AID |
+| `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
+| `/plan-epic <path>` | Parse EPIC → generate Plan JSON + session file |
+| `/run-epic [id]` | Run Controller state machine for full EPIC orchestration |
+| `/run-step <id> <step>` | Manually run one step from an existing plan |
+| `/epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |
+| `/run-gates [id]` | Run quality gates for an EPIC |
+| `/epic-queue [sub]` | Manage EPIC execution queue (add, remove, pause, resume) |
+| `/quality-gates` | Run 6-gate pre-commit quality protocol |
+| `/session-start` | Start a new tracked session |
+| `/session-end` | Complete and archive current session |
+| `/handoff` | Create handoff block for next AI session |
+| `/audit` | Run project health audit |
+| `/coding-standards` | Load project coding standards |
+| `/testing` | Load testing workflow and standards |
+| `/docs-protocol` | Load documentation protocol |
+
+## Agents (18)
+
+**Role Agents (9)** — dispatched per-step during EPIC execution:
+
+| Agent | Role | When |
+|-------|------|------|
+| `architect` | API contracts, ADRs, system design | Always first |
+| `domain` | Domain models, entities, invariants | After architect |
+| `backend` | Server-side code, APIs, services | After domain |
+| `frontend` | UI components, pages, client logic | After architect |
+| `qa` | Unit, integration, e2e tests | After implementation |
+| `security` | OWASP review, SAST, AuthZ | After implementation |
+| `observability` | Logging, metrics, tracing, health | After implementation |
+| `docs-writer` | API docs, guides, changelogs | After implementation |
+| `release` | Versioning, deployment config | Last |
+
+**Specialist Agents (3):**
+
+| Agent | Purpose |
+|-------|---------|
+| `curator` | Collects improvement notes from agents, proposes improvements |
+| `auditor` | Post-EPIC audit — code, security, docs, health scoring |
+| `project-scanner` | Tech stack detection, project analysis → `project-profile.yaml` |
+
+**Utility Agents (6):**
+
+| Agent | Purpose |
+|-------|---------|
+| `code-reviewer` | Reviews code against plan + coding standards |
+| `docs-reviewer` | Reviews docs for format compliance |
+| `quality-gates-runner` | Runs 6-gate pre-commit protocol |
+| `session-validator` | Validates session file completeness |
+| `lessons-extractor` | Extracts lessons from completed sessions |
+| `gate-fixer` | Analyzes gate failures, applies targeted fixes |
+
+## Skills (12)
+
+| Skill | Purpose |
+|-------|---------|
+| `epic-orchestration` | 11-state Controller FSM |
+| `agent-core` | Core agent behavior, roles, workflow routing |
+| `quality-gates` | 6-gate pre-commit protocol |
+| `session-management` | Session lifecycle, handoffs, epic tracking |
+| `gates-engine` | Post-step gates — YAML parsing, execution, reporting |
+| `retry-engine` | Gate failure retry — analysis, fix dispatch, escalation |
+| `planner` | Plan generation — dependency graph, parallel groups, analysis groups |
+| `parallel-dispatch` | Parallel agent dispatch — branches, conflict detection, merge |
+| `analysis-merge` | Multi-perspective analysis — union, consensus, weighted strategies |
+| `improvement-proposals` | Standard format for improvement notes, collection, deduplication |
+| `slack-mcp` | Slack MCP integration — 7 message types, fallback, timeouts |
+| `epic-queue` | EPIC queue management — add, remove, prioritize, auto-pickup |
+
+## Controller State Machine
 
 ```
-aid-orchestrator/
-  .claude-plugin/plugin.json   # Plugin manifest
-  agents/                      # 5 utility agents
-    code-reviewer.md           # Reviews code against plan + standards
-    docs-reviewer.md           # Reviews docs for MDX/frontmatter compliance
-    quality-gates-runner.md    # Runs 6-gate pre-commit protocol
-    session-validator.md       # Validates session file completeness
-    lessons-extractor.md       # Extracts lessons from completed sessions
-  commands/                    # 9 commands
-    aid-init.md                # Initialize .aid-o/ workspace in target project
-    quality-gates.md           # Run pre-commit quality gates
-    session-start.md           # Start tracked session
-    session-end.md             # Complete and archive session
-    handoff.md                 # Create handoff for next AI session
-    audit.md                   # Project health audit
-    coding-standards.md        # Load coding standards
-    testing.md                 # Load testing workflow
-    docs-protocol.md           # Load documentation protocol
-  skills/                      # 4 skills
-    epic-orchestration.md      # Controller state machine
-    agent-core.md              # Core agent behavior and routing
-    quality-gates.md           # 6-gate quality protocol
-    session-management.md      # Session lifecycle management
-  defaults/                    # Copied to target project by /aid-init
-    policies/
-      gates.yaml               # Quality gate definitions + retry config
-      decision-policies.yaml   # Autonomous decision rules
-    templates/
-      plan.md                  # Plan template
-      epic.md                  # EPIC specification template
-      plan.schema.json         # Plan JSON Schema (draft 2020-12)
-      session-*.md             # 4 session type templates
-    playbooks/                 # 9 role playbooks
-      architect.md, domain.md, backend.md, frontend.md,
-      qa.md, security.md, observability.md, docs.md, release.md
+IDLE ──→ PLANNING ──→ PLAN_REVIEW ──→ EXECUTING ──→ PHASE_CHECK
+                          ↑               ↑               │
+                          │ revise        │ more steps     │
+                          └───────────────┤               ↓
+                                          └─── NEXT_PHASE
+                                                          │
+                                                   all steps done
+                                                          ↓
+                                          GATES ──→ GATE_RETRY (max 3)
+                                            │              │
+                                        all pass    retries exhausted
+                                            ↓              ↓
+                                      PM_APPROVAL    ESCALATION
+                                            │         (PM decides)
+                                        approved
+                                            ↓
+                                          DONE
+                                    (Curator + Auditor)
+                                            │
+                                     queue not empty?
+                                            ↓
+                                    auto-start next EPIC
 ```
 
-## What `/aid-init` Creates
+**PM Checkpoints** (via Slack or chat fallback):
+- **PLAN_REVIEW**: approve execution plan (GO / REVISE / ABORT)
+- **ESCALATION**: handle failures (Fix / Skip / Abort)
+- **PM_APPROVAL**: approve merge (APPROVE / REJECT / REVISE)
+
+## Workspace Structure
+
+`/aid-init` creates in your project:
 
 ```
 .aid-o/
-  01-plans/          # PM + AI brainstorming (archive/ for completed)
-  02-epics/          # PM + AI detailed specs (archive/ for completed)
-  03-config/         # PM-customizable config (policies, templates, playbooks)
-  04-engine/         # AI internal (sessions, memory, backlog, evidence)
-```
-
-## Architecture
-
-```
-EPIC → Planner → Plan JSON → Scheduler → Agent Dispatch
-                                              ↓
-                               ┌──────────────┼──────────────┐
-                               ↓              ↓              ↓
-                          Architect      Backend+FE         QA
-                               ↓              ↓              ↓
-                          Contracts      Implementation    Tests
-                               └──────────────┼──────────────┘
-                                              ↓
-                                     Quality Gates
-                                              ↓
-                                    PM Approval → Merge
-```
-
-## State Machine
-
-```
-IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK
-  → NEXT_PHASE / RETRY → GATES → GATE_RETRY / ESCALATION
-  → PM_APPROVAL → DONE / REJECTED
+  01-plans/              Plans (PM + AI brainstorming)
+  02-epics/              EPICs (task specifications)
+  03-config/
+    policies/            gates.yaml, decision-policies.yaml, slack-config.yaml
+    templates/           EPIC template, session templates, plan schema
+    playbooks/           9 role playbooks + 2 docs platform playbooks
+  04-engine/
+    sessions/            Active + archived session files
+    memory/              project-profile.yaml, active-work.md, decisions.yaml
+    evidence/            EPIC execution evidence (per epic, per run)
+    backlog.md           Discovered issues backlog
+    lessons-learned.md   Accumulated lessons
+    command-history.md   Known working commands
 ```
 
 ## Configuration
 
-After `/aid-init`, customize files in `.aid-o/03-config/`:
-- `policies/gates.yaml` — quality gate definitions and thresholds
-- `policies/decision-policies.yaml` — what the orchestrator decides autonomously vs. escalates
-- `playbooks/*.md` — role-specific agent instructions
+After `/aid-setup`, customize in `.aid-o/03-config/`:
+
+| File | What to customize |
+|------|-------------------|
+| `policies/gates.yaml` | Gate commands, retry limits, budget |
+| `policies/decision-policies.yaml` | Autonomy level — what Controller decides vs. escalates |
+| `policies/slack-config.yaml` | Slack channel, timeouts, reminder intervals |
+| `playbooks/*.md` | Role-specific agent instructions for your project |
 
 ## Version
 
 - **Plugin:** 0.1.0
-- **Status:** Phase A — Foundation Controller
+- **Requires:** Claude Code >= 1.0.0
+- **License:** MIT

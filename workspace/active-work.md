@@ -6,11 +6,23 @@
 
 ## Current Focus
 
-No active session. Ready for Session 7.
+No active session. Plugin ready for deployment testing or Session 8 (Memory MCP).
 
 ---
 
 ## Recent Work
+
+### 2026-02-17 — Session 7: E2E Test + Hardening
+- **Session:** [S-20260217-de07](sessions/completed/S-20260217-de07-e2e-test-hardening.md)
+- **Epic:** EPIC-ADO-0001 (Session 7 of 8)
+- **Branch:** `session/S-20260217-de07-e2e-test-hardening`
+- **Summary:** Full static verification — cross-reference integrity (70/70 files), legacy cleanup (28 `.claude/` + 12 C.I.C.E.R.O. refs removed), pipeline hardening (22 gaps found, 7 critical fixes in run-epic.md), 18 edge cases verified, README rewrite, reference EPIC created, Deployment + Testing Guide (16 test scenarios).
+- **Key artifacts:**
+  - `plugins/aid-orchestrator/README.md` — complete rewrite (18 agents, 17 commands, 12 skills)
+  - `plugins/aid-orchestrator/defaults/templates/epic-example.md` — reference EPIC
+  - `plugins/aid-orchestrator/commands/run-epic.md` — 7 hardening fixes
+  - `workspace/DEPLOYMENT-AND-TESTING-GUIDE.md` — deployment + testing guide
+- **Files:** 24 changed (+354/-272 lines)
 
 ### 2026-02-17 — Session 6: Slack + Autonomní Běh
 - **Session:** [S-20260217-d9c4](sessions/active/S-20260217-d9c4-slack-autonomous-run.md)
@@ -59,8 +71,9 @@ No active session. Ready for Session 7.
 
 ## Next Steps
 
-1. **Session 7:** E2E Test + Hardening (real EPIC, edge cases, documentation)
-2. **Session 8:** Memory MCP (Qdrant vector DB, semantic search)
+1. **Deployment Testing:** Follow `workspace/DEPLOYMENT-AND-TESTING-GUIDE.md` — publish plugin, install in test project, run 16 test scenarios
+2. **Session 8:** Memory MCP (Qdrant vector DB, semantic search, long-term agent memory)
+3. **Future improvement:** Dynamic MCP server discovery + integration (currently hardcoded to Slack + Playwright)
 
 ---
 

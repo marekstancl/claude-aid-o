@@ -181,7 +181,7 @@ GATES COMMANDS:
 
 QUALITY COMMANDS:
 
-  /quality-gates     Run 6-gate pre-commit protocol (C.I.C.E.R.O.)
+  /quality-gates     Run 6-gate pre-commit protocol
   /audit             Project health audit
   /coding-standards  Load coding standards
   /testing           Load testing workflow
@@ -516,7 +516,7 @@ AID has TWO gate systems:
    Agent:    gate-fixer.md (auto-fix on failure)
    Purpose:  Validate entire EPIC output before PM approval
 
-2. C.I.C.E.R.O. Quality Gates (pre-commit)
+2. Pre-Commit Quality Gates
    Command:  /quality-gates
    Skill:    quality-gates.md
    Agent:    quality-gates-runner.md

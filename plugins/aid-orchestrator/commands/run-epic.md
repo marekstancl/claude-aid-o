@@ -60,12 +60,14 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 2. Read and validate EPIC (same validation as `/plan-epic` Step 1)
 3. Read `.aid-o/03-config/policies/decision-policies.yaml`
 4. Read `.aid-o/03-config/policies/gates.yaml`
-5. Find existing Plan JSON (in evidence directory) or generate one:
-   - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id`
+5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/`
+   (also create subdirectories: `steps/`, `prompts/`, `gates/`, `analysis/`, `discovered_issues/`, `reviews/`, `parallel_groups/`)
+6. Find existing Plan JSON (in evidence directory) or generate one:
+   - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id` (most recent by directory name — run IDs use ISO timestamp prefix)
    - If plan.json exists → load it
    - If not → run `/plan-epic` logic inline
-6. Initialize or load `plan_progress.json`
-7. Copy EPIC to evidence (if not already there)
+7. Initialize or load `plan_progress.json`
+8. Copy EPIC to evidence (if not already there)
 
 **Evidence:** `epic_input.md` saved to evidence directory.
 
@@ -79,8 +81,16 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 1. If Plan JSON doesn't exist, generate it (same logic as `/plan-epic` Steps 2-4)
 2. Validate plan against `.aid-o/03-config/templates/plan.schema.json`
 3. Save plan to evidence
+4. **Generate session file** following Session Creation Protocol (`commands/plan-epic.md` Step 5)
+5. **Validate session file** completeness (per `skills/epic-orchestration.md` Session File Quality Check):
+   - Objective: 3+ sentences with success criteria
+   - Scope: explicit IN (3+) and OUT (2+) lists
+   - Phases: each has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+)
+   - Dependencies table present
+   - Quality Gates listed
+   - If any check fails → fix before proceeding
 
-**Evidence:** `plan.json` saved.
+**Evidence:** `plan.json` + session file saved.
 
 **Transition:** → PLAN_REVIEW
 
@@ -153,6 +163,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 1. Update `plan_progress.json`: set step status to "running", set `current_step`
 2. Create branch: `epic/{epic_id}/step_{N}_{role}`
 3. Load playbook: `.aid-o/03-config/playbooks/{role}.md`
+   - If playbook not found: ESCALATION ("Missing playbook for role '{role}'. Run /aid-init or create `.aid-o/03-config/playbooks/{role}.md`")
 4. Build agent prompt:
    ```
    ## Context
@@ -492,7 +503,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
 - **Fix (A)** (`response_type: "fix"`) → apply PM guidance (if `discussion` response, use PM's thread text), return to appropriate state
 - **Skip (B)** (`response_type: "skip"`) → mark gate as `skipped_by_pm` in gates_report.json, proceed to GATES re-check
 - **Abort (C)** (`response_type: "abort"`) → transition to DONE (status: aborted)
-- **Discussion** (`response_type: "discussion"`) → include PM's thread text as context, re-present options
+- **Discussion** (`response_type: "discussion"`) → include PM's thread text as context, re-present options (max 3 discussion rounds; after 3 rounds treat as "abort" with PM notification)
 - **Timeout** (`response.auto: true`) → execute `timeout_actions.escalation` from config
 
 **Evidence:** Save `pm_decision.json`:
@@ -550,8 +561,10 @@ After a step passes PHASE_CHECK, check for pending analysis:
 **Actions:**
 1. If status = approved:
    a. Merge step branches (or note for manual PR creation)
+      - If merge fails (conflict, permissions): create PR instead of merging, log warning, note in final report
    b. Update EPIC file status to "Completed"
-   c. Archive session file: move to `.aid-o/04-engine/sessions/archive/`
+      - If EPIC file write fails: log warning, do not block DONE completion
+   c. Archive session file: `mkdir -p .aid-o/04-engine/sessions/archive/` then move
    d. Update `.aid-o/04-engine/memory/active-work.md`
 2. If status = aborted:
    a. Log abort reason
@@ -585,11 +598,12 @@ After a step passes PHASE_CHECK, check for pending analysis:
    All artifacts: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
    ```
 4. **POST-PROCESSING** (per `skills/epic-orchestration.md` DONE state):
-   a. Dispatch **Curator agent** — collect improvement_notes, propose improvements
-   b. Dispatch **Auditor agent** — run post-EPIC audit, generate report
-   c. Curator proposals → Orchestrator evaluates → approved proposals to PM via Slack
+   a. Dispatch **Curator agent** (`agents/curator.md`) and **Auditor agent** (`agents/auditor.md`) in parallel (single message with two Task calls)
+   b. If Curator fails: log warning, skip proposals, continue (post-processing is non-blocking)
+   c. If Auditor fails: log warning, note "audit incomplete" in final report, continue
+   d. Curator proposals → Orchestrator evaluates → approved proposals to PM via Slack
       (per `skills/slack-mcp.md` Type D — Proposal, Type E — Rejection Info)
-   d. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
+   e. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
 5. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
 6. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
    a. Read `.aid-o/04-engine/epic-queue.yaml`
@@ -687,4 +701,5 @@ If Slack is not configured or send fails → silently skip (status updates are n
 - **Auto-decide where possible** — use `decision-policies.yaml` to minimize PM interruptions
 - **Evidence is mandatory** — every transition logs to `stage_log.jsonl`, Slack messages to `slack_log.jsonl`
 - If resuming an interrupted run: read `plan_progress.json` to find where to continue
+  - If `plan_progress.json` is corrupted or unreadable: rebuild from `stage_log.jsonl` entries (scan for completed steps), or ask PM to confirm which steps are done
 - If `$ARGUMENTS` is empty and multiple EPICs exist → list them and ask which to run

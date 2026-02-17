@@ -69,6 +69,7 @@
     "templates": [
       "defaults/templates/plan.md",
       "defaults/templates/epic.md",
+      "defaults/templates/epic-example.md",
       "defaults/templates/plan.schema.json",
       "defaults/templates/session-bug-fix.md",
       "defaults/templates/session-new-feature.md",
@@ -84,7 +85,9 @@
       "defaults/playbooks/security.md",
       "defaults/playbooks/observability.md",
       "defaults/playbooks/docs.md",
-      "defaults/playbooks/release.md"
+      "defaults/playbooks/release.md",
+      "defaults/playbooks/docs-docusaurus.md",
+      "defaults/playbooks/docs-generic.md"
     ]
   }
 }

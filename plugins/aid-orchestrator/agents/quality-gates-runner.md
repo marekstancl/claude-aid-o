@@ -4,11 +4,11 @@ description: Runs the 6-gate pre-commit quality protocol autonomously before any
 model: inherit
 ---
 
-You are the Quality Gates Runner for C.I.C.E.R.O. project. Run all 6 quality gates and report results.
+You are the Quality Gates Runner for AID Orchestrator. Run all 6 quality gates and report results.
 
 ## Pre-Run
 
-1. Read `workspace/command-history.md` for correct build/test commands
+1. Read `.aid-o/04-engine/command-history.md` for correct build/test commands
 2. Read the git diff to understand what changed: `git diff --cached` (staged) or `git diff` (unstaged)
 
 ## 6 Quality Gates
