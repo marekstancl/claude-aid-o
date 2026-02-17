@@ -242,14 +242,25 @@ Both artifacts are stored in `evidence/{epic_id}/`:
 
 ## Integration Flow
 
+**Communication protocol:** `skills/slack-mcp.md`
+
 ```
 Epic DONE --> merge
   --> Auditor agent runs (post-merge)
   --> audit_report --> evidence/{epic_id}/audit-report.yaml + audit-report.md
   --> findings --> Orchestrator validates
        |-- Orchestrator approves --> Curator processes critical/high into backlog
-       +-- Orchestrator rejects --> log + inform PM
-  --> Summary --> PM (chat now, Slack in Session 6)
+       +-- Orchestrator rejects --> log + Slack Type E (Rejection Info) to PM
+  --> Summary --> Slack Type F (Audit Summary) to PM — no reply expected
+       Chat fallback: Summary presented in conversation
+
+Critical findings escalation:
+  IF audit finds CRITICAL findings AND they match escalation_triggers
+  from decision-policies.yaml:
+    --> Orchestrator sends additional Slack Type A (Escalation) — expects reply
+    --> PM must acknowledge critical findings before queue picks up next EPIC
+
+Slack interactions logged in evidence/{epic_id}/{run_id}/slack_log.jsonl.
 ```
 
 ---

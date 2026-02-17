@@ -6,22 +6,34 @@
 
 ## Current Focus
 
-**Session 5:** Planner + Paralelizace + Multi-Perspective Analysis
-
-- **Session:** [S-20260217-1ffa](sessions/active/S-20260217-1ffa-planner-parallelization.md)
-- **Epic:** EPIC-ADO-0001 (Session 5 of 8)
-- **Branch:** `session/S-20260217-1ffa-planner-parallelization`
-- **Status:** Active — session file created, awaiting PM approval
-
-**Scope:**
-- 3 new skills: planner.md, parallel-dispatch.md, analysis-merge.md
-- Plan schema update (analysis_groups)
-- 5 existing file updates (plan-epic, run-epic, run-step, epic-orchestration, aid-help)
-- Plugin integration (18 agents, 16 commands, 10 skills)
+No active session. Ready for Session 7.
 
 ---
 
 ## Recent Work
+
+### 2026-02-17 — Session 6: Slack + Autonomní Běh
+- **Session:** [S-20260217-d9c4](sessions/active/S-20260217-d9c4-slack-autonomous-run.md)
+- **Epic:** EPIC-ADO-0001 (Session 6 of 8)
+- **Branch:** `session/S-20260217-d9c4-slack-autonomous-run`
+- **Summary:** Slack MCP integration protocol (7 message types, async PM communication), Epic Queue (auto-pickup, priority ordering), all PM touchpoints updated. Full autonomous pipeline.
+- **Key artifacts:**
+  - `plugins/aid-orchestrator/skills/slack-mcp.md` — 7 message types, MCP server interface, PM Communication Protocol, fallback, evidence logging
+  - `plugins/aid-orchestrator/skills/epic-queue.md` — Queue format, operations, auto-pickup protocol, safety guards
+  - `plugins/aid-orchestrator/commands/epic-queue.md` — /epic-queue CLI (list, add, remove, next, pause, resume, reorder)
+  - `plugins/aid-orchestrator/defaults/policies/slack-config.yaml` — Default Slack config (enabled: false)
+  - `plugin.json` — 18 agents, 17 commands, 12 skills
+
+### 2026-02-17 — Session 5: Planner + Paralelizace + Multi-Perspective Analysis
+- **Session:** [S-20260217-1ffa](sessions/active/S-20260217-1ffa-planner-parallelization.md)
+- **Epic:** EPIC-ADO-0001 (Session 5 of 8)
+- **Branch:** `session/S-20260217-1ffa-planner-parallelization`
+- **Summary:** 3 new skills (planner, parallel-dispatch, analysis-merge), plan schema update (analysis_groups), 5 existing file updates. Full planning + parallelization layer.
+- **Key artifacts:**
+  - `plugins/aid-orchestrator/skills/planner.md` — Dependency graph, parallel groups, analysis groups, auto-triggers
+  - `plugins/aid-orchestrator/skills/parallel-dispatch.md` — Branch strategy, concurrent dispatch, conflict detection
+  - `plugins/aid-orchestrator/skills/analysis-merge.md` — 3 merge strategies (union, consensus, weighted)
+  - `plugin.json` — 18 agents, 16 commands, 10 skills
 
 ### 2026-02-17 — Session 4: Worker Agents + Curator + Auditor + Scanner
 - **Session:** [S-20260217-e7b3](sessions/completed/S-20260217-e7b3-worker-agents-curator-auditor-scanner.md)
@@ -29,47 +41,26 @@
 - **Branch:** `session/S-20260217-e7b3-worker-agents`
 - **Summary:** 12 new agents (9 role + 3 specialist), improvement-proposals skill, 9 playbook updates. Full agent layer for AID orchestrator.
 - **Commits:** 2 | **Files:** 26 | **Lines:** +3,205
-- **Key artifacts:**
-  - `plugins/aid-orchestrator/skills/improvement-proposals.md` — Standard format, collection, dedup, backlog (320 lines)
-  - `plugins/aid-orchestrator/agents/{architect,domain,backend,frontend,qa,security,observability,docs-writer,release}.md` — 9 role agents
-  - `plugins/aid-orchestrator/agents/curator.md` — Post-session specialist (240 lines)
-  - `plugins/aid-orchestrator/agents/auditor.md` — Post-Epic specialist (304 lines)
-  - `plugins/aid-orchestrator/agents/project-scanner.md` — On-demand specialist (246 lines)
-  - `plugin.json` — 18 agents, 16 commands, 7 skills
 
 ### 2026-02-16 — Session 3: Gates Engine + Retry
 - **Session:** [S-20260216-c8d2](sessions/completed/S-20260216-c8d2-gates-engine-retry.md)
 - **Epic:** EPIC-ADO-0001 (Session 3 of 8)
-- **Branch:** `session/S-20260216-c8d2-gates-engine-retry`
 - **Summary:** Gates engine (YAML parsing + execution), retry loop (max 3), gate-fixer agent, standalone /run-gates command, escalation protocol.
-- **Key artifacts:**
-  - `plugins/aid-orchestrator/skills/gates-engine.md` — Gates execution protocol
-  - `plugins/aid-orchestrator/skills/retry-engine.md` — Retry loop + fix dispatch
-  - `plugins/aid-orchestrator/agents/gate-fixer.md` — Specialized fix agent
-  - `plugins/aid-orchestrator/commands/run-gates.md` — Standalone gates command
 
 ### 2026-02-16 — Session 2: EPIC Runner Commands + AID Commands
 - **Session:** [S-20260216-f47a](sessions/completed/S-20260216-f47a-runtime-commands.md)
-- **Epic:** EPIC-ADO-0001 (Session 2 of 8)
-- **Branch:** `session/S-20260216-f47a-runtime-commands`
-- **Summary:** 6 new commands implementing the runtime layer: `/plan-epic` (EPIC->Plan JSON), `/run-epic` (11-state Controller loop), `/run-step` (manual dispatch), `/epic-status` (pipeline status), `/aid-setup` (onboarding), `/aid-help` (self-knowledge). Plugin.json updated to 15 commands.
-- **Files created:** 7 | **Lines:** +1,745 (commands)
+- **Summary:** 6 new commands: `/plan-epic`, `/run-epic`, `/run-step`, `/epic-status`, `/aid-setup`, `/aid-help`.
 
 ### 2026-02-15 / 2026-02-16 — Session 1: Plugin Scaffold + Controller State Machine
 - **Session:** [S-20260215-a1f0](sessions/completed/S-20260215-a1f0-foundation-controller.md)
-- **Epic:** EPIC-ADO-0001 (Session 1 of 8)
-- **Branch:** `session/S-20260215-a1f0-foundation-controller`
-- **Summary:** Bootstrap session. Created `aid-orchestrator` marketplace plugin with full structure: 5 agents, 9 commands, 4 skills (incl. Controller State Machine), 9 playbooks, policies, templates. Rebranded ADO->AID with `.aid-o/` workspace structure. Created workflow catalog (13 WFs).
-- **Commits:** 7 | **Files:** 45 | **Lines:** +6,133
+- **Summary:** Bootstrap. `aid-orchestrator` plugin with full structure: 5 agents, 9 commands, 4 skills, 9 playbooks, policies, templates. ADO→AID rebrand. Workflow catalog (13 WFs).
 
 ---
 
 ## Next Steps
 
-1. **Session 5 (active):** Planner + Parallelization + Multi-Perspective Analysis
-2. **Session 6:** Slack + Autonomous Run (MCP Slack, escalation, epic queue)
-3. **Session 7:** E2E Test + Hardening (real EPIC, edge cases, documentation)
-4. **Session 8:** Memory MCP (Qdrant vector DB, semantic search)
+1. **Session 7:** E2E Test + Hardening (real EPIC, edge cases, documentation)
+2. **Session 8:** Memory MCP (Qdrant vector DB, semantic search)
 
 ---
 

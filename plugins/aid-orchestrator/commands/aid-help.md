@@ -8,7 +8,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`
 
 **Examples:**
 ```
@@ -21,6 +21,8 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help gates             # quality gates + retry logic
 /aid-help evidence          # evidence store structure
 /aid-help config            # configuration files
+/aid-help slack             # Slack integration + PM communication
+/aid-help queue             # Epic queue + autonomous pipeline
 ```
 
 ## Flow
@@ -63,6 +65,7 @@ Commands:
   /run-step        Run one step manually
   /epic-status     Show pipeline status
   /run-gates       Run EPIC quality gates (standalone or in /run-epic)
+  /epic-queue      Manage EPIC execution queue (add, list, pause, resume)
   /quality-gates   6-gate pre-commit protocol
   /session-start   Start tracked session
   /session-end     Complete + archive session
@@ -84,7 +87,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -164,6 +167,18 @@ GATES COMMANDS:
     On failure: auto-fix via gate-fixer agent, retry up to 3x, then escalate.
     Config: .aid-o/03-config/policies/gates.yaml
 
+  /epic-queue [subcommand]
+    Manage EPIC execution queue for autonomous pipeline.
+    Usage: /epic-queue                        (show queue)
+           /epic-queue add <path> [--priority high]
+           /epic-queue remove <epic-id>
+           /epic-queue next                   (show next in line)
+           /epic-queue pause                  (pause auto-pickup)
+           /epic-queue resume                 (resume auto-pickup)
+           /epic-queue reorder <id> --priority <level>
+    Auto-pickup: after EPIC DONE, next queued EPIC starts automatically.
+    Skill: skills/epic-queue.md
+
 QUALITY COMMANDS:
 
   /quality-gates     Run 6-gate pre-commit protocol (C.I.C.E.R.O.)
@@ -234,10 +249,20 @@ Orchestration Flow:
                                               ▼
                                             DONE
 
-PM Interaction Points:
+PM Interaction Points (via Slack or chat fallback):
   - PLAN_REVIEW: approve execution plan (GO / REVISE / ABORT)
   - ESCALATION: handle failures (fix / skip / abort)
   - PM_APPROVAL: approve merge (APPROVE / REJECT / REVISE)
+  - CURATOR proposals: approve/defer/reject improvements
+  - AUDITOR summary: informational (no reply needed)
+
+Communication: skills/slack-mcp.md (Slack preferred, chat fallback)
+Config: .aid-o/03-config/policies/slack-config.yaml
+
+Epic Queue (autonomous pipeline):
+  /epic-queue add <path> → queue EPICs
+  After DONE → auto-pickup next EPIC from queue
+  /epic-queue pause/resume → control auto-pickup
 
 Everything else is autonomous (auto-decisions from decision-policies.yaml).
 ```
@@ -634,6 +659,12 @@ Policies (.aid-o/03-config/policies/):
     - escalation_triggers (7 rules — when PM must decide)
     - acceptable_debt vs. not_acceptable
 
+  slack-config.yaml
+    Slack MCP integration settings.
+    Set enabled: true to use Slack for PM communication.
+    Configure: channel, timeouts, reminders, timeout actions.
+    See: /aid-help slack
+
 Templates (.aid-o/03-config/templates/):
   plan.md              Plan document template
   epic.md              EPIC template
@@ -649,7 +680,129 @@ To customize AID for your project:
   1. /aid-setup (auto-configures for your stack)
   2. Edit gates.yaml (gate commands, retry limits)
   3. Edit decision-policies.yaml (autonomy level)
-  4. Edit playbooks (agent behavior)
+  4. Edit slack-config.yaml (Slack integration)
+  5. Edit playbooks (agent behavior)
+```
+
+---
+
+#### Topic: slack
+
+```
+Slack Integration — PM Communication
+====================================
+
+AID communicates with PM via Slack using an external MCP server.
+When Slack is disabled (default), all communication is chat-based.
+
+Skill: skills/slack-mcp.md
+Config: .aid-o/03-config/policies/slack-config.yaml
+
+SETUP:
+
+  1. Install a Slack MCP server (e.g., @anthropic/slack-mcp)
+  2. Edit .aid-o/03-config/policies/slack-config.yaml:
+     - Set slack.enabled: true
+     - Set slack.channel: "#your-channel"
+     - Set slack.pm_user_id: "U1234567"
+  3. AID will now send all PM messages to Slack
+
+7 MESSAGE TYPES:
+
+  Type A — Escalation (expects reply)
+    When: gate failure, agent error, scope violation, budget exceeded
+    PM options: Fix (A) / Skip (B) / Abort (C)
+
+  Type B — Plan Approval (expects reply)
+    When: Plan JSON generated, needs PM approval
+    PM options: GO / REVISE / ABORT
+
+  Type C — Merge Approval (expects reply)
+    When: all gates pass, EPIC ready for merge
+    PM options: APPROVE / REJECT / REVISE
+
+  Type D — Improvement Proposal (expects reply)
+    When: Curator proposes improvement, Orchestrator approved
+    PM options: APPROVE / DEFER / REJECT
+
+  Type E — Rejection Info (no reply)
+    When: Orchestrator rejects a Curator proposal (informational)
+
+  Type F — Audit Summary (no reply)
+    When: post-EPIC audit completes (project health scores + findings)
+
+  Type G — Status Update (no reply)
+    When: EPIC starts, step completes, gates pass, queue events
+
+TIMEOUTS:
+
+  If PM doesn't respond within configured timeout:
+  - Reminders sent at interval (default: every 60 min, max 3)
+  - After timeout: configurable action per type:
+    plan_approval:  wait (default)
+    escalation:     wait (default)
+    merge_approval: wait (default)
+    proposal:       defer (default — lower priority)
+
+FALLBACK:
+
+  If Slack MCP unavailable or not configured:
+  - Messages presented in chat (pre-Slack behavior)
+  - Retry 3x on Slack failure, then fall back to chat
+  - Status updates silently skipped on failure (non-critical)
+```
+
+---
+
+#### Topic: queue
+
+```
+Epic Queue — Autonomous Pipeline
+====================================
+
+The Epic Queue lets you queue multiple EPICs for sequential execution.
+After each EPIC completes, the Orchestrator auto-picks the next one.
+
+Skill: skills/epic-queue.md
+Command: /epic-queue
+File: .aid-o/04-engine/epic-queue.yaml
+
+USAGE:
+
+  /epic-queue                                     Show queue
+  /epic-queue add <path> [--priority high]        Add EPIC
+  /epic-queue remove <epic-id>                    Remove from queue
+  /epic-queue next                                Show next in line
+  /epic-queue pause                               Pause auto-pickup
+  /epic-queue resume                              Resume auto-pickup
+  /epic-queue reorder <id> --priority <level>     Change priority
+
+PRIORITY LEVELS:
+
+  critical > high > medium (default) > low
+  Within same priority: FIFO (first added, first executed)
+
+HOW IT WORKS:
+
+  1. PM queues EPICs:
+     /epic-queue add .aid-o/02-epics/E-auth.md --priority high
+     /epic-queue add .aid-o/02-epics/E-api-v2.md
+     /epic-queue add .aid-o/02-epics/E-dashboard.md --priority low
+
+  2. Start first EPIC:
+     /run-epic    (picks up highest priority queued EPIC)
+
+  3. Autonomous loop:
+     EPIC 1 → DONE → auto-start EPIC 2 → DONE → auto-start EPIC 3 → DONE → idle
+
+  PM only interacts via Slack (plan approval, escalation, merge approval).
+
+SAFETY:
+
+  - Max 1 EPIC runs at a time (no parallel EPIC execution)
+  - Failed EPIC → queue auto-pauses (PM must investigate)
+  - /epic-queue pause → stops next pickup (running EPIC continues)
+  - Queue persists in YAML (survives session restarts)
 ```
 
 ## Reference Files

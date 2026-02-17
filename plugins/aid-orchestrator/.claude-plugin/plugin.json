@@ -36,6 +36,7 @@
     { "name": "run-step", "file": "commands/run-step.md", "description": "Manually run one step from an existing plan" },
     { "name": "epic-status", "file": "commands/epic-status.md", "description": "Show EPIC pipeline status — steps, gates, budget" },
     { "name": "run-gates", "file": "commands/run-gates.md", "description": "Run quality gates for an EPIC — standalone or integrated with /run-epic" },
+    { "name": "epic-queue", "file": "commands/epic-queue.md", "description": "Manage EPIC execution queue — add, remove, reorder, pause/resume for autonomous pipeline" },
     { "name": "quality-gates", "file": "commands/quality-gates.md", "description": "Run 6-gate pre-commit quality protocol" },
     { "name": "session-start", "file": "commands/session-start.md", "description": "Start a new tracked session" },
     { "name": "session-end", "file": "commands/session-end.md", "description": "Complete and archive current session" },
@@ -55,12 +56,15 @@
     { "name": "improvement-proposals", "file": "skills/improvement-proposals.md", "description": "Standard format for improvement notes, collection protocol, deduplication, backlog management" },
     { "name": "planner", "file": "skills/planner.md", "description": "Plan generation from EPIC — dependency graph, parallel groups, auto-trigger rules, analysis groups" },
     { "name": "parallel-dispatch", "file": "skills/parallel-dispatch.md", "description": "Parallel agent dispatch — branch strategy, concurrent execution, conflict detection, merge protocol" },
-    { "name": "analysis-merge", "file": "skills/analysis-merge.md", "description": "Multi-perspective analysis merge — union, consensus, weighted strategies, analysis report format" }
+    { "name": "analysis-merge", "file": "skills/analysis-merge.md", "description": "Multi-perspective analysis merge — union, consensus, weighted strategies, analysis report format" },
+    { "name": "slack-mcp", "file": "skills/slack-mcp.md", "description": "Slack MCP integration — PM communication protocol, 7 message types, fallback, timeouts" },
+    { "name": "epic-queue", "file": "skills/epic-queue.md", "description": "Epic queue management — add, remove, prioritize, auto-pickup after EPIC completion" }
   ],
   "defaults": {
     "policies": [
       "defaults/policies/gates.yaml",
-      "defaults/policies/decision-policies.yaml"
+      "defaults/policies/decision-policies.yaml",
+      "defaults/policies/slack-config.yaml"
     ],
     "templates": [
       "defaults/templates/plan.md",

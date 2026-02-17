@@ -204,20 +204,35 @@ the same structure with `notes_collected: 0` and empty lists for all array field
 
 ## Orchestrator Integration
 
+**Communication protocol:** `skills/slack-mcp.md`
+
 ```
 Curator sends curator_report with proposals to Orchestrator.
 
 Orchestrator evaluates each proposal:
+
   +-- REJECT --> backlog.md status: orchestrator-rejected
-  |     Reason logged. Info sent to PM (Slack / chat).
+  |     Reason logged.
+  |     Slack: Type E (Rejection Info) sent to PM — no reply expected.
+  |     Chat fallback: Info presented in conversation.
   |
   +-- APPROVE --> proposal forwarded to PM
+        Slack: Type D (Improvement Proposal) sent — expects reply.
+        Chat fallback: Proposal presented in conversation with APPROVE/DEFER/REJECT options.
         PM decides:
         +-- APPROVE --> Orchestrator creates new Epic
         +-- DEFER  --> backlog.md status: deferred (reason + date)
         +-- REJECT --> backlog.md status: pm-rejected (reason)
 
-All transitions are logged in backlog.md with timestamp and actor.
+Batch handling (multiple proposals):
+  - Each proposal is sent as a separate Slack message
+  - PM responds to each independently (thread replies or reactions)
+  - Orchestrator collects all responses (parallel wait via slack_wait_for_reply)
+  - Timeout for proposals: 72h default (configurable in slack-config.yaml)
+  - Timeout action: "defer" (proposals are lower priority than escalations)
+
+All transitions are logged in backlog.md with timestamp, actor, and channel (slack|chat).
+Slack interactions are logged in evidence/{epic_id}/{run_id}/slack_log.jsonl.
 ```
 
 ---
