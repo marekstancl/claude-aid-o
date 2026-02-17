@@ -298,14 +298,14 @@ Recommendation: [A/B] because [reason]
 ```
 Start: PM gives task → Identify role → Propose plan → PM approves → Session file + branch
 Work:  Implement phase → Phase-End Protocol (summary + PM approval) → Commit → Next phase
-End:   Session-End Protocol (Docusaurus docs update + final commit + PM approval for PR/merge + archive)
+End:   Session-End Protocol (docs update per project docs playbook + final commit + PM approval for PR/merge + archive)
 ```
 
 **Lifecycle Protocols** (full details in `session-management` skill):
 - **Brainstorming-End:** Summary → ask PM "Plan or Session?"
 - **Session-Start:** Session file + describe work + PM approval + branch
 - **Phase-End:** Update session + active-work + summary + context check + ask PM to commit
-- **Session-End:** Docusaurus docs update + final quality gates + ask PM for PR/merge + archive
+- **Session-End:** docs update (per `playbooks/docs-{project.docs.platform}.md`) + final quality gates + ask PM for PR/merge + archive
 
 ---
 
@@ -345,7 +345,7 @@ End:   Session-End Protocol (Docusaurus docs update + final commit + PM approval
 - Follow lifecycle protocols at each transition (brainstorming-end, phase-end, session-end)
 - Quality gates before commit
 - Update session file after commit
-- Update Docusaurus docs at session-end (mandatory impact analysis)
+- Update project docs at session-end (mandatory impact analysis per docs platform playbook)
 - Archive session after completion
 - Load skills on-demand
 
