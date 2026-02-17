@@ -21,9 +21,9 @@
 
 | Artifact | Format | Location |
 |----------|--------|----------|
-| API docs | Markdown/MDX | `docs/api/` |
-| Architecture docs | Markdown/MDX | `docs/architecture/` |
-| User docs | Markdown/MDX | `docs/guides/` |
+| API docs | `{project.docs.format}` | `{project.docs.path}/api/` |
+| Architecture docs | `{project.docs.format}` | `{project.docs.path}/architecture/` |
+| User docs | `{project.docs.format}` | `{project.docs.path}/guides/` |
 | CHANGELOG entry | Markdown | `CHANGELOG.md` |
 
 ## Process
@@ -31,8 +31,8 @@
 1. **Impact analysis** — Map code changes to affected documentation
 2. **Update** — Write/update all affected docs
 3. **CHANGELOG** — Add entry with date, type, and description
-4. **Build** — Verify docs build without errors (`npm run build` in docs/)
-5. **Review** — Check for broken links, stale examples, MDX escaping
+4. **Build** — Verify docs build: run `{project.docs.build_command}` in `{project.docs.path}` (skip if no build command)
+5. **Review** — Check for broken links, stale examples. Load platform-specific rules from `playbooks/docs-{project.docs.platform}.md`
 
 ## Quality Criteria
 
@@ -40,8 +40,8 @@
 - [ ] CHANGELOG.md updated
 - [ ] Docs build passes without errors
 - [ ] No broken internal links
-- [ ] MDX escaping correct (braces, angle brackets)
-- [ ] Frontmatter present on all doc pages (title, sidebar_label, last_updated)
+- [ ] Platform-specific formatting rules followed (per `playbooks/docs-{project.docs.platform}.md`)
+- [ ] Frontmatter present where required by platform (see platform playbook)
 
 ## Constraints
 
