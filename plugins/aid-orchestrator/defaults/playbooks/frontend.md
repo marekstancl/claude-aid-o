@@ -49,3 +49,34 @@
 - **DO NOT** use `any` type
 - **DO** use existing component library and patterns
 - **DO** implement proper error boundaries
+
+---
+
+## Improvement Notes
+
+During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.
+
+**Format:** (see `skills/improvement-proposals.md` for full specification)
+
+```yaml
+improvement_notes:
+  - type: refactoring|performance|security|architecture|dx
+    area: "path/to/affected/module"
+    observation: "What you observed — be specific"
+    suggestion: "Concrete, actionable suggestion"
+    priority: low|medium|high
+    source_agent: "{your_role}"
+    source_step: "{step_id}"
+```
+
+**Record when you see:**
+- Accessibility issues (missing alt text, no keyboard navigation, poor contrast)
+- Performance problems (large bundle imports, unnecessary re-renders, missing lazy loading)
+- Inconsistent component patterns (mixing styles, different state approaches)
+- Missing loading or error states in UI components
+- Responsive design gaps
+
+**Do NOT record:**
+- Issues you are actively fixing in your current task
+- Style preferences without objective backing
+- Suggestions requiring complete rewrites with unclear benefit

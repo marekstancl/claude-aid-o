@@ -892,6 +892,16 @@ agents/project-scanner.md output:
 | Čas | Událost |
 |-----|---------|
 | 2026-02-17 | Session file vytvořen, 8 phases definováno |
+| 2026-02-17 | Phase 1 done: skills/improvement-proposals.md (320 lines — format, collection, dedup, backlog, proposals, orchestrator integration) |
+| 2026-02-17 | Phases 2-6 dispatched in parallel via 5 subagents |
+| 2026-02-17 | Phase 2 done: 9 role agents (architect, domain, backend, frontend, qa, security, observability, docs-writer, release) — each ~130-170 lines |
+| 2026-02-17 | Phase 3 done: 9 playbooks updated with ## Improvement Notes section (role-specific guidance) |
+| 2026-02-17 | Phase 4 done: agents/curator.md (240 lines — collect, dedup, analyze, propose, backlog management) |
+| 2026-02-17 | Phase 5 done: agents/auditor.md (304 lines — 5 audit types, scoring 0-100, trend tracking, dual output) |
+| 2026-02-17 | Phase 6 done: agents/project-scanner.md (246 lines — quick/deep modes, project-profile.yaml format) |
+| 2026-02-17 | Phase 7 done: plugin.json (18 agents, 7 skills), aid-help.md (3 agent categories), epic-orchestration.md (Curator+Auditor in DONE) |
+| 2026-02-17 | Phase 8 done: Smoke test — 159 checks, 0 failures, all cross-references valid |
+| 2026-02-17 | **SESSION COMPLETED** |
 
 ## Notes
 
@@ -904,6 +914,25 @@ agents/project-scanner.md output:
 
 ---
 
-**Status:** active
+**Status:** completed
 **Last Updated:** 2026-02-17
-**Completion:** 0%
+**Completion:** 100%
+
+## Completion Summary
+
+- **Duration:** 2026-02-17 (1 conversation)
+- **Files created:** 13 (9 role agents + 3 specialist agents + 1 skill)
+- **Files modified:** 13 (9 playbooks + plugin.json + aid-help.md + epic-orchestration.md + session file)
+- **Total new lines:** ~3,500 (core deliverables)
+- **Phases completed:** 8/8
+- **What was accomplished:**
+  - `skills/improvement-proposals.md` — Standard format, collection protocol, deduplication, backlog management, proposal generation, orchestrator integration (320 lines)
+  - 9 role agents (`agents/{architect,domain,backend,frontend,qa,security,observability,docs-writer,release}.md`) — each with Identity, Capabilities, Constraints, Input, Output Format (with improvement_notes), Workflow
+  - 9 playbooks updated — `## Improvement Notes` section with role-specific guidance added to all
+  - `agents/curator.md` — Post-session specialist: collect, deduplicate, analyze patterns, propose improvements (240 lines)
+  - `agents/auditor.md` — Post-Epic specialist: 5 audit types, scoring (0-100), trend tracking, dual output (304 lines)
+  - `agents/project-scanner.md` — On-demand specialist: quick scan + deep analysis, project-profile.yaml (246 lines)
+  - `plugin.json` — 18 agents, 16 commands, 7 skills registered
+  - `commands/aid-help.md` — Updated agents topic with 3 categories (Role, Specialist, Utility)
+  - `skills/epic-orchestration.md` — DONE state updated with Curator + Auditor POST-PROCESSING
+  - Smoke test: 159 checks, 0 failures, all cross-references validated

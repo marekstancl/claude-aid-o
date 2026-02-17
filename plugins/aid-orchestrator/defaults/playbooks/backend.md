@@ -52,3 +52,34 @@
 - **DO** use `logging` module (no `print()`)
 - **DO** use parameterized queries (no string concatenation for SQL)
 - **DO** implement outbox pattern if EPIC.constraints.outbox = true
+
+---
+
+## Improvement Notes
+
+During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.
+
+**Format:** (see `skills/improvement-proposals.md` for full specification)
+
+```yaml
+improvement_notes:
+  - type: refactoring|performance|security|architecture|dx
+    area: "path/to/affected/module"
+    observation: "What you observed — be specific"
+    suggestion: "Concrete, actionable suggestion"
+    priority: low|medium|high
+    source_agent: "{your_role}"
+    source_step: "{step_id}"
+```
+
+**Record when you see:**
+- Performance bottlenecks (N+1 queries, missing caching, unoptimized loops)
+- Error handling gaps (swallowed exceptions, missing error responses)
+- Security anti-patterns (hardcoded secrets, missing input validation)
+- Code duplication across services or controllers
+- Missing or inadequate logging for debugging
+
+**Do NOT record:**
+- Issues you are actively fixing in your current task
+- Style preferences without objective backing
+- Suggestions requiring complete rewrites with unclear benefit

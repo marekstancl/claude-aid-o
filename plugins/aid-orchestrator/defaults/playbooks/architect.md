@@ -48,3 +48,34 @@
 - **DO NOT** modify existing contracts without migration plan
 - **DO** consider tenant isolation if EPIC requires it
 - **DO** document why you chose one approach over alternatives
+
+---
+
+## Improvement Notes
+
+During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.
+
+**Format:** (see `skills/improvement-proposals.md` for full specification)
+
+```yaml
+improvement_notes:
+  - type: refactoring|performance|security|architecture|dx
+    area: "path/to/affected/module"
+    observation: "What you observed — be specific"
+    suggestion: "Concrete, actionable suggestion"
+    priority: low|medium|high
+    source_agent: "{your_role}"
+    source_step: "{step_id}"
+```
+
+**Record when you see:**
+- Module boundaries being violated (imports crossing layers)
+- API contracts drifting from implementation
+- Missing or outdated Architecture Decision Records
+- Inconsistent architectural patterns across modules
+- Over-engineering or premature abstractions
+
+**Do NOT record:**
+- Issues you are actively fixing in your current task
+- Style preferences without objective backing
+- Suggestions requiring complete rewrites with unclear benefit
