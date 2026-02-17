@@ -183,6 +183,11 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    Produce the following:
    1. Implementation files (within allowed paths)
    2. Output summary (what you did, what you created, decisions made)
+   3. (Optional) If you discover problems outside your task scope, add a `## DISCOVERED ISSUES` section:
+      - Format: `- **[SEVERITY]** Description` where SEVERITY is CRITICAL/HIGH/MEDIUM/INFO
+      - Each issue needs: `- Impact:` and `- Recommendation:` sub-bullets
+      - CRITICAL = blocks further work. HIGH = should be addressed. MEDIUM/INFO = nice to know.
+      - Only report genuine issues — do not pad this section.
    ```
 5. Dispatch agent using the Task tool:
    ```
@@ -257,6 +262,11 @@ After a step passes PHASE_CHECK, check for pending analysis:
 | Outputs present AND within scope | → NEXT_PHASE |
 | Outputs present AND scope violation | Re-dispatch once with warning, then ESCALATION |
 | No outputs OR agent error | → ESCALATION |
+| Acceptance criteria met (verified from output.md) | → NEXT_PHASE |
+| Acceptance unclear, review_required_when matches | Dispatch code-reviewer, then re-check |
+| Acceptance clearly NOT met | Re-dispatch agent with feedback (max 2 cycles), then ESCALATION |
+| CRITICAL discovered issue reported | Triage: auto-fix or ESCALATION (step blocked) |
+| HIGH discovered issue reported | Log to backlog + PM Slack notification (non-blocking) |
 
 3. For parallel groups: check ALL agents in the group before transitioning
 
@@ -273,6 +283,22 @@ After a step passes PHASE_CHECK, check for pending analysis:
    ```
 4. If all dry-run merges clean → actually merge branches (same order)
 5. Record merge results in `evidence/parallel_groups/group_{N}/merge_log.json`
+
+4. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
+   - Read agent's `output.md` from evidence
+   - Compare against step acceptance criteria from plan.json
+   - Auto-accept: simple roles (docs, config, release), ≤3 criteria, all verifiable
+   - Review required: complex roles (architect, backend, frontend, security), 5+ criteria, unclear items
+   - If review needed: dispatch `code-reviewer` agent with output.md + plan criteria + git diff
+   - Review result: APPROVED → proceed; REJECTED → re-dispatch original agent with feedback
+   - Max 2 review-fix cycles, then ESCALATION
+
+5. **Discovered Issues Triage** (per `decision-policies.yaml` → `discovered_issues`):
+   - Parse `## DISCOVERED ISSUES` from agent's output.md
+   - CRITICAL → check auto_fix_patterns → dispatch fix agent or ESCALATION (step blocked)
+   - HIGH → log to evidence + backlog.md + PM Slack (non-blocking)
+   - MEDIUM/INFO → log to evidence + improvement_notes (non-blocking)
+   - Evidence: `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
 
 **Evidence:** Append check result to `stage_log.jsonl`.
 
