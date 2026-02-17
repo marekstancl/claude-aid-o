@@ -587,7 +587,9 @@ The Controller creates and maintains a session file for each EPIC run:
    - Validate completeness before proceeding to PLAN_REVIEW
 
 2. **On each PHASE_CHECK:** Update session file:
-   - Mark completed phase acceptance items as checked
+   - Mark completed phase acceptance items as checked/failed based on acceptance validation
+   - If review dispatched: log review result (approved/rejected + feedback summary)
+   - If discovered issues: log CRITICAL/HIGH issues to Session Log with severity and status
    - Add step status + commit hash to Session Log
 
 3. **On analysis complete:** Log analysis_report summary to Session Log
