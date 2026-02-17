@@ -210,14 +210,43 @@ Key context to pass:
    a. Check for critical findings → ESCALATION
    b. Check for high findings → log warning to PM
    c. Merge analysis improvement_notes into step evidence (for Curator)
+5. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
+   a. Read agent's `output.md` from `evidence/steps/step_{N}_{role}/output.md`
+   b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + session file acceptance items
+   c. For each acceptance criterion, evaluate:
+      - Verifiable from output.md + `git diff`? → verify directly
+      - Requires domain knowledge beyond Controller's scope? → mark `needs_review`
+   d. Decision (per `content_quality` rules):
+      - All criteria clearly met → PASS
+      - Any `needs_review` AND step matches `review_required_when` → dispatch `code-reviewer` agent
+        - Reviewer APPROVED → PASS
+        - Reviewer REJECTED (with feedback) → re-dispatch original agent with reviewer feedback
+        - Max `max_review_fix_cycles` (default 2) → then ESCALATION
+      - Any criterion clearly NOT met → re-dispatch agent with specific feedback (max 2 cycles → ESCALATION)
+   e. Evidence: save review to `evidence/{epic_id}/{run_id}/reviews/step_{N}_{role}_review_{cycle}.md`
+6. **Discovered Issues Triage** (per `decision-policies.yaml` → `discovered_issues`):
+   a. Parse `## DISCOVERED ISSUES` section from agent's `output.md` (if present)
+   b. If no section → skip (no issues reported)
+   c. For each issue, extract: severity (`[CRITICAL]`/`[HIGH]`/`[MEDIUM]`/`[INFO]`), description, impact, recommendation
+   d. Triage per severity:
+      - **CRITICAL:** Check `auto_fix_patterns` → match → dispatch fix agent; no match → ESCALATION. Current step BLOCKED.
+      - **HIGH:** Log to `evidence/discovered_issues/`. Forward to later step if natural fit, else create `backlog.md` entry. PM Slack notification (informational). NOT blocking.
+      - **MEDIUM/INFO:** Log to `evidence/discovered_issues/`. Add to `improvement_notes` (Curator picks up). NOT blocking.
+   e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
+   f. Session file: add CRITICAL/HIGH issues to Session Log
 
 **Auto-Decision Logic:**
 ```
-outputs_present AND within_scope → NEXT_PHASE
+outputs_present AND within_scope AND acceptance_met → NEXT_PHASE
+outputs_present AND within_scope AND acceptance_unclear → dispatch code-reviewer (if review_required_when)
+outputs_present AND acceptance_not_met → re-dispatch agent with feedback (max 2 cycles)
 outputs_present AND scope_violation → re-dispatch (max 1 retry)
 no_outputs OR error → ESCALATION
 parallel_merge_conflict → ESCALATION
 analysis_critical_findings → ESCALATION
+discovered_issue_CRITICAL → triage (auto-fix or ESCALATION)
+discovered_issue_HIGH → log + backlog + PM notification (non-blocking)
+review_fix_cycles_exhausted → ESCALATION
 ```
 
 ### 6. NEXT_PHASE
