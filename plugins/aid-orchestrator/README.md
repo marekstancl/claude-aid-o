@@ -4,13 +4,14 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 ## What It Does
 
-1. Takes an **EPIC** specification (feature description with scope, constraints, acceptance criteria)
-2. Generates a structured **Plan JSON** (steps, dependencies, parallel groups, analysis groups)
-3. **Dispatches role-based agents** (Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release)
-4. **Enforces quality gates** (tests, lint, security scan, docs) with auto-fix retry logic
-5. **Communicates with PM** via Slack MCP (or chat fallback) at key checkpoints
-6. Maintains a complete **evidence trail** for every decision and action
-7. **Queues EPICs** for autonomous sequential execution
+1. **Brainstorming** — PM + AI explore ideas, compare approaches, make design decisions → Plan document
+2. **EPIC** — PM converts plan into a structured task specification (scope, constraints, acceptance criteria, steps)
+3. **Plan Generation** — `/plan-epic` generates execution plan with dependency graph, parallel groups, analysis groups
+4. **Agent Dispatch** — Controller sends work to role-based agents (Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release)
+5. **Quality Gates** — tests, lint, security scan, docs check — with auto-fix retry logic
+6. **PM Communication** — Slack MCP or chat fallback at key checkpoints (plan approval, escalation, merge approval)
+7. **Evidence Trail** — every decision, prompt, output, and gate result is recorded
+8. **EPIC Queue** — queue multiple EPICs for autonomous sequential execution
 
 ## Quick Start
 
@@ -18,13 +19,16 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 # 1. Initialize and configure for your project
 /aid-setup
 
-# 2. Create an EPIC (or copy the example template)
-# Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
+# 2. Brainstorm with AI — explore approaches, make design decisions
+#    Output: plan document in .aid-o/01-plans/
 
-# 3. Generate execution plan
+# 3. Write an EPIC from the plan (or use the template)
+#    Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
+
+# 4. Generate execution plan
 /plan-epic .aid-o/02-epics/my-epic.md
 
-# 4. Run the orchestrator
+# 5. Run the orchestrator
 /run-epic
 ```
 
@@ -85,7 +89,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `lessons-extractor` | Extracts lessons from completed sessions |
 | `gate-fixer` | Analyzes gate failures, applies targeted fixes |
 
-## Skills (12)
+## Skills (13)
 
 | Skill | Purpose |
 |-------|---------|
@@ -101,6 +105,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `improvement-proposals` | Standard format for improvement notes, collection, deduplication |
 | `slack-mcp` | Slack MCP integration — 7 message types, fallback, timeouts |
 | `epic-queue` | EPIC queue management — add, remove, prioritize, auto-pickup |
+| `memory-mcp` | Qdrant vector memory — semantic search, auto-indexing, agent context |
 
 ## Controller State Machine
 
@@ -134,6 +139,34 @@ IDLE ──→ PLANNING ──→ PLAN_REVIEW ──→ EXECUTING ──→ PHAS
 - **ESCALATION**: handle failures (Fix / Skip / Abort)
 - **PM_APPROVAL**: approve merge (APPROVE / REJECT / REVISE)
 
+## Memory (Optional)
+
+AID supports **long-term vector memory** via Qdrant MCP server. When enabled, agents
+can search past decisions, lessons, and patterns semantically — improving output quality
+over time.
+
+**Setup:**
+```bash
+# Install Qdrant MCP server
+claude mcp add qdrant-memory \
+  -e QDRANT_URL="http://localhost:6333" \
+  -e COLLECTION_NAME="aid-memory" \
+  -- uvx mcp-server-qdrant
+
+# Enable in AID config
+# Set memory.enabled: true in .aid-o/03-config/policies/memory-config.yaml
+```
+
+**What gets indexed:**
+- Session-end: decisions, lessons learned, working commands
+- EPIC completion: architectural decisions, code patterns, audit findings
+
+**What agents receive:** Before each step, the Controller searches memory for relevant
+past knowledge and injects it as `## MEMORY CONTEXT (from past sessions)` in the agent prompt.
+
+**Without Qdrant:** Plugin works identically using file-based memory only (active-work.md,
+lessons-learned.md, command-history.md). Qdrant is supplementary, never required.
+
 ## Workspace Structure
 
 `/aid-init` creates in your project:
@@ -143,7 +176,7 @@ IDLE ──→ PLANNING ──→ PLAN_REVIEW ──→ EXECUTING ──→ PHAS
   01-plans/              Plans (PM + AI brainstorming)
   02-epics/              EPICs (task specifications)
   03-config/
-    policies/            gates.yaml, decision-policies.yaml, slack-config.yaml
+    policies/            gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
     templates/           EPIC template, session templates, plan schema
     playbooks/           9 role playbooks + 2 docs platform playbooks
   04-engine/
@@ -164,6 +197,7 @@ After `/aid-setup`, customize in `.aid-o/03-config/`:
 | `policies/gates.yaml` | Gate commands, retry limits, budget |
 | `policies/decision-policies.yaml` | Autonomy level — what Controller decides vs. escalates |
 | `policies/slack-config.yaml` | Slack channel, timeouts, reminder intervals |
+| `policies/memory-config.yaml` | Qdrant vector memory — collection, auto-index triggers, search |
 | `playbooks/*.md` | Role-specific agent instructions for your project |
 
 ## Version

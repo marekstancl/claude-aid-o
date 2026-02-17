@@ -25,6 +25,26 @@
 
 If CONTINUATION → load referenced session file + plan, continue from checkpoint.
 
+### Memory-Augmented Context (Optional)
+
+If Qdrant MCP is enabled (`.aid-o/03-config/policies/memory-config.yaml` → `memory.enabled: true`):
+
+After loading file-based context (steps 1-5 above), search vector memory for relevant past knowledge:
+
+```
+mem_config = read(".aid-o/03-config/policies/memory-config.yaml")
+IF mem_config.memory.enabled AND mem_config.memory.search.pre_step_search:
+  query = current_task_description OR session_objective
+  results = qdrant-find(query=query, collection_name=mem_config.memory.collection_name)
+  filtered = [r for r in results if r.score >= mem_config.memory.search.min_score]
+  IF filtered:
+    Include as "## MEMORY CONTEXT (from past sessions)" in working context
+    (Clearly labeled — this is historical reference, not current session state)
+```
+
+If Qdrant is unavailable or disabled → skip silently, proceed with file-based context only.
+See `skills/memory-mcp.md` for full protocol.
+
 ---
 
 ## Role & Mindset
@@ -331,6 +351,7 @@ End:   Session-End Protocol (docs update per project docs playbook + final commi
 | `skills/improvement-proposals.md` | Curator improvement notes format |
 | `skills/slack-mcp.md` | Slack PM communication |
 | `skills/epic-queue.md` | EPIC queue management |
+| `skills/memory-mcp.md` | Qdrant vector memory (long-term semantic search) |
 
 **Principle:** Load ONLY what you need. Don't load everything at once.
 

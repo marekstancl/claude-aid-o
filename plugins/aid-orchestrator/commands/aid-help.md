@@ -8,7 +8,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`
 
 **Examples:**
 ```
@@ -23,6 +23,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help config            # configuration files
 /aid-help slack             # Slack integration + PM communication
 /aid-help queue             # Epic queue + autonomous pipeline
+/aid-help memory            # Qdrant vector memory + semantic search
 ```
 
 ## Flow
@@ -87,7 +88,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -805,9 +806,68 @@ SAFETY:
   - Queue persists in YAML (survives session restarts)
 ```
 
+#### Topic: memory
+
+```
+Memory — Qdrant Vector Memory (Optional)
+====================================
+
+AID can use Qdrant MCP for long-term semantic memory across sessions.
+Agents learn from past decisions, patterns, and lessons automatically.
+
+Skill: skills/memory-mcp.md
+Config: .aid-o/03-config/policies/memory-config.yaml
+
+SETUP:
+
+  1. Install Qdrant MCP server:
+     claude mcp add qdrant-memory \
+       -e QDRANT_URL="http://localhost:6333" \
+       -e COLLECTION_NAME="aid-memory" \
+       -- uvx mcp-server-qdrant
+
+  2. Enable in config:
+     Set memory.enabled: true in .aid-o/03-config/policies/memory-config.yaml
+
+  3. Or auto-detect during /aid-setup
+     (AID probes for qdrant-find tool availability)
+
+WHAT GETS INDEXED:
+
+  At session-end:
+    - Decisions from session log (type: decision)
+    - Lessons learned (type: lesson)
+    - Working commands (type: command)
+
+  At EPIC completion:
+    - Architectural decisions (type: decision)
+    - Code/architecture patterns (type: pattern)
+    - Audit findings (type: audit_finding)
+
+HOW AGENTS USE IT:
+
+  Before each agent dispatch in EXECUTING state:
+    1. Controller searches Qdrant for relevant past knowledge
+    2. Results injected as "## MEMORY CONTEXT (from past sessions)"
+    3. Agent uses as reference (not blindly followed)
+    4. If Qdrant unavailable → skip silently, agent works normally
+
+TOOLS (from Qdrant MCP server):
+
+  qdrant-store   Store text + metadata (embedding via FastEmbed, local)
+  qdrant-find    Semantic search (returns ranked results with scores)
+
+WITHOUT QDRANT:
+
+  Plugin works identically — file-based memory (active-work.md,
+  lessons-learned.md, command-history.md) is always the primary source.
+  Qdrant adds semantic search on top, never replaces files.
+```
+
 ## Reference Files
 
 - `skills/epic-orchestration.md` — state machine, evidence, dispatch
+- `skills/memory-mcp.md` — vector memory protocol, document types, fallback
 - `.claude-plugin/plugin.json` — registered commands, agents, skills
 - Plan P-20260216-b3a1, section D-008 (/aid-help)
 

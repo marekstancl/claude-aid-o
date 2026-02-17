@@ -9,10 +9,14 @@ AID takes a structured task specification (EPIC), generates an execution plan, d
 ## How It Works
 
 ```
-EPIC (task spec)
-  ↓
-Plan Generation (dependency graph, parallel groups)
-  ↓  PM approves plan
+Brainstorming (PM + AI)
+  ↓  explore ideas, compare approaches, design decisions
+Plan Document (.aid-o/01-plans/)
+  ↓  PM converts plan into task spec
+EPIC (.aid-o/02-epics/)
+  ↓  /plan-epic generates execution plan
+Plan JSON (dependency graph, parallel groups, gates)
+  ↓  PM approves plan (GO / REVISE / ABORT)
 Dispatch Agents (architect → backend + frontend → QA + security → docs)
   ↓  each agent follows role-specific playbook
 Quality Gates (tests, lint, security scan, docs check)
@@ -22,7 +26,7 @@ PM Approval → Merge → Done
 Next EPIC from queue (autonomous pipeline)
 ```
 
-The **control flow is deterministic** — defined by YAML/JSON configuration files (EPIC structure, gates.yaml, decision-policies.yaml). The **content is AI-generated** — each agent produces code, tests, docs via LLM.
+The **control flow is deterministic** — defined by YAML/JSON configuration (EPIC structure, gates.yaml, decision-policies.yaml). The **content is AI-generated** — each agent produces code, tests, docs via LLM.
 
 ## Installation
 
@@ -45,15 +49,52 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 # 1. Initialize AID in your project
 /aid-setup
 
-# 2. Create an EPIC from template
+# 2. Brainstorm with AI — explore approaches, make design decisions
+#    Output: plan document in .aid-o/01-plans/
+
+# 3. Write an EPIC from the plan (or use the template)
 #    Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
 
-# 3. Generate execution plan
+# 4. Generate execution plan
 /plan-epic .aid-o/02-epics/my-epic.md
 
-# 4. Run the orchestrator
+# 5. Run the orchestrator
 /run-epic
 ```
+
+## Example: Bookmark Manager
+
+The [`examples/bookmark-manager/`](examples/bookmark-manager/) directory contains a complete end-to-end example that produces a **working full-stack bookmark manager** (FastAPI + React + SQLite).
+
+**What's included:**
+
+| File | Description | Created by |
+|------|-------------|------------|
+| [`plan.md`](examples/bookmark-manager/plan.md) | Brainstorming output — design decisions, options considered, architecture | PM + AI brainstorming |
+| [`EPIC.md`](examples/bookmark-manager/EPIC.md) | Task specification — 6 steps, 15 acceptance criteria, scope constraints | PM (derived from plan) |
+| [`plan.json`](examples/bookmark-manager/plan.json) | Execution plan — dependency graph, 2 parallel groups, gates | `/plan-epic` (auto-generated) |
+
+**What AID builds from this EPIC:**
+
+```
+Step 1: Architect    → API contracts, SQLite schema, component tree
+                     ↓
+Step 2: Backend  ────┤ (parallel)  → FastAPI endpoints, SQLite, URL fetcher
+Step 3: Frontend ────┘             → React components, card grid, tag sidebar
+                     ↓
+Step 4: QA       ────┤ (parallel)  → pytest tests for API + edge cases
+Step 5: Security ────┘             → SQL injection, SSRF, input validation review
+                     ↓
+Step 6: Docs         → API documentation + CHANGELOG
+                     ↓
+Gates                → tests_pass, lint_pass, docs_updated
+                     ↓
+PM Approval          → review and merge
+```
+
+**Result:** A bookmark manager where you can add/edit/delete bookmarks with tags, search, favicon auto-fetch, and a card-based grid UI.
+
+See the [example README](examples/bookmark-manager/README.md) for step-by-step instructions.
 
 ## What's Inside
 
@@ -126,6 +167,7 @@ AID is fully customizable via YAML/JSON configs in `.aid-o/03-config/`:
 | `gates.yaml` | Which gates run, commands, retry limits, budget |
 | `decision-policies.yaml` | What Controller decides autonomously vs. escalates to PM |
 | `slack-config.yaml` | Slack channel, timeouts, reminder intervals |
+| `memory-config.yaml` | Qdrant vector memory settings |
 | `playbooks/*.md` | Role-specific agent behavior for your project |
 
 `/aid-setup` auto-configures everything based on your detected tech stack.
@@ -136,7 +178,7 @@ AID is fully customizable via YAML/JSON configs in `.aid-o/03-config/`:
 
 ```
 .aid-o/
-  01-plans/              Plans (brainstorming)
+  01-plans/              Plans (brainstorming output)
   02-epics/              EPICs (task specifications)
   03-config/
     policies/            gates.yaml, decision-policies.yaml, slack-config.yaml
@@ -169,7 +211,6 @@ gates/                  Gate command outputs
 AID supports long-term semantic memory via Qdrant MCP. Past decisions, lessons, and patterns are searchable by agents — improving quality over time.
 
 ```bash
-# Install Qdrant MCP server
 claude mcp add qdrant-memory \
   -e QDRANT_URL="http://localhost:6333" \
   -e COLLECTION_NAME="aid-memory" \
@@ -200,6 +241,11 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 | `/testing` | Load testing workflow |
 | `/docs-protocol` | Load documentation protocol |
 
+## Roadmap
+
+- **v0.2.0** — `/aid-brainstorm` command (guided brainstorming before EPIC writing), git worktrees for parallel dispatch isolation, Slack setup guide
+- **v0.3.0** — Browser-based evidence viewer, EPIC templates library
+
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) >= 1.0.0
@@ -207,8 +253,4 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 
 ## License
 
-MIT
-
-## Version
-
-0.1.0
+MIT — v0.1.0

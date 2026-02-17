@@ -194,7 +194,11 @@ Phases are defined in the session file (from plan or epic). They can be adjusted
    - `workspace/command-history.md` — add any new working commands discovered
    - `workspace/lessons-learned.md` — add lessons, gotchas, patterns from this session
    - `workspace/backlog.md` — update if session relates to a backlog item
-7. **Present PM with completion options** (REQUIRED format):
+7. **Memory indexing** (per `skills/memory-mcp.md` → `memory_index_session()`):
+   - IF `memory-config.yaml` exists AND `memory.enabled` AND `memory.auto_index.session_end`:
+     - Index decisions, lessons, commands from this session to Qdrant
+   - IF disabled or fails → skip silently (non-blocking)
+8. **Present PM with completion options** (REQUIRED format):
 
 #### Standard Session (NOT last epic session):
 ```

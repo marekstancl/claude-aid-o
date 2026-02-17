@@ -39,6 +39,8 @@ Copy these files from the plugin's `defaults/` directory into `.aid-o/03-config/
 |---------------------------|--------------------------------|
 | `policies/gates.yaml` | `policies/gates.yaml` |
 | `policies/decision-policies.yaml` | `policies/decision-policies.yaml` |
+| `policies/slack-config.yaml` | `policies/slack-config.yaml` |
+| `policies/memory-config.yaml` | `policies/memory-config.yaml` |
 | `templates/plan.md` | `templates/plan.md` |
 | `templates/epic.md` | `templates/epic.md` |
 | `templates/plan.schema.json` | `templates/plan.schema.json` |

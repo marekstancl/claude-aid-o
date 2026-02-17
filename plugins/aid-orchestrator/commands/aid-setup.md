@@ -239,6 +239,34 @@ Proceed with recommended? (Y/N/select numbers, e.g., "1,2,3,5")
   ```
   Note: These are commented out by default — user decides what to track in git.
 
+**Option 6: Detect Qdrant MCP (Memory)**
+- Probe for Qdrant MCP availability:
+  ```
+  TRY: qdrant-find(query="test", collection_name="aid-memory-probe")
+  IF tool exists (even if collection not found): Qdrant MCP available
+  IF tool_not_found error: Qdrant MCP not available
+  ```
+- If available:
+  ```
+  Qdrant MCP server detected!
+
+  AID can use vector memory for semantic search across sessions.
+  This enables agents to learn from past decisions and patterns.
+
+  Enable memory? (Y/N)
+  Collection name: [aid-memory]
+  ```
+  - If Y: update `.aid-o/03-config/policies/memory-config.yaml` → `memory.enabled: true`, set `collection_name`
+  - Update `project-profile.yaml` with `memory: { enabled: true, provider: "qdrant", collection: "{name}" }`
+- If not available:
+  ```
+  Qdrant MCP server not detected (optional).
+  To enable vector memory later:
+    1. Install: claude mcp add qdrant-memory -e QDRANT_URL="http://localhost:6333" -e COLLECTION_NAME="aid-memory" -- uvx mcp-server-qdrant
+    2. Set memory.enabled: true in .aid-o/03-config/policies/memory-config.yaml
+  ```
+  - Skip silently, no error
+
 ### Step 6: New Project Flow
 
 If the project is empty (no source files, only `.git`):
@@ -267,6 +295,7 @@ Workspace: .aid-o/ ✅
 Gates: customized for {stack} ✅
 Profile: project-profile.yaml populated ✅
 CLAUDE.md: generated ✅
+Memory: {enabled (Qdrant MCP) | disabled (file-based only)}
 
 Your project is ready for AID orchestration.
 

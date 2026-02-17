@@ -164,7 +164,14 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 2. Create branch: `epic/{epic_id}/step_{N}_{role}`
 3. Load playbook: `.aid-o/03-config/playbooks/{role}.md`
    - If playbook not found: ESCALATION ("Missing playbook for role '{role}'. Run /aid-init or create `.aid-o/03-config/playbooks/{role}.md`")
-4. Build agent prompt:
+4. **Memory context retrieval** (per `skills/memory-mcp.md` → `memory_context_for_step()`):
+   - Read `.aid-o/03-config/policies/memory-config.yaml`
+   - IF `memory.enabled` AND `memory.search.pre_step_search`:
+     - `qdrant-find(query=step.objective, collection_name=config.collection_name)`
+     - Filter by `min_score`, limit to `top_k`
+     - Format as `## MEMORY CONTEXT (from past sessions)` block
+   - IF disabled or unavailable → skip (empty string), proceed normally
+5. Build agent prompt:
    ```
    ## Context
    You are the {role} agent working on EPIC {epic_id}.
@@ -189,6 +196,14 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 
    ## Previous Step Outputs
    {Read and include outputs from dependency steps in evidence/steps/}
+
+   {IF memory_context is not empty:}
+   ## MEMORY CONTEXT (from past sessions)
+   _The following knowledge was retrieved from past sessions via vector memory.
+   Use as reference — do not blindly follow if project context has changed._
+
+   {memory_context from step 4}
+   {END IF}
 
    ## Deliverables
    Produce the following:
@@ -604,8 +619,17 @@ After a step passes PHASE_CHECK, check for pending analysis:
    d. Curator proposals → Orchestrator evaluates → approved proposals to PM via Slack
       (per `skills/slack-mcp.md` Type D — Proposal, Type E — Rejection Info)
    e. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
-5. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
-6. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+5. **Memory indexing** (per `skills/memory-mcp.md` → `memory_index_epic()`):
+   - Read `.aid-o/03-config/policies/memory-config.yaml`
+   - IF `memory.enabled` AND `memory.auto_index.epic_done`:
+     - Index EPIC summary → `qdrant-store` (type: decision)
+     - Index architectural decisions from architect step → `qdrant-store` (type: decision)
+     - Index patterns from agent outputs → `qdrant-store` (type: pattern)
+     - Index audit findings from audit-report.md → `qdrant-store` (type: audit_finding)
+     - IF `memory.auto_index.gate_results`: index gates summary → `qdrant-store` (type: audit_finding)
+   - IF disabled or fails → skip silently, DONE continues normally
+6. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
+7. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
    a. Read `.aid-o/04-engine/epic-queue.yaml`
    b. IF queue is not paused AND next EPIC exists (status: "queued"):
       - Mark next EPIC as "running" in queue

@@ -14,12 +14,14 @@ ai-orchestrator/
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
     commands/                   # 17 slash commands
-    skills/                     # 12 skills (orchestration, gates, session mgmt, etc.)
+    skills/                     # 13 skills (orchestration, gates, session mgmt, etc.)
     defaults/                   # Files copied by /aid-init into target projects
-      policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml
+      policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, session-*.md
       playbooks/                # 11 role-based playbooks
     README.md                   # Plugin documentation
+  examples/
+    bookmark-manager/           # Complete example (plan → EPIC → plan.json)
   docs/                         # User-facing documentation
     MULTIAGENT_GUIDE.md         # Multi-agent architecture guide
 ```
