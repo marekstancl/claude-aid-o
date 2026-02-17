@@ -57,6 +57,7 @@ Your only write targets are the designated output paths in `.aid-o/04-engine/`.
    Build system — npm/yarn/pnpm/pip/cargo/gradle/maven
    Test framework — jest/vitest/pytest/cargo test/junit (from config + devDeps)
    CI/CD — GitHub Actions/GitLab CI/Jenkins/CircleCI
+   Docs platform — check for docusaurus.config.js/ts, mkdocs.yml, conf.py, .vitepress/config.*, book.toml in project root or docs/
 
 3. ANALYZE directory structure:
    - Map top-level directories
@@ -157,6 +158,12 @@ tech_stack:
   test_framework:  # {tool, config_file}
   ci_cd:           # {platform, config_files: []}
   package_managers: []
+  docs:
+    platform: "{docusaurus|mkdocs|sphinx|vitepress|mdbook|generic-markdown|none}"
+    path: "{detected docs root}"
+    format: "{mdx|md|rst}"
+    build_command: "{platform build command or null}"
+    frontmatter_required: true|false
 
 architecture:
   pattern: "monorepo|single-app|microservices"
