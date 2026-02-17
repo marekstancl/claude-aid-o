@@ -61,6 +61,7 @@ Commands:
   /run-epic        Start orchestration (state machine)
   /run-step        Run one step manually
   /epic-status     Show pipeline status
+  /run-gates       Run EPIC quality gates (standalone or in /run-epic)
   /quality-gates   6-gate pre-commit protocol
   /session-start   Start tracked session
   /session-end     Complete + archive session
@@ -150,9 +151,20 @@ SESSION COMMANDS:
   /session-end       Archive session, update workspace files
   /handoff           Create handoff block for next AI
 
+GATES COMMANDS:
+
+  /run-gates [epic-id]
+    Run EPIC quality gates — standalone or integrated with /run-epic.
+    Usage: /run-gates TEST-0001    (run gates for EPIC)
+           /run-gates --dry-run    (preview which gates would run)
+           /run-gates              (run all gates standalone)
+    Gates: tests_pass, lint_pass, security_scan, docs_updated (+conditionals)
+    On failure: auto-fix via gate-fixer agent, retry up to 3x, then escalate.
+    Config: .aid-o/03-config/policies/gates.yaml
+
 QUALITY COMMANDS:
 
-  /quality-gates     Run 6-gate protocol before commit
+  /quality-gates     Run 6-gate pre-commit protocol (C.I.C.E.R.O.)
   /audit             Project health audit
   /coding-standards  Load coding standards
   /testing           Load testing workflow
@@ -350,42 +362,73 @@ Default Execution Order:
 Quality Gates
 ====================================
 
-Config: .aid-o/03-config/policies/gates.yaml
+AID has TWO gate systems:
 
-4 Required Gates:
-  1. tests_pass        All tests pass (unit + integration)
-  2. lint_pass         Code passes linting + formatting
-  3. security_scan     No high/critical security findings
-  4. docs_updated      Documentation updated for changed APIs
+1. AID Gates Engine (post-EPIC-steps)
+   Command:  /run-gates
+   Config:   .aid-o/03-config/policies/gates.yaml
+   Skills:   gates-engine.md, retry-engine.md
+   Agent:    gate-fixer.md (auto-fix on failure)
+   Purpose:  Validate entire EPIC output before PM approval
 
-2 Conditional Gates:
-  5. type_check        TypeScript/mypy passes (when relevant)
-  6. build_pass        Frontend builds (when frontend changed)
+2. C.I.C.E.R.O. Quality Gates (pre-commit)
+   Command:  /quality-gates
+   Skill:    quality-gates.md
+   Agent:    quality-gates-runner.md
+   Purpose:  6-gate commit-level quality check
 
-Retry Logic:
-  - Each gate can fail up to 3 times (configurable)
-  - On failure: Controller analyzes error, dispatches fix agent
-  - After max retries: escalate to PM
+AID Gates Engine — Detail:
 
-Gate Flow in /run-epic:
-  All steps done
-      ↓
-  Run gates (sequential)
-      ↓
-  Any fail? → GATE_RETRY → fix → re-run gate
-      ↓
-  Max retries? → ESCALATION (PM decides)
-      ↓
-  All pass → PM_APPROVAL
+  Config: .aid-o/03-config/policies/gates.yaml
 
-Customization:
-  Edit .aid-o/03-config/policies/gates.yaml to:
-  - Change gate commands (e.g., pytest → jest)
-  - Add/remove gates
-  - Adjust retry limits
-  - Set budget
+  4 Required Gates:
+    1. tests_pass        All tests pass (unit + integration)
+    2. lint_pass         Code passes linting + formatting
+    3. security_scan     No high/critical security findings
+    4. docs_updated      Documentation updated for changed APIs
 
-/aid-setup auto-configures gates for your tech stack.
+  2 Conditional Gates (run only when condition met):
+    5. type_check        TypeScript passes (when frontend files changed)
+    6. build_pass        Frontend builds (when frontend files changed)
+
+  Gate Types:
+    - Command gates: execute a shell command, check exit code
+    - Rule gates: evaluate a logical rule (e.g., "docs updated?")
+
+  Retry Logic:
+    - Each gate can fail up to 3 times (configurable in gates.yaml)
+    - On failure: gate-fixer agent analyzes error, applies fix
+    - After fix: re-run failed gate, then re-check ALL gates
+    - After max retries: escalate to PM with options (skip/fix/abort)
+
+  Gate Flow in /run-epic:
+    All steps done
+        ↓
+    GATES state: run all required gates
+        ↓
+    Any fail? → GATE_RETRY → gate-fixer → re-run gate
+        ↓
+    Max retries? → ESCALATION (PM decides: skip / manual fix / abort)
+        ↓
+    All pass → PM_APPROVAL
+
+  Evidence (per gate run):
+    gates_report.json           Structured report with retry history
+    gates/tests_pass.txt        Raw command output
+    gates/retry_lint_pass_1.md  Fix agent output (per attempt)
+
+  Standalone Usage:
+    /run-gates                  Run all gates
+    /run-gates TEST-0001        Run gates for specific EPIC
+    /run-gates --dry-run        Preview which gates would run
+
+  Customization:
+    Edit .aid-o/03-config/policies/gates.yaml to:
+    - Change gate commands (e.g., pytest → jest, ruff → eslint)
+    - Add/remove gates
+    - Adjust retry limits (max_attempts, backoff)
+    - Set budget constraints
+    /aid-setup auto-configures gates for your tech stack.
 ```
 
 ---
@@ -420,9 +463,10 @@ Structure:
           step_2_domain/
             output.md
             diff.patch
-        gates/                  Gate command outputs
+        gates/                  Gate command outputs + retry evidence
           tests_pass.txt
           lint_pass.txt
+          retry_lint_pass_1.md  Fix agent attempt evidence
 
 Key Files:
   plan_progress.json  — current state, which steps done/pending

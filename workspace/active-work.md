@@ -6,7 +6,17 @@
 
 ## Current Focus
 
-**None** — Session 2 completed, waiting for PM to start Session 3.
+**Session 3: Gates Engine + Retry** — EPIC-ADO-0001 (Session 3 of 8)
+- **Session:** [S-20260216-c8d2](sessions/active/S-20260216-c8d2-gates-engine-retry.md)
+- **Branch:** `session/S-20260216-c8d2-gates-engine-retry`
+- **Goal:** Gates engine (gates.yaml parsing + execution), pass/fail reports, retry loop (max 3), gate-fixer agent, escalation protocol.
+- **Deliverables:**
+  - `skills/gates-engine.md` — Gates execution protocol
+  - `skills/retry-engine.md` — Retry loop + fix dispatch
+  - `agents/gate-fixer.md` — Specialized fix agent
+  - `commands/run-gates.md` — Standalone gates command
+  - Update `commands/run-epic.md` — GATES + GATE_RETRY concrete refs
+  - Update `plugin.json` — new command + agent + 2 skills
 
 ---
 
@@ -40,7 +50,7 @@
 
 ## Next Steps
 
-1. **Session 3:** Gates Engine + Retry (gates.yaml parsing, pass/fail reports, retry loop)
+1. **Session 3:** Gates Engine + Retry ← **ACTIVE**
 2. **Session 4:** Worker Agents + Curator + Auditor + Scanner (9 role agents + 3 new specialists)
 3. **Session 5:** Planner + Parallelization (auto plan generation, parallel dispatch, branches)
 4. **Session 6:** Slack + Autonomous Run (MCP Slack, escalation, epic queue)
@@ -66,3 +76,4 @@ None.
 | 2026-02-16 | 3 new agents: Curator, Auditor, Scanner | Post-session improvement, post-EPIC audit, onboarding |
 | 2026-02-16 | MCP Qdrant for memory | Long-term memory via vector DB + file-based active memory |
 | 2026-02-16 | Commands = markdown prompt engineering | Not executable code — Claude reads and follows instructions |
+| 2026-02-16 | Two gates systems coexist | C.I.C.E.R.O. (pre-commit) + AID Gates Engine (post-EPIC-steps) |

@@ -220,60 +220,64 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 
 ### State: GATES
 
+> **Reference:** Read `skills/gates-engine.md` for the complete protocol.
+
 **Actions:**
-1. Read `.aid-o/03-config/policies/gates.yaml`
-2. Identify required gates from the plan's `gates` array
-3. For each required gate:
-   a. If gate has a `command` → execute it (via Bash tool)
-   b. If gate has a `rule` → evaluate it manually
-   c. Record result: pass/fail + output
-4. Generate `gates_report.json`:
-   ```json
-   {
-     "epic_id": "{epic_id}",
-     "run_id": "{run_id}",
-     "timestamp": "{ISO 8601}",
-     "gates": [
-       {
-         "name": "tests_pass",
-         "status": "pass|fail",
-         "output": "{command output or evaluation}",
-         "attempt": 1
-       }
-     ],
-     "overall": "pass|fail",
-     "next_action": "pm_approval|gate_retry"
-   }
-   ```
+1. Read `skills/gates-engine.md` — follow the Gates Execution Protocol exactly
+2. Execute `/run-gates {epic_id}` logic in **non-interactive mode**:
+   - Parse `.aid-o/03-config/policies/gates.yaml` (Section 1 of gates-engine.md)
+   - Identify required gates; if plan.json specifies a `gates` subset, use only those
+   - For each gate: execute per type (command or rule) following Section 2
+   - Evaluate `when` conditions for conditional gates
+   - Generate `gates_report.json` per Section 3 format (includes attempts array)
+   - Store evidence: `gates/{gate_name}.txt` for each executed gate
+3. Read `gates_report.json` result and apply next-action logic (Section 3.3):
+   - Check `overall` status and per-gate attempt counts
+   - Apply auto-decision rules from `decision-policies.yaml`
 
 **Transition:**
-- ALL required gates pass → PM_APPROVAL
-- ANY required gate fails → GATE_RETRY
+- `overall: "pass"` → PM_APPROVAL
+- `overall: "fail"` + retries remaining for any failed gate → GATE_RETRY
+- `overall: "fail"` + all retries exhausted → ESCALATION
 
-**Evidence:** Save `gates_report.json`, save individual gate outputs to `gates/{gate_name}.txt`.
+**Evidence:**
+- `gates_report.json` — structured report with retry history per gate
+- `gates/{gate_name}.txt` — raw output for each executed gate
+- Entries in `stage_log.jsonl` for each gate start/complete
 
 ---
 
 ### State: GATE_RETRY
 
-**Actions:**
-1. Read failed gates from `gates_report.json`
-2. Check retry count against `gates.yaml` → `retry.max_attempts` (default: 3)
-3. If retries remaining:
-   a. Analyze failure output — determine what needs to be fixed
-   b. Generate fix instructions:
-      ```
-      Gate "{gate_name}" failed (attempt {N}/{max}).
-      Error: {gate output}
-      Fix: {specific instructions based on failure analysis}
-      ```
-   c. Dispatch appropriate agent to fix (usually backend or security role)
-   d. Re-run ONLY the failed gate
-   e. Update `gates_report.json` with retry result
-4. If fixed → back to GATES (re-check all)
-5. If max retries exceeded → ESCALATION
+> **Reference:** Read `skills/retry-engine.md` for the complete protocol.
 
-**Evidence:** Retry entries appended to `gates_report.json`.
+**Actions:**
+1. Read `skills/retry-engine.md` — follow the Retry Decision Protocol (Section 1)
+2. For each failed required gate (in `gates.yaml` order):
+   a. **Analyze failure** — run Failure Analysis Protocol (Section 2 of retry-engine.md)
+      for the specific gate type (tests_pass, lint_pass, security_scan_pass, etc.)
+   b. **Dispatch fix agent** — follow Fix Agent Dispatch Protocol (Section 3):
+      - Build fix prompt with failure output, analysis, constraints, previous attempts
+      - Dispatch `agents/gate-fixer.md` via Task tool
+      - Store fix evidence: `gates/retry_{gate_name}_{attempt}.md`
+   c. **Re-run failed gate only** — follow Re-run Protocol (Section 4):
+      - Verify fix agent made changes (git diff)
+      - Re-execute the single failed gate
+      - Update `gates_report.json` with new attempt entry
+   d. **Evaluate result:**
+      - Gate now passes → back to GATES (re-check ALL gates — fix might break others)
+      - Gate still fails → increment attempt, check retry count
+3. Apply backoff between attempts per gates.yaml config (Section 7 of retry-engine.md)
+4. Handle multiple gate failures sequentially (Section 6 of retry-engine.md)
+
+**Transition:**
+- Any gate fixed → GATES (full re-check of all gates)
+- All retries exhausted for any gate → ESCALATION
+
+**Evidence:**
+- `gates/retry_{gate_name}_{attempt}.md` — fix agent output per attempt
+- Updated `gates_report.json` — attempts array grows with each retry
+- Entries in `stage_log.jsonl` for each fix dispatch and gate re-run
 
 ---
 
@@ -283,7 +287,40 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 
 **Actions:**
 1. Determine escalation reason and prepare context
-2. Present to PM:
+2. **For gate failures** (from GATE_RETRY): follow `skills/retry-engine.md` Section 5 —
+   compile full escalation report with all attempt outputs and fix descriptions
+3. Present to PM:
+
+   **Gate failure escalation format:**
+   ```
+   GATE ESCALATION
+   ====================================
+   EPIC: {epic_id}
+   Gate: {gate_name}
+   Attempts: {max_attempts}/{max_attempts} exhausted
+
+   Gate command: {command}
+   Pass criteria: {pass_criteria}
+
+   Last failure output:
+   {last attempt output — truncated to key error}
+
+   Fix attempts:
+   1. {attempt 1}: {fix description} → {outcome}
+   2. {attempt 2}: {fix description} → {outcome}
+   3. {attempt 3}: {fix description} → {outcome}
+
+   Other gates: {N} passed, {M} skipped
+
+   Options:
+   A) Skip this gate — proceed with warning (marked skipped_by_pm)
+   B) Manual fix — provide guidance, I'll retry (resets attempt counter)
+   C) Abort EPIC run
+
+   Recommendation: {based on context}
+   ```
+
+   **Non-gate escalation format:**
    ```
    ESCALATION — {trigger_reason}
    ================================
@@ -292,27 +329,31 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    Details: {failure details}
 
    Options:
-   A) {first option from decision-policies.yaml escalation_triggers}
-   B) {second option}
+   A) {context-specific option}
+   B) {context-specific option}
    C) Abort EPIC
 
    Recommendation: {auto recommendation based on context}
    ```
-3. **STOP and wait for PM decision.**
+4. **STOP and wait for PM decision.**
 
 **PM Responses:**
-- **Fix** → apply PM's instructions, return to the appropriate state
-- **Skip** → mark as skipped in progress, continue to next state
-- **Abort** → transition to DONE (status: aborted)
+- **Skip (A)** → mark gate as `skipped_by_pm` in gates_report.json, proceed to GATES re-check
+- **Manual fix (B)** → reset attempt counter, apply PM guidance, dispatch fix agent, re-run gate
+- **Abort (C)** → transition to DONE (status: aborted)
+- **Fix (non-gate)** → apply PM's instructions, return to the appropriate state
 
 **Evidence:** Save `pm_decision.json`:
 ```json
 {
   "timestamp": "{ISO 8601}",
   "trigger": "{escalation reason}",
-  "options_presented": ["A", "B", "C"],
+  "gate": "{gate_name or null}",
+  "attempts_exhausted": "{count or null}",
+  "options_presented": ["skip", "manual_fix", "abort"],
   "pm_decision": "{chosen option}",
-  "pm_feedback": "{additional instructions}"
+  "pm_feedback": "{additional instructions}",
+  "pm_reason": "{reason for skip if applicable}"
 }
 ```
 

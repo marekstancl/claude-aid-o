@@ -205,7 +205,7 @@ cílový-projekt/
 
 ### Session 2: EPIC Runner Commands + AID Commands
 
-**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260216-f47a-runtime-commands.md`
+**Stav:** Hotová ✅. Session file: `workspace/sessions/completed/S-20260216-f47a-runtime-commands.md`
 
 **Cíl:** 4 orchestrační commands + 2 nové AID commands.
 
@@ -241,17 +241,37 @@ cílový-projekt/
 
 ### Session 3: Gates Engine + Retry
 
-**Cíl:** Gates runner, pass/fail report, retry loop (max 3).
+**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260216-c8d2-gates-engine-retry.md`
+
+**Cíl:** Gates engine (gates.yaml parsing + execution), pass/fail reports do evidence, retry loop s fix-agent dispatch (max 3 pokusy), escalation protocol. Koexistence s existujícím C.I.C.E.R.O. pre-commit gates systémem.
 
 **Deliverables:**
-- Rozšíření quality-gates-runner o gates.yaml parsing
-- Pass/fail report generace do evidence/
-- Retry loop logika (max 3, pak escalation)
+- `skills/gates-engine.md` — Gates execution protocol (YAML parsing, command/rule execution, reporting)
+- `skills/retry-engine.md` — Retry loop + failure analysis + fix-agent dispatch + escalation
+- `agents/gate-fixer.md` — Specializovaný agent pro opravu failujících gates
+- `commands/run-gates.md` — Standalone gates command (`/run-gates`, `--dry-run`)
+- Update `commands/run-epic.md` — GATES + GATE_RETRY stavy s referencí na nové skills
+- Update `plugin.json` — 1 nový command, 1 nový agent, 2 nové skills
+
+**Phases (7):**
+1. Gates Engine Skill — gates.yaml parsing, execution protocol, gates_report.json
+2. Retry Engine Skill — retry loop, failure analysis, fix dispatch, escalation
+3. Gate Fixer Agent — specializovaný fix agent s constraints
+4. Run Gates Command — standalone `/run-gates` + `--dry-run`
+5. Update run-epic.md — concrete GATES + GATE_RETRY implementation
+6. Plugin Integration + Cross-references
+7. Smoke Test (happy path, retry, escalation, conditional skip)
 
 **Acceptance:**
-- Failing gate → retry → fix → pass
-- Evidence uložena
-- Po 3 failech: escalation (Slack v Session 6)
+- `gates-engine.md` parsuje gates.yaml a generuje `gates_report.json` s retry history
+- `retry-engine.md` definuje failure analysis pro všech 6 gate typů + fix dispatch protocol
+- `gate-fixer.md` má scope constraints (allowed/forbidden paths) + no-skip policy
+- `/run-gates` spustí gates standalone s real-time progress
+- `/run-gates --dry-run` zobrazí gates bez spuštění
+- Failing gate → retry (gate-fixer) → re-run → pass (evidence recorded)
+- Po 3 failech: escalation s PM options (skip/manual fix/abort)
+- Evidence: `gates_report.json` + `gates/*.txt` + `gates/retry_*.md`
+- `run-epic.md` GATES + GATE_RETRY odkazují na nové skills
 
 ---
 
