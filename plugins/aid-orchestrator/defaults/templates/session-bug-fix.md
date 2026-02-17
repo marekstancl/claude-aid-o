@@ -10,16 +10,52 @@ ai_agent: {AI_NAME}
 epic_id: {epic-id} (if epic session)
 epic_session: {N} of {M} (if epic session)
 epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+plan_ref: {path to plan.json or plan file} (if exists)
+orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # Bug Fix: {Title}
 
-> **Multi-Session Work?** If this bug fix requires 3+ sessions, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Session Work?** If this bug fix requires 3+ sessions or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
 
 ## Objective
-> One-sentence description of what needs to be fixed
+<!-- MIN: 3-5 sentences. State WHAT is broken, WHY it matters, and what FIXED looks like.
+     Bad:  "Fix login crash"
+     Good: "Fix crash on login when user has special characters in password. Users with
+            passwords containing '&' or '<' trigger an unescaped HTML injection in the
+            auth form (Issue #87). This blocks ~5% of users from logging in. Fixed means:
+            all special characters are properly escaped, login succeeds for all valid
+            passwords, and XSS vector is eliminated." -->
+
+## Context
+<!-- What preceded this work. Reference previous sessions, state of the codebase, dependencies.
+     For orchestrated sessions: which EPIC session is this, what was delivered before.
+     For non-orchestrated: what's the current project state, any related ongoing work. -->
+
+**Previous work:** {reference prior sessions or "N/A — first report"}
+**Current state:** {what exists now, when did the bug first appear}
+**Dependencies:** {external systems, libraries, or other sessions this depends on}
+
+## Scope
+<!-- Explicit IN/OUT lists prevent scope creep. Be specific — name files, components, areas. -->
+
+**In Scope:**
+<!-- MIN: 3 items -->
+- {what WILL be done}
+- {what WILL be done}
+- {what WILL be done}
+
+**Out of Scope:**
+<!-- MIN: 2 items -->
+- {what will NOT be done in this session}
+- {what will NOT be done in this session}
+
+---
 
 ## Discovery
+<!-- Bug-specific context. Fill in every field — this is critical for root cause analysis
+     and for future agents who need to understand the bug without re-investigating. -->
+
 **Reported:** {Date}
 **Discovered In:** {Environment - dev/staging/prod}
 **Affected Features:** {List components affected}
@@ -36,37 +72,116 @@ epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if ep
 
 ---
 
-## Investigation Steps
+## Phases
 
-**Checklist (update as you progress):**
-- [ ] Reproduced bug locally
-- [ ] Analyzed logs/errors
-- [ ] Identified root cause in {file.py:line}
-- [ ] Verified scope (what else is affected?)
-- [ ] Checked for similar issues in codebase
+<!-- Each phase = one logical chunk of work. Map from plan.json steps (orchestrated)
+     or decompose the task yourself (non-orchestrated).
+     Every phase MUST have all 6 subsections below. Do not skip any. -->
 
-### Investigation Log
-**{Timestamp}** - {Finding}
+### Phase 1: Investigation
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+{Reproduce the bug, trace execution path, identify root cause. Explain what you expect to find
+and why narrowing the root cause first prevents wasted effort on symptoms rather than the
+underlying defect.}
+
+**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+
+**Inputs:**
+<!-- Files, context, or outputs from previous phases that this phase needs. -->
+- {file path or description}
+
+**Outputs:**
+<!-- Files produced, artifacts created. Include expected file paths. -->
+- {file path or description}
+
+**Constraints:**
+<!-- Boundaries: allowed/forbidden paths, backward compatibility, performance limits. -->
+- {constraint}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] {criterion 1}
+- [ ] {criterion 2}
+- [ ] {criterion 3}
+
+### Phase 2: Fix Implementation
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+{Apply the minimal, targeted fix that addresses the root cause identified in Phase 1. Explain
+the fix strategy and why it's preferred over alternatives. This phase should change only what
+is necessary to resolve the defect without introducing side effects.}
+
+**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+
+**Inputs:**
+<!-- Files, context, or outputs from previous phases that this phase needs. -->
+- {file path or description}
+
+**Outputs:**
+<!-- Files produced, artifacts created. Include expected file paths. -->
+- {file path or description}
+
+**Constraints:**
+<!-- Boundaries: allowed/forbidden paths, backward compatibility, performance limits. -->
+- {constraint}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] {criterion 1}
+- [ ] {criterion 2}
+- [ ] {criterion 3}
+
+### Phase 3: Regression Testing
+
+**Goal:**
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+{Verify the fix resolves the reported symptom AND does not break existing functionality.
+Write regression tests that would catch this bug if it were re-introduced. Confirm all
+existing test suites still pass.}
+
+**Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
+
+**Inputs:**
+<!-- Files, context, or outputs from previous phases that this phase needs. -->
+- {file path or description}
+
+**Outputs:**
+<!-- Files produced, artifacts created. Include expected file paths. -->
+- {file path or description}
+
+**Constraints:**
+<!-- Boundaries: allowed/forbidden paths, backward compatibility, performance limits. -->
+- {constraint}
+
+**Acceptance:**
+<!-- MIN: 3 items. How we verify this phase is done. -->
+- [ ] {criterion 1}
+- [ ] {criterion 2}
+- [ ] {criterion 3}
+
+<!-- Repeat for additional phases if needed. -->
 
 ---
 
-## Solution
+## Dependencies
 
-### Root Cause
-{Technical explanation of WHY bug exists}
+<!-- Which phases depend on which and why. For single-phase sessions, write "No inter-phase dependencies." -->
 
-### Proposed Fix
-{High-level strategy}
+| Phase | Depends On | Reason |
+|-------|-----------|--------|
+| Phase 2 | Phase 1 | {why — e.g., "needs root cause analysis from Phase 1"} |
+| Phase 3 | Phase 2 | {why — e.g., "needs fix applied before regression testing"} |
 
-### Changes Made
-| File | Lines | Description | Commit |
-|------|-------|-------------|--------|
-| {path/file.py} | 123-145 | {What changed} | {hash} |
+---
 
-### Code Snippet
-```
-# Show key changes here
-```
+## Quality Gates
+
+<!-- What automated checks run after this session's work. Reference specific gate names from gates.yaml. -->
+
+- **{gate name}** — {what it verifies}
 
 ---
 
