@@ -1,59 +1,70 @@
 # AID — AI Development Orchestrator
 
-## Project Overview
+## What is AID?
 
-AID is a Claude Code marketplace plugin that implements Controller + Workers architecture for AI-driven software development. It takes an EPIC specification, generates structured execution plans, dispatches specialized role-based agents, enforces quality gates, and maintains complete evidence trails.
+AID is a Claude Code plugin that implements **Controller + Workers architecture** for AI-driven software development. It takes an EPIC specification, generates structured execution plans, dispatches specialized role-based agents, enforces quality gates, and maintains complete evidence trails.
 
-## Structure
+## Repository Structure
 
 ```
 ai-orchestrator/
-  marketplace.json              # Plugin registry
+  .claude-plugin/
+    marketplace.json            # Marketplace manifest
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
-    agents/                     # 5 utility agents (+ 3 planned: curator, auditor, scanner)
-    commands/                   # 9 commands (incl. /aid-init)
-    skills/                     # 4 skills (incl. epic-orchestration)
-    defaults/                   # Files copied by /aid-init
-      policies/                 # gates.yaml, decision-policies.yaml
+    agents/                     # 18 specialized agents
+    commands/                   # 17 slash commands
+    skills/                     # 12 skills (orchestration, gates, session mgmt, etc.)
+    defaults/                   # Files copied by /aid-init into target projects
+      policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, session-*.md
-      playbooks/                # 9 role playbooks
-  _unzipped/                    # Reference specs (read-only)
-  workspace/                    # AID project workspace (own development)
-  docs/                         # Documentation
+      playbooks/                # 11 role-based playbooks
+    README.md                   # Plugin documentation
+  docs/                         # User-facing documentation
+    MULTIAGENT_GUIDE.md         # Multi-agent architecture guide
 ```
 
-## What `/aid-init` Creates in Target Projects
+## Plugin Installation
+
+```bash
+# Add marketplace
+/plugin marketplace add marekstancl/claude-aid-o
+
+# Install plugin
+/plugin install aid-orchestrator@claude-aid-o
+
+# Verify
+/aid-help
+```
+
+## What the Plugin Creates in Target Projects
+
+When users run `/aid-init`, it creates:
 
 ```
 .aid-o/
-  01-plans/          # PM + AI brainstorming → plány (archive/ for completed)
-  02-epics/          # PM + AI detail → zadání (archive/ for completed)
+  01-plans/          # PM + AI brainstorming → plans (archive/ for completed)
+  02-epics/          # PM + AI detail → specifications (archive/ for completed)
   03-config/         # PM-customizable (policies, templates, playbooks)
   04-engine/         # AI internal (sessions, memory, backlog, evidence)
 ```
 
-## Key Conventions
+## Key Commands
 
-- **Language:** Czech for session/workspace files, English for code/plugin files
-- **Session management:** Follow `skills/session-management.md`
-- **Quality gates:** Run before every commit via `skills/quality-gates.md`
-- **Commits:** `type(scope): description (YYYY-MM-DD HH:MM TZ)`
-- **Branches:** `session/{session-id}-{topic}`
-- **Naming:** Plans: `P-{YYYYMMDD}-{hash}`, Epics: `E-{YYYYMMDD}-{hash}`, Sessions: `S-{YYYYMMDD}-{hash}`
+| Command | Purpose |
+|---------|---------|
+| `/aid-init` | Initialize .aid-o/ workspace |
+| `/aid-setup` | Interactive project onboarding |
+| `/aid-help` | Show AID documentation |
+| `/plan-epic` | Parse EPIC → generate Plan JSON |
+| `/run-epic` | Run full EPIC orchestration pipeline |
+| `/run-step` | Manually run a single plan step |
+| `/run-gates` | Run quality gates |
+| `/epic-status` | Show pipeline status |
+| `/epic-queue` | Manage EPIC execution queue |
 
-## Current Epic
+## Contributing
 
-EPIC-ADO-0001: Build AID Orchestrator (8 sessions)
-See: `workspace/workflow/epics/active/EPIC-ADO-0001-BUILD-ORCHESTRATOR.md`
-
-## Design Plan
-
-P-20260216-b3a1: AID v2 — Workspace Redesign, New Agents, Memory
-See: `workspace/workflow/plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md`
-
-## Reference Documentation
-
-- Architecture: `_unzipped/ai_dev_orchestrator_docs/01_ARCHITECTURE_OVERVIEW.md`
-- Starter Kit: `_unzipped/ado_starter_kit/01_MASTER_SPEC.md`
-- Multi-agent Guide: `docs/MULTIAGENT_GUIDE.md`
+- **Language:** English for all plugin code and documentation
+- **Plugin manifest:** `plugins/aid-orchestrator/.claude-plugin/plugin.json`
+- **Testing:** Use `/plugin validate .` from repo root to validate marketplace

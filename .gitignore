@@ -29,3 +29,12 @@ Thumbs.db
 # Evidence (runtime artifacts — large, generated)
 evidence/
 !evidence/.gitkeep
+
+# Development workspace (session logs, active work, internal docs)
+workspace/
+
+# Reference specs (internal, not for distribution)
+_unzipped/
+
+# Development plans (internal design documents)
+docs/plans/
