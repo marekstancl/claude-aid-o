@@ -235,6 +235,64 @@ improvement_notes:
     priority: low|medium|high
 ```
 
+### D-011: Multi-Perspective Analysis (`analysis_groups`)
+
+**Role:** Vice agentu analyzuje stejny target z ruznych perspektiv — consolidovany vysledek.
+
+**Plan JSON rozsireni:**
+```json
+"analysis_groups": [
+  {
+    "id": "analysis_{N}_{purpose}",
+    "target": "step_{M}_{role}",
+    "agents": ["security", "backend", "architect"],
+    "mode": "review|audit|validation",
+    "merge_strategy": "union|consensus|weighted",
+    "trigger": "auto|manual"
+  }
+]
+```
+
+**Merge strategie:**
+- `union` — sesbira vsechny findings, deduplikuje
+- `consensus` — jen co vidi 2+ agenti (high-confidence)
+- `weighted` — vahy dle role (security findings maji vyssi vahu)
+
+**Auto-trigger pravidla (Planner vklada automaticky):**
+- Security-relevant step → pridej `security` review
+- Vysoka komplexita → pridej `architect` review
+- DB zmeny → pridej `backend` + `security` review
+
+**Vystup — consolidovany `analysis_report`:**
+```yaml
+analysis_report:
+  id: "analysis_1_security_review"
+  target_step: "step_3_backend"
+  perspectives: 3
+  findings:
+    - agent: security
+      severity: high
+      finding: "SQL injection risk"
+    - agent: architect
+      severity: medium
+      finding: "Contract violation in endpoint X"
+  consensus_items: [...]
+  merged_summary: "..."
+```
+
+**Controller flow:**
+```
+EXECUTING → dispatch analysis_group paralelne
+  → collect vsechny vystupy
+  → merge dle strategie (union/consensus/weighted)
+  → ulozit analysis_report do evidence/
+  → PHASE_CHECK
+```
+
+**Kdy pouzit (vs parallel_groups):**
+- `parallel_groups` = ruzni agenti delaji ruznou praci soucasne
+- `analysis_groups` = ruzni agenti analyzuji STEJNY target z ruznych uhlu
+
 ## Workflow Principles
 
 1. **Plan + Epic = PM + AI spoluprace** (brainstorming, detaily)
@@ -291,7 +349,13 @@ improvement_notes:
 - Pridat: Curator agent, Auditor agent, Project Scanner agent
 - Playbooks: pridat `improvement_notes` sekci
 
-### Session 5 (Planner — beze zmeny)
+### Session 5 (Planner — rozsirit o analysis_groups):
+- Puvodni: auto plan generation, paralelni dispatch, branch management
+- Pridat: `analysis_groups` — multi-perspective analysis (N agentu analyzuje stejny target)
+- Plan JSON schema: novy top-level `analysis_groups` array
+- Merge strategie: `union` | `consensus` | `weighted`
+- Auto-trigger pravidla v Planneru (security-relevant → security review, etc.)
+- Controller EXECUTING: dispatch + merge logic pro analysis_groups
 
 ### Session 6 (Slack — beze zmeny, ale zohlednit Curator/Auditor Slack flow)
 

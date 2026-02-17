@@ -296,13 +296,24 @@ cílový-projekt/
 
 ---
 
-### Session 5: Planner + Paralelizace
+### Session 5: Planner + Paralelizace + Multi-Perspective Analysis
 
-**Cíl:** Automatická generace plánů, paralelní dispatch, branch management.
+**Cíl:** Automatická generace plánů, paralelní dispatch, branch management, multi-perspective analysis.
+
+**Deliverables:**
+- Auto plan generation z EPIC → Plan JSON (dependency graph, parallel groups)
+- `analysis_groups` v Plan JSON — více agentů analyzuje stejný target z různých perspektiv
+- Auto-trigger pravidla (security-relevant → security review, DB changes → backend+security review)
+- 3 merge strategie: `union` (sbírej vše), `consensus` (2+ agenti), `weighted` (váhy dle role)
+- Controller EXECUTING rozšíření: dispatch + merge logic pro analysis_groups
+- Branch management: branch per agent, merge bez konfliktů
 
 **Acceptance:**
-- Plan JSON validní dle schema
+- Plan JSON validní dle schema (včetně `analysis_groups`)
 - Paralelní kroky běží současně (branch per agent)
+- `analysis_groups` dispatch: N agentů analyzuje stejný target → konsolidovaný `analysis_report`
+- Merge strategie fungují (`union`, `consensus`, `weighted`)
+- Auto-trigger pravidla v Planneru správně detekují security/complexity/DB kroky
 - Merge bez konfliktů
 
 ---
