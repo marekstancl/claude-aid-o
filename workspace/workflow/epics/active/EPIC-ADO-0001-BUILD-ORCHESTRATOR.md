@@ -404,12 +404,60 @@ na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokonče
 
 ---
 
+### Session 6.7: Content Quality Loop + Agent-Discovered Issues
+
+**Stav:** Čeká na implementaci. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 1 + Gap 2)
+
+**Cíl:** Rozšířit PHASE_CHECK o validaci kvality obsahu (acceptance criteria check) a zavést standardní formát pro reportování problémů nalezených agenty během práce.
+
+**Deliverables:**
+- Rozšíření PHASE_CHECK o Acceptance Validation (step 4): Controller porovná output.md s acceptance criteria, conditional dispatch code-reviewer
+- `## DISCOVERED ISSUES` sekce v output.md: strukturovaný formát (CRITICAL/HIGH/MEDIUM/INFO) s Controller triáží
+- Rozšíření `decision-policies.yaml` o `content_quality` + `discovered_issues` pravidla
+- Update 9 role playbooks — instrukce pro DISCOVERED ISSUES reporting
+- Update `run-epic.md` agent prompt template — acceptance criteria + issue reporting
+- Evidence: `reviews/`, `discovered_issues/` v evidence store
+
+**Acceptance:**
+- PHASE_CHECK kontroluje acceptance criteria z plánu (ne jen existenci souborů)
+- Orchestrátor auto-accept pro jednoduché kroky, dispatch code-reviewer pro komplexní
+- Max 2 review-fix cykly → escalation
+- Agent může reportovat DISCOVERED ISSUES v output.md
+- CRITICAL issue → blokuje krok → auto-fix nebo ESCALATION
+- HIGH issue → backlog + PM Slack notifikace (non-blocking)
+- MEDIUM/INFO → improvement_notes (Curator)
+
+---
+
+### Session 6.8: Docs Platform Detection + Playbooks
+
+**Stav:** Čeká na implementaci. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 3)
+
+**Cíl:** Odstranit hardcoded Docusaurus předpoklady z pluginu. Zavést detekci docs platformy přes aid-setup a platform-specific docs playbooks.
+
+**Deliverables:**
+- `defaults/playbooks/docs-docusaurus.md` — konsolidace existujících Docusaurus instrukcí (MDX, sidebar_label, npm run build)
+- `defaults/playbooks/docs-generic.md` — plain Markdown fallback
+- Rozšíření `commands/aid-setup.md` — docs platform detekce (docusaurus, mkdocs, sphinx, vitepress, generic)
+- Rozšíření `project-profile.yaml` — `docs: {platform, path, format, build_command}`
+- Parametrizace 5 hlavních souborů: session-management.md, agent-core.md, docs.md playbook, docs-reviewer.md, aid-setup.md
+
+**Acceptance:**
+- aid-setup detekuje docs platformu a zapíše do project-profile.yaml
+- Agenti čtou `{project.docs.*}` místo hardcoded "Docusaurus"
+- session-management.md / agent-core.md neobsahují slovo "Docusaurus"
+- docs-reviewer.md podmíněně aplikuje MDX pravidla jen pro Docusaurus projekty
+- Docusaurus playbook obsahuje vše co dříve bylo rozptýlené v 10 souborech
+- Projekt bez docs platformy → žádné docs gates, žádné docs requirements
+
+---
+
 ### Session 7: E2E Test + Hardening
 
 **Cíl:** Reálný EPIC, edge cases, dokumentace.
 
 **Acceptance:**
-- Reálný EPIC projede kompletně
+- Reálný EPIC projede kompletně (včetně quality loop + discovered issues)
 - Curator flow end-to-end (postřehy → backlog → PM)
 - Audit report po Epicu
 - Evidence kompletní
@@ -447,6 +495,12 @@ Session 4 (9 agentů + curator + auditor + scanner)
 Session 5 (planner + parallel)
     ↓
 Session 6 (slack + autonomie)
+    ↓
+Session 6.5 (session file detail quality)
+    ↓
+Session 6.7 (content quality loop + discovered issues)
+    ↓
+Session 6.8 (docs platform detection)
     ↓
 Session 7 (E2E test)
     ↓
