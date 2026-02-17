@@ -239,9 +239,9 @@ cílový-projekt/
 
 ---
 
-### Session 3: Gates Engine + Retry
+### Session 3: Gates Engine + Retry ✅
 
-**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260216-c8d2-gates-engine-retry.md`
+**Stav:** Hotová ✅. Session file: `workspace/sessions/active/S-20260216-c8d2-gates-engine-retry.md`
 
 **Cíl:** Gates engine (gates.yaml parsing + execution), pass/fail reports do evidence, retry loop s fix-agent dispatch (max 3 pokusy), escalation protocol. Koexistence s existujícím C.I.C.E.R.O. pre-commit gates systémem.
 
@@ -298,9 +298,9 @@ cílový-projekt/
 
 ---
 
-### Session 5: Planner + Paralelizace + Multi-Perspective Analysis
+### Session 5: Planner + Paralelizace + Multi-Perspective Analysis ✅
 
-**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260217-1ffa-planner-parallelization.md`
+**Stav:** Hotová ✅. Session file: `workspace/sessions/active/S-20260217-1ffa-planner-parallelization.md`
 
 **Cíl:** Automatická generace plánů, paralelní dispatch, branch management, multi-perspective analysis.
 
@@ -406,7 +406,9 @@ na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokonče
 
 ### Session 6.7: Content Quality Loop + Agent-Discovered Issues
 
-**Stav:** Čeká na implementaci. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 1 + Gap 2)
+**Stav:** Hotová ✅. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 1 + Gap 2), Impl plan: `docs/plans/2026-02-17-session-6.7-quality-loop-issues-impl.md`
+
+**Note:** 7 tasks implemented: decision-policies.yaml (content_quality + discovered_issues), PHASE_CHECK expansion (epic-orchestration.md + run-epic.md), agent-core.md format, 9 playbooks, session management integration
 
 **Cíl:** Rozšířit PHASE_CHECK o validaci kvality obsahu (acceptance criteria check) a zavést standardní formát pro reportování problémů nalezených agenty během práce.
 
@@ -431,7 +433,9 @@ na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokonče
 
 ### Session 6.8: Docs Platform Detection + Playbooks
 
-**Stav:** Čeká na implementaci. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 3)
+**Stav:** Hotová ✅. Design: `docs/plans/2026-02-17-orchestrator-gaps-design.md` (Gap 3), Impl plan: `docs/plans/2026-02-17-session-6.8-docs-platform-impl.md`
+
+**Note:** 9 tasks implemented: 2 platform playbooks (docusaurus + generic), aid-setup detection, project-scanner schema, parametrized 5 behavioral files (session-management, agent-core, docs playbook, docs-reviewer)
 
 **Cíl:** Odstranit hardcoded Docusaurus předpoklady z pluginu. Zavést detekci docs platformy přes aid-setup a platform-specific docs playbooks.
 
@@ -449,6 +453,27 @@ na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokonče
 - docs-reviewer.md podmíněně aplikuje MDX pravidla jen pro Docusaurus projekty
 - Docusaurus playbook obsahuje vše co dříve bylo rozptýlené v 10 souborech
 - Projekt bez docs platformy → žádné docs gates, žádné docs requirements
+
+---
+
+### Session 6.9: Feedback Loop Completion + Deferred Docs Paths
+
+**Status:** Hotová ✅
+**Objective:** Complete the re-dispatch feedback loop mechanism and parametrize remaining hardcoded docs/ references.
+
+**Deliverables:**
+- Re-dispatch prompt template in run-epic.md (mirrors gate-fixer pattern from retry-engine.md)
+- Code-reviewer step acceptance review output format
+- acceptance_criteria field in plan.schema.json + plan-epic.md generation
+- Review cycle tracking in plan_progress.json
+- Parametrized 10 remaining hardcoded docs/ paths across 6 files
+
+**Acceptance:**
+- Re-dispatch prompt includes feedback section, previous attempts, cycle tracking
+- Code-reviewer has structured output format for step reviews
+- plan.schema.json has optional acceptance_criteria field
+- plan_progress.json tracks review_cycles per step
+- No hardcoded "docs/" or "Docusaurus" in behavioral files
 
 ---
 
@@ -501,6 +526,8 @@ Session 6.5 (session file detail quality)
 Session 6.7 (content quality loop + discovered issues)
     ↓
 Session 6.8 (docs platform detection)
+    ↓
+Session 6.9 (feedback loop + deferred docs paths)
     ↓
 Session 7 (E2E test)
     ↓
