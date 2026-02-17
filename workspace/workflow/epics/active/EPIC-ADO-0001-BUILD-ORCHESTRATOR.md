@@ -341,18 +341,42 @@ cílový-projekt/
 
 ### Session 6: Slack + Autonomní Běh
 
-**Cíl:** Slack MCP, escalation, epic queue.
+**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260217-d9c4-slack-autonomous-run.md`
+
+**Cíl:** Slack MCP skill pro asynchronní PM komunikaci, přepojení všech PM touchpoints
+(PLAN_REVIEW, ESCALATION, PM_APPROVAL, Curator proposals, Auditor summaries) z chat-based
+na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokončení.
 
 **Deliverables:**
-- MCP server pro Slack (send_escalation, wait_for_reply, send_status)
-- Integrace: Curator→Orchestrator→Slack PM
-- Integrace: Auditor→Orchestrator→Slack PM
-- Epic queue — automatický pickup
+- `skills/slack-mcp.md` — Slack MCP integration skill (message types, formatting, response parsing, timeout handling)
+- `skills/epic-queue.md` — Epic Queue skill (queue management, auto-pickup, status tracking)
+- `commands/epic-queue.md` — Epic Queue command (`/epic-queue list|add|next|pause|resume`)
+- Update `commands/run-epic.md` — PLAN_REVIEW, ESCALATION, PM_APPROVAL → Slack MCP integration
+- Update `skills/epic-orchestration.md` — State definitions aktualizovány pro Slack komunikaci + DONE → auto-pickup
+- Update `agents/curator.md` — Orchestrátor→Slack flow pro proposals a rejection info
+- Update `agents/auditor.md` — Orchestrátor→Slack flow pro audit summaries
+- Update `commands/aid-help.md` — Slack integration + Epic Queue dokumentace
+- Update `plugin.json` — 18 agents, 17 commands (+1 epic-queue), 12 skills (+2 slack-mcp, epic-queue)
+
+**Phases (8):**
+1. Slack MCP Skill — message types, formatting, response parsing, timeouts
+2. Run-Epic Slack Integration — PLAN_REVIEW, ESCALATION, PM_APPROVAL přepojení
+3. Epic-Orchestration Skill Update — state definitions pro Slack
+4. Curator Slack Integration — proposals + rejection info přes Slack
+5. Auditor Slack Integration — audit summaries přes Slack
+6. Epic Queue Skill + Command — queue management, auto-pickup
+7. Plugin Integration + Cross-references
+8. Smoke Test
 
 **Acceptance:**
-- Slack escalation funguje (včetně Curator proposals a Audit summaries)
-- PM odpověď → orchestrátor pokračuje
-- 2 EPICy v řadě bez manuálního zásahu
+- Slack MCP skill definuje 7 message typů (Escalation, Plan Approval, Merge Approval, Proposal, Rejection Info, Audit Summary, Status Update)
+- `run-epic.md` PLAN_REVIEW/ESCALATION/PM_APPROVAL používají Slack MCP místo chat
+- Curator proposals jdou přes Slack (approve/defer/reject) + rejection info
+- Auditor audit summaries jdou přes Slack (informational)
+- Epic Queue: `/epic-queue add` → `/epic-queue list` → auto-pickup po DONE
+- 2 EPICy v řadě projdou bez manuálního zásahu (queue-driven)
+- Timeout handling: PM neodpoví → escalation reminder → configurable default action
+- Backward compatible: pokud Slack MCP není configured → fallback na chat
 
 ---
 

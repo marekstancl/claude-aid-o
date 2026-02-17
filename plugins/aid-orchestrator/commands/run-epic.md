@@ -26,6 +26,22 @@ This is the **main orchestration command** — it implements the entire 11-state
 
 **Read `skills/epic-orchestration.md` FIRST.** It is the authoritative source for the state machine. This command file provides the execution protocol — but the state definitions, evidence formats, and dispatch rules come from that skill.
 
+**Read `skills/slack-mcp.md` for PM communication.** All PM-facing messages (plan review, escalation, merge approval) use the Slack MCP protocol with chat fallback.
+
+## PM Communication Protocol
+
+All PM communication uses the abstraction from `skills/slack-mcp.md`:
+
+1. **`resolve_pm_channel()`** — reads `.aid-o/03-config/policies/slack-config.yaml`,
+   returns `{ mode: "slack", config }` or `{ mode: "chat" }`.
+2. **`send_pm_message(type, payload)`** — formats and sends message via Slack MCP
+   (or presents in chat if fallback).
+3. **`wait_pm_response(message_ref, timeout_type)`** — waits for PM reply via Slack
+   (or chat). Handles timeouts with configurable default actions.
+
+On first use in a run, call `resolve_pm_channel()` once and cache the result.
+If Slack is configured, also send a Type G Status Update: `:rocket: EPIC started`.
+
 ## State Machine Loop
 
 Implement the following loop. On each state transition, append to `stage_log.jsonl`.
@@ -75,12 +91,10 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 ### State: PLAN_REVIEW
 
 **Actions:**
-1. Present the plan to PM in readable format:
+1. Format plan summary (per `skills/slack-mcp.md` Type B — Plan Approval):
    ```
    EPIC: {title} ({epic_id})
-   ====================================
-   Steps: {count}
-   Parallel groups: {count}
+   Steps: {count} ({parallel_groups} parallel groups, {analysis_groups} analysis groups)
    Roles: {list}
    Budget: ${max_cost}
 
@@ -92,15 +106,26 @@ Implement the following loop. On each state transition, append to `stage_log.jso
      ...
 
    Gates: {list}
-
-   Proceed? (GO / REVISE / ABORT)
    ```
-2. **STOP and wait for PM response.**
+2. Send via PM Communication Protocol:
+   ```
+   message_ref = send_pm_message("plan_approval", {
+     epic_id, epic_title, total_steps, parallel_groups,
+     analysis_groups, agent_roles, step_summary, run_id
+   })
+   ```
+3. Wait for PM response:
+   ```
+   response = wait_pm_response(message_ref, "plan_approval")
+   ```
+4. **If Slack:** Orchestrator continues when PM responds in Slack.
+   **If chat:** STOP and wait for PM response in conversation.
 
 **PM Responses:**
-- **GO** → save `pm_plan_approval.json`, transition to EXECUTING
-- **REVISE** → return to PLANNING with PM feedback, increment plan version
-- **ABORT** → transition to DONE (status: aborted)
+- **GO** (`response_type: "go"`) → save `pm_plan_approval.json`, transition to EXECUTING
+- **REVISE** (`response_type: "revise"`) → return to PLANNING with PM feedback (`response.feedback`), increment plan version
+- **ABORT** (`response_type: "abort"`) → transition to DONE (status: aborted)
+- **Timeout** (`response.auto: true`) → execute `timeout_actions.plan_approval` from config
 
 **Evidence:** `pm_plan_approval.json`:
 ```json
@@ -109,7 +134,9 @@ Implement the following loop. On each state transition, append to `stage_log.jso
   "run_id": "{run_id}",
   "timestamp": "{ISO 8601}",
   "decision": "approved|revised|aborted",
-  "feedback": "{PM feedback if revised}"
+  "feedback": "{PM feedback if revised}",
+  "channel": "slack|chat",
+  "latency_minutes": {N}
 }
 ```
 
@@ -341,59 +368,53 @@ After a step passes PHASE_CHECK, check for pending analysis:
 1. Determine escalation reason and prepare context
 2. **For gate failures** (from GATE_RETRY): follow `skills/retry-engine.md` Section 5 —
    compile full escalation report with all attempt outputs and fix descriptions
-3. Present to PM:
+3. Build escalation payload:
 
-   **Gate failure escalation format:**
+   **Gate failure payload:**
    ```
-   GATE ESCALATION
-   ====================================
-   EPIC: {epic_id}
-   Gate: {gate_name}
-   Attempts: {max_attempts}/{max_attempts} exhausted
-
-   Gate command: {command}
-   Pass criteria: {pass_criteria}
-
-   Last failure output:
-   {last attempt output — truncated to key error}
-
-   Fix attempts:
-   1. {attempt 1}: {fix description} → {outcome}
-   2. {attempt 2}: {fix description} → {outcome}
-   3. {attempt 3}: {fix description} → {outcome}
-
-   Other gates: {N} passed, {M} skipped
-
-   Options:
-   A) Skip this gate — proceed with warning (marked skipped_by_pm)
-   B) Manual fix — provide guidance, I'll retry (resets attempt counter)
-   C) Abort EPIC run
-
-   Recommendation: {based on context}
+   trigger_reason: "Gate failure: {gate_name} — {max_attempts} attempts exhausted"
+   failure_details: |
+     Gate: {gate_name}
+     Command: {command}
+     Pass criteria: {pass_criteria}
+     Last failure: {last attempt output — truncated to key error}
+     Fix attempts:
+     1. {attempt 1}: {fix description} → {outcome}
+     2. {attempt 2}: {fix description} → {outcome}
+     3. {attempt 3}: {fix description} → {outcome}
+     Other gates: {N} passed, {M} skipped
+   fix_option: "Skip this gate — proceed with warning (marked skipped_by_pm)"
+   skip_option: "Manual fix — provide guidance, I'll retry (resets attempt counter)"
+   recommendation: "{based on context}"
    ```
 
-   **Non-gate escalation format:**
+   **Non-gate escalation payload:**
    ```
-   ESCALATION — {trigger_reason}
-   ================================
-   EPIC: {epic_id}
-   State: {state that caused escalation}
-   Details: {failure details}
-
-   Options:
-   A) {context-specific option}
-   B) {context-specific option}
-   C) Abort EPIC
-
-   Recommendation: {auto recommendation based on context}
+   trigger_reason: "{trigger_reason}"
+   failure_details: "{failure details — max 500 chars}"
+   fix_option: "{context-specific fix option}"
+   skip_option: "{context-specific skip option}"
+   recommendation: "{auto recommendation}"
    ```
-4. **STOP and wait for PM decision.**
+
+4. Send via PM Communication Protocol (per `skills/slack-mcp.md` Type A — Escalation):
+   ```
+   message_ref = send_pm_message("escalation", {
+     epic_id, epic_title, current_state,
+     trigger_reason, failure_details,
+     fix_option, skip_option, recommendation
+   })
+   response = wait_pm_response(message_ref, "escalation")
+   ```
+5. **If Slack:** Orchestrator continues when PM responds in Slack.
+   **If chat:** STOP and wait for PM decision in conversation.
 
 **PM Responses:**
-- **Skip (A)** → mark gate as `skipped_by_pm` in gates_report.json, proceed to GATES re-check
-- **Manual fix (B)** → reset attempt counter, apply PM guidance, dispatch fix agent, re-run gate
-- **Abort (C)** → transition to DONE (status: aborted)
-- **Fix (non-gate)** → apply PM's instructions, return to the appropriate state
+- **Fix (A)** (`response_type: "fix"`) → apply PM guidance (if `discussion` response, use PM's thread text), return to appropriate state
+- **Skip (B)** (`response_type: "skip"`) → mark gate as `skipped_by_pm` in gates_report.json, proceed to GATES re-check
+- **Abort (C)** (`response_type: "abort"`) → transition to DONE (status: aborted)
+- **Discussion** (`response_type: "discussion"`) → include PM's thread text as context, re-present options
+- **Timeout** (`response.auto: true`) → execute `timeout_actions.escalation` from config
 
 **Evidence:** Save `pm_decision.json`:
 ```json
@@ -402,10 +423,12 @@ After a step passes PHASE_CHECK, check for pending analysis:
   "trigger": "{escalation reason}",
   "gate": "{gate_name or null}",
   "attempts_exhausted": "{count or null}",
-  "options_presented": ["skip", "manual_fix", "abort"],
+  "options_presented": ["fix", "skip", "abort"],
   "pm_decision": "{chosen option}",
   "pm_feedback": "{additional instructions}",
-  "pm_reason": "{reason for skip if applicable}"
+  "pm_reason": "{reason for skip if applicable}",
+  "channel": "slack|chat",
+  "latency_minutes": {N}
 }
 ```
 
@@ -414,32 +437,32 @@ After a step passes PHASE_CHECK, check for pending analysis:
 ### State: PM_APPROVAL
 
 **Actions:**
-1. Compile final summary:
+1. Compile final summary payload:
    ```
-   EPIC COMPLETE — Ready for Merge
-   ====================================
-   EPIC: {title} ({epic_id})
-   Steps completed: {N}/{total}
-   Steps skipped: {count} (if any)
-   Gates: ALL PASS
-   Escalations: {count}
-   Evidence: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
-
-   Changes:
-   - {file count} files changed
-   - {commit count} commits
-   - Branches: {list}
-
-   Merge to main? (APPROVE / REJECT / REVISE)
+   epic_id, epic_title,
+   completed_steps, total_steps, skipped_steps,
+   file_count, commit_count, branch_list,
+   escalation_count,
+   evidence_dir
    ```
-2. **STOP and wait for PM decision.**
+2. Send via PM Communication Protocol (per `skills/slack-mcp.md` Type C — Merge Approval):
+   ```
+   message_ref = send_pm_message("merge_approval", {
+     epic_id, epic_title, completed, total,
+     file_count, commit_count, branch_list, evidence_dir
+   })
+   response = wait_pm_response(message_ref, "merge_approval")
+   ```
+3. **If Slack:** Orchestrator continues when PM responds in Slack.
+   **If chat:** STOP and wait for PM decision in conversation.
 
 **PM Responses:**
-- **APPROVE** → transition to DONE
-- **REJECT** → transition to ESCALATION (with PM feedback for re-work)
-- **REVISE** → return to EXECUTING with PM's specific revision instructions
+- **APPROVE** (`response_type: "approve"`) → transition to DONE
+- **REJECT** (`response_type: "reject"`) → transition to ESCALATION (with PM feedback `response.feedback`)
+- **REVISE** (`response_type: "revise"`) → return to EXECUTING with PM's revision instructions (`response.feedback`)
+- **Timeout** (`response.auto: true`) → execute `timeout_actions.merge_approval` from config
 
-**Evidence:** Append to `pm_decision.json`.
+**Evidence:** Append to `pm_decision.json` (with `channel` and `latency_minutes` fields).
 
 ---
 
@@ -482,7 +505,22 @@ After a step passes PHASE_CHECK, check for pending analysis:
    ## Evidence
    All artifacts: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
    ```
-4. Print completion message
+4. **POST-PROCESSING** (per `skills/epic-orchestration.md` DONE state):
+   a. Dispatch **Curator agent** — collect improvement_notes, propose improvements
+   b. Dispatch **Auditor agent** — run post-EPIC audit, generate report
+   c. Curator proposals → Orchestrator evaluates → approved proposals to PM via Slack
+      (per `skills/slack-mcp.md` Type D — Proposal, Type E — Rejection Info)
+   d. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
+5. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
+6. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+   a. Read `.aid-o/04-engine/epic-queue.yaml`
+   b. IF queue is not paused AND next EPIC exists (status: "queued"):
+      - Mark next EPIC as "running" in queue
+      - Send Status Update: `:arrows_counterclockwise: Auto-starting next EPIC: {next_epic_id}`
+      - Start new run-epic loop with next EPIC (transition: DONE → IDLE → PLANNING)
+   c. ELSE:
+      - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
+      - Print completion message
 
 **Evidence:** Save `final_report.md`.
 
@@ -531,21 +569,43 @@ Track estimated LLM cost throughout the run:
 - If cost exceeds `budget.warn_at_percentage` (80%) → warn PM
 - If cost exceeds `budget.max_llm_cost_usd` → ESCALATION
 
+## Status Updates
+
+Send informational Slack messages (Type G — Status Update, per `skills/slack-mcp.md`)
+at key orchestration points. These are fire-and-forget — never block execution.
+
+| Event | When | Message |
+|-------|------|---------|
+| EPIC start | IDLE → PLANNING | `:rocket: EPIC started — {step_count} steps planned` |
+| Step start | EXECUTING (each step) | `:zap: Step {N}/{total}: {role} started` |
+| Step complete | PHASE_CHECK pass | `:white_check_mark: Step {N}/{total}: {role} done ({file_count} files)` |
+| Gates start | NEXT_PHASE → GATES | `:mag: All steps complete — running gates...` |
+| Gates pass | GATES → PM_APPROVAL | `:white_check_mark: All gates passed — awaiting merge approval` |
+| EPIC done | DONE | `:checkered_flag: EPIC completed — merged to main` |
+| Queue pickup | DONE → next EPIC | `:arrows_counterclockwise: Auto-starting next EPIC: {id}` |
+| Queue empty | DONE, no more EPICs | `:white_check_mark: Queue empty. Orchestrator idle.` |
+
+If Slack is not configured or send fails → silently skip (status updates are non-critical).
+
 ## Reference Files
 
 - **PRIMARY:** `skills/epic-orchestration.md` — state machine definitions, dispatch protocol, evidence formats
+- **PM COMMS:** `skills/slack-mcp.md` — Slack MCP protocol, message types, fallback, timeouts
+- **QUEUE:** `skills/epic-queue.md` — Epic Queue management, auto-pickup protocol
 - `skills/planner.md` — plan generation: dependency graph, parallel groups, analysis groups
 - `skills/parallel-dispatch.md` — branch strategy, parallel dispatch protocol, conflict detection
 - `skills/analysis-merge.md` — analysis group merge strategies (union, consensus, weighted)
 - `defaults/policies/decision-policies.yaml` — auto-decisions, escalation triggers
 - `defaults/policies/gates.yaml` — gate definitions, retry config
+- `defaults/policies/slack-config.yaml` — Slack channel, timeouts, reminder config
 - `defaults/templates/plan.schema.json` — plan validation (includes `analysis_groups`)
 
 ## Important
 
 - **Read `skills/epic-orchestration.md` BEFORE starting the loop** — it is the single source of truth
-- **STOP at PM checkpoints** — PLAN_REVIEW, ESCALATION, PM_APPROVAL require human response
+- **Read `skills/slack-mcp.md` for PM communication** — defines message formats and fallback
+- **PM checkpoints** — PLAN_REVIEW, ESCALATION, PM_APPROVAL wait for PM via Slack (or chat fallback)
 - **Auto-decide where possible** — use `decision-policies.yaml` to minimize PM interruptions
-- **Evidence is mandatory** — every transition logs to `stage_log.jsonl`
+- **Evidence is mandatory** — every transition logs to `stage_log.jsonl`, Slack messages to `slack_log.jsonl`
 - If resuming an interrupted run: read `plan_progress.json` to find where to continue
 - If `$ARGUMENTS` is empty and multiple EPICs exist → list them and ask which to run

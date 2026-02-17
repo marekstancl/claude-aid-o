@@ -1,0 +1,39 @@
+# Slack MCP Integration — Configuration
+# See: skills/slack-mcp.md for protocol details
+#
+# To enable Slack integration:
+# 1. Install a Slack MCP server (e.g., @anthropic/slack-mcp)
+# 2. Set enabled: true
+# 3. Configure channel and pm_user_id
+#
+# When disabled, all PM communication falls back to chat (in-conversation).
+
+slack:
+  enabled: false                          # Set to true to enable Slack integration
+  channel: "#aid-orchestrator"            # Slack channel for AID messages
+  pm_user_id: ""                          # PM's Slack user ID (for @mentions)
+
+  # Timeout (minutes) — how long to wait for PM response per message type
+  timeouts:
+    plan_approval_minutes: 1440           # 24 hours
+    escalation_minutes: 480              # 8 hours
+    merge_approval_minutes: 1440          # 24 hours
+    proposal_minutes: 4320               # 72 hours (improvement proposals, lower priority)
+
+  # Reminder configuration — periodic nudges when PM hasn't responded
+  reminders:
+    enabled: true
+    interval_minutes: 60                  # Send reminder every 60 minutes
+    max_reminders: 3                      # Stop after 3 reminders, then apply timeout_action
+
+  # What happens when timeout expires (after max_reminders)
+  # Options per type:
+  #   "wait"  — keep waiting indefinitely (safe default)
+  #   "skip"  — treat as skip (escalation only)
+  #   "abort" — treat as abort
+  #   "defer" — treat as defer (proposals only)
+  timeout_actions:
+    plan_approval: "wait"
+    escalation: "wait"
+    merge_approval: "wait"
+    proposal: "defer"
