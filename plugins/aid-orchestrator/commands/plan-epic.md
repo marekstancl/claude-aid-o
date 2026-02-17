@@ -118,7 +118,8 @@ Generate a Plan JSON object with these fields:
       "outputs": ["{expected artifacts}"],
       "constraints": ["{from EPIC Constraints + Scope}"],
       "allowed_paths": ["{from EPIC Scope → Allowed files/paths}"],
-      "forbidden_paths": ["{from EPIC Scope → Forbidden zones}"]
+      "forbidden_paths": ["{from EPIC Scope → Forbidden zones}"],
+      "acceptance_criteria": ["{verifiable criteria derived from EPIC + step objective}"]
     }
   ],
   "dependencies": [
@@ -159,6 +160,12 @@ Generate a Plan JSON object with these fields:
 - QA/Security: inputs include implementation outputs
 - Docs: inputs include all previous outputs
 
+**Acceptance criteria derivation:**
+- From EPIC acceptance criteria (mapped to relevant steps)
+- From step objective (decomposed into verifiable checks)
+- From step outputs (each output = one criterion: "artifact exists and is complete")
+- Keep criteria specific and testable — "API docs cover all new endpoints" not "docs are good"
+
 **Self-validation** (per `skills/planner.md` Section 6): After generating, verify:
 - All `step.id` values are unique
 - All `step.role` values are valid enum values
@@ -188,8 +195,16 @@ If validation fails → fix and regenerate (do not present invalid plan).
      "state": "PLANNING",
      "started_at": "{ISO 8601}",
      "steps": {
-       "step_1_architect": "pending",
-       "step_2_domain": "pending"
+       "step_1_architect": {
+         "status": "pending",
+         "review_cycles": 0,
+         "last_review": null
+       },
+       "step_2_domain": {
+         "status": "pending",
+         "review_cycles": 0,
+         "last_review": null
+       }
      },
      "current_step": null,
      "gates": {},

@@ -69,6 +69,11 @@
             "type": "array",
             "items": { "type": "string" },
             "description": "Filesystem paths this step must NOT touch"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Verifiable criteria that must be met for this step to pass acceptance validation. Each criterion should be specific and testable."
           }
         },
         "additionalProperties": false
