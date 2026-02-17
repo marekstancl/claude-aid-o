@@ -164,15 +164,53 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 6. Collect output
 
 **For a parallel group:**
+
+> **Reference:** Read `skills/parallel-dispatch.md` Section 2 for the complete protocol.
+
 1. Prepare dispatch for ALL steps in the group (same as sequential, per step)
-2. Dispatch all agents in a single message with multiple Task tool calls
-3. Collect all outputs
+2. Add "PARALLEL CONTEXT" to each agent's prompt (per `skills/parallel-dispatch.md`):
+   - List other agents working in parallel
+   - Note agent's branch name
+   - Emphasize: ONLY modify files in allowed_paths
+3. Create all branches from `epic/{epic_id}/main` (same base commit)
+4. Dispatch all agents in a single message with multiple Task tool calls
+5. Collect all outputs
+
+**For analysis groups (post-step):**
+
+> **Reference:** Read `skills/parallel-dispatch.md` Section 2 and `skills/analysis-merge.md`.
+
+After a step passes PHASE_CHECK, check for pending analysis:
+
+1. Read `plan.analysis_groups` — find entries where `target` == just-completed step ID
+2. If none → skip, proceed normally to NEXT_PHASE
+3. For each matching analysis_group:
+   a. Prepare analysis prompt per agent (per `skills/parallel-dispatch.md` analysis dispatch):
+      - Target step output: `evidence/steps/{target}/output.md`
+      - Target step diff: `evidence/steps/{target}/diff.patch`
+      - Analysis mode and merge strategy context
+      - Agent's playbook (relevant analysis sections)
+   b. Dispatch ALL analysis agents in single message (parallel Task calls)
+   c. Collect outputs — validate each `analysis_output` YAML
+   d. Apply merge strategy (per `skills/analysis-merge.md`):
+      - `union` → collect all findings, no dedup
+      - `consensus` → only findings confirmed by 2+ agents
+      - `weighted` → rank by domain expertise weights
+   e. Generate `analysis_report` and save to evidence
+   f. **Critical findings → ESCALATION** ("Analysis found {N} critical issues. PM must acknowledge.")
+   g. **High findings → log warning**, notify PM (non-blocking)
+   h. Medium/low/info → proceed normally
+4. Continue to NEXT_PHASE
 
 **Evidence per step:**
 - Save prompt: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/prompts/step_{N}_{role}.md`
 - Save output: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
 - Generate diff: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/diff.patch`
 - Append to `stage_log.jsonl`
+
+**Evidence per analysis group (additional):**
+- Raw agent outputs: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/analysis/analysis_{N}_{purpose}/raw_{agent}.yaml`
+- Merged report: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/analysis/analysis_{N}_{purpose}/analysis_report.yaml`
 
 **Transition:** → PHASE_CHECK
 
@@ -194,6 +232,20 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 | No outputs OR agent error | → ESCALATION |
 
 3. For parallel groups: check ALL agents in the group before transitioning
+
+**Parallel group additional checks** (per `skills/parallel-dispatch.md` Section 3-4):
+1. Collect all modified files across all agents in the parallel group
+2. If any file modified by 2+ agents → potential conflict
+3. Dry-run merge (by step number order):
+   ```
+   git checkout epic/{epic_id}/main
+   For each step branch (ascending step number):
+     git merge --no-commit --no-ff epic/{epic_id}/step_{N}_{role}
+     If conflict → git merge --abort → ESCALATION (with conflict details)
+     If clean → git merge --abort (was just a test)
+   ```
+4. If all dry-run merges clean → actually merge branches (same order)
+5. Record merge results in `evidence/parallel_groups/group_{N}/merge_log.json`
 
 **Evidence:** Append check result to `stage_log.jsonl`.
 
@@ -453,14 +505,20 @@ Every state transition MUST append a line to `stage_log.jsonl`:
 
 ## Branch Management
 
+> **Reference:** Read `skills/parallel-dispatch.md` Section 1 for the complete branch strategy.
+
 ```
+Base branch:
+  epic/{epic_id}/main — created at EPIC start from current HEAD of main
+
 Per-step branches:
   epic/{epic_id}/step_{N}_{role}
 
 Merge strategy:
-  Sequential: each step branch created from previous step's branch
-  Parallel: all branches created from last sequential step's branch
-  Final: PR from last step branch → main
+  Sequential: step branch FROM epic/{epic_id}/main → merge back after PHASE_CHECK pass
+  Parallel: all branches fork FROM epic/{epic_id}/main (same base) → merge one-by-one (by step number) after all pass
+  Analysis: NO branches — analysis agents are read-only (reports only, no code changes)
+  Final: epic/{epic_id}/main → PR to project main branch
 
 If git operations fail: log warning, continue without branching
 (branching is helpful but not blocking for the orchestration)
@@ -476,9 +534,12 @@ Track estimated LLM cost throughout the run:
 ## Reference Files
 
 - **PRIMARY:** `skills/epic-orchestration.md` — state machine definitions, dispatch protocol, evidence formats
+- `skills/planner.md` — plan generation: dependency graph, parallel groups, analysis groups
+- `skills/parallel-dispatch.md` — branch strategy, parallel dispatch protocol, conflict detection
+- `skills/analysis-merge.md` — analysis group merge strategies (union, consensus, weighted)
 - `defaults/policies/decision-policies.yaml` — auto-decisions, escalation triggers
 - `defaults/policies/gates.yaml` — gate definitions, retry config
-- `defaults/templates/plan.schema.json` — plan validation
+- `defaults/templates/plan.schema.json` — plan validation (includes `analysis_groups`)
 
 ## Important
 

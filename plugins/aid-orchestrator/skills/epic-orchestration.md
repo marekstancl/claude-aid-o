@@ -73,8 +73,8 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 | **IDLE** | Load EPIC file, validate structure | EPIC parsed successfully | `epic_input.md` saved |
 | **PLANNING** | Read EPIC → generate Plan JSON per `plan.schema.json` | Valid Plan JSON produced | `plan.json` saved |
 | **PLAN_REVIEW** | Present plan to PM, show steps + dependencies + parallel groups | PM says GO | `pm_plan_approval.json` |
-| **EXECUTING** | Dispatch current step's agent (per role playbook) | Step produces expected outputs | `stage_log.jsonl` entry, `diffs/` |
-| **PHASE_CHECK** | Verify step outputs against acceptance criteria | Auto-decision per `decision-policies.yaml` | Check result in `stage_log.jsonl` |
+| **EXECUTING** | Dispatch current step's agent (per role playbook); dispatch analysis_groups post-step (per `parallel-dispatch.md`) | Step produces expected outputs; analysis reports generated | `stage_log.jsonl` entry, `diffs/`, `analysis/` |
+| **PHASE_CHECK** | Verify step outputs; merge analysis results; check parallel conflicts (per `parallel-dispatch.md`) | Auto-decision per `decision-policies.yaml`; critical analysis findings → ESCALATION | Check result in `stage_log.jsonl` |
 | **NEXT_PHASE** | Advance to next step (or next parallel group) | Next step ready | Updated `plan_progress.json` |
 | **GATES** | Run all gates from `gates.yaml` | All required gates pass | `gates_report.json` |
 | **GATE_RETRY** | Generate fix instructions from gate failure, re-dispatch | Fix applied, re-run gate | Retry entry in `gates_report.json` |
@@ -151,7 +151,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 **Actions:**
 1. Determine next step(s) to execute (respect dependency graph)
 2. For sequential step:
-   a. Create branch: `epic/{epic_id}/step_{N}_{role}`
+   a. Create branch: `epic/{epic_id}/step_{N}_{role}` from `epic/{epic_id}/main`
    b. Load role playbook from `.aid-o/03-config/playbooks/{role}.md`
    c. Dispatch agent with context:
       - EPIC specification (relevant sections)
@@ -159,11 +159,19 @@ The Controller is a state machine. Every transition produces evidence. Failures 
       - Previous step outputs (if dependency)
       - Allowed/forbidden paths
    d. Agent executes and produces outputs
-3. For parallel group:
-   a. Create branch per agent: `epic/{epic_id}/step_{N}_{role}`
-   b. Dispatch all agents in the group concurrently (use Task tool with parallel calls)
-   c. Collect all outputs
-4. Transition to PHASE_CHECK
+3. For parallel group (per `skills/parallel-dispatch.md`):
+   a. Create branch per agent from `epic/{epic_id}/main` (same base commit)
+   b. Add PARALLEL CONTEXT to each prompt (other agents, branch names, scope warning)
+   c. Dispatch all agents in the group concurrently (use Task tool with parallel calls)
+   d. Collect all outputs
+4. Post-step analysis (analysis_groups — per `skills/parallel-dispatch.md` + `skills/analysis-merge.md`):
+   a. After step passes PHASE_CHECK, check `plan.analysis_groups` for groups targeting this step
+   b. If no analysis groups → skip
+   c. If found: dispatch analysis agents (read-only, no branches) in parallel
+   d. Collect outputs, apply merge strategy (`skills/analysis-merge.md`)
+   e. Generate `analysis_report`, save to `evidence/analysis/`
+   f. Critical findings → ESCALATION; high findings → PM warning; others → continue
+5. Transition to PHASE_CHECK
 
 **Context Passing Between Steps:**
 ```
@@ -193,13 +201,23 @@ Key context to pass:
    - Agent modified forbidden paths? → auto-reject, re-dispatch with warning
    - Outputs match expected artifacts? → auto-accept
    - No output or error? → escalate
-3. If parallel group: check all agents in the group
+3. If parallel group: check all agents in the group, then check for cross-agent conflicts:
+   a. Collect all modified files across agents (`skills/parallel-dispatch.md` Section 3-4)
+   b. If any file modified by 2+ agents → dry-run merge check
+   c. Git merge conflict → ESCALATION with conflict details
+   d. Clean merge → record and proceed
+4. If analysis results present (from analysis_groups):
+   a. Check for critical findings → ESCALATION
+   b. Check for high findings → log warning to PM
+   c. Merge analysis improvement_notes into step evidence (for Curator)
 
 **Auto-Decision Logic:**
 ```
 outputs_present AND within_scope → NEXT_PHASE
 outputs_present AND scope_violation → re-dispatch (max 1 retry)
 no_outputs OR error → ESCALATION
+parallel_merge_conflict → ESCALATION
+analysis_critical_findings → ESCALATION
 ```
 
 ### 6. NEXT_PHASE
@@ -374,7 +392,7 @@ All artifacts stored in: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
 ```
 .aid-o/04-engine/evidence/{epic_id}/{run_id}/
   epic_input.md              # Original EPIC
-  plan.json                  # Generated plan
+  plan.json                  # Generated plan (includes analysis_groups)
   plan_progress.json         # Step completion tracking
   pm_plan_approval.json      # PM's plan approval
   pm_decision.json           # PM decisions (escalations, final approval)
@@ -393,6 +411,16 @@ All artifacts stored in: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
       output.md
       diff.patch
     ...
+  parallel_groups/            # Parallel execution evidence
+    group_{N}/
+      dispatch_log.json       # Dispatch times, prompts
+      merge_log.json          # Merge order, conflict checks
+      branch_status.json      # Branch names, base commit
+  analysis/                   # Multi-perspective analysis results
+    analysis_{N}_{purpose}/
+      raw_{agent_role}.yaml   # Raw output from each analysis agent
+      analysis_report.yaml    # Merged report (per analysis-merge.md)
+      dispatch_log.json       # Analysis dispatch times
   gates/                     # Gate command outputs
     tests_pass.txt
     lint_pass.txt
@@ -434,25 +462,52 @@ Each line is a JSON object:
 
 ### Parallel Group Dispatch
 
+> **Reference:** `skills/parallel-dispatch.md` for complete protocol.
+
 ```
 1. Identify all steps in the parallel group
-2. For each step: prepare dispatch (same as sequential)
-3. Use single message with multiple Task tool calls
-4. Collect all outputs
-5. Check for conflicts between parallel outputs
-6. If conflicts: → ESCALATION
-7. If no conflicts: save all to .aid-o/04-engine/evidence/
+2. For each step: prepare dispatch (same as sequential) + PARALLEL CONTEXT
+3. Create all branches from epic/{epic_id}/main (same base commit)
+4. Use single message with multiple Task tool calls
+5. Collect all outputs
+6. Check for conflicts (git dry-run merge + scope violations)
+7. If conflicts: → ESCALATION
+8. If no conflicts: merge branches into epic/{epic_id}/main, save evidence
+```
+
+### Analysis Group Dispatch
+
+> **Reference:** `skills/parallel-dispatch.md` Section 2 + `skills/analysis-merge.md`
+
+```
+Triggered: AFTER target step passes PHASE_CHECK (not during execution)
+Key difference: Analysis agents are READ-ONLY — no branches, no code changes
+
+1. Check plan.analysis_groups for groups targeting completed step
+2. If found: prepare analysis prompts (step output, diff, mode, strategy)
+3. Dispatch all analysis agents in parallel (Task tool)
+4. Collect analysis_output YAML from each agent
+5. Apply merge strategy (union|consensus|weighted) per analysis-merge.md
+6. Generate consolidated analysis_report
+7. Save to evidence/analysis/
+8. Critical findings → ESCALATION
 ```
 
 ### Branch Management
 
+> **Reference:** `skills/parallel-dispatch.md` Section 1 for complete branch strategy.
+
 ```
+Base branch:
+  epic/{epic_id}/main — created from HEAD of main at EPIC start
+
 Per-step branches:
   epic/{epic_id}/step_{N}_{role}
 
 Merge strategy:
-  Sequential steps: merge into previous step's branch
-  Parallel steps: merge all into epic/{epic_id}/main
+  Sequential steps: branch from epic/{epic_id}/main → merge back after pass
+  Parallel steps: all fork from epic/{epic_id}/main → merge one-by-one (by step #) after all pass
+  Analysis: NO branches (read-only analysis, reports only)
   Final: PR from epic/{epic_id}/main → main
 ```
 
@@ -460,9 +515,12 @@ Merge strategy:
 
 ## Configuration References
 
+- **Planner:** `skills/planner.md` — dependency graph, parallel groups, analysis groups generation
+- **Parallel dispatch:** `skills/parallel-dispatch.md` — branch strategy, dispatch protocol, conflict detection
+- **Analysis merge:** `skills/analysis-merge.md` — merge strategies (union, consensus, weighted)
 - **Gates:** `.aid-o/03-config/policies/gates.yaml`
 - **Decision policies:** `.aid-o/03-config/policies/decision-policies.yaml`
-- **Plan schema:** `.aid-o/03-config/templates/plan.schema.json`
+- **Plan schema:** `.aid-o/03-config/templates/plan.schema.json` (includes `analysis_groups`)
 - **EPIC template:** `.aid-o/03-config/templates/epic.md`
 - **Playbooks:** `.aid-o/03-config/playbooks/{role}.md`
 - **Evidence:** `.aid-o/04-engine/evidence/`
@@ -476,8 +534,9 @@ Merge strategy:
 The Controller creates a session file for each EPIC run:
 1. On PLANNING: create session file from EPIC (auto-generated phases from plan steps)
 2. On each PHASE_CHECK: update session file (step status, commit hash)
-3. On GATES: update session file (gate results)
-4. On DONE: complete session file, archive
+3. On analysis complete: log analysis_report summary to session file
+4. On GATES: update session file (gate results)
+5. On DONE: complete session file, archive
 
 Session file frontmatter:
 ```yaml
@@ -503,6 +562,9 @@ orchestrated: true  # marks this as Controller-managed
 | Gate fails, no retries | GATE_RETRY | ESCALATION |
 | Budget exceeded | Any | ESCALATION |
 | Conflicting parallel outputs | PHASE_CHECK | ESCALATION |
+| Git merge conflict in parallel | PHASE_CHECK | ESCALATION with conflict details |
+| Analysis critical findings | PHASE_CHECK | ESCALATION (PM must acknowledge) |
+| Analysis agent failure | EXECUTING | Skip agent, log warning, proceed |
 | PM rejects final | PM_APPROVAL | ESCALATION with feedback |
 
 ---

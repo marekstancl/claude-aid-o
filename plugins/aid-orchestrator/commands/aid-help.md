@@ -8,7 +8,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `gates`, `evidence`, `config`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`
 
 **Examples:**
 ```
@@ -16,7 +16,8 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help commands          # detail on every command
 /aid-help workflow          # Plan → EPIC → Session flow
 /aid-help epic              # how to write an EPIC
-/aid-help agents            # 9 agent roles + playbooks
+/aid-help agents            # 18 agent roles + specialists
+/aid-help planning          # planner, parallelization, analysis groups
 /aid-help gates             # quality gates + retry logic
 /aid-help evidence          # evidence store structure
 /aid-help config            # configuration files
@@ -83,7 +84,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | gates | evidence | config
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -134,10 +135,11 @@ ORCHESTRATION COMMANDS:
     PM checkpoints: plan review, escalation, final approval
     Auto-decisions: scope check, gate retry, step progression
 
-  /run-step <epic-id> <step-id>
-    Run one step manually (without full pipeline).
+  /run-step <epic-id> <step-id> [--analysis-group <group-id>]
+    Run one step or analysis group manually (without full pipeline).
     Usage: /run-step TEST-0001 step_3_backend
-    Useful for: debugging, re-running failed steps, testing agents
+           /run-step TEST-0001 --analysis-group analysis_1_security_review
+    Useful for: debugging, re-running failed steps, manual analysis
 
   /epic-status [epic-id]
     Show pipeline status.
@@ -387,6 +389,93 @@ UTILITY AGENTS (6) — support functions:
 
 ---
 
+#### Topic: planning
+
+```
+Planning, Parallelization & Analysis Groups
+====================================
+
+The Planner transforms an EPIC into an executable Plan JSON with dependency
+graph, parallel groups, and multi-perspective analysis groups.
+
+Skills: planner.md, parallel-dispatch.md, analysis-merge.md
+
+PLAN GENERATION (/plan-epic):
+
+  1. Parse EPIC steps (role, objective, dependencies)
+  2. Build dependency graph (DAG — topological sort)
+  3. Detect parallel groups (same-level independent steps)
+  4. Auto-generate analysis groups (see below)
+  5. Validate and output Plan JSON
+
+  Skill: skills/planner.md (complete algorithm)
+
+DEFAULT STEP ORDER (when EPIC doesn't specify):
+  1. Architect (always first — contracts)
+  2. Domain (needs contracts)
+  3. Backend + Frontend (parallel — depend on contracts)
+  4. QA + Security + Observability (parallel — depend on implementation)
+  5. Docs (after implementation)
+  6. Release (last — after gates)
+
+  EPIC explicit ordering ALWAYS overrides defaults.
+
+PARALLEL GROUPS (different agents, different work, concurrent):
+
+  Parallel groups let independent steps run at the same time.
+  Example: Backend + Frontend implement different features in parallel.
+
+  Branch strategy (per parallel-dispatch.md):
+    - Base: epic/{epic_id}/main (created from main at EPIC start)
+    - Each parallel agent gets own branch
+    - After all complete: merge one-by-one into epic/main
+    - Git conflicts → ESCALATION (PM decides)
+
+  Skill: skills/parallel-dispatch.md
+
+ANALYSIS GROUPS (same target, different perspectives, read-only):
+
+  Analysis groups let multiple agents review the SAME completed step
+  from different angles. They are READ-ONLY (no code changes).
+
+  Example: security + architect + backend review backend's auth code.
+
+  Key difference from parallel groups:
+    parallel_groups  → different work, code changes, branches
+    analysis_groups  → same target, reports only, no branches
+
+  Auto-trigger rules (Planner generates automatically):
+    - Security-relevant step → [security] review (union)
+    - High complexity step → [architect] review (weighted)
+    - Database changes → [backend, security] validation (consensus)
+    - API contract changes → [backend, frontend] validation (union)
+
+  Manual: EPIC can define analysis_groups explicitly (overrides auto).
+
+  3 Merge Strategies:
+    union     — all findings collected, nothing lost (safest)
+    consensus — only findings confirmed by 2+ agents (high confidence)
+    weighted  — findings ranked by domain expertise (prioritized)
+
+  Skill: skills/analysis-merge.md
+
+ANALYSIS REPORT OUTPUT:
+
+  Generated per analysis group → evidence/analysis/{group_id}/
+  Contains: findings by severity, action items, statistics,
+  improvement_notes (merged from all analysis agents).
+
+  Critical findings → ESCALATION (PM must acknowledge)
+  High findings → warning (non-blocking)
+
+Plan JSON Schema:
+  .aid-o/03-config/templates/plan.schema.json
+  Includes: steps, dependencies, parallel_groups, analysis_groups,
+  gates, budget.
+```
+
+---
+
 #### Topic: gates
 
 ```
@@ -477,7 +566,7 @@ Structure:
     {epic_id}/
       {run_id}/
         epic_input.md           Original EPIC (immutable copy)
-        plan.json               Execution plan
+        plan.json               Execution plan (incl. analysis_groups)
         plan_progress.json      Step completion tracker
         pm_plan_approval.json   PM's plan approval
         pm_decision.json        PM decisions (escalations, final)
@@ -494,6 +583,15 @@ Structure:
           step_2_domain/
             output.md
             diff.patch
+        parallel_groups/        Parallel execution evidence
+          group_{N}/
+            dispatch_log.json
+            merge_log.json
+            branch_status.json
+        analysis/               Multi-perspective analysis results
+          analysis_1_security_review/
+            raw_security.yaml
+            analysis_report.yaml
         gates/                  Gate command outputs + retry evidence
           tests_pass.txt
           lint_pass.txt
