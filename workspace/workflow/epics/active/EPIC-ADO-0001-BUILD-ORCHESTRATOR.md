@@ -339,9 +339,9 @@ cílový-projekt/
 
 ---
 
-### Session 6: Slack + Autonomní Běh
+### Session 6: Slack + Autonomní Běh ✅
 
-**Stav:** Aktivní. Session file: `workspace/sessions/active/S-20260217-d9c4-slack-autonomous-run.md`
+**Stav:** Hotová. Session file: `workspace/sessions/completed/S-20260217-d9c4-slack-autonomous-run.md`
 
 **Cíl:** Slack MCP skill pro asynchronní PM komunikaci, přepojení všech PM touchpoints
 (PLAN_REVIEW, ESCALATION, PM_APPROVAL, Curator proposals, Auditor summaries) z chat-based
@@ -377,6 +377,30 @@ na Slack-based, a Epic Queue pro automatický pickup dalšího EPICu po dokonče
 - 2 EPICy v řadě projdou bez manuálního zásahu (queue-driven)
 - Timeout handling: PM neodpoví → escalation reminder → configurable default action
 - Backward compatible: pokud Slack MCP není configured → fallback na chat
+
+---
+
+### Session 6.5: Session File Detail Quality ✅
+
+**Stav:** Hotová. Design: `docs/plans/2026-02-17-session-file-detail-quality-design.md`, Impl plan: `docs/plans/2026-02-17-session-file-detail-quality-impl.md`
+
+**Cíl:** Zajistit, aby session files vytvořené přes `/session-start` (non-orchestrated) i `/plan-epic` (orchestrated) byly vždy maximálně detailní — s plným kontextem, phases, dependencies, quality gates.
+
+**Problém:** Session files byly fádní a nedostatečné. Plan JSON (z Planner skill) je detailní a validovaný, ale detail se nepřenášel do session file. Templates měly generické placeholdery bez guidance, instrukce v commands nespecifikovaly minimum detail.
+
+**Deliverables:**
+- Rework 4 session templates (`session-new-feature.md`, `session-bug-fix.md`, `session-refactoring.md`, `session-exploration.md`) — guidance comments, MIN markers, 6-subsection Phase structure
+- Expand `commands/plan-epic.md` Step 5 — Session Creation Protocol (sources, Plan JSON → Session Phases mapping, quality checklist)
+- Update `skills/epic-orchestration.md` — PLANNING state quality check + Integration with Session Management section
+- Rewrite `commands/session-start.md` — non-orchestrated Session Creation Protocol (sources including EPIC, decomposition rules, quality check)
+
+**Acceptance:**
+- Všechny 4 templates mají 7 povinných sekcí (Objective, Context, Scope, Phases, Dependencies, Quality Gates, Session Log)
+- Každá Phase má 6 subsections (Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
+- MIN markers konzistentní across all templates (Objective 3-5 vět, Scope IN 3+/OUT 2+, Acceptance 3+ items)
+- plan-epic.md Step 5 obsahuje 8-krokový mapping Plan JSON → Session Phases
+- session-start.md obsahuje Session Creation Protocol i pro non-orchestrated flow
+- Cross-reference verification prošla (7 souborů konzistentních)
 
 ---
 
