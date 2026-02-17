@@ -71,6 +71,26 @@ improvement_notes:
     source_step: "{step_id}"
 ```
 
+## Discovered Issues
+
+If you encounter problems **outside your task scope** during work, report them in your output using `## DISCOVERED ISSUES`:
+
+```
+## DISCOVERED ISSUES
+
+- **[SEVERITY]** Description of the problem
+  - Impact: What is affected
+  - Recommendation: Fix now / defer / escalate
+```
+
+Severities:
+- **CRITICAL** — blocks your work or other steps. Controller will auto-fix or escalate to PM.
+- **HIGH** — should be addressed but doesn't block you. Goes to backlog + PM notification.
+- **MEDIUM** — technical debt or minor improvement. Curator picks up later.
+- **INFO** — for awareness only.
+
+Only report genuine issues. Do not create this section if you found no issues.
+
 **Record when you see:**
 - OWASP Top 10 violations in any code you review
 - Hardcoded secrets or credentials (even in test fixtures)
