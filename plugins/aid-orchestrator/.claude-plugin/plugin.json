@@ -2,92 +2,9 @@
   "name": "aid-orchestrator",
   "version": "0.1.0",
   "description": "AID — AI Development Orchestrator. Controller + Workers architecture for multi-agent software development. Takes an EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
-  "author": "Marek Stancl",
-  "license": "MIT",
-  "engines": {
-    "claude_code": ">=1.0.0"
+  "author": {
+    "name": "Marek Stancl"
   },
-  "agents": [
-    { "name": "code-reviewer", "file": "agents/code-reviewer.md" },
-    { "name": "docs-reviewer", "file": "agents/docs-reviewer.md" },
-    { "name": "quality-gates-runner", "file": "agents/quality-gates-runner.md" },
-    { "name": "session-validator", "file": "agents/session-validator.md" },
-    { "name": "lessons-extractor", "file": "agents/lessons-extractor.md" },
-    { "name": "gate-fixer", "file": "agents/gate-fixer.md" },
-    { "name": "architect", "file": "agents/architect.md" },
-    { "name": "domain", "file": "agents/domain.md" },
-    { "name": "backend", "file": "agents/backend.md" },
-    { "name": "frontend", "file": "agents/frontend.md" },
-    { "name": "qa", "file": "agents/qa.md" },
-    { "name": "security", "file": "agents/security.md" },
-    { "name": "observability", "file": "agents/observability.md" },
-    { "name": "docs-writer", "file": "agents/docs-writer.md" },
-    { "name": "release", "file": "agents/release.md" },
-    { "name": "curator", "file": "agents/curator.md" },
-    { "name": "auditor", "file": "agents/auditor.md" },
-    { "name": "project-scanner", "file": "agents/project-scanner.md" }
-  ],
-  "commands": [
-    { "name": "aid-init", "file": "commands/aid-init.md", "description": "Initialize .aid-o/ workspace in target project" },
-    { "name": "aid-setup", "file": "commands/aid-setup.md", "description": "Interactive project onboarding — detect tech stack, configure AID" },
-    { "name": "aid-help", "file": "commands/aid-help.md", "description": "Show AID documentation — commands, workflow, agents, FAQ" },
-    { "name": "plan-epic", "file": "commands/plan-epic.md", "description": "Parse EPIC → generate Plan JSON + session file" },
-    { "name": "run-epic", "file": "commands/run-epic.md", "description": "Run Controller state machine for full EPIC orchestration" },
-    { "name": "run-step", "file": "commands/run-step.md", "description": "Manually run one step from an existing plan" },
-    { "name": "epic-status", "file": "commands/epic-status.md", "description": "Show EPIC pipeline status — steps, gates, budget" },
-    { "name": "run-gates", "file": "commands/run-gates.md", "description": "Run quality gates for an EPIC — standalone or integrated with /run-epic" },
-    { "name": "epic-queue", "file": "commands/epic-queue.md", "description": "Manage EPIC execution queue — add, remove, reorder, pause/resume for autonomous pipeline" },
-    { "name": "quality-gates", "file": "commands/quality-gates.md", "description": "Run 6-gate pre-commit quality protocol" },
-    { "name": "session-start", "file": "commands/session-start.md", "description": "Start a new tracked session" },
-    { "name": "session-end", "file": "commands/session-end.md", "description": "Complete and archive current session" },
-    { "name": "handoff", "file": "commands/handoff.md", "description": "Create handoff block for next AI session" },
-    { "name": "audit", "file": "commands/audit.md", "description": "Run project health audit" },
-    { "name": "coding-standards", "file": "commands/coding-standards.md", "description": "Load project coding standards" },
-    { "name": "testing", "file": "commands/testing.md", "description": "Load testing workflow and standards" },
-    { "name": "docs-protocol", "file": "commands/docs-protocol.md", "description": "Load documentation protocol" }
-  ],
-  "skills": [
-    { "name": "epic-orchestration", "file": "skills/epic-orchestration.md", "description": "Controller state machine for EPIC orchestration" },
-    { "name": "agent-core", "file": "skills/agent-core.md", "description": "Core agent behavior, roles, and workflow routing" },
-    { "name": "quality-gates", "file": "skills/quality-gates.md", "description": "6-gate pre-commit quality protocol" },
-    { "name": "session-management", "file": "skills/session-management.md", "description": "Session lifecycle, handoffs, and epic tracking" },
-    { "name": "gates-engine", "file": "skills/gates-engine.md", "description": "Post-EPIC gates execution — YAML parsing, command/rule gates, reporting" },
-    { "name": "retry-engine", "file": "skills/retry-engine.md", "description": "Gate failure retry loop — analysis, fix dispatch, escalation" },
-    { "name": "improvement-proposals", "file": "skills/improvement-proposals.md", "description": "Standard format for improvement notes, collection protocol, deduplication, backlog management" },
-    { "name": "planner", "file": "skills/planner.md", "description": "Plan generation from EPIC — dependency graph, parallel groups, auto-trigger rules, analysis groups" },
-    { "name": "parallel-dispatch", "file": "skills/parallel-dispatch.md", "description": "Parallel agent dispatch — branch strategy, concurrent execution, conflict detection, merge protocol" },
-    { "name": "analysis-merge", "file": "skills/analysis-merge.md", "description": "Multi-perspective analysis merge — union, consensus, weighted strategies, analysis report format" },
-    { "name": "slack-mcp", "file": "skills/slack-mcp.md", "description": "Slack MCP integration — PM communication protocol, 7 message types, fallback, timeouts" },
-    { "name": "epic-queue", "file": "skills/epic-queue.md", "description": "Epic queue management — add, remove, prioritize, auto-pickup after EPIC completion" }
-  ],
-  "defaults": {
-    "policies": [
-      "defaults/policies/gates.yaml",
-      "defaults/policies/decision-policies.yaml",
-      "defaults/policies/slack-config.yaml"
-    ],
-    "templates": [
-      "defaults/templates/plan.md",
-      "defaults/templates/epic.md",
-      "defaults/templates/epic-example.md",
-      "defaults/templates/plan.schema.json",
-      "defaults/templates/session-bug-fix.md",
-      "defaults/templates/session-new-feature.md",
-      "defaults/templates/session-refactoring.md",
-      "defaults/templates/session-exploration.md"
-    ],
-    "playbooks": [
-      "defaults/playbooks/architect.md",
-      "defaults/playbooks/domain.md",
-      "defaults/playbooks/backend.md",
-      "defaults/playbooks/frontend.md",
-      "defaults/playbooks/qa.md",
-      "defaults/playbooks/security.md",
-      "defaults/playbooks/observability.md",
-      "defaults/playbooks/docs.md",
-      "defaults/playbooks/release.md",
-      "defaults/playbooks/docs-docusaurus.md",
-      "defaults/playbooks/docs-generic.md"
-    ]
-  }
+  "license": "MIT",
+  "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management"]
 }
