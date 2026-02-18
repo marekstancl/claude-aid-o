@@ -1,0 +1,288 @@
+Interactive brainstorming session — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
+
+This command guides PM through a structured 9-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
+
+## Usage
+
+```
+/aid-brainstorm [topic]
+```
+
+**Examples:**
+```
+/aid-brainstorm                         # start open brainstorming
+/aid-brainstorm user authentication     # start with a topic seed
+/aid-brainstorm "migrate to PostgreSQL" # start with a specific idea
+```
+
+## Prerequisites
+
+- `.aid-o/` workspace should exist (run `/aid-init` first; if missing, suggest it but proceed anyway)
+- No EPIC or plan file required — this command creates them
+
+## Flow
+
+### Step 1: Context
+
+Read project state to ground the brainstorming in reality.
+
+1. Check if `.aid-o/` exists:
+   - If yes: read `.aid-o/04-engine/memory/active-work.md` (current focus, recent work, blockers)
+   - If yes: read `.aid-o/04-engine/memory/project-profile.yaml` (tech stack, architecture, conventions)
+   - If yes: scan `.aid-o/01-plans/` and `.aid-o/02-epics/` for recent/active items (last 5 by date)
+   - If no: note that workspace is not initialized; proceed with limited context
+2. If `$ARGUMENTS` contains a topic: use it as the brainstorming seed
+3. If `$ARGUMENTS` is empty: ask PM "What would you like to brainstorm?"
+4. Read `skills/brainstorming.md` for process rules and key principles
+5. Detect PM's language from their input — conversation will follow PM's language throughout
+6. Read language configuration:
+   - If `.aid-o/03-config/language.yaml` exists: use `document_language` for output documents
+   - If not: default to `EN` for output documents
+
+**Present to PM:**
+```
+Brainstorming: {topic}
+====================================
+Project: {name from project-profile.yaml or directory name}
+Stack: {languages, frameworks from project-profile.yaml or "unknown"}
+Recent: {last active EPIC or plan, or "no prior context"}
+
+I'll help you explore this idea step by step.
+Let's start with some questions to understand what you need.
+```
+
+### Step 2: Questions
+
+Ask PM clarifying questions to understand requirements, constraints, and goals. Follow the questioning protocol from `skills/brainstorming.md`.
+
+**Rules:**
+- Ask ONE question at a time (never batch multiple questions)
+- Prefer multiple-choice format (A/B/C options) over open-ended questions
+- After each answer, acknowledge it and ask the next question
+- Aim for 3-7 questions total (stop when you have enough context to propose approaches)
+- Questions should cover: scope, users/audience, constraints, existing patterns, success criteria
+- If PM gives a short answer, infer reasonable defaults and confirm: "I'll assume X — correct?"
+
+**Question categories (cover at least 3):**
+
+| Category | Example Question |
+|----------|-----------------|
+| **Scope** | "What's the boundary? (A) Just backend API (B) Full stack with UI (C) Infrastructure only" |
+| **Users** | "Who uses this? (A) End users via UI (B) Other services via API (C) Internal team tooling" |
+| **Constraints** | "Any hard constraints? (A) Must use existing DB (B) Must be backwards-compatible (C) No constraints" |
+| **Patterns** | "Should this follow existing patterns in the project, or is a new approach acceptable?" |
+| **Scale** | "Expected load? (A) Low (<100 req/min) (B) Medium (C) High (1000+ req/min)" |
+| **Timeline** | "How urgent? (A) This sprint (B) This quarter (C) When it's ready" |
+| **Success** | "How will you know this succeeded?" |
+
+**Transition:** When enough context is gathered, summarize what you've learned and move to Step 3.
+
+### Step 3: Approaches
+
+Propose 2-3 distinct approaches with tradeoffs and a recommendation.
+
+1. Based on the answers from Step 2, generate 2-3 approaches
+2. Each approach MUST include:
+   - **Name** — short descriptive label
+   - **Summary** — 2-3 sentences explaining the approach
+   - **Pros** — concrete advantages (3+ items)
+   - **Cons** — concrete disadvantages (2+ items)
+   - **Effort** — estimated relative effort (S/M/L)
+   - **Risk** — key risk and mitigation
+3. Clearly state which approach you recommend and why
+4. Ask PM: "Which approach do you prefer? (A/B/C or suggest modifications)"
+
+**Format:**
+```
+Approaches
+====================================
+
+Option A: {Name} (Recommended)
+  {Summary}
+  Pros:  {list}
+  Cons:  {list}
+  Effort: {S/M/L}
+  Risk:  {risk + mitigation}
+
+Option B: {Name}
+  {Summary}
+  Pros:  {list}
+  Cons:  {list}
+  Effort: {S/M/L}
+  Risk:  {risk + mitigation}
+
+Option C: {Name} (if applicable)
+  ...
+
+Recommendation: Option A because {reasoning}.
+
+Which approach? (A/B/C/modify)
+```
+
+**If PM asks for modifications:** Incorporate feedback, present a revised option, and confirm.
+
+### Step 4: Design
+
+Present the chosen approach as a structured design with PM input.
+
+1. Take the chosen approach (or modified version) from Step 3
+2. Expand it into a structured design covering:
+   - **Architecture** — components, data flow, integration points
+   - **Data model** — key entities, relationships, storage
+   - **API / Interface** — endpoints, contracts, protocols
+   - **Implementation plan** — high-level steps, order of work
+   - **Testing strategy** — what to test, how
+   - **Risks and mitigations** — detailed risk analysis
+3. Present the design in a clear, organized format
+4. Ask PM: "Does this design look right? Any changes before we go section by section?"
+
+**Detail by default:** Provide comprehensive detail without PM asking for it. Include specifics like field names, endpoint paths, error handling strategies. PM can always say "simplify" but should never need to say "add more detail."
+
+### Step 5: Sections
+
+Walk through the design section by section, getting approval for each.
+
+1. Present each design section individually (architecture, data model, API, etc.)
+2. For each section:
+   a. Show the detailed content
+   b. Ask: "Approve this section? (Y/modify/skip)"
+   c. If modify: incorporate changes, re-present, ask again
+   d. If skip: mark as "needs review" and continue
+   e. If approve: mark as approved, move to next section
+3. Track approval status:
+   ```
+   Section Status:
+     [x] Architecture — approved
+     [x] Data Model — approved (modified: added soft-delete field)
+     [ ] API Design — in progress
+     [ ] Implementation Plan — pending
+     [ ] Testing Strategy — pending
+     [ ] Risks — pending
+   ```
+4. After all sections reviewed, move to Step 6
+
+### Step 6: Approval
+
+Final design approval from PM.
+
+1. Present the complete design summary with all section statuses
+2. Highlight any sections that were modified or skipped
+3. Ask PM for final approval:
+   ```
+   Design Summary
+   ====================================
+   All sections reviewed:
+     {section statuses from Step 5}
+
+   Ready to write the plan document?
+   (Y) Approve and write plan
+   (N) Go back to a section
+   (X) Abort brainstorming
+   ```
+4. If PM says Y: proceed to Step 7
+5. If PM says N: ask which section to revisit, return to Step 5 for that section
+6. If PM says X: end brainstorming, no files written
+
+### Step 7: Document
+
+Write the validated design to a plan file.
+
+1. Generate plan ID: `P-{YYYYMMDD}-{4char-hash}` (hash: `echo $(date +%s%N | md5sum | head -c 4)`)
+2. Generate topic slug from the brainstorming topic (lowercase, hyphens, max 40 chars)
+3. Determine output language:
+   - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
+   - If `scope.plans: true`: write the plan document in the configured `document_language`
+   - If `scope.plans: false` or config missing: write in English
+   - **Note:** The conversation with PM stays in PM's language regardless of document language
+4. Write plan to `.aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md` using the plan template structure:
+   - Frontmatter: id, type (plan), status (draft), created, author (PM + AI)
+   - Context: why this plan exists (from Step 1-2)
+   - Goal: one-sentence desired outcome
+   - Scope: in-scope and out-of-scope items
+   - Approach: chosen option with pros/cons, rejected alternatives summarized
+   - Decision: which option and rationale
+   - High-Level Steps: numbered steps with descriptions and effort estimates
+   - Constraints: from PM answers
+   - Risks: from design discussion
+   - Success Criteria: from PM answers
+   - Next Steps: suggest creating EPIC
+5. Confirm to PM:
+   ```
+   Plan written: .aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md
+   ```
+
+### Step 8: EPIC Subagent
+
+Generate an EPIC draft from the approved plan using the EPIC subagent prompt template from `skills/brainstorming.md`.
+
+1. Read the plan file just created (Step 7)
+2. Read `skills/brainstorming.md` Section "EPIC Subagent Prompt Template"
+3. Read `.aid-o/04-engine/memory/project-profile.yaml` for tech stack context
+4. Read `.aid-o/03-config/templates/epic.md` for the EPIC template structure
+5. Determine output language:
+   - Same logic as Step 7: use `language.yaml` → `document_language` if `scope.plans: true`
+6. Generate EPIC draft:
+   - EPIC ID: `E-{YYYYMMDD}-{4char-hash}`
+   - Fill all EPIC template sections from the approved plan:
+     - **Context** — from plan Context + Approach Decision
+     - **Goal** — from plan Goal (1-3 sentences, specific, testable)
+     - **Scope** — Allowed files/paths and Forbidden zones derived from plan + project structure
+     - **Artifacts** — concrete deliverables from plan High-Level Steps
+     - **Constraints** — from plan Constraints + PM answers
+     - **DoD Gates** — default (tests_pass, lint_pass, security_scan_pass, docs_updated) + conditional gates based on stack
+     - **Acceptance Criteria** — from plan Success Criteria, expanded into testable checkboxes
+     - **Dependencies** — from plan Constraints + project context
+     - **Steps (Role Pipeline)** — map plan steps to AID roles (architect, backend, frontend, qa, etc.) with dependencies and parallel groups
+     - **Session Breakdown** — estimate single vs. multi-session based on step count and complexity
+   - Apply YAGNI: do not add steps or roles that the plan does not require
+7. Write EPIC draft to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md`
+8. Confirm:
+   ```
+   EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
+   ```
+
+### Step 9: Handoff
+
+Present the plan + EPIC draft and suggest next steps.
+
+1. Present a summary of what was produced:
+   ```
+   Brainstorming Complete
+   ====================================
+   Topic: {topic}
+   Plan:  .aid-o/01-plans/P-{id}-{topic}.md
+   EPIC:  .aid-o/02-epics/E-{id}-{topic}.md (draft)
+
+   The EPIC is a draft — review it and adjust before running.
+
+   Next steps:
+     1. Review the EPIC draft and refine if needed
+     2. Run /plan-epic .aid-o/02-epics/E-{id}-{topic}.md to generate execution plan
+     3. Run /run-epic to start orchestration
+
+   Or:
+     - Edit the EPIC manually for fine-tuning
+     - Run /aid-brainstorm again for a different topic
+   ```
+2. If `.aid-o/` does not exist, remind PM to run `/aid-init` or `/aid-setup` first
+3. Brainstorming session ends here
+
+## Reference Files
+
+- `skills/brainstorming.md` — process rules, key principles, EPIC subagent prompt template, language handling
+- `defaults/templates/plan.md` — plan document template
+- `defaults/templates/epic.md` — EPIC template
+- `defaults/templates/epic-example.md` — EPIC example for reference
+- `skills/session-management.md` — lifecycle protocols (End of Brainstorming Protocol)
+- `.aid-o/03-config/language.yaml` — document language configuration
+
+## Important
+
+- **This command CREATES two files** — plan + EPIC draft. It never modifies existing files.
+- **Detail by default** — brainstorming produces comprehensive output. PM should never need to ask for more detail.
+- **One question at a time** — never batch questions. PM attention is the bottleneck.
+- **Multiple choice preferred** — reduce PM cognitive load with options, not open-ended questions.
+- **Language split** — conversation follows PM's language; output documents follow `language.yaml` configuration.
+- **YAGNI** — do not propose over-engineered solutions. Start simple, PM can ask for complexity.
+- If PM aborts at any step (says "stop", "cancel", "abort"), end gracefully without writing files.
+- If `.aid-o/` does not exist, the command still works but writes plan/EPIC to current directory with a warning.

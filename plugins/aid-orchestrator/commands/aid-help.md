@@ -8,7 +8,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `examples`
 
 **Examples:**
 ```
@@ -24,6 +24,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help slack             # Slack integration + PM communication
 /aid-help queue             # Epic queue + autonomous pipeline
 /aid-help memory            # Qdrant vector memory + semantic search
+/aid-help examples          # interactive project prompts to try /aid-brainstorm
 ```
 
 ## Flow
@@ -45,7 +46,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.1.0
+Version: 0.2.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -57,9 +58,10 @@ What is AID?
   to deliver features end-to-end: architecture → implementation → testing
   → security → documentation → release.
 
-Commands:
+Commands (18):
   /aid-init        Initialize .aid-o/ workspace
   /aid-setup       Interactive project onboarding
+  /aid-brainstorm  9-step interactive brainstorming flow
   /aid-help        This help
   /plan-epic       EPIC → Plan JSON + session file
   /run-epic        Start orchestration (state machine)
@@ -78,9 +80,10 @@ Commands:
 
 Quick Start:
   1. /aid-setup                              ← first time only
-  2. Create EPIC in .aid-o/02-epics/         ← your task spec
-  3. /plan-epic .aid-o/02-epics/my-epic.md   ← generate plan
-  4. /run-epic                               ← orchestrator takes over
+  2. /aid-brainstorm                         ← explore ideas with AI
+  3. Create EPIC in .aid-o/02-epics/         ← your task spec
+  4. /plan-epic .aid-o/02-epics/my-epic.md   ← generate plan
+  5. /run-epic                               ← orchestrator takes over
 
 Where things live:
   .aid-o/01-plans/      Plans (brainstorming)
@@ -88,7 +91,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | examples
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -119,9 +122,16 @@ SETUP COMMANDS:
     Flow: detect → analyze → present → configure
     Calls /aid-init internally if needed.
 
+  /aid-brainstorm [topic]
+    9-step interactive brainstorming flow.
+    Usage: /aid-brainstorm "Build a REST API with auth and CRUD"
+    Flow: context → questions → approaches → design → sections → approval
+          → document → EPIC draft → handoff
+    Output: Plan document in .aid-o/01-plans/ + optional EPIC draft
+
   /aid-help [topic]
     This help. Shows commands, workflow, FAQ.
-    Topics: commands, workflow, epic, agents, gates, evidence, config
+    Topics: commands, workflow, epic, agents, gates, evidence, config, examples
 
 ORCHESTRATION COMMANDS:
 
@@ -862,6 +872,89 @@ WITHOUT QDRANT:
   Plugin works identically — file-based memory (active-work.md,
   lessons-learned.md, command-history.md) is always the primary source.
   Qdrant adds semantic search on top, never replaces files.
+```
+
+---
+
+#### Topic: examples
+
+```
+Interactive Project Prompts — Try /aid-brainstorm
+====================================
+
+Pick a project below and run /aid-brainstorm with the prompt to see the
+9-step brainstorming flow in action.
+
+─────────────────────────────────────────────────────────
+1. REST API + Database
+─────────────────────────────────────────────────────────
+
+  Prompt:
+    /aid-brainstorm "Build a REST API with database, auth, and CRUD operations"
+
+  What happens:
+    Step 1 — Context: AI asks about your tech stack, DB preference, auth method
+    Step 2 — Questions: Clarifying questions (REST vs GraphQL? ORM? Deploy target?)
+    Step 3 — Approaches: Compare options (Express+Postgres vs FastAPI+SQLite vs...)
+    Step 4 — Design: API routes, DB schema, auth flow, error handling
+    Step 5 — Sections: Plan outline for PM review
+    Step 6 — Approval: PM approves or requests changes
+    Step 7 — Document: Full plan written to .aid-o/01-plans/
+    Step 8 — EPIC draft: Optional EPIC generated from the plan
+    Step 9 — Handoff: Summary of decisions + next steps
+
+  Result: A detailed plan covering endpoints, database schema, authentication
+  strategy, and a ready-to-execute EPIC with 6-8 steps.
+
+─────────────────────────────────────────────────────────
+2. CLI Tool
+─────────────────────────────────────────────────────────
+
+  Prompt:
+    /aid-brainstorm "Build a CLI tool that does X"
+    (replace X with your idea — e.g., "manages git worktrees",
+     "converts CSV to JSON", "automates deployments")
+
+  What happens:
+    Step 1 — Context: AI asks about target platform, language, distribution
+    Step 2 — Questions: Input/output format? Config file? Subcommands?
+    Step 3 — Approaches: Compare frameworks (Click vs Typer vs Commander vs Cobra)
+    Step 4 — Design: Command structure, flags, config, output formatting
+    Step 5 — Sections: Plan outline for PM review
+    Step 6 — Approval: PM approves or requests changes
+    Step 7 — Document: Full plan written to .aid-o/01-plans/
+    Step 8 — EPIC draft: Optional EPIC generated from the plan
+    Step 9 — Handoff: Summary of decisions + next steps
+
+  Result: A plan covering CLI architecture, argument parsing, config management,
+  error handling, and a ready-to-execute EPIC with 4-6 steps.
+
+─────────────────────────────────────────────────────────
+3. Full-Stack App
+─────────────────────────────────────────────────────────
+
+  Prompt:
+    /aid-brainstorm "Build a full-stack web app with React frontend and API backend"
+
+  What happens:
+    Step 1 — Context: AI asks about backend language, DB, hosting, features
+    Step 2 — Questions: SSR vs SPA? State management? Auth provider?
+    Step 3 — Approaches: Compare stacks (Next.js vs Vite+Express vs Remix vs...)
+    Step 4 — Design: Component tree, API contracts, DB schema, auth flow
+    Step 5 — Sections: Plan outline for PM review
+    Step 6 — Approval: PM approves or requests changes
+    Step 7 — Document: Full plan written to .aid-o/01-plans/
+    Step 8 — EPIC draft: Optional EPIC generated from the plan
+    Step 9 — Handoff: Summary of decisions + next steps
+
+  Result: A comprehensive plan covering frontend components, API endpoints,
+  database design, auth integration, and a ready-to-execute EPIC with 8-10 steps
+  (architect → backend + frontend parallel → QA + security → docs).
+
+─────────────────────────────────────────────────────────
+
+Tip: You can brainstorm ANY project — these are just starting points.
+     Run /aid-brainstorm with your own idea to begin.
 ```
 
 ## Reference Files

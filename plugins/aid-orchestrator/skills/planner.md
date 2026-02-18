@@ -382,8 +382,9 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
  8. ASSEMBLE Plan JSON:
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
- 9. VALIDATE → V-01 through V-18 → fix + re-validate on failure (max 3 attempts → escalation)
-10. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
+ 9. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
+10. VALIDATE → V-01 through V-18 → fix + re-validate on failure (max 3 attempts → escalation)
+11. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
 
 ### Example — Auto-Generated analysis_groups for the 7-Step EPIC
@@ -398,6 +399,44 @@ Using the EPIC from Sections 1-2, the Planner auto-generates 4 groups:
 | `analysis_4_architecture_review` | step_3_backend | B | step has 5 outputs | architect | review | weighted |
 
 Note: Rule A did NOT fire for step_6_security because V-15 prevents self-review (security reviewing security).
+
+---
+
+## 8. LLM Cost Estimates — Conditional on Billing Mode
+
+LLM cost estimates (e.g., `budget.max_llm_cost_usd` in Plan JSON, `LLM Cost: $X` in reports) are
+only relevant when the user pays per-token via API. Users on subscription plans (Claude Pro, Team,
+Enterprise) pay a flat fee regardless of token usage, making cost estimates misleading and irrelevant.
+
+### Behavior
+
+```
+1. Read project profile from `.aid-o/03-config/project-profile.yaml`
+   (or `.aid-o/03-config/policies/project-profile.yaml`)
+2. Check `billing_mode` field:
+
+   billing_mode: "api"          → INCLUDE cost estimates in plan + reports
+   billing_mode: "subscription" → SKIP cost estimates entirely
+   billing_mode: not set / null → SKIP cost estimates (default = subscription)
+
+3. When SKIPPING cost estimates:
+   a. Omit `budget.max_llm_cost_usd` from Plan JSON (or set to null)
+   b. Omit "LLM Cost: $X" line from final_report.md summary
+   c. Omit per-step cost columns from plan summary presented to PM
+   d. Do NOT mention estimated costs in any PM-facing messages
+
+4. When INCLUDING cost estimates (billing_mode: "api"):
+   a. Estimate per-step token usage based on role complexity + input size
+   b. Include `budget.max_llm_cost_usd` in Plan JSON
+   c. Include "LLM Cost: ${estimated}" in final_report.md
+   d. Show cost column in PM plan summary
+```
+
+### Validation Update
+
+Validation rule V-07 (`budget.max_llm_cost_usd >= 0`) only applies when `billing_mode: "api"`.
+When cost estimates are skipped, the budget field may be absent or have `max_llm_cost_usd: null` —
+both are valid.
 
 ---
 

@@ -1,0 +1,32 @@
+# Document Language — Configuration
+# Controls the language used in AID-generated documents (plans, reports,
+# gate reviews, PM summaries, lessons learned, etc.).
+#
+# This setting affects OUTPUT language only. AID internal commands,
+# YAML keys, log field names, and code comments remain in English
+# regardless of this setting.
+#
+# Supported languages use ISO 639-1 codes. Examples:
+#   EN — English (default)
+#   ES — Spanish
+#   PT — Portuguese
+#   FR — French
+#   DE — German
+#   JA — Japanese
+#   ZH — Chinese (Simplified)
+#   KO — Korean
+#
+# Any valid ISO 639-1 code is accepted. If the language is unsupported
+# by the model, output falls back to English with a logged warning.
+
+language:
+  document_language: "EN"                 # ISO 639-1 code for generated documents
+  fallback_language: "EN"                 # Fallback if primary language is unsupported
+
+  scope:
+    plans: true                           # EPIC plans and step descriptions
+    reports: true                         # PM reports and status summaries
+    gate_reviews: true                    # Quality gate review narratives
+    lessons_learned: true                 # Lessons-learned entries
+    commit_messages: false                # Git commit messages (false = always English)
+    code_comments: false                  # Inline code comments (false = always English)

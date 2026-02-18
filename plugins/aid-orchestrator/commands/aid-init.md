@@ -41,6 +41,8 @@ Copy these files from the plugin's `defaults/` directory into `.aid-o/03-config/
 | `policies/decision-policies.yaml` | `policies/decision-policies.yaml` |
 | `policies/slack-config.yaml` | `policies/slack-config.yaml` |
 | `policies/memory-config.yaml` | `policies/memory-config.yaml` |
+| `policies/dispatch-strategy.yaml` | `policies/dispatch-strategy.yaml` |
+| `policies/language.yaml` | `policies/language.yaml` |
 | `templates/plan.md` | `templates/plan.md` |
 | `templates/epic.md` | `templates/epic.md` |
 | `templates/plan.schema.json` | `templates/plan.schema.json` |
@@ -84,7 +86,8 @@ Create these empty tracking files in `.aid-o/04-engine/` (skip if they already e
 4. For each engine file:
    - Check if it exists → if yes, skip
    - If no, create with initial content
-5. Print summary of what was created vs. skipped
+5. Update CLAUDE.md in the project root with the AID section (see **CLAUDE.md Marker-Based Merge** below)
+6. Print summary of what was created vs. skipped
 
 ## Output Format
 
@@ -115,6 +118,78 @@ Next steps:
   1. Run /aid-setup for interactive project onboarding
   2. Customize .aid-o/03-config/policies/ for your project
   3. Create your first Plan in .aid-o/01-plans/
+```
+
+## CLAUDE.md Marker-Based Merge
+
+Step 5 of the implementation handles creating or updating `CLAUDE.md` in the project root so that AID information is always present and up to date, without destroying any user-written content.
+
+### Markers
+
+The AID section is delimited by exactly these HTML comment markers:
+
+```
+<!-- AID-O START -->
+<!-- AID-O END -->
+```
+
+### AID Section Content
+
+The full block (including markers) that is written:
+
+```markdown
+<!-- AID-O START -->
+## AID Orchestrator
+
+This project uses AID for multi-agent orchestration.
+
+**Workspace:** `.aid-o/`
+**Commands:** `/aid-help` for full documentation
+**Quick start:** `/aid-setup` → create EPIC → `/run-epic`
+
+**Key paths:**
+- Plans: `.aid-o/01-plans/`
+- EPICs: `.aid-o/02-epics/`
+- Config: `.aid-o/03-config/`
+- Engine: `.aid-o/04-engine/`
+<!-- AID-O END -->
+```
+
+### Merge Logic
+
+1. **Generate** the AID section content (the block above).
+2. **Check** if `CLAUDE.md` exists in the project root.
+3. **If CLAUDE.md exists:**
+   a. Read the entire file content.
+   b. Search for `<!-- AID-O START -->` and `<!-- AID-O END -->` markers.
+   c. **If both markers are found:** replace everything from `<!-- AID-O START -->` through `<!-- AID-O END -->` (inclusive) with the new AID section content. All content before and after the markers is preserved exactly as-is.
+   d. **If markers are NOT found:** append a blank line followed by the AID section content at the end of the file.
+   e. Log `[UPDATED] CLAUDE.md (markers replaced)` or `[UPDATED] CLAUDE.md (section appended)`.
+4. **If CLAUDE.md does not exist:**
+   a. Create `CLAUDE.md` with the AID section content as its sole content.
+   b. Log `[CREATED] CLAUDE.md`.
+
+### Output Format Addition
+
+Add to the initialization output after the Engine files block:
+
+```
+CLAUDE.md:
+  [CREATED]  CLAUDE.md
+```
+
+or
+
+```
+CLAUDE.md:
+  [UPDATED] CLAUDE.md (markers replaced)
+```
+
+or
+
+```
+CLAUDE.md:
+  [UPDATED] CLAUDE.md (section appended)
 ```
 
 ## Important

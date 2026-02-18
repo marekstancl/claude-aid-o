@@ -13,15 +13,14 @@ ai-orchestrator/
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
-    commands/                   # 17 slash commands
-    skills/                     # 13 skills (orchestration, gates, session mgmt, etc.)
+    commands/                   # 18 slash commands
+    skills/                     # 14 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, session-*.md
       playbooks/                # 11 role-based playbooks
     README.md                   # Plugin documentation
-  examples/
-    bookmark-manager/           # Complete example (plan → EPIC → plan.json)
+  CHANGELOG.md                  # Version history
   docs/                         # User-facing documentation
     MULTIAGENT_GUIDE.md         # Multi-agent architecture guide
 ```
@@ -70,3 +69,13 @@ When users run `/aid-init`, it creates:
 - **Language:** English for all plugin code and documentation
 - **Plugin manifest:** `plugins/aid-orchestrator/.claude-plugin/plugin.json`
 - **Testing:** Use `/plugin validate .` from repo root to validate marketplace
+
+## Release Workflow
+
+1. Ensure all changes are committed
+2. Run `/plugin validate .` from repo root to validate marketplace structure
+3. Run `claude plugin validate plugins/aid-orchestrator` to validate the plugin
+4. Update version in `plugins/aid-orchestrator/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
+5. Update `CHANGELOG.md` with new version entry
+6. Create git tag: `git tag v{version}`
+7. Push: `git push && git push --tags`

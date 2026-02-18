@@ -32,12 +32,13 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 /run-epic
 ```
 
-## Commands (17)
+## Commands (18)
 
 | Command | Description |
 |---------|-------------|
 | `/aid-init` | Initialize `.aid-o/` workspace with default config |
 | `/aid-setup` | Interactive project onboarding — detect tech stack, configure AID |
+| `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
 | `/plan-epic <path>` | Parse EPIC → generate Plan JSON + session file |
 | `/run-epic [id]` | Run Controller state machine for full EPIC orchestration |
@@ -89,11 +90,12 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `lessons-extractor` | Extracts lessons from completed sessions |
 | `gate-fixer` | Analyzes gate failures, applies targeted fixes |
 
-## Skills (13)
+## Skills (14)
 
 | Skill | Purpose |
 |-------|---------|
 | `epic-orchestration` | 11-state Controller FSM |
+| `brainstorming` | 9-step brainstorming process, EPIC subagent prompt template |
 | `agent-core` | Core agent behavior, roles, workflow routing |
 | `quality-gates` | 6-gate pre-commit protocol |
 | `session-management` | Session lifecycle, handoffs, epic tracking |
@@ -198,10 +200,14 @@ After `/aid-setup`, customize in `.aid-o/03-config/`:
 | `policies/decision-policies.yaml` | Autonomy level — what Controller decides vs. escalates |
 | `policies/slack-config.yaml` | Slack channel, timeouts, reminder intervals |
 | `policies/memory-config.yaml` | Qdrant vector memory — collection, auto-index triggers, search |
+| `policies/dispatch-strategy.yaml` | Parallel isolation — worktrees / branches / sequential |
+| `policies/language.yaml` | Document language — ISO 639-1 code (default: EN) |
 | `playbooks/*.md` | Role-specific agent instructions for your project |
+
+`/aid-setup` also configures **permission presets** (Safe / Recommended / Advanced) and **document language** (ISO 639-1) during onboarding.
 
 ## Version
 
-- **Plugin:** 0.1.0
+- **Plugin:** 0.2.0
 - **Requires:** Claude Code >= 1.0.0
 - **License:** MIT

@@ -9,10 +9,10 @@ AID takes a structured task specification (EPIC), generates an execution plan, d
 ## How It Works
 
 ```
-Brainstorming (PM + AI)
-  ↓  explore ideas, compare approaches, design decisions
+/aid-brainstorm (PM + AI)
+  ↓  9-step interactive flow: context → questions → approaches → design
 Plan Document (.aid-o/01-plans/)
-  ↓  PM converts plan into task spec
+  ↓  PM converts plan into task spec (or uses auto-generated EPIC draft)
 EPIC (.aid-o/02-epics/)
   ↓  /plan-epic generates execution plan
 Plan JSON (dependency graph, parallel groups, gates)
@@ -39,7 +39,7 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 # Install plugin
 /plugin install aid-orchestrator@claude-aid-o
 
-# Verify (shows all 17 commands)
+# Verify (shows all 18 commands)
 /aid-help
 ```
 
@@ -49,8 +49,8 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 # 1. Initialize AID in your project
 /aid-setup
 
-# 2. Brainstorm with AI — explore approaches, make design decisions
-#    Output: plan document in .aid-o/01-plans/
+# 2. Brainstorm with AI — 9-step interactive flow
+/aid-brainstorm "Build a REST API with auth and CRUD operations"
 
 # 3. Write an EPIC from the plan (or use the template)
 #    Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
@@ -62,47 +62,43 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 /run-epic
 ```
 
-## Example: Bookmark Manager
+## Getting Started with Brainstorming
 
-The [`examples/bookmark-manager/`](examples/bookmark-manager/) directory contains a complete end-to-end example that produces a **working full-stack bookmark manager** (FastAPI + React + SQLite).
-
-**What's included:**
-
-| File | Description | Created by |
-|------|-------------|------------|
-| [`plan.md`](examples/bookmark-manager/plan.md) | Brainstorming output — design decisions, options considered, architecture | PM + AI brainstorming |
-| [`EPIC.md`](examples/bookmark-manager/EPIC.md) | Task specification — 6 steps, 15 acceptance criteria, scope constraints | PM (derived from plan) |
-| [`plan.json`](examples/bookmark-manager/plan.json) | Execution plan — dependency graph, 2 parallel groups, gates | `/plan-epic` (auto-generated) |
-
-**What AID builds from this EPIC:**
+The `/aid-brainstorm` command walks you through a **9-step interactive flow** to go from idea to execution plan:
 
 ```
-Step 1: Architect    → API contracts, SQLite schema, component tree
-                     ↓
-Step 2: Backend  ────┤ (parallel)  → FastAPI endpoints, SQLite, URL fetcher
-Step 3: Frontend ────┘             → React components, card grid, tag sidebar
-                     ↓
-Step 4: QA       ────┤ (parallel)  → pytest tests for API + edge cases
-Step 5: Security ────┘             → SQL injection, SSRF, input validation review
-                     ↓
-Step 6: Docs         → API documentation + CHANGELOG
-                     ↓
-Gates                → tests_pass, lint_pass, docs_updated
-                     ↓
-PM Approval          → review and merge
+/aid-brainstorm "Build a REST API with database, auth, and CRUD operations"
 ```
 
-**Result:** A bookmark manager where you can add/edit/delete bookmarks with tags, search, favicon auto-fetch, and a card-based grid UI.
+**The 9 steps:**
 
-See the [example README](examples/bookmark-manager/README.md) for step-by-step instructions.
+1. **Context** — AI asks about your tech stack, preferences, constraints
+2. **Questions** — Clarifying questions to narrow the design space
+3. **Approaches** — Compare options (frameworks, patterns, trade-offs)
+4. **Design** — Architecture decisions, API contracts, data models
+5. **Sections** — Plan outline for your review
+6. **Approval** — You approve or request changes
+7. **Document** — Full plan written to `.aid-o/01-plans/`
+8. **EPIC draft** — Optional EPIC generated from the plan
+9. **Handoff** — Summary of decisions and next steps
+
+**Try one of these prompts to get started:**
+
+| Prompt | What you get |
+|--------|-------------|
+| `"Build a REST API with database, auth, and CRUD operations"` | Endpoints, DB schema, auth strategy, 6-8 step EPIC |
+| `"Build a CLI tool that does X"` (fill in X) | Command structure, flags, config, 4-6 step EPIC |
+| `"Build a full-stack web app with React frontend and API backend"` | Components, API contracts, DB design, 8-10 step EPIC |
+
+Run `/aid-help examples` for detailed walkthroughs of each prompt.
 
 ## What's Inside
 
 | Component | Count | Description |
 |-----------|-------|-------------|
-| **Commands** | 17 | `/aid-setup`, `/run-epic`, `/plan-epic`, `/run-gates`, `/epic-queue`, `/audit`... |
+| **Commands** | 18 | `/aid-setup`, `/aid-brainstorm`, `/run-epic`, `/plan-epic`, `/run-gates`, `/epic-queue`, `/audit`... |
 | **Agents** | 18 | 9 role + 3 specialist + 6 utility |
-| **Skills** | 13 | State machine, planner, parallel dispatch, gates engine, Slack MCP... |
+| **Skills** | 14 | State machine, planner, brainstorming, parallel dispatch, gates engine, Slack MCP... |
 | **Playbooks** | 11 | Role-specific instructions (customizable per project) |
 
 ### Role Agents
@@ -168,6 +164,8 @@ AID is fully customizable via YAML/JSON configs in `.aid-o/03-config/`:
 | `decision-policies.yaml` | What Controller decides autonomously vs. escalates to PM |
 | `slack-config.yaml` | Slack channel, timeouts, reminder intervals |
 | `memory-config.yaml` | Qdrant vector memory settings |
+| `dispatch-strategy.yaml` | Parallel isolation — worktrees / branches / sequential |
+| `language.yaml` | Document language — ISO 639-1 code (default: EN) |
 | `playbooks/*.md` | Role-specific agent behavior for your project |
 
 `/aid-setup` auto-configures everything based on your detected tech stack.
@@ -225,6 +223,7 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 |---------|-------------|
 | `/aid-init` | Initialize `.aid-o/` workspace |
 | `/aid-setup` | Interactive project onboarding (tech stack detection) |
+| `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Documentation (commands, workflow, agents, gates, config...) |
 | `/plan-epic <path>` | EPIC → Plan JSON + session file |
 | `/run-epic [id]` | Full orchestration pipeline |
@@ -243,8 +242,8 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 
 ## Roadmap
 
-- **v0.2.0** — `/aid-brainstorm` command (guided brainstorming before EPIC writing), git worktrees for parallel dispatch isolation, Slack setup guide
-- **v0.3.0** — Browser-based evidence viewer, EPIC templates library
+- **v0.2.0** (done) — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
+- **v0.3.0** — Browser-based evidence viewer, EPIC templates library, multi-project workspace support
 
 ## Requirements
 
@@ -253,4 +252,4 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 
 ## License
 
-MIT — v0.1.0
+MIT — v0.2.0

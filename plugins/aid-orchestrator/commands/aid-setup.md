@@ -131,6 +131,10 @@ Setup options:
   3. [x] Populate project-profile.yaml
   4. [ ] Generate/update CLAUDE.md for this project
   5. [ ] Add .aid-o/ patterns to .gitignore
+  6. [x] MCP server onboarding (Qdrant local, Slack, custom)
+  7. [x] Permission preset selection (Safe/Recommended/Advanced)
+  8. [x] Document language (default: EN)
+  9. [x] Parallel isolation strategy (default: worktrees)
 
   [x] = recommended, [ ] = optional
 
@@ -239,33 +243,246 @@ Proceed with recommended? (Y/N/select numbers, e.g., "1,2,3,5")
   ```
   Note: These are commented out by default — user decides what to track in git.
 
-**Option 6: Detect Qdrant MCP (Memory)**
-- Probe for Qdrant MCP availability:
+**Option 6: MCP Server Onboarding**
+
+This option replaces and extends the previous Qdrant-only detection with full MCP server onboarding.
+
+**6a. Qdrant Local (Recommended)**
+
+Recommend Qdrant local for vector memory — no Docker required:
+
+```
+MCP Server Onboarding
+====================================
+
+1. Qdrant Memory (Recommended)
+   Enables semantic search across sessions — agents learn from past decisions.
+   Local mode: no Docker needed, data stored in .aid-o/qdrant-data.
+
+   Install command:
+     claude mcp add qdrant-memory \
+       --qdrant-local-path .aid-o/qdrant-data \
+       -- uvx mcp-server-qdrant
+
+   Enable Qdrant local memory? (Y/N) [Y]
+   Collection name: [aid-memory]
+```
+
+- If Y: run the install command, update `.aid-o/03-config/policies/memory-config.yaml`:
+  - Set `memory.enabled: true`
+  - Set `memory.provider: "qdrant"`
+  - Set `memory.collection_name: "{name}"`
+  - Set `memory.local_path: ".aid-o/qdrant-data"`
+- Update `project-profile.yaml` with `memory: { enabled: true, provider: "qdrant-local", collection: "{name}" }`
+- Probe to confirm availability after install:
   ```
   TRY: qdrant-find(query="test", collection_name="aid-memory-probe")
-  IF tool exists (even if collection not found): Qdrant MCP available
-  IF tool_not_found error: Qdrant MCP not available
+  IF tool exists: Qdrant MCP confirmed
+  IF tool_not_found: warn and continue (user can fix later)
   ```
-- If available:
-  ```
-  Qdrant MCP server detected!
 
-  AID can use vector memory for semantic search across sessions.
-  This enables agents to learn from past decisions and patterns.
+**6b. Slack MCP (Opt-in)**
 
-  Enable memory? (Y/N)
-  Collection name: [aid-memory]
+```
+2. Slack MCP (Optional)
+   Send EPIC status updates and gate results to a Slack channel.
+   Requires a Slack Bot Token with chat:write scope.
+
+   Enable Slack integration? (Y/N) [N]
+```
+
+- If Y: prompt for bot token and channel:
   ```
-  - If Y: update `.aid-o/03-config/policies/memory-config.yaml` → `memory.enabled: true`, set `collection_name`
-  - Update `project-profile.yaml` with `memory: { enabled: true, provider: "qdrant", collection: "{name}" }`
-- If not available:
+  Slack Bot Token: [xoxb-...]
+  Default channel: [#aid-updates]
   ```
-  Qdrant MCP server not detected (optional).
-  To enable vector memory later:
-    1. Install: claude mcp add qdrant-memory -e QDRANT_URL="http://localhost:6333" -e COLLECTION_NAME="aid-memory" -- uvx mcp-server-qdrant
-    2. Set memory.enabled: true in .aid-o/03-config/policies/memory-config.yaml
+  - Run: `claude mcp add slack -e SLACK_BOT_TOKEN="{token}" -- npx -y @anthropic/mcp-slack`
+  - Update `.aid-o/03-config/policies/slack-config.yaml` with channel and enable flag
+- If N: skip silently
+
+**6c. Auto-detect Tech MCPs**
+
+Based on the project stack detected in Step 1, suggest relevant MCP servers:
+
+| Detected | MCP Server | Install Command |
+|----------|-----------|-----------------|
+| `.github/` or GitHub remote | GitHub MCP | `claude mcp add github -- npx -y @anthropic/mcp-github` |
+| `Dockerfile` / `docker-compose.yml` | Docker MCP | `claude mcp add docker -- npx -y @anthropic/mcp-docker` |
+| PostgreSQL in deps | Postgres MCP | `claude mcp add postgres -e DATABASE_URL="{url}" -- npx -y @anthropic/mcp-postgres` |
+
+```
+Auto-detected MCP servers for your stack:
+  [x] GitHub MCP (GitHub repository detected)
+  [ ] Docker MCP (Docker detected)
+
+Install selected? (Y/N/select numbers)
+```
+
+- Install each selected MCP server using its command
+- Log installed MCPs to `project-profile.yaml` under `mcp_servers: [...]`
+
+**6d. Custom MCP Server**
+
+```
+Add a custom MCP server? (Y/N) [N]
+```
+
+- If Y:
   ```
-  - Skip silently, no error
+  MCP server name: [my-server]
+  Install command: [npx -y @scope/mcp-server]
+  Environment variables (KEY=VALUE, comma-separated, or blank): []
+  ```
+  - Run: `claude mcp add {name} {env_flags} -- {command}`
+  - Append to `project-profile.yaml` under `mcp_servers`
+- Repeat prompt: "Add another? (Y/N)"
+
+**Option 7: Permission Preset Selection**
+
+Present permission presets with a comparison matrix:
+
+```
+Permission Presets
+====================================
+
+Choose a permission level for AID agents:
+
+  1. Safe       — Read-only. No file writes, no command execution.
+                  Tools: Read, Glob, Grep, Task, WebSearch
+                  Best for: auditing, code review, exploration
+
+  2. Recommended — Edit, test, local git. No push, no remote MCP.  [DEFAULT]
+                  Tools: Read, Write, Edit, Glob, Grep, local git,
+                         test runners, Qdrant memory
+                  Blocked: git push, rm -rf, curl, wget, Slack MCP
+                  Best for: most development workflows
+
+  3. Advanced   — Full access. Push, web, all MCP servers.
+                  Tools: everything enabled, nothing blocked
+                  Best for: trusted CI, experienced users
+
+Comparison:
+  +-------------------+------+-------------+----------+
+  | Capability        | Safe | Recommended | Advanced |
+  +-------------------+------+-------------+----------+
+  | Read files        |  Y   |      Y      |    Y     |
+  | Write/Edit files  |  N   |      Y      |    Y     |
+  | Run tests         |  N   |      Y      |    Y     |
+  | Local git ops     |  N   |      Y      |    Y     |
+  | git push          |  N   |      N      |    Y     |
+  | Web access        |  Y*  |      N      |    Y     |
+  | Qdrant memory     |  N   |      Y      |    Y     |
+  | Slack MCP         |  N   |      N      |    Y     |
+  | Destructive cmds  |  N   |      N      |    Y     |
+  +-------------------+------+-------------+----------+
+  * Safe allows WebSearch (read-only) but not WebFetch
+
+Select preset: (1/2/3) [2]
+```
+
+- Save the selected preset to `project-profile.yaml` under `permission_preset`:
+  ```yaml
+  permission_preset: "recommended"   # safe | recommended | advanced
+  ```
+- Also write the full permission block to `.aid-o/03-config/policies/permissions.yaml` based on the selected preset:
+  - **Safe:**
+    ```yaml
+    permissions:
+      allow: ["Read", "Glob", "Grep", "Task", "WebSearch"]
+      deny: ["Write", "Edit", "Bash", "NotebookEdit", "WebFetch", "mcp__*"]
+    ```
+  - **Recommended:**
+    ```yaml
+    permissions:
+      allow: ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit", "Task",
+              "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout *)", "Bash(git branch *)",
+              "Bash(git merge *)", "Bash(git stash *)", "Bash(git worktree *)",
+              "Bash(git diff *)", "Bash(git log *)", "Bash(git status *)",
+              "Bash(npm test *)", "Bash(npm run test *)", "Bash(npx jest *)",
+              "Bash(pytest *)", "Bash(make test *)",
+              "mcp__qdrant-memory__store", "mcp__qdrant-memory__find"]
+      deny: ["Bash(git push *)", "Bash(git push)", "Bash(rm -rf *)",
+             "Bash(curl *)", "Bash(wget *)", "WebFetch", "WebSearch", "mcp__slack__*"]
+    ```
+  - **Advanced:**
+    ```yaml
+    permissions:
+      allow: ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "NotebookEdit", "Task",
+              "WebFetch", "WebSearch", "mcp__qdrant-memory__*", "mcp__slack__*"]
+      deny: []
+    ```
+
+**Option 8: Document Language**
+
+```
+Document Language
+====================================
+
+AID-generated documents (plans, reports, gate reviews, lessons learned)
+can be written in your preferred language.
+
+Internal commands, YAML keys, and code comments always remain in English.
+
+Common options:
+  EN — English (default)
+  ES — Spanish
+  PT — Portuguese
+  FR — French
+  DE — German
+  JA — Japanese
+  ZH — Chinese (Simplified)
+  KO — Korean
+
+Any ISO 639-1 code is accepted.
+
+Document language: [EN]
+```
+
+- Copy `defaults/policies/language.yaml` to `.aid-o/03-config/policies/language.yaml`
+- Update the `document_language` field with the user's choice
+- Update `project-profile.yaml` with `document_language: "{code}"`
+- If the user enters an unrecognized code, accept it but warn:
+  ```
+  Note: "{code}" is not in the common list. If the model cannot produce
+  output in this language, it will fall back to English (logged as warning).
+  ```
+
+**Option 9: Parallel Isolation Strategy**
+
+```
+Parallel Isolation Strategy
+====================================
+
+AID runs agents in parallel during EPIC execution. Choose how to isolate
+their work:
+
+  1. Worktrees (Recommended)  [DEFAULT]
+     Each agent gets a dedicated git worktree under .aid-o/worktrees/.
+     Full filesystem isolation — agents can build and test independently.
+     Requires: git 2.15+
+
+  2. Branches
+     Agents share the working tree but operate on separate branches.
+     Lighter weight, but risk of file collisions during concurrent writes.
+     Use when: disk space is limited.
+
+  3. Sequential
+     No parallelism. Steps run one at a time in the current working tree.
+     Use when: small EPICs or CI environments.
+
+Select strategy: (1/2/3) [1]
+```
+
+- Copy `defaults/policies/dispatch-strategy.yaml` to `.aid-o/03-config/policies/dispatch-strategy.yaml`
+- Update the `strategy` field based on user choice:
+  - 1 → `"worktrees"`, 2 → `"branches"`, 3 → `"sequential"`
+- Update `project-profile.yaml` with `dispatch_strategy: "{strategy}"`
+- Display confirmation:
+  ```
+  Strategy set to: {strategy}
+  You can change this later by editing:
+    .aid-o/03-config/policies/dispatch-strategy.yaml
+  ```
 
 ### Step 6: New Project Flow
 
@@ -291,18 +508,29 @@ Choose: (1/2/3)
 ```
 AID Setup Complete
 ====================================
-Workspace: .aid-o/ ✅
-Gates: customized for {stack} ✅
-Profile: project-profile.yaml populated ✅
-CLAUDE.md: generated ✅
-Memory: {enabled (Qdrant MCP) | disabled (file-based only)}
+Workspace:    .aid-o/ initialized
+Gates:        customized for {stack}
+Profile:      project-profile.yaml populated
+CLAUDE.md:    {generated | skipped}
+MCP servers:  {Qdrant local, Slack, GitHub MCP, ... | none}
+Permissions:  {safe | recommended | advanced}
+Language:     {EN | user choice}
+Isolation:    {worktrees | branches | sequential}
+Memory:       {enabled (Qdrant local) | disabled (file-based only)}
 
 Your project is ready for AID orchestration.
+
+Config files written:
+  .aid-o/03-config/policies/permissions.yaml
+  .aid-o/03-config/policies/language.yaml
+  .aid-o/03-config/policies/dispatch-strategy.yaml
 
 Next steps:
   1. Create an EPIC: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
   2. Or customize further: .aid-o/03-config/
   3. Run /aid-help for full documentation
+  4. Change isolation strategy: edit .aid-o/03-config/policies/dispatch-strategy.yaml
+  5. Change permissions: edit .aid-o/03-config/policies/permissions.yaml
 ```
 
 ## Reference Files

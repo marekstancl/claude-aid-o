@@ -419,6 +419,75 @@ if gate_fails:
 All artifacts stored in: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
 ```
 
+#### Enriched Report Generation from Qdrant
+
+When generating the `final_report.md`, the orchestrator enriches it with data from Qdrant if available:
+
+```
+1. Check Qdrant MCP availability
+2. IF Qdrant available:
+   a. Query collection "aid-orchestration-log" for all events matching this epic_id
+   b. Extract per-step timing data from dispatch_event + completion_event pairs:
+      - step_duration = completion.timestamp - dispatch.timestamp
+      - total_epic_duration = last_completion.timestamp - first_dispatch.timestamp
+   c. Extract retry counts: count dispatch_events where retry_count > 0
+   d. Extract strategy usage: which dispatch strategy was used per step
+   e. Include in final_report.md:
+      - Per-step duration breakdown (table with actual seconds/minutes)
+      - Total EPIC wall-clock duration
+      - Retry summary (which steps retried, how many times)
+      - Dispatch strategy summary (worktrees vs branches vs sequential)
+      - Fallback events (if any worktree→branch fallbacks occurred)
+3. IF Qdrant unavailable:
+   a. Fall back to stage_log.jsonl data (existing behavior)
+   b. Extract timing from stage_log.jsonl timestamps (less precise)
+   c. Note in report: "Timing data from stage_log.jsonl (Qdrant unavailable)"
+```
+
+#### Lessons Learned Collection and Storage
+
+After dispatching Curator and Auditor (step 3 of DONE actions), the orchestrator collects and stores lessons learned:
+
+```
+1. COLLECT lessons from all agent outputs:
+   a. For each step, read output.md from evidence/steps/step_{N}_{role}/output.md
+   b. Parse any "## Lessons Learned" or "## LESSONS LEARNED" section
+   c. For each lesson entry, extract:
+      - category: "process" | "technical" | "architecture" | "testing" | "security" | "tooling"
+      - severity: "info" | "warning" | "critical"
+      - description: the lesson text
+      - recommendation: suggested action (if present)
+      - related_steps: which other steps are affected
+      - tags: keywords extracted from the lesson
+
+2. STORE each lesson as a lesson_learned_event:
+   {
+     "event_type": "lesson_learned",
+     "epic_id": "{epic_id}",
+     "step_id": "{originating step_id}",
+     "timestamp": "{ISO 8601}",
+     "role": "{agent role that reported the lesson}",
+     "category": "{category}",
+     "severity": "{severity}",
+     "related_steps": [],
+     "tags": [],
+     "recommendation": "{text}",
+     "context": "{brief context of what the agent was doing}"
+   }
+
+3. STORAGE targets (try in order):
+   a. If Qdrant MCP available:
+      Store each lesson via qdrant-store to collection "aid-orchestration-log"
+   b. Always (regardless of Qdrant):
+      Append to .aid-o/04-engine/lessons-learned.md (file-based fallback)
+      Format: markdown section per lesson with epic_id, step_id, category, text
+   c. If Qdrant unavailable:
+      Also append to .aid-o/logs/orchestration-events.jsonl (for later rehydration)
+
+4. SUMMARY: Include lessons-learned count in final_report.md
+   "Lessons Learned: {count} entries collected ({categories breakdown})"
+```
+
 ---
 
 ## Evidence Store Structure
@@ -509,6 +578,60 @@ Each line is a JSON object:
 8. If no conflicts: merge branches into epic/{epic_id}/main, save evidence
 ```
 
+#### Worktree-Based Parallel Isolation
+
+Before dispatching a parallel group, the orchestrator reads the dispatch strategy to determine the isolation method for concurrent agents.
+
+**Pre-Dispatch:**
+
+```
+1. Read `.aid-o/03-config/policies/dispatch-strategy.yaml`
+2. Check `dispatch.strategy` value:
+   - "worktrees" → use worktree isolation (preferred for parallel groups)
+   - "branches"  → use existing branch-based behavior (above)
+   - "sequential" → dispatch steps one at a time (no parallelism)
+3. If strategy not set → default to "branches" (backward-compatible)
+```
+
+**Worktree Strategy (`dispatch.strategy: "worktrees"`):**
+
+```
+1. For each step in the parallel group:
+   a. Create worktree:
+      git worktree add .aid-o/worktrees/{step_id} epic/{epic_id}/step_{N}_{role}
+   b. If creation fails:
+      - Check dispatch.fallback.on_worktree_failure → try fallback strategy
+      - If fallback is "branches": create branch instead (existing behavior)
+      - If fallback is "sequential": queue step for sequential execution
+      - If dispatch.fallback.log_fallback: true → log fallback event to stage_log.jsonl
+   c. Add worktree_path to agent prompt context:
+      - worktree_path: .aid-o/worktrees/{step_id}
+      - Agent operates within worktree directory (full filesystem isolation)
+2. Respect dispatch.worktrees.max_parallel — if group size exceeds limit,
+   split into sub-batches of max_parallel and dispatch sequentially
+3. Dispatch all agents concurrently (each in its own worktree)
+
+Post-Dispatch (after parallel group completes and PHASE_CHECK passes):
+4. For each worktree in the group:
+   a. Merge worktree branch back into epic/{epic_id}/main
+   b. If dispatch.worktrees.cleanup_on_merge: true →
+      git worktree remove .aid-o/worktrees/{step_id}
+5. If any agent failed and dispatch.worktrees.cleanup_on_failure: false →
+   preserve worktree for debugging (do NOT remove)
+6. Record worktree lifecycle in evidence:
+   parallel_groups/group_{N}/worktree_status.json
+   { step_id, worktree_path, created_at, merged_at, cleaned_up, fallback_used }
+```
+
+**Fallback Chain:**
+
+```
+worktrees → (on failure) → branches → (on failure) → sequential
+Each fallback is configurable in dispatch-strategy.yaml:
+  dispatch.fallback.on_worktree_failure: "branches"
+  dispatch.fallback.on_branch_failure: "sequential"
+```
+
 ### Analysis Group Dispatch
 
 > **Reference:** `skills/parallel-dispatch.md` Section 2 + `skills/analysis-merge.md`
@@ -547,6 +670,92 @@ Merge strategy:
 
 ---
 
+## Orchestration Logging
+
+The orchestrator logs structured events to Qdrant (vector memory) for observability, reporting, and lessons-learned analysis. All logging is non-blocking: the orchestrator never waits for Qdrant operations to complete before continuing execution.
+
+### Configuration
+
+```
+1. Read `.aid-o/03-config/policies/memory-config.yaml`
+2. Check `memory.enabled` — if false, skip all Qdrant logging (use JSONL fallback only)
+3. Check Qdrant MCP availability — probe `qdrant-store` tool
+4. Collection name: "aid-orchestration-log"
+```
+
+### Dispatch Event Logging
+
+On every agent dispatch (sequential or parallel), log a `dispatch_event`:
+
+```json
+{
+  "event_type": "dispatch",
+  "epic_id": "{epic_id}",
+  "step_id": "{step_id}",
+  "timestamp": "{ISO 8601}",
+  "role": "{agent role}",
+  "status": "dispatched",
+  "strategy": "worktrees|branches|sequential",
+  "permission_preset": "{preset name from dispatch-strategy.yaml}",
+  "worktree_path": "{path or null}",
+  "branch_name": "{branch name or null}",
+  "retry_count": 0,
+  "context_summary": "{brief description of what agent was asked to do}"
+}
+```
+
+**How to log:**
+- If Qdrant MCP available: use `qdrant-store` tool with collection `aid-orchestration-log`
+- If Qdrant unavailable: append JSON line to `.aid-o/logs/orchestration-events.jsonl`
+
+### Completion Event Logging
+
+On every agent completion (success or failure), log a `completion_event`:
+
+```json
+{
+  "event_type": "completion",
+  "epic_id": "{epic_id}",
+  "step_id": "{step_id}",
+  "timestamp": "{ISO 8601}",
+  "role": "{agent role}",
+  "status": "success|failure|timeout|scope_violation",
+  "duration_seconds": 0,
+  "exit_reason": "{null or reason string}",
+  "files_changed": ["list", "of", "files"],
+  "files_changed_count": 0,
+  "error_type": "{null or error classification}",
+  "retry_scheduled": false
+}
+```
+
+### Graceful Degradation
+
+All Qdrant operations are wrapped in try/catch equivalent logic. The orchestrator must never fail or block due to Qdrant unavailability.
+
+```
+ON QDRANT OPERATION:
+  try:
+    execute qdrant-store / qdrant-find
+  catch (any error):
+    1. Log warning to stage_log.jsonl: "Qdrant unavailable — falling back to JSONL"
+    2. Write event to fallback file: .aid-o/logs/orchestration-events.jsonl
+    3. Continue execution — do NOT retry synchronously, do NOT block
+
+ON STARTUP (IDLE → PLANNING transition):
+  1. Check if .aid-o/logs/orchestration-events.jsonl exists and has entries
+  2. If entries found AND Qdrant MCP is available:
+     a. Read up to max_retry_batch (default 100) entries from JSONL
+     b. Attempt to rehydrate each entry into Qdrant collection "aid-orchestration-log"
+     c. On success: remove rehydrated entries from JSONL
+     d. On failure: leave entries in JSONL, log warning, continue
+  3. Rehydration is best-effort — never block EPIC startup
+```
+
+**Fallback file format:** `.aid-o/logs/orchestration-events.jsonl` — one JSON object per line, same schema as Qdrant events. File is append-only during execution; only rehydration removes entries.
+
+---
+
 ## Communication Protocol
 
 States PLAN_REVIEW, ESCALATION, and PM_APPROVAL communicate with PM via `skills/slack-mcp.md`.
@@ -576,6 +785,11 @@ auto-starts the next queued EPIC if available.
 - **Epic queue:** `.aid-o/04-engine/epic-queue.yaml`
 - **Sessions:** `.aid-o/04-engine/sessions/`
 - **Memory:** `.aid-o/04-engine/memory/active-work.md`
+- **Dispatch strategy:** `.aid-o/03-config/policies/dispatch-strategy.yaml`
+- **Memory config:** `.aid-o/03-config/policies/memory-config.yaml`
+- **Orchestration log (Qdrant):** collection `aid-orchestration-log`
+- **Orchestration log (fallback):** `.aid-o/logs/orchestration-events.jsonl`
+- **Lessons learned (file):** `.aid-o/04-engine/lessons-learned.md`
 
 ---
 
