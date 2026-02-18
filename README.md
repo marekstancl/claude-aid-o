@@ -2,31 +2,38 @@
 
 **Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).**
 
-AID takes a structured task specification (EPIC), generates an execution plan, dispatches specialized role-based agents, enforces quality gates with auto-retry, and delivers reviewed code — with PM checkpoints and complete evidence trails.
+You come with an idea, AID walks you through the entire process — from concept to reviewed, merged code.
 
 ---
 
+## Why AID?
+
+Today you chat with AI on a single thread, manually coordinate what it should do, and on anything bigger than a small feature it falls apart — you lose context, forget about tests, have no overview of what's done.
+
+AID gives you an entire dev team under one command. You're the PM — you approve the plan and the final merge, everything else runs autonomously.
+
 ## How It Works
 
+1. **You come with an idea** — `/aid-brainstorm "Build a REST API with auth and CRUD"`. AID walks you through a 9-step interactive dialog: asks about your stack, proposes approaches, compares trade-offs, and together you arrive at an architecture and plan.
+
+2. **AID generates the task spec** — from the brainstorm, AID produces a structured specification (EPIC) with steps, dependencies, acceptance criteria, and quality gates. You just review and approve.
+
+3. **You launch the pipeline** — `/run-epic` and AID takes over:
+   - Generates an execution plan with dependency graph and parallel groups
+   - Dispatches work to 9 role-based agents (architect → domain → backend + frontend → QA + security → docs → release)
+   - Parallelizes what it can — backend + frontend run simultaneously on separate git worktrees
+   - After each step, checks outputs and scope compliance
+   - Runs quality gates (tests, lint, security scan) with auto-retry — gate-fixer agent patches and re-runs (max 3 attempts)
+   - Requests your PM approval and merges
+
 ```
-/aid-brainstorm (PM + AI)
-  ↓  9-step interactive flow: context → questions → approaches → design
-Plan Document (.aid-o/01-plans/)
-  ↓  PM converts plan into task spec (or uses auto-generated EPIC draft)
-EPIC (.aid-o/02-epics/)
-  ↓  /plan-epic generates execution plan
-Plan JSON (dependency graph, parallel groups, gates)
-  ↓  PM approves plan (GO / REVISE / ABORT)
-Dispatch Agents (architect → backend + frontend → QA + security → docs)
-  ↓  each agent follows role-specific playbook
-Quality Gates (tests, lint, security scan, docs check)
-  ↓  auto-fix on failure, retry up to 3x
-PM Approval → Merge → Done
-  ↓
-Next EPIC from queue (autonomous pipeline)
+/aid-brainstorm "topic"       ← 9-step dialog: context → questions → approaches → design → plan
+                              ← AID offers to generate an EPIC from the conclusions
+/plan-epic path/to/epic.md   ← generates JSON plan + session file
+/run-epic                     ← orchestrator takes control
 ```
 
-The **control flow is deterministic** — defined by YAML/JSON configuration (EPIC structure, gates.yaml, decision-policies.yaml). The **content is AI-generated** — each agent produces code, tests, docs via LLM.
+The entire process is governed by a state machine: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → GATES → PM_APPROVAL → DONE. The **control flow is deterministic** — defined by YAML/JSON configuration. The **content is AI-generated** — each agent produces code, tests, docs via LLM.
 
 ## Installation
 
@@ -39,50 +46,27 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 # Install plugin
 /plugin install aid-orchestrator@claude-aid-o
 
-# Verify (shows all 18 commands)
-/aid-help
+# Onboarding — detects tech stack, configures gates, sets permissions
+/aid-setup
 ```
 
 ## Quick Start
 
 ```bash
-# 1. Initialize AID in your project
-/aid-setup
-
-# 2. Brainstorm with AI — 9-step interactive flow
+# Brainstorm with AI — 9-step interactive flow
 /aid-brainstorm "Build a REST API with auth and CRUD operations"
 
-# 3. Write an EPIC from the plan (or use the template)
-#    Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
+# AID generates EPIC from your brainstorm → review and approve
+# Or write one manually from the template in .aid-o/02-epics/
 
-# 4. Generate execution plan
+# Generate execution plan
 /plan-epic .aid-o/02-epics/my-epic.md
 
-# 5. Run the orchestrator
+# Run the orchestrator
 /run-epic
 ```
 
-## Getting Started with Brainstorming
-
-The `/aid-brainstorm` command walks you through a **9-step interactive flow** to go from idea to execution plan:
-
-```
-/aid-brainstorm "Build a REST API with database, auth, and CRUD operations"
-```
-
-**The 9 steps:**
-
-1. **Context** — AI asks about your tech stack, preferences, constraints
-2. **Questions** — Clarifying questions to narrow the design space
-3. **Approaches** — Compare options (frameworks, patterns, trade-offs)
-4. **Design** — Architecture decisions, API contracts, data models
-5. **Sections** — Plan outline for your review
-6. **Approval** — You approve or request changes
-7. **Document** — Full plan written to `.aid-o/01-plans/`
-8. **EPIC draft** — Optional EPIC generated from the plan
-9. **Handoff** — Summary of decisions and next steps
-
-**Try one of these prompts to get started:**
+**Try one of these prompts:**
 
 | Prompt | What you get |
 |--------|-------------|
@@ -90,7 +74,7 @@ The `/aid-brainstorm` command walks you through a **9-step interactive flow** to
 | `"Build a CLI tool that does X"` (fill in X) | Command structure, flags, config, 4-6 step EPIC |
 | `"Build a full-stack web app with React frontend and API backend"` | Components, API contracts, DB design, 8-10 step EPIC |
 
-Run `/aid-help examples` for detailed walkthroughs of each prompt.
+Run `/aid-help examples` for detailed walkthroughs.
 
 ## What's Inside
 
@@ -119,9 +103,16 @@ Run `/aid-help examples` for detailed walkthroughs of each prompt.
 
 | Agent | Purpose |
 |-------|---------|
-| **Curator** | Collects improvement notes from all agents, proposes improvements to PM |
-| **Auditor** | Post-EPIC health audit (code, security, docs) with 0-100 scoring |
+| **Curator** | After each EPIC, collects improvement notes from all agents, deduplicates, proposes improvements to backlog |
+| **Auditor** | Post-EPIC audit (code, security, docs, process compliance) with scoring |
 | **Project Scanner** | Analyzes tech stack, structure, conventions → `project-profile.yaml` |
+
+## Integrations
+
+- **Slack MCP** — PM communication via Slack (plan approval, escalation, merge approval, 7 message types with timeout/reminder logic). Chat fallback when Slack is not configured.
+- **Qdrant Memory** (optional) — Agents remember past decisions and lessons learned, improving with every EPIC. File-based fallback when Qdrant is unavailable.
+- **Epic Queue** — `/epic-queue add` to stack EPICs, AID processes them one by one autonomously.
+- **Project Scanner** — `/aid-setup` analyzes your project (tech stack, structure, conventions) → generates `project-profile.yaml`, configures gates for your stack.
 
 ## Controller State Machine
 
@@ -156,7 +147,7 @@ IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → NEXT_PHASE
 
 ## Configuration
 
-AID is fully customizable via YAML/JSON configs in `.aid-o/03-config/`:
+Everything is customizable via YAML/JSON configs in `.aid-o/03-config/`:
 
 | File | Controls |
 |------|----------|
@@ -204,19 +195,6 @@ steps/                  Agent outputs + diffs
 gates/                  Gate command outputs
 ```
 
-## Optional: Vector Memory (Qdrant)
-
-AID supports long-term semantic memory via Qdrant MCP. Past decisions, lessons, and patterns are searchable by agents — improving quality over time.
-
-```bash
-claude mcp add qdrant-memory \
-  -e QDRANT_URL="http://localhost:6333" \
-  -e COLLECTION_NAME="aid-memory" \
-  -- uvx mcp-server-qdrant
-```
-
-Works without Qdrant using file-based memory (active-work.md, lessons-learned.md).
-
 ## All Commands
 
 | Command | Description |
@@ -242,7 +220,7 @@ Works without Qdrant using file-based memory (active-work.md, lessons-learned.md
 
 ## Roadmap
 
-- **v0.2.0** (done) — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
+- **v0.2.0** (current) — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
 - **v0.3.0** — Browser-based evidence viewer, EPIC templates library, multi-project workspace support
 
 ## Requirements
