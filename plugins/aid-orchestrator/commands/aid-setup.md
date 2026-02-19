@@ -79,6 +79,54 @@ Scan the project root for indicator files. For each found, extract key informati
 
 Search for indicator files in project root first, then inside `docs/` directory.
 
+### Git Detection and Health Check
+
+1. Check if `.git/` exists in project root
+
+2. If NOT a git repo:
+   - Display warning:
+     ```
+     Git Status: Not initialized
+     ====================================
+     AID works best with git for branch isolation, evidence tracking,
+     and diff generation. Without git, these features are disabled.
+     ```
+   - Ask PM:
+     ```
+     Initialize git in this project?
+     (A) Yes — run `git init` and create initial commit (Recommended)
+     (B) No — proceed without git (branch isolation disabled)
+     ```
+   - If A: run `git init`, create `.gitignore` (see below), initial commit
+   - If B: log decision, force `dispatch-strategy: sequential`
+
+3. If IS a git repo — check for .gitignore:
+   - If `.gitignore` does NOT exist: create it with sensible defaults
+   - If `.gitignore` exists but missing `.aid-o/04-engine/` entries:
+     append AID-specific patterns
+
+   Default .gitignore additions for AID:
+   ```
+   # AID Engine (internal state — not for version control)
+   .aid-o/04-engine/sessions/
+   .aid-o/04-engine/evidence/
+   .aid-o/04-engine/memory/
+   .aid-o/logs/
+
+   # Environment
+   .env
+   .env.local
+   ```
+
+4. Record git status in project-profile.yaml:
+   ```yaml
+   git:
+     initialized: true|false
+     default_branch: "main"  # or detected from remote
+     remote: ""              # or detected
+     gitignore: true|false
+   ```
+
 ### Step 2: Detect Project Type
 
 Based on scan results, classify:
@@ -337,7 +385,7 @@ Add a custom MCP server? (Y/N) [N]
   - Append to `project-profile.yaml` under `mcp_servers`
 - Repeat prompt: "Add another? (Y/N)"
 
-**Option 7: Permission Preset Selection**
+**Option 7: Permission Preset Selection — Dual Write**
 
 Present permission presets with a comparison matrix:
 
@@ -380,37 +428,39 @@ Comparison:
 Select preset: (1/2/3) [2]
 ```
 
-- Save the selected preset to `project-profile.yaml` under `permission_preset`:
-  ```yaml
-  permission_preset: "recommended"   # safe | recommended | advanced
-  ```
-- Also write the full permission block to `.aid-o/03-config/policies/permissions.yaml` based on the selected preset:
-  - **Safe:**
-    ```yaml
-    permissions:
-      allow: ["Read", "Glob", "Grep", "Task", "WebSearch"]
-      deny: ["Write", "Edit", "Bash", "NotebookEdit", "WebFetch", "mcp__*"]
-    ```
-  - **Recommended:**
-    ```yaml
-    permissions:
-      allow: ["Read", "Glob", "Grep", "Write", "Edit", "NotebookEdit", "Task",
-              "Bash(git add *)", "Bash(git commit *)", "Bash(git checkout *)", "Bash(git branch *)",
-              "Bash(git merge *)", "Bash(git stash *)", "Bash(git worktree *)",
-              "Bash(git diff *)", "Bash(git log *)", "Bash(git status *)",
-              "Bash(npm test *)", "Bash(npm run test *)", "Bash(npx jest *)",
-              "Bash(pytest *)", "Bash(make test *)",
-              "mcp__qdrant-memory__store", "mcp__qdrant-memory__find"]
-      deny: ["Bash(git push *)", "Bash(git push)", "Bash(rm -rf *)",
-             "Bash(curl *)", "Bash(wget *)", "WebFetch", "WebSearch", "mcp__slack__*"]
-    ```
-  - **Advanced:**
-    ```yaml
-    permissions:
-      allow: ["Read", "Glob", "Grep", "Write", "Edit", "Bash", "NotebookEdit", "Task",
-              "WebFetch", "WebSearch", "mcp__qdrant-memory__*", "mcp__slack__*"]
-      deny: []
-    ```
+When PM selects a preset, perform **dual write** to BOTH files:
+
+1. **Write preset to `.aid-o/03-config/policies/permissions.yaml`** (AID internal —
+   tells agents what they're allowed to do via prompt):
+   - Set `active_preset` to the selected value
+   - The preset definitions are already in the file (copied from defaults)
+
+2. **Update `.claude/settings.local.json`** (Claude Code enforcement —
+   controls what VS Code auto-allows without prompting):
+   a. Read existing `.claude/settings.local.json` (create `{"permissions":{"allow":[]}}` if missing)
+   b. Read the selected preset's `claude_code_permissions` array from permissions.yaml
+   c. Merge into `permissions.allow[]`, preserving existing user entries, avoiding duplicates
+   d. Write updated `.claude/settings.local.json`
+
+3. Save the selected preset to `project-profile.yaml` under `permission_preset`:
+   ```yaml
+   permission_preset: "recommended"   # safe | recommended | advanced
+   ```
+
+4. Confirm to PM:
+   ```
+   Permissions applied:
+     - Preset: {name}
+     - AID agents: .aid-o/03-config/policies/permissions.yaml
+     - VS Code auto-allow: .claude/settings.local.json ({count} entries)
+     - VS Code will NOT prompt for commands in the allow list
+   ```
+
+**Important:**
+- NEVER overwrite existing user entries in `.claude/settings.local.json`
+- Read -> merge -> write (additive, never destructive)
+- For "advanced": `Bash(*:*)` means VS Code never prompts for ANY bash command
+- Target file is `.claude/settings.local.json` (NOT `.claude/settings.json`)
 
 **Option 8: Document Language**
 

@@ -177,6 +177,24 @@ Phases are defined in the session file (from plan or epic). They can be adjusted
 
 **Poruseni tohoto checkpointu = chyba AI.**
 
+### Session Closure Mandatory Steps (Controller MUST execute ALL during DONE state)
+
+When the Controller transitions to DONE state for an EPIC, it MUST execute ALL
+of the following steps. Failure to execute any step is a BUG in the Controller.
+
+1. [ ] Update session frontmatter: `status: completed`, add `completed:` timestamp
+2. [ ] Update Completion to `100%`
+3. [ ] Run lessons-extractor agent
+4. [ ] Write lessons-extractor output to `lessons-learned.md` (per-project, ALWAYS)
+5. [ ] Write lessons-extractor output to `command-history.md` (per-project, ALWAYS)
+6. [ ] Write lessons + commands to Qdrant with `project_name` tag (cross-project)
+7. [ ] Archive session file to `sessions/archive/`
+8. [ ] Append final DONE entry to `stage_log.jsonl` with `result: success`
+9. [ ] Verify archived session shows `status: completed` (not `active`)
+
+Step 6 (Qdrant) is skipped gracefully if Qdrant is not available.
+Steps 4 and 5 (file-based writes) run ALWAYS, regardless of Qdrant availability.
+
 ### Phase 3: Session-End Protocol
 
 1. Final quality gates (tests pass, no TODO/FIXME, no debug statements)

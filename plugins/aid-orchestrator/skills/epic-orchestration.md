@@ -95,7 +95,35 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 2. Read `.aid-o/03-config/policies/decision-policies.yaml` for architecture principles
 3. Read `.aid-o/03-config/policies/gates.yaml` for gate definitions
 4. Read relevant playbooks from `.aid-o/03-config/playbooks/`
-5. Transition to PLANNING
+5. **Session Branch Creation:**
+   a. Check if git is initialized:
+      - Run `git rev-parse --is-inside-work-tree` (suppress errors)
+      - If not a git repo: skip branch management, log to stage_log:
+        `{"state": "IDLE", "warning": "git not initialized — branch management disabled"}`
+        Proceed without branching.
+   b. If git is available:
+      1. Ensure working tree is clean: `git status --porcelain`
+         - If dirty: warn PM, suggest committing or stashing first
+      2. Create session branch from current HEAD:
+         `git checkout -b epic/{epic_id}`
+      3. Log to stage_log:
+         `{"state": "IDLE", "action": "branch_created", "branch": "epic/{epic_id}"}`
+      4. Record branch in plan_progress.json:
+         ```json
+         "branch": "epic/{epic_id}",
+         "base_commit": "{HEAD sha before branch}"
+         ```
+   c. All subsequent agent dispatches include in their prompt:
+      ```
+      GIT CONTEXT:
+      - You are on branch: epic/{epic_id}
+      - Commit your changes after each meaningful piece of work
+      - Use conventional commits: type(scope): description
+      - Types: feat, fix, refactor, test, docs, chore
+      - Do NOT push to remote
+      - Do NOT switch branches
+      ```
+6. Transition to PLANNING
 
 **Evidence:** Copy EPIC to `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
 
@@ -147,6 +175,28 @@ If any check fails, fix the session file before proceeding.
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/pm_plan_approval.json`
 
 ### 4. EXECUTING
+
+**Permission Context for Agent Dispatch:**
+
+Before dispatching any agent, load the permission context:
+
+1. Read `.aid-o/03-config/policies/permissions.yaml`
+2. Resolve `active_preset` to the preset definition
+3. Check `role_overrides` for the agent's role
+4. Merge: preset.claude_code_permissions + role_override.additional_permissions
+5. Include the resolved permissions in the agent's dispatch prompt as a
+   PERMISSIONS CONTEXT block:
+
+```
+PERMISSIONS CONTEXT:
+- Preset: {active_preset}
+- Allowed Bash commands: {merged_permissions_list}
+- If a command is not in the allowed list, DO NOT execute it.
+  Report status: blocked with the command you need.
+```
+
+If `permissions.yaml` does not exist or `active_preset` is not set,
+default to `recommended` preset behavior.
 
 **Actions:**
 1. Determine next step(s) to execute (respect dependency graph)
@@ -360,10 +410,34 @@ if gate_fails:
 
 **Actions:**
 1. If approved:
-   a. Merge all step branches to main (or create PR)
-   b. Update EPIC file status to "Completed"
-   c. Archive session file to `.aid-o/04-engine/sessions/archive/`
-   d. Update `.aid-o/04-engine/memory/active-work.md`
+   a. **Session File Status Update** (BEFORE archive — MANDATORY):
+      1. Read the active session file from `.aid-o/04-engine/sessions/S-*.md`
+      2. Update YAML frontmatter:
+         - `status: completed`
+         - `completed: {ISO 8601 timestamp}`
+      3. Update the `Completion:` line in the body to `100%`
+      4. Update the last phase status to `done`
+      5. Write the updated session file
+      6. THEN proceed with archive (copy to archive/ directory)
+
+      The archived copy MUST reflect the completed status. Never archive a session
+      that still shows `status: active`.
+
+   b. **Session Branch Merge** (if git available):
+      If a session branch was created (check plan_progress.json -> branch):
+      1. Verify all gates passed and PM approved
+      2. Switch to base branch: `git checkout {default_branch}`
+      3. Merge session branch: `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+      4. If merge conflict: escalate to PM (do NOT auto-resolve)
+      5. Delete session branch: `git branch -d epic/{epic_id}`
+      6. Log to stage_log:
+         `{"state": "DONE", "action": "branch_merged", "branch": "epic/{epic_id}"}`
+
+      If no session branch (git not available): skip this step.
+
+   c. Update EPIC file status to "Completed"
+   d. Archive session file to `.aid-o/04-engine/sessions/archive/`
+   e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
 3. **POST-PROCESSING:**
    a. Dispatch **Curator agent** (`agents/curator.md`) — collects `improvement_notes`
@@ -371,26 +445,98 @@ if gate_fails:
       Protocol: `skills/improvement-proposals.md`
    b. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
       (code, security, docs, frontend, database), scores project health,
-      tracks trend vs previous audit. Report → `evidence/{epic_id}/audit-report.md`
-   c. Curator proposals → Orchestrator evaluates:
-      - APPROVED proposals → PM via Slack Type D (Improvement Proposal, expects reply)
-      - REJECTED proposals → PM via Slack Type E (Rejection Info, no reply)
+      tracks trend vs previous audit. Report -> `evidence/{epic_id}/audit-report.md`
+   c. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`) —
+      parses all step outputs for lessons, commands, and gotchas.
+   d. Curator proposals -> Orchestrator evaluates:
+      - APPROVED proposals -> PM via Slack Type D (Improvement Proposal, expects reply)
+      - REJECTED proposals -> PM via Slack Type E (Rejection Info, no reply)
       - Per `skills/slack-mcp.md` — batch handling: each proposal = separate message
-   d. Auditor summary → PM via Slack Type F (Audit Summary, no reply)
-      - If critical findings match `escalation_triggers` → additional Type A (Escalation)
-   e. Auditor findings → Orchestrator validates → Curator processes into backlog
-4. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
-5. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+   e. Auditor summary -> PM via Slack Type F (Audit Summary, no reply)
+      - If critical findings match `escalation_triggers` -> additional Type A (Escalation)
+   f. Auditor findings -> Orchestrator validates -> Curator processes into backlog
+4. **Lessons-Learned File Update** (ALWAYS — independent of Qdrant):
+   After dispatching lessons-extractor agent, parse its output and append new entries
+   to `.aid-o/04-engine/lessons-learned.md`:
+
+   1. Read current `lessons-learned.md`
+   2. Parse lessons-extractor output for the "NEW LESSONS" table rows
+   3. For each new lesson:
+      - Check for duplicates (>80% text overlap with existing entries)
+      - If not duplicate: append row to the markdown table
+   4. Write updated `lessons-learned.md`
+
+   ```yaml
+   # Append format per row:
+   | {date} | {lesson_text} | {context_from_epic_id} |
+   ```
+
+   This step runs ALWAYS, even if Qdrant indexing succeeded. The .md file is
+   the durable, human-readable record. Qdrant is the searchable index.
+
+5. **Command-History File Update** (ALWAYS — independent of Qdrant):
+   After dispatching lessons-extractor agent, parse its output and append new entries
+   to `.aid-o/04-engine/command-history.md`:
+
+   1. Read current `command-history.md`
+   2. Parse lessons-extractor output for the "NEW COMMANDS" table rows
+   3. For each new command:
+      - Check for duplicates (exact command string match)
+      - If not duplicate: append row to the markdown table
+   4. Write updated `command-history.md`
+
+   ```yaml
+   # Append format per row:
+   | {command} | {purpose} | {date} |
+   ```
+
+6. **Qdrant Project Tagging** (MANDATORY for all Qdrant writes):
+   Every `qdrant-store` call in the DONE state MUST include `project_name` in metadata:
+
+   ```json
+   {
+     "collection_name": "aid-orchestration-log",
+     "data": "{lesson_text}",
+     "metadata": {
+       "project_name": "{from project-profile.yaml -> project_name}",
+       "epic_id": "{epic_id}",
+       "step_id": "{step_id}",
+       "type": "lesson|command|decision|pattern",
+       "category": "{category}",
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
+
+   **Why:** Qdrant is the cross-project knowledge store. Without `project_name`,
+   lessons from different projects are indistinguishable. Agents reading Qdrant
+   at IDLE/EXECUTING states filter by relevance but display source project for
+   traceability.
+
+   If Qdrant is unavailable: skip gracefully (non-blocking), log warning.
+   File-based writes (steps 4 and 5) are the authoritative record.
+
+7. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
+8. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
    a. Read `.aid-o/04-engine/epic-queue.yaml`
    b. IF queue is not paused AND next EPIC exists (status: "queued"):
       - Mark current EPIC as "completed" in queue
       - Mark next EPIC as "running"
       - Send Status Update: `:arrows_counterclockwise: Auto-starting next EPIC: {next_epic_id}`
-      - Transition: DONE → IDLE (with next EPIC) — start new orchestration loop
+      - Transition: DONE -> IDLE (with next EPIC) — start new orchestration loop
    c. IF queue is paused OR empty:
       - Mark current EPIC as "completed" in queue (if in queue)
       - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
       - Remain in terminal DONE state
+9. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
+   Append the closing DONE entry to `stage_log.jsonl`:
+
+   ```json
+   {"state": "DONE", "timestamp": "{ISO 8601}", "result": "success", "epic_id": "{epic_id}", "run_id": "{run_id}", "summary": "EPIC completed successfully. {step_count} steps, {gate_count} gates, {retry_count} retries."}
+   ```
+
+   This MUST be the last line in the stage log. The `result` field MUST be
+   `"success"` (not `"pending"`). If the EPIC was aborted, use `"result": "aborted"`.
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/final_report.md`:
 ```markdown

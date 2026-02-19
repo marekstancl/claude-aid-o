@@ -233,6 +233,13 @@ IF NOT mem.enabled:
   return  # Silent no-op
 
 TRY:
+  # AUTO-INJECT project_name for cross-project knowledge sharing
+  project_profile = read_if_exists(".aid-o/04-engine/memory/project-profile.yaml")
+  IF project_profile AND project_profile.project_name:
+    metadata.project_name = project_profile.project_name
+  ELSE:
+    metadata.project_name = "unknown"  # Fallback — should not happen in initialized projects
+
   full_metadata = merge(metadata, {
     "type": document_type,
     "indexed_at": current_iso_timestamp()
@@ -250,6 +257,11 @@ CATCH (tool_not_found, timeout, any_error):
   log_memory_event("store", document_type, "failed", error_message)
   # Silent failure — never block workflow for memory indexing
 ```
+
+**IMPORTANT:** The `project_name` field is MANDATORY in all Qdrant writes.
+It enables cross-project knowledge sharing (see `epic-orchestration.md` DONE
+state, Qdrant Project Tagging section). The auto-injection ensures all callers
+get `project_name` without having to pass it explicitly.
 
 ### `memory_find(query, document_type_filter = null)`
 

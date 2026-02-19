@@ -23,14 +23,21 @@ Key principles:
 
 ## 1. Branch Strategy
 
+### Session Branch (created by Controller at IDLE)
+
+The Controller creates a single session branch `epic/{epic_id}` at IDLE state
+(see `skills/epic-orchestration.md` Section 1). This is the base for all work
+in this EPIC. If the Controller did not create a branch (git not available),
+all branching in this skill is skipped — agents work without version control.
+
 ### A) Epic Base Branch
 
 ```
-epic/{epic_id}/main — created at EPIC start from current HEAD of main
+epic/{epic_id}/main — created at EPIC start from epic/{epic_id}
 
 This is the integration branch for all step work.
 All step branches fork from here. All merges return here.
-Final PR is from this branch to project main.
+Final merge at DONE state: epic/{epic_id} -> project default branch.
 ```
 
 ### B) Sequential Step

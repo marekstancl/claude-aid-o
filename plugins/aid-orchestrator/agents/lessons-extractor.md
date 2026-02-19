@@ -86,7 +86,12 @@ SUMMARY:
 
 ## Important
 
-- Do NOT modify any files — only read and report
-- The parent agent will use this output to update workspace files
+- Do NOT modify workspace files directly — only read and report
+- The Controller (DONE state) is responsible for writing your output to:
+  - `.aid-o/04-engine/lessons-learned.md` (lessons table — per-project, ALWAYS written)
+  - `.aid-o/04-engine/command-history.md` (commands table — per-project, ALWAYS written)
+  - Qdrant collection `aid-orchestration-log` (cross-project, tagged with project_name)
+- Your output format MUST match the table schemas in those files exactly
+- If no new lessons/commands found, output "None found" — Controller skips the write
 - Quality over quantity — only extract genuinely useful knowledge
 - Check for duplicates against existing files before including

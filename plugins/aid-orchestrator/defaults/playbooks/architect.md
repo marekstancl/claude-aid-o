@@ -51,6 +51,18 @@
 
 ---
 
+## Git Discipline
+
+- Commit after each meaningful change (not at the end of all work)
+- Use conventional commit format: `type(scope): description`
+- Types: feat, fix, refactor, test, docs, chore
+- One logical change per commit
+- If you see a GIT CONTEXT block in your dispatch prompt, follow its instructions
+- Do NOT push to remote unless explicitly instructed
+- Do NOT switch branches unless explicitly instructed
+
+---
+
 ## Improvement Notes
 
 During your work, record observations about code or architecture that is **outside your current task scope** but could be improved.

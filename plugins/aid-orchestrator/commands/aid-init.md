@@ -43,6 +43,7 @@ Copy these files from the plugin's `defaults/` directory into `.aid-o/03-config/
 | `policies/memory-config.yaml` | `policies/memory-config.yaml` |
 | `policies/dispatch-strategy.yaml` | `policies/dispatch-strategy.yaml` |
 | `policies/language.yaml` | `policies/language.yaml` |
+| `policies/permissions.yaml` | `policies/permissions.yaml` |
 | `templates/plan.md` | `templates/plan.md` |
 | `templates/epic.md` | `templates/epic.md` |
 | `templates/plan.schema.json` | `templates/plan.schema.json` |

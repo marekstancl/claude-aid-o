@@ -1,0 +1,111 @@
+# AID Permission Presets
+# Two targets: (1) agent dispatch prompts, (2) .claude/settings.local.json
+# Selected via /aid-setup, customizable per project
+#
+# How it works:
+# - permissions.yaml tells agents what they're ALLOWED to do (prompt-level)
+# - .claude/settings.local.json tells Claude Code what to AUTO-ALLOW without prompting (enforcement-level)
+# - /aid-setup writes BOTH files simultaneously (dual-write)
+
+active_preset: "recommended"  # safe | recommended | advanced
+
+presets:
+  safe:
+    description: "Read-only exploration, no file modifications"
+    # Claude Code auto-allow entries (written to .claude/settings.local.json)
+    claude_code_permissions:
+      - "Glob"
+      - "Grep"
+      - "Read"
+      - "Task"
+      - "TodoWrite"
+      - "WebSearch"
+      - "Bash(git status:*)"
+      - "Bash(git log:*)"
+      - "Bash(git diff:*)"
+      - "Bash(ls:*)"
+    notes: "VS Code will prompt for any file modifications"
+
+  recommended:
+    description: "Edit files, run local git, tests, and linters — no push, no install"
+    claude_code_permissions:
+      # Tools
+      - "Glob"
+      - "Grep"
+      - "Read"
+      - "Edit"
+      - "Write"
+      - "NotebookEdit"
+      - "Task"
+      - "TodoWrite"
+      - "WebSearch"
+      - "WebFetch"
+      # Git (local only)
+      - "Bash(git add:*)"
+      - "Bash(git commit:*)"
+      - "Bash(git branch:*)"
+      - "Bash(git checkout:*)"
+      - "Bash(git diff:*)"
+      - "Bash(git log:*)"
+      - "Bash(git status:*)"
+      - "Bash(git stash:*)"
+      - "Bash(git merge:*)"
+      - "Bash(git worktree:*)"
+      # Testing & Linting
+      - "Bash(pytest:*)"
+      - "Bash(python -m pytest:*)"
+      - "Bash(ruff check:*)"
+      - "Bash(ruff format:*)"
+      - "Bash(npm test:*)"
+      - "Bash(npm run build:*)"
+      - "Bash(npx vitest:*)"
+      - "Bash(npx tsc:*)"
+      # Filesystem (read + basic write)
+      - "Bash(ls:*)"
+      - "Bash(mkdir:*)"
+      - "Bash(cp:*)"
+      - "Bash(mv:*)"
+      - "Bash(cat:*)"
+      - "Bash(head:*)"
+      - "Bash(tail:*)"
+      - "Bash(find:*)"
+      - "Bash(grep:*)"
+      - "Bash(wc:*)"
+      - "Bash(diff:*)"
+      # MCP tools
+      - "mcp__plugin_context7_context7__*"
+    notes: "No git push, no package install, no rm, no network commands"
+
+  advanced:
+    description: "Full access — zero VS Code prompts, agents can do anything"
+    claude_code_permissions:
+      # Everything from recommended, plus:
+      - "Glob"
+      - "Grep"
+      - "Read"
+      - "Edit"
+      - "Write"
+      - "NotebookEdit"
+      - "Task"
+      - "TodoWrite"
+      - "WebSearch"
+      - "WebFetch"
+      - "Bash(*:*)"
+      - "mcp__*"
+    notes: "Use with caution — agents can push, install packages, delete files"
+
+# Role-specific overrides (merged with active_preset)
+role_overrides:
+  security:
+    additional_permissions:
+      - "Bash(bandit:*)"
+      - "Bash(npm audit:*)"
+      - "Bash(pip-audit:*)"
+  qa:
+    additional_permissions:
+      - "Bash(pytest:*)"
+      - "Bash(coverage:*)"
+  release:
+    additional_permissions:
+      - "Bash(git tag:*)"
+      - "Bash(git push:*)"
