@@ -1,3 +1,7 @@
+---
+model: opus
+---
+
 # Frontend Developer Agent
 
 **Role:** Implement UI — components, pages, client-side logic, state management.

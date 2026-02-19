@@ -525,6 +525,83 @@ Format (one JSON object per line):
 
 ---
 
+## Cross-Project Knowledge Protocol
+
+Qdrant serves as the SINGLE cross-project knowledge store. Every entry is
+tagged with `project_name` so knowledge from Project A can inform Project B.
+
+### Architecture
+
+```
+Project A (.aid-o/)              Project B (.aid-o/)
+  lessons-learned.md               lessons-learned.md
+  command-history.md               command-history.md
+        | write                          | write
+  +---------------------------------------------+
+  |         Qdrant: aid-memory collection       |
+  |  entry: { data, project_name, type, ... }   |
+  |                                             |
+  |  Semantic search across ALL projects        |
+  +---------------------------------------------+
+        ^ read                           ^ read
+  Project C (starting)             Project D (planning)
+```
+
+### Write Protocol (DONE state)
+
+Every `qdrant-store` call includes mandatory metadata:
+
+```json
+{
+  "collection_name": "aid-memory",
+  "data": "{lesson/command/decision text}",
+  "metadata": {
+    "project_name": "{from project-profile.yaml}",
+    "epic_id": "{epic_id}",
+    "type": "lesson|command|decision|pattern",
+    "category": "{category}",
+    "timestamp": "{ISO 8601}",
+    "tech_stack": "{languages + frameworks from project-profile}"
+  }
+}
+```
+
+The `tech_stack` field enables filtering: when Project B uses FastAPI,
+it can find lessons tagged with "Python, FastAPI" from Project A.
+
+### Read Protocol (IDLE state + EXECUTING state)
+
+**At IDLE (before planning):**
+1. If Qdrant available: `qdrant-find` with query = EPIC goal + tech stack
+2. Filter: `type IN (lesson, pattern, decision)`, exclude current project's entries
+   (those are already in local .md files)
+3. Include top 3 cross-project results in Planner context:
+   ```
+   CROSS-PROJECT KNOWLEDGE (from Qdrant):
+   - [project-A] Async SQLAlchemy: use db.refresh() after mutations
+   - [project-B] ruff --fix + format resolves all F401 issues automatically
+   - [project-C] Slack MCP requires users:read scope or crashes at startup
+   ```
+
+**At EXECUTING (before agent dispatch):**
+1. If `memory.search.pre_step_search: true`:
+2. `qdrant-find` with query = step objective + role
+3. Include top 3 results (cross-project + same-project) in agent dispatch prompt:
+   ```
+   RELEVANT KNOWLEDGE (from memory):
+   - {lesson} (source: {project_name})
+   ```
+
+### No Qdrant = No Cross-Project (Graceful Degradation)
+
+If Qdrant is not configured or unavailable:
+- Local .md files work normally (per-project)
+- Cross-project search returns empty results
+- No error, no warning (beyond initial IDLE log)
+- This is an expected state for users who do not want or need Qdrant
+
+---
+
 ## Reference Files
 
 - `skills/agent-core.md` — Context loading protocol (consumer: memory-augmented context)

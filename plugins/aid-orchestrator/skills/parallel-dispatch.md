@@ -157,12 +157,13 @@ For steps listed in `plan.parallel_groups`:
       git checkout epic/{epic_id}/main
       git checkout -b epic/{epic_id}/step_{N}_{role}
 
-   b. Prepare agent prompt (same as sequential dispatch from run-epic.md):
-      - Role playbook from .aid-o/03-config/playbooks/{role}.md
-      - EPIC context (goal, scope, constraints)
+   b. Prepare agent prompt using OPTIMIZED dispatch template (see below):
+      - Role SUMMARY (3-5 lines, NOT full playbook)
+      - EPIC summary (goal + constraints + step AC only, NOT full EPIC)
       - Plan step spec (objective, inputs, outputs, allowed_paths, forbidden_paths)
-      - Previous step outputs (from dependency steps in evidence/)
-      - Project conventions and constraints
+      - Dependency outputs ONLY (from direct dependency steps, NOT all prior)
+      - File scope: relevant_files list from plan.json
+      - Playbook reference: "Read defaults/playbooks/{role}.md for details"
 
    c. ADD "PARALLEL CONTEXT" block to prompt (see below)
 
@@ -447,7 +448,7 @@ For each analysis agent output:
       dispatch_log.json                 # When each analysis agent was dispatched
 ```
 
-### dispatch_log.json
+### dispatch_log.json (Enhanced with Per-Agent Metrics)
 
 ```json
 {
@@ -464,8 +465,21 @@ For each analysis agent output:
       "branch": "epic/E-20260217-a1b2/step_3_backend",
       "dispatched_at": "2026-02-17T14:30:00Z",
       "completed_at": "2026-02-17T14:35:12Z",
+      "duration_seconds": 312,
       "status": "completed",
-      "prompt_file": "prompts/step_3_backend.md"
+      "prompt_file": "prompts/step_3_backend.md",
+      "prompt_size_chars": 4200,
+      "output_size_chars": 12500,
+      "self_report": {
+        "files_read": 12,
+        "files_created": 3,
+        "files_modified": 5,
+        "bash_commands": 8,
+        "errors": 2,
+        "error_details": ["import error -> fixed unused import", "test timeout -> increased timeout"],
+        "complexity": "high",
+        "bottleneck": "writing integration tests -- read 4 test files for patterns"
+      }
     },
     {
       "step_id": "step_4",
@@ -473,12 +487,38 @@ For each analysis agent output:
       "branch": "epic/E-20260217-a1b2/step_4_frontend",
       "dispatched_at": "2026-02-17T14:30:00Z",
       "completed_at": "2026-02-17T14:37:45Z",
+      "duration_seconds": 465,
       "status": "completed",
-      "prompt_file": "prompts/step_4_frontend.md"
+      "prompt_file": "prompts/step_4_frontend.md",
+      "prompt_size_chars": 3800,
+      "output_size_chars": 9200,
+      "self_report": {
+        "files_read": 8,
+        "files_created": 6,
+        "files_modified": 2,
+        "bash_commands": 4,
+        "errors": 0,
+        "error_details": [],
+        "complexity": "medium",
+        "bottleneck": "component composition -- matching existing patterns from 3 reference components"
+      }
     }
   ]
 }
 ```
+
+**Per-agent metric fields (added to each agent entry):**
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `duration_seconds` | Controller-measured | `completed_at - dispatched_at` |
+| `prompt_size_chars` | Controller-measured | Length of dispatch prompt sent to agent |
+| `output_size_chars` | Controller-measured | Length of step output returned by agent |
+| `self_report` | Agent self-reported | Parsed from `## Execution Summary` block in agent output |
+
+The `self_report` object is populated by parsing the agent's mandatory `## Execution Summary` block
+(defined in `skills/agent-core.md`). If the block is missing, `self_report` is set to `null` and
+a warning is logged.
 
 ### merge_log.json
 
@@ -582,6 +622,64 @@ git issues alone.
 
 ---
 
+## 7. Dispatch Prompt Template (Optimized)
+
+When constructing the dispatch prompt for a step agent, use this optimized structure
+to minimize token consumption while maintaining all necessary context.
+
+### Template Structure
+
+```
+1. ROLE summary (3-5 lines, NOT full playbook):
+   ROLE: {role}
+   MISSION: {one-sentence mission from playbook}
+   CONSTRAINTS: {key constraints from playbook}
+   PLAYBOOK: Read defaults/playbooks/{role}.md for details.
+
+2. EPIC summary (goal + constraints + step AC only, NOT full EPIC):
+   GOAL: {epic goal in one sentence}
+   CONSTRAINTS: {tech stack, key constraints}
+   YOUR ACCEPTANCE CRITERIA: {only this step's AC items}
+
+3. Step definition from plan.json:
+   - step_id, role, objective
+   - allowed_paths, forbidden_paths
+   - relevant_files (if available)
+
+4. Dependency outputs (ONLY from direct dependencies, NOT all prior):
+   - If step depends on step_2_domain: include step_2 output
+   - Do NOT include step_1_architect output unless it is a direct dependency
+   - Rationale: BMK-001 showed steps 4-6 each received ~90-102K chars of prior output.
+     With deps-only: each gets ~30K chars. Saves ~49K tokens across 6 dispatches.
+
+5. File scope (from plan.json relevant_files):
+   Read these files FIRST: {relevant_files list}
+   These are your primary inputs. Only Glob/Grep within allowed_paths if you need
+   additional context beyond these files.
+
+6. Reference to full playbook:
+   For full playbook details: defaults/playbooks/{role}.md
+```
+
+### Template Rules
+
+- **Rule 1:** Playbook summary, not full playbook. Full playbook = 875 tokens. Summary = 50 tokens.
+- **Rule 2:** Dependency outputs only. Not ALL prior outputs.
+- **Rule 3:** EPIC summary, not full EPIC. Full EPIC = 1,574 tokens. Summary = 100 tokens.
+- **Rule 4:** Memory search top_k=3 (not 5) for pre-step context from Qdrant.
+- **Rule 5:** Policy files are read ONCE at IDLE and cached. Do not re-read per dispatch.
+
+### Model Selection in Dispatch
+
+When dispatching an agent, read the agent's `model:` field from frontmatter:
+- `model: opus` -- dispatch with opus (default/inherit behavior)
+- `model: sonnet` -- dispatch with sonnet
+- `model: haiku` -- dispatch with haiku
+
+See `skills/cost-optimization.md` for the full agent-to-model mapping.
+
+---
+
 ## Reference Files
 
 | File | Relevance |
@@ -589,9 +687,10 @@ git issues alone.
 | `skills/epic-orchestration.md` | State machine (EXECUTING, PHASE_CHECK, NEXT_PHASE states) |
 | `skills/planner.md` | Parallel groups and analysis groups generation in plan JSON |
 | `skills/analysis-merge.md` | Merge strategies for combining analysis agent outputs |
+| `skills/cost-optimization.md` | Model selection, file scoping, dispatch optimization |
 | `commands/run-epic.md` | Main orchestration loop that calls this dispatch protocol |
 
 ---
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-17
+**Version:** 0.3.0
+**Last Updated:** 2026-02-19

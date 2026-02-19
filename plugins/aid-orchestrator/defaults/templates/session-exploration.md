@@ -260,7 +260,7 @@ orchestrated: true|false (if orchestrated by Controller)
 - [ ] Architecture decision documented (if applicable)
 - [ ] `CHANGELOG.md` entry added (if prototype committed)
 
-**See:** `skills/coding-standards.md` for documentation dependency tables
+**See:** `skills/agent-core.md` for documentation dependency tables
 
 ---
 

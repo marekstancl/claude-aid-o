@@ -346,14 +346,15 @@ and re-validate. Never output an invalid plan.
 | V-13 | `.trigger` is `auto\|manual` | "Analysis group {id} has invalid trigger: {value}" |
 | V-14 | No duplicate analysis_group IDs | "Duplicate analysis_group ID: {id}" |
 | V-15 | Agents must NOT include target step's own role (no self-review) | "Analysis group {id} includes self-review: agent '{role}' same as target {target}" |
-| V-16 | `analysis_groups` is OPTIONAL (missing/empty = valid, treat as `[]`) | — |
-| V-17 | Required fields: id, target, agents, mode, merge_strategy, trigger | "Analysis group at index {i} missing required field: {field}" |
-| V-18 | `.agents` has at least 1 entry | "Analysis group {id} has empty agents list" |
+| V-16 | `plan.gates` MUST contain ALL gates from `gates.yaml` where `required: true` | "Missing required gate: {gate_name}. Gates.yaml requires it but plan.json omits it" |
+| V-17 | `analysis_groups` is OPTIONAL (missing/empty = valid, treat as `[]`) | — |
+| V-18 | Required fields: id, target, agents, mode, merge_strategy, trigger | "Analysis group at index {i} missing required field: {field}" |
+| V-19 | `.agents` has at least 1 entry | "Analysis group {id} has empty agents list" |
 
 ### Validation Order
 
 ```
-Run validations in order V-01 through V-18.
+Run validations in order V-01 through V-19.
 Stop on FIRST failure — report the error, fix, re-validate from V-01.
 Rationale: later validations may depend on earlier ones passing
 (e.g., V-09 depends on V-01 having established valid step IDs).
@@ -368,6 +369,8 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
 ```
  1. RECEIVE EPIC file → validate sections (Goal, Scope, Constraints, DoD, AC) → extract epic_id
  2. PARSE steps → extract (role, objective, depends_on[], outputs[], paths, constraints) → assign step_ids
+ 2.1. AUTO-SCAFFOLD DETECTION (Section 7.3):
+      Check project-profile.yaml → if uninitialized → generate step_0_scaffold → PM confirms
  3. RESOLVE ordering:
       explicit deps → use as-is | partial → fill from defaults (Section 3) | none → full defaults
  4. BUILD dependency graph → adjacency list → dependencies[] with reasons (Section 1)
@@ -379,12 +382,18 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       c. Merge: manual wins on conflict, both kept if different agents, auto kept if uncovered
       d. Assign sequential IDs (Section 5)
       e. Apply V-15: remove self-review agents, drop empty groups
- 8. ASSEMBLE Plan JSON:
+ 8. GENERATE relevant_files per step (Section 7.1):
+      For each step, infer which files the agent needs to READ based on:
+      a. Outputs from dependency steps (files created/modified by prior steps)
+      b. Architect's file manifest (if available from step_1 output)
+      c. Step's allowed_paths (entry points like main.py, app.py, etc.)
+      d. Step's role-specific conventions (e.g., backend needs models/, schemas/)
+ 9. ASSEMBLE Plan JSON:
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
- 9. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
-10. VALIDATE → V-01 through V-18 → fix + re-validate on failure (max 3 attempts → escalation)
-11. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
+10. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
+11. VALIDATE → V-01 through V-19 → fix + re-validate on failure (max 3 attempts → escalation)
+12. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
 
 ### Example — Auto-Generated analysis_groups for the 7-Step EPIC
@@ -399,6 +408,168 @@ Using the EPIC from Sections 1-2, the Planner auto-generates 4 groups:
 | `analysis_4_architecture_review` | step_3_backend | B | step has 5 outputs | architect | review | weighted |
 
 Note: Rule A did NOT fire for step_6_security because V-15 prevents self-review (security reviewing security).
+
+---
+
+## 7.1 Relevant Files Generation per Step
+
+For each step in the plan, generate a `relevant_files` list that tells the dispatched
+agent which files to read FIRST. This eliminates exploratory Glob/Grep operations and
+significantly reduces agent execution time and token consumption.
+
+### Algorithm
+
+```
+For each step S in plan.steps:
+  relevant_files = []
+
+  1. DEPENDENCY OUTPUTS:
+     For each dep in S.depends_on:
+       dep_step = lookup(dep)
+       Add dep_step's expected output files to relevant_files
+       Format: "{file_path} ({description} -- from {dep_step.step_id})"
+
+  2. ARCHITECT MANIFEST (if step_1_architect produced a file manifest):
+     If architect output includes a file manifest or directory structure:
+       Filter files relevant to S.role from the manifest
+       Add filtered files to relevant_files
+
+  3. ENTRY POINTS from allowed_paths:
+     For each path in S.allowed_paths:
+       If path is a file (not directory): add it
+       If path is a directory: add conventional entry points:
+         - Python: __init__.py, main.py, app.py, conftest.py
+         - JS/TS: index.ts, App.tsx, main.ts
+         - Config: pyproject.toml, package.json, tsconfig.json
+
+  4. ROLE-SPECIFIC CONVENTIONS:
+     backend: models/, schemas/, routers/ entry files from allowed_paths
+     frontend: components/, pages/, services/ entry files
+     qa: existing test files in tests/ directory (for pattern matching)
+     security: middleware/auth*, endpoints with auth logic
+     domain: existing models/, entities/ files
+     docs: README, CHANGELOG, existing docs structure
+
+  5. DEDUPLICATE and LIMIT:
+     Remove duplicate paths
+     Limit to 15 files max (prioritize: deps > manifest > entry points > conventions)
+```
+
+### Output Format in plan.json
+
+```json
+{
+  "step_id": "step_3_backend",
+  "role": "backend",
+  "objective": "Implement REST API endpoints",
+  "allowed_paths": ["app/routers/", "app/services/", "app/main.py"],
+  "relevant_files": [
+    "app/models/bookmark.py (ORM model -- from step_2_domain)",
+    "app/schemas/bookmark.py (Pydantic schemas -- from step_2_domain)",
+    "contracts/openapi/bookmarks.yaml (API contract -- from step_1_architect)",
+    "app/main.py (FastAPI app entry point)"
+  ]
+}
+```
+
+### When relevant_files Cannot Be Determined
+
+If the Planner cannot infer relevant_files for a step (e.g., first EPIC run with no
+existing code), set `relevant_files: []`. The agent will fall back to Glob/Grep
+exploration within allowed_paths. This is acceptable but suboptimal.
+
+---
+
+## 7.2 E2E Step (Playwright)
+
+The Planner adds an E2E testing step when ALL of the following conditions are met:
+
+1. `project-profile.yaml` indicates `has_frontend: true` (or `architecture.app_type: web-app`)
+2. Playwright MCP is configured (available in MCP tools)
+3. EPIC includes frontend implementation or UI changes
+
+### E2E Step Configuration
+
+```json
+{
+  "step_id": "step_{N}_e2e",
+  "role": "e2e",
+  "objective": "Browser-level E2E testing of critical user flows with Playwright",
+  "depends_on": ["{frontend_step_id}", "{backend_step_id}"],
+  "outputs": ["e2e_test_results", "screenshots"],
+  "acceptance_criteria": [
+    "Critical user flows pass in browser",
+    "Screenshots captured as evidence",
+    "No broken navigation or form submission errors"
+  ],
+  "playbook": "e2e.md",
+  "model": "sonnet"
+}
+```
+
+### Placement Rules
+
+- **Dependencies:** Depends on frontend + backend implementation steps (both must complete)
+- **Parallel group:** Runs alongside QA, Security, and Docs (same level in DAG)
+- **Agent:** Uses QA agent with E2E playbook override (`playbook: "e2e.md"`)
+- **Model:** Sonnet (browser interactions are structured, do not require Opus)
+
+### When NOT to Add E2E Step
+
+If any of the three conditions above are NOT met, do NOT add an E2E step. No warning
+is needed -- the Planner simply skips it. The absence of Playwright MCP or frontend
+files is a normal, valid configuration.
+
+---
+
+## 7.3 Auto-Scaffold Detection
+
+Check if the project needs scaffolding before EPIC execution begins. This step
+runs between PARSE (step 2) and RESOLVE ordering (step 3) in the plan generation flow.
+
+### Algorithm
+
+```
+1. Read `project-profile.yaml` → check `initialized` field
+2. If `initialized: false` OR project-profile has no `tech_stack.test` configured:
+   - Detect needed scaffold from `tech_stack.languages`:
+     - Python:  `python -m venv .venv && pip install -r requirements.txt`
+     - Node.js: `npm init -y && npm install`
+     - Go:      `go mod init {module_name}`
+     - Rust:    `cargo init`
+   - Generate "step_0_scaffold":
+     {
+       "step_id": "step_0_scaffold",
+       "role": "architect",
+       "objective": "Initialize project structure, virtual environment, and dependencies",
+       "depends_on": [],
+       "outputs": ["project scaffold", "dependency manifest", "test configuration"],
+       "acceptance_criteria": [
+         "Project structure matches conventions",
+         "Dependencies installed and importable",
+         "Test runner configured and executable"
+       ]
+     }
+   - Insert as first step (all other steps depend on it)
+
+3. If `initialized: true` AND test framework configured: skip scaffold step
+
+4. Present scaffold plan to PM for confirmation:
+   ```
+   Auto-scaffold detected: {language} project needs initialization.
+   Step 0 will set up: {scaffold_description}
+   Include this step? (Y/N)
+   ```
+   If PM says N: skip scaffold step, proceed with existing steps.
+```
+
+### Dependency Wiring
+
+When step_0_scaffold is included:
+- All existing steps that had no dependencies (`depends_on: []`) now depend on `step_0_scaffold`
+- Steps that already have dependencies are NOT modified (their transitive dependency
+  through other steps is sufficient)
+- This ensures scaffold completes before any implementation begins
 
 ---
 
@@ -440,6 +611,156 @@ both are valid.
 
 ---
 
+## 9. Plan and EPIC Frontmatter Counters
+
+When generating plan and EPIC files, the Planner writes counters to their frontmatter
+for lifecycle tracking (archive logic in `skills/epic-orchestration.md` DONE state).
+
+### Plan Frontmatter (extended)
+
+```yaml
+# In .aid-o/01-plans/{plan}.md frontmatter:
+status: active           # active | completed
+epics_total: 3           # how many EPICs this plan spawns
+epics_completed: 0       # incremented at each EPIC DONE
+```
+
+The Planner determines `epics_total` from the plan content (number of EPIC references or
+explicit EPIC list). If only one EPIC: `epics_total: 1`. If plan does not reference
+specific EPICs: `epics_total: 1` (default -- single EPIC assumed).
+
+### EPIC Frontmatter (extended)
+
+```yaml
+# In .aid-o/02-epics/{epic}.md frontmatter:
+status: active
+plan_ref: bookmark-plan.md   # parent plan (null for standalone)
+plan_epics_total: 3      # copied from plan for quick reference
+sessions_total: 1        # from Session Breakdown (1 = single session)
+sessions_completed: 0    # incremented at each session DONE
+```
+
+If EPIC has `## Session Breakdown` with N sessions: `sessions_total: N`.
+Otherwise default `sessions_total: 1`.
+
+If EPIC is standalone (no parent plan): `plan_ref: null`, `plan_epics_total: null`.
+
+---
+
+## 10. Gate Inclusion (Step 3.gates)
+
+The plan MUST include ALL gates from the project's `gates.yaml`:
+
+1. Read `.aid-o/03-config/policies/gates.yaml`
+2. For each gate definition:
+   - If `required: true`: ALWAYS include in plan.json gates
+   - If `required: false` AND `when` condition evaluates to true based on
+     EPIC scope: include in plan.json gates
+   - If `required: false` AND `when` condition evaluates to false: exclude
+3. The plan.json `gates` array MUST match gates.yaml required gates exactly
+
+**Validation rule V-16 (NEW):** `plan.gates` MUST contain ALL gates from
+`gates.yaml` where `required: true`. Missing required gates = validation failure.
+
+Example:
+```yaml
+# gates.yaml has:
+tests_pass:     required: true    # MUST be in plan.json
+lint_pass:      required: true    # MUST be in plan.json
+security_scan:  required: true    # MUST be in plan.json
+docs_updated:   required: true    # MUST be in plan.json
+type_check:     required: false   # include IF frontend files in scope
+build_pass:     required: false   # include IF frontend files in scope
+```
+
+```json
+// plan.json gates (correct):
+"gates": ["tests_pass", "lint_pass", "security_scan_pass", "docs_updated"]
+// + conditionally: "type_check", "build_pass"
+```
+
+**NEVER** hardcode the gates list. ALWAYS read from gates.yaml.
+
+---
+
+## 11. Planner Optimization Strategy
+
+The Planner's job is to produce a plan.json + EPIC that the Controller can
+execute as FAST, EFFICIENTLY, and with as HIGH QUALITY as possible.
+
+### Optimization Priorities (in order)
+
+1. **Speed** -- minimize wall-clock time to completion
+   - Maximize parallelization: identify independent steps, group them
+   - Minimize sequential chain length (critical path)
+   - Prefer more parallel steps over fewer sequential steps
+   - Token count matters ONLY if it affects latency (larger context = slower)
+   - Cost is NOT a factor (MAX plan -- flat rate)
+
+2. **Quality** -- ensure outputs meet acceptance criteria
+   - Every step has clear, verifiable acceptance criteria
+   - Dependencies are explicit -- no implicit ordering assumptions
+   - Security and QA steps always run AFTER implementation (not before)
+   - Gates validate cumulative quality, not just last step
+
+3. **Efficiency** -- avoid wasted work
+   - No redundant steps (don't split what one agent can do well)
+   - File scoping: each step knows exactly which files to read (relevant_files)
+   - Dependency outputs are explicit -- agents don't guess what prior steps did
+
+### Step Planning Rules
+
+1. **Architect is always step 1** -- scaffolds structure, defines contracts
+2. **Domain + Backend can sometimes parallelize** if architect provides clear
+   enough contracts (models vs. routes are independent)
+3. **QA + Security + Docs ALWAYS parallelize** -- they read existing code, don't
+   conflict
+4. **Frontend + Backend parallelize** when contracts are defined by architect
+5. **Maximum parallel group size: 4** -- more causes context window pressure
+   on the Controller tracking all outputs
+
+### Session Split Decision
+
+The Planner decides session boundaries automatically:
+
+| Steps | Sessions | Rationale |
+|-------|----------|-----------|
+| 1-6 | 1 | Fits comfortably in single context window |
+| 7-9 | 2 | Split at natural breakpoint (implementation -> verification) |
+| 10-14 | 2-3 | Split by domain (backend session -> frontend session -> quality) |
+| 15+ | 3+ | Rare; split at dependency-free boundaries |
+
+Rules for split placement:
+- NEVER split inside a parallel group
+- ALWAYS split AFTER a gate-worthy milestone (something that can be validated)
+- Each session should produce independently testable deliverables
+- First session always includes architect + core implementation
+- Last session always includes QA + Security + Docs
+
+### Session Breakdown Generation
+
+The Planner writes `## Session Breakdown` into the EPIC file:
+
+```markdown
+## Session Breakdown
+
+### Session 1: Core Implementation (steps 1-5)
+**Goal:** Build working API with data model
+**Steps:** architect -> domain -> backend -> frontend (parallel: domain+backend)
+**Deliverables:** Working endpoints, database, basic UI
+**Estimated duration:** 30-45 min
+
+### Session 2: Quality & Release (steps 6-8)
+**Goal:** Verify, secure, document, release
+**Steps:** qa + security + docs (all parallel)
+**Deliverables:** Test suite (90%+ coverage), security review, documentation
+**Estimated duration:** 20-30 min
+```
+
+And sets EPIC frontmatter: `sessions_total: 2`
+
+---
+
 ## MUST Rules
 
 1. **ALWAYS validate the dependency graph** before generating parallel groups or analysis groups
@@ -452,6 +773,8 @@ both are valid.
 8. **ALWAYS include a reason** for every dependency edge
 9. **ALWAYS assign sequential analysis group IDs** — no gaps, no duplicates
 10. **ALWAYS preserve EPIC-defined analysis groups** even if no auto-trigger rules match
+11. **NEVER hardcode gates** — ALWAYS read from gates.yaml and include all required gates (V-16)
+12. **ALWAYS write frontmatter counters** when creating plans (epics_total) and EPICs (sessions_total)
 
 ---
 
@@ -464,5 +787,5 @@ both are valid.
 
 ---
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-17
+**Version:** 0.3.0
+**Last Updated:** 2026-02-19

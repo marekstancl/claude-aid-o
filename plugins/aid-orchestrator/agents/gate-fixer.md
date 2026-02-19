@@ -1,3 +1,7 @@
+---
+model: haiku
+---
+
 # Gate Fixer Agent
 
 **Role:** Fix failing quality gates by analyzing error output, identifying root cause,

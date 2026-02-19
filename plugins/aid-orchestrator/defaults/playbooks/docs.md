@@ -112,3 +112,10 @@ Only report genuine issues. Do not create this section if you found no issues.
 - Issues you are actively fixing in your current task
 - Style preferences without objective backing
 - Suggestions requiring complete rewrites with unclear benefit
+
+---
+
+## Output Requirements
+
+Your step output MUST end with an `## Execution Summary` block.
+See `skills/agent-core.md` for the exact format. This is not optional.

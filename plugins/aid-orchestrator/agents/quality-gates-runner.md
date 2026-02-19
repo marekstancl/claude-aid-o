@@ -1,7 +1,7 @@
 ---
 name: quality-gates-runner
 description: Runs the 6-gate pre-commit quality protocol autonomously before any git commit. Use this agent before committing to ensure all quality standards are met.
-model: inherit
+model: haiku
 ---
 
 You are the Quality Gates Runner for AID Orchestrator. Run all 6 quality gates and report results.

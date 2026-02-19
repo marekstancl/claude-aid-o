@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Project Scanner Agent
 
 **Role:** Analyze projects to understand tech stack, architecture, and conventions.
@@ -64,6 +68,33 @@ Your only write targets are the designated output paths in `.aid-o/04-engine/`.
    - Identify: src/, lib/, app/, pages/, components/, tests/, docs/, scripts/
    - Detect pattern: monorepo (workspaces), single app, microservices
    - Detect architecture: by-feature, by-layer, hybrid
+
+3.1. CLASSIFY app type from project indicators:
+
+   | Type | Indicators | AID Pipeline Adaptation |
+   |------|-----------|------------------------|
+   | `web-app` | package.json + React/Vue/Angular/Svelte | Full frontend+backend pipeline, Playwright MCP recommended |
+   | `api-service` | FastAPI/Express/Flask/Spring, no frontend framework | Backend-focused, skip frontend role |
+   | `cli-tool` | argparse/click/commander/cobra, `bin` in package.json | Backend-focused, skip frontend role |
+   | `desktop-app` | Electron/Tauri, tkinter/PyQt | Custom pipeline, platform-specific testing |
+   | `mobile-app` | React Native/Flutter/Swift/Kotlin project | Custom pipeline, device testing considerations |
+   | `library` | No entry point, just src + tests, `main`/`module` in package.json | Backend-focused, emphasis on API design + docs |
+   | `plugin` | Plugin manifest (claude-plugin, vscode extension, etc.) | Adapt to host platform conventions |
+   | `script` | Single file or small collection, no framework | Minimal pipeline, maybe just QA + docs |
+   | `monorepo` | Workspaces in package.json/pnpm-workspace.yaml/lerna.json | Multi-package orchestration |
+   | `erp-module` | ERP framework indicators (Odoo manifests, SAP config, etc.) | Domain-heavy, strict conventions |
+   | `infrastructure` | Terraform/Pulumi/CloudFormation, Dockerfile only | DevOps-focused roles |
+
+   Store as `architecture.app_type` in project-profile.yaml.
+
+   The Planner uses `app_type` to:
+   - Select appropriate roles (skip frontend for CLI tools)
+   - Choose relevant gates (skip build_pass for libraries)
+   - Assign parallel groups (backend+frontend only for web-app)
+   - Recommend MCPs (Playwright for web-app, Docker for infrastructure)
+
+   If type is ambiguous, set `architecture.app_type_confidence: "low"` and list
+   candidates. The PM can override in project-profile.yaml.
 
 4. DETECT conventions:
    - Naming: camelCase, snake_case, kebab-case, PascalCase (from file names)
@@ -167,6 +198,8 @@ tech_stack:
 
 architecture:
   pattern: "monorepo|single-app|microservices"
+  app_type: "web-app|api-service|cli-tool|desktop-app|mobile-app|library|plugin|script|monorepo|erp-module|infrastructure"
+  app_type_confidence: "low|medium|high"
   structure: "by-feature|by-layer|hybrid"
   directories:     # {source: [], tests: [], docs: [], config: [], scripts: []}
   frontend_backend_split: true|false

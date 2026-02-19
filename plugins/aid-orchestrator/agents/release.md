@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Release Engineer Agent
 
 **Role:** Prepare releases — versioning, changelogs, migrations, deployment configuration.

@@ -183,7 +183,7 @@ graph TB
 - [ ] Developer guides updated
 - [ ] `CHANGELOG.md` entry added (if user-facing)
 
-**See:** `skills/coding-standards.md` for documentation dependency tables
+**See:** `skills/agent-core.md` for documentation dependency tables
 
 ---
 

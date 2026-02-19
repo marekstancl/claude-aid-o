@@ -70,10 +70,54 @@ Create these empty tracking files in `.aid-o/04-engine/` (skip if they already e
 | `memory/active-work.md` | `# Active Work\n\n_Initialized by /aid-init_\n\n## Current Focus\n\n_No active work_\n\n## Context for Next Session\n\n## Recent Work\n\n## Next Steps\n\n## Blockers` |
 | `memory/project-profile.yaml` | `# Project Profile\n# Auto-populated by /aid-setup or Project Scanner agent\n\nproject_name: ""\ntech_stack: {}\narchitecture: ""\ninitialized: false` |
 | `memory/decisions.yaml` | `# Key Decisions\n# ADR-lite format — recorded by Orchestrator\n\ndecisions: []` |
-| `backlog.md` | `# Backlog\n\n_Managed by AID Curator agent_\n\n## Active Proposals\n\n| ID | Type | Area | Suggestion | Priority | Source | Status |\n|----|------|------|------------|----------|--------|--------|\n\n## Deferred\n\n| ID | Type | Area | Suggestion | Reason | Date |\n|----|------|------|------------|--------|------|\n\n## Rejected\n\n| ID | Type | Area | Suggestion | Rejected by | Reason | Date |\n|----|------|------|------------|-------------|--------|------|\n\n## Implemented\n\n| ID | Type | Area | Epic Ref | Date |\n|----|------|------|----------|------|` |
+| `backlog.md` | See **Backlog Template** below |
 | `lessons-learned.md` | `# Lessons Learned\n\n| Date | Lesson | Context |\n|------|---------|---------|` |
 | `command-history.md` | `# Command History\n\n| Command | Purpose | Verified |\n|---------|---------|----------|` |
 | `evidence/.gitkeep` | _(empty file)_ |
+
+### Backlog Template
+
+The `backlog.md` file uses categorized sections for different proposal types.
+**Source values:** `user` (submitted by PM), `agent` (discovered by AI agent during EPIC),
+`curator` (proposed by Curator post-processing), `audit` (found by Auditor).
+
+Initial content for `backlog.md`:
+
+```markdown
+# AID Backlog
+
+_Managed by AID Curator agent. Source: user | agent | curator | audit_
+
+## Active Proposals
+
+### Bugs
+| ID | Priority | Source | Summary | Epic |
+|----|----------|--------|---------|------|
+
+### Features
+| ID | Priority | Source | Summary | Epic |
+|----|----------|--------|---------|------|
+
+### Refactoring / Tech Debt
+| ID | Priority | Source | Summary | Epic |
+|----|----------|--------|---------|------|
+
+### Performance
+| ID | Priority | Source | Summary | Epic |
+|----|----------|--------|---------|------|
+
+## Deferred
+| ID | Type | Priority | Source | Summary | Reason |
+|----|------|----------|--------|---------|--------|
+
+## Rejected
+| ID | Type | Source | Summary | Reason |
+|----|------|--------|---------|--------|
+
+## Implemented
+| ID | Type | Source | Summary | Implemented In |
+|----|------|--------|---------|----------------|
+```
 
 ## Implementation Steps
 

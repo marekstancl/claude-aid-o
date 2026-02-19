@@ -1,3 +1,11 @@
+---
+status: active
+plan_ref: null             # parent plan filename (null for standalone)
+plan_epics_total: null     # copied from plan for quick reference (null for standalone)
+sessions_total: 1          # from Session Breakdown (1 = single session)
+sessions_completed: 0      # incremented at each session DONE
+---
+
 # EPIC: <ID> — <Title>
 
 ## Context

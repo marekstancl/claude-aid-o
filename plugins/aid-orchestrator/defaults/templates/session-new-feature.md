@@ -165,7 +165,7 @@ pytest tests/test_new_feature.py
 - [ ] Developer guides updated
 - [ ] `CHANGELOG.md` entry added
 
-**See:** `skills/coding-standards.md` for documentation dependency tables
+**See:** `skills/agent-core.md` for documentation dependency tables
 
 ---
 

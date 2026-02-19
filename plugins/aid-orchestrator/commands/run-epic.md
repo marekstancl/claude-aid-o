@@ -612,13 +612,11 @@ After a step passes PHASE_CHECK, check for pending analysis:
    ## Evidence
    All artifacts: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
    ```
-4. **POST-PROCESSING** (per `skills/epic-orchestration.md` DONE state):
-   a. Dispatch **Curator agent** (`agents/curator.md`) and **Auditor agent** (`agents/auditor.md`) in parallel (single message with two Task calls)
-   b. If Curator fails: log warning, skip proposals, continue (post-processing is non-blocking)
+4. **POST-PROCESSING (Auditor + Lessons-Extractor)** (per `skills/epic-orchestration.md` DONE state):
+   a. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
+   b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`)
    c. If Auditor fails: log warning, note "audit incomplete" in final report, continue
-   d. Curator proposals → Orchestrator evaluates → approved proposals to PM via Slack
-      (per `skills/slack-mcp.md` Type D — Proposal, Type E — Rejection Info)
-   e. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
+   d. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
 5. **Memory indexing** (per `skills/memory-mcp.md` → `memory_index_epic()`):
    - Read `.aid-o/03-config/policies/memory-config.yaml`
    - IF `memory.enabled` AND `memory.auto_index.epic_done`:
@@ -628,16 +626,32 @@ After a step passes PHASE_CHECK, check for pending analysis:
      - Index audit findings from audit-report.md → `qdrant-store` (type: audit_finding)
      - IF `memory.auto_index.gate_results`: index gates summary → `qdrant-store` (type: audit_finding)
    - IF disabled or fails → skip silently, DONE continues normally
-6. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
-7. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
-   a. Read `.aid-o/04-engine/epic-queue.yaml`
-   b. IF queue is not paused AND next EPIC exists (status: "queued"):
-      - Mark next EPIC as "running" in queue
-      - Send Status Update: `:arrows_counterclockwise: Auto-starting next EPIC: {next_epic_id}`
-      - Start new run-epic loop with next EPIC (transition: DONE → IDLE → PLANNING)
-   c. ELSE:
-      - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
-      - Print completion message
+6. **Archive Logic** (per `skills/epic-orchestration.md` DONE state item 8):
+   - Archive session, update EPIC counter, conditionally archive EPIC and plan
+   - EPIC archived only when `sessions_completed == sessions_total`
+   - Plan archived only when `epics_completed == epics_total`
+7. **Curator Post-Processing (MANDATORY — synchronous):**
+   - Dispatch Curator agent with all step outputs, gate results, final report
+   - Wait for Curator output (NOT in background)
+   - Write proposals to backlog.md
+   - Include proposal count in completion summary
+   - If Curator fails: log warning, set proposal_count = 0, continue
+8. **Completion Summary** (per `skills/epic-orchestration.md` DONE state item 10):
+   Present the structured Completion Summary from `skills/epic-orchestration.md`
+   DONE state section. This is the last thing the PM sees -- make it informative
+   and actionable. Includes step count, gates, duration, key outputs, and 5
+   next-step options (/aid-review, /aid-brainstorm, /plan-epic, /audit, /aid-analytics).
+9. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
+10. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+    a. Read `.aid-o/04-engine/epic-queue.yaml`
+    b. IF queue is not paused AND next EPIC exists (status: "queued"):
+       - Mark next EPIC as "running" in queue
+       - Send Status Update: `:arrows_counterclockwise: Auto-starting next EPIC: {next_epic_id}`
+       - Start new run-epic loop with next EPIC (transition: DONE → IDLE → PLANNING)
+    c. ELSE:
+       - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
+       - Print completion message
+11. **Final Stage Log Entry** (MUST be the LAST action in DONE state)
 
 **Evidence:** Save `final_report.md`.
 

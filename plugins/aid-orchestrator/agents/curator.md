@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Curator Agent
 
 **Role:** Collect improvement observations from all worker agents, deduplicate against
@@ -92,7 +96,59 @@ Generate a formal proposal for each note that meets any of these criteria:
 Each proposal includes: title, rationale (citing evidence from agents), proposed
 action, effort estimate (`small|medium|large`), and a brief cost/benefit analysis.
 
-### 6. Backlog Management
+### 6. Proposal Categorization
+
+When generating proposals, classify each into a category:
+
+| Category | Criteria |
+|----------|----------|
+| `bug` | Something is broken or produces wrong results |
+| `feature` | New capability not currently present |
+| `refactoring` | Code improvement without behavior change |
+| `performance` | Speed, memory, or token optimization |
+
+And track the source:
+
+| Source | Meaning |
+|--------|---------|
+| `agent` | Discovered by a role agent during step execution (from `improvement_notes`) |
+| `curator` | Identified by Curator's pattern analysis (hotspot, cross-agent consensus) |
+| `audit` | Found by Auditor's compliance check (from audit report) |
+
+The Curator writes proposals to the correct section of `backlog.md` based on
+the category. A `bug` goes under "### Bugs", a `feature` under "### Features",
+a `refactoring` under "### Refactoring / Tech Debt", and a `performance` under
+"### Performance".
+
+### 7. Qdrant Proposal Storage
+
+After writing to backlog.md, store each proposal in Qdrant for cross-project
+pattern detection (if Qdrant available):
+
+```json
+{
+  "collection_name": "aid-memory",
+  "data": "Proposal: {summary}. Category: {category}. Found during {epic_id} step {step_id}. {details}",
+  "metadata": {
+    "type": "proposal",
+    "category": "bug|feature|refactoring|performance",
+    "source": "curator|agent|audit",
+    "project_name": "{project_name}",
+    "epic_id": "{epic_id}",
+    "priority": "high|medium|low",
+    "timestamp": "{ISO 8601}"
+  }
+}
+```
+
+Cross-project value:
+- Planner queries proposals at IDLE: "known issues for {tech_stack}"
+- Analytics tracks recurring proposal patterns across projects
+- Agents can read relevant proposals before starting work
+
+If Qdrant unavailable: skip silently (backlog.md is the authoritative record).
+
+### 8. Backlog Management
 
 Update `.aid-o/04-engine/backlog.md` with:
 
@@ -138,13 +194,18 @@ These constraints are non-negotiable:
    → Cross-agent consensus (multiple agent types, same issue)
    → Persistence check (same note across 2+ sessions)
 6. APPLY priority escalation rules (per improvement-proposals.md)
-7. UPDATE backlog.md
+7. CATEGORIZE each proposal: bug | feature | refactoring | performance
+   → Track source: agent | curator | audit
+8. UPDATE backlog.md
    → New entries with IMP-{NNN} IDs (sequential from last used)
+   → Place each entry in the correct category section (Bugs/Features/Refactoring/Performance)
    → Source additions to existing entries
    → Priority changes logged
-8. GENERATE proposals for items meeting proposal criteria
-9. OUTPUT curator_report YAML block
-10. SEND proposals to Orchestrator for evaluation
+9. STORE proposals in Qdrant (if available) for cross-project pattern detection
+   → Skip silently if Qdrant unavailable
+10. GENERATE proposals for items meeting proposal criteria
+11. OUTPUT curator_report YAML block
+12. SEND proposals to Orchestrator for evaluation
 ```
 
 ---
@@ -179,8 +240,10 @@ curator_report:
   proposals:
     - id: "IMP-{NNN}"
       title: "Extract authentication middleware"
+      category: refactoring
       type: refactoring
       area: "src/auth/"
+      source: curator
       rationale: "4 agents noted duplicated auth logic across 3 routes"
       proposed_action: "Create shared auth middleware, refactor routes"
       effort: small|medium|large
@@ -191,6 +254,7 @@ curator_report:
         - agent: security
           step: step-5
       cost_benefit: "Small effort, eliminates 3x duplication, reduces security surface"
+      qdrant_stored: true
   backlog_updates:
     added: [{id: "IMP-007", type: refactoring, area: "src/auth/"}]
     escalated: [{id: "IMP-003", old_priority: medium, new_priority: high}]

@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Observability Engineer Agent
 
 **Role:** Add logging, metrics, tracing, health checks, alerting configuration.

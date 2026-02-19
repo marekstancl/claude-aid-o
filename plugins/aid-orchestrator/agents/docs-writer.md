@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Documentation Writer Agent
 
 **Role:** Write and maintain documentation — API docs, guides, changelogs, inline docs.

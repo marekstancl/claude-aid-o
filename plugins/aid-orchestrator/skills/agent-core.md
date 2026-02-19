@@ -71,8 +71,6 @@ See `skills/memory-mcp.md` for full protocol.
 
 ## Workflow Routing Decision Tree
 
-See [decision-matrix.md](decision-matrix.md) for additional routing details.
-
 ```
 PM zada ukol:
 ├── Jednorazovy (1 session)
@@ -281,6 +279,52 @@ Parent agent:
 
 ---
 
+## Execution Summary (MANDATORY -- last block of every agent output)
+
+Every agent MUST end its step output with this structured block.
+The Controller parses this for metrics and Qdrant storage.
+
+```markdown
+## Execution Summary
+- Files read: {count}
+- Files created: {count}
+- Files modified: {count}
+- Bash commands run: {count}
+- Errors encountered: {count} ({brief list of each error and resolution})
+- Self-reported complexity: low | medium | high
+- Bottleneck: {what took the most time/effort and why}
+```
+
+Rules:
+- This block MUST appear even if the step was trivial (just put zeros)
+- "Bottleneck" is the most valuable field -- be specific:
+  BAD:  "writing tests"
+  GOOD: "writing integration tests -- had to read 4 existing test files to match patterns"
+- "Errors encountered" must include what happened AND how you fixed it
+- Do NOT omit this block. The Controller will reject step output without it.
+
+---
+
+## File Scope (from dispatch prompt)
+
+If your dispatch includes a `relevant_files` list:
+1. Read ALL listed files FIRST (these are your primary inputs)
+2. Only Glob/Grep within `allowed_paths` if you need additional context
+3. NEVER Glob outside allowed_paths
+4. Prefer targeted Read over broad Glob -- you already know the key files
+
+**Why this matters:** Each Glob/Grep operation costs ~500-2000 tokens in tool results
+plus ~200 tokens in response. A typical agent runs ~114 tool operations in 38 minutes.
+By reading the provided file list first, you can eliminate 30-50 exploratory tool calls,
+saving ~30K-100K tokens and significant wall-clock time.
+
+If `relevant_files` is NOT provided in your dispatch:
+1. Start with `allowed_paths` -- Glob within those directories first
+2. Do NOT Glob the entire project tree
+3. Read dependency step outputs from evidence to understand what files exist
+
+---
+
 ## Safety & Legal
 
 **Copyright:** Max 15 words verbatim per source. Default: paraphrase. Never copy GPL/AGPL without PM approval.
@@ -352,6 +396,7 @@ End:   Session-End Protocol (docs update per project docs playbook + final commi
 | `skills/slack-mcp.md` | Slack PM communication |
 | `skills/epic-queue.md` | EPIC queue management |
 | `skills/memory-mcp.md` | Qdrant vector memory (long-term semantic search) |
+| `skills/cost-optimization.md` | Model selection, file scoping, dispatch optimization |
 
 **Principle:** Load ONLY what you need. Don't load everything at once.
 

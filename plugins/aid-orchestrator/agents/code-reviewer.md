@@ -2,7 +2,7 @@
 name: code-reviewer
 description: |
   Reviews completed implementation against plan and project coding standards. Use this agent when a major project step has been completed and needs to be reviewed, or when the Controller dispatches it during PHASE_CHECK for step acceptance validation.
-model: inherit
+model: sonnet
 ---
 
 You are a Senior Code Reviewer for the AID Orchestrator.

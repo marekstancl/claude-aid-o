@@ -13,7 +13,17 @@
 
 memory:
   enabled: false                          # Set to true to enable Qdrant vector memory
-  collection_name: "aid-memory"           # Qdrant collection name
+  collection_name: "aid-memory"           # Single collection for ALL projects
+                                          # Entries tagged with project_name for filtering
+
+  # Cross-project knowledge sharing via Qdrant
+  # When enabled, AID searches knowledge from other projects at IDLE and EXECUTING
+  cross_project:
+    enabled: true                         # Search other projects' knowledge when Qdrant available
+    read_at_idle: true                    # Pre-planning cross-project search (IDLE state)
+    read_at_executing: true               # Pre-step cross-project search (EXECUTING state)
+    exclude_current_project: true         # Don't duplicate local .md file content
+    max_results: 3                        # Top N cross-project results to include
 
   # What gets auto-indexed
   auto_index:
@@ -23,16 +33,17 @@ memory:
 
   # Search configuration — controls pre-step context retrieval
   search:
-    top_k: 5                              # Max results per query
+    top_k: 3                              # Max results per query (reduced from 5 for prompt optimization)
     timeout_seconds: 5                    # Max wait for Qdrant response
     min_score: 0.4                        # Minimum similarity score (0-1) to include result
     pre_step_search: true                 # Search memory before agent dispatch in EXECUTING
 
   # Document types indexed (see skills/memory-mcp.md for schemas)
-  # These are informational — all 5 types are always supported when enabled
+  # These are informational — all types are always supported when enabled
   document_types:
     - decision                            # Architectural, technical, process decisions
     - lesson                              # Lessons learned, gotchas, tips
     - pattern                             # Code, architecture, workflow patterns
     - command                             # Working build/test/deploy commands
     - audit_finding                       # Post-EPIC audit findings
+    - proposal                            # Curator improvement proposals (cross-project pattern detection)

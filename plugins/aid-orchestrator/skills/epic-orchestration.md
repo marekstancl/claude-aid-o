@@ -125,6 +125,27 @@ The Controller is a state machine. Every transition produces evidence. Failures 
       ```
 6. Transition to PLANNING
 
+#### Cross-Project Knowledge Read (IDLE state)
+
+Before generating the plan, search Qdrant for relevant cross-project knowledge:
+
+1. Check `memory-config.yaml` -> `memory.enabled` AND `cross_project.enabled`
+2. If both true:
+   a. Read `project-profile.yaml` for current project's `tech_stack`
+   b. `qdrant-find` with query = "{EPIC goal} {tech_stack_summary}"
+   c. Filter: exclude entries where `metadata.project_name == current_project`
+   d. Take top `cross_project.max_results` entries (default: 3)
+   e. Format as CROSS-PROJECT KNOWLEDGE block:
+      ```
+      CROSS-PROJECT KNOWLEDGE (from Qdrant):
+      - [{source_project}] {lesson/pattern/decision text}
+      - [{source_project}] {lesson/pattern/decision text}
+      ```
+   f. Pass to Planner as additional context
+3. If Qdrant unavailable or `cross_project.enabled: false`:
+   Skip silently, log to stage_log:
+   `{"state": "IDLE", "action": "cross_project_search", "status": "skipped", "reason": "qdrant_unavailable|disabled"}`
+
 **Evidence:** Copy EPIC to `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
 
 ### 2. PLANNING
@@ -208,7 +229,12 @@ default to `recommended` preset behavior.
       - Plan step (objective, inputs, outputs, constraints)
       - Previous step outputs (if dependency)
       - Allowed/forbidden paths
-   d. Agent executes and produces outputs
+   d. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
+      - If `memory.cross_project.read_at_executing: true` AND Qdrant available:
+        `qdrant-find` query = step objective + role + tech_stack
+      - Include top `cross_project.max_results` entries in dispatch prompt
+      - If Qdrant unavailable: skip silently (agent works normally)
+   e. Agent executes and produces outputs
 3. For parallel group (per `skills/parallel-dispatch.md`):
    a. Create branch per agent from `epic/{epic_id}/main` (same base commit)
    b. Add PARALLEL CONTEXT to each prompt (other agents, branch names, scope warning)
@@ -285,6 +311,77 @@ Key context to pass:
       - **MEDIUM/INFO:** Log to `evidence/discovered_issues/`. Add to `improvement_notes` (Curator picks up). NOT blocking.
    e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
    f. Session file: add CRITICAL/HIGH issues to Session Log
+
+#### Diff Generation (after output verification)
+
+For each completed step that modified files:
+
+1. Generate diff:
+   - If on a step branch: `git diff main...HEAD > diff.patch`
+   - If on main branch: `git diff HEAD~{commit_count}..HEAD > diff.patch`
+   - If git not available: skip, log warning
+2. Save to evidence: `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/diff.patch`
+3. Record in plan_progress.json:
+   ```json
+   "step_3_backend": {
+     "diff_patch": "evidence/{epic_id}/{run_id}/steps/step_3_backend/diff.patch",
+     "files_modified": 15,
+     "lines_added": 423,
+     "lines_removed": 12
+   }
+   ```
+
+If the diff is empty (step produced no file changes), record:
+```json
+"diff_patch": null,
+"files_modified": 0
+```
+
+#### Per-Agent Metrics Capture (PHASE_CHECK)
+
+For each completed step (sequential or parallel):
+
+1. **Controller-measured metrics:**
+   - `completed_at`: timestamp when Task tool returned
+   - `duration_seconds`: completed_at - dispatched_at
+   - `prompt_size_chars`: length of dispatch prompt
+   - `output_size_chars`: length of step output
+
+2. **Agent self-reported metrics:**
+   - Parse the `## Execution Summary` block from step output
+   - Extract: files_read, files_created, files_modified, bash_commands,
+     errors, error_details, complexity, bottleneck
+   - If Execution Summary block is missing: log warning, proceed with
+     controller-only metrics
+
+3. **Update evidence files:**
+   - `dispatch_log.json`: per-agent entry with all metrics
+   - `plan_progress.json`: per-step timing + complexity
+   - `stage_log.jsonl`: timing summary with bottleneck identification:
+     ```json
+     {"state": "PHASE_CHECK", "step_id": "step_3_backend", "duration_seconds": 323, "complexity": "high", "bottleneck": "writing integration tests", "errors": 2}
+     ```
+
+4. **Qdrant metric write (async, non-blocking):**
+   If Qdrant available, store execution metric:
+   ```json
+   {
+     "collection_name": "aid-memory",
+     "data": "Agent backend completed step_3 in 323s. Complexity: high. Bottleneck: writing integration tests -- read 4 test files for patterns. Errors: 2 (import fix, timeout retry).",
+     "metadata": {
+       "type": "metric",
+       "metric_kind": "agent_execution",
+       "project_name": "{project_name}",
+       "epic_id": "{epic_id}",
+       "step_id": "step_3_backend",
+       "role": "backend",
+       "duration_seconds": 323,
+       "complexity": "high",
+       "errors": 2,
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
 
 **Auto-Decision Logic:**
 ```
@@ -439,22 +536,19 @@ if gate_fails:
    d. Archive session file to `.aid-o/04-engine/sessions/archive/`
    e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
-3. **POST-PROCESSING:**
-   a. Dispatch **Curator agent** (`agents/curator.md`) — collects `improvement_notes`
-      from all step outputs, deduplicates vs backlog, proposes improvements.
-      Protocol: `skills/improvement-proposals.md`
-   b. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
+3. **POST-PROCESSING (Auditor + Lessons-Extractor):**
+
+   **NOTE:** Curator dispatch has been moved to item 9 (mandatory synchronous step).
+   Curator MUST run BEFORE the completion summary so proposal count is available.
+
+   a. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
       (code, security, docs, frontend, database), scores project health,
       tracks trend vs previous audit. Report -> `evidence/{epic_id}/audit-report.md`
-   c. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`) —
+   b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`) —
       parses all step outputs for lessons, commands, and gotchas.
-   d. Curator proposals -> Orchestrator evaluates:
-      - APPROVED proposals -> PM via Slack Type D (Improvement Proposal, expects reply)
-      - REJECTED proposals -> PM via Slack Type E (Rejection Info, no reply)
-      - Per `skills/slack-mcp.md` — batch handling: each proposal = separate message
-   e. Auditor summary -> PM via Slack Type F (Audit Summary, no reply)
+   c. Auditor summary -> PM via Slack Type F (Audit Summary, no reply)
       - If critical findings match `escalation_triggers` -> additional Type A (Escalation)
-   f. Auditor findings -> Orchestrator validates -> Curator processes into backlog
+   d. Auditor findings -> Orchestrator validates -> Curator processes into backlog (item 9)
 4. **Lessons-Learned File Update** (ALWAYS — independent of Qdrant):
    After dispatching lessons-extractor agent, parse its output and append new entries
    to `.aid-o/04-engine/lessons-learned.md`:
@@ -516,8 +610,209 @@ if gate_fails:
    If Qdrant is unavailable: skip gracefully (non-blocking), log warning.
    File-based writes (steps 4 and 5) are the authoritative record.
 
-7. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
-8. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+7. **EPIC-Level Metrics to Qdrant (DONE state)**
+
+   Aggregate all step metrics into an EPIC summary metric:
+
+   ```json
+   {
+     "collection_name": "aid-memory",
+     "data": "EPIC {epic_id} completed: {step_count} steps, {total_duration}s total, {gate_retries} gate retries. Slowest: {slowest_step} ({slowest_duration}s). Most errors: {most_errors_step}.",
+     "metadata": {
+       "type": "metric",
+       "metric_kind": "epic_summary",
+       "project_name": "{project_name}",
+       "epic_id": "{epic_id}",
+       "total_duration_seconds": "{sum of all step durations}",
+       "step_count": "{count}",
+       "gate_retries": "{count}",
+       "slowest_step": "{step_id}",
+       "most_errors_step": "{step_id}",
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
+
+   Also store gate results as metrics:
+   ```json
+   {
+     "collection_name": "aid-memory",
+     "data": "Gate {gate_name} result for EPIC {epic_id}: {passed/failed}, {retries} retries, {duration_seconds}s.",
+     "metadata": {
+       "type": "metric",
+       "metric_kind": "gate_result",
+       "project_name": "{project_name}",
+       "epic_id": "{epic_id}",
+       "gate_name": "{gate_name}",
+       "passed": true,
+       "retries": 0,
+       "duration_seconds": 45,
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
+
+   **Token Consumption Profile to Qdrant:**
+
+   Record the token consumption profile for cross-project analysis via /aid-analytics:
+   ```json
+   {
+     "collection_name": "aid-memory",
+     "data": "EPIC {epic_id} token profile: {total_tokens_estimated} total, {agent_execution_pct}% agent execution, {dispatch_pct}% dispatch, {controller_pct}% controller. Active compute: {active_compute_minutes} min. Models: {models_used}.",
+     "metadata": {
+       "type": "metric",
+       "metric_kind": "token_profile",
+       "project_name": "{project_name}",
+       "epic_id": "{epic_id}",
+       "total_tokens_estimated": "{estimated from duration and ops}",
+       "agent_execution_pct": "{percentage}",
+       "dispatch_pct": "{percentage}",
+       "controller_pct": "{percentage}",
+       "step_count": "{count}",
+       "active_compute_minutes": "{total minutes}",
+       "models_used": {"opus": 0, "sonnet": 0, "haiku": 0},
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
+
+   Per-step token estimate (stored per step):
+   ```json
+   {
+     "collection_name": "aid-memory",
+     "data": "Step {step_id} token profile: model={model}, dispatch={dispatch_prompt_tokens} tokens, execution={estimated_execution_tokens} tokens, {duration_seconds}s, {tool_operations_estimated} tool ops.",
+     "metadata": {
+       "type": "metric",
+       "metric_kind": "step_token_profile",
+       "project_name": "{project_name}",
+       "epic_id": "{epic_id}",
+       "step_id": "{step_id}",
+       "model": "{opus|sonnet|haiku}",
+       "dispatch_prompt_tokens": "{token count}",
+       "estimated_execution_tokens": "{estimated from duration}",
+       "duration_seconds": "{seconds}",
+       "tool_operations_estimated": "{count}",
+       "files_in_scope": "{count}",
+       "timestamp": "{ISO 8601}"
+     }
+   }
+   ```
+
+   The Controller estimates execution tokens from:
+   - `duration_seconds x ops_per_minute_estimate x avg_tokens_per_op`
+   - Where ops_per_minute ~ 3, avg_tokens_per_op ~ 2600 (from BMK-001 baseline)
+
+   This is an ESTIMATE, not exact API billing. The estimate provides useful relative
+   comparison across steps and EPICs for optimization decisions.
+
+   If Qdrant unavailable: skip metric writes gracefully, log warning. Continue with
+   remaining DONE actions.
+
+8. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
+
+   1. **Archive session:**
+      - Move to `.aid-o/04-engine/sessions/archive/{filename}`
+      - Update frontmatter: `status: completed`, `completed: {timestamp}`
+
+   2. **Update EPIC counter:**
+      - Increment `sessions_completed += 1` in EPIC frontmatter
+
+   3. **Archive EPIC (conditional):**
+      - IF `sessions_completed == sessions_total`:
+        - Set `status: completed`, `completed: {timestamp}`
+        - Move to `.aid-o/02-epics/archive/{filename}`
+      - ELSE: EPIC stays active, log "session {N}/{total} done"
+
+   4. **Update Plan counter (conditional):**
+      - IF EPIC archived AND `plan_ref` exists:
+        - Increment `epics_completed += 1` in plan frontmatter
+        - IF `epics_completed == epics_total`:
+          - Set `status: completed`, move to `.aid-o/01-plans/archive/`
+        - ELSE: plan stays active, log "plan: {N}/{total} EPICs done"
+
+   5. **Stage log:**
+      ```json
+      {"state": "DONE", "action": "archive", "session_archived": true,
+       "epic_archived": true, "epic_sessions": "2/2",
+       "plan_archived": false, "plan_epics": "1/3"}
+      ```
+
+   6. **Final commit** (includes all archive moves + all DONE writes):
+      `git add -A && git commit -m "done({epic_id}): completed, archived [list]"`
+
+   Archive = MOVE (copy + delete original). Active dirs = only pending work.
+   All archive ops happen BEFORE commit -- one clean commit for entire DONE state.
+
+9. **Curator Post-Processing (MANDATORY — synchronous)**
+
+   After generating final_report.md and BEFORE presenting the completion summary:
+
+   1. Dispatch Curator agent with:
+      - All step outputs from `evidence/{epic_id}/{run_id}/steps/*/step_output.json`
+      - Gate results from `evidence/{epic_id}/{run_id}/gates_report.json`
+      - Final report from `evidence/{epic_id}/{run_id}/final_report.md`
+   2. Wait for Curator output (do NOT dispatch in background)
+   3. Process Curator proposals:
+      - Write new proposals to `.aid-o/04-engine/backlog.md`
+      - Include proposal count in the completion summary
+   4. If Slack is enabled: send each proposal as a Type D message for PM review
+   5. If Slack is disabled: list proposals in the completion summary for PM to review
+
+   The Curator runs SYNCHRONOUSLY before the completion summary so that the
+   summary can include the proposal count and any high-priority findings.
+
+   Curator dispatch prompt template:
+   ```
+   You are the Curator agent. Analyze the completed EPIC evidence and produce
+   improvement proposals for the backlog.
+
+   EPIC: {epic_id}
+   Evidence: {evidence_dir}
+   Step count: {step_count}
+   Gate retries: {retry_count}
+   Duration: {total_duration}
+
+   Read: skills/improvement-proposals.md for proposal format.
+   Read: agents/curator.md for your full specification.
+   ```
+
+   If Curator fails: log warning, set proposal_count = 0, continue (post-processing
+   is best-effort but MUST be attempted).
+
+10. **Completion Summary and Next Steps** (presented to PM — LAST before queue check)
+
+   After all DONE state actions complete, present this summary to PM:
+
+   ```
+   EPIC Complete: {epic_id}
+   ====================================
+
+   Summary:
+     - Steps completed: {completed_count}/{total_count}
+     - Gates passed: {passed_gates}/{total_gates} ({retry_count} retries)
+     - Duration: {total_duration}
+     - Evidence: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
+
+   Key outputs:
+     {list of main artifacts created -- files, endpoints, components}
+
+   What's next?
+     1. Review the code -- run /aid-review or examine the changes manually
+     2. Start new work -- run /aid-brainstorm to explore a new idea
+     3. Continue building -- run /plan-epic with a new EPIC
+     4. Check quality -- run /audit for a project health assessment
+     5. Analyze performance -- run /aid-analytics to see bottlenecks and optimization tips
+     6. Archive -- the session has been archived to sessions/archive/
+
+   Lessons learned: {count} new entries added to lessons-learned.md
+   Backlog proposals: {proposal_count} new entries (review with /aid-backlog)
+   ```
+
+   The summary MUST include concrete artifact names (not generic descriptions).
+   Read the step outputs to list actual files created/modified.
+
+11. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
+12. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
    a. Read `.aid-o/04-engine/epic-queue.yaml`
    b. IF queue is not paused AND next EPIC exists (status: "queued"):
       - Mark current EPIC as "completed" in queue
@@ -528,7 +823,7 @@ if gate_fails:
       - Mark current EPIC as "completed" in queue (if in queue)
       - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
       - Remain in terminal DONE state
-9. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
+13. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
    Append the closing DONE entry to `stage_log.jsonl`:
 
    ```json
@@ -936,6 +1231,7 @@ auto-starts the next queued EPIC if available.
 - **Orchestration log (Qdrant):** collection `aid-orchestration-log`
 - **Orchestration log (fallback):** `.aid-o/logs/orchestration-events.jsonl`
 - **Lessons learned (file):** `.aid-o/04-engine/lessons-learned.md`
+- **Cost optimization:** `skills/cost-optimization.md` (model selection, file scoping, dispatch optimization)
 
 ---
 
@@ -998,5 +1294,5 @@ orchestrated: true  # marks this as Controller-managed
 
 ---
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-16
+**Version:** 0.3.0
+**Last Updated:** 2026-02-19

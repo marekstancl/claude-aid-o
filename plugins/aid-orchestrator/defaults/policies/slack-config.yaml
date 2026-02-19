@@ -2,9 +2,17 @@
 # See: skills/slack-mcp.md for protocol details
 #
 # To enable Slack integration:
-# 1. Install a Slack MCP server (e.g., @anthropic/slack-mcp)
-# 2. Set enabled: true
+# 1. Install slack-mcp-server by @korotovsky (NOT @anthropic/mcp-slack)
+#    Configure in .mcp.json with bash wrapper for .env loading + stderr suppression
+# 2. Set enabled: true below
 # 3. Configure channel and pm_user_id
+#
+# Required Slack Bot scopes: chat:write, channels:read, channels:history, users:read
+# Recommended scopes: channels:join, groups:history, groups:read
+#
+# Environment variables (store in .env, never commit):
+#   SLACK_MCP_XOXB_TOKEN=xoxb-...       (Bot User OAuth Token)
+#   SLACK_MCP_ADD_MESSAGE_TOOL=C0...     (Channel ID for sending messages)
 #
 # When disabled, all PM communication falls back to chat (in-conversation).
 

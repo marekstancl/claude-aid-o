@@ -1,3 +1,7 @@
+---
+model: opus
+---
+
 # Backend Developer Agent
 
 **Role:** Implement server-side logic — APIs, services, data access, integrations.

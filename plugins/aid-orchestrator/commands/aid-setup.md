@@ -168,26 +168,74 @@ Git:
   Commits: {total count}
 ```
 
-### Step 4: Offer Setup Options
+### Step 4: Present Options with Details (Chat-First)
 
-Present interactive checklist:
+BEFORE asking PM to select options, present ALL options with detailed descriptions:
 
 ```
-Setup options:
-  1. [x] Initialize .aid-o/ workspace (/aid-init)
-  2. [x] Customize gates.yaml for your tech stack
-  3. [x] Populate project-profile.yaml
-  4. [ ] Generate/update CLAUDE.md for this project
-  5. [ ] Add .aid-o/ patterns to .gitignore
-  6. [x] MCP server onboarding (Qdrant local, Slack, custom)
-  7. [x] Permission preset selection (Safe/Recommended/Advanced)
-  8. [x] Document language (default: EN)
-  9. [x] Parallel isolation strategy (default: worktrees)
+Setup Options Available
+====================================
 
-  [x] = recommended, [ ] = optional
+1. Initialize .aid-o/ workspace
+   Creates the directory structure for plans, epics, sessions, and evidence.
+   Required for all AID features. (Recommended: always)
 
-Proceed with recommended? (Y/N/select numbers, e.g., "1,2,3,5")
+2. Customize gates.yaml
+   Configures quality gates for your tech stack:
+   - Tests: {detected_test_framework or "none detected"}
+   - Linting: {detected_linter or "none detected"}
+   - Security: {detected_security_tool or "none detected"}
+   (Recommended: yes)
+
+3. Populate project-profile.yaml
+   Saves your project's tech stack, architecture, and conventions for agents.
+   Detected: {languages}, {frameworks}
+   (Recommended: yes)
+
+4. Generate/update CLAUDE.md
+   Adds AID commands reference and workspace info to your CLAUDE.md.
+   (Recommended: if CLAUDE.md exists or you want one)
+
+5. Add .aid-o/ to .gitignore
+   Prevents committing evidence and engine files to git.
+   (Recommended: yes for most projects)
+
+6. MCP Servers
+   a. Qdrant — vector memory for cross-session knowledge
+   b. Slack — PM communication via Slack messages
+   c. Auto-detect — {list detected MCPs based on stack}
+   d. Custom — add your own MCP servers
+   (Recommended: at minimum Qdrant local)
+
+7. Permission Preset
+   Controls what agents can do:
+   - Safe: read-only, no file changes
+   - Recommended: edit files, run tests/linters, local git (no push)
+   - Advanced: full access including git push and package install
+   (Recommended: Recommended preset)
+
+8. Document Language
+   Language for generated plans, EPICs, and reports.
+   Default: EN (English). Conversation always follows your language.
+   (Recommended: EN unless you prefer another)
+
+9. Parallel Isolation Strategy
+   How agents are isolated when running in parallel:
+   - Worktrees: full filesystem isolation (recommended, requires git)
+   - Branches: lighter isolation, shared filesystem
+   - Sequential: no parallelism (safest, slowest)
+   (Recommended: Worktrees if git available, Sequential otherwise)
 ```
+
+THEN ask PM:
+```
+Which options would you like to configure?
+(A) All recommended (options 1,2,3,6a,7,8,9)
+(B) Let me pick specific options
+(C) Everything (all options)
+```
+
+If (B): present a numbered list for PM to select from (e.g., "Enter option numbers: 1,2,3,5").
 
 ### Step 5: Execute Selected Options
 
@@ -295,16 +343,35 @@ Proceed with recommended? (Y/N/select numbers, e.g., "1,2,3,5")
 
 This option replaces and extends the previous Qdrant-only detection with full MCP server onboarding.
 
-**6a. Qdrant Local (Recommended)**
+**6a. Qdrant — Cross-Project Knowledge Database (Recommended)**
 
-Recommend Qdrant local for vector memory — no Docker required:
+Qdrant is NOT just "optional memory" -- it is the **cross-project knowledge base**.
+
+```
+Why Qdrant?
+====================================
+Without Qdrant:
+  - Lessons learned stay in THIS project only
+  - When you start a new project, you start from zero
+  - No way to search "what did I learn about FastAPI?"
+
+With Qdrant:
+  - Lessons, commands, and decisions from ALL your projects are searchable
+  - Starting a new project? AID automatically finds relevant knowledge
+  - "How did I handle auth last time?" -> instant answer from Project B
+  - Semantic search: find by meaning, not just keywords
+
+Qdrant runs locally (embedded or Docker). Your data never leaves your machine.
+```
+
+Present to PM:
 
 ```
 MCP Server Onboarding
 ====================================
 
 1. Qdrant Memory (Recommended)
-   Enables semantic search across sessions — agents learn from past decisions.
+   Cross-project knowledge database — learn from ALL your projects.
    Local mode: no Docker needed, data stored in .aid-o/qdrant-data.
 
    Install command:
@@ -312,7 +379,9 @@ MCP Server Onboarding
        --qdrant-local-path .aid-o/qdrant-data \
        -- uvx mcp-server-qdrant
 
-   Enable Qdrant local memory? (Y/N) [Y]
+   Install Qdrant for cross-project knowledge? (Recommended)
+   (A) Yes — set up Qdrant local (recommended)
+   (B) No — per-project knowledge only (lessons stay in each project)
    Collection name: [aid-memory]
 ```
 
@@ -329,24 +398,88 @@ MCP Server Onboarding
   IF tool_not_found: warn and continue (user can fix later)
   ```
 
-**6b. Slack MCP (Opt-in)**
+**6b. Slack MCP Server**
 
-```
-2. Slack MCP (Optional)
-   Send EPIC status updates and gate results to a Slack channel.
-   Requires a Slack Bot Token with chat:write scope.
+**Package:** `slack-mcp-server` by @korotovsky
+(NOT `@anthropic/mcp-slack` -- does not exist. NOT `@kazuph/mcp-slack` -- has Linux platform bug.)
 
-   Enable Slack integration? (Y/N) [N]
-```
+**Setup flow:**
 
-- If Y: prompt for bot token and channel:
-  ```
-  Slack Bot Token: [xoxb-...]
-  Default channel: [#aid-updates]
-  ```
-  - Run: `claude mcp add slack -e SLACK_BOT_TOKEN="{token}" -- npx -y @anthropic/mcp-slack`
-  - Update `.aid-o/03-config/policies/slack-config.yaml` with channel and enable flag
-- If N: skip silently
+1. Ask PM: "Do you want Slack integration for PM notifications?"
+   If no: skip, set `slack.enabled: false` in slack-config.yaml
+
+2. If yes, display requirements:
+   ```
+   Slack Setup Requirements
+   ====================================
+
+   You need a Slack Bot with these scopes:
+     Required:
+       - chat:write        (send messages)
+       - channels:read     (find channels)
+       - channels:history  (read channel messages)
+       - users:read        (CRITICAL: server crashes without this)
+     Recommended:
+       - channels:join     (auto-join channels)
+       - groups:history    (private channel access)
+       - groups:read       (private channel discovery)
+
+   Setup steps:
+     1. Go to https://api.slack.com/apps
+     2. Select your app (or create one)
+     3. Go to OAuth & Permissions -> Bot Token Scopes
+     4. Add ALL required scopes listed above
+     5. Reinstall app to workspace if you changed scopes
+     6. Copy the Bot User OAuth Token (xoxb-...)
+     7. In Slack, type: /invite @YourAppName in your channel
+   ```
+
+3. Ask PM for bot token: "Paste your Bot Token (xoxb-...):"
+
+4. Ask PM for channel: "Which channel? (e.g., #aid-orchestrator):"
+
+5. Ask PM for channel ID (for add_message tool):
+   "Channel ID for sending messages (e.g., C0AFP2GP459):"
+   "Find it in Slack: right-click channel name -> View channel details -> scroll down"
+
+6. Create `.env` file (if not exists) with:
+   ```
+   SLACK_MCP_XOXB_TOKEN=xoxb-...
+   SLACK_MCP_ADD_MESSAGE_TOOL=C0AFP2GP459
+   ```
+
+7. Add `.env` to `.gitignore` (if not already there)
+
+8. Configure MCP server in `.mcp.json`:
+   ```json
+   {
+     "slack": {
+       "type": "stdio",
+       "command": "bash",
+       "args": [
+         "-c",
+         "[ -f .env ] && set -a && source .env && set +a; exec npx -y slack-mcp-server 2>/dev/null"
+       ]
+     }
+   }
+   ```
+   Note: `2>/dev/null` suppresses stderr logs that interfere with VSCode MCP protocol.
+
+9. Update `slack-config.yaml`:
+   ```yaml
+   slack:
+     enabled: true
+     channel: "#aid-orchestrator"
+     pm_user_id: ""  # Optional: PM's Slack user ID for @mentions
+   ```
+
+10. Verify: Test MCP connection by asking Claude to list Slack channels.
+    If it fails, check: scopes, token, channel invite, .env file.
+
+**Common issues:**
+- "FATAL: users:read scope required" -- Add `users:read` scope in Slack app settings, reinstall
+- "conversations_add_message disabled" -- Set `SLACK_MCP_ADD_MESSAGE_TOOL` env var
+- MCP stderr JSON logs -- Already handled by `2>/dev/null` in config
 
 **6c. Auto-detect Tech MCPs**
 
@@ -357,6 +490,7 @@ Based on the project stack detected in Step 1, suggest relevant MCP servers:
 | `.github/` or GitHub remote | GitHub MCP | `claude mcp add github -- npx -y @anthropic/mcp-github` |
 | `Dockerfile` / `docker-compose.yml` | Docker MCP | `claude mcp add docker -- npx -y @anthropic/mcp-docker` |
 | PostgreSQL in deps | Postgres MCP | `claude mcp add postgres -e DATABASE_URL="{url}" -- npx -y @anthropic/mcp-postgres` |
+| Frontend framework (React/Vue/Angular/Svelte) or .tsx/.jsx/.vue files | Playwright MCP | `claude mcp add playwright -- npx -y @anthropic/mcp-playwright` |
 
 ```
 Auto-detected MCP servers for your stack:
@@ -553,35 +687,41 @@ Choose: (1/2/3)
 - **Option 2:** Ask for project type and generate basic scaffold
 - **Option 3:** Just run `/aid-init`
 
-### Step 7: Summary
+### Step 7: Summary and Next Steps
+
+After all selected options are configured:
 
 ```
-AID Setup Complete
+Setup Complete
 ====================================
-Workspace:    .aid-o/ initialized
-Gates:        customized for {stack}
-Profile:      project-profile.yaml populated
-CLAUDE.md:    {generated | skipped}
-MCP servers:  {Qdrant local, Slack, GitHub MCP, ... | none}
-Permissions:  {safe | recommended | advanced}
-Language:     {EN | user choice}
-Isolation:    {worktrees | branches | sequential}
-Memory:       {enabled (Qdrant local) | disabled (file-based only)}
+Configured: {list of completed options}
+Workspace:  .aid-o/ (ready)
+Profile:    {detected_stack_summary}
 
-Your project is ready for AID orchestration.
+What to do next:
+====================================
 
-Config files written:
-  .aid-o/03-config/policies/permissions.yaml
-  .aid-o/03-config/policies/language.yaml
-  .aid-o/03-config/policies/dispatch-strategy.yaml
+If you have an idea but aren't sure how to build it:
+  -> /aid-brainstorm "your idea"
+  This starts an interactive design session. AID asks questions,
+  explores approaches, and produces a plan + EPIC draft.
 
-Next steps:
-  1. Create an EPIC: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
-  2. Or customize further: .aid-o/03-config/
-  3. Run /aid-help for full documentation
-  4. Change isolation strategy: edit .aid-o/03-config/policies/dispatch-strategy.yaml
-  5. Change permissions: edit .aid-o/03-config/policies/permissions.yaml
+If you already know what to build:
+  -> Create an EPIC file in .aid-o/02-epics/ (see template)
+  -> /plan-epic .aid-o/02-epics/your-epic.md
+  -> /run-epic
+
+For help and examples:
+  -> /aid-help           -- full documentation
+  -> /aid-help examples  -- step-by-step example workflows
+  -> /aid-help commands  -- all available commands
+
+Tip: Start with /aid-brainstorm -- it's the best way to explore ideas
+     and let AID help you design before coding.
 ```
+
+**Do NOT** end with just "Your project is ready." Always provide concrete,
+actionable next steps with command examples.
 
 ## Reference Files
 

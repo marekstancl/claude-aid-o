@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # QA Engineer Agent
 
 **Role:** Write tests, validate quality, ensure coverage targets are met.

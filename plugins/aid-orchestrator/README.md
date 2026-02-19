@@ -32,7 +32,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 /run-epic
 ```
 
-## Commands (18)
+## Commands (19)
 
 | Command | Description |
 |---------|-------------|
@@ -40,6 +40,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `/aid-setup` | Interactive project onboarding — detect tech stack, configure AID |
 | `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
+| `/aid-analytics [scope]` | Analyze orchestration performance metrics and get optimization recommendations |
 | `/plan-epic <path>` | Parse EPIC → generate Plan JSON + session file |
 | `/run-epic [id]` | Run Controller state machine for full EPIC orchestration |
 | `/run-step <id> <step>` | Manually run one step from an existing plan |
@@ -90,7 +91,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `lessons-extractor` | Extracts lessons from completed sessions |
 | `gate-fixer` | Analyzes gate failures, applies targeted fixes |
 
-## Skills (14)
+## Skills (16)
 
 | Skill | Purpose |
 |-------|---------|
@@ -108,6 +109,8 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `slack-mcp` | Slack MCP integration — 7 message types, fallback, timeouts |
 | `epic-queue` | EPIC queue management — add, remove, prioritize, auto-pickup |
 | `memory-mcp` | Qdrant vector memory — semantic search, auto-indexing, agent context |
+| `cost-optimization` | Model selection, file scoping, dispatch trimming, token tracking |
+| `analytics` | Performance metrics analysis, bottleneck detection, trend reports |
 
 ## Controller State Machine
 
@@ -162,12 +165,35 @@ claude mcp add qdrant-memory \
 **What gets indexed:**
 - Session-end: decisions, lessons learned, working commands
 - EPIC completion: architectural decisions, code patterns, audit findings
+- Per-agent metrics: step duration, complexity, bottleneck flags
 
 **What agents receive:** Before each step, the Controller searches memory for relevant
 past knowledge and injects it as `## MEMORY CONTEXT (from past sessions)` in the agent prompt.
 
+**Cross-project knowledge:** All Qdrant entries include `project_name` metadata. When
+multiple projects share the same Qdrant collection, agents can discover patterns and
+lessons from related projects. Use `/aid-analytics global` to compare across projects.
+
 **Without Qdrant:** Plugin works identically using file-based memory only (active-work.md,
 lessons-learned.md, command-history.md). Qdrant is supplementary, never required.
+
+## Multi-Session EPICs
+
+For larger EPICs (7+ steps), the Planner automatically splits execution into multiple
+sessions optimized for speed and quality. Each session runs independently with handoff
+state preserved between them. Use `/run-epic E-xxx --session N` to run a specific session.
+The Planner decides the optimal split based on dependency analysis and parallel opportunity
+detection — PM approves the session plan.
+
+## Cost Optimization
+
+AID optimizes token usage and model costs through 4 axes:
+- **Model selection** — QA, Security, and Docs agents use Sonnet; Utility agents use Haiku
+- **File scoping** — agents receive only the files relevant to their step, not the entire codebase
+- **Dispatch trimming** — agent prompts include deps-only context, EPIC summary, and playbook reference
+- **Token tracking** — per-step and per-EPIC token estimates stored in Qdrant for trend analysis
+
+Use `/aid-analytics` to review cost trends and identify optimization opportunities.
 
 ## Workspace Structure
 
@@ -208,6 +234,6 @@ After `/aid-setup`, customize in `.aid-o/03-config/`:
 
 ## Version
 
-- **Plugin:** 0.2.0
+- **Plugin:** 0.3.0
 - **Requires:** Claude Code >= 1.0.0
 - **License:** MIT

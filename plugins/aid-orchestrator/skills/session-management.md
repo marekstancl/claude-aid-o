@@ -126,8 +126,18 @@ Testing/QA only? → Verification session
 3. Read `.aid-o/04-engine/lessons-learned.md` for gotchas and past lessons
 4. Read `.aid-o/04-engine/memory/project-profile.yaml` for paths and conventions
 5. Check `.aid-o/04-engine/memory/project-profile.yaml` — if missing or >7 days old, run `/aid-setup`
-6. Determine: NEW session or CONTINUATION of existing?
-7. If NEW:
+6. **Cross-project knowledge read** (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
+   - If `memory-config.yaml` -> `memory.enabled` AND `cross_project.read_at_idle: true`:
+     a. `qdrant-find` with query = current session topic + tech_stack
+     b. Exclude entries from current project (already in local .md files)
+     c. If results found: display as informational context to PM:
+        ```
+        Cross-project insights (from Qdrant):
+        - [{project}] {lesson_summary}
+        ```
+     d. If Qdrant unavailable: skip silently (no error, no warning)
+7. Determine: NEW session or CONTINUATION of existing?
+8. If NEW:
    a. **Assess complexity first:** Could this require 3+ sessions? If yes → suggest Epic workflow to PM before proceeding. PM decides.
    b. Generate session ID: `S-{YYYYMMDD}-{4char-hash}`
    c. Identify session type (see table above)
@@ -139,7 +149,7 @@ Testing/QA only? → Verification session
    f. If epic session: reference epic file, note which session # this is, review what previous sessions accomplished
    g. Ask PM for approval to proceed
    h. After approval: create branch `session/{id}-{topic}`
-8. If CONTINUATION:
+9. If CONTINUATION:
    a. Load session file + plan/epic
    b. Review last phase status and any handoff notes
    c. Announce what will be done next
@@ -359,6 +369,60 @@ Session files for epic sessions are stored in the standard `{project.paths.sessi
 
 ---
 
+## Multi-Session EPIC Flow
+
+### How It Works
+
+For EPICs with 7+ steps, the Planner automatically splits execution into
+multiple sessions optimized for speed and quality (see `skills/planner.md`
+Section 11 -- Session Split Decision).
+
+```
+Session 1: /run-epic E-xxx
+  -> Controller reads plan.json, sees Session 1 steps
+  -> Executes steps 1-5 (respecting dependencies + parallelism)
+  -> Runs gates on session 1 outputs
+  -> PM approval -> session archived -> handoff created
+  -> EPIC stays active (sessions_completed: 1/2)
+
+Session 2: /run-epic E-xxx --session 2
+  -> Controller reads plan_progress.json (knows steps 1-5 are done)
+  -> Reads Session 1 handoff for context
+  -> Executes steps 6-8
+  -> Runs gates on ALL outputs (cumulative)
+  -> PM approval -> session archived -> EPIC completed (2/2)
+```
+
+### Controller Behavior
+
+- EPIC has `Session Breakdown` -> Controller follows it automatically
+- No `Session Breakdown` -> single session (all steps)
+- At session boundary: save `plan_progress.json`, create handoff block, commit, stop
+- Next session: read `plan_progress.json` to resume from correct step
+- Prior step outputs from Session 1 are available on disk (same branch)
+
+### Handoff Between Sessions
+
+At session end, Controller writes to `plan_progress.json`:
+```json
+{
+  "session_completed": 1,
+  "steps_done": ["step_1_architect", "step_2_domain", "step_3_backend"],
+  "next_session_starts_at": "step_4_qa",
+  "handoff_notes": "API complete, 24 endpoints, auth working. Tests needed."
+}
+```
+
+### Archive Behavior
+
+- Each session is archived independently on completion
+- EPIC `sessions_completed` counter incremented after each session archive
+- EPIC archived to `.aid-o/02-epics/archive/` only when `sessions_completed == sessions_total`
+- Plan archived to `.aid-o/01-plans/archive/` only when `epics_completed == epics_total`
+- See `skills/epic-orchestration.md` DONE state item 8 for full archive logic
+
+---
+
 ## Active-Work Protocol
 
 **Purpose:** Filesystem-based "external memory" that works across ALL platforms (Copilot, Claude Desktop, Cursor, Cline). Single source of truth for session state.
@@ -515,5 +579,5 @@ Standard `.aid-o/` paths (created by `/aid-init`):
 
 ---
 
-**Version:** 4.0.0
-**Last Updated:** 2026-02-11
+**Version:** 4.1.0
+**Last Updated:** 2026-02-19

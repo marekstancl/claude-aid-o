@@ -220,7 +220,7 @@ pytest tests/test_fix.py
 - [ ] Relevant docs updated
 - [ ] `CHANGELOG.md` entry added
 
-**See:** `skills/coding-standards.md` for documentation dependency tables
+**See:** `skills/agent-core.md` for documentation dependency tables
 
 ---
 

@@ -8,7 +8,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `examples`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `analytics`, `examples`, `faq`
 
 **Examples:**
 ```
@@ -24,7 +24,9 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help slack             # Slack integration + PM communication
 /aid-help queue             # Epic queue + autonomous pipeline
 /aid-help memory            # Qdrant vector memory + semantic search
+/aid-help analytics          # performance analysis of orchestration metrics
 /aid-help examples          # interactive project prompts to try /aid-brainstorm
+/aid-help faq               # frequently asked questions
 ```
 
 ## Flow
@@ -46,7 +48,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.2.0
+Version: 0.3.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -58,7 +60,7 @@ What is AID?
   to deliver features end-to-end: architecture → implementation → testing
   → security → documentation → release.
 
-Commands (18):
+Commands (19):
   /aid-init        Initialize .aid-o/ workspace
   /aid-setup       Interactive project onboarding
   /aid-brainstorm  9-step interactive brainstorming flow
@@ -76,6 +78,7 @@ Commands (18):
   /audit           Project health audit
   /coding-standards Load coding standards
   /testing         Load testing workflow
+  /aid-analytics   Performance analysis of orchestration metrics
   /docs-protocol   Load docs protocol
 
 Quick Start:
@@ -91,7 +94,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | examples
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | analytics | examples | faq
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -190,6 +193,18 @@ GATES COMMANDS:
     Auto-pickup: after EPIC DONE, next queued EPIC starts automatically.
     Skill: skills/epic-queue.md
 
+ANALYTICS COMMANDS:
+
+  /aid-analytics [scope]
+    Analyze orchestration performance metrics from Qdrant.
+    Usage: /aid-analytics E-20260219-v030   (single EPIC report)
+           /aid-analytics project            (project trends)
+           /aid-analytics global             (cross-project comparison)
+           /aid-analytics                    (most recent EPIC)
+    Requires: Qdrant configured, at least one completed EPIC.
+    Output: executive summary, bottleneck analysis, recommendations.
+    Skill: skills/analytics.md
+
 QUALITY COMMANDS:
 
   /quality-gates     Run 6-gate pre-commit protocol
@@ -274,6 +289,12 @@ Epic Queue (autonomous pipeline):
   /epic-queue add <path> → queue EPICs
   After DONE → auto-pickup next EPIC from queue
   /epic-queue pause/resume → control auto-pickup
+
+Multi-Session EPICs:
+  For larger EPICs (7+ steps), the Planner automatically splits execution into
+  multiple sessions optimized for speed and quality. Each session runs
+  independently with handoff state preserved. Use /run-epic E-xxx --session N
+  to run a specific session. The Planner decides the optimal split — PM approves.
 
 Everything else is autonomous (auto-decisions from decision-policies.yaml).
 ```
@@ -683,9 +704,10 @@ Templates (.aid-o/03-config/templates/):
   session-*.md         Session file templates (4 types)
 
 Playbooks (.aid-o/03-config/playbooks/):
-  9 role playbooks (architect.md through release.md).
+  9 role playbooks (architect.md through release.md) + e2e.md.
   Each defines: Role, Mission, Responsibilities, Process,
   Quality Criteria, Constraints.
+  E2E playbook: Playwright browser testing (auto-added when frontend detected).
 
 To customize AID for your project:
   1. /aid-setup (auto-configures for your stack)
@@ -711,7 +733,9 @@ Config: .aid-o/03-config/policies/slack-config.yaml
 
 SETUP:
 
-  1. Install a Slack MCP server (e.g., @anthropic/slack-mcp)
+  1. Install slack-mcp-server by @korotovsky:
+     Configure in .mcp.json (see /aid-setup for full guide)
+     Required scopes: chat:write, channels:read, channels:history, users:read
   2. Edit .aid-o/03-config/policies/slack-config.yaml:
      - Set slack.enabled: true
      - Set slack.channel: "#your-channel"
@@ -876,6 +900,73 @@ WITHOUT QDRANT:
 
 ---
 
+#### Topic: analytics
+
+```
+Analytics — Performance Analysis
+====================================
+
+AID tracks detailed orchestration metrics in Qdrant. The /aid-analytics
+command queries these metrics and produces actionable performance reports.
+
+Command: /aid-analytics [scope]
+Skill: skills/analytics.md
+Requires: Qdrant configured, at least one completed EPIC with metrics
+
+USAGE:
+
+  /aid-analytics E-20260219-v030   Analyze a specific EPIC
+  /aid-analytics project           Trends across all EPICs in current project
+  /aid-analytics global            Compare across all projects
+  /aid-analytics                   Defaults to most recently completed EPIC
+
+3 REPORT TYPES:
+
+  1. EPIC Report (single EPIC)
+     - Step-by-step timeline with duration bars
+     - Bottleneck analysis with root cause explanation
+     - Gate performance (retries, time cost)
+     - Token profile (model usage, per-step estimates)
+     - Specific recommendations for improving this EPIC's pattern
+
+  2. Project Trends (across EPICs in one project)
+     - Duration trends: improving or regressing?
+     - Common bottlenecks: consistently slow roles
+     - Gate efficiency: which gates retry most
+     - Token trends: cost trajectory
+     - Systemic improvement recommendations
+
+  3. Cross-Project Comparison
+     - Project ranking by efficiency metrics
+     - Best practices from fastest projects
+     - Knowledge transfer opportunities
+
+METRICS TRACKED:
+
+  agent_execution   Per-step: duration, complexity, bottleneck, errors
+  epic_summary      Per-EPIC: total duration, step count, gate retries
+  gate_result       Per-gate: pass/fail, retries, duration
+  token_profile     Per-EPIC: token estimates, model distribution
+
+RECOMMENDATIONS:
+
+  Each recommendation includes a confidence level:
+    HIGH   — clear pattern from multiple data points
+    MEDIUM — emerging pattern, needs more data
+    LOW    — insufficient data, speculative
+
+WHEN TO USE:
+
+  - After completing an EPIC: identify what went well and what to improve
+  - Before starting a similar EPIC: learn from past performance
+  - Periodically: track project health trends
+  - When optimizing: find the biggest bottlenecks to address
+
+Related: skills/memory-mcp.md (metric storage), skills/cost-optimization.md
+```
+
+---
+
 #### Topic: examples
 
 ```
@@ -883,78 +974,134 @@ Interactive Project Prompts — Try /aid-brainstorm
 ====================================
 
 Pick a project below and run /aid-brainstorm with the prompt to see the
-9-step brainstorming flow in action.
+9-step brainstorming flow in action. All examples demonstrate full-stack
+development — AID orchestrates backend AND frontend in parallel.
 
-─────────────────────────────────────────────────────────
-1. REST API + Database
-─────────────────────────────────────────────────────────
+-------------------------------------------------------------
+1. REST API + Database + Admin UI
+-------------------------------------------------------------
 
   Prompt:
-    /aid-brainstorm "Build a REST API with database, auth, and CRUD operations"
+    /aid-brainstorm "Build a task management API with PostgreSQL storage
+    and a React admin dashboard for managing tasks, users, and analytics"
 
   What happens:
     Step 1 — Context: AI asks about your tech stack, DB preference, auth method
     Step 2 — Questions: Clarifying questions (REST vs GraphQL? ORM? Deploy target?)
-    Step 3 — Approaches: Compare options (Express+Postgres vs FastAPI+SQLite vs...)
-    Step 4 — Design: API routes, DB schema, auth flow, error handling
+    Step 3 — Approaches: Compare options (monolith vs separate services)
+    Step 4 — Design: API contracts, database schema, React components, routing
     Step 5 — Sections: Plan outline for PM review
     Step 6 — Approval: PM approves or requests changes
     Step 7 — Document: Full plan written to .aid-o/01-plans/
     Step 8 — EPIC draft: Optional EPIC generated from the plan
     Step 9 — Handoff: Summary of decisions + next steps
 
-  Result: A detailed plan covering endpoints, database schema, authentication
-  strategy, and a ready-to-execute EPIC with 6-8 steps.
+  Result: A detailed plan covering API endpoints, database schema, React
+  dashboard components, authentication, and a ready-to-execute EPIC with steps:
+  architect -> domain -> backend + frontend (parallel) -> qa + security -> docs
 
-─────────────────────────────────────────────────────────
-2. CLI Tool
-─────────────────────────────────────────────────────────
+-------------------------------------------------------------
+2. CLI Tool + Interactive TUI
+-------------------------------------------------------------
 
   Prompt:
-    /aid-brainstorm "Build a CLI tool that does X"
-    (replace X with your idea — e.g., "manages git worktrees",
-     "converts CSV to JSON", "automates deployments")
+    /aid-brainstorm "Create a git repository analytics CLI tool with
+    an interactive terminal UI showing commit stats, contributor graphs,
+    and branch visualization"
 
   What happens:
     Step 1 — Context: AI asks about target platform, language, distribution
-    Step 2 — Questions: Input/output format? Config file? Subcommands?
-    Step 3 — Approaches: Compare frameworks (Click vs Typer vs Commander vs Cobra)
-    Step 4 — Design: Command structure, flags, config, output formatting
+    Step 2 — Questions: Interactivity level? Output format? Dependencies?
+    Step 3 — Approaches: Compare (pure CLI vs TUI framework: textual/rich/blessed)
+    Step 4 — Design: Command structure, data pipeline, TUI layout, chart rendering
     Step 5 — Sections: Plan outline for PM review
     Step 6 — Approval: PM approves or requests changes
     Step 7 — Document: Full plan written to .aid-o/01-plans/
     Step 8 — EPIC draft: Optional EPIC generated from the plan
     Step 9 — Handoff: Summary of decisions + next steps
 
-  Result: A plan covering CLI architecture, argument parsing, config management,
-  error handling, and a ready-to-execute EPIC with 4-6 steps.
+  Result: A plan covering CLI architecture, data extraction pipeline, TUI
+  component layout, chart rendering, and a ready-to-execute EPIC with
+  appropriate roles for both backend logic and interactive UI.
 
-─────────────────────────────────────────────────────────
-3. Full-Stack App
-─────────────────────────────────────────────────────────
+-------------------------------------------------------------
+3. Full-Stack SaaS Application
+-------------------------------------------------------------
 
   Prompt:
-    /aid-brainstorm "Build a full-stack web app with React frontend and API backend"
+    /aid-brainstorm "Build a bookmark manager with tagging, full-text
+    search, a responsive web UI with dark mode, and browser extension
+    for one-click saving"
 
   What happens:
-    Step 1 — Context: AI asks about backend language, DB, hosting, features
-    Step 2 — Questions: SSR vs SPA? State management? Auth provider?
-    Step 3 — Approaches: Compare stacks (Next.js vs Vite+Express vs Remix vs...)
-    Step 4 — Design: Component tree, API contracts, DB schema, auth flow
+    Step 1 — Context: AI asks about auth method, search engine, UI framework
+    Step 2 — Questions: Browser targets? Sync strategy? Offline support?
+    Step 3 — Approaches: Tech stack options, architecture patterns, deployment
+    Step 4 — Design: Complete full-stack architecture including REST API,
+             database, React/Vue frontend with responsive layouts,
+             browser extension manifest
     Step 5 — Sections: Plan outline for PM review
     Step 6 — Approval: PM approves or requests changes
     Step 7 — Document: Full plan written to .aid-o/01-plans/
     Step 8 — EPIC draft: Optional EPIC generated from the plan
     Step 9 — Handoff: Summary of decisions + next steps
 
-  Result: A comprehensive plan covering frontend components, API endpoints,
-  database design, auth integration, and a ready-to-execute EPIC with 8-10 steps
-  (architect → backend + frontend parallel → QA + security → docs).
+  Result: A comprehensive plan covering all layers — API, database, web UI,
+  browser extension — with a ready-to-execute EPIC covering the full pipeline:
+  architect -> domain -> backend + frontend (parallel) -> qa + security
+  + e2e (parallel) -> docs
 
-─────────────────────────────────────────────────────────
+-------------------------------------------------------------
 
 Tip: You can brainstorm ANY project — these are just starting points.
      Run /aid-brainstorm with your own idea to begin.
+```
+
+---
+
+#### Topic: faq
+
+```
+Frequently Asked Questions
+====================================
+
+How does AID handle different application types?
+-------------------------------------------------
+
+AID auto-detects your app type from project indicators (web-app, API, CLI,
+library, plugin, etc.) and adapts the orchestration pipeline accordingly:
+
+- Web apps:     Full pipeline with frontend + backend parallel, Playwright E2E testing
+- APIs/CLIs:    Backend-focused, skip frontend roles
+- Libraries:    Emphasis on architect + domain + qa, skip deployment
+- Scripts:      Minimal pipeline -- just QA and docs
+- Monorepos:    Multi-package orchestration with workspace awareness
+- Desktop apps: Custom pipeline with platform-specific testing
+- Mobile apps:  Custom pipeline with device testing considerations
+- Plugins:      Adapted to host platform conventions
+- ERP modules:  Domain-heavy pipeline with strict conventions
+- Infra:        DevOps-focused roles (no frontend/backend split)
+
+Your app type is stored in project-profile.yaml -> architecture.app_type.
+To override: edit the file or re-run /aid-setup.
+
+Supported types (11): web-app, api-service, cli-tool, desktop-app,
+mobile-app, library, plugin, script, monorepo, erp-module, infrastructure.
+
+What if my project doesn't fit any type?
+-----------------------------------------
+
+AID defaults to the closest match with low confidence. You can:
+1. Edit project-profile.yaml -> architecture.app_type manually
+2. Re-run /aid-setup to re-detect
+3. The Planner always respects EPIC-level role specifications over auto-detection
+
+Can I change the pipeline after detection?
+-------------------------------------------
+
+Yes. The app type influences default behavior, but EPIC-level specifications
+always take priority. If you define frontend steps in your EPIC for a CLI
+project, AID will execute them.
 ```
 
 ## Reference Files

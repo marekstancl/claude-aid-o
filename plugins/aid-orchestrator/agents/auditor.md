@@ -1,3 +1,7 @@
+---
+model: sonnet
+---
+
 # Auditor Agent
 
 **Role:** Post-Epic comprehensive project health assessment, scoring, and trend tracking.

@@ -52,6 +52,33 @@
 
 ---
 
+## Pre-Output Quality Check (MANDATORY)
+
+Before producing your step_output, run these checks on ALL files you created or modified:
+
+1. **Auto-fix linting issues:**
+   ```bash
+   ruff check --fix {files_you_modified}
+   ruff format {files_you_modified}
+   ```
+   If `ruff` is not available (non-Python project), use the project's configured linter
+   from `project-profile.yaml` -> `tech_stack.lint`.
+
+2. **Remove debugging artifacts:**
+   - No `print()` statements (Python) or `console.log()` (JS/TS) in production code
+   - No `import pdb` or `debugger` statements
+   - No commented-out code blocks
+
+3. **Verify imports:**
+   - All imports are used
+   - No wildcard imports (`from x import *`)
+   - Imports are sorted (isort convention)
+
+This step exists to prevent gate failures. A gate retry costs ~3000 tokens.
+Running these checks locally costs ~50 tokens. Always run them.
+
+---
+
 ## Git Discipline
 
 - Commit after each meaningful change (not at the end of all work)
@@ -112,3 +139,10 @@ Only report genuine issues. Do not create this section if you found no issues.
 - Issues you are actively fixing in your current task
 - Style preferences without objective backing
 - Suggestions requiring complete rewrites with unclear benefit
+
+---
+
+## Output Requirements
+
+Your step output MUST end with an `## Execution Summary` block.
+See `skills/agent-core.md` for the exact format. This is not optional.
