@@ -220,8 +220,7 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.3.0-rc.1** (current) — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup, permission dual-write, DONE state fixes. *Release candidate — needs validation on an external project.*
-- **v0.2.0** — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
+- **v0.3.0** (current) — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup, permission dual-write, DONE state fixes. - **v0.2.0** — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
 - **v0.4.0** (planned) — Browser-based evidence viewer, EPIC templates library, benchmark framework
 
 ## Requirements
@@ -231,4 +230,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.3.0-rc.1
+MIT — v0.3.0

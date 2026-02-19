@@ -3,9 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.3.0-rc.1] — 2026-02-19
-
-> Release candidate. Self-validated via EPIC E-20260219-v030 (9 steps, 3 gates passed). Needs external project validation before stable release.
+## [0.3.0] — 2026-02-19
 
 ### Added
 - Mandatory Execution Summary block in all agent outputs with timing, self-assessment, and Qdrant storage (Task 6)

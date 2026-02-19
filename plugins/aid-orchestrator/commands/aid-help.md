@@ -48,7 +48,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.3.0-rc.1
+Version: 0.3.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
