@@ -80,9 +80,9 @@ Run `/aid-help examples` for detailed walkthroughs.
 
 | Component | Count | Description |
 |-----------|-------|-------------|
-| **Commands** | 18 | `/aid-setup`, `/aid-brainstorm`, `/run-epic`, `/plan-epic`, `/run-gates`, `/epic-queue`, `/audit`... |
+| **Commands** | 19 | `/aid-setup`, `/aid-brainstorm`, `/run-epic`, `/plan-epic`, `/aid-analytics`, `/run-gates`, `/epic-queue`, `/audit`... |
 | **Agents** | 18 | 9 role + 3 specialist + 6 utility |
-| **Skills** | 14 | State machine, planner, brainstorming, parallel dispatch, gates engine, Slack MCP... |
+| **Skills** | 16 | State machine, planner, brainstorming, parallel dispatch, gates engine, cost optimization, analytics... |
 | **Playbooks** | 11 | Role-specific instructions (customizable per project) |
 
 ### Role Agents
@@ -220,8 +220,9 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.2.0** (current) — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
-- **v0.3.0** — Browser-based evidence viewer, EPIC templates library, multi-project workspace support
+- **v0.3.0-rc.1** (current) — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup, permission dual-write, DONE state fixes. *Release candidate — needs validation on an external project.*
+- **v0.2.0** — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
+- **v0.4.0** (planned) — Browser-based evidence viewer, EPIC templates library, benchmark framework
 
 ## Requirements
 
@@ -230,4 +231,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.2.0
+MIT — v0.3.0-rc.1
