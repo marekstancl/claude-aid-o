@@ -1,3 +1,9 @@
+---
+name: session-start
+description: Start a tracked session
+user_invocable: true
+---
+
 Start a new tracked session.
 
 Read `skills/session-management.md` and follow the Initialization protocol.

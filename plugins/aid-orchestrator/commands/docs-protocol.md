@@ -1,3 +1,9 @@
+---
+name: docs-protocol
+description: Load documentation protocol
+user_invocable: true
+---
+
 Load documentation protocol for this project.
 
 Read `.aid-o/04-engine/memory/project-profile.yaml` to determine `project.docs.platform`.

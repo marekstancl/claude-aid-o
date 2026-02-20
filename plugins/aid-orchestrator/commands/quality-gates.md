@@ -1,3 +1,9 @@
+---
+name: quality-gates
+description: 6-gate pre-commit protocol
+user_invocable: true
+---
+
 Run the 6-gate pre-commit quality protocol before committing.
 
 Read `skills/quality-gates.md` and follow it step by step.

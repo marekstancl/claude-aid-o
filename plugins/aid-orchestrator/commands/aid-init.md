@@ -1,3 +1,9 @@
+---
+name: aid-init
+description: Initialize .aid-o/ workspace structure
+user_invocable: true
+---
+
 Initialize AID workspace (`.aid-o/`) in the current project.
 
 This command creates the recommended workspace structure and copies default configuration files from the plugin's `defaults/` directory. It is **idempotent** — running it again will not overwrite existing files.

@@ -1,0 +1,3 @@
+# AID Orchestrator — runtime engine artifacts (not versioned)
+# Plans, EPICs, and config ARE versioned (design artifacts)
+.aid-o/04-engine/

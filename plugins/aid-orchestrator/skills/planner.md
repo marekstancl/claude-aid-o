@@ -1,6 +1,6 @@
 # Planner — Plan Generation from EPIC
 
-**Version:** 0.1.0
+**Version:** 0.4.0
 **Skill:** planner
 **Dependencies:** epic-orchestration
 
@@ -72,39 +72,260 @@ step_4_frontend  → [step_7_docs]
 
 ---
 
-## 2. Parallel Group Detection
+## 2. Wave Assembly
 
 **Input:** dependency graph (adjacency list from Section 1)
-**Output:** `parallel_groups[]` array
+**Output:** `waves[]` array (ordered list of step groups, each wave runs in parallel)
 
 ### Algorithm
 
 ```
-1. LEVEL ASSIGNMENT via topological sort:
+1. LEVEL ASSIGNMENT via topological sort (unchanged):
    level(S) = 0 if S.depends_on is empty
    level(S) = max(level(dep) for dep in S.depends_on) + 1
 
 2. GROUP by level → level_groups = { level: [step_ids] }
 
-3. FILTER: for each level with 2+ steps:
-   Verify no inter-dependencies (no edge between candidates)
-   If verified → parallel group. Single-step levels → no entry.
+3. FILE CONFLICT CHECK:
+   For each level, verify no two steps share allowed_paths.
+   IF overlap detected:
+     → separate conflicting steps into sequential sub-waves
+     → log: "Wave split due to file conflict: {step_A} and {step_B} share {paths}"
 
-4. OUTPUT: array of arrays, each inner array has 2+ step IDs
+4. WAVE FORMATION:
+   For each level with 1+ steps (after conflict resolution):
+     IF level has <= 4 steps:
+       → single wave containing all steps
+     IF level has 5+ steps:
+       → split into sub-waves of max 4 steps each
+       → priority: keep same-domain steps together within sub-wave
+       → sub-wave order: lower step numbers first
+
+5. OUTPUT: waves[] array (each wave = array of step_ids)
+   waves[0] = [step_1_architect]
+   waves[1] = [step_2_domain, step_3a_backend]
+   waves[2] = [step_3b_backend, step_4_frontend]  ← cross-domain parallel
+   waves[3] = [step_5_qa, step_6_security, step_7_docs]
+
+6. BACKWARD COMPATIBILITY:
+   parallel_groups = waves with 2+ steps (for plan.json schema)
+   Single-step waves produce no parallel_groups entry.
 ```
 
-### Example — Levels from the 7-Step Dependency Graph
+### Example — Waves from the 7-Step Dependency Graph
 
 ```
-Level 0: [step_1_architect]                               ← no deps
-Level 1: [step_2_domain, step_4_frontend]                 ← parallel group
-Level 2: [step_3_backend]                                 ← sequential
-Level 3: [step_5_qa, step_6_security, step_7_docs]        ← parallel group
-         (step_7_docs: max(level(step_3), level(step_4)) + 1 = max(2,1)+1 = 3)
+Level 0: [step_1_architect]                    → wave 0 (1 step)
+Level 1: [step_2_domain, step_4_frontend]      → wave 1 (2 steps — parallel)
+Level 2: [step_3_backend]                      → wave 2 (1 step)
+Level 3: [step_5_qa, step_6_security, step_7_docs] → wave 3 (3 steps — parallel)
+
+Result: waves = [[step_1], [step_2, step_4], [step_3], [step_5, step_6, step_7]]
+Parallel groups: [[step_2, step_4], [step_5, step_6, step_7]]
 ```
 
-Result: `parallel_groups: [["step_2_domain","step_4_frontend"], ["step_5_qa","step_6_security","step_7_docs"]]`
-Single-step levels (0 and 2) produce no parallel group entries.
+---
+
+## 2b. Step Decomposition — Layer-Based Splitting
+
+Step Decomposition runs BEFORE dependency resolution and wave assembly.
+It converts coarse EPIC steps into finer-grained sub-steps when this
+enables new parallelism opportunities.
+
+### EPIC Type Guard
+
+Layer-based decomposition applies to DEVELOPMENT EPICs only.
+Detect EPIC type from typed artifacts (see EPIC template):
+
+- **Development**: artifacts contain `endpoint:`, `model:`, `component:`
+  → apply full layer-based decomposition below
+- **Documentation**: artifacts are all `doc:`
+  → decompose by TOPIC instead of layer (split "write all docs" into
+    "API docs", "user guide", "architecture docs" if they have different deps)
+- **Infrastructure/Config**: artifacts are `config:` or devops-oriented
+  → decompose by SCOPE (e.g., "CI pipeline" vs "deployment config" vs "monitoring")
+- **Mixed**: combination of types
+  → apply layer decomposition to dev steps, topic/scope to non-dev steps
+
+### Algorithm (Development EPICs)
+
+```
+For each step S in the parsed EPIC:
+  1. EVALUATE split criteria (ALL must be true):
+     a. S spans 2+ distinct layers (data, schema, API, service, UI, test, config)
+     b. S produces 5+ files (estimated from objective + allowed_paths)
+     c. Splitting enables at least 1 new parallel pairing with another domain
+     d. Each resulting sub-step would produce 3+ files
+
+  2. IF all criteria met → DECOMPOSE:
+     a. Identify layers present in S.objective and S.outputs
+     b. Create sub-steps following Layer Hierarchy (below)
+     c. Sub-step ID format: step_{N}{letter}_{role}
+        (e.g., step_3a_backend, step_3b_backend, step_3c_backend)
+     d. Sub-step dependencies:
+        - First sub-step inherits ALL of original step's depends_on
+        - Each subsequent sub-step depends on its predecessor
+        - Steps that depended on the ORIGINAL now depend on the LAST sub-step
+     e. Sub-step allowed_paths: subset of original, scoped to layer
+
+  3. IF criteria not met → keep as single step (no change)
+```
+
+### Layer Hierarchy (earlier layers first)
+
+| Priority | Layer | Typical Files |
+|----------|-------|---------------|
+| 1 | data | models, migrations, database setup, ORM entities |
+| 2 | schema | validation schemas, DTOs, type definitions, Pydantic/Zod |
+| 3 | API | routers, controllers, endpoints, middleware |
+| 4 | service | business logic, utilities, helpers, domain services |
+| 5 | UI | components, pages, layouts, styles |
+| 6 | test | unit tests, integration tests (per-layer) |
+| 7 | config | configuration, deployment, CI, environment |
+
+Adjacent layers (e.g., data+schema) CAN be merged into one sub-step
+if they're tightly coupled and splitting them would create trivially
+small steps (< 3 files each).
+
+### Example — Backend CRUD decomposition
+
+```
+BEFORE (1 monolithic step):
+  step_3_backend: "Implement REST API with models, schemas, routers, tests"
+  depends_on: [step_2_domain]
+  → Frontend (step_4) must wait for ALL of this to finish
+
+AFTER (3 focused sub-steps):
+  step_3a_backend: "Database models + Pydantic schemas" (data + schema layers)
+    depends_on: [step_2_domain]
+    outputs: models/*.py, schemas/*.py
+  step_3b_backend: "API routers + business logic" (API + service layers)
+    depends_on: [step_3a_backend]
+    outputs: routers/*.py, services/*.py
+  step_3c_backend: "Backend unit + integration tests" (test layer)
+    depends_on: [step_3a_backend, step_3b_backend]
+    outputs: tests/api/*.py, tests/models/*.py
+
+  step_4_frontend: "React components + pages"
+    depends_on: [step_1_architect]  ← NOTE: depends on architect, NOT backend!
+    → Frontend starts AS SOON AS architect finishes, parallel with backend
+
+Net effect: frontend starts 1-2 waves earlier.
+```
+
+### When NOT to decompose
+
+- Step produces fewer than 5 files total → too small to split meaningfully
+- All files are tightly coupled (one endpoint = model + schema + router + test) → splitting breaks cohesion
+- Splitting would create more than 4 sub-steps for a single role → diminishing returns
+- The EPIC already has 15+ steps → more steps adds overhead, not speed
+- Step is a leaf node with no downstream dependents → splitting doesn't enable new parallelism
+- EPIC type is documentation/infrastructure and step doesn't span multiple independent topics → topic-based split not applicable
+
+---
+
+## 2c. Critical Path Analysis (opt-in, 7+ steps)
+
+Critical path analysis is activated when total_steps >= 7. For smaller EPICs,
+the overhead of analysis exceeds the benefit.
+
+### Step 1: Compute Critical Path
+
+Critical path = longest chain through DAG measured by step count.
+
+```
+Algorithm:
+  1. For each step S in topological order:
+     dist(S) = 0 if S.depends_on is empty
+     dist(S) = max(dist(dep) + 1 for dep in S.depends_on)
+  2. critical_path_length = max(dist(S) for all S)
+  3. Backtrack from maximum → identify all steps on critical path
+  4. critical_path_ratio = critical_path_length / total_steps
+```
+
+### Step 2: Dependency Relaxation (if ratio > 0.6)
+
+If more than 60% of steps are on the critical path, the DAG is too sequential.
+Apply relaxation rules to shorten it.
+
+For each dependency edge ON the critical path, evaluate these rules.
+
+NOTE: Rules R1-R5 are DEVELOPMENT-SPECIFIC. For non-dev EPICs (docs, infra),
+CPA still computes critical path and ratio, but relaxation rules don't apply
+(no domain-specific heuristics). For mixed EPICs, apply rules only to dev steps.
+
+#### Development Relaxation Rules
+
+```
+RULE R1: "Frontend doesn't need Domain"
+  IF: step_{N}_frontend depends on step_{M}_domain
+  AND: step_{M}_domain produces only data models (no API contracts)
+  AND: step_{1}_architect produced API contracts
+  THEN: relax → frontend depends on architect instead of domain
+  REASON: Frontend builds against API contracts, not domain internals
+
+RULE R2: "QA can start with partial implementation"
+  IF: step_{N}_qa depends on ALL implementation steps
+  AND: implementation steps are in different domains (backend vs frontend)
+  THEN: split QA into domain-specific sub-steps:
+    step_{N}a_qa depends on backend steps only
+    step_{N}b_qa depends on frontend steps only
+  REASON: Backend tests don't need frontend code and vice versa
+
+RULE R3: "Docs can start after architect"
+  IF: step_{N}_docs depends on all implementation steps
+  AND: architect step produced contracts/ADRs
+  THEN: split docs:
+    step_{N}a_docs "API documentation" depends on architect (start early!)
+    step_{N}b_docs "Usage guides" depends on implementation (late)
+  REASON: API docs come from contracts, not from reading implementation
+
+RULE R4: "Security review of auth can run early"
+  IF: step_{N}_security depends on ALL backend steps
+  AND: one backend step is specifically auth/security-focused
+  THEN: security depends on auth step only (not all backend)
+  REASON: Security review of auth doesn't need CRUD endpoints
+
+RULE R5: "Layer split enables cross-domain parallel"
+  IF: step on critical path spans 2+ layers
+  AND: splitting would allow another domain to start earlier
+  THEN: recommend decomposition (Section 2b)
+  NOTE: Bridge between decomposition and relaxation — if decomposition
+  was skipped for this step, reconsider here.
+```
+
+### Step 3: Safety Net
+
+```
+EVERY relaxation MUST be:
+  a. LOGGED in plan metadata:
+     {"relaxation": "R1", "original_edge": "domain→frontend",
+      "relaxed_to": "architect→frontend",
+      "reason": "frontend needs API contracts only, not domain models"}
+  b. VISIBLE in PLAN_REVIEW output:
+     "Relaxed: frontend starts after architect (not after domain)
+      — needs API contracts only"
+  c. REJECTABLE by PM at PLAN_REVIEW — PM can reject individual relaxations
+  d. RECOVERABLE at runtime — if agent fails due to missing dependency
+     (detected at PHASE_CHECK):
+     → Controller re-dispatches with original (non-relaxed) dependency
+     → Log: "Relaxation R1 failed for step_X — re-run with full deps"
+     → This counts against the step's retry limit (not a new mechanism)
+```
+
+### Step 4: Re-optimization
+
+```
+After applying relaxations:
+  1. Re-build DAG with relaxed edges
+  2. Re-level (topological sort)
+  3. Re-assemble waves (Section 2)
+  4. Verify: new critical_path_ratio < original ratio
+     IF NOT improved: revert ALL relaxations (they didn't help)
+  5. Log delta:
+     "Critical path reduced from {old} to {new} steps ({percent}% shorter)"
+     "Relaxations applied: {count} ({rule_ids})"
+```
 
 ---
 
@@ -351,10 +572,19 @@ and re-validate. Never output an invalid plan.
 | V-18 | Required fields: id, target, agents, mode, merge_strategy, trigger | "Analysis group at index {i} missing required field: {field}" |
 | V-19 | `.agents` has at least 1 entry | "Analysis group {id} has empty agents list" |
 
+### Validations for optimization_metrics
+
+| Rule | Check | Error Template |
+|------|-------|----------------|
+| V-20 | `optimization_metrics` present in plan.json | "Plan missing optimization_metrics" |
+| V-21 | `critical_path_ratio` <= 1.0 | "Invalid critical_path_ratio: {value}" |
+| V-22 | `wave_count` > 0 | "Plan has no waves" |
+| V-23 | All relaxations reference valid step IDs | "Relaxation references unknown step: {id}" |
+
 ### Validation Order
 
 ```
-Run validations in order V-01 through V-19.
+Run validations in order V-01 through V-23.
 Stop on FIRST failure — report the error, fix, re-validate from V-01.
 Rationale: later validations may depend on earlier ones passing
 (e.g., V-09 depends on V-01 having established valid step IDs).
@@ -367,15 +597,50 @@ Rationale: later validations may depend on earlier ones passing
 This is the master procedure the Planner follows when `/plan-epic` is invoked.
 
 ```
- 1. RECEIVE EPIC file → validate sections (Goal, Scope, Constraints, DoD, AC) → extract epic_id
+ 1. RECEIVE EPIC file → validate sections → extract epic_id:
+      a. REQUIRED: Goal, Scope (with ≥1 path), DoD (≥1 gate), AC (≥3 criteria)
+      b. RECOMMENDED: Artifacts (typed), Context (with stack info), Hints
+      c. If Artifacts are untyped → infer types from text (best effort)
+      d. If Steps are missing → planner generates from Artifacts + AC (normal flow)
+      e. If Steps present → treat as constraints, validate deps, allow planner to add/split
+      f. If Scope has only directories (no files) → planner infers files from Artifacts
+      g. WARNING (not blocking): If AC < 5 or Artifacts empty → flag in PLAN_REVIEW
+         as "Low-detail EPIC — plan quality may be reduced. Consider adding typed artifacts."
  2. PARSE steps → extract (role, objective, depends_on[], outputs[], paths, constraints) → assign step_ids
  2.1. AUTO-SCAFFOLD DETECTION (Section 7.3):
       Check project-profile.yaml → if uninitialized → generate step_0_scaffold → PM confirms
+ 2.2. STEP DECOMPOSITION (Section 2b):
+      a. Detect EPIC type from artifacts (dev / docs / infra / mixed)
+      b. For each step, evaluate split criteria:
+         - Dev steps: layer-based (data → schema → API → service → UI → test → config)
+         - Docs steps: topic-based (API docs, user guide, architecture)
+         - Infra steps: scope-based (CI, deployment, monitoring)
+      c. IF criteria met → decompose into sub-steps
+      d. Update step list with sub-steps (original step replaced)
+      e. Log: decompositions_applied, sub_steps_created, epic_type
  3. RESOLVE ordering:
       explicit deps → use as-is | partial → fill from defaults (Section 3) | none → full defaults
  4. BUILD dependency graph → adjacency list → dependencies[] with reasons (Section 1)
  5. VALIDATE graph → no cycles, all refs exist, no self-deps → FAIL if invalid
- 6. DETECT parallel groups → level assignment → group same-level → filter 2+ (Section 2)
+ 6. WAVE ASSEMBLY (replaces "DETECT parallel groups"):
+      a. Level assignment via topological sort
+      b. File conflict check — separate conflicting steps
+      c. Group same-level steps into candidate waves
+      d. Split waves with 5+ steps into sub-waves of max 4
+      e. Output: waves[] array + parallel_groups (backward compat)
+      f. Log: wave_count, max_wave_size, parallel_step_count
+ 6.1. CRITICAL PATH ANALYSIS (opt-in, Section 2c):
+      IF total_steps >= 7:
+        a. Compute critical path (longest DAG chain)
+        b. IF critical_path_ratio > 0.6:
+           → For dev EPICs: apply relaxation rules R1-R5
+           → For non-dev EPICs: CPA data only, no relaxation rules
+           → Re-level and re-assemble waves
+           → Verify improvement, revert if no gain
+        c. Log critical path to plan metadata:
+           "critical_path": [step_ids on path]
+           "critical_path_ratio": 0.57
+           "relaxations_applied": [{rule, edge, reason}]
  7. GENERATE analysis_groups:
       a. Apply Rules A-D to each step → auto entries
       b. Parse EPIC manual analysis_groups → manual entries
@@ -392,8 +657,13 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
 10. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
-11. VALIDATE → V-01 through V-19 → fix + re-validate on failure (max 3 attempts → escalation)
-12. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
+11. SESSION BOUNDARIES:
+      a. Apply wave-based session boundary algorithm (Section 11)
+      b. Write ## Session Breakdown into EPIC file
+      c. Set EPIC frontmatter: sessions_total: N
+      d. Log: session_count, steps_per_session[]
+12. VALIDATE → V-01 through V-23 → fix + re-validate on failure (max 3 attempts → escalation)
+13. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
 
 ### Example — Auto-Generated analysis_groups for the 7-Step EPIC
@@ -683,59 +953,180 @@ build_pass:     required: false   # include IF frontend files in scope
 
 ---
 
-## 11. Planner Optimization Strategy
+## 11. Planner Optimization Strategy (Parallelism-First)
 
-The Planner's job is to produce a plan.json + EPIC that the Controller can
-execute as FAST, EFFICIENTLY, and with as HIGH QUALITY as possible.
+### Core Philosophy
+
+The Planner's PRIMARY job is to minimize WALL-CLOCK TIME to EPIC completion.
+Not step count. Not token count. WALL-CLOCK TIME.
+
+```
+Wall-clock time ≈ critical_path_length × avg_step_duration
+                + session_transitions × ~2 min each
+                + overhead (merges, phase checks, wave transitions)
+```
 
 ### Optimization Priorities (in order)
 
-1. **Speed** -- minimize wall-clock time to completion
-   - Maximize parallelization: identify independent steps, group them
-   - Minimize sequential chain length (critical path)
-   - Prefer more parallel steps over fewer sequential steps
-   - Token count matters ONLY if it affects latency (larger context = slower)
-   - Cost is NOT a factor (MAX plan -- flat rate)
+1. **PARALLELISM** — minimize critical path length
+   - Every step on the critical path is wall-clock time you can't avoid
+   - Decompose steps to move work OFF the critical path (Section 2b)
+   - Relax dependencies to shorten the critical path (Section 2c)
+   - Target: critical_path_ratio < 0.5 (< half of steps on critical path)
 
-2. **Quality** -- ensure outputs meet acceptance criteria
+2. **WAVE DENSITY** — maximize work per wave
+   - Empty slots in a wave = wasted parallelism capacity
+   - 4 agents in parallel ≈ same wall-clock time as 1 agent
+   - Target: average wave utilization > 2.5 steps/wave
+
+3. **SESSION COMPACTNESS** — minimize session count
+   - Each session transition costs: context reload + state verify ≈ 2 min
+   - Fewer sessions = less overhead
+   - Target: total_steps / session_count >= 4
+
+4. **QUALITY** — ensure outputs meet acceptance criteria
    - Every step has clear, verifiable acceptance criteria
-   - Dependencies are explicit -- no implicit ordering assumptions
-   - Security and QA steps always run AFTER implementation (not before)
-   - Gates validate cumulative quality, not just last step
+   - Dependencies are explicit — no implicit ordering assumptions
+   - Security and QA steps always AFTER implementation
+   - Gates validate cumulative quality
 
-3. **Efficiency** -- avoid wasted work
+5. **EFFICIENCY** — avoid wasted work
    - No redundant steps (don't split what one agent can do well)
-   - File scoping: each step knows exactly which files to read (relevant_files)
-   - Dependency outputs are explicit -- agents don't guess what prior steps did
+   - File scoping: relevant_files per step eliminates blind exploration
+   - Dependency outputs are explicit — agents don't guess what prior steps produced
 
-### Step Planning Rules
+### Step Planning Rules (revised)
 
-1. **Architect is always step 1** -- scaffolds structure, defines contracts
-2. **Domain + Backend can sometimes parallelize** if architect provides clear
-   enough contracts (models vs. routes are independent)
-3. **QA + Security + Docs ALWAYS parallelize** -- they read existing code, don't
-   conflict
-4. **Frontend + Backend parallelize** when contracts are defined by architect
-5. **Maximum parallel group size: 4** -- more causes context window pressure
-   on the Controller tracking all outputs
+#### Universal Rules (all EPIC types)
 
-### Session Split Decision
+1. **First step is always wave 0** — architect (dev), lead writer (docs), or scaffold (infra)
+2. **Maximum wave size: 4 steps** — soft limit, Controller handles overflow gracefully
+3. **NEVER create trivially small steps** (< 3 files) just for parallelism
+4. **Prefer wider waves over more waves** — 1 wave of 4 > 2 waves of 2
+5. **Verification/review steps ALWAYS after implementation/writing** — QA, security, review
 
-The Planner decides session boundaries automatically:
+#### Development-Specific Rules
 
-| Steps | Sessions | Rationale |
-|-------|----------|-----------|
-| 1-6 | 1 | Fits comfortably in single context window |
-| 7-9 | 2 | Split at natural breakpoint (implementation -> verification) |
-| 10-14 | 2-3 | Split by domain (backend session -> frontend session -> quality) |
-| 15+ | 3+ | Rare; split at dependency-free boundaries |
+6. **Backend + Frontend ALWAYS parallelize** when contracts exist from architect
+   This is the #1 parallelism opportunity in most dev EPICs
+7. **Decompose large steps** (5+ files, 2+ layers) into sub-steps
+   WHEN this enables at least 1 new parallel pairing (Section 2b)
+8. **Domain can parallelize with backend's first sub-step** IF:
+   - Domain produces models/entities
+   - Backend first sub-step is data layer (schemas, DB setup)
+   - They don't touch the same files (non-overlapping allowed_paths)
 
-Rules for split placement:
-- NEVER split inside a parallel group
-- ALWAYS split AFTER a gate-worthy milestone (something that can be validated)
-- Each session should produce independently testable deliverables
-- First session always includes architect + core implementation
-- Last session always includes QA + Security + Docs
+#### Non-Development Rules
+
+9. **Independent topics ALWAYS parallelize** — "API docs" ‖ "User guide" if different sources
+10. **Config steps parallelize when targeting different systems** — CI ‖ deployment ‖ monitoring
+
+### Plan Quality Metrics
+
+Every plan.json MUST include an `optimization_metrics` object:
+
+```json
+{
+  "optimization_metrics": {
+    "total_steps": 14,
+    "wave_count": 8,
+    "session_count": 3,
+    "critical_path_length": 5,
+    "critical_path_ratio": 0.36,
+    "avg_wave_density": 1.75,
+    "parallel_step_count": 10,
+    "sequential_step_count": 4,
+    "relaxations_applied": 2,
+    "decompositions_applied": 1
+  }
+}
+```
+
+These metrics are:
+- Shown in PLAN_REVIEW (so PM sees parallelism quality)
+- Stored in evidence (for post-EPIC analysis)
+- Fed to /aid-analytics (for cross-EPIC optimization tracking)
+- Used by Planner self-improvement (compare metrics across EPICs via Qdrant)
+
+### Session Split Decision (Wave-Based)
+
+**Core principle:** Sessions = contiguous sequences of waves that fit context window.
+NEVER split by domain. NEVER split inside a wave.
+
+#### Session Boundary Algorithm
+
+```
+1. Start with waves[] from Wave Assembly (Section 2)
+
+2. Assign waves to sessions greedily:
+   session_steps = 0
+   current_session = []
+
+   FOR each wave W in waves[]:
+     IF session_steps + len(W) <= MAX_STEPS_PER_SESSION:
+       current_session.append(W)
+       session_steps += len(W)
+     ELSE:
+       Flush current_session → new session
+       current_session = [W]
+       session_steps = len(W)
+
+3. Validate sessions:
+   a. NEVER split inside a wave (wave with 2+ steps = parallel group)
+   b. Each session must contain at least 1 gate-worthy milestone
+   c. First session always starts with architect
+   d. Last session always ends with release (if present)
+   e. Each session produces independently testable deliverables
+```
+
+#### MAX_STEPS_PER_SESSION heuristic
+
+| Total EPIC steps | Max per session | Rationale |
+|------------------|-----------------|-----------|
+| 1-6              | 6 (= 1 session) | Fits single context window |
+| 7-10             | 6-7             | 2 sessions, balanced |
+| 11-15            | 6               | 2-3 sessions |
+| 16+              | 5-6             | 3+ sessions, tighter bounds |
+
+Note: "steps" counts sub-steps from decomposition (Section 2b).
+A wave of 4 parallel steps counts as 4 steps for this limit.
+
+#### Example — 14-step full-stack EPIC after optimization
+
+Note: This example shows the result AFTER step decomposition has
+split monolithic steps into sub-steps (e.g., step_3a, step_3b).
+
+```
+Waves (from Wave Assembly):
+  wave 0: [step_1_architect]
+  wave 1: [step_2_domain, step_3a_backend]
+  wave 2: [step_3b_backend, step_4_frontend]         ← cross-domain parallel!
+  wave 3: [step_5_backend_search, step_6_extension]
+  wave 4: [step_7_frontend_pages]
+  wave 5: [step_8_frontend_polish]
+  wave 6: [step_9_qa, step_10_security, step_11_docs]
+  wave 7: [step_12_release]
+
+Sessions (MAX_STEPS_PER_SESSION = 6):
+  Session 1 (waves 0-2, 6 steps):
+    architect → [domain ‖ backend-data] → [backend-API ‖ frontend-scaffold]
+    Milestone: working API + frontend scaffold
+
+  Session 2 (waves 3-5, 4 steps):
+    [search ‖ extension] → frontend-pages → frontend-polish
+    Milestone: complete frontend + all features
+
+  Session 3 (waves 6-7, 4 steps):
+    [QA ‖ security ‖ docs] → release
+    Milestone: validated + released
+
+vs. OLD approach (sequential domains):
+  Session 1: architect → domain → backend (all 5 steps sequentially)
+  Session 2: frontend (all 4 steps sequentially)
+  Session 3: QA → security → docs → release
+
+Result: 3 waves of parallel work vs 0 in old approach.
+```
 
 ### Session Breakdown Generation
 
@@ -744,17 +1135,15 @@ The Planner writes `## Session Breakdown` into the EPIC file:
 ```markdown
 ## Session Breakdown
 
-### Session 1: Core Implementation (steps 1-5)
+### Session 1: Core Implementation (waves 0-2, 6 steps)
 **Goal:** Build working API with data model
-**Steps:** architect -> domain -> backend -> frontend (parallel: domain+backend)
+**Waves:** wave 0 [architect] → wave 1 [domain ‖ backend-data] → wave 2 [backend-API ‖ frontend]
 **Deliverables:** Working endpoints, database, basic UI
-**Estimated duration:** 30-45 min
 
-### Session 2: Quality & Release (steps 6-8)
+### Session 2: Quality & Release (waves 3-4, 4 steps)
 **Goal:** Verify, secure, document, release
-**Steps:** qa + security + docs (all parallel)
+**Waves:** wave 3 [QA ‖ security ‖ docs] → wave 4 [release]
 **Deliverables:** Test suite (90%+ coverage), security review, documentation
-**Estimated duration:** 20-30 min
 ```
 
 And sets EPIC frontmatter: `sessions_total: 2`
@@ -787,5 +1176,5 @@ And sets EPIC frontmatter: `sessions_total: 2`
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20

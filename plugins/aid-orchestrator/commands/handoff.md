@@ -1,3 +1,9 @@
+---
+name: handoff
+description: Create handoff block for next AI session
+user_invocable: true
+---
+
 Create a handoff block for the next AI session.
 
 Read `skills/session-management.md` and follow the Handoff protocol.

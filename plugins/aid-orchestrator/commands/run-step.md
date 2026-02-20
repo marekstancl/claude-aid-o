@@ -1,3 +1,9 @@
+---
+name: run-step
+description: Run a single step manually
+user_invocable: true
+---
+
 Manually run a single step from an existing EPIC plan.
 
 Use this to execute one specific agent step without running the full orchestration loop. Useful for debugging, re-running a failed step, or testing individual agents.
@@ -69,7 +75,16 @@ Available steps:
 2. Load playbook: `.aid-o/03-config/playbooks/{role}.md`
 3. Load previous step outputs (if dependencies are met):
    - For each dependency: read `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/{dep_step}/output.md`
-4. Build agent prompt (same format as `/run-epic` EXECUTING state):
+4. **Source Plan Loading (Variant B):**
+   - Read plan.json → check `source_plan` field
+   - If `source_plan` is set and file exists:
+     a. Read the source plan file
+     b. Find the matching task section for this step:
+        - Parse step.objective for plan task reference (e.g., "(Plan: Task A)")
+        - Match section headers against step keywords
+     c. Store matched section for prompt enrichment
+   - If `source_plan` is null or file missing → skip (backward compatible)
+5. Build agent prompt (same format as `/run-epic` EXECUTING state):
    ```
    ## Context
    You are the {role} agent working on EPIC {epic_id}.
@@ -94,6 +109,17 @@ Available steps:
 
    ## Previous Step Outputs
    {Content from dependency step outputs, if available}
+
+   {IF source_plan_section available:}
+   ## Source Plan — Implementation Detail
+
+   The following is the detailed implementation guide from the source plan.
+   Use this as your primary reference for WHAT to change and HOW.
+   The step definition above provides the structured constraints (allowed paths,
+   acceptance criteria). This section provides the implementation specifics.
+
+   {source_plan_section_content}
+   {END IF}
 
    ## Deliverables
    Produce the following:

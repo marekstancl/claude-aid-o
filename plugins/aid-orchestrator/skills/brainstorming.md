@@ -1,6 +1,6 @@
 # Brainstorming — Interactive Design and Planning Skill
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Skill:** brainstorming
 **Dependencies:** session-management, planner
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -223,6 +223,11 @@ through /plan-epic and /run-epic.
 
 2. Generate an EPIC following the template structure exactly. Fill all sections:
 
+   ### Frontmatter
+   - Set `plan_ref: {plan_filename}` (the source plan's filename, e.g., `P-20260219-task-mgmt.md`)
+   - Set `plan_epics_total: 1` (or as specified in plan)
+   - Set `sessions_total:` based on Session Breakdown rules
+
    ### Context
    - Reference the plan: "This EPIC implements Plan P-{plan_id}."
    - Summarize the problem and chosen approach from the plan.
@@ -239,8 +244,9 @@ through /plan-epic and /run-epic.
      Shared infrastructure, other bounded contexts, core modules.
 
    ### Artifacts
-   - List concrete deliverables from the plan's High-Level Steps.
-   - Include: endpoints, tables, components, docs, configs.
+   - List concrete deliverables from ALL plan tasks/steps (not just high-level).
+   - Type each artifact: endpoint:, model:, component:, config:, doc:
+   - Include specific file paths from the plan where mentioned.
 
    ### Constraints
    - Copy from plan's Constraints section.
@@ -263,7 +269,11 @@ through /plan-epic and /run-epic.
    - List external services, other EPICs, or libraries needed.
 
    ### Steps (Role Pipeline)
-   - Map plan's High-Level Steps to AID roles:
+   - Map ALL plan tasks to AID roles (each plan task = one EPIC step):
+   - Preserve plan Task IDs in objective field (e.g., "Add gitignore (Plan: Task A)")
+   - The source plan's implementation detail for each task is accessed via plan_ref
+     during execution — the EPIC step is a structured summary, not a replacement.
+   - Map roles using this table:
      | Plan Step Category | AID Role |
      |--------------------|----------|
      | Design, architecture, contracts | architect |
@@ -291,7 +301,13 @@ through /plan-epic and /run-epic.
 4. Apply YAGNI: do not add steps, roles, or constraints the plan does not require.
    If the plan describes a simple feature, the EPIC should be simple.
 
-5. Cross-reference the plan in the EPIC's Context section.
+5. IMPORTANT — Zero Detail Loss (Variant B):
+   The EPIC does NOT replace the source plan. It adds structure (roles, deps, gates, AC)
+   on top of the plan's implementation detail. The plan_ref field ensures agents can
+   always access the full plan. Do NOT try to compress all plan detail into the EPIC —
+   instead, create a well-structured specification that references the plan.
+
+6. Cross-reference the plan in the EPIC's Context section.
 
 ## Output Format
 
@@ -379,16 +395,22 @@ If abort AFTER Step 8:
 
 ### Transitioning to Execution
 
-After brainstorming completes, the standard AID workflow continues:
+After brainstorming completes, two paths are available:
 
 ```
 /aid-brainstorm → Plan + EPIC draft
-    ↓
-PM reviews and edits EPIC draft
-    ↓
-/plan-epic .aid-o/02-epics/E-*.md → Plan JSON + Session file
-    ↓
-/run-epic → Orchestrated execution
+    ├── (Y at Step 8b) Direct pipeline:
+    │     EPIC → Plan JSON + Session → ready for /run-epic
+    │
+    └── (N at Step 8b) Manual review:
+          PM reviews EPIC draft → /plan-epic → /run-epic
+```
+
+Additionally, `/plan-epic` accepts Plan files directly:
+
+```
+PM writes plan in .aid-o/01-plans/
+    → /plan-epic → auto-generates EPIC → Plan JSON + Session → /run-epic
 ```
 
 ---
@@ -526,5 +548,5 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20

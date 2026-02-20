@@ -183,7 +183,7 @@ If any check fails, fix the session file before proceeding.
 **Communication:** Per `skills/slack-mcp.md` Type B (Plan Approval).
 
 **Actions:**
-1. Format plan summary with step sequence, parallel groups, analysis groups, roles, budget
+1. Format plan summary using the **Rich Plan Summary Template** below
 2. Send to PM via `send_pm_message("plan_approval", payload)`:
    - **Slack:** Posts Plan Approval message to configured channel, waits for reply
    - **Chat fallback:** Presents plan in conversation, waits for response
@@ -192,6 +192,69 @@ If any check fails, fix the session file before proceeding.
 5. If REVISE: return to PLANNING with PM feedback
 6. If ABORT: transition to DONE (status: aborted)
 7. If timeout: execute `timeout_actions.plan_approval` from `slack-config.yaml`
+
+**Rich Plan Summary Template:**
+
+Present the plan in this format:
+
+```
+PLAN_REVIEW: EPIC {epic_id} — {title}
+
+Overview:
+  Steps: {count} ({wave_count} waves, {analysis_group_count} analysis groups)
+  Roles: {unique roles}
+  Sessions: {session_count}
+  Gates: {gate list}
+
+Wave Execution Plan:
+  Wave 0: [architect] Design API contracts, data model           ~3 files    —
+  Wave 1: [domain]    SQLAlchemy models, schemas                 ~8 files    ← wave 0
+           [backend]  Database models + Pydantic schemas          ~5 files    ← wave 0
+           └─ analysis: [security] → DB validation
+  Wave 2: [backend]  API routers + business logic                ~6 files    ← wave 1
+           [frontend] React scaffold, routing, pages             ~10 files   ← wave 0  ← CROSS-DOMAIN PARALLEL
+           └─ analysis: [security] → auth review
+  Wave 3: [qa]       Backend + frontend tests                    ~8 files    ← wave 2
+           [security] Security review                            ~2 files    ← wave 2
+           [docs]     API docs + guides                          ~4 files    ← wave 2
+  Wave 4: [release]  Version bump + deployment config            ~3 files    ← wave 3
+
+Optimization:
+  Critical path: {length} steps (ratio: {ratio})
+  Wave density: {avg} steps/wave
+  Parallel utilization: {parallel_count}/{total} steps ({percent}%)
+  Decompositions: {count} applied
+  Relaxations: {count} applied
+    {if any:}
+    - R1: frontend starts after architect (not domain) — needs contracts only
+    - R4: security starts after auth step (not all backend)
+
+Session Breakdown:
+  Session 1 (waves 0-2, {N} steps): {goal} — {milestone}
+  Session 2 (waves 3-4, {N} steps): {goal} — {milestone}
+
+Acceptance Criteria: {total_count} across {category_count} categories
+  - Auth: {count} criteria
+  - CRUD: {count} criteria
+  - Frontend: {count} criteria
+  ...
+```
+
+**MUST include for each step:**
+- Wave number (which wave it belongs to)
+- Role in brackets
+- Objective (what it builds, not just "implement backend")
+- Approximate file count (new/modified)
+- Dependencies (which wave it depends on)
+- Cross-domain parallel marker (when different domains run in same wave)
+- Analysis group (if any)
+- Relaxation marker (if dependency was relaxed)
+
+**MUST include optimization section:**
+- Critical path length and ratio
+- Wave density (avg steps/wave)
+- Parallel utilization (% of steps in multi-step waves)
+- Decompositions and relaxations applied (with explanation)
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/pm_plan_approval.json`
 
@@ -224,12 +287,14 @@ default to `recommended` preset behavior.
 2. For sequential step:
    a. Create branch: `epic/{epic_id}/step_{N}_{role}` from `epic/{epic_id}/main`
    b. Load role playbook from `.aid-o/03-config/playbooks/{role}.md`
-   c. Dispatch agent with context:
+   c. Load source plan detail (Variant B — see **Source Plan Integration** below)
+   d. Dispatch agent with context:
       - EPIC specification (relevant sections)
       - Plan step (objective, inputs, outputs, constraints)
+      - Source plan implementation detail (if available — see below)
       - Previous step outputs (if dependency)
       - Allowed/forbidden paths
-   d. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
+   e. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
       - If `memory.cross_project.read_at_executing: true` AND Qdrant available:
         `qdrant-find` query = step objective + role + tech_stack
       - Include top `cross_project.max_results` entries in dispatch prompt
@@ -261,6 +326,39 @@ Key context to pass:
 - Backend → QA: endpoint implementations, test fixtures
 - Backend → Security: code to review
 - All → Docs: what changed and why
+
+**Source Plan Integration (Variant B):**
+
+When dispatching an agent for a step, check if source plan detail is available:
+
+1. Read `plan.json` → check for `source_plan` field (path to source .md plan file)
+2. If `source_plan` exists AND file is readable:
+   a. Read the source plan file
+   b. Find the matching task section:
+      - Match by step objective keywords against plan section headers
+      - Match by explicit plan task reference in step objective (e.g., "(Plan: Task A)")
+      - If step.id contains a number, try matching against "## Task {letter}" sections
+   c. Extract the full task section content (from header to next ## header)
+   d. Include in agent prompt as:
+
+   ```
+   ## Source Plan — Implementation Detail
+
+   The following is the detailed implementation guide from the source plan.
+   Use this as your primary reference for WHAT to change and HOW.
+   The step definition above provides the structured constraints (allowed paths,
+   acceptance criteria). This section provides the implementation specifics.
+
+   {extracted_plan_task_section}
+   ```
+
+3. If `source_plan` does not exist or is unreadable:
+   → Agent proceeds with plan.json step data only (backward compatible)
+   → No error, no warning — standalone EPICs work as before
+
+4. IMPORTANT: The source plan section is ADDITIVE — it enriches the agent prompt
+   but does NOT override plan.json constraints (allowed_paths, forbidden_paths,
+   acceptance_criteria). If there's a conflict, plan.json wins.
 
 **Evidence:** For each step:
 - `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/output.md`
@@ -1294,5 +1392,5 @@ orchestrated: true  # marks this as Controller-managed
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20

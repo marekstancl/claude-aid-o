@@ -1,3 +1,9 @@
+---
+name: aid-setup
+description: Interactive project onboarding — detect stack, configure AID
+user_invocable: true
+---
+
 Interactive project onboarding — analyze the project's tech stack and configure AID for it.
 
 This is the first-time user experience. It detects what the project uses, initializes the workspace, and customizes AID configuration to match the project's tooling.
@@ -243,6 +249,19 @@ If (B): present a numbered list for PM to select from (e.g., "Enter option numbe
 - Check if `.aid-o/` exists
 - If not → run `/aid-init` logic (from `commands/aid-init.md`)
 - If yes → report "Already initialized, skipping"
+- **After init (automatic):** Configure `.gitignore` for runtime artifacts:
+  1. Check if `.gitignore` exists in project root
+  2. If yes: check if `.aid-o/04-engine/` rule already exists (grep)
+  3. If not present: append the AID gitignore block from `defaults/.gitignore`
+  4. If `.gitignore` doesn't exist: create it with the AID rules
+  - The appended block:
+    ```
+    # AID Orchestrator — runtime artifacts
+    .aid-o/04-engine/
+    ```
+  - IMPORTANT: Never overwrite existing .gitignore rules. Always append.
+  - This makes Option 5 (Add .aid-o/ to .gitignore) effectively automatic —
+    it happens as part of init. Option 5 remains available for manual re-runs.
 
 **Option 2: Customize gates.yaml**
 - Read `.aid-o/03-config/policies/gates.yaml`
@@ -372,11 +391,12 @@ MCP Server Onboarding
 
 1. Qdrant Memory (Recommended)
    Cross-project knowledge database — learn from ALL your projects.
-   Local mode: no Docker needed, data stored in .aid-o/qdrant-data.
+   Local mode: no Docker needed. Data stored centrally at
+   ~/.local/share/aid-orchestrator/qdrant-data (shared across all projects).
 
    Install command:
-     claude mcp add qdrant-memory \
-       --qdrant-local-path .aid-o/qdrant-data \
+     claude mcp add qdrant-memory --scope user \
+       --qdrant-local-path ~/.local/share/aid-orchestrator/qdrant-data \
        -- uvx mcp-server-qdrant
 
    Install Qdrant for cross-project knowledge? (Recommended)
@@ -385,11 +405,20 @@ MCP Server Onboarding
    Collection name: [aid-memory]
 ```
 
+- **Migration Check:** IF `.aid-o/qdrant-data/` exists in project root:
+  ```
+  Found local Qdrant data from previous setup. This data should be
+  in the centralized location (~/.local/share/aid-orchestrator/qdrant-data).
+  Would you like to migrate it? (Y/N)
+  ```
+  - If Y: move data, remove old directory, re-register MCP with --scope user
+  - If N: keep both, warn about potential duplicate entries
+
 - If Y: run the install command, update `.aid-o/03-config/policies/memory-config.yaml`:
   - Set `memory.enabled: true`
   - Set `memory.provider: "qdrant"`
   - Set `memory.collection_name: "{name}"`
-  - Set `memory.local_path: ".aid-o/qdrant-data"`
+  - Set `memory.local_path: "~/.local/share/aid-orchestrator/qdrant-data"`
 - Update `project-profile.yaml` with `memory: { enabled: true, provider: "qdrant-local", collection: "{name}" }`
 - Probe to confirm availability after install:
   ```
@@ -667,6 +696,46 @@ Select strategy: (1/2/3) [1]
   You can change this later by editing:
     .aid-o/03-config/policies/dispatch-strategy.yaml
   ```
+
+### Step 5b: Additional Options Followup
+
+After all recommended options complete, if PM selected "(A) All recommended":
+
+Run project-profile auto-detection for MCP candidates:
+  1. Check `.git` + remote → GitHub MCP candidate
+  2. Check `Dockerfile` or `docker-compose.yml` → Docker MCP candidate
+  3. Check `has_frontend: true` in project-profile → Playwright MCP candidate
+  4. Check `tech_stack.database` → Postgres/MySQL MCP candidate
+
+Present to PM:
+
+```
+Recommended setup complete!
+
+Additional options available:
+
+  (4) CLAUDE.md — Generate project context file for Claude Code
+      Adds AID markers to CLAUDE.md so Claude understands your project
+      structure, conventions, and workflow.
+
+  (6b) Slack notifications — PM approvals and escalations via Slack
+       Requires: Slack app with bot token. See /aid-help slack for setup.
+
+  (6c) Auto-detected MCPs for your stack:
+       - GitHub MCP (detected: .git + remote origin)
+       - Playwright MCP (detected: has_frontend: true)
+       [dynamically generated from project-profile detection above]
+
+  (6d) Custom MCP — Add your own MCP servers manually
+
+Configure any of these? (select numbers, or Enter to skip)
+```
+
+Process selected options using existing Step 4 logic for each.
+If PM presses Enter/skips: continue to Step 6.
+
+NOTE: Option 5 (.gitignore) is NOT offered here — it becomes automatic
+after Task A (selective .aid-o gitignore is applied during init).
 
 ### Step 6: New Project Flow
 

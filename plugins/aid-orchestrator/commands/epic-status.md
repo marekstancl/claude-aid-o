@@ -1,3 +1,9 @@
+---
+name: epic-status
+description: Show pipeline status (steps, gates, budget)
+user_invocable: true
+---
+
 Show the current status of an EPIC pipeline — steps progress, gate results, budget, and evidence location.
 
 ## Usage

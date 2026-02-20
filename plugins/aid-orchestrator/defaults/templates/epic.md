@@ -1,16 +1,26 @@
 ---
 status: active
-plan_ref: null             # parent plan filename (null for standalone)
+plan_ref: null             # REQUIRED when EPIC comes from a plan (set to plan filename)
+                           # null ONLY for standalone EPICs (no source plan)
 plan_epics_total: null     # copied from plan for quick reference (null for standalone)
 sessions_total: 1          # from Session Breakdown (1 = single session)
 sessions_completed: 0      # incremented at each session DONE
 ---
 
+<!-- plan_ref: Links this EPIC to its source plan in .aid-o/01-plans/.
+     When set, the execution pipeline reads the source plan for implementation detail.
+     Agents receive relevant plan sections alongside EPIC step definitions.
+     This is Variant B: EPIC = structured spec, Plan = implementation guide, both read during execution. -->
+
 # EPIC: <ID> — <Title>
 
 ## Context
 
-<!-- Background: why this EPIC exists, what problem it solves, relevant prior work -->
+<!-- REQUIRED for planner quality: -->
+<!-- - Tech stack (e.g. FastAPI + React + PostgreSQL) -->
+<!-- - Greenfield (new module) vs. brownfield (modifying existing) -->
+<!-- - Existing patterns to follow (e.g. "follows same structure as users/ module") -->
+<!-- - Prior work this builds on (e.g. "extends auth from EPIC-003") -->
 
 ## Goal
 
@@ -19,8 +29,11 @@ sessions_completed: 0      # incremented at each session DONE
 ## Scope
 
 ### Allowed files/paths
-- <!-- e.g. backend/app/services/invoicing/ -->
-- <!-- e.g. frontend/components/invoicing/ -->
+- <!-- Directories: backend/app/tasks/ -->
+- <!-- Specific files (helps planner scope agents): -->
+  - <!-- backend/app/tasks/models.py -->
+  - <!-- backend/app/tasks/routes.py -->
+  - <!-- backend/app/tasks/schemas.py -->
 
 ### Forbidden zones
 - <!-- e.g. backend/app/core/ (shared infrastructure) -->
@@ -28,8 +41,16 @@ sessions_completed: 0      # incremented at each session DONE
 
 ## Artifacts
 
-<!-- Expected outputs: API endpoints, DB tables, UI pages, docs, etc. -->
--
+<!-- Type each artifact for planner layer detection: -->
+<!-- endpoint: POST /api/v1/tasks, GET /api/v1/tasks, ... -->
+<!-- model: tasks table (id, title, status, tenant_id, timestamps) -->
+<!-- component: TaskBoard, TaskCard, TaskForm -->
+<!-- config: deployment config, env vars -->
+<!-- doc: API docs, ADR, CHANGELOG -->
+- endpoint:
+- model:
+- component:
+- doc:
 
 ## Constraints
 
@@ -49,9 +70,10 @@ sessions_completed: 0      # incremented at each session DONE
 ## Acceptance Criteria
 
 <!-- Specific, testable criteria that define "done" -->
-- [ ] <!-- e.g. POST /api/v1/invoices returns 201 with valid payload -->
-- [ ] <!-- e.g. Invoice list page renders with pagination -->
-- [ ] <!-- e.g. Unit test coverage > 80% for new code -->
+<!-- Prefix with [role] where applicable: [backend], [frontend], [qa], [security], [docs] -->
+- [ ] <!-- e.g. [backend] POST /api/v1/invoices returns 201 with valid payload -->
+- [ ] <!-- e.g. [frontend] Invoice list page renders with pagination -->
+- [ ] <!-- e.g. [qa] Unit test coverage > 80% for new code -->
 
 ## Dependencies
 
@@ -60,7 +82,9 @@ sessions_completed: 0      # incremented at each session DONE
 
 ## Steps (Role Pipeline)
 
-<!-- The Planner generates this from the EPIC, but you can pre-define the expected sequence -->
+<!-- OPTIONAL: If you define steps, the Planner treats them as constraints. -->
+<!-- If omitted, the Planner generates steps from Artifacts + AC + Scope. -->
+<!-- Tip: For complex EPICs (7+ expected steps), define at least the critical path. -->
 
 | # | Role | Objective | Depends On | Parallel Group |
 |---|------|-----------|------------|----------------|
@@ -85,6 +109,14 @@ sessions_completed: 0      # incremented at each session DONE
 ### Session 2: <Topic>
 **Goal:** ...
 **Deliverables:** ...
+
+## Hints (Optional)
+
+<!-- Help the planner make better decisions: -->
+- expected_steps: <!-- e.g. 5-8 -->
+- complexity: <!-- low | medium | high -->
+- parallelism_potential: <!-- low | medium | high -->
+- notes: <!-- e.g. "backend and frontend are fully independent" -->
 
 ## Notes
 

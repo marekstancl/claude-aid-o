@@ -1,3 +1,9 @@
+---
+name: aid-help
+description: AID documentation and help topics
+user_invocable: true
+---
+
 Show AID documentation — commands, workflow, agent roles, configuration, and FAQ.
 
 AID's self-knowledge command. Explains everything about how AID works, what commands are available, and how to use the orchestration system.
@@ -48,7 +54,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.3.0
+Version: 0.4.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -65,7 +71,7 @@ Commands (19):
   /aid-setup       Interactive project onboarding
   /aid-brainstorm  9-step interactive brainstorming flow
   /aid-help        This help
-  /plan-epic       EPIC → Plan JSON + session file
+  /plan-epic       EPIC or Plan → Plan JSON + session file
   /run-epic        Start orchestration (state machine)
   /run-step        Run one step manually
   /epic-status     Show pipeline status
@@ -139,10 +145,13 @@ SETUP COMMANDS:
 ORCHESTRATION COMMANDS:
 
   /plan-epic <path>
-    Parse EPIC → generate Plan JSON + session file.
-    Usage: /plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md
+    Parse EPIC or Plan → generate Plan JSON + session file.
+    Accepts:
+      EPIC file: /plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md  (standard)
+      Plan file: /plan-epic .aid-o/01-plans/2026-02-19-plan.md   (auto-converts to EPIC)
     Output: plan.json, plan_progress.json, session file
-    Validates EPIC structure, builds dependency graph.
+    Plan files are auto-detected and converted to EPIC using the EPIC
+    Subagent Template. PM reviews the generated EPIC before proceeding.
 
   /run-epic [epic-id]
     Start the Controller state machine.

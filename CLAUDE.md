@@ -57,7 +57,7 @@ When users run `/aid-init`, it creates:
 | `/aid-init` | Initialize .aid-o/ workspace |
 | `/aid-setup` | Interactive project onboarding |
 | `/aid-help` | Show AID documentation |
-| `/plan-epic` | Parse EPIC → generate Plan JSON |
+| `/plan-epic` | Parse EPIC or Plan → generate Plan JSON |
 | `/run-epic` | Run full EPIC orchestration pipeline |
 | `/run-step` | Manually run a single plan step |
 | `/run-gates` | Run quality gates |
@@ -69,6 +69,15 @@ When users run `/aid-init`, it creates:
 - **Language:** English for all plugin code and documentation
 - **Plugin manifest:** `plugins/aid-orchestrator/.claude-plugin/plugin.json`
 - **Testing:** Use `/plugin validate .` from repo root to validate marketplace
+
+### On Plugin Changes — Mandatory Updates
+
+When modifying plugin files (`plugins/aid-orchestrator/`), always update:
+
+1. **Version numbers** — bump in `plugin.json`, `marketplace.json`, skill headers/footers, README, `aid-help.md`
+2. **CHANGELOG.md** — both root and `plugins/aid-orchestrator/CHANGELOG.md` (keep in sync)
+3. **README.md** — both root (Roadmap section) and `plugins/aid-orchestrator/README.md` (if features/commands change)
+4. **Skill footers** — update `Last Updated` date in modified skill files
 
 ## Release Workflow
 

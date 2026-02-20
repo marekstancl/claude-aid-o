@@ -1,3 +1,9 @@
+---
+name: run-epic
+description: Execute full EPIC orchestration pipeline
+user_invocable: true
+---
+
 Run the Controller state machine to orchestrate an EPIC through its full lifecycle: Plan → Execute Steps → Gates → PM Approval → Done.
 
 This is the **main orchestration command** — it implements the entire 11-state Controller from `skills/epic-orchestration.md`. Once started, it runs autonomously, dispatching agents, checking outputs, retrying failures, and only escalating to PM when necessary.
@@ -68,6 +74,14 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - If not → run `/plan-epic` logic inline
 7. Initialize or load `plan_progress.json`
 8. Copy EPIC to evidence (if not already there)
+9. **Source Plan Loading (Variant B):**
+   - Check plan.json `source_plan` field
+   - If set and file exists:
+     a. Load source plan into memory for the duration of the run
+     b. Log: "Source plan loaded: {source_plan} ({line_count} lines)"
+     c. Source plan is passed to epic-orchestration.md EXECUTING state
+        for per-step section extraction during agent dispatch
+   - If null or missing → log: "No source plan (standalone EPIC)" → continue normally
 
 **Evidence:** `epic_input.md` saved to evidence directory.
 

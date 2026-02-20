@@ -1,3 +1,9 @@
+---
+name: coding-standards
+description: Load project coding standards
+user_invocable: true
+---
+
 Load project coding standards and quality rules.
 
 Read `.aid-o/04-engine/memory/project-profile.yaml` for detected tech stack and conventions.
