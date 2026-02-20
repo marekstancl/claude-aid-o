@@ -697,6 +697,46 @@ Select strategy: (1/2/3) [1]
     .aid-o/03-config/policies/dispatch-strategy.yaml
   ```
 
+### Step 5b: Additional Options Followup
+
+After all recommended options complete, if PM selected "(A) All recommended":
+
+Run project-profile auto-detection for MCP candidates:
+  1. Check `.git` + remote → GitHub MCP candidate
+  2. Check `Dockerfile` or `docker-compose.yml` → Docker MCP candidate
+  3. Check `has_frontend: true` in project-profile → Playwright MCP candidate
+  4. Check `tech_stack.database` → Postgres/MySQL MCP candidate
+
+Present to PM:
+
+```
+Recommended setup complete!
+
+Additional options available:
+
+  (4) CLAUDE.md — Generate project context file for Claude Code
+      Adds AID markers to CLAUDE.md so Claude understands your project
+      structure, conventions, and workflow.
+
+  (6b) Slack notifications — PM approvals and escalations via Slack
+       Requires: Slack app with bot token. See /aid-help slack for setup.
+
+  (6c) Auto-detected MCPs for your stack:
+       - GitHub MCP (detected: .git + remote origin)
+       - Playwright MCP (detected: has_frontend: true)
+       [dynamically generated from project-profile detection above]
+
+  (6d) Custom MCP — Add your own MCP servers manually
+
+Configure any of these? (select numbers, or Enter to skip)
+```
+
+Process selected options using existing Step 4 logic for each.
+If PM presses Enter/skips: continue to Step 6.
+
+NOTE: Option 5 (.gitignore) is NOT offered here — it becomes automatic
+after Task A (selective .aid-o gitignore is applied during init).
+
 ### Step 6: New Project Flow
 
 If the project is empty (no source files, only `.git`):
