@@ -1,3 +1,11 @@
+---
+status: active
+plan_ref: 2026-02-15-task-management-plan.md
+plan_epics_total: 1
+sessions_total: 1
+sessions_completed: 0
+---
+
 # EPIC: EXAMPLE-0001 — Task Management Module
 
 > **NOTE:** This is a reference example, not a real EPIC. It demonstrates
@@ -6,10 +14,16 @@
 
 ## Context
 
+<!-- Tech stack: FastAPI + React + PostgreSQL -->
+<!-- Greenfield: new bounded context, no existing task management code -->
+<!-- Follows: same module pattern as backend/app/users/ -->
+<!-- Prior work: auth module from EPIC-003 provides JWT middleware -->
+
 The project needs a task management module with CRUD API endpoints, a frontend
 list/detail view, and proper observability. This is a greenfield feature within
 an existing FastAPI + React + PostgreSQL stack. No existing task management code
-exists — this is a new bounded context.
+exists — this is a new bounded context. Follows the same module pattern as
+`backend/app/users/`.
 
 ## Goal
 
@@ -21,14 +35,14 @@ operations produce structured audit logs and OpenTelemetry traces.
 
 ### Allowed files/paths
 - `backend/app/tasks/` (new module)
-- `backend/app/tasks/models.py`
-- `backend/app/tasks/routes.py`
-- `backend/app/tasks/schemas.py`
-- `backend/app/tasks/service.py`
+  - `backend/app/tasks/models.py`
+  - `backend/app/tasks/routes.py`
+  - `backend/app/tasks/schemas.py`
+  - `backend/app/tasks/service.py`
 - `backend/tests/test_tasks/`
 - `frontend/src/features/tasks/`
-- `frontend/src/features/tasks/components/`
-- `frontend/src/features/tasks/hooks/`
+  - `frontend/src/features/tasks/components/`
+  - `frontend/src/features/tasks/hooks/`
 - `docs/api/tasks.md`
 - `docs/architecture/adr/`
 - `CHANGELOG.md`
@@ -41,12 +55,11 @@ operations produce structured audit logs and OpenTelemetry traces.
 
 ## Artifacts
 
-- 4 REST endpoints: POST, GET (list + detail), PATCH, DELETE `/api/v1/tasks`
-- PostgreSQL table: `tasks` with tenant isolation
-- React components: `TaskBoard`, `TaskCard`, `TaskForm`, `TaskFilter`
-- OpenAPI spec: `openapi_tasks.yaml`
-- ADR: `ADR-015-task-state-machine.md`
-- Updated: `CHANGELOG.md`, `docs/api/tasks.md`
+- endpoint: POST /api/v1/tasks (create), GET /api/v1/tasks (list, paginated), GET /api/v1/tasks/{id} (detail), PATCH /api/v1/tasks/{id} (update), DELETE /api/v1/tasks/{id} (soft delete)
+- model: tasks (id, title, description, status, tenant_id, created_by, created_at, updated_at)
+- component: TaskBoard (list + filter), TaskCard (single task), TaskForm (create/edit), TaskFilter (status/date)
+- config: OpenAPI spec (openapi_tasks.yaml)
+- doc: ADR-015-task-state-machine.md, docs/api/tasks.md, CHANGELOG.md
 
 ## Constraints
 
@@ -66,19 +79,19 @@ operations produce structured audit logs and OpenTelemetry traces.
 
 ## Acceptance Criteria
 
-- [ ] POST /api/v1/tasks returns 201 with valid JSON payload
-- [ ] GET /api/v1/tasks returns paginated list (default 20 per page)
-- [ ] GET /api/v1/tasks/{id} returns 404 for non-existent task
-- [ ] PATCH /api/v1/tasks/{id} updates only specified fields
-- [ ] DELETE /api/v1/tasks/{id} returns 204 (soft delete)
-- [ ] All endpoints require authentication (401 without token)
-- [ ] Tenant isolation: user A cannot see user B's tasks
-- [ ] TaskBoard component renders with loading, empty, and data states
-- [ ] TaskForm validates required fields (title, status) client-side
-- [ ] Unit test coverage > 80% for backend/app/tasks/
-- [ ] No HIGH/CRITICAL findings in security scan
-- [ ] OpenTelemetry spans on all API endpoints
-- [ ] API docs page builds without errors
+- [ ] [backend] POST /api/v1/tasks returns 201 with valid JSON payload
+- [ ] [backend] GET /api/v1/tasks returns paginated list (default 20 per page)
+- [ ] [backend] GET /api/v1/tasks/{id} returns 404 for non-existent task
+- [ ] [backend] PATCH /api/v1/tasks/{id} updates only specified fields
+- [ ] [backend] DELETE /api/v1/tasks/{id} returns 204 (soft delete)
+- [ ] [backend] All endpoints require authentication (401 without token)
+- [ ] [backend] Tenant isolation: user A cannot see user B's tasks
+- [ ] [frontend] TaskBoard component renders with loading, empty, and data states
+- [ ] [frontend] TaskForm validates required fields (title, status) client-side
+- [ ] [qa] Unit test coverage > 80% for backend/app/tasks/
+- [ ] [security] No HIGH/CRITICAL findings in security scan
+- [ ] [observability] OpenTelemetry spans on all API endpoints
+- [ ] [docs] API docs page builds without errors
 
 ## Dependencies
 
@@ -86,6 +99,8 @@ operations produce structured audit logs and OpenTelemetry traces.
 - PostgreSQL schema migration for `tasks` table (created separately)
 
 ## Steps (Role Pipeline)
+
+<!-- Planner may reorganize these into waves. Dependencies are constraints, roles are hints. -->
 
 | # | Role | Objective | Depends On | Parallel Group |
 |---|------|-----------|------------|----------------|
@@ -106,6 +121,13 @@ This EPIC fits in a single orchestrated run (no session split needed).
 ### Session 1: Full Implementation
 **Goal:** Complete task management module end-to-end.
 **Deliverables:** All artifacts listed above.
+
+## Hints (Optional)
+
+- expected_steps: 7-9
+- complexity: medium
+- parallelism_potential: high (backend + frontend independent after architect)
+- notes: "Frontend can start after architect step — only needs API contracts, not domain model"
 
 ## Notes
 

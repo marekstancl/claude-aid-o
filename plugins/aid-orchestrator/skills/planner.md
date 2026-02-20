@@ -367,7 +367,15 @@ Rationale: later validations may depend on earlier ones passing
 This is the master procedure the Planner follows when `/plan-epic` is invoked.
 
 ```
- 1. RECEIVE EPIC file → validate sections (Goal, Scope, Constraints, DoD, AC) → extract epic_id
+ 1. RECEIVE EPIC file → validate sections → extract epic_id:
+      a. REQUIRED: Goal, Scope (with ≥1 path), DoD (≥1 gate), AC (≥3 criteria)
+      b. RECOMMENDED: Artifacts (typed), Context (with stack info), Hints
+      c. If Artifacts are untyped → infer types from text (best effort)
+      d. If Steps are missing → planner generates from Artifacts + AC (normal flow)
+      e. If Steps present → treat as constraints, validate deps, allow planner to add/split
+      f. If Scope has only directories (no files) → planner infers files from Artifacts
+      g. WARNING (not blocking): If AC < 5 or Artifacts empty → flag in PLAN_REVIEW
+         as "Low-detail EPIC — plan quality may be reduced. Consider adding typed artifacts."
  2. PARSE steps → extract (role, objective, depends_on[], outputs[], paths, constraints) → assign step_ids
  2.1. AUTO-SCAFFOLD DETECTION (Section 7.3):
       Check project-profile.yaml → if uninitialized → generate step_0_scaffold → PM confirms
