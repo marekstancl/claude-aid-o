@@ -72,39 +72,57 @@ step_4_frontend  → [step_7_docs]
 
 ---
 
-## 2. Parallel Group Detection
+## 2. Wave Assembly
 
 **Input:** dependency graph (adjacency list from Section 1)
-**Output:** `parallel_groups[]` array
+**Output:** `waves[]` array (ordered list of step groups, each wave runs in parallel)
 
 ### Algorithm
 
 ```
-1. LEVEL ASSIGNMENT via topological sort:
+1. LEVEL ASSIGNMENT via topological sort (unchanged):
    level(S) = 0 if S.depends_on is empty
    level(S) = max(level(dep) for dep in S.depends_on) + 1
 
 2. GROUP by level → level_groups = { level: [step_ids] }
 
-3. FILTER: for each level with 2+ steps:
-   Verify no inter-dependencies (no edge between candidates)
-   If verified → parallel group. Single-step levels → no entry.
+3. FILE CONFLICT CHECK:
+   For each level, verify no two steps share allowed_paths.
+   IF overlap detected:
+     → separate conflicting steps into sequential sub-waves
+     → log: "Wave split due to file conflict: {step_A} and {step_B} share {paths}"
 
-4. OUTPUT: array of arrays, each inner array has 2+ step IDs
+4. WAVE FORMATION:
+   For each level with 1+ steps (after conflict resolution):
+     IF level has <= 4 steps:
+       → single wave containing all steps
+     IF level has 5+ steps:
+       → split into sub-waves of max 4 steps each
+       → priority: keep same-domain steps together within sub-wave
+       → sub-wave order: lower step numbers first
+
+5. OUTPUT: waves[] array (each wave = array of step_ids)
+   waves[0] = [step_1_architect]
+   waves[1] = [step_2_domain, step_3a_backend]
+   waves[2] = [step_3b_backend, step_4_frontend]  ← cross-domain parallel
+   waves[3] = [step_5_qa, step_6_security, step_7_docs]
+
+6. BACKWARD COMPATIBILITY:
+   parallel_groups = waves with 2+ steps (for plan.json schema)
+   Single-step waves produce no parallel_groups entry.
 ```
 
-### Example — Levels from the 7-Step Dependency Graph
+### Example — Waves from the 7-Step Dependency Graph
 
 ```
-Level 0: [step_1_architect]                               ← no deps
-Level 1: [step_2_domain, step_4_frontend]                 ← parallel group
-Level 2: [step_3_backend]                                 ← sequential
-Level 3: [step_5_qa, step_6_security, step_7_docs]        ← parallel group
-         (step_7_docs: max(level(step_3), level(step_4)) + 1 = max(2,1)+1 = 3)
-```
+Level 0: [step_1_architect]                    → wave 0 (1 step)
+Level 1: [step_2_domain, step_4_frontend]      → wave 1 (2 steps — parallel)
+Level 2: [step_3_backend]                      → wave 2 (1 step)
+Level 3: [step_5_qa, step_6_security, step_7_docs] → wave 3 (3 steps — parallel)
 
-Result: `parallel_groups: [["step_2_domain","step_4_frontend"], ["step_5_qa","step_6_security","step_7_docs"]]`
-Single-step levels (0 and 2) produce no parallel group entries.
+Result: waves = [[step_1], [step_2, step_4], [step_3], [step_5, step_6, step_7]]
+Parallel groups: [[step_2, step_4], [step_5, step_6, step_7]]
+```
 
 ---
 
@@ -383,7 +401,13 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       explicit deps → use as-is | partial → fill from defaults (Section 3) | none → full defaults
  4. BUILD dependency graph → adjacency list → dependencies[] with reasons (Section 1)
  5. VALIDATE graph → no cycles, all refs exist, no self-deps → FAIL if invalid
- 6. DETECT parallel groups → level assignment → group same-level → filter 2+ (Section 2)
+ 6. WAVE ASSEMBLY (replaces "DETECT parallel groups"):
+      a. Level assignment via topological sort
+      b. File conflict check — separate conflicting steps
+      c. Group same-level steps into candidate waves
+      d. Split waves with 5+ steps into sub-waves of max 4
+      e. Output: waves[] array + parallel_groups (backward compat)
+      f. Log: wave_count, max_wave_size, parallel_step_count
  7. GENERATE analysis_groups:
       a. Apply Rules A-D to each step → auto entries
       b. Parse EPIC manual analysis_groups → manual entries
@@ -400,8 +424,13 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
 10. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
-11. VALIDATE → V-01 through V-19 → fix + re-validate on failure (max 3 attempts → escalation)
-12. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
+11. SESSION BOUNDARIES:
+      a. Apply wave-based session boundary algorithm (Section 11)
+      b. Write ## Session Breakdown into EPIC file
+      c. Set EPIC frontmatter: sessions_total: N
+      d. Log: session_count, steps_per_session[]
+12. VALIDATE → V-01 through V-19 → fix + re-validate on failure (max 3 attempts → escalation)
+13. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
 
 ### Example — Auto-Generated analysis_groups for the 7-Step EPIC
@@ -727,23 +756,85 @@ execute as FAST, EFFICIENTLY, and with as HIGH QUALITY as possible.
 5. **Maximum parallel group size: 4** -- more causes context window pressure
    on the Controller tracking all outputs
 
-### Session Split Decision
+### Session Split Decision (Wave-Based)
 
-The Planner decides session boundaries automatically:
+**Core principle:** Sessions = contiguous sequences of waves that fit context window.
+NEVER split by domain. NEVER split inside a wave.
 
-| Steps | Sessions | Rationale |
-|-------|----------|-----------|
-| 1-6 | 1 | Fits comfortably in single context window |
-| 7-9 | 2 | Split at natural breakpoint (implementation -> verification) |
-| 10-14 | 2-3 | Split by domain (backend session -> frontend session -> quality) |
-| 15+ | 3+ | Rare; split at dependency-free boundaries |
+#### Session Boundary Algorithm
 
-Rules for split placement:
-- NEVER split inside a parallel group
-- ALWAYS split AFTER a gate-worthy milestone (something that can be validated)
-- Each session should produce independently testable deliverables
-- First session always includes architect + core implementation
-- Last session always includes QA + Security + Docs
+```
+1. Start with waves[] from Wave Assembly (Section 2)
+
+2. Assign waves to sessions greedily:
+   session_steps = 0
+   current_session = []
+
+   FOR each wave W in waves[]:
+     IF session_steps + len(W) <= MAX_STEPS_PER_SESSION:
+       current_session.append(W)
+       session_steps += len(W)
+     ELSE:
+       Flush current_session → new session
+       current_session = [W]
+       session_steps = len(W)
+
+3. Validate sessions:
+   a. NEVER split inside a wave (wave with 2+ steps = parallel group)
+   b. Each session must contain at least 1 gate-worthy milestone
+   c. First session always starts with architect
+   d. Last session always ends with release (if present)
+   e. Each session produces independently testable deliverables
+```
+
+#### MAX_STEPS_PER_SESSION heuristic
+
+| Total EPIC steps | Max per session | Rationale |
+|------------------|-----------------|-----------|
+| 1-6              | 6 (= 1 session) | Fits single context window |
+| 7-10             | 6-7             | 2 sessions, balanced |
+| 11-15            | 6               | 2-3 sessions |
+| 16+              | 5-6             | 3+ sessions, tighter bounds |
+
+Note: "steps" counts sub-steps from decomposition (Task J).
+A wave of 4 parallel steps counts as 4 steps for this limit.
+
+#### Example — 14-step full-stack EPIC after optimization
+
+Note: This example shows the result AFTER step decomposition has
+split monolithic steps into sub-steps (e.g., step_3a, step_3b).
+
+```
+Waves (from Wave Assembly):
+  wave 0: [step_1_architect]
+  wave 1: [step_2_domain, step_3a_backend]
+  wave 2: [step_3b_backend, step_4_frontend]         ← cross-domain parallel!
+  wave 3: [step_5_backend_search, step_6_extension]
+  wave 4: [step_7_frontend_pages]
+  wave 5: [step_8_frontend_polish]
+  wave 6: [step_9_qa, step_10_security, step_11_docs]
+  wave 7: [step_12_release]
+
+Sessions (MAX_STEPS_PER_SESSION = 6):
+  Session 1 (waves 0-2, 6 steps):
+    architect → [domain ‖ backend-data] → [backend-API ‖ frontend-scaffold]
+    Milestone: working API + frontend scaffold
+
+  Session 2 (waves 3-5, 4 steps):
+    [search ‖ extension] → frontend-pages → frontend-polish
+    Milestone: complete frontend + all features
+
+  Session 3 (waves 6-7, 4 steps):
+    [QA ‖ security ‖ docs] → release
+    Milestone: validated + released
+
+vs. OLD approach (sequential domains):
+  Session 1: architect → domain → backend (all 5 steps sequentially)
+  Session 2: frontend (all 4 steps sequentially)
+  Session 3: QA → security → docs → release
+
+Result: 3 waves of parallel work vs 0 in old approach.
+```
 
 ### Session Breakdown Generation
 
@@ -752,17 +843,15 @@ The Planner writes `## Session Breakdown` into the EPIC file:
 ```markdown
 ## Session Breakdown
 
-### Session 1: Core Implementation (steps 1-5)
+### Session 1: Core Implementation (waves 0-2, 6 steps)
 **Goal:** Build working API with data model
-**Steps:** architect -> domain -> backend -> frontend (parallel: domain+backend)
+**Waves:** wave 0 [architect] → wave 1 [domain ‖ backend-data] → wave 2 [backend-API ‖ frontend]
 **Deliverables:** Working endpoints, database, basic UI
-**Estimated duration:** 30-45 min
 
-### Session 2: Quality & Release (steps 6-8)
+### Session 2: Quality & Release (waves 3-4, 4 steps)
 **Goal:** Verify, secure, document, release
-**Steps:** qa + security + docs (all parallel)
+**Waves:** wave 3 [QA ‖ security ‖ docs] → wave 4 [release]
 **Deliverables:** Test suite (90%+ coverage), security review, documentation
-**Estimated duration:** 20-30 min
 ```
 
 And sets EPIC frontmatter: `sessions_total: 2`
