@@ -224,6 +224,111 @@ Net effect: frontend starts 1-2 waves earlier.
 
 ---
 
+## 2c. Critical Path Analysis (opt-in, 7+ steps)
+
+Critical path analysis is activated when total_steps >= 7. For smaller EPICs,
+the overhead of analysis exceeds the benefit.
+
+### Step 1: Compute Critical Path
+
+Critical path = longest chain through DAG measured by step count.
+
+```
+Algorithm:
+  1. For each step S in topological order:
+     dist(S) = 0 if S.depends_on is empty
+     dist(S) = max(dist(dep) + 1 for dep in S.depends_on)
+  2. critical_path_length = max(dist(S) for all S)
+  3. Backtrack from maximum → identify all steps on critical path
+  4. critical_path_ratio = critical_path_length / total_steps
+```
+
+### Step 2: Dependency Relaxation (if ratio > 0.6)
+
+If more than 60% of steps are on the critical path, the DAG is too sequential.
+Apply relaxation rules to shorten it.
+
+For each dependency edge ON the critical path, evaluate these rules.
+
+NOTE: Rules R1-R5 are DEVELOPMENT-SPECIFIC. For non-dev EPICs (docs, infra),
+CPA still computes critical path and ratio, but relaxation rules don't apply
+(no domain-specific heuristics). For mixed EPICs, apply rules only to dev steps.
+
+#### Development Relaxation Rules
+
+```
+RULE R1: "Frontend doesn't need Domain"
+  IF: step_{N}_frontend depends on step_{M}_domain
+  AND: step_{M}_domain produces only data models (no API contracts)
+  AND: step_{1}_architect produced API contracts
+  THEN: relax → frontend depends on architect instead of domain
+  REASON: Frontend builds against API contracts, not domain internals
+
+RULE R2: "QA can start with partial implementation"
+  IF: step_{N}_qa depends on ALL implementation steps
+  AND: implementation steps are in different domains (backend vs frontend)
+  THEN: split QA into domain-specific sub-steps:
+    step_{N}a_qa depends on backend steps only
+    step_{N}b_qa depends on frontend steps only
+  REASON: Backend tests don't need frontend code and vice versa
+
+RULE R3: "Docs can start after architect"
+  IF: step_{N}_docs depends on all implementation steps
+  AND: architect step produced contracts/ADRs
+  THEN: split docs:
+    step_{N}a_docs "API documentation" depends on architect (start early!)
+    step_{N}b_docs "Usage guides" depends on implementation (late)
+  REASON: API docs come from contracts, not from reading implementation
+
+RULE R4: "Security review of auth can run early"
+  IF: step_{N}_security depends on ALL backend steps
+  AND: one backend step is specifically auth/security-focused
+  THEN: security depends on auth step only (not all backend)
+  REASON: Security review of auth doesn't need CRUD endpoints
+
+RULE R5: "Layer split enables cross-domain parallel"
+  IF: step on critical path spans 2+ layers
+  AND: splitting would allow another domain to start earlier
+  THEN: recommend decomposition (Section 2b)
+  NOTE: Bridge between decomposition and relaxation — if decomposition
+  was skipped for this step, reconsider here.
+```
+
+### Step 3: Safety Net
+
+```
+EVERY relaxation MUST be:
+  a. LOGGED in plan metadata:
+     {"relaxation": "R1", "original_edge": "domain→frontend",
+      "relaxed_to": "architect→frontend",
+      "reason": "frontend needs API contracts only, not domain models"}
+  b. VISIBLE in PLAN_REVIEW output:
+     "Relaxed: frontend starts after architect (not after domain)
+      — needs API contracts only"
+  c. REJECTABLE by PM at PLAN_REVIEW — PM can reject individual relaxations
+  d. RECOVERABLE at runtime — if agent fails due to missing dependency
+     (detected at PHASE_CHECK):
+     → Controller re-dispatches with original (non-relaxed) dependency
+     → Log: "Relaxation R1 failed for step_X — re-run with full deps"
+     → This counts against the step's retry limit (not a new mechanism)
+```
+
+### Step 4: Re-optimization
+
+```
+After applying relaxations:
+  1. Re-build DAG with relaxed edges
+  2. Re-level (topological sort)
+  3. Re-assemble waves (Section 2)
+  4. Verify: new critical_path_ratio < original ratio
+     IF NOT improved: revert ALL relaxations (they didn't help)
+  5. Log delta:
+     "Critical path reduced from {old} to {new} steps ({percent}% shorter)"
+     "Relaxations applied: {count} ({rule_ids})"
+```
+
+---
+
 ## 3. Default Ordering Rules
 
 When the EPIC does not fully specify step ordering, apply these defaults based on role priority.
@@ -515,6 +620,18 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       d. Split waves with 5+ steps into sub-waves of max 4
       e. Output: waves[] array + parallel_groups (backward compat)
       f. Log: wave_count, max_wave_size, parallel_step_count
+ 6.1. CRITICAL PATH ANALYSIS (opt-in, Section 2c):
+      IF total_steps >= 7:
+        a. Compute critical path (longest DAG chain)
+        b. IF critical_path_ratio > 0.6:
+           → For dev EPICs: apply relaxation rules R1-R5
+           → For non-dev EPICs: CPA data only, no relaxation rules
+           → Re-level and re-assemble waves
+           → Verify improvement, revert if no gain
+        c. Log critical path to plan metadata:
+           "critical_path": [step_ids on path]
+           "critical_path_ratio": 0.57
+           "relaxations_applied": [{rule, edge, reason}]
  7. GENERATE analysis_groups:
       a. Apply Rules A-D to each step → auto entries
       b. Parse EPIC manual analysis_groups → manual entries
