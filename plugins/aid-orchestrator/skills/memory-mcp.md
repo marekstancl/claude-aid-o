@@ -6,6 +6,19 @@
 
 ---
 
+## Storage Architecture
+
+Qdrant data is stored CENTRALLY, not per-project:
+
+- Path: `~/.local/share/aid-orchestrator/qdrant-data`
+- MCP scope: `user` (global — available in all projects)
+- All projects write to the same `aid-memory` collection
+- Entries are tagged with `project_name` in metadata for filtering
+- Deleting a project does NOT delete its Qdrant entries
+- Cross-project search works because all data is in one place
+
+This is different from `.aid-o/` which is per-project.
+
 ## TL;DR
 
 This skill defines how AID stores and retrieves knowledge across sessions using a Qdrant

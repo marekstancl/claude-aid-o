@@ -391,11 +391,12 @@ MCP Server Onboarding
 
 1. Qdrant Memory (Recommended)
    Cross-project knowledge database — learn from ALL your projects.
-   Local mode: no Docker needed, data stored in .aid-o/qdrant-data.
+   Local mode: no Docker needed. Data stored centrally at
+   ~/.local/share/aid-orchestrator/qdrant-data (shared across all projects).
 
    Install command:
-     claude mcp add qdrant-memory \
-       --qdrant-local-path .aid-o/qdrant-data \
+     claude mcp add qdrant-memory --scope user \
+       --qdrant-local-path ~/.local/share/aid-orchestrator/qdrant-data \
        -- uvx mcp-server-qdrant
 
    Install Qdrant for cross-project knowledge? (Recommended)
@@ -404,11 +405,20 @@ MCP Server Onboarding
    Collection name: [aid-memory]
 ```
 
+- **Migration Check:** IF `.aid-o/qdrant-data/` exists in project root:
+  ```
+  Found local Qdrant data from previous setup. This data should be
+  in the centralized location (~/.local/share/aid-orchestrator/qdrant-data).
+  Would you like to migrate it? (Y/N)
+  ```
+  - If Y: move data, remove old directory, re-register MCP with --scope user
+  - If N: keep both, warn about potential duplicate entries
+
 - If Y: run the install command, update `.aid-o/03-config/policies/memory-config.yaml`:
   - Set `memory.enabled: true`
   - Set `memory.provider: "qdrant"`
   - Set `memory.collection_name: "{name}"`
-  - Set `memory.local_path: ".aid-o/qdrant-data"`
+  - Set `memory.local_path: "~/.local/share/aid-orchestrator/qdrant-data"`
 - Update `project-profile.yaml` with `memory: { enabled: true, provider: "qdrant-local", collection: "{name}" }`
 - Probe to confirm availability after install:
   ```
