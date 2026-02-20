@@ -249,6 +249,19 @@ If (B): present a numbered list for PM to select from (e.g., "Enter option numbe
 - Check if `.aid-o/` exists
 - If not → run `/aid-init` logic (from `commands/aid-init.md`)
 - If yes → report "Already initialized, skipping"
+- **After init (automatic):** Configure `.gitignore` for runtime artifacts:
+  1. Check if `.gitignore` exists in project root
+  2. If yes: check if `.aid-o/04-engine/` rule already exists (grep)
+  3. If not present: append the AID gitignore block from `defaults/.gitignore`
+  4. If `.gitignore` doesn't exist: create it with the AID rules
+  - The appended block:
+    ```
+    # AID Orchestrator — runtime artifacts
+    .aid-o/04-engine/
+    ```
+  - IMPORTANT: Never overwrite existing .gitignore rules. Always append.
+  - This makes Option 5 (Add .aid-o/ to .gitignore) effectively automatic —
+    it happens as part of init. Option 5 remains available for manual re-runs.
 
 **Option 2: Customize gates.yaml**
 - Read `.aid-o/03-config/policies/gates.yaml`
