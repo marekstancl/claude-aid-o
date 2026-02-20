@@ -572,10 +572,19 @@ and re-validate. Never output an invalid plan.
 | V-18 | Required fields: id, target, agents, mode, merge_strategy, trigger | "Analysis group at index {i} missing required field: {field}" |
 | V-19 | `.agents` has at least 1 entry | "Analysis group {id} has empty agents list" |
 
+### Validations for optimization_metrics
+
+| Rule | Check | Error Template |
+|------|-------|----------------|
+| V-20 | `optimization_metrics` present in plan.json | "Plan missing optimization_metrics" |
+| V-21 | `critical_path_ratio` <= 1.0 | "Invalid critical_path_ratio: {value}" |
+| V-22 | `wave_count` > 0 | "Plan has no waves" |
+| V-23 | All relaxations reference valid step IDs | "Relaxation references unknown step: {id}" |
+
 ### Validation Order
 
 ```
-Run validations in order V-01 through V-19.
+Run validations in order V-01 through V-23.
 Stop on FIRST failure — report the error, fix, re-validate from V-01.
 Rationale: later validations may depend on earlier ones passing
 (e.g., V-09 depends on V-01 having established valid step IDs).
@@ -653,7 +662,7 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
       b. Write ## Session Breakdown into EPIC file
       c. Set EPIC frontmatter: sessions_total: N
       d. Log: session_count, steps_per_session[]
-12. VALIDATE → V-01 through V-19 → fix + re-validate on failure (max 3 attempts → escalation)
+12. VALIDATE → V-01 through V-23 → fix + re-validate on failure (max 3 attempts → escalation)
 13. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
 
@@ -944,41 +953,100 @@ build_pass:     required: false   # include IF frontend files in scope
 
 ---
 
-## 11. Planner Optimization Strategy
+## 11. Planner Optimization Strategy (Parallelism-First)
 
-The Planner's job is to produce a plan.json + EPIC that the Controller can
-execute as FAST, EFFICIENTLY, and with as HIGH QUALITY as possible.
+### Core Philosophy
+
+The Planner's PRIMARY job is to minimize WALL-CLOCK TIME to EPIC completion.
+Not step count. Not token count. WALL-CLOCK TIME.
+
+```
+Wall-clock time ≈ critical_path_length × avg_step_duration
+                + session_transitions × ~2 min each
+                + overhead (merges, phase checks, wave transitions)
+```
 
 ### Optimization Priorities (in order)
 
-1. **Speed** -- minimize wall-clock time to completion
-   - Maximize parallelization: identify independent steps, group them
-   - Minimize sequential chain length (critical path)
-   - Prefer more parallel steps over fewer sequential steps
-   - Token count matters ONLY if it affects latency (larger context = slower)
-   - Cost is NOT a factor (MAX plan -- flat rate)
+1. **PARALLELISM** — minimize critical path length
+   - Every step on the critical path is wall-clock time you can't avoid
+   - Decompose steps to move work OFF the critical path (Section 2b)
+   - Relax dependencies to shorten the critical path (Section 2c)
+   - Target: critical_path_ratio < 0.5 (< half of steps on critical path)
 
-2. **Quality** -- ensure outputs meet acceptance criteria
+2. **WAVE DENSITY** — maximize work per wave
+   - Empty slots in a wave = wasted parallelism capacity
+   - 4 agents in parallel ≈ same wall-clock time as 1 agent
+   - Target: average wave utilization > 2.5 steps/wave
+
+3. **SESSION COMPACTNESS** — minimize session count
+   - Each session transition costs: context reload + state verify ≈ 2 min
+   - Fewer sessions = less overhead
+   - Target: total_steps / session_count >= 4
+
+4. **QUALITY** — ensure outputs meet acceptance criteria
    - Every step has clear, verifiable acceptance criteria
-   - Dependencies are explicit -- no implicit ordering assumptions
-   - Security and QA steps always run AFTER implementation (not before)
-   - Gates validate cumulative quality, not just last step
+   - Dependencies are explicit — no implicit ordering assumptions
+   - Security and QA steps always AFTER implementation
+   - Gates validate cumulative quality
 
-3. **Efficiency** -- avoid wasted work
+5. **EFFICIENCY** — avoid wasted work
    - No redundant steps (don't split what one agent can do well)
-   - File scoping: each step knows exactly which files to read (relevant_files)
-   - Dependency outputs are explicit -- agents don't guess what prior steps did
+   - File scoping: relevant_files per step eliminates blind exploration
+   - Dependency outputs are explicit — agents don't guess what prior steps produced
 
-### Step Planning Rules
+### Step Planning Rules (revised)
 
-1. **Architect is always step 1** -- scaffolds structure, defines contracts
-2. **Domain + Backend can sometimes parallelize** if architect provides clear
-   enough contracts (models vs. routes are independent)
-3. **QA + Security + Docs ALWAYS parallelize** -- they read existing code, don't
-   conflict
-4. **Frontend + Backend parallelize** when contracts are defined by architect
-5. **Maximum parallel group size: 4** -- more causes context window pressure
-   on the Controller tracking all outputs
+#### Universal Rules (all EPIC types)
+
+1. **First step is always wave 0** — architect (dev), lead writer (docs), or scaffold (infra)
+2. **Maximum wave size: 4 steps** — soft limit, Controller handles overflow gracefully
+3. **NEVER create trivially small steps** (< 3 files) just for parallelism
+4. **Prefer wider waves over more waves** — 1 wave of 4 > 2 waves of 2
+5. **Verification/review steps ALWAYS after implementation/writing** — QA, security, review
+
+#### Development-Specific Rules
+
+6. **Backend + Frontend ALWAYS parallelize** when contracts exist from architect
+   This is the #1 parallelism opportunity in most dev EPICs
+7. **Decompose large steps** (5+ files, 2+ layers) into sub-steps
+   WHEN this enables at least 1 new parallel pairing (Section 2b)
+8. **Domain can parallelize with backend's first sub-step** IF:
+   - Domain produces models/entities
+   - Backend first sub-step is data layer (schemas, DB setup)
+   - They don't touch the same files (non-overlapping allowed_paths)
+
+#### Non-Development Rules
+
+9. **Independent topics ALWAYS parallelize** — "API docs" ‖ "User guide" if different sources
+10. **Config steps parallelize when targeting different systems** — CI ‖ deployment ‖ monitoring
+
+### Plan Quality Metrics
+
+Every plan.json MUST include an `optimization_metrics` object:
+
+```json
+{
+  "optimization_metrics": {
+    "total_steps": 14,
+    "wave_count": 8,
+    "session_count": 3,
+    "critical_path_length": 5,
+    "critical_path_ratio": 0.36,
+    "avg_wave_density": 1.75,
+    "parallel_step_count": 10,
+    "sequential_step_count": 4,
+    "relaxations_applied": 2,
+    "decompositions_applied": 1
+  }
+}
+```
+
+These metrics are:
+- Shown in PLAN_REVIEW (so PM sees parallelism quality)
+- Stored in evidence (for post-EPIC analysis)
+- Fed to /aid-analytics (for cross-EPIC optimization tracking)
+- Used by Planner self-improvement (compare metrics across EPICs via Qdrant)
 
 ### Session Split Decision (Wave-Based)
 
@@ -1020,7 +1088,7 @@ NEVER split by domain. NEVER split inside a wave.
 | 11-15            | 6               | 2-3 sessions |
 | 16+              | 5-6             | 3+ sessions, tighter bounds |
 
-Note: "steps" counts sub-steps from decomposition (Task J).
+Note: "steps" counts sub-steps from decomposition (Section 2b).
 A wave of 4 parallel steps counts as 4 steps for this limit.
 
 #### Example — 14-step full-stack EPIC after optimization
