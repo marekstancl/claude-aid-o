@@ -1,25 +1,90 @@
-Parse an EPIC file and generate a Plan JSON + Session file for the Controller state machine.
+Parse an EPIC **or Plan** file and generate a Plan JSON + Session file for the Controller state machine.
 
-This command is the entry point to orchestration — it reads an EPIC, analyzes its steps and dependencies, and produces a validated execution plan that `/run-epic` will follow.
+This command is the entry point to orchestration — it reads an EPIC (or auto-converts a Plan to an EPIC), analyzes its steps and dependencies, and produces a validated execution plan that `/run-epic` will follow.
 
 ## Usage
 
 ```
-/plan-epic <path-to-epic-file>
+/plan-epic <path-to-epic-or-plan-file>
 ```
 
 **Examples:**
 ```
-/plan-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md
+/plan-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md          # EPIC input (standard)
+/plan-epic .aid-o/01-plans/2026-02-19-aido-v040.md                # Plan input (auto-converts to EPIC)
 /plan-epic workspace/workflow/epics/active/EPIC-TEST-0001-DUMMY.md
 ```
 
 ## Prerequisites
 
 - `.aid-o/` workspace must exist (run `/aid-init` first)
-- EPIC file must follow the epic template format
+- Input file must be an EPIC (preferred) or a Plan (auto-converted to EPIC)
 
 ## Flow
+
+### Step 0.5: Input Format Detection
+
+Before validating EPIC sections, detect whether the input file is a Plan or an EPIC.
+
+1. Read the input file at the given path
+2. Detect format using this heuristic (first match wins):
+   a. **Frontmatter check:** If YAML frontmatter contains `type: plan` → Plan format
+   b. **Header check:** If first H1 header starts with `# Plan:` → Plan format.
+      If first H1 header starts with `# EPIC:` → EPIC format
+   c. **Section fingerprinting:** Scan for section headers:
+      - If file contains BOTH `## DoD Gates` AND (`## Steps (Role Pipeline)` OR `## Steps`) → EPIC format
+      - If file contains ANY of (`## High-Level Steps`, `## Approach`, `## Success Criteria`,
+        `## Task Order`) AND lacks `## DoD Gates` → Plan format
+   d. **Ambiguous:** Ask PM: "This file doesn't match the standard Plan or EPIC format.
+      Is this a (P)lan or an (E)PIC?"
+
+3. If EPIC format detected → proceed to Step 1 (no change to existing flow)
+4. If Plan format detected → proceed to Step 0.7 (Plan-to-EPIC conversion)
+
+### Step 0.7: Plan-to-EPIC Conversion
+
+When a Plan file is provided instead of an EPIC, auto-generate an EPIC using the
+EPIC Subagent Prompt Template from `skills/brainstorming.md`.
+
+1. Read the plan file content (already loaded)
+2. Read `skills/brainstorming.md` Section "EPIC Subagent Prompt Template"
+3. Read `.aid-o/04-engine/memory/project-profile.yaml` for tech stack context
+4. Read `.aid-o/03-config/templates/epic.md` for the EPIC template structure
+5. Determine output language:
+   - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
+6. Extract plan_id:
+   - From frontmatter `id` field if present (e.g., `P-20260218-v020`)
+   - From filename if no frontmatter (e.g., `2026-02-19-aido-v040` → `P-20260219`)
+   - Fallback: `P-{YYYYMMDD}-{4char-hash}`
+7. Generate EPIC using the EPIC Subagent Prompt Template:
+   - Substitute `{plan_content}` with the plan file content
+   - Substitute `{project_profile_yaml}` with the project profile
+   - Substitute `{epic_template}` with the EPIC template
+   - Substitute `{document_language}` with the resolved language
+   - Substitute `{plan_id}` with the extracted plan ID
+8. Generate EPIC ID: `E-{YYYYMMDD}-{4char-hash}`
+9. Generate topic slug from plan title (lowercase, hyphens, max 40 chars)
+10. Save EPIC to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md`
+11. Present to PM:
+    ```
+    Input detected as a Plan (not an EPIC).
+    ====================================
+    Plan: {plan_file_path}
+    Generated EPIC: .aid-o/02-epics/E-{id}-{topic}.md
+
+    The EPIC was auto-generated from your plan using the standard template.
+    Review it below, then I'll proceed with plan generation.
+
+    [Show EPIC summary: Goal, Scope, Steps count, DoD Gates]
+
+    Proceed with plan generation? (Y/N/Edit)
+    ```
+12. If PM says Y → proceed to Step 1 with the newly generated EPIC file path
+13. If PM says N → stop, tell PM to edit EPIC manually and re-run
+14. If PM says Edit → PM modifies sections inline, then proceed to Step 1
+
+IMPORTANT: The generated EPIC is a DRAFT. PM reviews it before plan generation
+proceeds. This ensures the Plan-to-EPIC conversion quality is validated.
 
 ### Step 1: Load and Validate EPIC
 
@@ -102,11 +167,28 @@ After building steps + dependencies + parallel_groups, generate analysis groups:
 
 Read `.aid-o/03-config/templates/plan.schema.json` for the schema definition.
 
+**Source Plan Resolution (Variant B):**
+
+Before building plan.json, check if the EPIC has a source plan:
+
+1. Read EPIC frontmatter → extract `plan_ref` field
+2. If `plan_ref` is set and not null:
+   a. Resolve plan file path:
+      - If relative: resolve against `.aid-o/01-plans/`
+      - If absolute: use as-is
+   b. Verify file exists and is readable
+   c. Set `source_plan` in plan.json to the resolved path
+   d. Read plan file content for step enrichment (see below)
+3. If `plan_ref` is null or missing:
+   a. Set `source_plan: null` in plan.json
+   b. Skip enrichment (standard flow)
+
 Generate a Plan JSON object with these fields:
 
 ```json
 {
   "epic_id": "{extracted from step 1}",
+  "source_plan": "{path to source .md plan file, or null if no plan_ref}",
   "version": 1,
   "created_at": "{ISO 8601 timestamp}",
   "steps": [
@@ -181,6 +263,22 @@ Generate a Plan JSON object with these fields:
 - Analysis group agents != target step's agent role (no self-review)
 
 If validation fails → fix and regenerate (do not present invalid plan).
+
+**Source Plan Step Enrichment (Variant B):**
+
+When building each step in plan.json AND `source_plan` is available:
+
+For each step S:
+  1. Find matching plan task section (by objective keywords or Plan Task ID in objective)
+  2. If matched:
+     a. Enrich `inputs`: add specific files mentioned in plan task
+     b. Enrich `outputs`: add specific files/artifacts from plan task
+     c. Enrich `constraints`: add per-task constraints from plan
+     d. Enrich `acceptance_criteria`: add verifiable criteria from plan task
+  3. If not matched: use EPIC-derived data only (no error)
+
+IMPORTANT: Enrichment is ADDITIVE — EPIC-derived data is the base,
+plan task detail supplements it. Never override EPIC constraints with plan data.
 
 ### Step 4: Save Plan JSON
 
@@ -260,6 +358,18 @@ For EACH step in plan.json, create a Phase in the session file:
 7. Check `analysis_groups` — if this step is the target of an analysis group, add to the phase: "Post-phase review: {agent roles} will perform {mode} analysis (merge strategy: {merge_strategy})"
 8. Create **Acceptance** checklist from outputs (each output = one checkbox) + constraints that can be verified
 
+**Source Plan Phase Enrichment (Variant B):**
+
+When creating each Phase AND `source_plan` is available in plan.json:
+
+1. Read the matching plan task section
+2. Use plan task's detailed description to expand Phase Goal:
+   - Instead of just restating the step objective, include WHY this phase
+     matters, WHAT specific changes are expected, and KEY decisions from the plan
+3. Add to Phase Inputs: "Source plan: {source_plan} (Task {X})"
+4. Add to Phase Constraints: any specific implementation constraints from the plan task
+   that aren't captured in plan.json (e.g., "never overwrite existing rules — append only")
+
 #### 5d. Fill Remaining Sections
 
 - **Objective:** 3-5 sentences from EPIC goal + scope. Include success criteria.
@@ -327,6 +437,7 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 ## Reference Files
 
 - **`skills/planner.md`** — Planner skill: dependency graph, parallel groups, auto-triggers, analysis groups generation
+- **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used for Plan-to-EPIC conversion in Step 0.7)
 - `skills/epic-orchestration.md` — Section "2. PLANNING" (plan generation rules, evidence structure)
 - `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema (includes `analysis_groups`)
 - `.aid-o/03-config/templates/session-new-feature.md` — Session file template
@@ -336,7 +447,7 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 ## Important
 
 - **NEVER modify the original EPIC file** — it is the source of truth, only copy it to evidence
-- If `$ARGUMENTS` is empty, look for EPICs in `.aid-o/02-epics/` and list them for selection
+- If `$ARGUMENTS` is empty, list files from BOTH `.aid-o/02-epics/` (marked as `(EPIC)`) AND `.aid-o/01-plans/` (marked as `(Plan)`) for selection
 - If a Plan JSON already exists for this EPIC, ask: "Plan already exists (version {N}). Create new version? (Y/N)"
 - The plan is a **proposal** — PM reviews it in `/run-epic` (PLAN_REVIEW state) before execution begins
 - Budget defaults: `max_llm_cost_usd: 50`, `max_retries_per_gate: 3` (unless EPIC specifies otherwise)

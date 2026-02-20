@@ -65,7 +65,7 @@ Commands (19):
   /aid-setup       Interactive project onboarding
   /aid-brainstorm  9-step interactive brainstorming flow
   /aid-help        This help
-  /plan-epic       EPIC → Plan JSON + session file
+  /plan-epic       EPIC or Plan → Plan JSON + session file
   /run-epic        Start orchestration (state machine)
   /run-step        Run one step manually
   /epic-status     Show pipeline status
@@ -139,10 +139,13 @@ SETUP COMMANDS:
 ORCHESTRATION COMMANDS:
 
   /plan-epic <path>
-    Parse EPIC → generate Plan JSON + session file.
-    Usage: /plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md
+    Parse EPIC or Plan → generate Plan JSON + session file.
+    Accepts:
+      EPIC file: /plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md  (standard)
+      Plan file: /plan-epic .aid-o/01-plans/2026-02-19-plan.md   (auto-converts to EPIC)
     Output: plan.json, plan_progress.json, session file
-    Validates EPIC structure, builds dependency graph.
+    Plan files are auto-detected and converted to EPIC using the EPIC
+    Subagent Template. PM reviews the generated EPIC before proceeding.
 
   /run-epic [epic-id]
     Start the Controller state machine.
