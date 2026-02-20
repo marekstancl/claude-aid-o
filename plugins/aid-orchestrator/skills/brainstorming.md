@@ -395,16 +395,22 @@ If abort AFTER Step 8:
 
 ### Transitioning to Execution
 
-After brainstorming completes, the standard AID workflow continues:
+After brainstorming completes, two paths are available:
 
 ```
 /aid-brainstorm → Plan + EPIC draft
-    ↓
-PM reviews and edits EPIC draft
-    ↓
-/plan-epic .aid-o/02-epics/E-*.md → Plan JSON + Session file
-    ↓
-/run-epic → Orchestrated execution
+    ├── (Y at Step 8b) Direct pipeline:
+    │     EPIC → Plan JSON + Session → ready for /run-epic
+    │
+    └── (N at Step 8b) Manual review:
+          PM reviews EPIC draft → /plan-epic → /run-epic
+```
+
+Additionally, `/plan-epic` accepts Plan files directly:
+
+```
+PM writes plan in .aid-o/01-plans/
+    → /plan-epic → auto-generates EPIC → Plan JSON + Session → /run-epic
 ```
 
 ---
