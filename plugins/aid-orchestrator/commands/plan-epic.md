@@ -342,6 +342,7 @@ Before creating the session file, read ALL of the following:
    epic_id: {epic_id}
    epic_session: {N}
    plan_ref: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
+   source_plan: {from plan.json source_plan field, or null}
    orchestrated: true
    ```
 
