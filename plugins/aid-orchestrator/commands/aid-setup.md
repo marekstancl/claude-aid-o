@@ -1,3 +1,9 @@
+---
+name: aid-setup
+description: Interactive project onboarding — detect stack, configure AID
+user_invocable: true
+---
+
 Interactive project onboarding — analyze the project's tech stack and configure AID for it.
 
 This is the first-time user experience. It detects what the project uses, initializes the workspace, and customizes AID configuration to match the project's tooling.

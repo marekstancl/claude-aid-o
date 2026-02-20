@@ -1,3 +1,9 @@
+---
+name: plan-epic
+description: Generate Plan JSON from EPIC or Plan specification
+user_invocable: true
+---
+
 Parse an EPIC **or Plan** file and generate a Plan JSON + Session file for the Controller state machine.
 
 This command is the entry point to orchestration — it reads an EPIC (or auto-converts a Plan to an EPIC), analyzes its steps and dependencies, and produces a validated execution plan that `/run-epic` will follow.

@@ -1,3 +1,9 @@
+---
+name: testing
+description: Load testing workflow and standards
+user_invocable: true
+---
+
 Load testing workflow and standards for this project.
 
 Read `.aid-o/04-engine/memory/project-profile.yaml` for project-specific test configuration.

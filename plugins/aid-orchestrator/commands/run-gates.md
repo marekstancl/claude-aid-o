@@ -1,3 +1,9 @@
+---
+name: run-gates
+description: Run quality gates standalone
+user_invocable: true
+---
+
 Run quality gates for an EPIC — standalone or as part of `/run-epic`. Reads `gates.yaml`, executes each gate, generates `gates_report.json`, and offers retry on failure.
 
 ## Usage

@@ -1,3 +1,9 @@
+---
+name: run-step
+description: Run a single step manually
+user_invocable: true
+---
+
 Manually run a single step from an existing EPIC plan.
 
 Use this to execute one specific agent step without running the full orchestration loop. Useful for debugging, re-running a failed step, or testing individual agents.

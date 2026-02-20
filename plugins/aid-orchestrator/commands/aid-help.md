@@ -1,3 +1,9 @@
+---
+name: aid-help
+description: AID documentation and help topics
+user_invocable: true
+---
+
 Show AID documentation — commands, workflow, agent roles, configuration, and FAQ.
 
 AID's self-knowledge command. Explains everything about how AID works, what commands are available, and how to use the orchestration system.

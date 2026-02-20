@@ -41,7 +41,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
 | `/aid-analytics [scope]` | Analyze orchestration performance metrics and get optimization recommendations |
-| `/plan-epic <path>` | Parse EPIC → generate Plan JSON + session file |
+| `/plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + session file |
 | `/run-epic [id]` | Run Controller state machine for full EPIC orchestration |
 | `/run-step <id> <step>` | Manually run one step from an existing plan |
 | `/epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |

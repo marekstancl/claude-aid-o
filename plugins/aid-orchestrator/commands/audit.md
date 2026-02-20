@@ -1,3 +1,9 @@
+---
+name: audit
+description: Project health audit (0-100 score)
+user_invocable: true
+---
+
 Run a project health audit.
 
 Read `agents/auditor.md` for the full audit protocol.

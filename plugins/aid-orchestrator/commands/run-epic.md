@@ -1,3 +1,9 @@
+---
+name: run-epic
+description: Execute full EPIC orchestration pipeline
+user_invocable: true
+---
+
 Run the Controller state machine to orchestrate an EPIC through its full lifecycle: Plan → Execute Steps → Gates → PM Approval → Done.
 
 This is the **main orchestration command** — it implements the entire 11-state Controller from `skills/epic-orchestration.md`. Once started, it runs autonomously, dispatching agents, checking outputs, retrying failures, and only escalating to PM when necessary.

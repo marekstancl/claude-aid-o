@@ -1,3 +1,9 @@
+---
+name: session-end
+description: Complete and archive session
+user_invocable: true
+---
+
 Complete and archive the current session.
 
 Read `skills/session-management.md` and follow the Completion protocol.

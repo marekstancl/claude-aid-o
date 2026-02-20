@@ -1,3 +1,9 @@
+---
+name: aid-brainstorm
+description: 9-step interactive brainstorming flow
+user_invocable: true
+---
+
 Interactive brainstorming session — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
 
 This command guides PM through a structured 9-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.

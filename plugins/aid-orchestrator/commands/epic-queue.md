@@ -1,3 +1,9 @@
+---
+name: epic-queue
+description: EPIC queue management (add, remove, pause)
+user_invocable: true
+---
+
 Manage the EPIC execution queue — add, remove, reorder, pause, and monitor EPICs for autonomous pipeline execution.
 
 The queue enables the Orchestrator to process multiple EPICs in sequence without manual intervention. After each EPIC completes (including Curator + Auditor post-processing), the Orchestrator automatically picks up the next EPIC from the queue.
