@@ -54,7 +54,7 @@ When users run `/aid-init`, it creates:
 
 | Command | Purpose |
 |---------|---------|
-| `/aid-init` | Initialize .aid-o/ workspace |
+| `/aid-init` | Initialize or upgrade .aid-o/ workspace |
 | `/aid-setup` | Interactive project onboarding |
 | `/aid-help` | Show AID documentation |
 | `/plan-epic` | Parse EPIC or Plan → generate Plan JSON |
@@ -74,17 +74,63 @@ When users run `/aid-init`, it creates:
 
 When modifying plugin files (`plugins/aid-orchestrator/`), always update:
 
-1. **Version numbers** — bump in `plugin.json`, `marketplace.json`, skill headers/footers, README, `aid-help.md`
-2. **CHANGELOG.md** — both root and `plugins/aid-orchestrator/CHANGELOG.md` (keep in sync)
-3. **README.md** — both root (Roadmap section) and `plugins/aid-orchestrator/README.md` (if features/commands change)
-4. **Skill footers** — update `Last Updated` date in modified skill files
+1. **Version numbers** — bump in `plugin.json`, `marketplace.json`, skill headers/footers, plugin README, `aid-help.md`
+2. **CHANGELOG.md** — both root and `plugins/aid-orchestrator/CHANGELOG.md` — **must be identical** (see format below)
+3. **README.md** — root `README.md` Roadmap section (move current version down, add new), plugin `README.md` version badge
+4. **Skill footers** — update `Last Updated` date and version in modified skill files
+5. **`defaults/` sync** — if defaults files changed, note in CHANGELOG; `.aid-o/` in target projects will catch up via `/aid-init` upgrade
+
+### CHANGELOG Format Standard
+
+Both CHANGELOGs (`CHANGELOG.md` root and `plugins/aid-orchestrator/CHANGELOG.md`) follow [Keep a Changelog](https://keepachangelog.com/) with this entry format:
+
+```
+## [X.Y.Z] — YYYY-MM-DD
+
+### Added
+- **Feature Name** — description of what was added and why it matters
+
+### Changed
+- **Component Name** — what changed and the effect
+
+### Fixed
+- **Bug Name** — what was broken and how it was fixed
+
+### Removed
+- **Component Name** — what was removed and why
+```
+
+**Rules:**
+- Every entry starts with `- **Bold Name** — description` (em dash, not colon)
+- Description is one sentence, specific enough to understand without reading code
+- No trailing Task/Issue IDs in entries (those belong in commit messages, not CHANGELOG)
+- Group related changes into a single entry when they form one logical feature
+- Root and plugin CHANGELOGs are **always identical** — write one, copy to the other
+- Sections appear in order: Added → Changed → Fixed → Removed (omit empty sections)
+
+### README Roadmap Update
+
+When releasing a new version, update the `## Roadmap` section in root `README.md`:
+
+```markdown
+## Roadmap
+
+- **vX.Y.Z** (current) — one-line summary of major features in this version
+- **vA.B.C** — previous version summary
+- ...
+```
+
+Keep the 3 most recent versions. Older versions are documented only in CHANGELOG.
 
 ## Release Workflow
 
-1. Ensure all changes are committed
-2. Run `/plugin validate .` from repo root to validate marketplace structure
-3. Run `claude plugin validate plugins/aid-orchestrator` to validate the plugin
-4. Update version in `plugins/aid-orchestrator/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`
-5. Update `CHANGELOG.md` with new version entry
-6. Create git tag: `git tag v{version}`
-7. Push: `git push && git push --tags`
+1. Ensure all feature work is committed on a feature branch
+2. Run `/plugin validate .` from repo root
+3. Run `claude plugin validate plugins/aid-orchestrator`
+4. Bump version in: `plugin.json`, `marketplace.json` (2 places), plugin `README.md`, `aid-help.md`, modified skill headers/footers
+5. Write CHANGELOG entry in root `CHANGELOG.md`, copy to `plugins/aid-orchestrator/CHANGELOG.md`
+6. Update root `README.md` Roadmap section
+7. Commit release: `release: bump version to X.Y.Z`
+8. Merge feature branch to main (use `--no-ff` for merge commit)
+9. Tag: `git tag vX.Y.Z`
+10. Push: `git push && git push --tags`

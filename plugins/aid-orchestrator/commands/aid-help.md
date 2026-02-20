@@ -54,7 +54,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.4.0
+Version: 0.4.1
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -67,7 +67,7 @@ What is AID?
   → security → documentation → release.
 
 Commands (19):
-  /aid-init        Initialize .aid-o/ workspace
+  /aid-init        Initialize or upgrade .aid-o/ workspace
   /aid-setup       Interactive project onboarding
   /aid-brainstorm  9-step interactive brainstorming flow
   /aid-help        This help
@@ -120,10 +120,12 @@ AID Commands — Detailed Reference
 SETUP COMMANDS:
 
   /aid-init
-    Initialize .aid-o/ workspace with default config.
+    Initialize or upgrade .aid-o/ workspace.
     Usage: /aid-init
-    Creates: directories, policies, templates, playbooks, engine files.
-    Idempotent — safe to run multiple times.
+    Fresh install: creates directories, policies, templates, playbooks, engine files.
+    Upgrade: detects version mismatch, classifies files (new/upgradable/custom/protected),
+    asks PM for approval, updates only non-customized files.
+    Tracks state via .aid-o/03-config/.aid-manifest.yaml (checksums + version).
 
   /aid-setup
     Interactive onboarding. Detects tech stack, configures AID.
