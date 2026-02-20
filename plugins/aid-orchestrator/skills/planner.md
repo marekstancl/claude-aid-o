@@ -126,6 +126,104 @@ Parallel groups: [[step_2, step_4], [step_5, step_6, step_7]]
 
 ---
 
+## 2b. Step Decomposition — Layer-Based Splitting
+
+Step Decomposition runs BEFORE dependency resolution and wave assembly.
+It converts coarse EPIC steps into finer-grained sub-steps when this
+enables new parallelism opportunities.
+
+### EPIC Type Guard
+
+Layer-based decomposition applies to DEVELOPMENT EPICs only.
+Detect EPIC type from typed artifacts (see EPIC template):
+
+- **Development**: artifacts contain `endpoint:`, `model:`, `component:`
+  → apply full layer-based decomposition below
+- **Documentation**: artifacts are all `doc:`
+  → decompose by TOPIC instead of layer (split "write all docs" into
+    "API docs", "user guide", "architecture docs" if they have different deps)
+- **Infrastructure/Config**: artifacts are `config:` or devops-oriented
+  → decompose by SCOPE (e.g., "CI pipeline" vs "deployment config" vs "monitoring")
+- **Mixed**: combination of types
+  → apply layer decomposition to dev steps, topic/scope to non-dev steps
+
+### Algorithm (Development EPICs)
+
+```
+For each step S in the parsed EPIC:
+  1. EVALUATE split criteria (ALL must be true):
+     a. S spans 2+ distinct layers (data, schema, API, service, UI, test, config)
+     b. S produces 5+ files (estimated from objective + allowed_paths)
+     c. Splitting enables at least 1 new parallel pairing with another domain
+     d. Each resulting sub-step would produce 3+ files
+
+  2. IF all criteria met → DECOMPOSE:
+     a. Identify layers present in S.objective and S.outputs
+     b. Create sub-steps following Layer Hierarchy (below)
+     c. Sub-step ID format: step_{N}{letter}_{role}
+        (e.g., step_3a_backend, step_3b_backend, step_3c_backend)
+     d. Sub-step dependencies:
+        - First sub-step inherits ALL of original step's depends_on
+        - Each subsequent sub-step depends on its predecessor
+        - Steps that depended on the ORIGINAL now depend on the LAST sub-step
+     e. Sub-step allowed_paths: subset of original, scoped to layer
+
+  3. IF criteria not met → keep as single step (no change)
+```
+
+### Layer Hierarchy (earlier layers first)
+
+| Priority | Layer | Typical Files |
+|----------|-------|---------------|
+| 1 | data | models, migrations, database setup, ORM entities |
+| 2 | schema | validation schemas, DTOs, type definitions, Pydantic/Zod |
+| 3 | API | routers, controllers, endpoints, middleware |
+| 4 | service | business logic, utilities, helpers, domain services |
+| 5 | UI | components, pages, layouts, styles |
+| 6 | test | unit tests, integration tests (per-layer) |
+| 7 | config | configuration, deployment, CI, environment |
+
+Adjacent layers (e.g., data+schema) CAN be merged into one sub-step
+if they're tightly coupled and splitting them would create trivially
+small steps (< 3 files each).
+
+### Example — Backend CRUD decomposition
+
+```
+BEFORE (1 monolithic step):
+  step_3_backend: "Implement REST API with models, schemas, routers, tests"
+  depends_on: [step_2_domain]
+  → Frontend (step_4) must wait for ALL of this to finish
+
+AFTER (3 focused sub-steps):
+  step_3a_backend: "Database models + Pydantic schemas" (data + schema layers)
+    depends_on: [step_2_domain]
+    outputs: models/*.py, schemas/*.py
+  step_3b_backend: "API routers + business logic" (API + service layers)
+    depends_on: [step_3a_backend]
+    outputs: routers/*.py, services/*.py
+  step_3c_backend: "Backend unit + integration tests" (test layer)
+    depends_on: [step_3a_backend, step_3b_backend]
+    outputs: tests/api/*.py, tests/models/*.py
+
+  step_4_frontend: "React components + pages"
+    depends_on: [step_1_architect]  ← NOTE: depends on architect, NOT backend!
+    → Frontend starts AS SOON AS architect finishes, parallel with backend
+
+Net effect: frontend starts 1-2 waves earlier.
+```
+
+### When NOT to decompose
+
+- Step produces fewer than 5 files total → too small to split meaningfully
+- All files are tightly coupled (one endpoint = model + schema + router + test) → splitting breaks cohesion
+- Splitting would create more than 4 sub-steps for a single role → diminishing returns
+- The EPIC already has 15+ steps → more steps adds overhead, not speed
+- Step is a leaf node with no downstream dependents → splitting doesn't enable new parallelism
+- EPIC type is documentation/infrastructure and step doesn't span multiple independent topics → topic-based split not applicable
+
+---
+
 ## 3. Default Ordering Rules
 
 When the EPIC does not fully specify step ordering, apply these defaults based on role priority.
@@ -397,6 +495,15 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
  2. PARSE steps → extract (role, objective, depends_on[], outputs[], paths, constraints) → assign step_ids
  2.1. AUTO-SCAFFOLD DETECTION (Section 7.3):
       Check project-profile.yaml → if uninitialized → generate step_0_scaffold → PM confirms
+ 2.2. STEP DECOMPOSITION (Section 2b):
+      a. Detect EPIC type from artifacts (dev / docs / infra / mixed)
+      b. For each step, evaluate split criteria:
+         - Dev steps: layer-based (data → schema → API → service → UI → test → config)
+         - Docs steps: topic-based (API docs, user guide, architecture)
+         - Infra steps: scope-based (CI, deployment, monitoring)
+      c. IF criteria met → decompose into sub-steps
+      d. Update step list with sub-steps (original step replaced)
+      e. Log: decompositions_applied, sub_steps_created, epic_type
  3. RESOLVE ordering:
       explicit deps → use as-is | partial → fill from defaults (Section 3) | none → full defaults
  4. BUILD dependency graph → adjacency list → dependencies[] with reasons (Section 1)
