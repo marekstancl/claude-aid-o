@@ -1,6 +1,6 @@
 # Brainstorming — Interactive Design and Planning Skill
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Skill:** brainstorming
 **Dependencies:** session-management, planner
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -548,5 +548,5 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20

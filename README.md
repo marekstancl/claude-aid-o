@@ -220,9 +220,9 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.3.0** (current) — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup, permission dual-write, DONE state fixes
+- **v0.4.0** (current) — Zero detail loss pipeline (Variant B: EPIC references plan, agents receive source plan sections), wave-based parallel execution model, step decomposition, critical path analysis with dependency relaxation, `/plan-epic` accepts Plan files, `/aid-brainstorm` inline execution plan, shorthand commands, centralized Qdrant storage, setup followup
+- **v0.3.0** — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup, permission dual-write, DONE state fixes
 - **v0.2.0** — `/aid-brainstorm` command, MCP server onboarding, permission presets, git worktree parallel isolation, orchestration logging, CLAUDE.md marker merge, interactive examples, configurable document language
-- **v0.4.0** (planned) — Shorthand commands (`/aid-setup` without prefix), rich PLAN_REVIEW detail, cross-domain parallel sessions, finer-grained step splitting, MCP onboarding followup, worktree validation
 
 ## Requirements
 
@@ -231,4 +231,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.3.0
+MIT — v0.4.0

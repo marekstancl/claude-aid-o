@@ -692,5 +692,5 @@ See `skills/cost-optimization.md` for the full agent-to-model mapping.
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20

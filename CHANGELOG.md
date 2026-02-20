@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-02-20
+
+### Added
+- **Variant B — Zero Detail Loss Pipeline**: EPIC references source plan via `plan_ref`, all pipeline stages (plan.json, session, agent dispatch) read both EPIC and source plan. Agents receive `## Source Plan — Implementation Detail` sections in their prompts (Tasks D, H, O)
+- **Wave-based execution model**: Planner groups steps by DAG level into "waves" (max 4 per wave) for parallel execution. Replaces flat parallel group detection (Task I)
+- **Step Decomposition**: Layer-based splitting of monolithic steps (data → schema → API → test) to enable cross-domain parallelism. Supports dev (layer), docs (topic), and infra (scope) decomposition (Task J)
+- **Critical Path Analysis**: Opt-in for 7+ step EPICs. Computes critical path ratio, applies 5 relaxation rules (R1-R5) to shorten it. PM can reject individual relaxations at PLAN_REVIEW (Task K)
+- **Parallelism-first optimization strategy**: 5 priorities (parallelism > wave density > session compactness > quality > efficiency), plan quality metrics (`optimization_metrics` in plan.json), 4 new validation rules V-20–V-23 (Task L)
+- **`/plan-epic` accepts Plan files**: 3-tier format detection (frontmatter → header → section fingerprinting), auto-generates EPIC from Plan using EPIC Subagent Template, then proceeds with normal flow (Task M)
+- **`/aid-brainstorm` inline execution plan**: Step 8b offers to generate Plan JSON + Session immediately after EPIC draft. Step 9 split into 9a (standard handoff) / 9b (full pipeline handoff) (Task N)
+- **Wave-based session boundaries**: Sessions = contiguous sequences of waves. Never split by domain, never split inside a wave (Task I)
+- **Shorthand commands**: All 18 commands have `user_invocable: true` frontmatter enabling `/aid-setup` instead of `/aid-orchestrator:aid-setup` (Task F)
+- **Setup followup**: After "All recommended", `/aid-setup` now offers additional options (CLAUDE.md, Slack, auto-detected MCPs) (Task G)
+- **Selective `.aid-o/` gitignore**: Plans, EPICs, and config are versioned; engine artifacts (sessions, evidence) are ignored (Task A)
+- **Centralized Qdrant storage**: `~/.local/share/aid-orchestrator/qdrant-data` with `--scope user` for global MCP. Migration check for old paths (Task E)
+
+### Changed
+- EPIC template: typed artifacts (`endpoint:`, `model:`, `component:`), `plan_ref` enforcement, Hints section, Scope with specific files (Task D)
+- EPIC Subagent Template: frontmatter instructions, plan task ID preservation in steps, Variant B zero detail loss instruction (Task D)
+- Planner input validation: REQUIRED/RECOMMENDED checks with typed artifact inference (Task D)
+- PLAN_REVIEW: rich plan summary with wave execution plan, optimization metrics, session breakdown (Task H)
+- EXECUTING state: agent dispatch enriched with source plan sections (Task H)
+- Plan Generation Flow: 13-step procedure with decomposition (2.2), wave assembly (6), CPA (6.1), session boundaries (11) (Tasks I, J, K, L)
+
 ## [0.3.0] — 2026-02-19
 
 ### Added

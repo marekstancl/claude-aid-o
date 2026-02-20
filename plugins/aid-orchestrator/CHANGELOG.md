@@ -3,6 +3,29 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-02-20
+
+### Added
+- **Variant B — Zero Detail Loss Pipeline**: EPIC references source plan via `plan_ref`, all pipeline stages (plan.json, session, agent dispatch) read both EPIC and source plan. Agents receive `## Source Plan — Implementation Detail` sections in their prompts (Tasks D, H, O)
+- **Wave-based execution model**: Planner groups steps by DAG level into "waves" (max 4 per wave) for parallel execution. Replaces flat parallel group detection (Task I)
+- **Step Decomposition**: Layer-based splitting of monolithic steps (data → schema → API → test) to enable cross-domain parallelism. Supports dev (layer), docs (topic), and infra (scope) decomposition (Task J)
+- **Critical Path Analysis**: Opt-in for 7+ step EPICs. Computes critical path ratio, applies 5 relaxation rules (R1-R5) to shorten it. PM can reject individual relaxations at PLAN_REVIEW (Task K)
+- **Parallelism-first optimization strategy**: 5 priorities (parallelism > wave density > session compactness > quality > efficiency), plan quality metrics (`optimization_metrics` in plan.json), 4 new validation rules V-20–V-23 (Task L)
+- **`/plan-epic` accepts Plan files**: 3-tier format detection (frontmatter → header → section fingerprinting), auto-generates EPIC from Plan using EPIC Subagent Template (Task M)
+- **`/aid-brainstorm` inline execution plan**: Step 8b offers to generate Plan JSON + Session immediately after EPIC draft. Step 9 split into 9a/9b (Task N)
+- **Shorthand commands**: All 18 commands have `user_invocable: true` frontmatter (Task F)
+- **Setup followup**: After "All recommended", offers additional options (CLAUDE.md, Slack, auto-detected MCPs) (Task G)
+- **Selective `.aid-o/` gitignore**: Plans/EPICs/config versioned; engine artifacts ignored (Task A)
+- **Centralized Qdrant storage**: `~/.local/share/aid-orchestrator/qdrant-data` with `--scope user` (Task E)
+
+### Changed
+- EPIC template: typed artifacts, `plan_ref` enforcement, Hints section, detailed Scope guidance (Task D)
+- EPIC Subagent Template: frontmatter, plan task ID preservation, Variant B instruction (Task D)
+- Planner input validation: REQUIRED/RECOMMENDED checks (Task D)
+- PLAN_REVIEW: rich plan summary with wave plan, optimization metrics, session breakdown (Task H)
+- EXECUTING state: agent dispatch enriched with source plan sections (Task H)
+- Plan Generation Flow: 13-step procedure with decomposition, wave assembly, CPA, session boundaries (Tasks I, J, K, L)
+
 ## [0.3.0] — 2026-02-19
 
 ### Added

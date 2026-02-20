@@ -1392,5 +1392,5 @@ orchestrated: true  # marks this as Controller-managed
 
 ---
 
-**Version:** 0.3.0
-**Last Updated:** 2026-02-19
+**Version:** 0.4.0
+**Last Updated:** 2026-02-20
