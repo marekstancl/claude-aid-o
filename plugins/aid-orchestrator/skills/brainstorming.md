@@ -358,6 +358,22 @@ The EPIC subagent maps plan steps to AID roles using these rules:
    - docs + release → same parallel group only if no dependency between them
 ```
 
+### Phase Selection
+
+When generating an EPIC from a plan, the brainstorming handoff (Step 10) determines the scope:
+
+**All phases (Option B — default):**
+- Include ALL High-Level Steps from the plan in the EPIC
+- No special handling needed — standard EPIC generation
+
+**Specific phase (Option C):**
+- Only include steps from the selected phase
+- Set frontmatter: `plan_epics_total: {total_phase_count}`
+- Restrict `Allowed files/paths` to files relevant to this phase only
+- In `## Dependencies`, list steps from OTHER phases that this phase depends on as external dependencies
+- Add to `## Context`: "This EPIC covers Phase {N} of {total} from plan {plan_id}. External dependencies from other phases are listed but not executed in this EPIC."
+- EPIC filename includes phase: `E-{YYYYMMDD}-{hash}-{topic}-phase-{N}.md`
+
 ---
 
 ## Brainstorming Session Lifecycle
@@ -393,16 +409,40 @@ If abort AFTER Step 8:
   → Both files exist. Both are drafts. PM can edit or delete manually.
 ```
 
+### Re-opening a Brainstorming Session
+
+When PM selects Option A ("Add more items to plan") in Step 10:
+
+1. **Load existing plan** — Read the plan file written in Step 7
+2. **Display approved sections** — Show PM which sections were already approved (from Step 5)
+3. **Return to Step 2** — Resume questioning with existing context loaded
+   - The brainstorming context from Step 1 is still valid (project state hasn't changed)
+   - Previous answers from Step 2 are retained as context
+4. **New requirements ADD** — Never overwrite approved sections. New answers supplement existing ones:
+   - New scope items are APPENDED to the scope list
+   - New constraints are APPENDED
+   - If PM wants to MODIFY an approved section, they must explicitly say so
+5. **Re-present modified sections** — Only sections that changed go through Step 5 approval again
+   - Unchanged sections remain approved
+   - Modified sections require re-approval
+6. **Re-write plan file** — Update the plan document with additions (Step 7)
+7. **Re-generate EPIC draft** — Generate a new EPIC from the updated plan (Step 8)
+8. **Return to Step 10** — Present handoff options again
+
+**State management:** The brainstorming session maintains a list of approved sections and their content. When re-opening, this list is loaded to prevent re-asking about already-decided items.
+
+**Abort during re-open:** If PM says "stop" or "cancel" during a re-open loop, the most recently written plan file is preserved. No rollback occurs.
+
 ### Transitioning to Execution
 
 After brainstorming completes, two paths are available:
 
 ```
 /aid-brainstorm → Plan + EPIC draft
-    ├── (Y at Step 8b) Direct pipeline:
+    ├── (Y at Step 9) Direct pipeline:
     │     EPIC → Plan JSON + Session → ready for /run-epic
     │
-    └── (N at Step 8b) Manual review:
+    └── (N at Step 9) Manual review:
           PM reviews EPIC draft → /plan-epic → /run-epic
 ```
 
@@ -549,4 +589,4 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 ---
 
 **Version:** 0.4.0
-**Last Updated:** 2026-02-20
+**Last Updated:** 2026-02-21

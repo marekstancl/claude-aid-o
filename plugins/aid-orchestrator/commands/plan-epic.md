@@ -28,7 +28,7 @@ This command is the entry point to orchestration — it reads an EPIC (or auto-c
 
 ## Flow
 
-### Step 0.5: Input Format Detection
+### Step 1: Input Format Detection
 
 Before validating EPIC sections, detect whether the input file is a Plan or an EPIC.
 
@@ -44,10 +44,10 @@ Before validating EPIC sections, detect whether the input file is a Plan or an E
    d. **Ambiguous:** Ask PM: "This file doesn't match the standard Plan or EPIC format.
       Is this a (P)lan or an (E)PIC?"
 
-3. If EPIC format detected → proceed to Step 1 (no change to existing flow)
-4. If Plan format detected → proceed to Step 0.7 (Plan-to-EPIC conversion)
+3. If EPIC format detected → proceed to Step 3 (no change to existing flow)
+4. If Plan format detected → proceed to Step 2 (Plan-to-EPIC conversion)
 
-### Step 0.7: Plan-to-EPIC Conversion
+### Step 2: Plan-to-EPIC Conversion
 
 When a Plan file is provided instead of an EPIC, auto-generate an EPIC using the
 EPIC Subagent Prompt Template from `skills/brainstorming.md`.
@@ -85,14 +85,29 @@ EPIC Subagent Prompt Template from `skills/brainstorming.md`.
 
     Proceed with plan generation? (Y/N/Edit)
     ```
-12. If PM says Y → proceed to Step 1 with the newly generated EPIC file path
+12. If PM says Y → proceed to Step 3 with the newly generated EPIC file path
 13. If PM says N → stop, tell PM to edit EPIC manually and re-run
-14. If PM says Edit → PM modifies sections inline, then proceed to Step 1
+14. If PM says Edit → PM modifies sections inline, then proceed to Step 3
 
 IMPORTANT: The generated EPIC is a DRAFT. PM reviews it before plan generation
 proceeds. This ensures the Plan-to-EPIC conversion quality is validated.
 
-### Step 1: Load and Validate EPIC
+**Phase Selection (from brainstorming):**
+
+When this step is invoked from brainstorming with phase selection context:
+
+1. **All phases (Option B):** Process ALL High-Level Steps from the plan into a single EPIC. This is the default behavior — no changes to the conversion logic.
+
+2. **Specific phase (Option C):**
+   - Only include steps from the selected phase in the generated EPIC
+   - Set `plan_epics_total` in EPIC frontmatter to the total number of phases
+   - Add external dependencies: list steps from OTHER phases that this phase's steps depend on
+   - Scope the EPIC's Allowed files/paths to only files relevant to the selected phase
+   - Add a note in EPIC Context: "This EPIC covers Phase {N} of {total} from plan {plan_id}"
+
+If no phase context is provided (standard /plan-epic invocation), process all steps as usual.
+
+### Step 3: Load and Validate EPIC
 
 1. Read the EPIC file at the given path
 2. Validate required sections exist:
@@ -118,7 +133,7 @@ proceeds. This ensures the Plan-to-EPIC conversion quality is validated.
    - `E-20260216-c2d1-user-auth.md` → `E-20260216-c2d1`
    - Fallback: use full filename without `.md`
 
-### Step 2: Analyze Steps, Dependencies, and Parallel Groups
+### Step 4: Analyze Steps, Dependencies, and Parallel Groups
 
 > **Reference:** Read `skills/planner.md` for the complete algorithm (dependency graph, parallel groups, ordering rules).
 
@@ -151,7 +166,7 @@ proceeds. This ensures the Plan-to-EPIC conversion quality is validated.
 
 If the EPIC explicitly defines a different order → respect it (EPIC overrides defaults).
 
-### Step 2.5: Generate Analysis Groups
+### Step 5: Generate Analysis Groups
 
 > **Reference:** Read `skills/planner.md` Section 4 for auto-trigger rules.
 
@@ -169,7 +184,7 @@ After building steps + dependencies + parallel_groups, generate analysis groups:
 5. **Validate:** all targets reference existing steps, all agents are valid roles, agents != target step's own role
 6. Add `analysis_groups` array to Plan JSON (empty array `[]` if no triggers matched)
 
-### Step 3: Build Plan JSON
+### Step 6: Build Plan JSON
 
 Read `.aid-o/03-config/templates/plan.schema.json` for the schema definition.
 
@@ -193,7 +208,7 @@ Generate a Plan JSON object with these fields:
 
 ```json
 {
-  "epic_id": "{extracted from step 1}",
+  "epic_id": "{extracted from step 3}",
   "source_plan": "{path to source .md plan file, or null if no plan_ref}",
   "version": 1,
   "created_at": "{ISO 8601 timestamp}",
@@ -286,7 +301,7 @@ For each step S:
 IMPORTANT: Enrichment is ADDITIVE — EPIC-derived data is the base,
 plan task detail supplements it. Never override EPIC constraints with plan data.
 
-### Step 4: Save Plan JSON
+### Step 7: Save Plan JSON
 
 1. Generate `run_id`: `run_{YYYYMMDD}_{4char-hash}` (hash from `echo $(date +%s%N | md5sum | head -c 4)`)
 2. Create evidence directory: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`
@@ -317,24 +332,24 @@ plan task detail supplements it. Never override EPIC constraints with plan data.
    ```
 5. Copy EPIC to evidence: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
 
-### Step 5: Generate Session File (Session Creation Protocol)
+### Step 8: Generate Session File (Session Creation Protocol)
 
 The session file is the human-readable operational document for this EPIC run.
 It must be **detailed enough** that any agent reading it understands the full scope,
 their role, inputs/outputs, and acceptance criteria — without needing to parse plan.json.
 
-#### 5a. Gather Sources
+#### 8a. Gather Sources
 
 Before creating the session file, read ALL of the following:
 
-1. **EPIC file** (already loaded from Step 1) — goal, scope, constraints, affected areas
-2. **Plan JSON** (generated in Step 3) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
+1. **EPIC file** (already loaded from Step 3) — goal, scope, constraints, affected areas
+2. **Plan JSON** (generated in Step 6) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
 3. **Plan file** (`.aid-o/01-plans/` or `workspace/workflow/plans/` if referenced in EPIC) — broader project context
 4. **Previous session** (if `epic_session > 1`) — what was delivered, lessons learned
 5. **Relevant source code** — scan inputs/outputs from plan steps, read key files to understand current state
 6. **Decision policies** (`.aid-o/03-config/policies/decision-policies.yaml`) — auto_decisions, escalation_triggers
 
-#### 5b. Create Session File
+#### 8b. Create Session File
 
 1. Generate session ID: `S-{YYYYMMDD}-{4char-hash}`
 2. Use template from `.aid-o/03-config/templates/session-new-feature.md` (or type-appropriate template)
@@ -352,7 +367,7 @@ Before creating the session file, read ALL of the following:
    orchestrated: true
    ```
 
-#### 5c. Map Plan JSON to Session Phases
+#### 8c. Map Plan JSON to Session Phases
 
 For EACH step in plan.json, create a Phase in the session file:
 
@@ -377,7 +392,7 @@ When creating each Phase AND `source_plan` is available in plan.json:
 4. Add to Phase Constraints: any specific implementation constraints from the plan task
    that aren't captured in plan.json (e.g., "never overwrite existing rules — append only")
 
-#### 5d. Fill Remaining Sections
+#### 8d. Fill Remaining Sections
 
 - **Objective:** 3-5 sentences from EPIC goal + scope. Include success criteria.
 - **Context:** Reference previous sessions (if epic_session > 1), current code state, what was delivered before.
@@ -386,7 +401,7 @@ When creating each Phase AND `source_plan` is available in plan.json:
 - **Quality Gates:** List from plan.json `gates` array + relevant entries from decision-policies.yaml.
 - **Session Log:** Initialize with `| {date} | Session created from EPIC {epic_id}, {step_count} phases planned |`
 
-#### 5e. Quality Check
+#### 8e. Quality Check
 
 Before saving, verify the session file contains:
 - [ ] Objective: 3+ sentences (not just a one-liner)
@@ -399,11 +414,11 @@ Before saving, verify the session file contains:
 
 If any check fails, fix before proceeding.
 
-#### 5f. Save
+#### 8f. Save
 
 Save to: `.aid-o/04-engine/sessions/S-{YYYYMMDD}-{hash}-{topic}.md`
 
-### Step 6: Present Output
+### Step 9: Present Output
 
 ```
 Plan Generated for EPIC: {epic_id}
@@ -444,7 +459,7 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 ## Reference Files
 
 - **`skills/planner.md`** — Planner skill: dependency graph, parallel groups, auto-triggers, analysis groups generation
-- **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used for Plan-to-EPIC conversion in Step 0.7)
+- **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used for Plan-to-EPIC conversion in Step 2)
 - `skills/epic-orchestration.md` — Section "2. PLANNING" (plan generation rules, evidence structure)
 - `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema (includes `analysis_groups`)
 - `.aid-o/03-config/templates/session-new-feature.md` — Session file template

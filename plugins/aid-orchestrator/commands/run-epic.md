@@ -63,7 +63,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - If path given → use it
    - If epic_id given → search `.aid-o/02-epics/` for matching file
    - If no argument → list EPICs in `.aid-o/02-epics/`, pick if only one, else ask
-2. Read and validate EPIC (same validation as `/plan-epic` Step 1)
+2. Read and validate EPIC (same validation as `/plan-epic` Step 3)
 3. Read `.aid-o/03-config/policies/decision-policies.yaml`
 4. Read `.aid-o/03-config/policies/gates.yaml`
 5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/`
@@ -92,10 +92,10 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 ### State: PLANNING
 
 **Actions:**
-1. If Plan JSON doesn't exist, generate it (same logic as `/plan-epic` Steps 2-4)
+1. If Plan JSON doesn't exist, generate it (same logic as `/plan-epic` Steps 4-7)
 2. Validate plan against `.aid-o/03-config/templates/plan.schema.json`
 3. Save plan to evidence
-4. **Generate session file** following Session Creation Protocol (`commands/plan-epic.md` Step 5)
+4. **Generate session file** following Session Creation Protocol (`commands/plan-epic.md` Step 8)
 5. **Validate session file** completeness (per `skills/epic-orchestration.md` Session File Quality Check):
    - Objective: 3+ sentences with success criteria
    - Scope: explicit IN (3+) and OUT (2+) lists

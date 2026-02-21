@@ -67,7 +67,7 @@ What is AID?
   → security → documentation → release.
 
 Commands (19):
-  /aid-init        Initialize or upgrade .aid-o/ workspace
+  /aid-init [path] Initialize or upgrade .aid-o/ workspace
   /aid-setup       Interactive project onboarding
   /aid-brainstorm  9-step interactive brainstorming flow
   /aid-help        This help
@@ -119,9 +119,10 @@ AID Commands — Detailed Reference
 
 SETUP COMMANDS:
 
-  /aid-init
+  /aid-init [path]
     Initialize or upgrade .aid-o/ workspace.
-    Usage: /aid-init
+    Usage: /aid-init [path]
+    Optional path: target directory to initialize (defaults to current directory).
     Fresh install: creates directories, policies, templates, playbooks, engine files.
     Upgrade: detects version mismatch, classifies files (new/upgradable/custom/protected),
     asks PM for approval, updates only non-customized files.

@@ -1,12 +1,12 @@
 ---
 name: aid-brainstorm
-description: 9-step interactive brainstorming flow
+description: 10-step interactive brainstorming flow
 user_invocable: true
 ---
 
 Interactive brainstorming session — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
 
-This command guides PM through a structured 9-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
+This command guides PM through a structured 10-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
 
 ## Usage
 
@@ -247,7 +247,7 @@ Generate an EPIC draft from the approved plan using the EPIC subagent prompt tem
    EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
    ```
 
-### Step 8b: Execution Plan Option
+### Step 9: Execution Plan Option
 
 After the EPIC draft is written, offer PM the option to generate the execution plan immediately.
 
@@ -263,78 +263,91 @@ After the EPIC draft is written, offer PM the option to generate the execution p
    ```
 
 2. If PM says N (or skip, later, no):
-   → Proceed to Step 9a (standard handoff — no change from current behavior)
+   → Proceed to Step 10 (handoff — present A-D options)
 
 3. If PM says Y (or yes, go, generate):
    → Execute the plan-epic flow inline:
    a. Use the EPIC file just written in Step 8 as input
    b. Skip format detection (we know it's a valid EPIC — we just generated it)
-   c. Follow `commands/plan-epic.md` Steps 1-6 exactly:
-      - Step 1: Load and Validate EPIC
-      - Step 2: Analyze Steps, Dependencies, and Parallel Groups
-      - Step 2.5: Generate Analysis Groups
-      - Step 3: Build Plan JSON
-      - Step 4: Save Plan JSON (plan.json + plan_progress.json + epic_input.md)
-      - Step 5: Generate Session File
-      - Step 6: Present Output
-   d. After plan-epic completes → proceed to Step 9b (full pipeline handoff)
+   c. Follow `commands/plan-epic.md` Steps 3-9 exactly:
+      - Step 3: Load and Validate EPIC
+      - Step 4: Analyze Steps, Dependencies, and Parallel Groups
+      - Step 5: Generate Analysis Groups
+      - Step 6: Build Plan JSON
+      - Step 7: Save Plan JSON (plan.json + plan_progress.json + epic_input.md)
+      - Step 8: Generate Session File
+      - Step 9: Present Output
+   d. After plan-epic completes → proceed to Step 10 (handoff — present A-D options)
 
-### Step 9: Handoff
+### Step 10: Handoff
 
-**9a. Standard Handoff** (PM chose N in Step 8b, or Step 8b was skipped):
+Present interactive options based on the completed brainstorming session.
 
-1. Present a summary of what was produced:
+1. Parse the plan's High-Level Steps and group them into logical phases (by dependency/domain)
+2. Display phases:
+   ```
+   Phases detected:
+     Phase 1: {steps 1-3} — {description}
+     Phase 2: {steps 4-6} — {description}
+     Phase 3: {steps 7-9} — {description}
+   ```
+3. Present options:
    ```
    Brainstorming Complete
    ====================================
-   Topic: {topic}
    Plan:  .aid-o/01-plans/P-{id}-{topic}.md
    EPIC:  .aid-o/02-epics/E-{id}-{topic}.md (draft)
+   Phases: {count} detected
 
-   The EPIC is a draft — review it and adjust before running.
-
-   Next steps:
-     1. Review the EPIC draft and refine if needed
-     2. Run /plan-epic .aid-o/02-epics/E-{id}-{topic}.md to generate execution plan
-     3. Run /run-epic to start orchestration
-
-   Or:
-     - Edit the EPIC manually for fine-tuning
-     - Run /aid-brainstorm again for a different topic
+   What's next?
+   (A) Add more items to plan — re-open brainstorming
+   (B) Create EPIC for all phases — single EPIC covering everything
+   (C) Create EPIC for specific phase — pick a phase
+   (D) Stop here — review files, run /plan-epic manually later
    ```
-2. If `.aid-o/` does not exist, remind PM to run `/aid-init` or `/aid-setup` first
-3. Brainstorming session ends here
 
-**9b. Full Pipeline Handoff** (PM chose Y in Step 8b):
+**Option A — Re-open brainstorming:**
+1. Load existing plan from Step 7
+2. Display already-approved sections
+3. Return to Step 2 with existing context
+4. New requirements ADD to the plan (never overwrite approved sections)
+5. Re-present modified sections for approval (Step 5)
+6. Re-write plan file (Step 7)
+7. Re-generate EPIC draft (Step 8)
+8. Return to Step 10
 
-1. Present a summary of everything produced:
-   ```
-   Brainstorming Complete — Full Pipeline Ready
-   ====================================
-   Topic: {topic}
-   Plan:    .aid-o/01-plans/P-{id}-{topic}.md
-   EPIC:    .aid-o/02-epics/E-{id}-{topic}.md
-   JSON:    .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
-   Session: .aid-o/04-engine/sessions/S-{id}-{topic}.md
+**Option B — Create EPIC for all phases:**
+1. Use the EPIC draft from Step 8 as-is (covers all High-Level Steps)
+2. Proceed to Step 9 (Execution Plan Option) — ask if PM wants Plan JSON now
+3. If Y: generate Plan JSON inline, present full pipeline handoff
+4. If N: present plan + EPIC file paths
 
-   Steps: {count}
-   Parallel groups: {count}
-   Roles: {comma-separated list}
-   Gates: {comma-separated list}
+**Option C — Create EPIC for specific phase:**
+1. Ask PM: "Which phase? (1/2/3/...)"
+2. Generate a new EPIC covering only the selected phase's steps:
+   - Restrict scope to phase-relevant files
+   - Set `plan_epics_total` in EPIC frontmatter to total phase count
+   - List external dependencies from other phases
+   - Add context note: "This EPIC covers Phase {N} of {total}"
+3. Save phase-specific EPIC to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}-phase-{N}.md`
+4. Proceed to Step 9 (Execution Plan Option)
 
-   Everything is ready for execution.
+**Option D — Stop here:**
+```
+Brainstorming complete. Files written:
+  Plan: .aid-o/01-plans/P-{id}-{topic}.md
+  EPIC: .aid-o/02-epics/E-{id}-{topic}.md (draft)
 
-   Next:
-     1. Run /run-epic {epic_id} to start orchestration
-     2. Or run /epic-status {epic_id} to review the plan first
-   ```
-2. If `.aid-o/` does not exist, remind PM to run `/aid-init` or `/aid-setup` first
-3. Brainstorming session ends here
+Next steps:
+  1. Review the EPIC draft and refine if needed
+  2. Run /plan-epic {epic-path} to generate execution plan
+  3. Run /run-epic to start orchestration
+```
 
 ## Reference Files
 
 - `skills/brainstorming.md` — process rules, key principles, EPIC subagent prompt template, language handling
-- `commands/plan-epic.md` — plan-epic flow (Steps 1-6 used by Step 8b inline execution)
+- `commands/plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 9 inline execution)
 - `skills/planner.md` — plan generation logic (downstream from brainstorming)
 - `defaults/templates/plan.md` — plan document template
 - `defaults/templates/epic.md` — EPIC template

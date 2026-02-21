@@ -134,3 +134,50 @@ Keep the 3 most recent versions. Older versions are documented only in CHANGELOG
 8. Merge feature branch to main (use `--no-ff` for merge commit)
 9. Tag: `git tag vX.Y.Z`
 10. Push: `git push && git push --tags`
+11. **Sync marketplace cache** (see below)
+
+### Marketplace Cache Sync — MANDATORY after every release
+
+Claude Code loads plugin commands from a **cached copy**, not from this dev repo.
+If the cache is stale, commands will be missing new features (e.g., Steps 0.5/0.7 in `/plan-epic`).
+
+**Cache location:** `~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/{version}/`
+**Marketplace repo:** `~/.claude/plugins/marketplaces/claude-aid-o/` (git clone of `marekstancl/claude-aid-o`)
+
+**After every release, run these steps:**
+
+```bash
+# 1. Sync marketplace repo with dev repo
+cd ~/.claude/plugins/marketplaces/claude-aid-o
+git pull origin main          # get latest from GitHub (after dev repo pushed)
+
+# 2. Verify version matches
+grep '"version"' plugins/aid-orchestrator/.claude-plugin/plugin.json
+# Should show the new version
+
+# 3. Force cache rebuild — delete old cache entries
+rm -rf ~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/
+
+# 4. Restart Claude Code — it will recreate cache from marketplace repo
+# (close and reopen the IDE/terminal session)
+```
+
+**Why this is needed:** Claude Code clones the marketplace repo from GitHub, caches a versioned snapshot, and loads commands from cache. If the dev repo is ahead of GitHub (unpushed commits), or if the cache wasn't invalidated after a version bump, Claude Code serves stale commands.
+
+**Verification:** After restart, invoke any updated command (e.g., `/plan-epic`) and check that new features are present in the loaded content.
+
+<!-- AID-O START -->
+## AID Orchestrator
+
+This project uses AID for multi-agent orchestration.
+
+**Workspace:** `.aid-o/`
+**Commands:** `/aid-help` for full documentation
+**Quick start:** `/aid-setup` → create EPIC → `/run-epic`
+
+**Key paths:**
+- Plans: `.aid-o/01-plans/`
+- EPICs: `.aid-o/02-epics/`
+- Config: `.aid-o/03-config/`
+- Engine: `.aid-o/04-engine/`
+<!-- AID-O END -->

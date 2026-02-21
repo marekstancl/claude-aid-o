@@ -11,9 +11,21 @@ This command creates the recommended workspace structure and copies default conf
 ## Usage
 
 ```
-/aid-init
+/aid-init [path]
 /aid-init --upgrade     # force upgrade mode (skip init, go straight to upgrade)
 ```
+
+`[path]` is optional. When provided, it sets the base directory where `.aid-o/` is created instead of the current working directory.
+
+### Examples
+
+```
+/aid-init                        # create .aid-o/ in current directory
+/aid-init ./subdir               # create .aid-o/ in a relative subdirectory
+/aid-init /opt/project           # create .aid-o/ in an absolute path
+```
+
+When `[path]` differs from the current working directory, `CLAUDE.md` is created at `{path}/CLAUDE.md` rather than in the current directory.
 
 ## Mode Detection
 

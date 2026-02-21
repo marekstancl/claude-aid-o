@@ -156,7 +156,7 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 3. Identify parallel groups (steps that can run concurrently)
 4. Generate Plan JSON conforming to `.aid-o/03-config/templates/plan.schema.json`
 5. Validate Plan JSON against schema
-6. Generate session file following Session Creation Protocol (`commands/plan-epic.md` Step 5)
+6. Generate session file following Session Creation Protocol (`commands/plan-epic.md` Step 8)
 7. Validate session file completeness (see Session File Quality Check below)
 
 **Plan Generation Rules:**
@@ -1337,7 +1337,7 @@ auto-starts the next queued EPIC if available.
 
 The Controller creates and maintains a session file for each EPIC run:
 
-1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/plan-epic.md` Step 5):
+1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/plan-epic.md` Step 8):
    - Read sources: EPIC, Plan JSON, plan file, previous session, source code, decision policies
    - Map plan.json steps → session phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
    - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Session Log
