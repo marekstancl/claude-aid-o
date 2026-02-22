@@ -110,9 +110,21 @@ Run `/aid-help examples` for detailed walkthroughs.
 ## Integrations
 
 - **Slack MCP** — PM communication via Slack (plan approval, escalation, merge approval, 7 message types with timeout/reminder logic). Chat fallback when Slack is not configured.
-- **Qdrant Memory** (optional) — Agents remember past decisions and lessons learned, improving with every EPIC. File-based fallback when Qdrant is unavailable.
+- **Qdrant Memory** (optional) — Agents remember past decisions and lessons learned, improving with every EPIC. Powers the knowledge acquisition pipeline: documentation ingestion (Phase 1), pattern extraction from completed EPICs (Phase 2), and example EPIC auto-extraction with feedback tracking (Phase 3). File-based fallback when Qdrant is unavailable.
 - **Epic Queue** — `/aid-epic-queue add` to stack EPICs, AID processes them one by one autonomously.
 - **Project Scanner** — `/aid-setup` analyzes your project (tech stack, structure, conventions) → generates `project-profile.yaml`, configures gates for your stack.
+
+## Example EPICs
+
+AID ships with community example EPICs for common project types in `defaults/examples/`:
+
+| Example | Archetype | Frameworks | Steps |
+|---------|-----------|------------|-------|
+| `langchain-rag-chatbot.md` | RAG Chatbot | LangChain, ChromaDB, FastAPI | 6 |
+| `fastapi-crud-service.md` | CRUD API | FastAPI, SQLAlchemy, Alembic | 6 |
+| `react-dashboard.md` | Dashboard | React, TypeScript, Recharts | 6 |
+
+Examples are offered during `/aid-brainstorm` when your project matches. AID also auto-extracts patterns from your completed EPICs to build a project-specific example library.
 
 ## Controller State Machine
 
@@ -212,7 +224,7 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.5.0** (current) — Knowledge acquisition via Context7 MCP, quality-gated documentation storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, command prefix standardization (`aid-*`)
+- **v0.5.0** (current) — Knowledge acquisition pipeline (Phases 1-3 complete): Context7 MCP documentation ingestion, quality-gated storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, auto-extraction of reusable patterns from completed EPICs, community example EPIC templates (`defaults/examples/`), feedback tracking for knowledge retrieval, command prefix standardization (`aid-*`)
 - **v0.4.2** — `/plan-epic` and `/aid-brainstorm` step renumbering, `/aid-init [path]` parameter, phase selection for scoped EPIC generation
 - **v0.4.1** — `/aid-init` upgrade mode with manifest-based version tracking, config checksum detection, dynamic defaults scanning, release automation protocol
 

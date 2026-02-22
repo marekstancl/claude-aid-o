@@ -80,7 +80,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 | **GATE_RETRY** | Generate fix instructions from gate failure, re-dispatch | Fix applied, re-run gate | Retry entry in `gates_report.json` |
 | **ESCALATION** | Send failure to PM via Slack (or chat fallback) with options | PM decides (fix/skip/abort) | `pm_decision.json` |
 | **PM_APPROVAL** | Send final results to PM via Slack (or chat fallback) | PM approves merge | `pm_decision.json` |
-| **DONE** | Merge branch, archive evidence, run Curator + Auditor, send summaries via Slack, check Epic Queue for auto-pickup | — | `final_report.md`, `audit-report.md`, `curator_report.json`, `slack_log.jsonl` |
+| **DONE** | Merge branch, archive evidence, run Curator + Auditor, extract example pattern (if eligible), send summaries via Slack, check Epic Queue for auto-pickup | — | `final_report.md`, `audit-report.md`, `curator_report.json`, `slack_log.jsonl` |
 
 ---
 
@@ -877,6 +877,38 @@ if gate_fails:
    If Curator fails: log warning, set proposal_count = 0, continue (post-processing
    is best-effort but MUST be attempted).
 
+9b. **Example EPIC Extraction (optional — when Qdrant enabled)**
+
+   After Curator completes and BEFORE the completion summary, check if this EPIC
+   should be stored as a reusable example pattern for future projects.
+
+   **Prerequisite:** `memory.enabled: true` in `memory-config.yaml`
+
+   1. Read `memory-config.yaml` → check `memory.enabled`
+      - IF disabled: skip (log: "Example extraction skipped — memory disabled")
+   2. Call `extract_example_epic()` from `skills/knowledge-acquisition.md`:
+      ```
+      result = extract_example_epic(
+        epic_id = epic_id,
+        run_id = run_id,
+        epic_file = ".aid-o/02-epics/{epic_filename}",
+        final_report = "evidence/{epic_id}/{run_id}/final_report.md"
+      )
+      ```
+   3. The function handles eligibility checks, extraction, PM approval, and storage.
+      See `skills/knowledge-acquisition.md` → Example EPIC Extraction Protocol for details.
+   4. Store result for the completion summary:
+      - If `result.stored == true`: include in summary — "Example pattern saved: {result.archetype}"
+      - If `result.stored == false`: include reason — "Example extraction: {result.reason}"
+      - If `result == null`: no mention in summary (EPIC was not eligible)
+   5. Log to stage_log:
+      ```json
+      {"state": "DONE", "action": "example_extraction", "details": "{result}", "result": "pass|skip"}
+      ```
+
+   **Error handling:** If `extract_example_epic()` throws or fails, log warning and continue.
+   Example extraction is supplementary — it MUST NOT block the DONE state.
+
 10. **Completion Summary and Next Steps** (presented to PM — LAST before queue check)
 
    After all DONE state actions complete, present this summary to PM:
@@ -904,6 +936,7 @@ if gate_fails:
 
    Lessons learned: {count} new entries added to lessons-learned.md
    Backlog proposals: {proposal_count} new entries (review with /aid-backlog)
+   Example pattern: {archetype} saved to knowledge base  ← only if extraction stored
    ```
 
    The summary MUST include concrete artifact names (not generic descriptions).

@@ -66,12 +66,13 @@ What is AID?
   to deliver features end-to-end: architecture → implementation → testing
   → security → documentation → release.
 
-Commands (10):
+Commands (11):
   /aid-init          Initialize or upgrade .aid-o/ workspace
   /aid-setup         Interactive project onboarding
   /aid-brainstorm    9-step interactive brainstorming flow
   /aid-help          This help
   /aid-plan-epic     EPIC or Plan → Plan JSON + session file
+  /aid-research      On-demand documentation research (topic, URL, --deep)
   /aid-run-epic      Start orchestration (state machine)
   /aid-epic-status   Show pipeline status
   /aid-epic-queue    Manage EPIC execution queue (add, list, pause, resume)
@@ -91,7 +92,7 @@ Where things live:
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | analytics | examples | faq
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | research | analytics | examples | faq
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -135,6 +136,17 @@ SETUP COMMANDS:
   /aid-help [topic]
     This help. Shows commands, workflow, FAQ.
     Topics: commands, workflow, epic, agents, gates, evidence, config, examples
+
+  /aid-research [--deep] <framework> [topic]
+  /aid-research <url>
+    On-demand knowledge research. Researches framework documentation,
+    stores quality-gated chunks in Qdrant for agent use.
+    Three modes:
+      topic: /aid-research FastAPI WebSockets         (quick overview)
+      deep:  /aid-research --deep LangGraph            (extended API reference)
+      url:   /aid-research https://docs.celery.dev/    (index specific page)
+    Requires: .aid-o/ workspace. Optional: Qdrant, Context7 MCP.
+    Stores: documentation chunks in Qdrant (or session-only without Qdrant).
 
 ORCHESTRATION COMMANDS:
 
@@ -850,6 +862,11 @@ WHAT GETS INDEXED:
     - Architectural decisions (type: decision)
     - Code/architecture patterns (type: pattern)
     - Audit findings (type: audit_finding)
+
+  On-demand research:
+    /aid-research <topic>        Quick framework research
+    /aid-research --deep <topic> Extended API reference
+    /aid-research <url>          Index specific documentation URL
 
 HOW AGENTS USE IT:
 

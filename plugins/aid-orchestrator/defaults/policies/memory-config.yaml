@@ -48,6 +48,7 @@ memory:
     - audit_finding                       # Post-EPIC audit findings
     - proposal                            # Curator improvement proposals (cross-project pattern detection)
     - documentation                       # Framework/library documentation chunks (knowledge-acquisition skill)
+    - example_epic                        # Abstracted EPIC patterns for cross-project reference (knowledge-acquisition skill)
 
 # ---------------------------------------------------------------------------
 # Knowledge Acquisition — Research, Quality Gates, and Documentation Storage
@@ -131,19 +132,23 @@ knowledge:
       - "source"                          # Origin: "context7" | "websearch" | "manual"
       - "indexed_at"                      # ISO 8601 timestamp of when chunk was stored
 
-  # Phase 2: Aging protocol — TTL-based freshness weighting for search results
+  # Aging protocol — TTL-based freshness weighting for search results
   # Stale documentation gets lower relevance scores; expired docs excluded from results
-  # aging:
-  #   documentation_ttl_days: 90          # Documentation chunks expire after 90 days
-  #   pattern_ttl_days: 180               # Pattern chunks expire after 180 days
-  #   lesson_ttl_days: 365                # Lesson chunks expire after 365 days
-  #   stale_weight: 0.7                   # Score multiplier for stale chunks (0-30 days past TTL)
-  #   expired_weight: 0.3                 # Score multiplier for expired chunks (30-180 days past TTL)
-  #   exclude_after_days: 180             # Exclude chunks older than this many days past TTL
+  # See: skills/knowledge-acquisition.md "Aging Protocol" section for full logic
+  aging:
+    documentation_ttl_days: 90            # Documentation chunks expire after 90 days
+    pattern_ttl_days: 180                 # Pattern chunks expire after 180 days
+    lesson_ttl_days: 365                  # Lesson chunks expire after 365 days
+    command_ttl_days: 365                 # Command chunks expire after 365 days
+    audit_finding_ttl_days: 90            # Audit finding chunks expire after 90 days
+    # decision and example_epic types never expire (handled in code, not config)
+    stale_weight: 0.7                     # Score multiplier for stale chunks (0-30 days past TTL)
+    expired_weight: 0.3                   # Score multiplier for expired chunks (30-180 days past TTL)
+    exclude_after_days: 180               # Exclude chunks older than this many days past TTL
 
   # Phase 3: Feedback tracking — measure chunk usefulness for retrieval optimization
   # Tracks how often chunks are retrieved and whether agents found them useful
-  # feedback:
-  #   track_retrieval: true               # Count how many times each chunk is retrieved
-  #   track_usefulness: false             # Ask agents to rate chunk helpfulness (opt-in)
-  #   deprecate_unused_after_days: 180    # Mark chunks as stale if never retrieved in this period
+  feedback:
+    track_retrieval: true               # count times_retrieved
+    track_usefulness: false             # future opt-in (Phase 4+)
+    deprecate_unused_after_days: 180    # surface in /aid-analytics

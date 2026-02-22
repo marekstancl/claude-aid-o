@@ -160,6 +160,89 @@ IF mem_config missing OR knowledge.enabled == false OR knowledge unavailable:
   -> Output is identical to pre-knowledge brainstorming behavior.
 ```
 
+### Example EPIC Lookup (Step 3 Integration)
+
+After the approach-informed knowledge search, search for community example EPICs that match
+the PM's topic and selected approach. Example EPICs offer a concrete, pre-validated starting
+point that PM can adapt to the current project or use as inspiration.
+
+```
+WHEN: Step 3 (Approach Exploration), after approach-informed knowledge search, before presenting approaches.
+
+topic     = PM's stated topic or idea
+tech_stack = project-profile.yaml -> tech_stack.frameworks (list)
+
+--- SOURCE 1: Static files in defaults/examples/ ---
+
+examples_static = []
+FOR EACH file IN defaults/examples/:
+  frontmatter = parse_frontmatter(file)  # type, archetype, frameworks, complexity, description
+  IF frontmatter.type == "example_epic":
+    IF topic keywords overlap frontmatter.description OR frontmatter.archetype:
+      examples_static.APPEND(file)
+    ELIF any(fw IN frontmatter.frameworks for fw IN tech_stack):
+      examples_static.APPEND(file)
+
+--- SOURCE 2: Qdrant example_epic (if available) ---
+
+examples_qdrant = []
+IF mem_config.knowledge.enabled:
+  query = "{topic} {tech_stack frameworks joined}"
+  examples_qdrant = memory_find(
+    query  = query,
+    filter = { type: "example_epic" },
+    min_score = 0.4
+  )
+  TIMEOUT: 5 seconds. If slow, skip silently.
+
+--- MERGE AND DEDUPLICATE ---
+
+all_examples = examples_static + examples_qdrant
+deduplicated = {}
+FOR EACH ex IN all_examples:
+  archetype = ex.frontmatter.archetype OR ex.metadata.archetype
+  IF archetype NOT IN deduplicated:
+    deduplicated[archetype] = ex           # first seen wins (static file preferred)
+  ELIF ex is from examples_static AND deduplicated[archetype] is from examples_qdrant:
+    deduplicated[archetype] = ex           # static file overrides Qdrant on conflict
+
+top_examples = first 3 of deduplicated.values()
+
+--- PRESENT TO PM (if results found) ---
+
+IF top_examples (non-empty):
+  Display to PM (ONE message, non-blocking):
+    "I found an example EPIC for {top_examples[0].archetype}."
+    "Use as inspiration? (A) Adapt to your project  (B) Browse all examples  (C) Start fresh"
+
+  IF PM selects (A):
+    chosen = top_examples[0]
+    adapt_example(chosen, project_profile)   # defined in knowledge-acquisition.md
+    -> adapt_example() replaces path placeholders, updates framework versions,
+       adds project-specific constraints, asks PM about step count, then writes
+       the adapted EPIC to .aid-o/02-epics/ after PM approval.
+    -> After adaptation, continue brainstorming normally (PM can still refine).
+
+  IF PM selects (B):
+    List ALL available examples (all_examples, not just top 3):
+      FOR EACH ex IN all_examples:
+        "- [{ex.archetype}] {ex.description}  ({ex.frameworks joined})"
+    Ask: "Which would you like to use? Enter archetype name or (C) to skip."
+    IF PM picks one:
+      chosen = that example
+      adapt_example(chosen, project_profile)
+      -> Continue brainstorming normally after adaptation.
+    IF PM enters (C) or skips:
+      -> Continue normal brainstorming.
+
+  IF PM selects (C):
+    -> Skip silently. Continue normal brainstorming.
+
+IF top_examples (empty) OR examples search unavailable:
+  -> Skip silently. Continue normal brainstorming.
+  -> No message shown to PM. Step 3 behavior is identical to Phase 1.
+```
+
 ### Non-Blocking Guarantee
 
 ```
@@ -171,7 +254,9 @@ RULE 3: When knowledge is unavailable, brainstorming works exactly as before.
         The session is identical to a non-knowledge-augmented session.
 RULE 4: Knowledge informs but never overrides PM input.
         If PM contradicts a past decision or known pattern, follow PM's direction.
-RULE 5: Knowledge calls happen at most twice per session (Step 1 and Step 3).
+RULE 5: Knowledge calls happen at most three times per session:
+        (1) Step 1 pre-brainstorming search, (2) Step 3 approach-informed knowledge search,
+        (3) Step 3 example EPIC lookup.
         No additional calls during questioning, design validation, or document generation.
 ```
 
@@ -185,6 +270,13 @@ RULE 5: Knowledge calls happen at most twice per session (Step 1 and Step 3).
 | `knowledge_find()` times out (>5s) | Discard result. Brainstorm normally. |
 | `knowledge_find()` returns empty | No knowledge displayed. Brainstorm normally. |
 | Partial results (Step 1 works, Step 3 times out) | Use Step 1 results, skip Step 3 enrichment. |
+| `defaults/examples/` directory missing | Skip static example lookup. Qdrant lookup still runs (if enabled). |
+| `defaults/examples/` has no keyword or framework matches | No example offered. Continue brainstorming normally. |
+| Qdrant example_epic search times out (>5s) | Discard Qdrant results. Static file results still used (if any). |
+| Qdrant example_epic returns empty, static files found | Present static file examples only. |
+| Static files found, Qdrant returns results for same archetype | Static file takes precedence (deduplication rule). |
+| PM selects (C) Start fresh at example prompt | Skip silently. Continue normal brainstorming. No record kept. |
+| No examples found from either source | Skip silently. Step 3 identical to Phase 1 behavior. |
 
 In every degradation scenario, PM sees no difference from a standard brainstorming session.
 The knowledge layer is invisible when it has nothing to contribute.
@@ -702,7 +794,8 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 - `defaults/templates/epic-example.md` — EPIC example for reference
 - `skills/planner.md` — how plans become Plan JSON (downstream from brainstorming)
 - `skills/session-management.md` — End of Brainstorming Protocol (lifecycle integration)
-- `skills/knowledge-acquisition.md` — knowledge pipeline: `knowledge_find()` API used in Steps 1 and 3
+- `skills/knowledge-acquisition.md` — knowledge pipeline: `knowledge_find()`, `find_relevant_examples()`, and `adapt_example()` used in Steps 1 and 3
+- `defaults/examples/` — community example EPICs (static files) for Step 3 example lookup
 - `.aid-o/03-config/language.yaml` — document language configuration
 
 ---

@@ -32,7 +32,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 /aid-run-epic
 ```
 
-## Commands (10)
+## Commands (11)
 
 | Command | Description |
 |---------|-------------|
@@ -42,6 +42,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
 | `/aid-analytics [scope]` | Analyze orchestration performance metrics and get optimization recommendations |
 | `/aid-plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + session file |
+| `/aid-research [topic\|url]` | On-demand documentation research — topic, URL, or --deep mode |
 | `/aid-run-epic [id]` | Run Controller state machine for full EPIC orchestration |
 | `/aid-epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |
 | `/aid-epic-queue [sub]` | Manage EPIC execution queue (add, remove, pause, resume) |
@@ -82,7 +83,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `lessons-extractor` | Extracts lessons from completed sessions |
 | `gate-fixer` | Analyzes gate failures, applies targeted fixes |
 
-## Skills (16)
+## Skills (17)
 
 | Skill | Purpose |
 |-------|---------|
@@ -102,6 +103,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `memory-mcp` | Qdrant vector memory — semantic search, auto-indexing, agent context |
 | `cost-optimization` | Model selection, file scoping, dispatch trimming, token tracking |
 | `analytics` | Performance metrics analysis, bottleneck detection, trend reports |
+| `knowledge-acquisition` | Research pipeline, quality gates, aging protocol, manual sources |
 
 ## Controller State Machine
 
