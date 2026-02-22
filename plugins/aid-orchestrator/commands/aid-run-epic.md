@@ -1,5 +1,5 @@
 ---
-name: run-epic
+name: aid-run-epic
 description: Execute full EPIC orchestration pipeline
 user_invocable: true
 ---
@@ -11,22 +11,22 @@ This is the **main orchestration command** — it implements the entire 11-state
 ## Usage
 
 ```
-/run-epic <epic-id-or-path>
-/run-epic                      # auto-detect if only one active EPIC
+/aid-run-epic <epic-id-or-path>
+/aid-run-epic                      # auto-detect if only one active EPIC
 ```
 
 **Examples:**
 ```
-/run-epic TEST-0001
-/run-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md
-/run-epic                      # picks the only active EPIC
+/aid-run-epic TEST-0001
+/aid-run-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md
+/aid-run-epic                      # picks the only active EPIC
 ```
 
 ## Prerequisites
 
 - `.aid-o/` workspace must exist
 - EPIC file must exist in `.aid-o/02-epics/` or at the given path
-- Plan JSON should exist (from `/plan-epic`). If not, `/plan-epic` is called automatically.
+- Plan JSON should exist (from `/aid-plan-epic`). If not, `/aid-plan-epic` is called automatically.
 
 ## Core Instruction
 
@@ -63,7 +63,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - If path given → use it
    - If epic_id given → search `.aid-o/02-epics/` for matching file
    - If no argument → list EPICs in `.aid-o/02-epics/`, pick if only one, else ask
-2. Read and validate EPIC (same validation as `/plan-epic` Step 3)
+2. Read and validate EPIC (same validation as `/aid-plan-epic` Step 3)
 3. Read `.aid-o/03-config/policies/decision-policies.yaml`
 4. Read `.aid-o/03-config/policies/gates.yaml`
 5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/`
@@ -71,7 +71,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 6. Find existing Plan JSON (in evidence directory) or generate one:
    - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id` (most recent by directory name — run IDs use ISO timestamp prefix)
    - If plan.json exists → load it
-   - If not → run `/plan-epic` logic inline
+   - If not → run `/aid-plan-epic` logic inline
 7. Initialize or load `plan_progress.json`
 8. Copy EPIC to evidence (if not already there)
 9. **Source Plan Loading (Variant B):**
@@ -92,10 +92,10 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 ### State: PLANNING
 
 **Actions:**
-1. If Plan JSON doesn't exist, generate it (same logic as `/plan-epic` Steps 4-7)
+1. If Plan JSON doesn't exist, generate it (same logic as `/aid-plan-epic` Steps 4-7)
 2. Validate plan against `.aid-o/03-config/templates/plan.schema.json`
 3. Save plan to evidence
-4. **Generate session file** following Session Creation Protocol (`commands/plan-epic.md` Step 8)
+4. **Generate session file** following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8)
 5. **Validate session file** completeness (per `skills/epic-orchestration.md` Session File Quality Check):
    - Objective: 3+ sentences with success criteria
    - Scope: explicit IN (3+) and OUT (2+) lists
@@ -422,7 +422,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
 
 **Actions:**
 1. Read `skills/gates-engine.md` — follow the Gates Execution Protocol exactly
-2. Execute `/run-gates {epic_id}` logic in **non-interactive mode**:
+2. Execute gates engine logic (per `skills/gates-engine.md`) in **non-interactive mode**:
    - Parse `.aid-o/03-config/policies/gates.yaml` (Section 1 of gates-engine.md)
    - Identify required gates; if plan.json specifies a `gates` subset, use only those
    - For each gate: execute per type (command or rule) following Section 2
@@ -654,7 +654,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
    Present the structured Completion Summary from `skills/epic-orchestration.md`
    DONE state section. This is the last thing the PM sees -- make it informative
    and actionable. Includes step count, gates, duration, key outputs, and 5
-   next-step options (/aid-review, /aid-brainstorm, /plan-epic, /audit, /aid-analytics).
+   next-step options (/aid-review, /aid-brainstorm, /aid-plan-epic, /aid-audit, /aid-analytics).
 9. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
 10. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
     a. Read `.aid-o/04-engine/epic-queue.yaml`

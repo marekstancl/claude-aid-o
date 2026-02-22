@@ -1,25 +1,32 @@
 ---
-name: plan-epic
+name: aid-plan-epic
 description: Generate Plan JSON from EPIC or Plan specification
 user_invocable: true
 ---
 
 Parse an EPIC **or Plan** file and generate a Plan JSON + Session file for the Controller state machine.
 
-This command is the entry point to orchestration — it reads an EPIC (or auto-converts a Plan to an EPIC), analyzes its steps and dependencies, and produces a validated execution plan that `/run-epic` will follow.
+This command is the unified entry point to orchestration. It handles two input paths seamlessly:
+
+- **EPIC input (standard path):** Reads the EPIC, analyzes its steps and dependencies, and produces a validated execution plan that `/aid-run-epic` will follow.
+- **Plan input (unified Plan→EPIC→Plan path):** Auto-detects that a Plan file was given, generates a full EPIC from it using the EPIC Subagent Template, asks PM to review the generated EPIC, then proceeds with plan generation from that EPIC — all in one command invocation.
+
+After plan generation completes, the command asks the PM whether to run the EPIC immediately, review the plan first, or execute a single step.
 
 ## Usage
 
 ```
-/plan-epic <path-to-epic-or-plan-file>
+/aid-plan-epic <path-to-epic-or-plan-file>
 ```
 
 **Examples:**
 ```
-/plan-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md          # EPIC input (standard)
-/plan-epic .aid-o/01-plans/2026-02-19-aido-v040.md                # Plan input (auto-converts to EPIC)
-/plan-epic workspace/workflow/epics/active/EPIC-TEST-0001-DUMMY.md
+/aid-plan-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md          # EPIC input (standard)
+/aid-plan-epic .aid-o/01-plans/2026-02-19-aido-v040.md                # Plan input → auto-generates EPIC, then Plan JSON
+/aid-plan-epic workspace/workflow/epics/active/EPIC-TEST-0001-DUMMY.md
 ```
+
+Both input formats produce the same output: a plan.json, plan_progress.json, and session file ready for `/aid-run-epic`. When given a Plan file, the command adds an intermediate EPIC generation step and shows it to the PM for review before continuing.
 
 ## Prerequisites
 
@@ -105,7 +112,7 @@ When this step is invoked from brainstorming with phase selection context:
    - Scope the EPIC's Allowed files/paths to only files relevant to the selected phase
    - Add a note in EPIC Context: "This EPIC covers Phase {N} of {total} from plan {plan_id}"
 
-If no phase context is provided (standard /plan-epic invocation), process all steps as usual.
+If no phase context is provided (standard /aid-plan-epic invocation), process all steps as usual.
 
 ### Step 3: Load and Validate EPIC
 
@@ -125,7 +132,7 @@ If no phase context is provided (standard /plan-epic invocation), process all st
    - Goal (required)
    - Acceptance Criteria (required)
 
-   Fix the EPIC file and re-run /plan-epic.
+   Fix the EPIC file and re-run /aid-plan-epic.
    Template: .aid-o/03-config/templates/epic.md
    ```
 4. Extract `epic_id` from filename:
@@ -450,8 +457,10 @@ Files created:
   - EPIC copy: .aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md
   - Session: .aid-o/04-engine/sessions/{session_file}
 
-Next: Run `/run-epic {epic_id}` to start execution
-      or `/run-step {epic_id} step_1_architect` for manual step execution
+Ready to execute?
+  Want to run this EPIC now?  → /aid-run-epic {epic_id}
+  Review plan first?          → open .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
+  Run a single step?          → /aid-run-epic {epic_id} step_1_architect
 ```
 
 If no analysis groups were generated, omit the "Analysis groups" section from output.
@@ -471,5 +480,5 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 - **NEVER modify the original EPIC file** — it is the source of truth, only copy it to evidence
 - If `$ARGUMENTS` is empty, list files from BOTH `.aid-o/02-epics/` (marked as `(EPIC)`) AND `.aid-o/01-plans/` (marked as `(Plan)`) for selection
 - If a Plan JSON already exists for this EPIC, ask: "Plan already exists (version {N}). Create new version? (Y/N)"
-- The plan is a **proposal** — PM reviews it in `/run-epic` (PLAN_REVIEW state) before execution begins
+- The plan is a **proposal** — PM reviews it in `/aid-run-epic` (PLAN_REVIEW state) before execution begins
 - Budget defaults: `max_llm_cost_usd: 50`, `max_retries_per_gate: 3` (unless EPIC specifies otherwise)

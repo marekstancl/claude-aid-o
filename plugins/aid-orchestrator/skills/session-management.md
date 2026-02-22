@@ -378,14 +378,14 @@ multiple sessions optimized for speed and quality (see `skills/planner.md`
 Section 11 -- Session Split Decision).
 
 ```
-Session 1: /run-epic E-xxx
+Session 1: /aid-run-epic E-xxx
   -> Controller reads plan.json, sees Session 1 steps
   -> Executes steps 1-5 (respecting dependencies + parallelism)
   -> Runs gates on session 1 outputs
   -> PM approval -> session archived -> handoff created
   -> EPIC stays active (sessions_completed: 1/2)
 
-Session 2: /run-epic E-xxx --session 2
+Session 2: /aid-run-epic E-xxx --session 2
   -> Controller reads plan_progress.json (knows steps 1-5 are done)
   -> Reads Session 1 handoff for context
   -> Executes steps 6-8

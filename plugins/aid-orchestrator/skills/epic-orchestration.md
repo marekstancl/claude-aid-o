@@ -88,7 +88,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 
 ### 1. IDLE → PLANNING
 
-**Trigger:** `/run-epic <epic-file>` command or Controller receives EPIC path.
+**Trigger:** `/aid-run-epic <epic-file>` command or Controller receives EPIC path.
 
 **Actions:**
 1. Read EPIC file, validate it has required sections (Goal, Scope, Constraints, DoD, Acceptance Criteria)
@@ -156,7 +156,7 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 3. Identify parallel groups (steps that can run concurrently)
 4. Generate Plan JSON conforming to `.aid-o/03-config/templates/plan.schema.json`
 5. Validate Plan JSON against schema
-6. Generate session file following Session Creation Protocol (`commands/plan-epic.md` Step 8)
+6. Generate session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8)
 7. Validate session file completeness (see Session File Quality Check below)
 
 **Plan Generation Rules:**
@@ -897,8 +897,8 @@ if gate_fails:
    What's next?
      1. Review the code -- run /aid-review or examine the changes manually
      2. Start new work -- run /aid-brainstorm to explore a new idea
-     3. Continue building -- run /plan-epic with a new EPIC
-     4. Check quality -- run /audit for a project health assessment
+     3. Continue building -- run /aid-plan-epic with a new EPIC
+     4. Check quality -- run /aid-audit for a project health assessment
      5. Analyze performance -- run /aid-analytics to see bottlenecks and optimization tips
      6. Archive -- the session has been archived to sessions/archive/
 
@@ -1337,7 +1337,7 @@ auto-starts the next queued EPIC if available.
 
 The Controller creates and maintains a session file for each EPIC run:
 
-1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/plan-epic.md` Step 8):
+1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8):
    - Read sources: EPIC, Plan JSON, plan file, previous session, source code, decision policies
    - Map plan.json steps → session phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
    - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Session Log

@@ -11,7 +11,7 @@ Orchestrator.
 **Type:** Specialist agent (post-session, not per-step).
 
 **Dispatched by:** `skills/session-management.md` at session-end or
-`commands/run-epic.md` during POST_PROCESSING state.
+`commands/aid-run-epic.md` during POST_PROCESSING state.
 
 ---
 

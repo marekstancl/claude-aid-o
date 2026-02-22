@@ -1,6 +1,6 @@
 # Memory MCP Integration — Long-Term Vector Memory Protocol
 
-**Version:** 0.1.0
+**Version:** 0.5.0
 **Skill:** memory-mcp
 **Dependencies:** session-management, epic-orchestration
 
@@ -22,9 +22,10 @@ This is different from `.aid-o/` which is per-project.
 ## TL;DR
 
 This skill defines how AID stores and retrieves knowledge across sessions using a Qdrant
-MCP server. Agents auto-index decisions, lessons, patterns, and audit findings at session-end
-and EPIC completion. Before dispatching an agent, the Controller retrieves relevant past
-knowledge to augment the agent's context — enabling agents to learn from history.
+MCP server. Agents auto-index decisions, lessons, patterns, audit findings, and documentation
+at session-end, EPIC completion, and research triggers. Before dispatching an agent, the
+Controller retrieves relevant past knowledge to augment the agent's context — enabling agents
+to learn from history.
 
 **Principle:** File-based memory is authoritative. Qdrant is supplementary. Plugin works
 identically without Qdrant — every memory operation has a graceful no-op fallback.
@@ -94,13 +95,14 @@ memory:
     - pattern
     - command
     - audit_finding
+    - documentation
 ```
 
 ---
 
 ## Document Types
 
-AID indexes 5 types of knowledge. Each type has a defined metadata schema and indexing trigger.
+AID indexes 6 types of knowledge. Each type has a defined metadata schema and indexing trigger.
 
 ### Type 1: Decision
 
@@ -219,6 +221,75 @@ Findings from post-EPIC audits (code quality, security, documentation issues).
 ```
 
 **Text stored:** Finding description + recommendation.
+
+---
+
+### Type 6: Documentation
+
+Framework and library documentation chunks acquired through the knowledge-acquisition
+research pipeline (Context7 MCP primary, WebSearch fallback).
+
+**Source:** Context7 MCP (`query-docs`), WebSearch + WebFetch (fallback), PM-provided URLs (Phase 2)
+**Trigger:** `/aid-setup` onboarding, `/aid-brainstorm` framework detection, `/aid-research` (Phase 2)
+**Quality gates:** All documentation chunks MUST pass the 4-gate quality protocol before storage
+(see Documentation Quality Gate Protocol below). Other document types bypass quality gates.
+**Metadata schema:**
+
+```json
+{
+  "type": "documentation",
+  "framework": "FastAPI",
+  "framework_version": "0.115.x",
+  "section": "dependency-injection",
+  "source": "context7",
+  "source_url": "https://fastapi.tiangolo.com/tutorial/dependencies/",
+  "source_library_id": "/tiangolo/fastapi",
+  "indexed_at": "2026-02-20T10:00:00Z",
+  "valid_until": "2026-05-20T10:00:00Z",
+  "project_name": "global",
+  "confidence": "high",
+  "depth": "quick"
+}
+```
+
+**Field descriptions:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | yes | Always `"documentation"` for this document type |
+| `framework` | string | yes | Framework/library name (e.g., `"FastAPI"`, `"React"`) |
+| `framework_version` | string | recommended | Version string detected from docs (e.g., `"0.115.x"`) |
+| `section` | string | recommended | Logical section within the framework docs (e.g., `"dependency-injection"`, `"authentication"`) |
+| `source` | string | yes | Origin of the chunk: `"context7"`, `"websearch"`, or `"manual"` |
+| `source_url` | string | recommended | URL of the original documentation page |
+| `source_library_id` | string | auto | Context7 library ID (e.g., `"/tiangolo/fastapi"`), null for websearch |
+| `indexed_at` | ISO 8601 | yes | Timestamp when the chunk was stored |
+| `valid_until` | ISO 8601 | auto | Expiration timestamp: `indexed_at + 90 days` |
+| `project_name` | string | auto | Always `"global"` for documentation (shared across projects) |
+| `confidence` | string | auto | Quality confidence level: `"high"`, `"medium"`, or `"low"` (see Confidence Scoring) |
+| `depth` | string | auto | Research depth that produced this chunk: `"quick"` or `"deep"` |
+
+**Text stored:** Documentation chunk text — one concept, pattern, API endpoint, or code
+snippet per chunk. Target size: 50-500 words, max ~2000 tokens.
+
+**Example stored text:**
+```
+FastAPI Depends(): Use for dependency injection. Supports async. Nested deps resolved
+automatically. Use yield for cleanup (DB sessions). Example:
+  async def get_db():
+    db = SessionLocal()
+    try:
+      yield db
+    finally:
+      db.close()
+```
+
+**Key differences from other types:**
+- Uses `project_name="global"` (not the current project name) because framework
+  documentation is universal and shared across all projects.
+- Requires 4-gate quality validation before storage (other types store directly).
+- Has a `valid_until` TTL field (90 days default) for freshness tracking (Phase 2).
+- Full research and storage protocol defined in `skills/knowledge-acquisition.md`.
 
 ---
 
@@ -473,6 +544,213 @@ return context
 
 ---
 
+## Documentation Quality Gate Protocol
+
+When `document_type == "documentation"`, all chunks MUST pass the 4-gate quality protocol
+before being stored via `qdrant-store`. Other document types (decision, lesson, pattern,
+command, audit_finding) bypass quality gates and store directly — existing behavior is
+unchanged.
+
+The authoritative definition of the research pipeline, chunking logic, and storage flow
+lives in `skills/knowledge-acquisition.md`. This section defines the gate protocol that
+`memory_store` enforces for the `documentation` type.
+
+### Quality Gate Integration in `memory_store`
+
+When `memory_store("documentation", text, metadata)` is called, the following gate sequence
+runs before the `qdrant-store` call. If any gate rejects the chunk, storage is skipped and
+the rejection is logged. Non-documentation types proceed directly to `qdrant-store` as before.
+
+```
+memory_store(document_type, text, metadata):
+
+  # ... existing flow (check_memory_enabled, project_name injection) ...
+
+  # DOCUMENTATION QUALITY GATES — only for documentation type
+  IF document_type == "documentation":
+    gate_result = run_documentation_quality_gates(text, metadata)
+
+    IF NOT gate_result.passed:
+      log_memory_event("store", "documentation", "rejected",
+        gate=gate_result.gate, reason=gate_result.reason)
+      RETURN gate_result  # Caller handles rejection (merge, split, or discard)
+
+  # ... existing flow (qdrant-store call, logging) ...
+```
+
+### Gate 1: Minimum Informational Value
+
+Purpose: Reject marketing fluff, navigation fragments, and content too vague to help agents.
+
+```
+gate_1_min_value(chunk_text):
+
+  PASS if chunk contains at least one of:
+    - Specific API/function/class/method with description
+    - Code snippet (minimum 2 lines)
+    - Concrete pattern/procedure with explanation
+    - Specific constraint/gotcha/caveat with actionable detail
+
+  REJECT if chunk is:
+    - Marketing text ("FastAPI is the fastest framework...")
+    - Too generic ("You can use databases with FastAPI")
+    - Navigation/menu content ("Home > Docs > Tutorial > ...")
+    - Shorter than 50 words AND contains no code snippet
+
+  RETURN:
+    { passed: true|false, gate: "min_value", reason: "description if failed" }
+```
+
+### Gate 2: Deduplication (0.85 Threshold)
+
+Purpose: Prevent storing content that already exists in Qdrant.
+
+```
+gate_2_deduplication(chunk_text):
+
+  existing = memory_find(chunk_text, min_score=0.70)
+
+  IF match found with score > 0.85:
+    RETURN { passed: false, gate: "dedup", action: "reject",
+             reason: "duplicate (score {score})", existing_id: match.id }
+
+  IF match found with score 0.70 - 0.85:
+    RETURN { passed: false, gate: "dedup", action: "merge",
+             reason: "partial_overlap (score {score})", existing_match: match }
+    # Caller keeps the better version (longer, more specific, newer source)
+
+  IF no match OR all scores < 0.70:
+    RETURN { passed: true }
+
+  # For documentation type: also check same source_library_id + section
+  # to prevent duplicates from re-fetching the same Context7 library.
+```
+
+### Gate 3: Metadata Completeness
+
+Purpose: Ensure every stored chunk has enough metadata for filtering and attribution.
+
+```
+gate_3_metadata(chunk_text, metadata):
+
+  REQUIRED fields (reject without):
+    - type                    # must be "documentation"
+    - framework               # framework name (e.g., "FastAPI")
+    - source                  # "context7" | "websearch" | "manual"
+    - indexed_at              # ISO 8601 timestamp
+
+  RECOMMENDED fields (warn in log but allow storage):
+    - framework_version       # version string
+    - section                 # logical section within docs
+    - source_url              # URL of original page
+    - valid_until             # expiration timestamp
+
+  AUTO-COMPUTED fields (filled by protocol if missing):
+    - valid_until:    indexed_at + 90 days (if not provided)
+    - project_name:   "global" (always, for documentation type)
+    - confidence:     based on source tier (see Confidence Scoring Table)
+    - depth:          from research function parameter
+
+  IF any REQUIRED field is missing:
+    RETURN { passed: false, gate: "metadata", reason: "missing required: {field}" }
+
+  IF any RECOMMENDED field is missing:
+    log("Warning: chunk missing recommended field: {field}")
+
+  RETURN { passed: true, auto_filled: [list of auto-computed fields added] }
+```
+
+### Gate 4: Size Limits (50-500 Words, 2000 Tokens Max)
+
+Purpose: Keep chunks within the optimal size range for embedding quality and agent context.
+
+```
+gate_4_size(chunk_text):
+
+  word_count = count_words(chunk_text)
+  has_code = contains_code_block(chunk_text)
+
+  # Minimum size check
+  IF word_count < 50 AND NOT has_code:
+    RETURN { passed: false, gate: "size", action: "reject",
+             reason: "too_short ({word_count} words, no code)" }
+
+  IF has_code AND count_code_lines(chunk_text) < 2:
+    RETURN { passed: false, gate: "size", action: "reject",
+             reason: "code_too_short (under 2 lines)" }
+
+  # Maximum size check
+  token_count = estimate_tokens(chunk_text)
+  IF token_count > 2000:
+    RETURN { passed: false, gate: "size", action: "split",
+             reason: "too_large (~{token_count} tokens, split into sub-chunks)" }
+    # Caller splits the chunk and re-runs all gates on each sub-chunk
+
+  RETURN { passed: true }
+```
+
+### `run_documentation_quality_gates(text, metadata)`
+
+Orchestrates the 4 gates in order. A chunk rejected at Gate N does not proceed to Gate N+1.
+
+```
+run_documentation_quality_gates(text, metadata):
+
+  # Gate 1: Minimum informational value
+  g1 = gate_1_min_value(text)
+  IF NOT g1.passed:
+    RETURN g1
+
+  # Gate 2: Deduplication
+  g2 = gate_2_deduplication(text)
+  IF NOT g2.passed:
+    RETURN g2
+
+  # Gate 3: Metadata completeness
+  g3 = gate_3_metadata(text, metadata)
+  IF NOT g3.passed:
+    RETURN g3
+  # Apply auto-computed fields
+  IF g3.auto_filled:
+    apply_auto_fields(metadata, g3.auto_filled)
+
+  # Gate 4: Size limits
+  g4 = gate_4_size(text)
+  IF NOT g4.passed:
+    RETURN g4
+
+  # All gates passed
+  RETURN { passed: true, gates_run: 4 }
+```
+
+### Confidence Scoring Reference Table
+
+Confidence is auto-assigned based on the source that produced the chunk. It affects
+retrieval ranking: when multiple chunks match a query, higher-confidence chunks are
+preferred in the results ordering.
+
+| Source | Default Confidence | Notes |
+|--------|-------------------|-------|
+| Context7 MCP | high | Curated, up-to-date documentation |
+| Official docs (WebFetch Tier 1) | high | github.io, readthedocs, framework homepage |
+| GitHub README (WebFetch Tier 2) | medium | May be outdated or incomplete |
+| WebSearch result (Tier 2) | medium | Mixed quality, version uncertain |
+| PM manual URL (Phase 2) | medium | PM vouches for relevance |
+
+### Quality Gate Evidence Logging
+
+Quality gate results for documentation chunks are logged to the standard memory log:
+
+```json
+{"ts": "2026-02-20T10:00:00Z", "action": "store", "type": "documentation", "status": "success", "collection": "aid-memory", "gates": "4/4 passed"}
+{"ts": "2026-02-20T10:00:01Z", "action": "store", "type": "documentation", "status": "rejected", "gate": "dedup", "reason": "duplicate (score 0.91)", "collection": "aid-memory"}
+{"ts": "2026-02-20T10:00:02Z", "action": "store", "type": "documentation", "status": "rejected", "gate": "size", "reason": "too_short (23 words, no code)", "collection": "aid-memory"}
+{"ts": "2026-02-20T10:00:03Z", "action": "store", "type": "documentation", "status": "rejected", "gate": "min_value", "reason": "marketing text", "collection": "aid-memory"}
+{"ts": "2026-02-20T10:00:04Z", "action": "store", "type": "documentation", "status": "rejected", "gate": "size", "action": "split", "reason": "too_large (~3200 tokens)", "collection": "aid-memory"}
+```
+
+---
+
 ## Fallback Protocol
 
 ### When Qdrant MCP is not configured
@@ -571,7 +849,7 @@ Every `qdrant-store` call includes mandatory metadata:
   "metadata": {
     "project_name": "{from project-profile.yaml}",
     "epic_id": "{epic_id}",
-    "type": "lesson|command|decision|pattern",
+    "type": "lesson|command|decision|pattern|audit_finding|documentation",
     "category": "{category}",
     "timestamp": "{ISO 8601}",
     "tech_stack": "{languages + frameworks from project-profile}"
@@ -620,9 +898,10 @@ If Qdrant is not configured or unavailable:
 - `skills/agent-core.md` — Context loading protocol (consumer: memory-augmented context)
 - `skills/session-management.md` — Session completion protocol (consumer: session-end indexing)
 - `skills/epic-orchestration.md` — DONE state definition (consumer: EPIC DONE indexing)
-- `commands/run-epic.md` — EXECUTING state (consumer: pre-step memory retrieval) + DONE state (consumer: EPIC indexing)
-- `commands/session-end.md` — Session-end command (consumer: session-end indexing)
-- `commands/aid-setup.md` — Qdrant detection during onboarding
+- `commands/aid-run-epic.md` — EXECUTING state (consumer: pre-step memory retrieval) + DONE state (consumer: EPIC indexing)
+- `skills/session-management.md` — Session-end protocol (consumer: session-end indexing)
+- `skills/knowledge-acquisition.md` — Research pipeline, chunking, storage flow for documentation type
+- `commands/aid-setup.md` — Qdrant detection during onboarding, triggers knowledge research
 - `commands/aid-init.md` — Memory config file creation
 - `defaults/policies/memory-config.yaml` — Configuration file
 - `agents/lessons-extractor.md` — Produces lessons + commands (indexed by memory_index_session)

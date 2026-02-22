@@ -219,8 +219,8 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
 
 - `skills/epic-orchestration.md` — DONE state triggers auto-pickup
 - `skills/slack-mcp.md` — Status updates and escalations
-- `commands/run-epic.md` — Consumes next EPIC from queue
-- `commands/epic-queue.md` — CLI interface for queue management
+- `commands/aid-run-epic.md` — Consumes next EPIC from queue
+- `commands/aid-epic-queue.md` — CLI interface for queue management
 
 ---
 

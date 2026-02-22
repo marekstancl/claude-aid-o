@@ -18,7 +18,7 @@ AID gives you an entire dev team under one command. You're the PM — you approv
 
 2. **AID generates the task spec** — from the brainstorm, AID produces a structured specification (EPIC) with steps, dependencies, acceptance criteria, and quality gates. You just review and approve.
 
-3. **You launch the pipeline** — `/run-epic` and AID takes over:
+3. **You launch the pipeline** — `/aid-run-epic` and AID takes over:
    - Generates an execution plan with dependency graph and parallel groups
    - Dispatches work to 9 role-based agents (architect → domain → backend + frontend → QA + security → docs → release)
    - Parallelizes what it can — backend + frontend run simultaneously on separate git worktrees
@@ -27,10 +27,10 @@ AID gives you an entire dev team under one command. You're the PM — you approv
    - Requests your PM approval and merges
 
 ```
-/aid-brainstorm "topic"       ← 9-step dialog: context → questions → approaches → design → plan
-                              ← AID offers to generate an EPIC from the conclusions
-/plan-epic path/to/epic.md   ← generates JSON plan + session file
-/run-epic                     ← orchestrator takes control
+/aid-brainstorm "topic"            ← 9-step dialog: context → questions → approaches → design → plan
+                                   ← AID offers to generate an EPIC from the conclusions
+/aid-plan-epic path/to/epic.md    ← generates JSON plan + session file
+/aid-run-epic                      ← orchestrator takes control
 ```
 
 The entire process is governed by a state machine: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → GATES → PM_APPROVAL → DONE. The **control flow is deterministic** — defined by YAML/JSON configuration. The **content is AI-generated** — each agent produces code, tests, docs via LLM.
@@ -60,10 +60,10 @@ Requires [Claude Code](https://claude.com/claude-code) CLI.
 # Or write one manually from the template in .aid-o/02-epics/
 
 # Generate execution plan
-/plan-epic .aid-o/02-epics/my-epic.md
+/aid-plan-epic .aid-o/02-epics/my-epic.md
 
 # Run the orchestrator
-/run-epic
+/aid-run-epic
 ```
 
 **Try one of these prompts:**
@@ -80,7 +80,7 @@ Run `/aid-help examples` for detailed walkthroughs.
 
 | Component | Count | Description |
 |-----------|-------|-------------|
-| **Commands** | 19 | `/aid-setup`, `/aid-brainstorm`, `/run-epic`, `/plan-epic`, `/aid-analytics`, `/run-gates`, `/epic-queue`, `/audit`... |
+| **Commands** | 10 | `/aid-setup`, `/aid-brainstorm`, `/aid-run-epic`, `/aid-plan-epic`, `/aid-analytics`, `/aid-epic-queue`, `/aid-audit`... |
 | **Agents** | 18 | 9 role + 3 specialist + 6 utility |
 | **Skills** | 16 | State machine, planner, brainstorming, parallel dispatch, gates engine, cost optimization, analytics... |
 | **Playbooks** | 11 | Role-specific instructions (customizable per project) |
@@ -111,7 +111,7 @@ Run `/aid-help examples` for detailed walkthroughs.
 
 - **Slack MCP** — PM communication via Slack (plan approval, escalation, merge approval, 7 message types with timeout/reminder logic). Chat fallback when Slack is not configured.
 - **Qdrant Memory** (optional) — Agents remember past decisions and lessons learned, improving with every EPIC. File-based fallback when Qdrant is unavailable.
-- **Epic Queue** — `/epic-queue add` to stack EPICs, AID processes them one by one autonomously.
+- **Epic Queue** — `/aid-epic-queue add` to stack EPICs, AID processes them one by one autonomously.
 - **Project Scanner** — `/aid-setup` analyzes your project (tech stack, structure, conventions) → generates `project-profile.yaml`, configures gates for your stack.
 
 ## Controller State Machine
@@ -203,26 +203,18 @@ gates/                  Gate command outputs
 | `/aid-setup` | Interactive project onboarding (tech stack detection) |
 | `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Documentation (commands, workflow, agents, gates, config...) |
-| `/plan-epic <path>` | EPIC or Plan → Plan JSON + session file |
-| `/run-epic [id]` | Full orchestration pipeline |
-| `/run-step <id> <step>` | Run single step manually |
-| `/epic-status [id]` | Pipeline status (steps, gates, budget) |
-| `/run-gates [id]` | Run quality gates standalone |
-| `/epic-queue [sub]` | EPIC queue management (add, remove, pause, resume) |
-| `/quality-gates` | 6-gate pre-commit protocol |
-| `/session-start` | Start tracked session |
-| `/session-end` | Complete + archive session |
-| `/handoff` | Create handoff for next AI session |
-| `/audit` | Project health audit (0-100 score) |
-| `/coding-standards` | Load coding standards |
-| `/testing` | Load testing workflow |
-| `/docs-protocol` | Load documentation protocol |
+| `/aid-analytics [scope]` | Analyze orchestration performance metrics |
+| `/aid-plan-epic <path>` | EPIC or Plan → Plan JSON + session file |
+| `/aid-run-epic [id]` | Full orchestration pipeline |
+| `/aid-epic-status [id]` | Pipeline status (steps, gates, budget) |
+| `/aid-epic-queue [sub]` | EPIC queue management (add, remove, pause, resume) |
+| `/aid-audit` | Project health audit (0-100 score) |
 
 ## Roadmap
 
-- **v0.4.1** (current) — `/aid-init` upgrade mode with manifest-based version tracking, config checksum detection, dynamic defaults scanning, CHANGELOG format standardization, release automation protocol
-- **v0.4.0** — Zero detail loss pipeline (Variant B), wave-based parallel execution, step decomposition, critical path analysis, `/plan-epic` accepts Plan files, `/aid-brainstorm` inline execution plan
-- **v0.3.0** — Cost optimization, per-agent metrics, multi-session EPICs, cross-project Qdrant knowledge, `/aid-analytics`, auto-archive, Playwright E2E, chat-first setup
+- **v0.5.0** (current) — Knowledge acquisition via Context7 MCP, quality-gated documentation storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, command prefix standardization (`aid-*`)
+- **v0.4.2** — `/plan-epic` and `/aid-brainstorm` step renumbering, `/aid-init [path]` parameter, phase selection for scoped EPIC generation
+- **v0.4.1** — `/aid-init` upgrade mode with manifest-based version tracking, config checksum detection, dynamic defaults scanning, release automation protocol
 
 ## Requirements
 
@@ -231,4 +223,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.4.1
+MIT — v0.5.0

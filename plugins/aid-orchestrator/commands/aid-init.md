@@ -392,7 +392,7 @@ This project uses AID for multi-agent orchestration.
 
 **Workspace:** `.aid-o/`
 **Commands:** `/aid-help` for full documentation
-**Quick start:** `/aid-setup` → create EPIC → `/run-epic`
+**Quick start:** `/aid-setup` → create EPIC → `/aid-run-epic`
 
 **Key paths:**
 - Plans: `.aid-o/01-plans/`

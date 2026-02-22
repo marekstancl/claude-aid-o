@@ -47,3 +47,103 @@ memory:
     - command                             # Working build/test/deploy commands
     - audit_finding                       # Post-EPIC audit findings
     - proposal                            # Curator improvement proposals (cross-project pattern detection)
+    - documentation                       # Framework/library documentation chunks (knowledge-acquisition skill)
+
+# ---------------------------------------------------------------------------
+# Knowledge Acquisition — Research, Quality Gates, and Documentation Storage
+# See: skills/knowledge-acquisition.md for protocol details
+#
+# This section configures how AID researches framework documentation,
+# applies quality gates, and stores knowledge chunks in Qdrant.
+#
+# When disabled (or absent), all knowledge_* functions are no-ops.
+# Brainstorming and agent dispatch work identically to pre-knowledge behavior.
+#
+# To enable:
+# 1. Run /aid-setup — it detects Context7 MCP and sets enabled + context7.available
+# 2. Or manually set enabled: true and configure context7.available
+# ---------------------------------------------------------------------------
+
+knowledge:
+  enabled: false                          # Set to true to enable knowledge acquisition pipeline
+                                          # /aid-setup enables this automatically when Context7 is configured
+
+  primary_source: "context7"              # Primary research source: context7 | websearch
+                                          # Context7 provides curated, up-to-date docs for 1000+ libraries
+  fallback_source: "websearch"            # Fallback when primary source fails or library not found
+                                          # WebSearch + WebFetch fetches official docs, GitHub READMEs
+
+  # Context7 MCP integration
+  # Context7 is external — AID defines integration protocol, not Context7 availability
+  context7:
+    available: false                      # Whether Context7 MCP server is installed and reachable
+                                          # /aid-setup sets this to true after confirming MCP access
+    scope: "user"                         # MCP installation scope: user | project
+                                          # user = available across all projects
+                                          # project = configured for this project only
+    # installed_at: null                  # ISO date when Context7 was configured (set by /aid-setup)
+
+  # Research configuration — controls how documentation is fetched and chunked
+  research:
+    default_depth: "quick"                # Research depth: quick | deep
+                                          # quick = key concepts, patterns, gotchas (5-15 chunks)
+                                          # deep  = detailed API reference, edge cases (20-50 chunks, Phase 2)
+    deep_on_demand_only: true             # When true, deep research requires explicit /aid-research --deep
+                                          # Prevents expensive deep scans during onboarding
+    max_frameworks_per_scan: 5            # Max frameworks to research in a single onboarding scan
+                                          # Prevents runaway research during /aid-setup
+    max_urls_per_framework: 3             # WebSearch fallback: max URLs to fetch per framework
+                                          # Higher values increase coverage but slow down research
+    max_chunks_per_source: 15             # Max chunks stored per framework in quick mode
+                                          # Caps storage to keep Qdrant lean and relevant
+    min_chunks_to_skip_research: 3        # Skip re-fetching if this many global chunks exist in Qdrant
+                                          # Prevents redundant research when sufficient knowledge is available
+
+    # Source tier classification for WebSearch fallback
+    # Determines confidence level assigned to fetched documentation chunks
+    source_tiers:
+      tier1:                              # High confidence — official documentation sites
+        - "github.io"
+        - "readthedocs.io"
+        - "docs.python.org"
+      tier2:                              # Medium confidence — official but less curated
+        - "github.com"
+        - "pypi.org"
+      ignored:                            # Excluded — unreliable or too generic for agent consumption
+        - "medium.com"
+        - "dev.to"
+        - "w3schools.com"
+        - "stackoverflow.com"             # Version-specific, opinionated — high curation risk
+
+  # Quality gates — every chunk MUST pass all 4 gates before Qdrant storage
+  # Gates run in order: a chunk rejected at gate 1 does not proceed to gate 2
+  # See skills/knowledge-acquisition.md for full gate logic
+  quality:
+    min_chunk_words: 50                   # Gate 4: reject chunks shorter than this (unless has code snippet)
+    max_chunk_tokens: 2000                # Gate 4: split chunks larger than this for embedding quality
+    dedup_threshold: 0.85                 # Gate 2: reject if existing Qdrant match scores above this
+                                          # Prevents storing duplicate documentation
+    merge_threshold: 0.70                 # Gate 2: merge if existing match scores between this and dedup
+                                          # Keeps the better version (longer, more specific, newer)
+    required_metadata:                    # Gate 3: reject chunks missing any of these fields
+      - "type"                            # Must be "documentation" for knowledge chunks
+      - "framework"                       # Framework/library name (e.g., "FastAPI")
+      - "source"                          # Origin: "context7" | "websearch" | "manual"
+      - "indexed_at"                      # ISO 8601 timestamp of when chunk was stored
+
+  # Phase 2: Aging protocol — TTL-based freshness weighting for search results
+  # Stale documentation gets lower relevance scores; expired docs excluded from results
+  # aging:
+  #   documentation_ttl_days: 90          # Documentation chunks expire after 90 days
+  #   pattern_ttl_days: 180               # Pattern chunks expire after 180 days
+  #   lesson_ttl_days: 365                # Lesson chunks expire after 365 days
+  #   stale_weight: 0.7                   # Score multiplier for stale chunks (0-30 days past TTL)
+  #   expired_weight: 0.3                 # Score multiplier for expired chunks (30-180 days past TTL)
+  #   exclude_after_days: 180             # Exclude chunks older than this many days past TTL
+
+  # Phase 3: Feedback tracking — measure chunk usefulness for retrieval optimization
+  # Tracks how often chunks are retrieved and whether agents found them useful
+  # feedback:
+  #   track_retrieval: true               # Count how many times each chunk is retrieved
+  #   track_usefulness: false             # Ask agents to rate chunk helpfulness (opt-in)
+  #   deprecate_unused_after_days: 180    # Mark chunks as stale if never retrieved in this period

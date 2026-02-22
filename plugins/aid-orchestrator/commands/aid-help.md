@@ -54,7 +54,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.4.1
+Version: 0.5.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -66,33 +66,24 @@ What is AID?
   to deliver features end-to-end: architecture → implementation → testing
   → security → documentation → release.
 
-Commands (19):
-  /aid-init [path] Initialize or upgrade .aid-o/ workspace
-  /aid-setup       Interactive project onboarding
-  /aid-brainstorm  9-step interactive brainstorming flow
-  /aid-help        This help
-  /plan-epic       EPIC or Plan → Plan JSON + session file
-  /run-epic        Start orchestration (state machine)
-  /run-step        Run one step manually
-  /epic-status     Show pipeline status
-  /run-gates       Run EPIC quality gates (standalone or in /run-epic)
-  /epic-queue      Manage EPIC execution queue (add, list, pause, resume)
-  /quality-gates   6-gate pre-commit protocol
-  /session-start   Start tracked session
-  /session-end     Complete + archive session
-  /handoff         Create handoff for next session
-  /audit           Project health audit
-  /coding-standards Load coding standards
-  /testing         Load testing workflow
-  /aid-analytics   Performance analysis of orchestration metrics
-  /docs-protocol   Load docs protocol
+Commands (10):
+  /aid-init          Initialize or upgrade .aid-o/ workspace
+  /aid-setup         Interactive project onboarding
+  /aid-brainstorm    9-step interactive brainstorming flow
+  /aid-help          This help
+  /aid-plan-epic     EPIC or Plan → Plan JSON + session file
+  /aid-run-epic      Start orchestration (state machine)
+  /aid-epic-status   Show pipeline status
+  /aid-epic-queue    Manage EPIC execution queue (add, list, pause, resume)
+  /aid-audit         Project health audit
+  /aid-analytics     Performance analysis of orchestration metrics
 
 Quick Start:
-  1. /aid-setup                              ← first time only
-  2. /aid-brainstorm                         ← explore ideas with AI
-  3. Create EPIC in .aid-o/02-epics/         ← your task spec
-  4. /plan-epic .aid-o/02-epics/my-epic.md   ← generate plan
-  5. /run-epic                               ← orchestrator takes over
+  1. /aid-setup                                   ← first time only
+  2. /aid-brainstorm                              ← explore ideas with AI
+  3. Create EPIC in .aid-o/02-epics/              ← your task spec
+  4. /aid-plan-epic .aid-o/02-epics/my-epic.md    ← generate plan
+  5. /aid-run-epic                                ← orchestrator takes over
 
 Where things live:
   .aid-o/01-plans/      Plans (brainstorming)
@@ -147,61 +138,41 @@ SETUP COMMANDS:
 
 ORCHESTRATION COMMANDS:
 
-  /plan-epic <path>
-    Parse EPIC or Plan → generate Plan JSON + session file.
+  /aid-plan-epic <path>
+    Unified Plan→EPIC→Plan entry point: accepts an EPIC or a Plan file and
+    generates a Plan JSON + session file ready for /aid-run-epic.
     Accepts:
-      EPIC file: /plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md  (standard)
-      Plan file: /plan-epic .aid-o/01-plans/2026-02-19-plan.md   (auto-converts to EPIC)
+      EPIC file: /aid-plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md  (standard)
+      Plan file: /aid-plan-epic .aid-o/01-plans/2026-02-19-plan.md   (auto-generates EPIC first)
     Output: plan.json, plan_progress.json, session file
-    Plan files are auto-detected and converted to EPIC using the EPIC
-    Subagent Template. PM reviews the generated EPIC before proceeding.
+    When given a Plan, the command auto-generates an EPIC using the EPIC
+    Subagent Template, shows it to PM for review, then proceeds with plan
+    generation — all in one invocation. After plan generation, PM is asked
+    whether to run the EPIC now, review the plan, or execute a single step.
 
-  /run-epic [epic-id]
+  /aid-run-epic [epic-id]
     Start the Controller state machine.
-    Usage: /run-epic TEST-0001
+    Usage: /aid-run-epic TEST-0001
     States: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK
             → GATES → PM_APPROVAL → DONE
     PM checkpoints: plan review, escalation, final approval
     Auto-decisions: scope check, gate retry, step progression
 
-  /run-step <epic-id> <step-id> [--analysis-group <group-id>]
-    Run one step or analysis group manually (without full pipeline).
-    Usage: /run-step TEST-0001 step_3_backend
-           /run-step TEST-0001 --analysis-group analysis_1_security_review
-    Useful for: debugging, re-running failed steps, manual analysis
-
-  /epic-status [epic-id]
+  /aid-epic-status [epic-id]
     Show pipeline status.
-    Usage: /epic-status TEST-0001   (detailed)
-           /epic-status             (overview of all)
+    Usage: /aid-epic-status TEST-0001   (detailed)
+           /aid-epic-status             (overview of all)
     Shows: step progress, gates, budget, recent activity
 
-SESSION COMMANDS:
-
-  /session-start     Start tracked session with file + branch
-  /session-end       Archive session, update workspace files
-  /handoff           Create handoff block for next AI
-
-GATES COMMANDS:
-
-  /run-gates [epic-id]
-    Run EPIC quality gates — standalone or integrated with /run-epic.
-    Usage: /run-gates TEST-0001    (run gates for EPIC)
-           /run-gates --dry-run    (preview which gates would run)
-           /run-gates              (run all gates standalone)
-    Gates: tests_pass, lint_pass, security_scan, docs_updated (+conditionals)
-    On failure: auto-fix via gate-fixer agent, retry up to 3x, then escalate.
-    Config: .aid-o/03-config/policies/gates.yaml
-
-  /epic-queue [subcommand]
+  /aid-epic-queue [subcommand]
     Manage EPIC execution queue for autonomous pipeline.
-    Usage: /epic-queue                        (show queue)
-           /epic-queue add <path> [--priority high]
-           /epic-queue remove <epic-id>
-           /epic-queue next                   (show next in line)
-           /epic-queue pause                  (pause auto-pickup)
-           /epic-queue resume                 (resume auto-pickup)
-           /epic-queue reorder <id> --priority <level>
+    Usage: /aid-epic-queue                        (show queue)
+           /aid-epic-queue add <path> [--priority high]
+           /aid-epic-queue remove <epic-id>
+           /aid-epic-queue next                   (show next in line)
+           /aid-epic-queue pause                  (pause auto-pickup)
+           /aid-epic-queue resume                 (resume auto-pickup)
+           /aid-epic-queue reorder <id> --priority <level>
     Auto-pickup: after EPIC DONE, next queued EPIC starts automatically.
     Skill: skills/epic-queue.md
 
@@ -219,11 +190,7 @@ ANALYTICS COMMANDS:
 
 QUALITY COMMANDS:
 
-  /quality-gates     Run 6-gate pre-commit protocol
-  /audit             Project health audit
-  /coding-standards  Load coding standards
-  /testing           Load testing workflow
-  /docs-protocol     Load documentation protocol
+  /aid-audit         Project health audit
 ```
 
 ---
@@ -256,14 +223,14 @@ The AID workflow has three layers:
    - Naming: E-{YYYYMMDD}-{hash}-{topic}.md
 
 3. SESSION (.aid-o/04-engine/sessions/)
-   - Auto-generated from EPIC by /plan-epic
+   - Auto-generated from EPIC by /aid-plan-epic
    - Tracks progress, commits, decisions
    - One session per EPIC run (or per sub-session for multi-session EPICs)
    - Naming: S-{YYYYMMDD}-{hash}-{topic}.md
 
 Orchestration Flow:
-  /plan-epic → generates Plan JSON from EPIC
-  /run-epic  → executes plan (state machine):
+  /aid-plan-epic → generates Plan JSON from EPIC
+  /aid-run-epic  → executes plan (state machine):
 
     IDLE ──→ PLANNING ──→ PLAN_REVIEW (PM checkpoint)
                               │
@@ -298,14 +265,14 @@ Communication: skills/slack-mcp.md (Slack preferred, chat fallback)
 Config: .aid-o/03-config/policies/slack-config.yaml
 
 Epic Queue (autonomous pipeline):
-  /epic-queue add <path> → queue EPICs
+  /aid-epic-queue add <path> → queue EPICs
   After DONE → auto-pickup next EPIC from queue
-  /epic-queue pause/resume → control auto-pickup
+  /aid-epic-queue pause/resume → control auto-pickup
 
 Multi-Session EPICs:
   For larger EPICs (7+ steps), the Planner automatically splits execution into
   multiple sessions optimized for speed and quality. Each session runs
-  independently with handoff state preserved. Use /run-epic E-xxx --session N
+  independently with handoff state preserved. Use /aid-run-epic E-xxx --session N
   to run a specific session. The Planner decides the optimal split — PM approves.
 
 Everything else is autonomous (auto-decisions from decision-policies.yaml).
@@ -469,7 +436,7 @@ graph, parallel groups, and multi-perspective analysis groups.
 
 Skills: planner.md, parallel-dispatch.md, analysis-merge.md
 
-PLAN GENERATION (/plan-epic):
+PLAN GENERATION (/aid-plan-epic):
 
   1. Parse EPIC steps (role, objective, dependencies)
   2. Build dependency graph (DAG — topological sort)
@@ -554,14 +521,13 @@ Quality Gates
 AID has TWO gate systems:
 
 1. AID Gates Engine (post-EPIC-steps)
-   Command:  /run-gates
+   Invoked by: /aid-run-epic (GATES state)
    Config:   .aid-o/03-config/policies/gates.yaml
    Skills:   gates-engine.md, retry-engine.md
    Agent:    gate-fixer.md (auto-fix on failure)
    Purpose:  Validate entire EPIC output before PM approval
 
 2. Pre-Commit Quality Gates
-   Command:  /quality-gates
    Skill:    quality-gates.md
    Agent:    quality-gates-runner.md
    Purpose:  6-gate commit-level quality check
@@ -590,7 +556,7 @@ AID Gates Engine — Detail:
     - After fix: re-run failed gate, then re-check ALL gates
     - After max retries: escalate to PM with options (skip/fix/abort)
 
-  Gate Flow in /run-epic:
+  Gate Flow in /aid-run-epic:
     All steps done
         ↓
     GATES state: run all required gates
@@ -605,11 +571,6 @@ AID Gates Engine — Detail:
     gates_report.json           Structured report with retry history
     gates/tests_pass.txt        Raw command output
     gates/retry_lint_pass_1.md  Fix agent output (per attempt)
-
-  Standalone Usage:
-    /run-gates                  Run all gates
-    /run-gates TEST-0001        Run gates for specific EPIC
-    /run-gates --dry-run        Preview which gates would run
 
   Customization:
     Edit .aid-o/03-config/policies/gates.yaml to:
@@ -811,18 +772,18 @@ The Epic Queue lets you queue multiple EPICs for sequential execution.
 After each EPIC completes, the Orchestrator auto-picks the next one.
 
 Skill: skills/epic-queue.md
-Command: /epic-queue
+Command: /aid-epic-queue
 File: .aid-o/04-engine/epic-queue.yaml
 
 USAGE:
 
-  /epic-queue                                     Show queue
-  /epic-queue add <path> [--priority high]        Add EPIC
-  /epic-queue remove <epic-id>                    Remove from queue
-  /epic-queue next                                Show next in line
-  /epic-queue pause                               Pause auto-pickup
-  /epic-queue resume                              Resume auto-pickup
-  /epic-queue reorder <id> --priority <level>     Change priority
+  /aid-epic-queue                                     Show queue
+  /aid-epic-queue add <path> [--priority high]        Add EPIC
+  /aid-epic-queue remove <epic-id>                    Remove from queue
+  /aid-epic-queue next                                Show next in line
+  /aid-epic-queue pause                               Pause auto-pickup
+  /aid-epic-queue resume                              Resume auto-pickup
+  /aid-epic-queue reorder <id> --priority <level>     Change priority
 
 PRIORITY LEVELS:
 
@@ -832,12 +793,12 @@ PRIORITY LEVELS:
 HOW IT WORKS:
 
   1. PM queues EPICs:
-     /epic-queue add .aid-o/02-epics/E-auth.md --priority high
-     /epic-queue add .aid-o/02-epics/E-api-v2.md
-     /epic-queue add .aid-o/02-epics/E-dashboard.md --priority low
+     /aid-epic-queue add .aid-o/02-epics/E-auth.md --priority high
+     /aid-epic-queue add .aid-o/02-epics/E-api-v2.md
+     /aid-epic-queue add .aid-o/02-epics/E-dashboard.md --priority low
 
   2. Start first EPIC:
-     /run-epic    (picks up highest priority queued EPIC)
+     /aid-run-epic    (picks up highest priority queued EPIC)
 
   3. Autonomous loop:
      EPIC 1 → DONE → auto-start EPIC 2 → DONE → auto-start EPIC 3 → DONE → idle
@@ -848,7 +809,7 @@ SAFETY:
 
   - Max 1 EPIC runs at a time (no parallel EPIC execution)
   - Failed EPIC → queue auto-pauses (PM must investigate)
-  - /epic-queue pause → stops next pickup (running EPIC continues)
+  - /aid-epic-queue pause → stops next pickup (running EPIC continues)
   - Queue persists in YAML (survives session restarts)
 ```
 

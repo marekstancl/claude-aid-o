@@ -6,7 +6,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 1. **Brainstorming** — PM + AI explore ideas, compare approaches, make design decisions → Plan document
 2. **EPIC** — PM converts plan into a structured task specification (scope, constraints, acceptance criteria, steps)
-3. **Plan Generation** — `/plan-epic` generates execution plan with dependency graph, parallel groups, analysis groups
+3. **Plan Generation** — `/aid-plan-epic` generates execution plan with dependency graph, parallel groups, analysis groups
 4. **Agent Dispatch** — Controller sends work to role-based agents (Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release)
 5. **Quality Gates** — tests, lint, security scan, docs check — with auto-fix retry logic
 6. **PM Communication** — Slack MCP or chat fallback at key checkpoints (plan approval, escalation, merge approval)
@@ -26,13 +26,13 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 #    Edit .aid-o/02-epics/E-YYYYMMDD-xxxx-topic.md
 
 # 4. Generate execution plan
-/plan-epic .aid-o/02-epics/my-epic.md
+/aid-plan-epic .aid-o/02-epics/my-epic.md
 
 # 5. Run the orchestrator
-/run-epic
+/aid-run-epic
 ```
 
-## Commands (19)
+## Commands (10)
 
 | Command | Description |
 |---------|-------------|
@@ -41,20 +41,11 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
 | `/aid-analytics [scope]` | Analyze orchestration performance metrics and get optimization recommendations |
-| `/plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + session file |
-| `/run-epic [id]` | Run Controller state machine for full EPIC orchestration |
-| `/run-step <id> <step>` | Manually run one step from an existing plan |
-| `/epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |
-| `/run-gates [id]` | Run quality gates for an EPIC |
-| `/epic-queue [sub]` | Manage EPIC execution queue (add, remove, pause, resume) |
-| `/quality-gates` | Run 6-gate pre-commit quality protocol |
-| `/session-start` | Start a new tracked session |
-| `/session-end` | Complete and archive current session |
-| `/handoff` | Create handoff block for next AI session |
-| `/audit` | Run project health audit |
-| `/coding-standards` | Load project coding standards |
-| `/testing` | Load testing workflow and standards |
-| `/docs-protocol` | Load documentation protocol |
+| `/aid-plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + session file |
+| `/aid-run-epic [id]` | Run Controller state machine for full EPIC orchestration |
+| `/aid-epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |
+| `/aid-epic-queue [sub]` | Manage EPIC execution queue (add, remove, pause, resume) |
+| `/aid-audit` | Run project health audit (0-100 score) |
 
 ## Agents (18)
 
@@ -181,7 +172,7 @@ lessons-learned.md, command-history.md). Qdrant is supplementary, never required
 
 For larger EPICs (7+ steps), the Planner automatically splits execution into multiple
 sessions optimized for speed and quality. Each session runs independently with handoff
-state preserved between them. Use `/run-epic E-xxx --session N` to run a specific session.
+state preserved between them. Use `/aid-run-epic E-xxx --session N` to run a specific session.
 The Planner decides the optimal split based on dependency analysis and parallel opportunity
 detection — PM approves the session plan.
 

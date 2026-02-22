@@ -1,6 +1,6 @@
 # Brainstorming — Interactive Design and Planning Skill
 
-**Version:** 0.4.0
+**Version:** 0.5.0
 **Skill:** brainstorming
 **Dependencies:** session-management, planner
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -9,11 +9,11 @@
 
 ## TL;DR
 
-This skill defines how AID conducts interactive brainstorming sessions with the PM. It governs the questioning protocol, approach exploration, incremental design validation, plan document generation, and automatic EPIC draft creation.
+This skill defines how AID conducts interactive brainstorming sessions with the PM. It governs the questioning protocol, approach exploration, incremental design validation, plan document generation, and automatic EPIC draft creation. When knowledge acquisition is configured, brainstorming is augmented with relevant documentation, patterns, and lessons from past projects to inform questions (Step 1) and approach proposals (Step 3).
 
-The brainstorming skill is invoked by the `/aid-brainstorm` command and produces two artifacts: a validated plan document and an EPIC draft ready for `/plan-epic`.
+The brainstorming skill is invoked by the `/aid-brainstorm` command and produces two artifacts: a validated plan document and an EPIC draft ready for `/aid-plan-epic`.
 
-**Input:** PM's idea or topic + interactive Q&A
+**Input:** PM's idea or topic + interactive Q&A (+ knowledge context when available)
 **Output:** Plan document (`.aid-o/01-plans/P-*.md`) + EPIC draft (`.aid-o/02-epics/E-*.md`)
 
 ---
@@ -70,6 +70,124 @@ Minimize cognitive load on PM. Every interaction should be easy to process.
 - Short summaries before detailed sections
 - Clear action items: what does PM need to decide?
 - Accept brief answers and infer reasonable defaults
+
+---
+
+## Knowledge-Augmented Brainstorming
+
+When knowledge acquisition is configured, the brainstorming session is augmented with
+relevant knowledge from past projects, stored documentation, patterns, and lessons learned.
+This gives the brainstorming agent awareness of existing context before asking questions and
+proposing approaches.
+
+**Principle:** Knowledge retrieval is strictly non-blocking. It enriches the session when
+available but never delays or degrades it when unavailable.
+
+### Pre-Brainstorming Knowledge Search (Step 1 Integration)
+
+Before the questioning phase begins, search for relevant knowledge about the PM's topic.
+This informs which questions to ask and surfaces patterns from past work.
+
+```
+WHEN: Step 1 (Context Gathering), after reading project context but before first question.
+
+mem_config = read(".aid-o/03-config/policies/memory-config.yaml")
+
+IF mem_config.knowledge.enabled:
+  topic = PM's stated topic or idea (from /aid-brainstorm [topic])
+  tech_context = project-profile.yaml -> tech_stack (joined as string)
+
+  results = knowledge_find(
+    query = "{topic} {tech_context}",
+    filters = { types: ["documentation", "pattern", "decision", "lesson"] }
+  )
+  TIMEOUT: 5 seconds. If slow, skip silently.
+
+  IF results (non-empty):
+    Display to PM:
+      "Found relevant knowledge from past sessions:"
+      FOR EACH result IN results:
+        - "[{result.metadata.type}] {result summary}"
+          "Source: {result.metadata.project_name OR result.metadata.framework} ({result.metadata.indexed_at})"
+
+    Use results as context for questioning:
+      - Skip questions whose answers are already known from past decisions
+      - Ask more targeted questions informed by known patterns
+      - Reference relevant documentation when framing options
+      - Do NOT skip the questioning phase entirely -- past knowledge informs, not replaces
+
+IF mem_config missing OR knowledge.enabled == false OR knowledge unavailable:
+  -> Skip silently. Proceed to questioning as before. No error, no message.
+```
+
+### Approach-Informed Knowledge Search (Step 3 Integration)
+
+Before proposing approaches, search for relevant knowledge that can inform the proposals
+with documentation-backed evidence and lessons from past projects.
+
+```
+WHEN: Step 3 (Approach Exploration), after gathering enough context but before presenting approaches.
+
+IF mem_config.knowledge.enabled:
+  FOR EACH approach being considered:
+    approach_query = "{approach keywords} {relevant framework or technology}"
+
+    results = knowledge_find(
+      query = approach_query,
+      filters = { types: ["documentation", "pattern", "lesson"] }
+    )
+    TIMEOUT: 5 seconds per query. If slow, skip that query.
+
+    IF results (non-empty):
+      Inform the approach's pros/cons with knowledge-backed evidence:
+        - Add "[Knowledge]" label to pros/cons items that come from stored knowledge
+        - Reference specific documentation when recommending a pattern
+        - Surface lessons learned (both positive and negative) from past projects
+        - Include framework version context when relevant
+
+  Example output:
+    Approach A: JWT Authentication with FastAPI OAuth2
+      Pros:
+        - [Knowledge] FastAPI docs recommend OAuth2PasswordBearer for simple auth (v0.115.x)
+        - [Knowledge] Project crm-backend used this pattern successfully (2026-01)
+        - Standard, well-supported approach
+      Cons:
+        - [Knowledge] Lesson from invoice-api: token refresh requires careful CORS config
+        - Requires secure token storage on client side
+
+IF mem_config missing OR knowledge.enabled == false OR knowledge unavailable:
+  -> Skip silently. Propose approaches based on general knowledge only.
+  -> Output is identical to pre-knowledge brainstorming behavior.
+```
+
+### Non-Blocking Guarantee
+
+```
+RULE 1: All knowledge_find() calls use a 5-second timeout.
+        If the call does not return within 5 seconds, discard it and proceed.
+RULE 2: Knowledge retrieval failures are NEVER shown to PM as errors.
+        No "knowledge unavailable" messages, no degraded UX indicators.
+RULE 3: When knowledge is unavailable, brainstorming works exactly as before.
+        The session is identical to a non-knowledge-augmented session.
+RULE 4: Knowledge informs but never overrides PM input.
+        If PM contradicts a past decision or known pattern, follow PM's direction.
+RULE 5: Knowledge calls happen at most twice per session (Step 1 and Step 3).
+        No additional calls during questioning, design validation, or document generation.
+```
+
+### Graceful Degradation Scenarios
+
+| Scenario | Behavior |
+|----------|----------|
+| `memory-config.yaml` missing | Skip all knowledge calls. Brainstorm normally. |
+| `knowledge.enabled: false` | Skip all knowledge calls. Brainstorm normally. |
+| Qdrant MCP unavailable | `knowledge_find()` returns empty. Brainstorm normally. |
+| `knowledge_find()` times out (>5s) | Discard result. Brainstorm normally. |
+| `knowledge_find()` returns empty | No knowledge displayed. Brainstorm normally. |
+| Partial results (Step 1 works, Step 3 times out) | Use Step 1 results, skip Step 3 enrichment. |
+
+In every degradation scenario, PM sees no difference from a standard brainstorming session.
+The knowledge layer is invisible when it has nothing to contribute.
 
 ---
 
@@ -200,7 +318,7 @@ This template is used in Step 8 of `/aid-brainstorm` to auto-generate an EPIC dr
 ```markdown
 You are an EPIC authoring agent. Your task is to convert an approved brainstorming
 plan into a well-formed EPIC specification that the AID Orchestrator can process
-through /plan-epic and /run-epic.
+through /aid-plan-epic and /aid-run-epic.
 
 ## Input
 
@@ -440,17 +558,17 @@ After brainstorming completes, two paths are available:
 ```
 /aid-brainstorm → Plan + EPIC draft
     ├── (Y at Step 9) Direct pipeline:
-    │     EPIC → Plan JSON + Session → ready for /run-epic
+    │     EPIC → Plan JSON + Session → ready for /aid-run-epic
     │
     └── (N at Step 9) Manual review:
-          PM reviews EPIC draft → /plan-epic → /run-epic
+          PM reviews EPIC draft → /aid-plan-epic → /aid-run-epic
 ```
 
-Additionally, `/plan-epic` accepts Plan files directly:
+Additionally, `/aid-plan-epic` accepts Plan files directly:
 
 ```
 PM writes plan in .aid-o/01-plans/
-    → /plan-epic → auto-generates EPIC → Plan JSON + Session → /run-epic
+    → /aid-plan-epic → auto-generates EPIC → Plan JSON + Session → /aid-run-epic
 ```
 
 ---
@@ -584,9 +702,10 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 - `defaults/templates/epic-example.md` — EPIC example for reference
 - `skills/planner.md` — how plans become Plan JSON (downstream from brainstorming)
 - `skills/session-management.md` — End of Brainstorming Protocol (lifecycle integration)
+- `skills/knowledge-acquisition.md` — knowledge pipeline: `knowledge_find()` API used in Steps 1 and 3
 - `.aid-o/03-config/language.yaml` — document language configuration
 
 ---
 
-**Version:** 0.4.0
-**Last Updated:** 2026-02-21
+**Version:** 0.5.0
+**Last Updated:** 2026-02-22

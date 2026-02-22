@@ -1,5 +1,5 @@
 ---
-name: epic-status
+name: aid-epic-status
 description: Show pipeline status (steps, gates, budget)
 user_invocable: true
 ---
@@ -9,15 +9,15 @@ Show the current status of an EPIC pipeline — steps progress, gate results, bu
 ## Usage
 
 ```
-/epic-status [epic-id]
-/epic-status                    # show all active EPICs
+/aid-epic-status [epic-id]
+/aid-epic-status                    # show all active EPICs
 ```
 
 **Examples:**
 ```
-/epic-status TEST-0001
-/epic-status E-20260216-c2d1
-/epic-status                    # overview of all
+/aid-epic-status TEST-0001
+/aid-epic-status E-20260216-c2d1
+/aid-epic-status                    # overview of all
 ```
 
 ## Flow
@@ -106,9 +106,9 @@ Show the current status of an EPIC pipeline — steps progress, gate results, bu
    3. FIX-0039 — Fix login timeout              [DONE] 2026-02-14
 
    No plan yet:
-   4. PERF-0002 — Optimize queries              (run /plan-epic to start)
+   4. PERF-0002 — Optimize queries              (run /aid-plan-epic to start)
 
-   Use /epic-status <epic-id> for details.
+   Use /aid-epic-status <epic-id> for details.
    ```
 
 ### Edge Cases
@@ -120,8 +120,8 @@ No EPICs found.
 To get started:
 1. Create an EPIC: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
    Template: .aid-o/03-config/templates/epic.md
-2. Generate plan: /plan-epic <path-to-epic>
-3. Run: /run-epic
+2. Generate plan: /aid-plan-epic <path-to-epic>
+3. Run: /aid-run-epic
 ```
 
 **EPIC exists but no plan:**
@@ -129,7 +129,7 @@ To get started:
 EPIC: {epic_id} — {title}
 Status: No plan generated
 
-Run /plan-epic {path} to create an execution plan.
+Run /aid-plan-epic {path} to create an execution plan.
 ```
 
 **EPIC exists but no evidence (plan was generated but no run started):**
@@ -140,7 +140,7 @@ Status: Plan ready, not started
 Plan: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
 Steps: {count} | Roles: {list} | Budget: ${max}
 
-Run /run-epic {epic_id} to start execution.
+Run /aid-run-epic {epic_id} to start execution.
 ```
 
 ## Reference Files

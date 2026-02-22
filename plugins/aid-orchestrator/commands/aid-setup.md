@@ -208,9 +208,11 @@ Setup Options Available
 
 6. MCP Servers
    a. Qdrant — vector memory for cross-session knowledge
-   b. Slack — PM communication via Slack messages
-   c. Auto-detect — {list detected MCPs based on stack}
-   d. Custom — add your own MCP servers
+   b. Context7 — framework documentation via MCP (knowledge acquisition)
+   c. Slack — PM communication via Slack messages
+   d. Docker — container management via MCP
+   e. Auto-detect — {list detected MCPs based on stack}
+   f. Custom — add your own MCP servers
    (Recommended: at minimum Qdrant local)
 
 7. Permission Preset
@@ -236,7 +238,7 @@ Setup Options Available
 THEN ask PM:
 ```
 Which options would you like to configure?
-(A) All recommended (options 1,2,3,6a,7,8,9)
+(A) All recommended (options 1,2,3,6a,6b,6d,7,8,9)
 (B) Let me pick specific options
 (C) Everything (all options)
 ```
@@ -427,7 +429,125 @@ MCP Server Onboarding
   IF tool_not_found: warn and continue (user can fix later)
   ```
 
-**6b. Slack MCP Server**
+**6b. Context7 MCP -- Framework Documentation (Recommended)**
+
+Context7 provides curated, up-to-date documentation for 1000+ libraries directly via MCP.
+It powers the knowledge-acquisition skill, enabling AID to research framework docs and serve
+relevant knowledge to brainstorming sessions and agent dispatch.
+
+```
+Why Context7?
+====================================
+Without Context7:
+  - Agents rely on training data (may be outdated)
+  - WebSearch fallback is slower and less reliable
+  - No structured documentation for framework-specific questions
+
+With Context7:
+  - Curated docs for React, FastAPI, Next.js, LangChain, and 1000+ more
+  - Always up-to-date (maintained by the Context7 community)
+  - Two MCP tools: resolve-library-id + query-docs
+  - No API key needed -- runs via npx
+
+Context7 is optional. Without it, AID falls back to WebSearch for documentation.
+```
+
+**Setup flow:**
+
+1. **Auto-detect:** Check if Context7 MCP is already available.
+   ```
+   TRY: resolve-library-id(libraryName="react", query="setup")
+   IF tool exists AND returns results:
+     -> Context7 already configured
+     -> Skip to step 4 (Configuration)
+   IF tool_not_found:
+     -> Context7 not installed, proceed to step 2
+   ```
+
+2. **Install:** Present install option to PM.
+   ```
+   Context7 MCP Setup
+   ====================================
+
+   Context7 provides curated framework documentation via MCP.
+   Package: @upstash/context7-mcp
+
+   Install Context7 for framework documentation? (Recommended)
+   (A) Yes — user scope (recommended, shared across all projects)
+   (B) Yes — project scope (this project only)
+   (C) No — use WebSearch fallback for documentation
+
+   Scope explanation:
+     User scope:    Available in ALL your projects. Installed once.
+                    Command: claude mcp add context7 --scope user -- npx -y @upstash/context7-mcp
+     Project scope: Available only in THIS project. Creates .mcp.json entry.
+                    Command: claude mcp add context7 -- npx -y @upstash/context7-mcp
+   ```
+
+   - If A: run `claude mcp add context7 --scope user -- npx -y @upstash/context7-mcp`
+   - If B: run `claude mcp add context7 -- npx -y @upstash/context7-mcp`
+   - If C: skip, set `knowledge.context7.available: false` in memory-config.yaml, continue
+
+3. **Verification:** After install, confirm Context7 is working.
+   ```
+   TRY: resolve-library-id(libraryName="react", query="setup")
+
+   IF returns library results:
+     -> Display: "Context7 MCP verified -- ready to use."
+   IF tool_not_found OR timeout:
+     -> Display:
+        Context7 verification failed.
+        This may be a cold start issue (first npx call downloads the package).
+        You can retry later by running /aid-setup and selecting Option 6b.
+     -> Set knowledge.context7.available: false
+     -> Continue (non-blocking)
+   ```
+
+4. **Configuration:** Update memory-config.yaml with Context7 status.
+   - Set `knowledge.context7.available: true`
+   - Set `knowledge.context7.scope: "user"` (or `"project"`)
+   - Set `knowledge.context7.installed_at: "{ISO 8601 date}"`
+   - Set `knowledge.primary_source: "context7"`
+   - If Context7 was skipped or failed:
+     - Set `knowledge.context7.available: false`
+     - Set `knowledge.primary_source: "websearch"`
+
+   Configuration written to `.aid-o/03-config/policies/memory-config.yaml` under
+   the `knowledge:` section (see `skills/knowledge-acquisition.md` for full schema).
+
+**Common issues:**
+
+```
+Context7 Troubleshooting
+====================================
+
+1. "npx: command not found"
+   Context7 requires Node.js and npx. Install Node.js (v18+):
+     macOS:   brew install node
+     Linux:   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt-get install -y nodejs
+     Windows: https://nodejs.org/
+   After installing Node.js, restart your terminal and retry.
+
+2. Cold start timeout (first call is slow)
+   The first call to Context7 downloads the @upstash/context7-mcp package via npx.
+   This can take 10-30 seconds depending on your network.
+   Subsequent calls are fast (package is cached by npx).
+   If verification fails on first try, wait 30 seconds and retry.
+
+3. "Library not found" for a specific framework
+   Context7 covers 1000+ libraries but not all. If resolve-library-id returns
+   no results for a framework, AID automatically falls back to WebSearch for
+   that framework. No action needed.
+
+4. MCP server crashes or restarts
+   Context7 runs as a stdio MCP server via npx. If it crashes, Claude Code
+   will restart it automatically on the next tool call.
+   If persistent crashes occur, try reinstalling:
+     claude mcp remove context7
+     claude mcp add context7 --scope user -- npx -y @upstash/context7-mcp
+```
+
+**6c. Slack MCP Server**
 
 **Package:** `slack-mcp-server` by @korotovsky
 (NOT `@anthropic/mcp-slack` -- does not exist. NOT `@kazuph/mcp-slack` -- has Linux platform bug.)
@@ -510,21 +630,123 @@ MCP Server Onboarding
 - "conversations_add_message disabled" -- Set `SLACK_MCP_ADD_MESSAGE_TOOL` env var
 - MCP stderr JSON logs -- Already handled by `2>/dev/null` in config
 
-**6c. Auto-detect Tech MCPs**
+**6d. Docker MCP -- Container Management (Recommended)**
+
+Docker MCP lets AID agents manage containers, build images, and run services directly
+from Claude Code. For projects using Docker, this eliminates context-switching between
+the terminal and the IDE for container operations.
+
+```
+Why Docker MCP?
+====================================
+Without Docker MCP:
+  - Agents cannot interact with containers or images
+  - Build/run commands must be executed manually
+  - No visibility into running containers from Claude
+
+With Docker MCP:
+  - Build images, start/stop containers from Claude Code
+  - Inspect logs, exec into containers, manage volumes
+  - Agents can verify their work against real services
+  - Works with both Dockerfile and docker-compose setups
+
+Docker MCP runs locally. It connects to your existing Docker daemon.
+```
+
+**Setup flow:**
+
+1. **Detection:** Check if `Dockerfile` or `docker-compose.yml` exists in the project.
+   - If neither found: inform PM that Docker was not detected, but offer install anyway
+     (some projects use Docker for dependencies only).
+
+2. **Auto-detect:** Check if Docker MCP is already available.
+   ```
+   TRY: docker_list_containers()
+   IF tool exists:
+     -> Docker MCP already configured, skip to confirmation
+   IF tool_not_found:
+     -> Docker MCP not installed, proceed to step 3
+   ```
+
+3. **Install:** Present install option to PM.
+   ```
+   Docker MCP Setup
+   ====================================
+
+   Docker MCP provides container management via MCP.
+   Package: @anthropic/mcp-docker
+
+   Install Docker MCP? (Recommended)
+   (A) Yes — user scope (recommended, shared across all projects)
+   (B) Yes — project scope (this project only)
+   (C) No — skip Docker MCP
+
+   Scope explanation:
+     User scope:    Available in ALL your projects. Installed once.
+                    Command: claude mcp add docker --scope user -- npx -y @anthropic/mcp-docker
+     Project scope: Available only in THIS project. Creates .mcp.json entry.
+                    Command: claude mcp add docker -- npx -y @anthropic/mcp-docker
+   ```
+
+   - If A: run `claude mcp add docker --scope user -- npx -y @anthropic/mcp-docker`
+   - If B: run `claude mcp add docker -- npx -y @anthropic/mcp-docker`
+   - If C: skip, continue
+   - No environment variables needed.
+
+4. **Verification:** After install, confirm Docker MCP is working.
+   ```
+   TRY: docker_list_containers()
+
+   IF returns results (even empty list):
+     -> Display: "Docker MCP verified -- ready to use."
+   IF tool_not_found OR error:
+     -> Display:
+        Docker MCP verification failed.
+        Ensure Docker daemon is running: docker info
+        You can retry later by running /aid-setup and selecting Option 6d.
+     -> Continue (non-blocking)
+   ```
+
+5. **Configuration:** Update project-profile.yaml.
+   - Append `docker` to `mcp_servers: [...]`
+
+**Common issues:**
+
+```
+Docker MCP Troubleshooting
+====================================
+
+1. "Cannot connect to Docker daemon"
+   Docker MCP requires the Docker daemon to be running.
+   Start Docker:
+     macOS:   Open Docker Desktop
+     Linux:   sudo systemctl start docker
+   Verify: docker info
+
+2. "npx: command not found"
+   Docker MCP requires Node.js and npx. Install Node.js (v18+):
+     macOS:   brew install node
+     Linux:   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt-get install -y nodejs
+
+3. Permission denied on Linux
+   Add your user to the docker group:
+     sudo usermod -aG docker $USER
+   Then log out and back in.
+```
+
+**6e. Auto-detect Tech MCPs**
 
 Based on the project stack detected in Step 1, suggest relevant MCP servers:
 
 | Detected | MCP Server | Install Command |
 |----------|-----------|-----------------|
 | `.github/` or GitHub remote | GitHub MCP | `claude mcp add github -- npx -y @anthropic/mcp-github` |
-| `Dockerfile` / `docker-compose.yml` | Docker MCP | `claude mcp add docker -- npx -y @anthropic/mcp-docker` |
 | PostgreSQL in deps | Postgres MCP | `claude mcp add postgres -e DATABASE_URL="{url}" -- npx -y @anthropic/mcp-postgres` |
 | Frontend framework (React/Vue/Angular/Svelte) or .tsx/.jsx/.vue files | Playwright MCP | `claude mcp add playwright -- npx -y @anthropic/mcp-playwright` |
 
 ```
 Auto-detected MCP servers for your stack:
   [x] GitHub MCP (GitHub repository detected)
-  [ ] Docker MCP (Docker detected)
 
 Install selected? (Y/N/select numbers)
 ```
@@ -532,7 +754,7 @@ Install selected? (Y/N/select numbers)
 - Install each selected MCP server using its command
 - Log installed MCPs to `project-profile.yaml` under `mcp_servers: [...]`
 
-**6d. Custom MCP Server**
+**6f. Custom MCP Server**
 
 ```
 Add a custom MCP server? (Y/N) [N]
@@ -703,9 +925,8 @@ After all recommended options complete, if PM selected "(A) All recommended":
 
 Run project-profile auto-detection for MCP candidates:
   1. Check `.git` + remote → GitHub MCP candidate
-  2. Check `Dockerfile` or `docker-compose.yml` → Docker MCP candidate
-  3. Check `has_frontend: true` in project-profile → Playwright MCP candidate
-  4. Check `tech_stack.database` → Postgres/MySQL MCP candidate
+  2. Check `has_frontend: true` in project-profile → Playwright MCP candidate
+  3. Check `tech_stack.database` → Postgres/MySQL MCP candidate
 
 Present to PM:
 
@@ -718,15 +939,15 @@ Additional options available:
       Adds AID markers to CLAUDE.md so Claude understands your project
       structure, conventions, and workflow.
 
-  (6b) Slack notifications — PM approvals and escalations via Slack
+  (6c) Slack notifications — PM approvals and escalations via Slack
        Requires: Slack app with bot token. See /aid-help slack for setup.
 
-  (6c) Auto-detected MCPs for your stack:
+  (6e) Auto-detected MCPs for your stack:
        - GitHub MCP (detected: .git + remote origin)
        - Playwright MCP (detected: has_frontend: true)
        [dynamically generated from project-profile detection above]
 
-  (6d) Custom MCP — Add your own MCP servers manually
+  (6f) Custom MCP — Add your own MCP servers manually
 
 Configure any of these? (select numbers, or Enter to skip)
 ```
@@ -777,8 +998,8 @@ If you have an idea but aren't sure how to build it:
 
 If you already know what to build:
   -> Create an EPIC file in .aid-o/02-epics/ (see template)
-  -> /plan-epic .aid-o/02-epics/your-epic.md
-  -> /run-epic
+  -> /aid-plan-epic .aid-o/02-epics/your-epic.md
+  -> /aid-run-epic
 
 For help and examples:
   -> /aid-help           -- full documentation

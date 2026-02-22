@@ -106,7 +106,7 @@ slack:
 
 ## PM Communication Protocol
 
-All PM communication from `commands/run-epic.md` and agent integration flows uses
+All PM communication from `commands/aid-run-epic.md` and agent integration flows uses
 these three functions. They provide the abstraction layer over Slack vs chat.
 
 ### `resolve_pm_channel()`
@@ -179,7 +179,7 @@ expects a reply, and how PM responses are parsed.
 ### Type A: Escalation
 
 **Expects reply:** Yes
-**Sender:** Orchestrator (`commands/run-epic.md` ESCALATION state)
+**Sender:** Orchestrator (`commands/aid-run-epic.md` ESCALATION state)
 **Timeout type:** `escalation`
 
 **Format:**
@@ -220,7 +220,7 @@ and re-presents options (do NOT auto-decide from discussion text).
 ### Type B: Plan Approval
 
 **Expects reply:** Yes
-**Sender:** Orchestrator (`commands/run-epic.md` PLAN_REVIEW state)
+**Sender:** Orchestrator (`commands/aid-run-epic.md` PLAN_REVIEW state)
 **Timeout type:** `plan_approval`
 
 **Format:**
@@ -253,7 +253,7 @@ _Reply: *GO* / *REVISE* / *ABORT*_
 ### Type C: Merge Approval
 
 **Expects reply:** Yes
-**Sender:** Orchestrator (`commands/run-epic.md` PM_APPROVAL state)
+**Sender:** Orchestrator (`commands/aid-run-epic.md` PM_APPROVAL state)
 **Timeout type:** `merge_approval`
 
 **Format:**
@@ -485,7 +485,7 @@ Format (one JSON object per line):
 
 ## Reference Files
 
-- `commands/run-epic.md` — PLAN_REVIEW, ESCALATION, PM_APPROVAL states (consumers)
+- `commands/aid-run-epic.md` — PLAN_REVIEW, ESCALATION, PM_APPROVAL states (consumers)
 - `skills/epic-orchestration.md` — State machine definitions (authoritative)
 - `agents/curator.md` — Curator → Orchestrator → PM flow (proposal consumer)
 - `agents/auditor.md` — Auditor → Orchestrator → PM flow (summary consumer)

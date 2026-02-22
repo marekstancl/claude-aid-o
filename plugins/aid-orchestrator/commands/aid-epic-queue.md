@@ -1,5 +1,5 @@
 ---
-name: epic-queue
+name: aid-epic-queue
 description: EPIC queue management (add, remove, pause)
 user_invocable: true
 ---
@@ -11,14 +11,14 @@ The queue enables the Orchestrator to process multiple EPICs in sequence without
 ## Usage
 
 ```
-/epic-queue                                           # Show queue (= list)
-/epic-queue list                                      # Show queue with status
-/epic-queue add <epic-path> [--priority <level>]      # Add EPIC to queue
-/epic-queue remove <epic-id>                          # Remove from queue
-/epic-queue next                                      # Show next EPIC in line
-/epic-queue pause                                     # Pause auto-pickup
-/epic-queue resume                                    # Resume auto-pickup
-/epic-queue reorder <epic-id> --priority <level>      # Change priority
+/aid-epic-queue                                           # Show queue (= list)
+/aid-epic-queue list                                      # Show queue with status
+/aid-epic-queue add <epic-path> [--priority <level>]      # Add EPIC to queue
+/aid-epic-queue remove <epic-id>                          # Remove from queue
+/aid-epic-queue next                                      # Show next EPIC in line
+/aid-epic-queue pause                                     # Pause auto-pickup
+/aid-epic-queue resume                                    # Resume auto-pickup
+/aid-epic-queue reorder <epic-id> --priority <level>      # Change priority
 ```
 
 **Priority levels:** `critical` | `high` | `medium` (default) | `low`
@@ -26,24 +26,24 @@ The queue enables the Orchestrator to process multiple EPICs in sequence without
 ## Prerequisites
 
 - `.aid-o/` workspace must exist
-- Queue file: `.aid-o/04-engine/epic-queue.yaml`
+- Queue file: `.aid-o/04-engine/aid-epic-queue.yaml`
 - If queue file doesn't exist, create it with empty queue on first use
 
 ## Core Instruction
 
-**Read `skills/epic-queue.md` FIRST.** It is the authoritative source for queue operations, priority rules, auto-pickup protocol, and safety guards.
+**Read `skills/aid-epic-queue.md` FIRST.** It is the authoritative source for queue operations, priority rules, auto-pickup protocol, and safety guards.
 
 ## Commands
 
 ---
 
-### `/epic-queue` or `/epic-queue list`
+### `/aid-epic-queue` or `/aid-epic-queue list`
 
 Display the full queue with status, priority, and timing.
 
 **Actions:**
-1. Read `.aid-o/04-engine/epic-queue.yaml`
-2. If file doesn't exist → print "No queue configured. Use `/epic-queue add` to start."
+1. Read `.aid-o/04-engine/aid-epic-queue.yaml`
+2. If file doesn't exist → print "No queue configured. Use `/aid-epic-queue add` to start."
 3. Display queue:
 
 ```
@@ -60,12 +60,12 @@ Auto-pickup: Active (2 EPICs queued)
 
 If queue is paused:
 ```
-Auto-pickup: PAUSED (2 EPICs queued, waiting for /epic-queue resume)
+Auto-pickup: PAUSED (2 EPICs queued, waiting for /aid-epic-queue resume)
 ```
 
 ---
 
-### `/epic-queue add <epic-path> [--priority <level>]`
+### `/aid-epic-queue add <epic-path> [--priority <level>]`
 
 Add an EPIC to the queue.
 
@@ -73,7 +73,7 @@ Add an EPIC to the queue.
 1. Parse `$ARGUMENTS` — extract epic path and optional `--priority` flag
 2. If no path → list EPICs in `.aid-o/02-epics/` and ask which to add
 3. Validate EPIC file exists and has required sections (Goal, Scope, Constraints)
-4. Call `add(epic_path, priority)` from `skills/epic-queue.md`:
+4. Call `add(epic_path, priority)` from `skills/aid-epic-queue.md`:
    - Default priority: `medium`
    - Reject if duplicate (already queued or running)
 5. Confirm:
@@ -84,13 +84,13 @@ Add an EPIC to the queue.
 
 ---
 
-### `/epic-queue remove <epic-id>`
+### `/aid-epic-queue remove <epic-id>`
 
 Remove an EPIC from the queue.
 
 **Actions:**
 1. Parse `$ARGUMENTS` — extract epic_id
-2. Call `remove(epic_id)` from `skills/epic-queue.md`
+2. Call `remove(epic_id)` from `skills/aid-epic-queue.md`
 3. If running → reject: "Cannot remove a running EPIC. Pause the queue first."
 4. Confirm:
    ```
@@ -99,43 +99,43 @@ Remove an EPIC from the queue.
 
 ---
 
-### `/epic-queue next`
+### `/aid-epic-queue next`
 
 Show the next EPIC that will be picked up.
 
 **Actions:**
-1. Call `next()` from `skills/epic-queue.md`
+1. Call `next()` from `skills/aid-epic-queue.md`
 2. Display:
    ```
    Next EPIC: E-20260217-c3d4-api-v2 (priority: medium)
    Path: .aid-o/02-epics/E-20260217-c3d4-api-v2.md
    Added: 1h ago
    ```
-   Or: "Queue is empty. Add EPICs with `/epic-queue add`."
+   Or: "Queue is empty. Add EPICs with `/aid-epic-queue add`."
 
 ---
 
-### `/epic-queue pause`
+### `/aid-epic-queue pause`
 
 Pause auto-pickup. The currently running EPIC continues, but no new EPIC starts.
 
 **Actions:**
-1. Call `pause_queue()` from `skills/epic-queue.md`
+1. Call `pause_queue()` from `skills/aid-epic-queue.md`
 2. Confirm:
    ```
    Queue paused. Auto-pickup disabled.
    Currently running EPIC (if any) will continue to completion.
-   Use /epic-queue resume to re-enable auto-pickup.
+   Use /aid-epic-queue resume to re-enable auto-pickup.
    ```
 
 ---
 
-### `/epic-queue resume`
+### `/aid-epic-queue resume`
 
 Resume auto-pickup.
 
 **Actions:**
-1. Call `resume_queue()` from `skills/epic-queue.md`
+1. Call `resume_queue()` from `skills/aid-epic-queue.md`
 2. If an EPIC just completed while paused, check if next should start:
    - If queue has next EPIC → inform PM: "Queue resumed. Next EPIC will start after current run (or immediately if idle)."
 3. Confirm:
@@ -146,13 +146,13 @@ Resume auto-pickup.
 
 ---
 
-### `/epic-queue reorder <epic-id> --priority <level>`
+### `/aid-epic-queue reorder <epic-id> --priority <level>`
 
 Change the priority of a queued EPIC.
 
 **Actions:**
 1. Parse `$ARGUMENTS` — extract epic_id and new priority
-2. Call `reorder(epic_id, new_priority)` from `skills/epic-queue.md`
+2. Call `reorder(epic_id, new_priority)` from `skills/aid-epic-queue.md`
 3. If not queued → reject: "Can only reorder EPICs with status 'queued'."
 4. Confirm with new queue order:
    ```
@@ -166,16 +166,16 @@ Change the priority of a queued EPIC.
 
 ## Reference Files
 
-- **PRIMARY:** `skills/epic-queue.md` — queue format, operations, auto-pickup protocol, safety guards
+- **PRIMARY:** `skills/aid-epic-queue.md` — queue format, operations, auto-pickup protocol, safety guards
 - `skills/epic-orchestration.md` — DONE state auto-pickup trigger
 - `skills/slack-mcp.md` — Status updates for queue events
-- `commands/run-epic.md` — Consumes next EPIC from queue in DONE state
+- `commands/aid-run-epic.md` — Consumes next EPIC from queue in DONE state
 
 ## Important
 
-- Queue file is created automatically on first `/epic-queue add` if it doesn't exist
+- Queue file is created automatically on first `/aid-epic-queue add` if it doesn't exist
 - The queue persists across sessions (YAML file on disk)
 - Auto-pickup only happens in the Orchestrator's DONE state — not triggered by this command
-- `/epic-queue pause` does NOT abort a running EPIC — it prevents the next one from starting
+- `/aid-epic-queue pause` does NOT abort a running EPIC — it prevents the next one from starting
 - If the queue file doesn't exist when the Orchestrator checks (DONE state), it simply skips auto-pickup
 - If `$ARGUMENTS` is empty → default to `list` behavior

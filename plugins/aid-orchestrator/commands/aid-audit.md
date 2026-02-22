@@ -1,5 +1,5 @@
 ---
-name: audit
+name: aid-audit
 description: Project health audit (0-100 score)
 user_invocable: true
 ---

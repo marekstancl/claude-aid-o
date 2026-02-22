@@ -336,9 +336,8 @@ IF overall == "fail":
 
 | Caller | Mode | Notes |
 |--------|------|-------|
-| `/run-epic` (GATES state) | Non-interactive | Follows protocol, decides automatically |
-| `/run-gates` command | Interactive | Shows progress, offers retry options |
-| `/run-gates --dry-run` | Preview | Lists gates without executing |
+| `/aid-run-epic` (GATES state) | Non-interactive | Follows protocol, decides automatically |
+| `/aid-run-epic` (manual gate run) | Interactive | Shows progress, offers retry options |
 
 ### 5.2 Calls To
 
@@ -352,9 +351,9 @@ IF overall == "fail":
 
 | Consumer | What it reads |
 |----------|--------------|
-| `/epic-status` | `gates_report.json` for display |
-| `/run-epic` PM_APPROVAL | Gate results for final summary |
-| `/run-epic` DONE | Gate results for final report |
+| `/aid-epic-status` | `gates_report.json` for display |
+| `/aid-run-epic` PM_APPROVAL | Gate results for final summary |
+| `/aid-run-epic` DONE | Gate results for final report |
 | Auditor agent (Session 4) | Gate history for trend tracking |
 
 ---

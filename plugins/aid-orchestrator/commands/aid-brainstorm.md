@@ -256,8 +256,8 @@ After the EPIC draft is written, offer PM the option to generate the execution p
    EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
 
    Would you like to generate the execution plan now?
-   (Y) Generate Plan JSON + Session file → ready for /run-epic
-   (N) Stop here → review the EPIC draft, then run /plan-epic manually
+   (Y) Generate Plan JSON + Session file → ready for /aid-run-epic
+   (N) Stop here → review the EPIC draft, then run /aid-plan-epic manually
 
    Generating now saves a step but skips manual EPIC review.
    ```
@@ -269,7 +269,7 @@ After the EPIC draft is written, offer PM the option to generate the execution p
    → Execute the plan-epic flow inline:
    a. Use the EPIC file just written in Step 8 as input
    b. Skip format detection (we know it's a valid EPIC — we just generated it)
-   c. Follow `commands/plan-epic.md` Steps 3-9 exactly:
+   c. Follow `commands/aid-plan-epic.md` Steps 3-9 exactly:
       - Step 3: Load and Validate EPIC
       - Step 4: Analyze Steps, Dependencies, and Parallel Groups
       - Step 5: Generate Analysis Groups
@@ -303,7 +303,7 @@ Present interactive options based on the completed brainstorming session.
    (A) Add more items to plan — re-open brainstorming
    (B) Create EPIC for all phases — single EPIC covering everything
    (C) Create EPIC for specific phase — pick a phase
-   (D) Stop here — review files, run /plan-epic manually later
+   (D) Stop here — review files, run /aid-plan-epic manually later
    ```
 
 **Option A — Re-open brainstorming:**
@@ -340,14 +340,14 @@ Brainstorming complete. Files written:
 
 Next steps:
   1. Review the EPIC draft and refine if needed
-  2. Run /plan-epic {epic-path} to generate execution plan
-  3. Run /run-epic to start orchestration
+  2. Run /aid-plan-epic {epic-path} to generate execution plan
+  3. Run /aid-run-epic to start orchestration
 ```
 
 ## Reference Files
 
 - `skills/brainstorming.md` — process rules, key principles, EPIC subagent prompt template, language handling
-- `commands/plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 9 inline execution)
+- `commands/aid-plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 9 inline execution)
 - `skills/planner.md` — plan generation logic (downstream from brainstorming)
 - `defaults/templates/plan.md` — plan document template
 - `defaults/templates/epic.md` — EPIC template

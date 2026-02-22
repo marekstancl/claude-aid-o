@@ -1169,7 +1169,7 @@ And sets EPIC frontmatter: `sessions_total: 2`
 
 ## Reference Files
 
-- `commands/plan-epic.md` -- command that invokes this skill
+- `commands/aid-plan-epic.md` -- command that invokes this skill
 - `skills/epic-orchestration.md` -- PLANNING state references this skill (Section 2)
 - `defaults/templates/plan.schema.json` -- Plan JSON schema (includes analysis_groups)
 - `workspace/workflow/plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md` -- Plan D-011 (analysis_groups design decision)

@@ -13,7 +13,7 @@ ai-orchestrator/
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
-    commands/                   # 18 slash commands
+    commands/                   # 10 slash commands
     skills/                     # 14 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
@@ -57,12 +57,11 @@ When users run `/aid-init`, it creates:
 | `/aid-init` | Initialize or upgrade .aid-o/ workspace |
 | `/aid-setup` | Interactive project onboarding |
 | `/aid-help` | Show AID documentation |
-| `/plan-epic` | Parse EPIC or Plan → generate Plan JSON |
-| `/run-epic` | Run full EPIC orchestration pipeline |
-| `/run-step` | Manually run a single plan step |
-| `/run-gates` | Run quality gates |
-| `/epic-status` | Show pipeline status |
-| `/epic-queue` | Manage EPIC execution queue |
+| `/aid-plan-epic` | Parse EPIC or Plan → generate Plan JSON |
+| `/aid-run-epic` | Run full EPIC orchestration pipeline |
+| `/aid-epic-status` | Show pipeline status |
+| `/aid-epic-queue` | Manage EPIC execution queue |
+| `/aid-audit` | Run project health audit |
 
 ## Contributing
 
@@ -139,7 +138,7 @@ Keep the 3 most recent versions. Older versions are documented only in CHANGELOG
 ### Marketplace Cache Sync — MANDATORY after every release
 
 Claude Code loads plugin commands from a **cached copy**, not from this dev repo.
-If the cache is stale, commands will be missing new features (e.g., Steps 0.5/0.7 in `/plan-epic`).
+If the cache is stale, commands will be missing new features (e.g., Steps 0.5/0.7 in `/aid-plan-epic`).
 
 **Cache location:** `~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/{version}/`
 **Marketplace repo:** `~/.claude/plugins/marketplaces/claude-aid-o/` (git clone of `marekstancl/claude-aid-o`)
@@ -164,7 +163,7 @@ rm -rf ~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/
 
 **Why this is needed:** Claude Code clones the marketplace repo from GitHub, caches a versioned snapshot, and loads commands from cache. If the dev repo is ahead of GitHub (unpushed commits), or if the cache wasn't invalidated after a version bump, Claude Code serves stale commands.
 
-**Verification:** After restart, invoke any updated command (e.g., `/plan-epic`) and check that new features are present in the loaded content.
+**Verification:** After restart, invoke any updated command (e.g., `/aid-plan-epic`) and check that new features are present in the loaded content.
 
 <!-- AID-O START -->
 ## AID Orchestrator
@@ -173,7 +172,7 @@ This project uses AID for multi-agent orchestration.
 
 **Workspace:** `.aid-o/`
 **Commands:** `/aid-help` for full documentation
-**Quick start:** `/aid-setup` → create EPIC → `/run-epic`
+**Quick start:** `/aid-setup` → create EPIC → `/aid-run-epic`
 
 **Key paths:**
 - Plans: `.aid-o/01-plans/`

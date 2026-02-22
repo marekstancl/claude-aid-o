@@ -25,6 +25,8 @@
 
 If CONTINUATION → load referenced session file + plan, continue from checkpoint.
 
+After steps 1-7, optionally augment context with vector memory and knowledge (see subsections below).
+
 ### Memory-Augmented Context (Optional)
 
 If Qdrant MCP is enabled (`.aid-o/03-config/policies/memory-config.yaml` → `memory.enabled: true`):
@@ -44,6 +46,28 @@ IF mem_config.memory.enabled AND mem_config.memory.search.pre_step_search:
 
 If Qdrant is unavailable or disabled → skip silently, proceed with file-based context only.
 See `skills/memory-mcp.md` for full protocol.
+
+### Knowledge-Augmented Context (Optional)
+
+If knowledge acquisition is enabled (`.aid-o/03-config/policies/memory-config.yaml` → `knowledge.enabled: true`):
+
+After memory context (step above), build the KNOWLEDGE CONTEXT block using `knowledge_context_for_agent()` from `skills/knowledge-acquisition.md`:
+
+```
+mem_config = read(".aid-o/03-config/policies/memory-config.yaml")
+IF mem_config.knowledge.enabled:
+  query = current_task_description OR step_objective
+  context_block = knowledge_context_for_agent(query)
+  # Returns formatted "## KNOWLEDGE CONTEXT" block with 3 sections:
+  #   - Framework Documentation (staleness threshold: >90 days)
+  #   - Patterns from Past Projects (staleness threshold: >180 days)
+  #   - Lessons (staleness threshold: >365 days)
+  # See skills/knowledge-acquisition.md for full format specification.
+```
+
+If knowledge is unavailable or disabled → skip silently, proceed with memory context only.
+Knowledge context is SEPARATE from memory context — both may be present in an agent's working context.
+See `skills/knowledge-acquisition.md` for full protocol.
 
 ---
 
@@ -84,9 +108,9 @@ PM zada ukol:
 ├── Brainstorming
 │   └── → vysledek: Plan NEBO Session (PM rozhodne)
 ├── Audit/Review
-│   ├── Project health audit → /audit command → project-audit skill
+│   ├── Project health audit → /aid-audit command → project-audit skill
 │   ├── Code review → code-reviewer agent / requesting-code-review superpower
-│   └── Quality check → /quality-gates command → quality-gates skill
+│   └── Quality check → skills/quality-gates.md (loaded on demand)
 └── Revert/Rollback
     └── → git-workflow skill (Revert/Rollback section)
 
@@ -396,6 +420,7 @@ End:   Session-End Protocol (docs update per project docs playbook + final commi
 | `skills/slack-mcp.md` | Slack PM communication |
 | `skills/epic-queue.md` | EPIC queue management |
 | `skills/memory-mcp.md` | Qdrant vector memory (long-term semantic search) |
+| `skills/knowledge-acquisition.md` | Knowledge acquisition: research, quality gates, consumption |
 | `skills/cost-optimization.md` | Model selection, file scoping, dispatch optimization |
 
 **Principle:** Load ONLY what you need. Don't load everything at once.

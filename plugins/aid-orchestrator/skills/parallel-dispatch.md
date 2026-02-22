@@ -688,7 +688,7 @@ See `skills/cost-optimization.md` for the full agent-to-model mapping.
 | `skills/planner.md` | Parallel groups and analysis groups generation in plan JSON |
 | `skills/analysis-merge.md` | Merge strategies for combining analysis agent outputs |
 | `skills/cost-optimization.md` | Model selection, file scoping, dispatch optimization |
-| `commands/run-epic.md` | Main orchestration loop that calls this dispatch protocol |
+| `commands/aid-run-epic.md` | Main orchestration loop that calls this dispatch protocol |
 
 ---
 
