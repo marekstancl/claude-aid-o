@@ -1624,5 +1624,87 @@ orchestrated: true  # marks this as Controller-managed
 
 ---
 
+## ID Generation
+
+This section defines the ID format specification and generation protocol for all AID entities. IDs are deterministic, sequential, and encode parent-child relationships.
+
+### ID Format Specification
+
+| Entity | Format | Example | Description |
+|--------|--------|---------|-------------|
+| Plan | `P{NNN}` | P001, P002 | Zero-padded 3-digit from `plan` counter |
+| EPIC from plan | `E-{NNN}-{phase}_{total}` | E-001-1_3 | Plan number + phase X of Y total phases |
+| Ad-hoc EPIC (no plan) | `E-{NNN}` | E-001, E-002 | Standalone sequential from `epic` counter |
+| Single-phase EPIC | `E-{NNN}-1_1` | E-001-1_1 | Plan number + "1 of 1" phase notation |
+| Run | `R-{EPIC_ID}-{run_number}` | R-001-1_3-1 | EPIC ID + sequential run number |
+
+Where `NNN` = zero-padded 3-digit number from `.aid-o/03-config/counter.yaml`.
+
+### Counter File
+
+Location: `.aid-o/03-config/counter.yaml`
+
+The counter file tracks the last-assigned sequential ID for each entity type. Initial values are `0`, meaning the next entity created gets ID `1` (formatted as `001`).
+
+```yaml
+plan: 0       # Last assigned plan number. Next: P001
+epic: 0       # Last assigned ad-hoc EPIC number. Next: E-001
+```
+
+Notes:
+- Plan-linked EPICs derive their number from the `plan` counter + phase info, so they do not need a separate counter.
+- Runs derive their number from the EPIC (sequential within that EPIC), so no separate counter is needed.
+- This is a single-user tool; no concurrency control is required.
+
+### ID Generation Protocol
+
+1. Read `.aid-o/03-config/counter.yaml`
+2. Increment the appropriate counter by 1
+3. Write updated counter back to file
+4. Use the new value to construct the ID
+
+**When to generate each ID type:**
+
+| ID Type | Generated During | Trigger |
+|---------|-----------------|---------|
+| Plan ID (`P{NNN}`) | `/aid-plan-epic` (PLANNING state) or `/aid-brainstorm` | New plan creation |
+| EPIC ID (from plan) | EPIC creation from a plan | Plan approved, EPICs generated |
+| EPIC ID (ad-hoc) | Ad-hoc EPIC creation (no parent plan) | `/aid-run-epic` with standalone EPIC |
+| Run ID | `/aid-run-epic` (IDLE state) | New run of an existing EPIC |
+
+### Relationship Encoding
+
+The ID scheme encodes parent-child relationships directly in the identifier:
+
+- **Plan number in EPIC ID** links the EPIC to its parent plan. `E-001-2_3` belongs to plan `P001`.
+- **EPIC ID in Run ID** links the run to its parent EPIC. `R-001-1_3-1` is a run of EPIC `E-001-1_3`.
+- **Ad-hoc EPICs** (created without a plan) get a standalone sequential number from the `epic` counter. They have no plan linkage.
+- **Phase notation** (`{phase}_{total}`) encodes "phase X of Y total phases" from the parent plan.
+
+### Examples
+
+```
+Plan P001 has 3 EPICs:
+  E-001-1_3  (phase 1 of 3)
+  E-001-2_3  (phase 2 of 3)
+  E-001-3_3  (phase 3 of 3)
+
+Each EPIC can have multiple runs:
+  R-001-1_3-1  (first run of E-001-1_3)
+  R-001-1_3-2  (second run, if first failed/was aborted)
+
+Ad-hoc EPIC (no plan):
+  E-002        (standalone, epic counter incremented)
+
+Single-phase plan:
+  P002 -> E-002-1_1 -> R-002-1_1-1
+```
+
+### Migration Note
+
+Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of the refactoring plan. The `counter.yaml` initial values (`0`) assume migration will set them to the correct starting point after accounting for existing entities.
+
+---
+
 **Version:** 0.8.2
 **Last Updated:** 2026-02-23
