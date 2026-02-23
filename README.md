@@ -224,7 +224,8 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.5.0** (current) — Knowledge acquisition pipeline (Phases 1-3 complete): Context7 MCP documentation ingestion, quality-gated storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, auto-extraction of reusable patterns from completed EPICs, community example EPIC templates (`defaults/examples/`), feedback tracking for knowledge retrieval, command prefix standardization (`aid-*`)
+- **v0.6.0** (current) — Workflow intelligence: seed research (147 Qdrant chunks across LangChain/LangGraph, N8N, LangFlow), 19 example EPICs (12 AI workflows + 7 common projects), platform detection, domain-specific questioning, Docker/MCP recommendations, knowledge-augmented brainstorming with example EPIC lookup
+- **v0.5.0** — Knowledge acquisition pipeline (Phases 1-3): Context7 MCP documentation ingestion, quality-gated storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, auto-extraction of reusable patterns, community example EPIC templates, feedback tracking, command prefix standardization (`aid-*`)
 - **v0.4.2** — `/plan-epic` and `/aid-brainstorm` step renumbering, `/aid-init [path]` parameter, phase selection for scoped EPIC generation
 - **v0.4.1** — `/aid-init` upgrade mode with manifest-based version tracking, config checksum detection, dynamic defaults scanning, release automation protocol
 
@@ -235,4 +236,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.5.0
+MIT — v0.6.0
