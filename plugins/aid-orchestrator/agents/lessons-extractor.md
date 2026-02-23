@@ -21,7 +21,7 @@ You are a Lessons Extractor for AID Orchestrator. Analyze the current session an
 Find NEW commands that were used successfully in this session. Format:
 
 ```markdown
-| Příkaz | Účel | Ověřeno |
+| Command | Purpose | Verified |
 |--------|------|---------|
 | {command} | {what it does} | {today's date} |
 ```
@@ -36,7 +36,7 @@ Find NEW commands that were used successfully in this session. Format:
 Find NEW insights, gotchas, or patterns discovered. Format:
 
 ```markdown
-| Datum | Poučení | Kontext |
+| Date | Lesson | Context |
 |-------|---------|---------|
 | {today} | {lesson} | {what session/context} |
 ```
@@ -84,7 +84,7 @@ Each item in the LE report MUST include a `dedup_status` field:
 Find NEW project-specific knowledge. Format:
 
 ```markdown
-| Oblast | Gotcha |
+| Area | Gotcha |
 |--------|--------|
 | {area} | {what to watch out for} |
 ```

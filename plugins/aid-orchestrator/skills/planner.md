@@ -1,6 +1,6 @@
 # Planner — Plan Generation from EPIC
 
-**Version:** 0.6.0
+**Version:** 0.8.2
 **Skill:** planner
 **Dependencies:** epic-orchestration
 
@@ -598,7 +598,7 @@ Rationale: later validations may depend on earlier ones passing
 
 ## 7. Complete Plan Generation Flow
 
-This is the master procedure the Planner follows when `/plan-epic` is invoked.
+This is the master procedure the Planner follows when `/aid-plan-epic` is invoked.
 
 ```
  1. RECEIVE EPIC file → validate sections → extract epic_id:
@@ -1323,5 +1323,5 @@ And sets EPIC frontmatter: `sessions_total: 2`
 
 ---
 
-**Version:** 0.6.0
+**Version:** 0.8.2
 **Last Updated:** 2026-02-23
