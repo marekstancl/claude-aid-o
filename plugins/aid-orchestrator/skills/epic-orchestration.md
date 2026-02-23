@@ -293,11 +293,23 @@ default to `recommended` preset behavior.
 2. For sequential step:
    a. Create branch: `epic/{epic_id}/step_{N}_{role}` from `epic/{epic_id}/main`
    b. Load role playbook from `.aid-o/03-config/playbooks/{role}.md`
-   c. Load source plan detail (Variant B — see **Source Plan Integration** below)
+   c. **Resolve plan_ref and load source plan detail** (see **Source Plan Integration** below):
+      1. Read EPIC frontmatter → extract `plan_ref` field
+      2. If `plan_ref` is set and not null:
+         - Resolve plan file path (relative paths resolve against `.aid-o/01-plans/`)
+         - Read the source plan file
+         - Match current step to plan section (by step number, plan task ref, or objective keywords)
+         - Extract the matching section content
+      3. If `plan_ref` is null or missing:
+         - Check `plan.json` → `source_plan` field as fallback
+         - If `source_plan` is also null or file unreadable → skip (no error)
+      4. Store extracted section for inclusion in agent prompt (step 2d)
    d. Dispatch agent with context:
       - EPIC specification (relevant sections)
       - Plan step (objective, inputs, outputs, constraints)
-      - Source plan implementation detail (if available — see below)
+      - **Source plan implementation detail** (if resolved in step 2c — injected as
+        `## Source Plan — Implementation Detail` section in the prompt, placed after
+        `## Your Task` and before `## Scope`)
       - Previous step outputs (if dependency)
       - Allowed/forbidden paths
    e. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
@@ -305,7 +317,7 @@ default to `recommended` preset behavior.
         `qdrant-find` query = step objective + role + tech_stack
       - Include top `cross_project.max_results` entries in dispatch prompt
       - If Qdrant unavailable: skip silently (agent works normally)
-   e. Agent executes and produces outputs
+   f. Agent executes and produces outputs
 3. For parallel group (per `skills/parallel-dispatch.md`):
    a. Create branch per agent from `epic/{epic_id}/main` (same base commit)
    b. Add PARALLEL CONTEXT to each prompt (other agents, branch names, scope warning)
@@ -333,38 +345,99 @@ Key context to pass:
 - Backend → Security: code to review
 - All → Docs: what changed and why
 
-**Source Plan Integration (Variant B):**
+**Source Plan Integration (Variant B) — plan_ref Injection Protocol:**
 
-When dispatching an agent for a step, check if source plan detail is available:
+When dispatching an agent for a step, resolve and inject the source plan detail.
+This closes the information gap between the high-level EPIC (structured spec) and the
+detailed source plan (implementation guide). Agents receive the full design context
+for their specific step.
 
-1. Read `plan.json` → check for `source_plan` field (path to source .md plan file)
-2. If `source_plan` exists AND file is readable:
-   a. Read the source plan file
-   b. Find the matching task section:
-      - Match by step objective keywords against plan section headers
-      - Match by explicit plan task reference in step objective (e.g., "(Plan: Task A)")
-      - If step.id contains a number, try matching against "## Task {letter}" sections
-   c. Extract the full task section content (from header to next ## header)
-   d. Include in agent prompt as:
+**Step A — Resolve source plan file path:**
 
-   ```
-   ## Source Plan — Implementation Detail
+1. Read EPIC frontmatter → extract `plan_ref` field
+2. If `plan_ref` is set and not null:
+   a. Resolve file path:
+      - If relative (no leading `/` or `.`): resolve against `.aid-o/01-plans/`
+      - If starts with `.aid-o/` or is absolute: use as-is
+   b. Verify file exists and is readable
+   c. If file not found: log warning to stage_log, fall through to step 3
+3. If `plan_ref` is null/missing OR file not found in step 2:
+   a. Read `plan.json` → check `source_plan` field (fallback)
+   b. If `source_plan` is set and file is readable: use that path
+   c. If `source_plan` is also null or unreadable: skip injection entirely
+      → Agent proceeds with plan.json step data only (backward compatible)
+      → No error, no warning — standalone EPICs work as before
 
-   The following is the detailed implementation guide from the source plan.
-   Use this as your primary reference for WHAT to change and HOW.
-   The step definition above provides the structured constraints (allowed paths,
-   acceptance criteria). This section provides the implementation specifics.
+**Step B — Match current step to plan section:**
 
-   {extracted_plan_task_section}
-   ```
+Given the source plan file content, find the section relevant to the current step.
+Try these matching strategies in order (first match wins):
 
-3. If `source_plan` does not exist or is unreadable:
-   → Agent proceeds with plan.json step data only (backward compatible)
-   → No error, no warning — standalone EPICs work as before
+1. **Explicit plan task reference in step objective:**
+   - Look for pattern `(Plan: Step N)` or `(Plan: Task N)` or `(Plan Task: N)` in the
+     step's `objective` field from plan.json
+   - If found, search the plan file for headers matching: `## Step N`, `**Step N**`,
+     `### Step N`, `## Task N`, `N.` at line start, or `## N.` patterns
+   - Example: objective = "Implement API routes (Plan: Step 3)" → find "## Step 3" or
+     "### 3." or "**Step 3**" in the plan
 
-4. IMPORTANT: The source plan section is ADDITIVE — it enriches the agent prompt
-   but does NOT override plan.json constraints (allowed_paths, forbidden_paths,
-   acceptance_criteria). If there's a conflict, plan.json wins.
+2. **Step number to plan section number mapping:**
+   - Extract the step number from `step.id` (e.g., `step_2_backend` → `2`)
+   - Search plan for section headers matching that number:
+     `## Step 2`, `### 2.`, `**2.`, `## Task 2`, `## Phase 2`
+   - Also try: `## High-Level Steps` → find numbered item `2.` within that section
+
+3. **Keyword matching (fallback):**
+   - Extract key terms from step objective (role name, action verbs, domain terms)
+   - Scan plan section headers for best keyword overlap
+   - Require at least 2 keyword matches to accept
+
+4. **No match found:**
+   - If no section matches after all strategies: skip injection for this step
+   - Log to stage_log: `{"state": "EXECUTING", "action": "plan_ref_match",
+     "step_id": "{step_id}", "result": "no_match", "reason": "no matching section found"}`
+   - Agent proceeds without source plan detail (still functional)
+
+**Step C — Extract section content:**
+
+1. Extract the full matched section: from the matched header line to the next header
+   of the same or higher level (e.g., from `## Step 3` to the next `## Step 4` or `# ...`)
+2. Include all sub-headers, code blocks, lists, and prose within the section
+3. If the section exceeds 3000 lines: truncate with a note
+   `[Section truncated — {N} lines omitted. Full plan at: {plan_file_path}]`
+
+**Step D — Include in agent prompt:**
+
+Insert the extracted section into the agent dispatch prompt, placed AFTER `## Your Task`
+and BEFORE `## Scope`:
+
+```
+## Source Plan — Implementation Detail
+
+From the plan: "{first line or title of extracted section}"
+
+The following is the detailed implementation guide from the source plan.
+Use this as your primary reference for WHAT to change and HOW.
+The step definition above provides the structured constraints (allowed paths,
+acceptance criteria). This section provides the implementation specifics.
+
+{extracted_plan_task_section}
+```
+
+**Important rules:**
+
+- The source plan section is ADDITIVE — it enriches the agent prompt but does NOT
+  override plan.json constraints (allowed_paths, forbidden_paths, acceptance_criteria).
+  If there's a conflict, plan.json wins.
+- If `plan_ref` resolution, section matching, or file reading fails at any point,
+  the agent dispatch MUST continue without the plan section. Plan injection is
+  best-effort and MUST NOT block agent execution.
+- Log all plan_ref resolution outcomes to stage_log.jsonl for traceability:
+  ```json
+  {"state": "EXECUTING", "action": "plan_ref_inject", "step_id": "{step_id}",
+   "source": "plan_ref|source_plan|none", "matched_section": "{header or null}",
+   "chars_injected": 0}
+  ```
 
 **Evidence:** For each step:
 - `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/output.md`
