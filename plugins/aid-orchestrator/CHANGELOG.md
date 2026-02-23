@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] — 2026-02-23
+
+### Added
+
+- **CURATOR_RESOLVE state** (`skills/epic-orchestration.md` section 10) — new state between GATES and PM_APPROVAL; dispatches Curator + Lessons-Extractor in parallel, auto-evaluates proposals via 3-tier algorithm (YAML rules → Qdrant history → default), dispatches fix agents for approved proposals, writes lessons with 3-layer dedup, presents compact summary to PM
+- **`curator_auto_rules`** in `decision-policies.yaml` — explicit rules (always_approve dx + security/high + docs/*, always_defer architecture), Qdrant learning settings (similarity 0.80, min 3 decisions), configurable default action
+- **PM override at PM_APPROVAL** — PM can override rejected proposals ("fix IMP-{NNN}") and teach new auto-rules ("always approve {type/area}"); decisions stored in Qdrant for future learning
+- **Improvement Pipeline analytics** (`skills/analytics.md`) — Report Type 4 with EPIC-level and Project-level sections; Qdrant query pattern for `curator_decision` type
+- **3-layer Lessons-Extractor dedup** (`agents/lessons-extractor.md`) — Layer 1: exact text >90%, Layer 2: semantic >80%, Layer 3: Qdrant cross-project >0.85; output tagged with dedup_status (NEW/DUPLICATE/CROSS_PROJECT)
+
+### Changed
+
+- **State machine** — 11 states → 12 states; CURATOR_RESOLVE inserted between GATES and PM_APPROVAL; section numbering: 10=CURATOR_RESOLVE, 11=PM_APPROVAL, 12=DONE
+- **PM_APPROVAL** extended with Curator summary block (implemented/rejected/deferred counts), PM override handling, PM rule teaching, Qdrant decision storage
+- **DONE state simplified** — Curator dispatch, Lessons-Extractor dispatch, and lessons/command-history file writes moved to CURATOR_RESOLVE; Auditor remains in DONE; items renumbered 1-11; migration note added
+- **`curator.md`** — dispatch context updated to CURATOR_RESOLVE (was POST_PROCESSING/session-end); Orchestrator Integration section rewritten with auto-evaluate flow
+- **`lessons-extractor.md`** — dispatch context updated to CURATOR_RESOLVE; 3-layer dedup protocol added
+- **`improvement-proposals.md`** — Section 6 rewritten with 3-tier auto-evaluate algorithm; Section 7 integration points updated
+- **`aid-run-epic.md`** — CURATOR_RESOLVE state handling added; GATES transition updated; DONE simplified (Auditor only)
+- **`aid-help.md`** — state machine diagram updated; Curator description updated; PM override/rule teaching documented
+- **`backlog.md`** — 19 PROP-* IDs migrated to IMP-{NNN}; legacy alias table added
+
 ## [0.7.0] — 2026-02-23
 
 ### Added

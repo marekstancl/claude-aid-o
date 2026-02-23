@@ -68,7 +68,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 | Agent | Purpose |
 |-------|---------|
-| `curator` | Collects improvement notes from agents, proposes improvements |
+| `curator` | Collects improvement notes, proposes improvements, auto-evaluated in CURATOR_RESOLVE |
 | `auditor` | Post-EPIC audit — code, security, docs, health scoring |
 | `project-scanner` | Tech stack detection, project analysis → `project-profile.yaml` |
 
@@ -87,7 +87,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 | Skill | Purpose |
 |-------|---------|
-| `epic-orchestration` | 11-state Controller FSM |
+| `epic-orchestration` | 12-state Controller FSM |
 | `brainstorming` | 9-step brainstorming process, EPIC subagent prompt template |
 | `agent-core` | Core agent behavior, roles, workflow routing |
 | `quality-gates` | 6-gate pre-commit protocol |
@@ -120,12 +120,16 @@ IDLE ──→ PLANNING ──→ PLAN_REVIEW ──→ EXECUTING ──→ PHAS
                                             │              │
                                         all pass    retries exhausted
                                             ↓              ↓
-                                      PM_APPROVAL    ESCALATION
-                                            │         (PM decides)
+                                    CURATOR_RESOLVE    ESCALATION
+                                  (auto-evaluate,       (PM decides)
+                                   fix, learn)
+                                            ↓
+                                      PM_APPROVAL
+                                            │
                                         approved
                                             ↓
                                           DONE
-                                    (Curator + Auditor)
+                                        (Auditor)
                                             │
                                      queue not empty?
                                             ↓
@@ -135,7 +139,7 @@ IDLE ──→ PLANNING ──→ PLAN_REVIEW ──→ EXECUTING ──→ PHAS
 **PM Checkpoints** (via Slack or chat fallback):
 - **PLAN_REVIEW**: approve execution plan (GO / REVISE / ABORT)
 - **ESCALATION**: handle failures (Fix / Skip / Abort)
-- **PM_APPROVAL**: approve merge (APPROVE / REJECT / REVISE)
+- **PM_APPROVAL**: approve merge, override proposals, teach rules (APPROVE / REJECT / REVISE / Override / Teach)
 
 ## Memory (Optional)
 

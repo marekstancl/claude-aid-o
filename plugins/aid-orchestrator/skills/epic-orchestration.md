@@ -1152,50 +1152,6 @@ When generating the `final_report.md`, the orchestrator enriches it with data fr
    c. Note in report: "Timing data from stage_log.jsonl (Qdrant unavailable)"
 ```
 
-#### Lessons Learned Collection and Storage
-
-After dispatching Curator and Auditor (step 3 of DONE actions), the orchestrator collects and stores lessons learned:
-
-```
-1. COLLECT lessons from all agent outputs:
-   a. For each step, read output.md from evidence/steps/step_{N}_{role}/output.md
-   b. Parse any "## Lessons Learned" or "## LESSONS LEARNED" section
-   c. For each lesson entry, extract:
-      - category: "process" | "technical" | "architecture" | "testing" | "security" | "tooling"
-      - severity: "info" | "warning" | "critical"
-      - description: the lesson text
-      - recommendation: suggested action (if present)
-      - related_steps: which other steps are affected
-      - tags: keywords extracted from the lesson
-
-2. STORE each lesson as a lesson_learned_event:
-   {
-     "event_type": "lesson_learned",
-     "epic_id": "{epic_id}",
-     "step_id": "{originating step_id}",
-     "timestamp": "{ISO 8601}",
-     "role": "{agent role that reported the lesson}",
-     "category": "{category}",
-     "severity": "{severity}",
-     "related_steps": [],
-     "tags": [],
-     "recommendation": "{text}",
-     "context": "{brief context of what the agent was doing}"
-   }
-
-3. STORAGE targets (try in order):
-   a. If Qdrant MCP available:
-      Store each lesson via qdrant-store to collection "aid-orchestration-log"
-   b. Always (regardless of Qdrant):
-      Append to .aid-o/04-engine/lessons-learned.md (file-based fallback)
-      Format: markdown section per lesson with epic_id, step_id, category, text
-   c. If Qdrant unavailable:
-      Also append to .aid-o/logs/orchestration-events.jsonl (for later rehydration)
-
-4. SUMMARY: Include lessons-learned count in final_report.md
-   "Lessons Learned: {count} entries collected ({categories breakdown})"
-```
-
 ---
 
 ## Evidence Store Structure
@@ -1467,7 +1423,7 @@ ON STARTUP (IDLE → PLANNING transition):
 ## Communication Protocol
 
 States PLAN_REVIEW, ESCALATION, and PM_APPROVAL communicate with PM via `skills/slack-mcp.md`.
-The DONE state sends Curator proposals (Type D), rejection info (Type E), and audit summaries (Type F).
+The DONE state sends audit summaries (Type F). Curator proposals (Type D) and rejection info (Type E) are presented at PM_APPROVAL after CURATOR_RESOLVE.
 Status updates (Type G) are sent at key orchestration points (non-blocking, fire-and-forget).
 
 If Slack MCP is not configured (`.aid-o/03-config/policies/slack-config.yaml` missing or

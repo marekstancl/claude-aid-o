@@ -108,7 +108,7 @@ Each note must be:
 
 ## 3. Collection Protocol
 
-The Curator agent follows this protocol after each session-end:
+The Curator agent follows this protocol during the CURATOR_RESOLVE state (after all gates pass, before PM_APPROVAL):
 
 ### Step 1: Collect
 

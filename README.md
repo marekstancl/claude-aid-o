@@ -33,7 +33,7 @@ AID gives you an entire dev team under one command. You're the PM — you approv
 /aid-run-epic                      ← orchestrator takes control
 ```
 
-The entire process is governed by a state machine: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → GATES → PM_APPROVAL → DONE. The **control flow is deterministic** — defined by YAML/JSON configuration. The **content is AI-generated** — each agent produces code, tests, docs via LLM.
+The entire process is governed by a state machine: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → GATES → CURATOR_RESOLVE → PM_APPROVAL → DONE. The **control flow is deterministic** — defined by YAML/JSON configuration. The **content is AI-generated** — each agent produces code, tests, docs via LLM.
 
 ## Installation
 
