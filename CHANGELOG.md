@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.1] — 2026-02-23
+
+### Added
+
+- **Process Audit type** in `agents/auditor.md` — 6th audit type (ALWAYS runs) with 13 checks across 4 categories: EPIC Lifecycle, Evidence Completeness, Cross-Validation, Stage Log Integrity; deduction-based scoring (0-100); 15% weight in Overall score
+
+### Changed
+
+- **Audit weight redistribution** — Documentation 20% → 25%, Process 15% added; 4 always-run audit types (was 3)
+
 ## [0.8.0] — 2026-02-23
 
 ### Added
