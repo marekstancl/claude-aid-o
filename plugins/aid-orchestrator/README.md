@@ -231,6 +231,6 @@ After `/aid-setup`, customize in `.aid-o/03-config/`:
 
 ## Version
 
-- **Plugin:** 0.4.1
+- **Plugin:** 0.8.2
 - **Requires:** Claude Code >= 1.0.0
 - **License:** MIT
