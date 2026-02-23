@@ -1,6 +1,6 @@
 # Epic Orchestration — Controller State Machine
 
-**Version:** 0.1.0
+**Version:** 0.8.2
 **Skill:** epic-orchestration
 **Dependencies:** agent-core, quality-gates, session-management
 
@@ -1517,5 +1517,5 @@ orchestrated: true  # marks this as Controller-managed
 
 ---
 
-**Version:** 0.4.0
-**Last Updated:** 2026-02-20
+**Version:** 0.8.2
+**Last Updated:** 2026-02-23

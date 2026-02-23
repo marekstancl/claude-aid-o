@@ -1,6 +1,6 @@
 # Session Management - Instructions
 
-**Version:** 4.0.0
+**Version:** 0.8.2
 **Skill:** session-management
 **Dependencies:** agent-core
 
@@ -11,12 +11,12 @@
 1. **READ active-work.md** at EVERY session start (authoritative over platform memory)
 2. **READ command-history.md + lessons-learned.md** at EVERY session start
 3. **CREATE session file** for non-trivial work (multi-change, multi-file) — use templates, not invented structure
-4. **SESSION = DETAILED WORK PLAN** — evolvuje s kodem, zachycuje co se realne stalo (viz Document Hierarchy)
+4. **SESSION = DETAILED WORK PLAN** — evolves with the code, captures what actually happened (see Document Hierarchy)
 5. **UPDATE session file** after EVERY commit
 6. **UPDATE active-work.md** at session end (current focus, recent work, next steps)
 7. **ARCHIVE completed sessions** to `{project.paths.sessions_completed}/`
 8. **FOLLOW lifecycle protocols** at each transition (brainstorming-end, session-start, phase-end, session-end)
-9. **PHASE-END = HARD STOP** — zastav se, shrn co bylo udelano, cekej na PM GO
+9. **PHASE-END = HARD STOP** — stop, summarize what was done, wait for PM GO
 10. **UPDATE project docs** at session-end (mandatory impact analysis per `playbooks/docs-{project.docs.platform}.md`)
 11. **UPDATE workspace files** at session-end (command-history, lessons-learned, backlog)
 12. **MONITOR context window** after each phase — warn PM if getting large
@@ -26,44 +26,44 @@
 
 ## Document Hierarchy
 
-**Plan, Epic a Session maji odlisne role. Neplest je.**
+**Plan, Epic, and Session have distinct roles. Do not confuse them.**
 
-| Dokument | Ucel | Kdy vznikne | Jak se vyviji |
-|----------|------|-------------|---------------|
-| **Plan** | Formovani napadu, hruby postup | Brainstorming / PM zadani | Staticke — jednou napsany, referencuje se |
-| **Epic** | Slozitejsi ulohy, vetsi detail a kontext, rozpad na sessions | Pred prvni session slozitejsiho projektu | Aktualizuje se po kazde session (progress, decisions) |
-| **Session** | Detailni plan prace pro jednu session | Na zacatku kazde session | **AKTIVNE SE VYVIJI S KODEM** — to je klicovy benefit |
+| Document | Purpose | When Created | How It Evolves |
+|----------|---------|--------------|----------------|
+| **Plan** | Forming ideas, rough approach | Brainstorming / PM assignment | Static — written once, referenced later |
+| **Epic** | Complex tasks, more detail and context, breakdown into sessions | Before the first session of a complex project | Updated after each session (progress, decisions) |
+| **Session** | Detailed work plan for a single session | At the start of each session | **ACTIVELY EVOLVES WITH THE CODE** — that is the key benefit |
 
-### Session file jako zivy dokument
+### Session file as a living document
 
-Session file neni staticka sablona — je to **detailni plan prace**, ktery:
-- Na zacatku popisuje CO se bude delat (na zaklade Epic/Plan + co se stalo v predchozich sessions)
-- Behem prace se aktualizuje (faze, zmeny, rozhodnuti, commity)
-- Na konci zachycuje CO SE REALNE STALO (ne co bylo planovano)
-- Slouzi jako kontext pro dalsi session (AI si precte a vi kde se skoncilo)
+The session file is not a static template — it is a **detailed work plan** that:
+- At the start, describes WHAT will be done (based on Epic/Plan + what happened in previous sessions)
+- During work, gets updated (phases, changes, decisions, commits)
+- At the end, captures WHAT ACTUALLY HAPPENED (not what was planned)
+- Serves as context for the next session (AI reads it and knows where things left off)
 
-### Kde co ukladat
+### Where to store what
 
 ```
-PM zada ukol:
-├── Jednorazovy (1 session)
+PM assigns a task:
+├── One-off (1 session)
 │   ├── Bug → debugging skill → session file
 │   ├── Feature → brainstorming → session file
-│   └── Refaktoring → session file (safety officer role)
-├── Vicesession (3+)
-│   └── Epic → workspace/workflow/epics/active/
-├── Design/plan (bez implementace)
-│   └── Plan → workspace/workflow/plans/
+│   └── Refactoring → session file (safety officer role)
+├── Multi-session (3+)
+│   └── Epic → .aid-o/02-epics/
+├── Design/plan (no implementation)
+│   └── Plan → .aid-o/01-plans/
 └── Brainstorming
-    └── → vysledek: Plan NEBO Session (PM rozhodne)
+    └── → result: Plan OR Session (PM decides)
 
-NIKDY:
-- Epic do plans/
-- Plan do epics/
-- Session file do workflow/
+NEVER:
+- Epic into plans/
+- Plan into epics/
+- Session file into .aid-o/
 ```
 
-**CRITICAL:** `workspace/workflow/plans/` je JEDINE misto pro plany. `workspace/workflow/epics/` je JEDINE misto pro epics. NIKDY jinam.
+**CRITICAL:** `.aid-o/01-plans/` is the ONLY location for plans. `.aid-o/02-epics/` is the ONLY location for epics. NEVER anywhere else.
 
 ---
 
@@ -78,21 +78,21 @@ PREFIX:
 - S = Session
 - E = Epic
 
-Hash generovani:
+Hash generation:
   echo $(date +%s%N | md5sum | head -c 4)
 
-Priklady:
+Examples:
 - S-20260210-a3f2
 - E-20260210-b5c1
 ```
 
-### Pouziti
+### Usage
 
-- **Session file nazev:** `S-20260211-1f8c-session-mgmt-templates-debugging.md`
-- **Epic file nazev:** `E-20260210-44f1-skills-refactoring-v4.md`
+- **Session file name:** `S-20260211-1f8c-session-mgmt-templates-debugging.md`
+- **Epic file name:** `E-20260210-44f1-skills-refactoring-v4.md`
 - **Frontmatter:** `id: S-20260211-1f8c`
 - **Branch:** `session/S-20260211-1f8c-session-mgmt-templates-debugging`
-- **Cross-reference:** `epic_id: E-20260210-44f1` v session file
+- **Cross-reference:** `epic_id: E-20260210-44f1` in session file
 
 ---
 
@@ -169,23 +169,23 @@ Loop until complete:
 
 Phases are defined in the session file (from plan or epic). They can be adjusted before starting each phase — announce adjustments to PM.
 
-#### PHASE-END CHECKPOINT (HARD STOP — POVINNE)
+#### PHASE-END CHECKPOINT (HARD STOP — MANDATORY)
 
-**Pred pokracovanim na dalsi fazi AI MUSI:**
+**Before continuing to the next phase, AI MUST:**
 
-1. Aktualizovat session file (faze = done, commit hash, zmeny)
-2. Aktualizovat active-work.md (progress, rozhodnuti)
-3. Napsat shrnuti: 2-3 vety co bylo udelano
-4. Pokud faze obsahuje testovatelne zmeny:
-   → Navrhnout manualni QA kroky (konkretni, klikatelne)
-5. Pokud je to posledni faze:
-   → Testing proposal je POVINNY
-6. Zkontrolovat context window — pokud je velky, upozornit PM
-7. **ZASTAVIT SE a zeptat PM:**
-   "Faze X dokoncena. [shrnuti]. Pokracovat na fazi Y?"
-8. **NEPOKRACOVAT dokud PM nerekne GO**
+1. Update session file (phase = done, commit hash, changes)
+2. Update active-work.md (progress, decisions)
+3. Write a summary: 2-3 sentences about what was done
+4. If the phase contains testable changes:
+   → Propose manual QA steps (specific, actionable)
+5. If this is the last phase:
+   → Testing proposal is MANDATORY
+6. Check context window — if it is large, warn PM
+7. **STOP and ask PM:**
+   "Phase X completed. [summary]. Proceed to phase Y?"
+8. **DO NOT CONTINUE until PM says GO**
 
-**Poruseni tohoto checkpointu = chyba AI.**
+**Violating this checkpoint = AI error.**
 
 ### Session Closure Mandatory Steps (Controller MUST execute ALL during DONE state)
 
@@ -230,29 +230,29 @@ Steps 4 and 5 (file-based writes) run ALWAYS, regardless of Qdrant availability.
 
 #### Standard Session (NOT last epic session):
 ```
-Pokud souhlasis, tak:
-- presunu session do completed/
-- commitnu zmeny
-- mergnu do main
-- napisu ti text pro zadani pokracovani prace v novem okne
+If you agree, I will:
+- move session to completed/
+- commit changes
+- merge to main
+- write you a text for continuing the work in a new window
 
-Nebo:
-- nasel jsi nejake nedostatky, ktere je treba vyresit?
-- chces postupovat jinak?
+Or:
+- did you find any issues that need to be resolved?
+- do you want to proceed differently?
 ```
 
-#### Last Session of Epic (posledni session epicu):
+#### Last Session of Epic (last session of the epic):
 ```
-Pokud souhlasis, tak:
-- presunu session do completed/
-- presunu epic do workspace/workflow/epics/completed/
-- aktualizuji epic file (status = Completed)
-- commitnu zmeny
-- mergnu do main
+If you agree, I will:
+- move session to completed/
+- move epic to .aid-o/02-epics/archive/
+- update epic file (status = Completed)
+- commit changes
+- merge to main
 
-Nebo:
-- nasel jsi nejake nedostatky, ktere je treba vyresit?
-- chces postupovat jinak?
+Or:
+- did you find any issues that need to be resolved?
+- do you want to proceed differently?
 ```
 
 8. If PM approves:
@@ -274,13 +274,13 @@ Nebo:
 
 ### Phase 3b: Post-Merge Protocol
 
-**Po merge do main (at uz behem session-end nebo kdykoli pozdeji):**
+**After merge to main (whether during session-end or any time later):**
 
 1. Update session file: status = completed, merge commit hash
 2. Update active-work.md: remove from current focus, add to Recent Work
-3. Update backlog.md: pokud session resila backlog item, aktualizovat jeho status
-4. Session KONCI — zadne dalsi zmeny na branchi
-5. Archive session file do completed/
+3. Update backlog.md: if session addressed a backlog item, update its status
+4. Session ENDS — no further changes on the branch
+5. Archive session file to completed/
 6. Update session-log.md
 
 ### Phase 4: Handoff (Optional)
@@ -318,14 +318,14 @@ When brainstorming or planning finishes, Claude MUST:
    - Is it a design/plan without implementation? → recommend Plan document
 3. Present recommendation to PM with reasoning:
    "Based on scope [reasoning], I recommend: [Plan / Session / Epic]. What do you prefer?"
-   - **Plan** = design document for future session(s), stored in `workspace/workflow/plans/`
+   - **Plan** = design document for future session(s), stored in `.aid-o/01-plans/`
    - **Direct Session** = work fits in one session
-   - **Epic** = complex work requiring 3+ sessions, stored in `workspace/workflow/epics/active/`
-4. If PM chooses Plan → create Plan document in `workspace/workflow/plans/`
-5. If PM chooses Epic → create Epic file in `workspace/workflow/epics/active/` from template
+   - **Epic** = complex work requiring 3+ sessions, stored in `.aid-o/02-epics/`
+4. If PM chooses Plan → create Plan document in `.aid-o/01-plans/`
+5. If PM chooses Epic → create Epic file in `.aid-o/02-epics/` from template
 6. If PM chooses Session → proceed to Session Start Protocol (Phase 1 above)
 
-**CRITICAL: `workspace/workflow/plans/` is the ONLY location for plan/design documents. Epics go to `workspace/workflow/epics/`. NEVER save plans or epics anywhere else.**
+**CRITICAL: `.aid-o/01-plans/` is the ONLY location for plan/design documents. Epics go to `.aid-o/02-epics/`. NEVER save plans or epics anywhere else.**
 
 ### Context Window Monitoring
 
@@ -350,18 +350,18 @@ During long sessions (roughly every 2-3 phases or every major transition):
 
 ### Structure
 ```
-workspace/workflow/epics/active/
+.aid-o/02-epics/
 └── E-{YYYYMMDD}-{hash}-{topic}.md    # Epic file (plan + progress + session log)
 ```
 
 Session files for epic sessions are stored in the standard `{project.paths.sessions_active}/` location, linked to the epic via `epic_id` in frontmatter.
 
 ### Workflow
-1. Create epic file in `workspace/workflow/epics/active/` from `templates/epic-breakdown.md`
+1. Create epic file in `.aid-o/02-epics/` from `templates/epic-breakdown.md`
 2. For each session: create session file in `{project.paths.sessions_active}/`, set `epic_id` in frontmatter
 3. Session file must reference: epic file, session number, what previous sessions accomplished
 4. On session completion: update epic file (session log, progress)
-5. Epic completion: all sessions done, status = Completed, move to `workspace/workflow/epics/completed/`
+5. Epic completion: all sessions done, status = Completed, move to `.aid-o/02-epics/archive/`
 
 ### Cross-References
 - **Session → Epic:** `epic_id: E-20260210-44f1` in frontmatter + link in References section
@@ -579,5 +579,5 @@ Standard `.aid-o/` paths (created by `/aid-init`):
 
 ---
 
-**Version:** 4.1.0
-**Last Updated:** 2026-02-19
+**Version:** 0.8.2
+**Last Updated:** 2026-02-23

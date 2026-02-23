@@ -1,12 +1,12 @@
 # AID Retry Engine
 
-Version: 1.0.0 — Gate failure analysis, fix-agent dispatch, retry loop, escalation.
+Version: 0.8.2 — Gate failure analysis, fix-agent dispatch, retry loop, escalation.
 
 **Purpose:** When a quality gate fails, this skill defines how to analyze the failure,
 dispatch a fix agent, re-run the gate, and escalate if retries are exhausted.
 
 **Called by:** `skills/gates-engine.md` (when `next_action: "gate_retry"`)
-and `/run-epic` (State 8: GATE_RETRY).
+and `/aid-run-epic` (State 8: GATE_RETRY).
 
 ---
 
