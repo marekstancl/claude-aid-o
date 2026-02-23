@@ -1,0 +1,6 @@
+# AID Orchestrator — Autoincrement ID Counters
+# This file tracks the last-assigned sequential ID for each entity type.
+# To generate a new ID: read counter, increment by 1, write back, use new value.
+
+plan: 0       # Last assigned plan number. Next: P001
+epic: 0       # Last assigned ad-hoc EPIC number. Next: E-001
