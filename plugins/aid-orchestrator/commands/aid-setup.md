@@ -588,13 +588,13 @@ Context7 Troubleshooting
 4. Ask PM for channel: "Which channel? (e.g., #aid-orchestrator):"
 
 5. Ask PM for channel ID (for add_message tool):
-   "Channel ID for sending messages (e.g., C0AFP2GP459):"
+   "Channel ID for sending messages (e.g., YOUR_CHANNEL_ID):"
    "Find it in Slack: right-click channel name -> View channel details -> scroll down"
 
 6. Create `.env` file (if not exists) with:
    ```
    SLACK_MCP_XOXB_TOKEN=xoxb-...
-   SLACK_MCP_ADD_MESSAGE_TOOL=C0AFP2GP459
+   SLACK_MCP_ADD_MESSAGE_TOOL=YOUR_CHANNEL_ID
    ```
 
 7. Add `.env` to `.gitignore` (if not already there)
