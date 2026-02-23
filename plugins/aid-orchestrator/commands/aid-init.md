@@ -64,6 +64,7 @@ Create the following directories (skip if they already exist):
       archive/
     memory/
     evidence/
+  05-inputs/
 ```
 
 ### Config Files (Dynamic Scan)
@@ -135,6 +136,14 @@ _Managed by AID Curator agent. Source: user | agent | curator | audit_
 |----|------|--------|---------|----------------|
 ```
 
+### Input Files
+
+Copy the inputs README template into the `05-inputs/` directory (skip if it already exists):
+
+```
+Copy defaults/templates/inputs-readme.md → .aid-o/05-inputs/README.md
+```
+
 ### Generate Manifest
 
 After all files are created/copied, generate `.aid-o/03-config/.aid-manifest.yaml`:
@@ -184,6 +193,9 @@ Engine files (.aid-o/04-engine/):
   [CREATED] memory/active-work.md
   [CREATED] backlog.md
   ...
+
+Input files (.aid-o/05-inputs/):
+  [CREATED] README.md
 
 Manifest: .aid-o/03-config/.aid-manifest.yaml (v{version})
 
@@ -422,13 +434,14 @@ This project uses AID for multi-agent orchestration.
 
 ### Fresh Init
 1. Determine the plugin's `defaults/` directory location (relative to this command file: `../defaults/`)
-2. Create directory structure (skip existing)
+2. Create directory structure (skip existing, includes `05-inputs/`)
 3. **Scan** `defaults/{policies,templates,playbooks}/*` for all files (dynamic, not hardcoded)
 4. Copy each file to `.aid-o/03-config/` (skip existing)
 5. Create engine files (skip existing)
-6. **Generate `.aid-manifest.yaml`** with version and checksums
-7. Update CLAUDE.md (marker-based merge)
-8. Print summary
+6. Copy `defaults/templates/inputs-readme.md` to `.aid-o/05-inputs/README.md` (skip if exists)
+7. **Generate `.aid-manifest.yaml`** with version and checksums
+8. Update CLAUDE.md (marker-based merge)
+9. Print summary
 
 ### Upgrade
 1. Read manifest and plugin version

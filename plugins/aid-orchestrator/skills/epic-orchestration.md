@@ -9,7 +9,7 @@
 ## TL;DR
 
 This skill defines the **Controller** that orchestrates an EPIC through its full lifecycle:
-EPIC → Plan → Execute Steps → Gates → PM Approval → Done.
+EPIC → Plan → Execute Steps → Gates → Curator Resolution → PM Approval → Done.
 
 The Controller is a state machine. Every transition produces evidence. Failures trigger retry (max 3) then escalation to PM.
 
@@ -53,6 +53,11 @@ The Controller is a state machine. Every transition produces evidence. Failures 
    │                                          │
    │ all pass                                 │
    ▼                                          │
+┌───────────────────┐                         │
+│ CURATOR_RESOLVE   │                         │
+└──┬────────────────┘                         │
+   │ proposals resolved                       │
+   ▼                                          │
 ┌──────────────┐                              │
 │ PM_APPROVAL  │                              │
 └──┬───────┬───┘                              │
@@ -79,8 +84,9 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 | **GATES** | Run all gates from `gates.yaml` | All required gates pass | `gates_report.json` |
 | **GATE_RETRY** | Generate fix instructions from gate failure, re-dispatch | Fix applied, re-run gate | Retry entry in `gates_report.json` |
 | **ESCALATION** | Send failure to PM via Slack (or chat fallback) with options | PM decides (fix/skip/abort) | `pm_decision.json` |
+| **CURATOR_RESOLVE** | Dispatch Curator + Lessons-Extractor in parallel; auto-evaluate proposals via `decision-policies.yaml` rules + Qdrant history; dispatch fix agents for approved proposals; write lessons to workspace files | All proposals resolved, fixes complete | `curator_resolve_report.json`, updated `backlog.md`, updated `lessons-learned.md` |
 | **PM_APPROVAL** | Send final results to PM via Slack (or chat fallback) | PM approves merge | `pm_decision.json` |
-| **DONE** | Merge branch, archive evidence, run Curator + Auditor, extract example pattern (if eligible), send summaries via Slack, check Epic Queue for auto-pickup | — | `final_report.md`, `audit-report.md`, `curator_report.json`, `slack_log.jsonl` |
+| **DONE** | Merge branch, archive evidence, run Auditor, extract example pattern (if eligible), send summaries via Slack, check Epic Queue for auto-pickup | — | `final_report.md`, `audit-report.md`, `slack_log.jsonl` |
 
 ---
 
@@ -586,22 +592,229 @@ if gate_fails:
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/pm_decision.json`
 
-### 10. PM_APPROVAL
+### 10. CURATOR_RESOLVE
+
+**Trigger:** All gates passed (transition from GATES).
+
+**Purpose:** Dispatch Curator + Lessons-Extractor in parallel, auto-evaluate proposals, implement approved fixes, process lessons, and prepare a summary for PM_APPROVAL.
+
+**Sub-Steps:**
+
+1. **Parallel Dispatch:**
+
+   a. Dispatch **Curator agent** (`agents/curator.md`, model: sonnet) with:
+      - All step outputs: `evidence/{epic_id}/{run_id}/steps/*/step_output.json`
+      - Gate results: `evidence/{epic_id}/{run_id}/gates_report.json`
+      - Final report: `evidence/{epic_id}/{run_id}/final_report.md`
+   b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`, model: haiku) with:
+      - Active session file
+      - Git log and diff
+   c. Log:
+      ```json
+      {"state": "CURATOR_RESOLVE", "action": "dispatch_parallel", "details": "Curator + Lessons-Extractor dispatched"}
+      ```
+
+2. **Process Curator Output:**
+
+   a. Parse `curator_report.proposals[]` from Curator agent output
+   b. If no proposals: log "0 proposals", skip to sub-step 4
+   c. For each proposal: run Auto-Evaluate Algorithm (sub-step 3)
+
+3. **Auto-Evaluate Algorithm** (per proposal):
+
+   ```
+   for each proposal in curator_report.proposals:
+     1. Load curator_auto_rules from decision-policies.yaml
+     2. Tier 1 — Check explicit YAML rules:
+        - always_approve[] → match on {type, area, priority}?
+          → YES: decision = APPROVE. Log rule match.
+        - always_reject[] → match?
+          → YES: decision = REJECT. Log rule match.
+        - always_defer[] → match?
+          → YES: decision = DEFER. Log rule match.
+     3. Tier 2 — No explicit rule matched → Query Qdrant:
+        - Search: type=curator_decision, similar to proposal title+area+type
+        - If similarity > learning.similarity_threshold AND
+          matching decisions >= learning.min_decisions:
+          → Apply majority action from past decisions
+          → Log: "learned from {N} past decisions"
+        - If Qdrant unavailable: skip Tier 2 gracefully, fall through to Tier 3
+     4. Tier 3 — No rule, no Qdrant history:
+        → Apply curator_auto_rules.default_action (default: approve)
+        → Log: "default rule applied"
+   ```
+
+   Rule matching: each rule is `{type?, area?, priority?}`. All specified keys must match.
+   `area` uses glob matching. First match wins within each list.
+
+   Decision stage_log entries:
+
+   ```json
+   {"state": "CURATOR_RESOLVE", "action": "auto_evaluate", "proposal": "IMP-{NNN}",
+    "decision": "approve", "rule": "{matched_rule_or_source}"}
+
+   {"state": "CURATOR_RESOLVE", "action": "auto_evaluate", "proposal": "IMP-{NNN}",
+    "decision": "reject", "reason": "{reason}"}
+
+   {"state": "CURATOR_RESOLVE", "action": "auto_evaluate", "proposal": "IMP-{NNN}",
+    "decision": "defer", "reason": "{reason}"}
+   ```
+
+   Backlog status updates per decision:
+   - **APPROVE:** `implementing` → (after fix) `implemented`
+   - **REJECT:** `orchestrator-rejected` (reason logged)
+   - **DEFER:** `deferred` (reason logged)
+
+4. **Process Lessons-Extractor Output:**
+
+   a. Parse LE report for NEW LESSONS, NEW COMMANDS, NEW GOTCHAS sections
+   b. 3-layer dedup for each lesson/gotcha:
+      - Layer 1: exact text overlap >90% against local `.aid-o/04-engine/lessons-learned.md`
+      - Layer 2: semantic similarity >80% against existing lessons (if embeddings available)
+      - Layer 3: Qdrant cross-project dedup >0.85 similarity (if Qdrant available)
+   c. Write new lessons to `.aid-o/04-engine/lessons-learned.md`
+   d. Write new commands to `.aid-o/04-engine/command-history.md`
+   e. Store to Qdrant (if available) with metadata:
+      ```json
+      {"type": "lesson", "subtype": "lesson|gotcha|command",
+       "project_name": "{project_name}", "epic_id": "{epic_id}",
+       "area": "{area}", "timestamp": "{ISO 8601}"}
+      ```
+   f. Log:
+      ```json
+      {"state": "CURATOR_RESOLVE", "action": "lessons_written",
+       "new_lessons": "{N}", "new_commands": "{N}", "duplicates_skipped": "{N}"}
+      ```
+
+5. **Dispatch Approved Fixes:**
+
+   For each APPROVED proposal:
+   a. Determine agent role from proposal area/type (backend, frontend, docs, etc.)
+   b. Dispatch fix agent with:
+      - Proposal details (title, area, proposed_action, rationale)
+      - Current file contents for the affected area
+      - Instruction: implement the proposed fix, produce diff output
+   c. Wait for fix completion
+   d. Update `backlog.md`: status → `implemented`, `epic_ref`: current EPIC
+   e. Store fix output in `evidence/{epic_id}/{run_id}/curator_fixes/fix_{IMP_id}/`
+   f. Log each fix:
+      ```json
+      {"state": "CURATOR_RESOLVE", "action": "fix_completed", "proposal": "IMP-{NNN}",
+       "files_modified": ["path/to/file"], "agent": "{role}"}
+      ```
+
+   If a fix agent fails: log warning, set proposal status → `deferred` with reason
+   "fix attempt failed", continue with remaining fixes.
+
+   No limits on fix size or effort — the Orchestrator approves everything relevant
+   regardless of scope.
+
+6. **Prepare PM Summary:**
+
+   Compile CURATOR_RESOLVE results into structured block for PM_APPROVAL:
+
+   ```
+   --- Curator Resolution ---
+   Implemented ({count}):
+     - IMP-{NNN}: {title} (effort: {effort})
+   Rejected by Orchestrator ({count}):
+     - IMP-{NNN}: {title}
+       Reason: {reason} [Rule: {rule_source}]
+   Deferred ({count}):
+     - IMP-{NNN}: {title}
+       Reason: {reason}
+   Lessons: {count} new | Gotchas: {count} new | Commands: {count} new
+   ```
+
+   Store as `evidence/{epic_id}/{run_id}/curator_resolve_report.json`
+
+7. **Transition → PM_APPROVAL**
+
+   ```json
+   {"state": "CURATOR_RESOLVE", "action": "transition",
+    "details": "{approved} approved ({fixed} fixed), {rejected} rejected, {deferred} deferred. → PM_APPROVAL"}
+   ```
+
+**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/curator_resolve_report.json`
+
+### 11. PM_APPROVAL
 
 **Communication:** Per `skills/slack-mcp.md` Type C (Merge Approval).
 
 **Actions:**
 1. Compile final summary payload (steps, gates, changes, evidence path)
-2. Send to PM via `send_pm_message("merge_approval", payload)`:
+2. Load `curator_resolve_report.json` from `evidence/{epic_id}/{run_id}/` and include
+   Curator summary block in the payload:
+
+   ```
+   EPIC Ready for Approval: {epic_id}
+   ====================================
+   Steps: {completed}/{total} | Gates: {passed}/{total} | Duration: {duration}
+
+   --- Curator Resolution ---
+   Implemented ({count}):
+     - IMP-{NNN}: {title} (effort: {effort})
+
+   Rejected by Orchestrator ({count}):
+     - IMP-{NNN}: {title}
+       Reason: {reason} [Rule: {rule_source}]
+
+   Deferred ({count}):
+     - IMP-{NNN}: {title}
+       Reason: {reason}
+
+   Lessons: {count} new | Gotchas: {count} new
+
+   PM Actions:
+     1. APPROVE — merge everything, EPIC done
+     2. Override rejected: "fix IMP-{NNN}" — Orchestrator dispatches fix agent
+     3. Teach rule: "always approve {type/area}" — added to auto-rules + Qdrant
+     4. REJECT — do not merge
+   ```
+
+3. Send to PM via `send_pm_message("merge_approval", payload)`:
    - **Slack:** Posts Merge Approval message, waits for reply
    - **Chat fallback:** Presents summary in conversation, waits for response
-3. Wait for PM response via `wait_pm_response(message_ref, "merge_approval")`
-4. If APPROVE (`response_type: "approve"`): transition to DONE
-5. If REJECT (`response_type: "reject"`): transition to ESCALATION (with PM feedback)
-6. If REVISE (`response_type: "revise"`): return to EXECUTING with PM's revision instructions
-7. If timeout: execute `timeout_actions.merge_approval` from `slack-config.yaml`
+4. Wait for PM response via `wait_pm_response(message_ref, "merge_approval")`
+5. If APPROVE (`response_type: "approve"`): transition to DONE
+6. If PM Override — "fix IMP-{NNN}" (override a rejected proposal):
+   a. Dispatch fix agent for the specified proposal
+   b. Update `backlog.md`: status → `implemented`, actor: `pm-override`
+   c. Store PM decision in Qdrant for learning:
+      ```json
+      {"type": "curator_decision", "action": "approve",
+       "proposal_type": "{type}", "proposal_area": "{area}",
+       "project_name": "{project_name}", "epic_id": "{epic_id}",
+       "pm_instruction": "override rejection", "timestamp": "{ISO 8601}"}
+      ```
+   d. Log:
+      ```json
+      {"state": "PM_APPROVAL", "action": "pm_override", "proposal": "IMP-{NNN}"}
+      ```
+   e. Re-present updated summary to PM (return to action 4)
+7. If PM Rule Teaching — "always approve {pattern}" (or similar):
+   a. Parse instruction to extract: type, area, or priority pattern
+   b. Append to `decision-policies.yaml` → `curator_auto_rules.always_approve[]`
+   c. Store in Qdrant as `curator_decision` with `pm_instruction` field
+   d. Confirm to PM: "Rule added: always approve {pattern}"
+   e. Log:
+      ```json
+      {"state": "PM_APPROVAL", "action": "rule_learned", "rule": "{pattern}"}
+      ```
+   f. Re-present updated summary to PM (return to action 4)
+8. If REJECT (`response_type: "reject"`): transition to ESCALATION (with PM feedback)
+9. If REVISE (`response_type: "revise"`): return to EXECUTING with PM's revision instructions
+10. If timeout: execute `timeout_actions.merge_approval` from `slack-config.yaml`
 
-### 11. DONE
+PM override and rule teaching are **non-blocking** — the PM can simply APPROVE without
+interacting with the Curator summary at all.
+
+### 12. DONE
+
+> **NOTE:** Curator dispatch, Lessons-Extractor dispatch, and lessons/command-history
+> file writes have been moved to the CURATOR_RESOLVE state (section 10). They now run
+> BEFORE PM_APPROVAL, not after it. The Auditor remains in DONE because it audits the
+> final state including any Curator fixes.
 
 **Actions:**
 1. If approved:
@@ -634,55 +847,14 @@ if gate_fails:
    d. Archive session file to `.aid-o/04-engine/sessions/archive/`
    e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
-3. **POST-PROCESSING (Auditor + Lessons-Extractor):**
-
-   **NOTE:** Curator dispatch has been moved to item 9 (mandatory synchronous step).
-   Curator MUST run BEFORE the completion summary so proposal count is available.
+3. **POST-PROCESSING (Auditor):**
 
    a. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
       (code, security, docs, frontend, database), scores project health,
       tracks trend vs previous audit. Report -> `evidence/{epic_id}/audit-report.md`
-   b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`) —
-      parses all step outputs for lessons, commands, and gotchas.
-   c. Auditor summary -> PM via Slack Type F (Audit Summary, no reply)
+   b. Auditor summary -> PM via Slack Type F (Audit Summary, no reply)
       - If critical findings match `escalation_triggers` -> additional Type A (Escalation)
-   d. Auditor findings -> Orchestrator validates -> Curator processes into backlog (item 9)
-4. **Lessons-Learned File Update** (ALWAYS — independent of Qdrant):
-   After dispatching lessons-extractor agent, parse its output and append new entries
-   to `.aid-o/04-engine/lessons-learned.md`:
-
-   1. Read current `lessons-learned.md`
-   2. Parse lessons-extractor output for the "NEW LESSONS" table rows
-   3. For each new lesson:
-      - Check for duplicates (>80% text overlap with existing entries)
-      - If not duplicate: append row to the markdown table
-   4. Write updated `lessons-learned.md`
-
-   ```yaml
-   # Append format per row:
-   | {date} | {lesson_text} | {context_from_epic_id} |
-   ```
-
-   This step runs ALWAYS, even if Qdrant indexing succeeded. The .md file is
-   the durable, human-readable record. Qdrant is the searchable index.
-
-5. **Command-History File Update** (ALWAYS — independent of Qdrant):
-   After dispatching lessons-extractor agent, parse its output and append new entries
-   to `.aid-o/04-engine/command-history.md`:
-
-   1. Read current `command-history.md`
-   2. Parse lessons-extractor output for the "NEW COMMANDS" table rows
-   3. For each new command:
-      - Check for duplicates (exact command string match)
-      - If not duplicate: append row to the markdown table
-   4. Write updated `command-history.md`
-
-   ```yaml
-   # Append format per row:
-   | {command} | {purpose} | {date} |
-   ```
-
-6. **Qdrant Project Tagging** (MANDATORY for all Qdrant writes):
+4. **Qdrant Project Tagging** (MANDATORY for all Qdrant writes):
    Every `qdrant-store` call in the DONE state MUST include `project_name` in metadata:
 
    ```json
@@ -706,9 +878,9 @@ if gate_fails:
    traceability.
 
    If Qdrant is unavailable: skip gracefully (non-blocking), log warning.
-   File-based writes (steps 4 and 5) are the authoritative record.
+   File-based writes in CURATOR_RESOLVE are the authoritative record.
 
-7. **EPIC-Level Metrics to Qdrant (DONE state)**
+5. **EPIC-Level Metrics to Qdrant (DONE state)**
 
    Aggregate all step metrics into an EPIC summary metric:
 
@@ -806,7 +978,7 @@ if gate_fails:
    If Qdrant unavailable: skip metric writes gracefully, log warning. Continue with
    remaining DONE actions.
 
-8. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
+6. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
 
    1. **Archive session:**
       - Move to `.aid-o/04-engine/sessions/archive/{filename}`
@@ -841,45 +1013,9 @@ if gate_fails:
    Archive = MOVE (copy + delete original). Active dirs = only pending work.
    All archive ops happen BEFORE commit -- one clean commit for entire DONE state.
 
-9. **Curator Post-Processing (MANDATORY — synchronous)**
+7. **Example EPIC Extraction (optional — when Qdrant enabled)**
 
-   After generating final_report.md and BEFORE presenting the completion summary:
-
-   1. Dispatch Curator agent with:
-      - All step outputs from `evidence/{epic_id}/{run_id}/steps/*/step_output.json`
-      - Gate results from `evidence/{epic_id}/{run_id}/gates_report.json`
-      - Final report from `evidence/{epic_id}/{run_id}/final_report.md`
-   2. Wait for Curator output (do NOT dispatch in background)
-   3. Process Curator proposals:
-      - Write new proposals to `.aid-o/04-engine/backlog.md`
-      - Include proposal count in the completion summary
-   4. If Slack is enabled: send each proposal as a Type D message for PM review
-   5. If Slack is disabled: list proposals in the completion summary for PM to review
-
-   The Curator runs SYNCHRONOUSLY before the completion summary so that the
-   summary can include the proposal count and any high-priority findings.
-
-   Curator dispatch prompt template:
-   ```
-   You are the Curator agent. Analyze the completed EPIC evidence and produce
-   improvement proposals for the backlog.
-
-   EPIC: {epic_id}
-   Evidence: {evidence_dir}
-   Step count: {step_count}
-   Gate retries: {retry_count}
-   Duration: {total_duration}
-
-   Read: skills/improvement-proposals.md for proposal format.
-   Read: agents/curator.md for your full specification.
-   ```
-
-   If Curator fails: log warning, set proposal_count = 0, continue (post-processing
-   is best-effort but MUST be attempted).
-
-9b. **Example EPIC Extraction (optional — when Qdrant enabled)**
-
-   After Curator completes and BEFORE the completion summary, check if this EPIC
+   BEFORE the completion summary, check if this EPIC
    should be stored as a reusable example pattern for future projects.
 
    **Prerequisite:** `memory.enabled: true` in `memory-config.yaml`
@@ -909,7 +1045,7 @@ if gate_fails:
    **Error handling:** If `extract_example_epic()` throws or fails, log warning and continue.
    Example extraction is supplementary — it MUST NOT block the DONE state.
 
-10. **Completion Summary and Next Steps** (presented to PM — LAST before queue check)
+8. **Completion Summary and Next Steps** (presented to PM — LAST before queue check)
 
    After all DONE state actions complete, present this summary to PM:
 
@@ -934,7 +1070,7 @@ if gate_fails:
      5. Analyze performance -- run /aid-analytics to see bottlenecks and optimization tips
      6. Archive -- the session has been archived to sessions/archive/
 
-   Lessons learned: {count} new entries added to lessons-learned.md
+   Lessons learned: processed in CURATOR_RESOLVE (see curator_resolve_report.json)
    Backlog proposals: {proposal_count} new entries (review with /aid-backlog)
    Example pattern: {archetype} saved to knowledge base  ← only if extraction stored
    ```
@@ -942,8 +1078,8 @@ if gate_fails:
    The summary MUST include concrete artifact names (not generic descriptions).
    Read the step outputs to list actual files created/modified.
 
-11. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
-12. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+9. Send Status Update (Type G): `:checkered_flag: EPIC completed — merged to main`
+10. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
    a. Read `.aid-o/04-engine/epic-queue.yaml`
    b. IF queue is not paused AND next EPIC exists (status: "queued"):
       - Mark current EPIC as "completed" in queue
@@ -954,7 +1090,7 @@ if gate_fails:
       - Mark current EPIC as "completed" in queue (if in queue)
       - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
       - Remain in terminal DONE state
-13. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
+11. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
    Append the closing DONE entry to `stage_log.jsonl`:
 
    ```json

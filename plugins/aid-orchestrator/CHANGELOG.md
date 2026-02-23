@@ -3,6 +3,36 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — 2026-02-23
+
+### Added
+
+**Phase 2 — Seed Research + Example EPICs:**
+- **Qdrant seed research: LangChain/LangGraph** — 64 chunks covering architecture (21), code (15), Docker (10), best practices (12), UI (6) from 14+ repos including langchain-ai/langchain, langchain-ai/langgraph, aws-samples/langgraph-multi-agent
+- **Qdrant seed research: N8N** — 48 chunks covering workflow (18), AI node (10), Docker (7), custom node (5), best practices (8) from n8n-io/n8n-docs, Zie619/n8n-workflows
+- **Qdrant seed research: LangFlow** — 35 chunks covering flow (11), deployment (8), embedding (6), custom component (4), best practices (6) from langflow-ai/langflow, community tutorials
+- **AI workflow example EPICs** (`defaults/examples/ai-workflows/`) — 12 templates: langchain-rag-chatbot, langgraph-multi-agent, langgraph-react-agent, n8n-ai-automation, langflow-rag-pipeline, doc-qa-chatbot, email-assistant, pdf-invoice-processor, meeting-summarizer, content-generator, code-review-agent, data-extraction-pipeline
+- **Common project example EPICs** (`defaults/examples/common-projects/`) — 7 templates: fastapi-crud-service, nextjs-fullstack, react-dashboard, landing-page, saas-starter, ecommerce-store, api-with-auth
+- **Context7 + Qdrant verification** — live research returns relevant results for all platforms; Qdrant retrieval confirmed functional with correct metadata
+
+## [0.6.0] — 2026-02-23
+
+### Added
+
+- **Workflow Intelligence skill** (`skills/workflow-intelligence.md`) — platform detection (LangChain/LangGraph, N8N, LangFlow, generic-workflow), domain-specific questioning (WF1-WF7) inserted transparently into the brainstorming flow, UI derivation from interaction model and output type, platform-specific knowledge and Docker Compose templates, three-tier knowledge enrichment (Qdrant → Context7 → static fallback)
+- **Docker/MCP preference rules** in `brainstorming.md` — cross-cutting recommendation logic for Docker Compose (triggered when project has 2+ services) and MCP servers (DB, GitHub, Filesystem, Context7, Playwright); PM may decline once and the topic is closed for the session
+- **Docker/MCP step injection** in `planner.md` (Section 7.4) — automatic "Docker Compose setup" step injected into the plan when `docker_recommended == true` in the brainstorming plan; MCP configuration is included in the same step, never as a separate step
+- **Sample file analysis** in `brainstorming.md` — automatic scan of `.aid-o/05-inputs/` during Step 1; supports PDF, CSV, JSON, and image files; silent when directory is missing or empty; results used by WF4 (workflow projects) and Step 3 approach proposals
+- **Example EPIC lookup** in `brainstorming.md` — weighted scoring search against `defaults/examples/` frontmatter during Step 3; integrates workflow context (platform hint, WF7 recommendation) when `workflow_detected == true`; PM offered: Adapt, Browse all, or Start fresh
+- **Input files support** — `/aid-init` creates `.aid-o/05-inputs/` directory and copies `defaults/templates/inputs-readme.md` as README; `/aid-help inputs` documents supported formats and usage
+
+### Changed
+
+- **`brainstorming.md`** extended with workflow detection integration, Docker/MCP preference rules, 05-inputs auto-scan protocol, and example EPIC lookup (804 → 1450 lines); version bumped to 0.6.0
+- **`planner.md`** extended with Docker/MCP step injection rules in new Section 7.4; version bumped to 0.6.0
+- **`aid-init.md`** creates `05-inputs/` directory and copies inputs README during fresh init; upgrade mode includes the new directory and template file
+- **`aid-help.md`** includes new `inputs` help topic; version display updated to 0.6.0
+
 ## [0.5.0] — 2026-02-22
 
 ### Added

@@ -179,3 +179,28 @@ not_acceptable:
   - "breaking contract changes without migration plan"
   - "console.log / print() in production code"
   - "empty catch blocks"
+
+# ─── Curator Auto-Resolution Rules ───────────────────────────────────
+# Used by CURATOR_RESOLVE state to auto-evaluate improvement proposals.
+# PM can teach new rules via "always approve {pattern}" at PM_APPROVAL.
+curator_auto_rules:
+  # Explicit rules (deterministic, highest priority)
+  always_approve:
+    - { type: dx }                         # DX improvements always
+    - { type: security, priority: high }   # Critical security always
+    - { area: "docs/*" }                   # Documentation always
+
+  always_reject: []
+    # Example: - { type: refactoring, area: "legacy/*" }
+
+  always_defer:
+    - { type: architecture }               # Architecture changes need separate planning
+
+  # Default behavior when no rule matches and no Qdrant history found
+  default_action: approve   # approve | defer | reject
+
+  # Qdrant learning settings
+  learning:
+    enabled: true
+    similarity_threshold: 0.80   # Min similarity score for past-decision match
+    min_decisions: 3              # Min past decisions with same action to trust pattern

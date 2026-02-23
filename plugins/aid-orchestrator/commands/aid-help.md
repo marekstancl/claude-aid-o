@@ -14,7 +14,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `analytics`, `examples`, `faq`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `analytics`, `inputs`, `examples`, `faq`
 
 **Examples:**
 ```
@@ -31,6 +31,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help queue             # Epic queue + autonomous pipeline
 /aid-help memory            # Qdrant vector memory + semantic search
 /aid-help analytics          # performance analysis of orchestration metrics
+/aid-help inputs            # input files for brainstorming
 /aid-help examples          # interactive project prompts to try /aid-brainstorm
 /aid-help faq               # frequently asked questions
 ```
@@ -54,7 +55,7 @@ Display the complete AID overview:
 ```
 AID — AI Development Orchestrator
 ====================================
-Version: 0.5.0
+Version: 0.6.0
 
 What is AID?
   AID is a multi-agent orchestration system for Claude Code. It takes
@@ -91,8 +92,9 @@ Where things live:
   .aid-o/02-epics/      EPICs (task specs)
   .aid-o/03-config/     Configuration
   .aid-o/04-engine/     AI internals (sessions, evidence, memory)
+  .aid-o/05-inputs/     Sample data files for brainstorming
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | research | analytics | examples | faq
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | research | analytics | inputs | examples | faq
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -166,7 +168,7 @@ ORCHESTRATION COMMANDS:
     Start the Controller state machine.
     Usage: /aid-run-epic TEST-0001
     States: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK
-            → GATES → PM_APPROVAL → DONE
+            → GATES → CURATOR_RESOLVE → PM_APPROVAL → DONE
     PM checkpoints: plan review, escalation, final approval
     Auto-decisions: scope check, gate retry, step progression
 
@@ -259,6 +261,11 @@ Orchestration Flow:
                                           all pass
                                               │
                                               ▼
+                                      CURATOR_RESOLVE (auto-evaluate proposals)
+                                              │
+                                       proposals resolved
+                                              │
+                                              ▼
                                       PM_APPROVAL (PM checkpoint)
                                               │
                                           approved
@@ -269,8 +276,8 @@ Orchestration Flow:
 PM Interaction Points (via Slack or chat fallback):
   - PLAN_REVIEW: approve execution plan (GO / REVISE / ABORT)
   - ESCALATION: handle failures (fix / skip / abort)
-  - PM_APPROVAL: approve merge (APPROVE / REJECT / REVISE)
-  - CURATOR proposals: approve/defer/reject improvements
+  - PM_APPROVAL: approve merge, override rejected proposals ("fix IMP-{NNN}"),
+    teach auto-rules ("always approve {type/area}") (APPROVE / REJECT / REVISE)
   - AUDITOR summary: informational (no reply needed)
 
 Communication: skills/slack-mcp.md (Slack preferred, chat fallback)
@@ -409,12 +416,16 @@ Default Execution Order:
 SPECIALIST AGENTS (3) — triggered by specific events:
 
   CURATOR (agents/curator.md)
-    Triggered: after session-end (POST_PROCESSING)
+    Triggered: CURATOR_RESOLVE state (after gates pass, before PM_APPROVAL)
     Collects improvement_notes from all role agents, deduplicates
     against backlog, analyzes patterns, proposes improvements.
-    Flow: collect → deduplicate → analyze → propose → Orchestrator → PM
-    Output: curator_report + backlog.md updates
-    See: skills/improvement-proposals.md
+    Flow: collect → deduplicate → analyze → propose → auto-evaluate
+          → fix approved → PM sees summary at PM_APPROVAL
+    Auto-evaluate: 3-tier (YAML rules → Qdrant history → default)
+    PM can override rejections ("fix IMP-{NNN}") or teach rules
+    ("always approve {type}") at PM_APPROVAL.
+    Output: curator_resolve_report.json + backlog.md updates
+    See: skills/improvement-proposals.md, decision-policies.yaml → curator_auto_rules
 
   AUDITOR (agents/auditor.md)
     Triggered: after Epic DONE (post-merge)
@@ -739,7 +750,9 @@ SETUP:
 
   Type C — Merge Approval (expects reply)
     When: all gates pass, EPIC ready for merge
-    PM options: APPROVE / REJECT / REVISE
+    Includes: Curator Resolution summary (implemented/rejected/deferred)
+    PM options: APPROVE / REJECT / REVISE / Override ("fix IMP-{NNN}")
+               / Teach rule ("always approve {type}")
 
   Type D — Improvement Proposal (expects reply)
     When: Curator proposes improvement, Orchestrator approved
@@ -953,6 +966,47 @@ WHEN TO USE:
   - When optimizing: find the biggest bottlenecks to address
 
 Related: skills/memory-mcp.md (metric storage), skills/cost-optimization.md
+```
+
+---
+
+#### Topic: inputs
+
+```
+Input Files — Sample Data for Brainstorming
+====================================
+
+Place sample data files in .aid-o/05-inputs/ for AID to analyze during
+brainstorming sessions.
+
+SUPPORTED FORMATS:
+
+  PDF      AID detects page count, language, and document structure
+  CSV      AID reads headers, counts rows, and shows a sample
+  JSON     AID detects schema structure and top-level keys
+  Images   (PNG, JPG, etc.) AID describes visual content
+  Other    text files — AID notes filename and size
+
+HOW IT WORKS:
+
+  - During /aid-brainstorm, AID automatically scans .aid-o/05-inputs/ in Step 1
+  - Found files are analyzed and summarized:
+      PDF:  structure, page count, language
+      CSV:  headers + sample rows
+      JSON: schema + top-level keys
+  - You can also point AID to files outside this directory during brainstorming
+  - Files are read-only — AID never modifies or moves your input files
+  - Maximum 10 files are analyzed per session
+
+ALTERNATIVE:
+
+  You can reference any file by path during brainstorming.
+  Just say "look at ./data/customers.json" and AID will analyze it.
+
+SETUP:
+
+  Created automatically by /aid-init.
+  Or create manually: mkdir -p .aid-o/05-inputs
 ```
 
 ---

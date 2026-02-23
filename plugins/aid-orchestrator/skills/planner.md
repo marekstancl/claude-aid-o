@@ -1,6 +1,6 @@
 # Planner — Plan Generation from EPIC
 
-**Version:** 0.4.0
+**Version:** 0.6.0
 **Skill:** planner
 **Dependencies:** epic-orchestration
 
@@ -338,8 +338,9 @@ When the EPIC does not fully specify step ordering, apply these defaults based o
 | Priority | Role | Reason |
 |----------|------|--------|
 | 1 | architect | Contracts before implementation |
-| 2 | domain | Needs contracts, before implementation |
-| 3 | backend, frontend | Parallel — both depend on contracts |
+| 1.5 | docker (conditional) | Infrastructure before implementation; only when docker_recommended (Section 7.4) |
+| 2 | domain | Needs contracts, before implementation; parallel with docker when both present |
+| 3 | backend, frontend | Parallel — both depend on contracts (and docker step when present) |
 | 4 | qa, security, observability | Parallel — all depend on implementation |
 | 5 | docs | After implementation |
 | 6 | release | Last — needs all gates to pass |
@@ -349,12 +350,15 @@ When the EPIC does not fully specify step ordering, apply these defaults based o
 ```
 RULE 1: EPIC explicit ordering ALWAYS overrides defaults.
 RULE 2: No ordering specified → apply full default chain:
-        architect → domain → [backend, frontend] → [qa, security, observability] → docs → release
+        architect → [docker, domain] → [backend, frontend] → [qa, security, observability] → docs → release
+        (docker step only present when docker_recommended == true per Section 7.4)
 RULE 3: Partial ordering → keep EPIC deps, fill missing from default table.
         Find unspecified step's role in priority table → add deps to nearest
         higher-priority role(s) present in the EPIC.
 RULE 4: Role not in EPIC → skip (not all EPICs use all 9 roles).
+        Docker step is only present when injected by Section 7.4 rules.
 RULE 5: Same-priority roles without explicit ordering → parallel group.
+        Docker and domain run in parallel when both are present (both depend on architect).
 ```
 
 ### Example — Partial Specification
@@ -609,6 +613,10 @@ This is the master procedure the Planner follows when `/plan-epic` is invoked.
  2. PARSE steps → extract (role, objective, depends_on[], outputs[], paths, constraints) → assign step_ids
  2.1. AUTO-SCAFFOLD DETECTION (Section 7.3):
       Check project-profile.yaml → if uninitialized → generate step_0_scaffold → PM confirms
+ 2.1b DOCKER/MCP STEP INJECTION (Section 7.4):
+      Check brainstorming plan for docker_recommended → if true → inject Docker step
+      If MCP servers recommended → merge MCP config into Docker step
+      If workflow project → add workflow-intelligence.md template constraints
  2.2. STEP DECOMPOSITION (Section 2b):
       a. Detect EPIC type from artifacts (dev / docs / infra / mixed)
       b. For each step, evaluate split criteria:
@@ -840,6 +848,140 @@ When step_0_scaffold is included:
 - Steps that already have dependencies are NOT modified (their transitive dependency
   through other steps is sufficient)
 - This ensures scaffold completes before any implementation begins
+
+---
+
+## 7.4 Docker/MCP Step Injection
+
+When the brainstorming plan recommends Docker, the Planner injects a "Docker Compose setup"
+step into the plan. MCP server configuration is always part of this Docker step -- never a
+separate step. This section defines when and how the Docker step is injected, and where it
+sits in the dependency graph.
+
+### Injection Rules
+
+```
+WHEN: Generating plan steps from the approved brainstorming plan/EPIC.
+
+IF brainstorming plan includes docker_recommended == true:
+  1. ADD a "Docker Compose setup" step to the plan:
+     - step_id: step_{N}_docker (N assigned by position in sequence)
+     - role: backend
+     - objective: "Create Docker Compose configuration for the project"
+     - outputs: ["docker-compose.yml", ".env.example"]
+     - constraints: ["Follow platform-specific Docker template from
+       workflow-intelligence.md if workflow project"]
+     - Position: AFTER architect step, BEFORE other backend steps
+       (see Step Ordering below)
+
+  2. IF MCP servers were recommended in brainstorming:
+     - MCP server configuration is PART of the Docker step (never a separate step)
+     - Update Docker step objective to:
+       "Create Docker Compose configuration for the project, including
+        MCP server containers"
+     - Add to outputs: ["mcp-config.json"]
+     - The Docker step's acceptance_criteria MUST include:
+       "MCP server containers defined in docker-compose.yml with correct
+        port mappings and environment variables"
+
+  3. IF workflow project detected (from project-profile.yaml or brainstorming):
+     - Docker Compose template comes from workflow-intelligence.md platform knowledge
+     - Docker step constraints add:
+       "Include platform-specific services from workflow-intelligence.md
+        (vectorstore, workers, message broker, etc.)"
+     - Docker step relevant_files includes:
+       "workflow-intelligence.md (platform Docker template reference)"
+
+  4. IF docker_recommended == false OR not present:
+     - Do NOT add a Docker step
+     - Do NOT generate docker-compose.yml in any step's outputs
+     - Do NOT mention Docker anywhere in the plan
+
+  5. IF brainstorming plan includes constraint "PM decided: no Docker":
+     - Do NOT add a Docker step regardless of other signals
+     - Respect PM decision unconditionally
+```
+
+### Step Ordering
+
+```
+Docker step placement in the dependency graph:
+
+  architect → Docker Compose setup → backend → frontend → ...
+
+Dependency rules:
+  a. Docker step depends_on: [step_{M}_architect]
+     Reason: Docker Compose needs architecture decisions (services, ports,
+     data stores) defined by the architect step before it can be configured.
+
+  b. Backend steps depend_on: [step_{N}_docker]
+     Reason: Backend implementation references docker-compose.yml for
+     service names, ports, database connection strings, and environment
+     variables.
+
+  c. Frontend steps depend_on: [step_{N}_docker]
+     Reason: Frontend container definition lives in docker-compose.yml.
+     Frontend development server configuration references compose services.
+
+  d. If step_0_scaffold exists:
+     scaffold → architect → Docker → backend/frontend
+     Docker step does NOT depend on scaffold directly (transitive through
+     architect is sufficient).
+
+  e. Domain step (if present) runs parallel with Docker step:
+     architect → [domain ‖ Docker] → backend
+     Domain does not need Docker. Docker does not need domain models.
+     Both depend on architect. Backend depends on both.
+```
+
+### Example — Plan With Docker Step
+
+```
+EPIC with docker_recommended == true and MCP servers recommended:
+
+  step_1_architect:  "Define API contracts and ADRs"
+    depends_on: []
+
+  step_2_docker:     "Create Docker Compose configuration, including MCP server containers"
+    depends_on: [step_1_architect]
+    role: backend
+    outputs: [docker-compose.yml, .env.example, mcp-config.json]
+
+  step_3_domain:     "Define domain entities and invariants"
+    depends_on: [step_1_architect]
+
+  step_4_backend:    "Implement REST API endpoints"
+    depends_on: [step_2_docker, step_3_domain]
+
+  step_5_frontend:   "Implement UI components"
+    depends_on: [step_2_docker, step_1_architect]
+
+Wave assembly result:
+  wave 0: [step_1_architect]
+  wave 1: [step_2_docker, step_3_domain]       ← parallel
+  wave 2: [step_4_backend, step_5_frontend]    ← parallel
+```
+
+### Integration with Plan Generation Flow
+
+Docker step injection runs at step 2.1 of the master procedure (Section 7), alongside
+Auto-Scaffold Detection. The sequence is:
+
+```
+2.   PARSE steps
+2.1. AUTO-SCAFFOLD DETECTION (Section 7.3)
+2.1b DOCKER/MCP STEP INJECTION (this section):
+     a. Check brainstorming plan for docker_recommended flag
+     b. If true: generate Docker step, wire dependencies
+     c. If MCP servers recommended: merge into Docker step
+     d. If workflow project: add workflow-intelligence.md constraints
+2.2. STEP DECOMPOSITION (Section 2b)
+3.   RESOLVE ordering
+```
+
+The Docker step is injected BEFORE step decomposition so that decomposition rules
+can evaluate it normally (though Docker steps rarely meet decomposition criteria
+since they produce only 2-3 files).
 
 ---
 
@@ -1164,6 +1306,9 @@ And sets EPIC frontmatter: `sessions_total: 2`
 10. **ALWAYS preserve EPIC-defined analysis groups** even if no auto-trigger rules match
 11. **NEVER hardcode gates** — ALWAYS read from gates.yaml and include all required gates (V-16)
 12. **ALWAYS write frontmatter counters** when creating plans (epics_total) and EPICs (sessions_total)
+13. **NEVER add Docker steps when docker_recommended is false or absent** — Docker is opt-in only (Section 7.4)
+14. **NEVER create a separate MCP step** — MCP configuration is always part of the Docker step (Section 7.4)
+15. **ALWAYS respect "PM decided: no Docker"** constraint — overrides docker_recommended flag
 
 ---
 
@@ -1171,10 +1316,12 @@ And sets EPIC frontmatter: `sessions_total: 2`
 
 - `commands/aid-plan-epic.md` -- command that invokes this skill
 - `skills/epic-orchestration.md` -- PLANNING state references this skill (Section 2)
+- `skills/brainstorming.md` -- produces docker_recommended flag consumed by Section 7.4
+- `skills/workflow-intelligence.md` -- platform-specific Docker Compose templates for workflow projects (Section 7.4)
 - `defaults/templates/plan.schema.json` -- Plan JSON schema (includes analysis_groups)
 - `workspace/workflow/plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md` -- Plan D-011 (analysis_groups design decision)
 
 ---
 
-**Version:** 0.4.0
-**Last Updated:** 2026-02-20
+**Version:** 0.6.0
+**Last Updated:** 2026-02-23

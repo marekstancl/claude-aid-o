@@ -62,6 +62,27 @@ Output:
 - Knowledge transfer: lessons from fast projects applicable to slow ones
 - Token comparison: which projects are most/least efficient
 
+### 4. Improvement Pipeline (included in EPIC and Project reports)
+
+**EPIC-level section** (appended to EPIC Report):
+
+Query: `stage_log` entries with `state=CURATOR_RESOLVE` for `{epic_id}` + `backlog.md` entries with `epic_ref={epic_id}`
+
+Output:
+- Curator Activity: proposals generated, auto-approved, auto-rejected, PM overrides
+- Lessons Extracted: new lessons, new gotchas, duplicates skipped, cross-project matches
+- Fix Effectiveness: fixes implemented, files modified, fix agent models used
+
+**Project-level section** (appended to Project Trends):
+
+Query: all `backlog.md` entries + Qdrant `curator_decision` entries for `{project_name}`
+
+Output:
+- Backlog Health: total/active/implemented/rejected/deferred counts, implementation rate
+- Recurring Issues: top hotspot areas, proposals persisting 3+ EPICs
+- Learning Progress: auto-rules count, Qdrant decisions, auto-resolve accuracy (PM override rate)
+- Lessons Trends: per-EPIC lesson/gotcha/duplicate counts
+
 ## How to Query Qdrant
 
 Use the memory-mcp search tool:
@@ -106,6 +127,22 @@ For cross-project comparison:
     "must": [
       {"key": "type", "match": {"value": "metric"}},
       {"key": "metric_kind", "match": {"value": "epic_summary"}}
+    ]
+  },
+  "limit": 100
+}
+```
+
+For curator auto-evaluate decisions (Improvement Pipeline):
+
+```json
+{
+  "collection_name": "aid-memory",
+  "query": "curator auto-evaluate decisions for {project_name}",
+  "filter": {
+    "must": [
+      {"key": "type", "match": {"value": "curator_decision"}},
+      {"key": "project_name", "match": {"value": "{project_name}"}}
     ]
   },
   "limit": 100

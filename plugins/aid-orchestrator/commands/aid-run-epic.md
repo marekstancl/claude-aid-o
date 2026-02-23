@@ -434,7 +434,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
    - Apply auto-decision rules from `decision-policies.yaml`
 
 **Transition:**
-- `overall: "pass"` → PM_APPROVAL
+- `overall: "pass"` → CURATOR_RESOLVE
 - `overall: "fail"` + retries remaining for any failed gate → GATE_RETRY
 - `overall: "fail"` + all retries exhausted → ESCALATION
 
@@ -553,6 +553,38 @@ After a step passes PHASE_CHECK, check for pending analysis:
 
 ---
 
+### State: CURATOR_RESOLVE
+
+> **Reference:** Read `skills/epic-orchestration.md` section 10 for the complete protocol.
+
+**Trigger:** All gates passed (transition from GATES).
+
+**Actions:**
+1. Dispatch **Curator agent** (`agents/curator.md`, model: sonnet) and **Lessons-Extractor agent**
+   (`agents/lessons-extractor.md`, model: haiku) in parallel:
+   - Curator inputs: all step outputs, gate results, final report
+   - LE inputs: active session file, git log and diff
+   - Log: `{"state": "CURATOR_RESOLVE", "action": "dispatch_parallel", "details": "Curator + Lessons-Extractor dispatched"}`
+2. Process Curator output — for each proposal, run **Auto-Evaluate Algorithm**
+   (3-tier: YAML rules → Qdrant history → default action) per `decision-policies.yaml` → `curator_auto_rules`
+3. Process LE output — 3-layer dedup (text >90%, semantic >80%, Qdrant >0.85),
+   write to `lessons-learned.md` and `command-history.md`, store to Qdrant
+4. Dispatch fix agents for all APPROVED proposals — store fixes in
+   `evidence/{epic_id}/{run_id}/curator_fixes/fix_{IMP_id}/`
+5. Compile summary block (`curator_resolve_report.json`) with implemented/rejected/deferred counts
+6. Log transition: `{"state": "CURATOR_RESOLVE", "action": "transition", "details": "..."}`
+
+**Transition:** → PM_APPROVAL (always — even if 0 proposals)
+
+**Evidence:**
+- `curator_resolve_report.json` — structured summary of all proposals and decisions
+- Updated `backlog.md` — proposal statuses updated per auto-evaluate decisions
+- Updated `lessons-learned.md`, `command-history.md` — new entries from LE
+- `curator_fixes/fix_{IMP_id}/` — fix evidence per approved proposal
+- Entries in `stage_log.jsonl` for each sub-step
+
+---
+
 ### State: PM_APPROVAL
 
 **Actions:**
@@ -626,11 +658,10 @@ After a step passes PHASE_CHECK, check for pending analysis:
    ## Evidence
    All artifacts: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
    ```
-4. **POST-PROCESSING (Auditor + Lessons-Extractor)** (per `skills/epic-orchestration.md` DONE state):
+4. **POST-PROCESSING (Auditor)** (per `skills/epic-orchestration.md` DONE state):
    a. Dispatch **Auditor agent** (`agents/auditor.md`) — runs 5 audit types
-   b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`)
-   c. If Auditor fails: log warning, note "audit incomplete" in final report, continue
-   d. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
+   b. If Auditor fails: log warning, note "audit incomplete" in final report, continue
+   c. Auditor summary → PM via Slack (per `skills/slack-mcp.md` Type F — Audit Summary)
 5. **Memory indexing** (per `skills/memory-mcp.md` → `memory_index_epic()`):
    - Read `.aid-o/03-config/policies/memory-config.yaml`
    - IF `memory.enabled` AND `memory.auto_index.epic_done`:
@@ -640,23 +671,17 @@ After a step passes PHASE_CHECK, check for pending analysis:
      - Index audit findings from audit-report.md → `qdrant-store` (type: audit_finding)
      - IF `memory.auto_index.gate_results`: index gates summary → `qdrant-store` (type: audit_finding)
    - IF disabled or fails → skip silently, DONE continues normally
-6. **Archive Logic** (per `skills/epic-orchestration.md` DONE state item 8):
+6. **Archive Logic** (per `skills/epic-orchestration.md` DONE state item 6):
    - Archive session, update EPIC counter, conditionally archive EPIC and plan
    - EPIC archived only when `sessions_completed == sessions_total`
    - Plan archived only when `epics_completed == epics_total`
-7. **Curator Post-Processing (MANDATORY — synchronous):**
-   - Dispatch Curator agent with all step outputs, gate results, final report
-   - Wait for Curator output (NOT in background)
-   - Write proposals to backlog.md
-   - Include proposal count in completion summary
-   - If Curator fails: log warning, set proposal_count = 0, continue
-8. **Completion Summary** (per `skills/epic-orchestration.md` DONE state item 10):
+7. **Completion Summary** (per `skills/epic-orchestration.md` DONE state item 8):
    Present the structured Completion Summary from `skills/epic-orchestration.md`
    DONE state section. This is the last thing the PM sees -- make it informative
    and actionable. Includes step count, gates, duration, key outputs, and 5
    next-step options (/aid-review, /aid-brainstorm, /aid-plan-epic, /aid-audit, /aid-analytics).
-9. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
-10. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
+8. Send Status Update: `:checkered_flag: EPIC completed — merged to main`
+9. **EPIC QUEUE CHECK** (per `skills/epic-queue.md`):
     a. Read `.aid-o/04-engine/epic-queue.yaml`
     b. IF queue is not paused AND next EPIC exists (status: "queued"):
        - Mark next EPIC as "running" in queue
@@ -665,7 +690,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
     c. ELSE:
        - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
        - Print completion message
-11. **Final Stage Log Entry** (MUST be the LAST action in DONE state)
+10. **Final Stage Log Entry** (MUST be the LAST action in DONE state)
 
 **Evidence:** Save `final_report.md`.
 
