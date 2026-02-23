@@ -96,17 +96,17 @@ See `skills/knowledge-acquisition.md` for full protocol.
 ## Workflow Routing Decision Tree
 
 ```
-PM zada ukol:
-├── Jednorazovy (1 session)
+PM assigns a task:
+├── One-off (1 session)
 │   ├── Bug → Detective role → debugging skill → session
 │   ├── Feature → Architect role → brainstorming → session
-│   └── Refaktoring → Safety Officer role → session
-├── Vicesession (3+)
+│   └── Refactoring → Safety Officer role → session
+├── Multi-session (3+)
 │   └── Epic → .aid-o/02-epics/
-├── Design/plan (bez implementace)
+├── Design/plan (no implementation)
 │   └── Plan → .aid-o/01-plans/
 ├── Brainstorming
-│   └── → vysledek: Plan NEBO Session (PM rozhodne)
+│   └── → result: Plan OR Session (PM decides)
 ├── Audit/Review
 │   ├── Project health audit → /aid-audit command → project-audit skill
 │   ├── Code review → code-reviewer agent / requesting-code-review superpower
@@ -114,10 +114,10 @@ PM zada ukol:
 └── Revert/Rollback
     └── → git-workflow skill (Revert/Rollback section)
 
-NIKDY:
-- Epic do plans/
-- Plan do epics/
-- Session file do workflow/
+NEVER:
+- Epic into plans/
+- Plan into epics/
+- Session file into .aid-o/
 ```
 
 **Complexity assessment (at session start):**
@@ -489,4 +489,4 @@ Project configuration is stored in `.aid-o/04-engine/memory/project-profile.yaml
 
 ---
 
-**Version:** 4.0.0 | **Philosophy:** Context → Role → Decision → Action | **Approach:** On-Demand + Think-First + Quality Gates
+**Version:** 0.8.2 | **Philosophy:** Context → Role → Decision → Action | **Approach:** On-Demand + Think-First + Quality Gates
