@@ -1,12 +1,12 @@
 ---
 name: aid-brainstorm
-description: 10-step interactive brainstorming flow
+description: 11-step interactive brainstorming flow
 user_invocable: true
 ---
 
 Interactive brainstorming run — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
 
-This command guides PM through a structured 10-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
+This command guides PM through a structured 11-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
 
 ## Usage
 
@@ -57,7 +57,22 @@ I'll help you explore this idea step by step.
 Let's start with some questions to understand what you need.
 ```
 
-### Step 2: Questions
+### Step 2: Analysis
+
+Present a structured analysis of the PM's topic before asking any questions. Follow the Initial Analysis Phase protocol from `skills/brainstorming.md`.
+
+1. Based on context gathered in Step 1, present a brief structured analysis (5-8 lines max):
+   - **What I understand from your topic** — paraphrase + key aspects identified
+   - **Key dimensions I see** — technical, organizational, integration, risk
+   - **Potential challenges** — what could go wrong, what needs careful decisions
+   - **What I need to clarify** — preview of question areas (not the questions themselves)
+2. Ask PM: "Is this understanding correct, or should I adjust my focus before we continue?"
+3. If PM corrects: acknowledge, restate corrected understanding, then proceed
+4. If PM confirms: proceed to Step 3 (Questions)
+
+**Transition:** When PM confirms understanding, move to Step 3.
+
+### Step 3: Questions
 
 Ask PM clarifying questions to understand requirements, constraints, and goals. Follow the questioning protocol from `skills/brainstorming.md`.
 
@@ -81,13 +96,13 @@ Ask PM clarifying questions to understand requirements, constraints, and goals. 
 | **Timeline** | "How urgent? (A) This sprint (B) This quarter (C) When it's ready" |
 | **Success** | "How will you know this succeeded?" |
 
-**Transition:** When enough context is gathered, summarize what you've learned and move to Step 3.
+**Transition:** When enough context is gathered, summarize what you've learned and move to Step 4.
 
-### Step 3: Approaches
+### Step 4: Approaches
 
 Propose 2-3 distinct approaches with tradeoffs and a recommendation.
 
-1. Based on the answers from Step 2, generate 2-3 approaches
+1. Based on the answers from Step 3, generate 2-3 approaches
 2. Each approach MUST include:
    - **Name** — short descriptive label
    - **Summary** — 2-3 sentences explaining the approach
@@ -127,11 +142,11 @@ Which approach? (A/B/C/modify)
 
 **If PM asks for modifications:** Incorporate feedback, present a revised option, and confirm.
 
-### Step 4: Design
+### Step 5: Design
 
 Present the chosen approach as a structured design with PM input.
 
-1. Take the chosen approach (or modified version) from Step 3
+1. Take the chosen approach (or modified version) from Step 4
 2. Expand it into a structured design covering:
    - **Architecture** — components, data flow, integration points
    - **Data model** — key entities, relationships, storage
@@ -144,7 +159,7 @@ Present the chosen approach as a structured design with PM input.
 
 **Detail by default:** Provide comprehensive detail without PM asking for it. Include specifics like field names, endpoint paths, error handling strategies. PM can always say "simplify" but should never need to say "add more detail."
 
-### Step 5: Sections
+### Step 6: Sections
 
 Walk through the design section by section, getting approval for each.
 
@@ -165,9 +180,9 @@ Walk through the design section by section, getting approval for each.
      [ ] Testing Strategy — pending
      [ ] Risks — pending
    ```
-4. After all sections reviewed, move to Step 6
+4. After all sections reviewed, move to Step 7
 
-### Step 6: Approval
+### Step 7: Approval
 
 Final design approval from PM.
 
@@ -178,18 +193,18 @@ Final design approval from PM.
    Design Summary
    ====================================
    All sections reviewed:
-     {section statuses from Step 5}
+     {section statuses from Step 6}
 
    Ready to write the plan document?
    (Y) Approve and write plan
    (N) Go back to a section
    (X) Abort brainstorming
    ```
-4. If PM says Y: proceed to Step 7
-5. If PM says N: ask which section to revisit, return to Step 5 for that section
+4. If PM says Y: proceed to Step 8
+5. If PM says N: ask which section to revisit, return to Step 6 for that section
 6. If PM says X: end brainstorming, no files written
 
-### Step 7: Document
+### Step 8: Document
 
 Write the validated design to a plan file.
 
@@ -202,7 +217,7 @@ Write the validated design to a plan file.
    - **Note:** The conversation with PM stays in PM's language regardless of document language
 4. Write plan to `.aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md` using the plan template structure:
    - Frontmatter: id, type (plan), status (draft), created, author (PM + AI)
-   - Context: why this plan exists (from Step 1-2)
+   - Context: why this plan exists (from Step 1-3)
    - Goal: one-sentence desired outcome
    - Scope: in-scope and out-of-scope items
    - Approach: chosen option with pros/cons, rejected alternatives summarized
@@ -217,16 +232,16 @@ Write the validated design to a plan file.
    Plan written: .aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md
    ```
 
-### Step 8: EPIC Subagent
+### Step 9: EPIC Subagent
 
 Generate an EPIC draft from the approved plan using the EPIC subagent prompt template from `skills/brainstorming.md`.
 
-1. Read the plan file just created (Step 7)
+1. Read the plan file just created (Step 8)
 2. Read `skills/brainstorming.md` Section "EPIC Subagent Prompt Template"
 3. Read `.aid-o/04-engine/memory/project-profile.yaml` for tech stack context
 4. Read `.aid-o/03-config/templates/epic.md` for the EPIC template structure
 5. Determine output language:
-   - Same logic as Step 7: use `language.yaml` → `document_language` if `scope.plans: true`
+   - Same logic as Step 8: use `language.yaml` → `document_language` if `scope.plans: true`
 6. Generate EPIC draft:
    - EPIC ID: `E-{YYYYMMDD}-{4char-hash}`
    - Fill all EPIC template sections from the approved plan:
@@ -247,7 +262,7 @@ Generate an EPIC draft from the approved plan using the EPIC subagent prompt tem
    EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
    ```
 
-### Step 9: Execution Plan Option
+### Step 10: Execution Plan Option
 
 After the EPIC draft is written, offer PM the option to generate the execution plan immediately.
 
@@ -263,11 +278,11 @@ After the EPIC draft is written, offer PM the option to generate the execution p
    ```
 
 2. If PM says N (or skip, later, no):
-   → Proceed to Step 10 (handoff — present A-D options)
+   → Proceed to Step 11 (handoff — present A-D options)
 
 3. If PM says Y (or yes, go, generate):
    → Execute the plan-epic flow inline:
-   a. Use the EPIC file just written in Step 8 as input
+   a. Use the EPIC file just written in Step 9 as input
    b. Skip format detection (we know it's a valid EPIC — we just generated it)
    c. Follow `commands/aid-plan-epic.md` Steps 3-9 exactly:
       - Step 3: Load and Validate EPIC
@@ -277,9 +292,9 @@ After the EPIC draft is written, offer PM the option to generate the execution p
       - Step 7: Save Plan JSON (plan.json + plan_progress.json + epic_input.md)
       - Step 8: Generate Run File
       - Step 9: Present Output
-   d. After plan-epic completes → proceed to Step 10 (handoff — present A-D options)
+   d. After plan-epic completes → proceed to Step 11 (handoff — present A-D options)
 
-### Step 10: Handoff
+### Step 11: Handoff
 
 Present interactive options based on the completed brainstorming run.
 
@@ -307,18 +322,18 @@ Present interactive options based on the completed brainstorming run.
    ```
 
 **Option A — Re-open brainstorming:**
-1. Load existing plan from Step 7
+1. Load existing plan from Step 8
 2. Display already-approved sections
-3. Return to Step 2 with existing context
+3. Return to Step 3 with existing context
 4. New requirements ADD to the plan (never overwrite approved sections)
-5. Re-present modified sections for approval (Step 5)
-6. Re-write plan file (Step 7)
-7. Re-generate EPIC draft (Step 8)
-8. Return to Step 10
+5. Re-present modified sections for approval (Step 6)
+6. Re-write plan file (Step 8)
+7. Re-generate EPIC draft (Step 9)
+8. Return to Step 11
 
 **Option B — Create EPIC for all phases:**
-1. Use the EPIC draft from Step 8 as-is (covers all High-Level Steps)
-2. Proceed to Step 9 (Execution Plan Option) — ask if PM wants Plan JSON now
+1. Use the EPIC draft from Step 9 as-is (covers all High-Level Steps)
+2. Proceed to Step 10 (Execution Plan Option) — ask if PM wants Plan JSON now
 3. If Y: generate Plan JSON inline, present full pipeline handoff
 4. If N: present plan + EPIC file paths
 
@@ -330,7 +345,7 @@ Present interactive options based on the completed brainstorming run.
    - List external dependencies from other phases
    - Add context note: "This EPIC covers Phase {N} of {total}"
 3. Save phase-specific EPIC to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}-phase-{N}.md`
-4. Proceed to Step 9 (Execution Plan Option)
+4. Proceed to Step 10 (Execution Plan Option)
 
 **Option D — Stop here:**
 ```
@@ -347,7 +362,7 @@ Next steps:
 ## Reference Files
 
 - `skills/brainstorming.md` — process rules, key principles, EPIC subagent prompt template, language handling
-- `commands/aid-plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 9 inline execution)
+- `commands/aid-plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 10 inline execution)
 - `skills/planner.md` — plan generation logic (downstream from brainstorming)
 - `defaults/templates/plan.md` — plan document template
 - `defaults/templates/epic.md` — EPIC template

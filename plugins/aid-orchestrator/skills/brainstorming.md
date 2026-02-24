@@ -73,6 +73,61 @@ Minimize cognitive load on PM. Every interaction should be easy to process.
 
 ---
 
+## Initial Analysis Phase
+
+Before asking any questions, the AI must present a brief structured analysis of the PM's topic. This ensures shared understanding, surfaces misinterpretations early, and makes subsequent questions more targeted.
+
+### When It Triggers
+
+This phase activates after the AI has read the PM's topic description and all gathered context (project profile, knowledge results, input files) but **before** the questioning phase (Step 1) begins. It is mandatory for every brainstorming run.
+
+### Analysis Protocol
+
+```
+RULE 1: After reading the PM's topic and all available context, PRESENT a structured
+        analysis BEFORE asking any questions. This is mandatory.
+RULE 2: The analysis output must be 5-8 lines maximum. Conciseness is critical —
+        PM's attention is the bottleneck.
+RULE 3: Structure the analysis with these four elements:
+        - "What I understand from your topic" — paraphrase the request + key aspects identified
+        - "Key dimensions I see" — technical, organizational, integration, risk dimensions
+        - "Potential challenges" — what could go wrong, what needs careful decisions
+        - "What I need to clarify" — preview of question areas (not the questions themselves)
+RULE 4: After presenting the analysis, WAIT for PM confirmation before proceeding
+        to questions. Ask: "Is this understanding correct, or should I adjust
+        my focus before we continue?"
+RULE 5: If PM corrects misunderstandings, ACKNOWLEDGE the correction, briefly restate
+        the corrected understanding, and then proceed to questioning.
+RULE 6: For trivial or straightforward topics, state "Straightforward topic, minimal
+        analysis needed" and keep the analysis to 3-4 lines. Skip dimensions or
+        challenges that do not apply.
+RULE 7: Do NOT turn this phase into a mini-brainstorm. No solution proposals,
+        no architecture suggestions — only understanding and scoping.
+RULE 8: The analysis must reflect knowledge context when available. If knowledge
+        search returned relevant patterns or past decisions, reference them briefly
+        (e.g., "I see a similar feature was built in project X").
+```
+
+### Example Output
+
+```
+**What I understand from your topic:** You want to add webhook support so external
+services can subscribe to events in the system — primarily for integration partners.
+
+**Key dimensions I see:** API design (endpoint structure, auth), event model (which
+events, payload format), reliability (retry logic, delivery guarantees), security.
+
+**Potential challenges:** Ensuring at-least-once delivery without duplicates; scaling
+webhook dispatch without blocking the main request path; secret rotation for signatures.
+
+**What I need to clarify:** Target consumers and their technical sophistication;
+expected event volume; whether this replaces or supplements existing polling APIs.
+
+Is this understanding correct, or should I adjust my focus before we continue?
+```
+
+---
+
 ## Knowledge-Augmented Brainstorming
 
 When knowledge acquisition is configured, the brainstorming run is augmented with
@@ -302,11 +357,11 @@ IF defaults/examples/ directory does NOT exist OR is empty:
   -> Skip SOURCE 1 silently. No error, no log, no message to PM.
   -> Proceed to SOURCE 2.
 ELSE:
-  FOR EACH file IN defaults/examples/:
+  FOR EACH file IN defaults/examples/**/*.md:
     frontmatter = parse_frontmatter(file)
     # Expected frontmatter fields: type, archetype, frameworks, platforms,
     #   ui, complexity, description
-    IF frontmatter.type != "example_epic":
+    IF frontmatter.type != "example":
       SKIP file
 
     score = 0
@@ -906,7 +961,9 @@ CONSTRAINT RECORDING:
 
 ```
 RULE 1: ONE question at a time. Never ask 2+ questions in one message.
-RULE 2: Prefer MULTIPLE CHOICE (A/B/C). Open-ended only when options are unknowable.
+RULE 2: ALWAYS use MULTIPLE CHOICE with recommendation (A/B/C — recommended: X because Y).
+        Open-ended ONLY for factual questions (names, URLs, numbers) where options
+        cannot be predicted.
 RULE 3: After each answer, ACKNOWLEDGE and SUMMARIZE before next question.
 RULE 4: 3-7 questions total. Stop when you can propose approaches.
 RULE 5: If PM gives a short answer, INFER defaults and CONFIRM:
@@ -920,6 +977,11 @@ RULE 9: When workflow_detected == true, interleave workflow inserts (WF1-WF6)
         at the points defined in "Workflow Question Inserts" above.
         Total questions (standard + workflow) must not exceed 12.
         See skills/workflow-intelligence.md for insert details.
+RULE 10: Every question that involves a directional choice MUST present 2-3
+         structured options with labels (A/B/C), descriptions, and a
+         recommendation with reasoning.
+RULE 11: For each recommended option, briefly state why the alternatives are
+         less suitable — not just why the recommendation is good.
 ```
 
 ### Approach Exploration Protocol
@@ -1425,6 +1487,9 @@ Reference: skills/workflow-intelligence.md for full protocol details
 12. **NEVER exceed 12 total questions** — standard questions (3-7) plus workflow inserts (0-5) combined
 13. **ALWAYS recommend Docker Compose when project has 2+ services** — PM can decline but recommendation is mandatory; applies to ALL project types, not just workflows
 14. **NEVER mention Docker/MCP again after PM declines** — record as constraint once, respect PM's decision for the entire run, do not hint or include as optional
+15. **ALWAYS present initial analysis before first question** — the AI must demonstrate understanding of the topic before asking anything (see Initial Analysis Phase section)
+16. **ALWAYS present 2-3 options with recommendation at every directional decision point** — questions involving direction, approach, or trade-off choices must use structured options with labeled alternatives and a recommended choice with reasoning
+17. **ALWAYS explain why alternatives are less suitable** — for each recommendation, state not just why the chosen option is good but specifically why the other options are less appropriate for this context
 
 ---
 
