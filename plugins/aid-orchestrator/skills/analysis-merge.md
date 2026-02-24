@@ -336,9 +336,9 @@ Step X completes → PHASE_CHECK pass → NEXT_PHASE
   │   ├── 4. GENERATE analysis_report (Section 5 format)
   │   │
   │   ├── 5. SAVE evidence:
-  │   │      evidence/{epic_id}/{run_id}/analysis/analysis_{N}_{purpose}/
-  │   │        raw_{agent}.yaml          # Each agent's raw output
-  │   │        analysis_report.yaml      # Merged report
+  │   │      evidence/{epic_id}/{run_id}/steps/step_{target}_{role}/
+  │   │        analysis_{N}_{purpose}_raw_{agent}.yaml   # Each agent's raw output
+  │   │        analysis_{N}_{purpose}_report.yaml        # Merged report
   │   │
   │   ├── 6. EVALUATE criticality:
   │   │      - Any critical findings → ESCALATION
@@ -355,16 +355,14 @@ Step X completes → PHASE_CHECK pass → NEXT_PHASE
 ### Evidence Directory Structure
 
 ```
-evidence/{epic_id}/{run_id}/analysis/
-  analysis_1_security_review/
-    raw_security.yaml
-    raw_backend.yaml
-    raw_architect.yaml
-    analysis_report.yaml
-  analysis_2_architecture_audit/
-    raw_architect.yaml
-    raw_domain.yaml
-    analysis_report.yaml
+evidence/{epic_id}/{run_id}/steps/step_{target}_{role}/
+  analysis_1_security_review_raw_security.yaml
+  analysis_1_security_review_raw_backend.yaml
+  analysis_1_security_review_raw_architect.yaml
+  analysis_1_security_review_report.yaml
+  analysis_2_architecture_audit_raw_architect.yaml
+  analysis_2_architecture_audit_raw_domain.yaml
+  analysis_2_architecture_audit_report.yaml
 ```
 
 ### Curator Integration

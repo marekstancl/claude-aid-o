@@ -113,7 +113,7 @@ All paths are relative to `evidence/{epic_id}/{run_id}/`.
 |---|-------|----------|-----------|------|
 | 10 | Step count consistency | Medium | -5 | Number of steps listed in `final_report.md` equals number of steps in `plan.json` |
 | 11 | Gate results consistency | Medium | -5 | Gate pass/fail results in `final_report.md` match values in `gates_report.json`. If `gates_report.json` is absent, skip this check entirely (not a finding). |
-| 12 | Discovered issues tracked | Medium | -5 each | Every discovered-issues section in agent `output.md` files has a corresponding entry in `evidence/discovered_issues/`. Deduction applied per untracked issue. |
+| 12 | Discovered issues tracked | Medium | -5 each | Every discovered-issues section in agent `output.md` files has a corresponding `discovered_issues.md` in `steps/step_{N}_{role}/`. Deduction applied per untracked issue. |
 
 #### F.4) Stage Log Integrity (1 check)
 
