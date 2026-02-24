@@ -1,6 +1,6 @@
 # Epic Orchestration — Controller State Machine
 
-**Version:** 0.9.0
+**Version:** 0.9.1
 **Skill:** epic-orchestration
 **Dependencies:** agent-core, quality-gates, run-management
 
@@ -1910,5 +1910,5 @@ Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of t
 
 ---
 
-**Version:** 0.9.0
+**Version:** 0.9.1
 **Last Updated:** 2026-02-23
