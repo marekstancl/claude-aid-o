@@ -14,6 +14,49 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 
 ---
 
+## FIRST AID Mode (Autonomous Execution)
+
+FIRST AID mode allows the Controller to execute an EPIC queue autonomously without stopping for PM approval at each decision point. PM approves the queue once; the Controller runs all EPICs end-to-end with agent-driven quality checks replacing manual approval gates.
+
+### Mode Storage
+
+The current orchestration mode is stored in `.aid-o/04-engine/auto-mode-state.yaml`:
+
+```yaml
+mode: manual        # manual | auto | paused
+started_at: ~       # ISO 8601 timestamp (set when mode becomes auto)
+paused_at: ~        # ISO 8601 timestamp (set when mode becomes paused)
+active_epic: ~      # epic_id currently executing
+escalation_count: 0 # incremented on every escalation event
+queue_position: ~   # index of currently executing EPIC in the queue
+progress_snapshot: ~ # path to snapshot file saved before pausing
+```
+
+**Mode values:**
+- `manual` — default; all PM decision points behave as documented (existing behavior)
+- `auto` — autonomous execution; PM decision points use auto-mode logic (see below)
+- `paused` — auto-mode was interrupted by an escalation; PM must resolve before resuming
+
+### How the Controller Reads Mode
+
+At every PM decision point (PLAN_REVIEW, PHASE_CHECK, PM_APPROVAL, DONE), the Controller:
+
+1. Reads `.aid-o/04-engine/auto-mode-state.yaml`
+2. Checks `mode` field
+3. Routes to the appropriate branch (IF mode == auto / ELSE manual)
+4. If file does not exist or is unreadable: defaults to `manual` mode (fail-safe)
+
+### Starting and Stopping FIRST AID Mode
+
+- **Start:** `/aid-first-aid` — PM confirms the EPIC queue; Controller elevates permissions, sets `mode: auto`, and begins autonomous execution. See `commands/aid-first-aid.md` and `skills/permission-sandwich.md`.
+- **Stop:** `/aid-stop` — immediately sets `mode: manual` (or `paused` if mid-EPIC); Controller finishes the current step cleanly and then waits for PM. See `commands/aid-stop.md`.
+
+### Escalation in Auto-Mode
+
+When auto-mode cannot proceed autonomously (validation failures, guardrail violations, repeated fix cycles), it escalates to the PM and pauses. The PM receives extended options including `continue-manual` to switch back to manual mode at the natural pause point. See `skills/auto-escalation.md` for the full escalation protocol (16 trigger conditions, severity classification, escalation budget tracking).
+
+---
+
 ## State Machine
 
 ```
@@ -262,6 +305,32 @@ Acceptance Criteria: {total_count} across {category_count} categories
 - Decompositions and relaxations applied (with explanation)
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/pm_plan_approval.json`
+
+#### PLAN_REVIEW — Auto-Mode Behavior
+
+```
+IF mode == auto:
+  1. Run plan validation:
+     a. Schema validation: Plan JSON must conform to plan.schema.json
+     b. Completeness: all required fields present (role, objective, inputs, outputs, acceptance)
+     c. Dependency graph: no cycles, all dependencies reference valid step IDs
+     d. Run file quality: passes all checks (objective 3+ sentences, scope IN/OUT lists,
+        phase subsections complete, dependencies table present, one or more gates listed)
+  2. IF all validations pass:
+     → Auto-approve (GO)
+     → Save pm_plan_approval.json with:
+        { "approver": "auto-mode", "mode": "auto", "timestamp": "{ISO 8601}",
+          "validation": { "schema": "pass", "completeness": "pass",
+                          "dependency_graph": "pass", "run_file_quality": "pass" } }
+     → Log: {"state": "PLAN_REVIEW", "action": "auto_approved", "mode": "auto"}
+     → Transition to EXECUTING
+  3. IF any validation fails:
+     → ESCALATION (mandatory PM touchpoint — auto-mode cannot proceed with an invalid plan)
+     → Escalation payload includes: which validation failed, specific errors, plan summary
+
+ELSE (mode == manual):
+  {existing manual behavior: send plan to PM via Slack/chat, wait for GO/REVISE/ABORT}
+```
 
 ### 4. EXECUTING
 
@@ -584,6 +653,29 @@ discovered_issue_HIGH → log + backlog + PM notification (non-blocking)
 review_fix_cycles_exhausted → ESCALATION
 ```
 
+#### PHASE_CHECK — Auto-Mode Behavior
+
+```
+IF mode == auto:
+  1. Run the same auto-decision logic as manual mode (unchanged — decisions are already automated)
+  2. IF review needed (acceptance_unclear AND review_required_when matches):
+     → Dispatch code-reviewer agent (same as manual mode)
+     → Reviewer APPROVED → NEXT_PHASE
+     → Reviewer REJECTED → re-dispatch original agent with feedback
+     → Max review_fix_cycles reached (default 2) → attempt ONE "fresh approach" cycle:
+        a. Re-dispatch the original agent with instruction:
+           "Previous approach exhausted fix cycles. Take a completely different approach
+            to satisfy the acceptance criteria."
+        b. Dispatch code-reviewer on fresh-approach output
+        c. Reviewer APPROVED → NEXT_PHASE
+        d. Reviewer REJECTED → ESCALATION (mandatory PM touchpoint — fresh approach failed)
+  3. All other paths (scope violation, no output, parallel conflict, CRITICAL findings):
+     → Identical to manual mode auto-decision logic above
+
+ELSE (mode == manual):
+  {existing manual behavior: max_review_fix_cycles exhausted → ESCALATION without fresh-approach cycle}
+```
+
 ### 6. NEXT_PHASE
 
 **Actions:**
@@ -674,6 +766,52 @@ if gate_fails:
    - Timeout → execute `timeout_actions.escalation` from `slack-config.yaml`
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/pm_decision.json`
+
+#### ESCALATION — Auto-Mode Behavior
+
+```
+IF mode == auto:
+  1. Pause auto-mode immediately:
+     a. Set mode: paused in auto-mode-state.yaml
+     b. Set paused_at: {ISO 8601 timestamp}
+  2. Save progress snapshot:
+     a. Write snapshot file: .aid-o/04-engine/auto-mode-state-snapshot-{epic_id}.json
+        { "epic_id": "{epic_id}", "run_id": "{run_id}", "paused_at": "{state}",
+          "last_completed_step": "{step_id}", "escalation_trigger": "{reason}" }
+     b. Set auto-mode-state.yaml → progress_snapshot: {snapshot_path}
+  3. Increment escalation counter:
+     → escalation_count += 1 in auto-mode-state.yaml
+  4. Notify PM with extended options (beyond standard fix/skip/abort/discussion):
+     ```
+     AUTO-MODE ESCALATION — {epic_id}
+     ====================================
+     Trigger: {trigger reason}
+     Details: {failure details}
+     Escalation count: {N}
+
+     Options:
+       A. Fix — provide guidance, auto-mode resumes after fix
+       B. Skip — skip this step/gate, auto-mode continues
+       C. Abort — stop execution entirely
+       D. Continue manual — switch to manual mode at this point
+          (auto-mode deactivated; all subsequent decisions require PM input)
+       E. Discuss — ask questions (re-presents options after answer)
+     ```
+  5. Wait for PM response (same timeout handling as manual mode)
+  6. Execute PM's choice:
+     - Fix → apply fix, set mode: auto, resume from paused state
+     - Skip → mark skipped, set mode: auto, continue
+     - Abort → transition to DONE (status: aborted), set mode: manual
+     - Continue manual → set mode: manual in auto-mode-state.yaml; continue from
+       this natural pause point in manual mode (PM makes all subsequent decisions)
+     - Discuss → incorporate PM text, re-present extended options
+
+  See `skills/auto-escalation.md` for the full protocol:
+  16 trigger conditions, severity classification, and escalation budget rules.
+
+ELSE (mode == manual):
+  {existing manual behavior: fix/skip/abort/discussion options as documented above}
+```
 
 ### 10. CURATOR_RESOLVE
 
@@ -893,6 +1031,58 @@ if gate_fails:
 
 PM override and rule teaching are **non-blocking** — the PM can simply APPROVE without
 interacting with the Curator summary at all.
+
+#### PM_APPROVAL — Auto-Mode Behavior
+
+```
+IF mode == auto:
+  1. Determine EPIC position from EPIC frontmatter:
+     a. Read plan_epics_total and runs_completed fields
+     b. IF plan_epics_total > 1 AND runs_completed + 1 < plan_epics_total:
+        → This is an INTERMEDIATE EPIC
+     c. ELSE:
+        → This is the LAST EPIC (or standalone)
+
+  2. IF intermediate EPIC:
+     → Auto-approve immediately (no guardrails required for intermediate EPICs)
+     → Save pm_decision.json:
+        { "approver": "auto-mode", "decision": "approve",
+          "epic_position": "intermediate ({N}/{total})",
+          "mode": "auto", "timestamp": "{ISO 8601}" }
+     → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
+              "reason": "intermediate_epic", "position": "{N}/{total}"}
+     → Transition to DONE
+
+  3. IF last EPIC (or standalone):
+     → Run auto-mode guardrails:
+        a. Gates passed: gates_report.json overall == "pass"                     required
+        b. No unresolved CRITICAL issues: check backlog.md for open CRITICAL items required
+        c. Escalation budget: escalation_count < 3 (from auto-mode-state.yaml)  required
+        d. Auditor trend: last audit overall score >= previous audit score - 5   required
+           (allows up to 5-point dip; beyond that indicates quality regression)
+     → IF all guardrails pass:
+        → Auto-approve with guardrails
+        → Save pm_decision.json:
+           { "approver": "auto-mode", "decision": "approve",
+             "epic_position": "last ({N}/{total})",
+             "guardrails": { "gates": "pass", "no_critical": "pass",
+                             "escalation_budget": "pass", "auditor_trend": "pass" },
+             "mode": "auto", "timestamp": "{ISO 8601}" }
+        → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
+                 "reason": "last_epic_guardrails_passed"}
+        → Transition to DONE
+     → IF any guardrail fails:
+        → ESCALATION with guardrail failure details
+           (mandatory PM touchpoint — auto-mode cannot approve final EPIC with guardrail failures)
+
+  NOTE: Curator rule teaching (PM teaches "always approve {pattern}") is NOT available
+  in auto-mode. Rule teaching requires deliberate PM interaction and is suppressed
+  during autonomous execution. Existing auto-rules still apply via CURATOR_RESOLVE.
+
+ELSE (mode == manual):
+  {existing manual behavior: send final summary to PM via Slack/chat, wait for
+   APPROVE/override/rule-teach/REJECT/REVISE/timeout}
+```
 
 ### 12. DONE
 
@@ -1333,6 +1523,47 @@ interacting with the Curator summary at all.
       - Mark current EPIC as "completed" in queue (if in queue)
       - Send Status Update: `:white_check_mark: Queue empty. Orchestrator idle.`
       - Remain in terminal DONE state
+
+#### DONE — Auto-Mode Behavior
+
+```
+IF mode == auto:
+
+  RELEASE (version bump decision):
+    → Follows release sub-phase logic (action 1b above) with these auto-mode rules:
+       - Intermediate EPIC: auto-defer version bump (no PM prompt)
+         per first_aid.intermediate_action (default: defer)
+       - Last EPIC or standalone: mandatory bump proceeds automatically
+       - Git tag: created automatically if release.auto_tag: true in release-policy.yaml
+       - GitHub Release: created automatically if release.auto_release: true
+
+  COMPLETION SUMMARY (action 8 above):
+    → Still presented (non-blocking Slack Type G or chat message)
+    → "What's next?" section is suppressed or condensed — no interactive prompts
+    → Aggregate EPIC summary is written to auto-mode-state.yaml:
+       { "last_completed_epic": "{epic_id}", "completed_at": "{ISO 8601}",
+         "steps": {N}, "gates": {N}, "retries": {N}, "escalations": {N} }
+
+  QUEUE TRANSITION (action 10 above):
+    → IF next EPIC exists in epic-queue.yaml (status: "queued"):
+       - Auto-load next EPIC (same as existing queue check behavior)
+       - Update auto-mode-state.yaml: active_epic: {next_epic_id}
+       - Increment queue_position by 1
+       - DONE -> IDLE transition happens automatically (no PM confirmation needed)
+    → IF queue is empty:
+       - Set mode: manual in auto-mode-state.yaml (auto-mode ends with the queue)
+       - Restore permissions (permission sandwich teardown — see skills/permission-sandwich.md)
+       - Send final summary to PM: "FIRST AID complete — queue exhausted. {N} EPICs completed."
+       - Remain in terminal DONE state
+
+  See `skills/auto-done-state.md` for the full auto-mode DONE state protocol
+  (including cross-EPIC summary aggregation and permission teardown sequence).
+
+ELSE (mode == manual):
+  {existing behavior: completion summary presented interactively, queue check proceeds,
+   PM chooses next action from the "What's next?" options}
+```
+
 11. **Final Stage Log Entry** (MUST be the LAST action in DONE state):
    Append the closing DONE entry to `stage_log.jsonl`:
 
@@ -1749,6 +1980,12 @@ auto-starts the next queued EPIC if available.
 - **Analysis merge:** `skills/analysis-merge.md` — merge strategies (union, consensus, weighted)
 - **PM communication:** `skills/slack-mcp.md` — Slack MCP protocol, message types, fallback
 - **Epic queue:** `skills/epic-queue.md` — queue management, auto-pickup protocol
+- **FIRST AID mode start:** `commands/aid-first-aid.md` — PM confirms queue, permissions elevated, auto-mode activated
+- **FIRST AID mode stop:** `commands/aid-stop.md` — immediate mode switch to manual or paused
+- **Permission lifecycle:** `skills/permission-sandwich.md` — permission backup, elevation, restoration, crash recovery
+- **Auto-escalation protocol:** `skills/auto-escalation.md` — 16 trigger conditions, severity classification, escalation budget
+- **Auto-mode DONE state:** `skills/auto-done-state.md` — DONE state in auto-mode: release decisions, queue transitions, cross-EPIC summary
+- **Auto-mode state file:** `.aid-o/04-engine/auto-mode-state.yaml` — current mode, active EPIC, escalation count, progress snapshot
 - **Gates:** `.aid-o/03-config/policies/gates.yaml`
 - **Decision policies:** `.aid-o/03-config/policies/decision-policies.yaml`
 - **Slack config:** `.aid-o/03-config/policies/slack-config.yaml`
@@ -1909,4 +2146,4 @@ Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of t
 
 ---
 
-**Last Updated:** 2026-02-23
+**Last Updated:** 2026-02-24
