@@ -66,7 +66,7 @@ What is AID?
   to deliver features end-to-end: architecture → implementation → testing
   → security → documentation → release.
 
-Commands (11):
+Commands (13):
   /aid-init          Initialize or upgrade .aid-o/ workspace
   /aid-setup         Interactive project onboarding
   /aid-brainstorm    9-step interactive brainstorming flow
@@ -76,6 +76,8 @@ Commands (11):
   /aid-run-epic      Start orchestration (state machine)
   /aid-epic-status   Show pipeline status
   /aid-epic-queue    Manage EPIC execution queue (add, list, pause, resume)
+  /aid-first-aid     Start FIRST AID autonomous mode (full EPIC queue execution with guardrails)
+  /aid-stop          Emergency stop FIRST AID mode (restore permissions, save progress)
   /aid-audit         Project health audit
   /aid-analytics     Performance analysis of orchestration metrics
 
