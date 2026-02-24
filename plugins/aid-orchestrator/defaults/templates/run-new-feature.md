@@ -1,22 +1,22 @@
 ---
-id: S-{YYYYMMDD}-{4char-hash}
-session_id: {YYYY-MM-DD}-new-feature-{short-description}
+id: R-{YYYYMMDD}-{4char-hash}
+run_id: {YYYY-MM-DD}-new-feature-{short-description}
 type: new-feature
 status: active
 priority: critical|high|medium|low
 started: YYYY-MM-DD HH:MM CET
 completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
-epic_id: {epic-id} (if epic session)
-epic_session: {N} of {M} (if epic session)
-epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+epic_id: {epic-id} (if epic run)
+epic_run: {N} of {M} (if epic run)
+epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # New Feature: {Title}
 
-> **Multi-Session Work?** If this feature requires 3+ sessions or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Run Work?** If this feature requires 3+ runs or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
 
 ## Objective
 <!-- MIN: 3-5 sentences. State WHAT you're building, WHY it's needed, and what SUCCESS looks like.
@@ -24,16 +24,16 @@ orchestrated: true|false (if orchestrated by Controller)
      Good: "Add dark mode toggle to application settings. Users have requested reduced eye strain
             for evening use (Issue #42). This enables theme switching via a persistent user
             preference stored in localStorage. Success: toggle works, preference persists across
-            sessions, all components respect the theme." -->
+            runs, all components respect the theme." -->
 
 ## Context
-<!-- What preceded this work. Reference previous sessions, state of the codebase, dependencies.
-     For orchestrated sessions: which EPIC session is this, what was delivered before.
+<!-- What preceded this work. Reference previous runs, state of the codebase, dependencies.
+     For orchestrated runs: which EPIC run is this, what was delivered before.
      For non-orchestrated: what's the current project state, any related ongoing work. -->
 
-**Previous work:** {reference prior sessions or "N/A — greenfield"}
-**Current state:** {what exists now that this session builds on}
-**Dependencies:** {external systems, libraries, or other sessions this depends on}
+**Previous work:** {reference prior runs or "N/A — greenfield"}
+**Current state:** {what exists now that this run builds on}
+**Dependencies:** {external systems, libraries, or other runs this depends on}
 
 ## Scope
 <!-- Explicit IN/OUT lists prevent scope creep. Be specific — name files, components, areas. -->
@@ -46,14 +46,14 @@ orchestrated: true|false (if orchestrated by Controller)
 
 **Out of Scope:**
 <!-- MIN: 2 items -->
-- {what will NOT be done in this session}
-- {what will NOT be done in this session}
+- {what will NOT be done in this run}
+- {what will NOT be done in this run}
 
 ---
 
 ## Requirements
 <!-- Define what the feature must do. Use MoSCoW prioritization for technical requirements.
-     For orchestrated sessions: derive from EPIC scope + plan.json constraints.
+     For orchestrated runs: derive from EPIC scope + plan.json constraints.
      For non-orchestrated: derive from PM's request + codebase analysis. -->
 
 ### Business Requirements
@@ -89,7 +89,7 @@ orchestrated: true|false (if orchestrated by Controller)
 ### Phase 1: {Phase Title}
 
 **Goal:**
-<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Describe what this phase solves — not just "implement X" but why, what it enables, what changes.}
 
 **Agent / Role:** {role name — e.g., backend, frontend, architect, security, qa}
@@ -118,7 +118,7 @@ orchestrated: true|false (if orchestrated by Controller)
 
 ## Dependencies
 
-<!-- Which phases depend on which and why. For single-phase sessions, write "No inter-phase dependencies." -->
+<!-- Which phases depend on which and why. For single-phase runs, write "No inter-phase dependencies." -->
 
 | Phase | Depends On | Reason |
 |-------|-----------|--------|
@@ -128,7 +128,7 @@ orchestrated: true|false (if orchestrated by Controller)
 
 ## Quality Gates
 
-<!-- What automated checks run after this session's work. Reference specific gate names from gates.yaml. -->
+<!-- What automated checks run after this run's work. Reference specific gate names from gates.yaml. -->
 
 - **{gate name}** — {what it verifies}
 
@@ -173,12 +173,12 @@ pytest tests/test_new_feature.py
 
 **Related Issues:** #{issue_number}
 **Related PRs:** #{pr_number}
-**Related Sessions:** [Previous session](../archive/{session-id}.md)
+**Related Runs:** [Previous run](../archive/{run-id}.md)
 **Commits:** `{hash}` - {message}
 
 ---
 
-## AI Session Log
+## AI Run Log
 
 **{Timestamp}** - {Action/Decision}
 
@@ -192,11 +192,11 @@ pytest tests/test_new_feature.py
 - [ ] Documentation updated
 - [ ] No TODO/FIXME left in code
 
-### Session Closure:
+### Run Closure:
 - [ ] Commit messages follow conventions
-- [ ] Session file archived to completed/
-- [ ] Handoff protocol executed (see `skills/session-management.md`)
-- [ ] Session log updated
+- [ ] Run file archived to completed/
+- [ ] Handoff protocol executed (see `skills/run-management.md`)
+- [ ] Run log updated
 
 ---
 
@@ -206,7 +206,7 @@ pytest tests/test_new_feature.py
 - Review PR #{pr_number}
 - Validate feature in staging
 
-**For AI (if session continues):**
+**For AI (if run continues):**
 - Monitor for related issues
 - Consider optimization opportunities
 

@@ -7,11 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Czech-language content removed** — translated all Czech text to English in `agents/lessons-extractor.md`, `skills/session-management.md`, `skills/agent-core.md`
+- **Czech-language content removed** — translated all Czech text to English in `agents/lessons-extractor.md`, `skills/run-management.md`, `skills/agent-core.md`
 - **Broken skill reference in `aid-epic-queue.md`** — `skills/aid-epic-queue.md` → `skills/epic-queue.md`, `aid-epic-queue.yaml` → `epic-queue.yaml`
-- **Stale `workspace/workflow/` paths** — 12 legacy path references replaced with `.aid-o/` equivalents in `skills/session-management.md`
+- **Stale `workspace/workflow/` paths** — 12 legacy path references replaced with `.aid-o/` equivalents in `skills/run-management.md`
 - **Stale command prefixes** — `/run-epic` → `/aid-run-epic`, `/plan-epic` → `/aid-plan-epic` in `skills/retry-engine.md`, `skills/planner.md`, `defaults/templates/epic-example.md`
-- **Version mismatches** — header/footer versions aligned to 0.8.2 in `session-management.md`, `epic-orchestration.md`, `retry-engine.md`, `planner.md`, `agent-core.md`
+- **Version mismatches** — header/footer versions aligned to 0.8.2 in `run-management.md`, `epic-orchestration.md`, `retry-engine.md`, `planner.md`, `agent-core.md`
 - **Hardcoded Slack channel ID** — replaced `C0AFP2GP459` with `YOUR_CHANNEL_ID` placeholder in `commands/aid-setup.md`
 - **Plugin README version** — updated from 0.4.1 to 0.8.2
 
@@ -50,7 +50,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **State machine** — 11 states → 12 states; CURATOR_RESOLVE inserted between GATES and PM_APPROVAL; section numbering: 10=CURATOR_RESOLVE, 11=PM_APPROVAL, 12=DONE
 - **PM_APPROVAL** extended with Curator summary block (implemented/rejected/deferred counts), PM override handling, PM rule teaching, Qdrant decision storage
 - **DONE state simplified** — Curator dispatch, Lessons-Extractor dispatch, and lessons/command-history file writes moved to CURATOR_RESOLVE; Auditor remains in DONE; items renumbered 1-11; migration note added
-- **`curator.md`** — dispatch context updated to CURATOR_RESOLVE (was POST_PROCESSING/session-end); Orchestrator Integration section rewritten with auto-evaluate flow
+- **`curator.md`** — dispatch context updated to CURATOR_RESOLVE (was POST_PROCESSING/run-end); Orchestrator Integration section rewritten with auto-evaluate flow
 - **`lessons-extractor.md`** — dispatch context updated to CURATOR_RESOLVE; 3-layer dedup protocol added
 - **`improvement-proposals.md`** — Section 6 rewritten with 3-tier auto-evaluate algorithm; Section 7 integration points updated
 - **`aid-run-epic.md`** — CURATOR_RESOLVE state handling added; GATES transition updated; DONE simplified (Auditor only)
@@ -74,7 +74,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 
 - **Workflow Intelligence skill** (`skills/workflow-intelligence.md`) — platform detection (LangChain/LangGraph, N8N, LangFlow, generic-workflow), domain-specific questioning (WF1-WF7) inserted transparently into the brainstorming flow, UI derivation from interaction model and output type, platform-specific knowledge and Docker Compose templates, three-tier knowledge enrichment (Qdrant → Context7 → static fallback)
-- **Docker/MCP preference rules** in `brainstorming.md` — cross-cutting recommendation logic for Docker Compose (triggered when project has 2+ services) and MCP servers (DB, GitHub, Filesystem, Context7, Playwright); PM may decline once and the topic is closed for the session
+- **Docker/MCP preference rules** in `brainstorming.md` — cross-cutting recommendation logic for Docker Compose (triggered when project has 2+ services) and MCP servers (DB, GitHub, Filesystem, Context7, Playwright); PM may decline once and the topic is closed for the run
 - **Docker/MCP step injection** in `planner.md` (Section 7.4) — automatic "Docker Compose setup" step injected into the plan when `docker_recommended == true` in the brainstorming plan; MCP configuration is included in the same step, never as a separate step
 - **Sample file analysis** in `brainstorming.md` — automatic scan of `.aid-o/05-inputs/` during Step 1; supports PDF, CSV, JSON, and image files; silent when directory is missing or empty; results used by WF4 (workflow projects) and Step 3 approach proposals
 - **Example EPIC lookup** in `brainstorming.md` — weighted scoring search against `defaults/examples/` frontmatter during Step 3; integrates workflow context (platform hint, WF7 recommendation) when `workflow_detected == true`; PM offered: Adapt, Browse all, or Start fresh
@@ -122,7 +122,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`/aid-help` command description** — updated `/aid-plan-epic` entry to "Unified Plan→EPIC→Plan entry point"
 - **DONE state in `epic-orchestration.md`** — new step 9b triggers example extraction after Curator; completion summary includes archetype when pattern is stored
 - **`memory-mcp.md` document types** — expanded from 6 to 8 types (added Proposal, Example EPIC); feedback tracking hook in `memory_find()`
-- **`brainstorming.md` non-blocking guarantee** — knowledge calls updated from 2 to 3 per session (Step 1 search + Step 3 knowledge + Step 3 examples); 7 new graceful degradation scenarios
+- **`brainstorming.md` non-blocking guarantee** — knowledge calls updated from 2 to 3 per run (Step 1 search + Step 3 knowledge + Step 3 examples); 7 new graceful degradation scenarios
 
 ## [0.4.1] — 2026-02-20
 
@@ -140,26 +140,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.4.0] — 2026-02-20
 
 ### Added
-- **Zero Detail Loss Pipeline (Variant B)** — EPIC references source plan via `plan_ref`; all pipeline stages (plan.json, session, agent dispatch) read both EPIC and source plan; agents receive `## Source Plan — Implementation Detail` sections
+- **Zero Detail Loss Pipeline (Variant B)** — EPIC references source plan via `plan_ref`; all pipeline stages (plan.json, run file, agent dispatch) read both EPIC and source plan; agents receive `## Source Plan — Implementation Detail` sections
 - **Wave-based execution model** — planner groups steps by DAG level into waves (max 4 per wave) for parallel execution; replaces flat parallel group detection
 - **Step decomposition** — layer-based splitting of monolithic steps (data → schema → API → test) to enable cross-domain parallelism; supports dev, docs, and infra decomposition types
 - **Critical path analysis** — opt-in for 7+ step EPICs; computes critical path ratio, applies 5 relaxation rules (R1–R5) to shorten it; PM can reject individual relaxations at PLAN_REVIEW
-- **Parallelism-first optimization** — 5-priority strategy (parallelism > wave density > session compactness > quality > efficiency); plan quality metrics in `optimization_metrics`; validation rules V-20–V-23
+- **Parallelism-first optimization** — 5-priority strategy (parallelism > wave density > run compactness > quality > efficiency); plan quality metrics in `optimization_metrics`; validation rules V-20–V-23
 - **`/plan-epic` accepts Plan files** — 3-tier format detection (frontmatter → header → section fingerprinting); auto-generates EPIC from Plan using EPIC Subagent Template
-- **`/aid-brainstorm` inline execution** — Step 8b offers to generate Plan JSON + Session immediately after EPIC draft; Step 9 split into 9a (standard handoff) / 9b (full pipeline handoff)
-- **Wave-based session boundaries** — sessions are contiguous sequences of waves; never split by domain or inside a wave
+- **`/aid-brainstorm` inline execution** — Step 8b offers to generate Plan JSON + Run file immediately after EPIC draft; Step 9 split into 9a (standard handoff) / 9b (full pipeline handoff)
+- **Wave-based run boundaries** — runs are contiguous sequences of waves; never split by domain or inside a wave
 - **Shorthand commands** — all 18 commands have `user_invocable: true` frontmatter enabling `/aid-setup` instead of `/aid-orchestrator:aid-setup`
 - **Setup followup** — after "All recommended", `/aid-setup` now offers additional options (CLAUDE.md, Slack, auto-detected MCPs)
-- **Selective `.aid-o/` gitignore** — plans, EPICs, and config are versioned; engine artifacts (sessions, evidence) are ignored
+- **Selective `.aid-o/` gitignore** — plans, EPICs, and config are versioned; engine artifacts (runs, evidence) are ignored
 - **Centralized Qdrant storage** — `~/.local/share/aid-orchestrator/qdrant-data` with `--scope user` for global MCP; migration check for old paths
 
 ### Changed
 - **EPIC template** — typed artifacts (`endpoint:`, `model:`, `component:`), `plan_ref` enforcement, Hints section, Scope with specific file paths
 - **EPIC Subagent Template** — frontmatter instructions, plan task ID preservation in steps, Variant B zero detail loss instruction
 - **Planner input validation** — REQUIRED/RECOMMENDED checks with typed artifact inference
-- **PLAN_REVIEW** — rich plan summary with wave execution plan, optimization metrics, session breakdown
+- **PLAN_REVIEW** — rich plan summary with wave execution plan, optimization metrics, run breakdown
 - **EXECUTING state** — agent dispatch enriched with source plan sections
-- **Plan generation flow** — 13-step procedure with decomposition (2.2), wave assembly (6), CPA (6.1), session boundaries (11)
+- **Plan generation flow** — 13-step procedure with decomposition (2.2), wave assembly (6), CPA (6.1), run boundaries (11)
 
 ## [0.3.0] — 2026-02-19
 
@@ -168,8 +168,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Per-agent metrics** — step duration, complexity self-report, bottleneck flags stored to Qdrant
 - **Cost optimization skill** — 4 axes: model selection, file scoping, dispatch prompt trimming, token tracking
 - **EPIC completion summary** — 5 next-step options presented to PM at DONE state
-- **Auto-archive** — multi-EPIC and multi-session counter awareness for session and EPIC files
-- **Multi-session flow** — planner optimization engine for EPICs with 7+ steps
+- **Auto-archive** — multi-EPIC and multi-run counter awareness for run and EPIC files
+- **Multi-run flow** — planner optimization engine for EPICs with 7+ steps
 - **Diff patches** — `diff.patch` generation for every file-modifying step, saved to evidence store
 - **Curator auto-invocation** — mandatory synchronous step in POST_PROCESSING
 - **Chat-first `/aid-setup`** — detailed option presentation and guided configuration
@@ -181,11 +181,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Backlog categorization** — by type (bug, enhancement, tech-debt, security, docs) and source agent
 - **`/aid-analytics`** — orchestration performance analysis command and skill
 - **Permission presets** — dual-write system keeping `.claude/settings.json` + `.aid-o` policies in sync
-- **Git branch integration** — one branch per EPIC session, auto-create and auto-merge
+- **Git branch integration** — one branch per EPIC run, auto-create and auto-merge
 - **Pre-Output Quality Check** — in all code-producing playbooks (ruff lint/format, debug artifact removal, import verification)
 
 ### Fixed
-- **DONE state** — now writes lessons to `lessons-learned.md`, updates session status to `completed`, writes commands to `command-history.md`, writes final `stage_log` entry with `result: success`
+- **DONE state** — now writes lessons to `lessons-learned.md`, updates run status to `completed`, writes commands to `command-history.md`, writes final `stage_log` entry with `result: success`
 - **Gate reconciliation** — `plan.json` gates now reconciled with `gates.yaml` definitions
 - **Qdrant isolation** — writes now include `project_name` metadata for cross-project isolation
 - **Slack MCP** — onboarding corrected to use `@anthropic/slack-mcp` package with proper scopes

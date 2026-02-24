@@ -167,7 +167,7 @@ acceptable_debt:
 
   - type: "placeholder error messages"
     allowed: true
-    condition: "replaced before release session"
+    condition: "replaced before release run"
 
 # ─── NOT Acceptable (always block) ──────────────────────────────────
 not_acceptable:

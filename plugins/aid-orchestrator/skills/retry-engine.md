@@ -176,12 +176,12 @@ Select the agent role for the fix based on gate type:
 |------|--------------|----------|
 | `tests_pass` | `gate-fixer` (with QA context) | Original step's role agent |
 | `lint_pass` | `gate-fixer` (auto-fix mode) | Original step's role agent |
-| `security_scan_pass` | `gate-fixer` (with security context) | Security agent (Session 4) |
-| `docs_updated` | `gate-fixer` (with docs context) | Docs-writer agent (Session 4) |
-| `type_check` | `gate-fixer` (with TS context) | Frontend agent (Session 4) |
+| `security_scan_pass` | `gate-fixer` (with security context) | Security agent (Run 4) |
+| `docs_updated` | `gate-fixer` (with docs context) | Docs-writer agent (Run 4) |
+| `type_check` | `gate-fixer` (with TS context) | Frontend agent (Run 4) |
 | `build_pass` | `gate-fixer` (with build context) | Frontend/backend agent |
 
-> **Note:** Until Session 4 delivers role-specific agents, `gate-fixer` handles all fixes.
+> **Note:** Until Run 4 delivers role-specific agents, `gate-fixer` handles all fixes.
 
 ### 3.2 Fix Prompt Construction
 
@@ -455,7 +455,7 @@ strategy: "exponential"
 
 > **Note:** In the current Claude Code environment, "waiting" means simply
 > pausing before the next action. There is no sleep mechanism — the delay
-> is advisory (documented for future Slack/async implementation in Session 6).
+> is advisory (documented for future Slack/async implementation in Run 6).
 
 ---
 

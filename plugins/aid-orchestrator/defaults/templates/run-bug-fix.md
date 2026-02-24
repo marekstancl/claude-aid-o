@@ -1,22 +1,22 @@
 ---
-id: S-{YYYYMMDD}-{4char-hash}
-session_id: {YYYY-MM-DD}-bug-fix-{short-description}
+id: R-{YYYYMMDD}-{4char-hash}
+run_id: {YYYY-MM-DD}-bug-fix-{short-description}
 type: bug-fix
 status: active
 priority: critical|high|medium|low
 started: YYYY-MM-DD HH:MM CET
 completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
-epic_id: {epic-id} (if epic session)
-epic_session: {N} of {M} (if epic session)
-epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+epic_id: {epic-id} (if epic run)
+epic_run: {N} of {M} (if epic run)
+epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # Bug Fix: {Title}
 
-> **Multi-Session Work?** If this bug fix requires 3+ sessions or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Run Work?** If this bug fix requires 3+ runs or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
 
 ## Objective
 <!-- MIN: 3-5 sentences. State WHAT is broken, WHY it matters, and what FIXED looks like.
@@ -28,13 +28,13 @@ orchestrated: true|false (if orchestrated by Controller)
             passwords, and XSS vector is eliminated." -->
 
 ## Context
-<!-- What preceded this work. Reference previous sessions, state of the codebase, dependencies.
-     For orchestrated sessions: which EPIC session is this, what was delivered before.
+<!-- What preceded this work. Reference previous runs, state of the codebase, dependencies.
+     For orchestrated runs: which EPIC run is this, what was delivered before.
      For non-orchestrated: what's the current project state, any related ongoing work. -->
 
-**Previous work:** {reference prior sessions or "N/A — first report"}
+**Previous work:** {reference prior runs or "N/A — first report"}
 **Current state:** {what exists now, when did the bug first appear}
-**Dependencies:** {external systems, libraries, or other sessions this depends on}
+**Dependencies:** {external systems, libraries, or other runs this depends on}
 
 ## Scope
 <!-- Explicit IN/OUT lists prevent scope creep. Be specific — name files, components, areas. -->
@@ -47,8 +47,8 @@ orchestrated: true|false (if orchestrated by Controller)
 
 **Out of Scope:**
 <!-- MIN: 2 items -->
-- {what will NOT be done in this session}
-- {what will NOT be done in this session}
+- {what will NOT be done in this run}
+- {what will NOT be done in this run}
 
 ---
 
@@ -81,7 +81,7 @@ orchestrated: true|false (if orchestrated by Controller)
 ### Phase 1: Investigation
 
 **Goal:**
-<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Reproduce the bug, trace execution path, identify root cause. Explain what you expect to find
 and why narrowing the root cause first prevents wasted effort on symptoms rather than the
 underlying defect.}
@@ -109,7 +109,7 @@ underlying defect.}
 ### Phase 2: Fix Implementation
 
 **Goal:**
-<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Apply the minimal, targeted fix that addresses the root cause identified in Phase 1. Explain
 the fix strategy and why it's preferred over alternatives. This phase should change only what
 is necessary to resolve the defect without introducing side effects.}
@@ -137,7 +137,7 @@ is necessary to resolve the defect without introducing side effects.}
 ### Phase 3: Regression Testing
 
 **Goal:**
-<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Verify the fix resolves the reported symptom AND does not break existing functionality.
 Write regression tests that would catch this bug if it were re-introduced. Confirm all
 existing test suites still pass.}
@@ -168,7 +168,7 @@ existing test suites still pass.}
 
 ## Dependencies
 
-<!-- Which phases depend on which and why. For single-phase sessions, write "No inter-phase dependencies." -->
+<!-- Which phases depend on which and why. For single-phase runs, write "No inter-phase dependencies." -->
 
 | Phase | Depends On | Reason |
 |-------|-----------|--------|
@@ -179,7 +179,7 @@ existing test suites still pass.}
 
 ## Quality Gates
 
-<!-- What automated checks run after this session's work. Reference specific gate names from gates.yaml. -->
+<!-- What automated checks run after this run's work. Reference specific gate names from gates.yaml. -->
 
 - **{gate name}** — {what it verifies}
 
@@ -228,12 +228,12 @@ pytest tests/test_fix.py
 
 **Related Issues:** #{issue_number}
 **Related PRs:** #{pr_number}
-**Related Sessions:** [Previous session](../archive/{session-id}.md)
+**Related Runs:** [Previous run](../archive/{run-id}.md)
 **Commits:** `{hash}` - {message}
 
 ---
 
-## AI Session Log
+## AI Run Log
 
 **{Timestamp}** - {Action/Decision}
 
@@ -247,11 +247,11 @@ pytest tests/test_fix.py
 - [ ] Documentation updated
 - [ ] No TODO/FIXME left in code
 
-### Session Closure:
+### Run Closure:
 - [ ] Commit messages follow conventions
-- [ ] Session file archived to completed/
-- [ ] Handoff protocol executed (see `skills/session-management.md`)
-- [ ] Session log updated
+- [ ] Run file archived to completed/
+- [ ] Handoff protocol executed (see `skills/run-management.md`)
+- [ ] Run log updated
 
 ---
 
@@ -261,7 +261,7 @@ pytest tests/test_fix.py
 - Review PR #{pr_number}
 - Validate fix in staging
 
-**For AI (if session continues):**
+**For AI (if run continues):**
 - Monitor for related issues
 - Consider optimization opportunities
 

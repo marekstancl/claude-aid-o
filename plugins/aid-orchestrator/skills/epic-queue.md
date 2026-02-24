@@ -210,7 +210,7 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
 | **Failed EPIC → auto-pause** | If an EPIC fails (aborted/unrecoverable), the queue pauses automatically. PM must investigate and resume. |
 | **Manual pause** | `/epic-queue pause` stops auto-pickup immediately. Does not abort the running EPIC. |
 | **Duplicate prevention** | Cannot add the same EPIC twice (by epic_id) if it's already queued or running. |
-| **Persistence** | Queue state lives in YAML file — survives session restarts and context window resets. |
+| **Persistence** | Queue state lives in YAML file — survives run restarts and context window resets. |
 | **Running protection** | Cannot remove or reorder a running EPIC. |
 
 ---

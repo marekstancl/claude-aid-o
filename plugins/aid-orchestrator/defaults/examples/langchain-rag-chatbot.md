@@ -44,7 +44,7 @@ Conversation history is maintained per session for multi-turn context.
   - `{backend_dir}/rag/ingestor.py` — document loading, chunking, embedding
   - `{backend_dir}/rag/retriever.py` — ChromaDB client, similarity search
   - `{backend_dir}/rag/chain.py` — LCEL chain, prompt template, LLM binding
-  - `{backend_dir}/rag/memory.py` — conversation buffer, session store
+  - `{backend_dir}/rag/memory.py` — conversation buffer, run store
   - `{backend_dir}/rag/routes.py` — FastAPI router (ingest + chat endpoints)
   - `{backend_dir}/rag/schemas.py` — Pydantic request/response models
 - `{backend_dir}/tests/test_rag/`
@@ -60,7 +60,7 @@ Conversation history is maintained per session for multi-turn context.
 
 - endpoint: POST /api/v1/rag/ingest (upload + process documents)
 - endpoint: GET /api/v1/rag/chat (SSE streaming chat with retrieval)
-- endpoint: DELETE /api/v1/rag/session/{session_id} (clear conversation memory)
+- endpoint: DELETE /api/v1/rag/run/{run_id} (clear conversation memory)
 - model: ChromaDB collection per tenant/project
 - config: `.env` keys — CHROMA_HOST, EMBED_MODEL, LLM_MODEL, CHUNK_SIZE
 - doc: `docs/api/rag.md`, `CHANGELOG.md`
@@ -86,9 +86,9 @@ Conversation history is maintained per session for multi-turn context.
 - [ ] [backend] Ingestor chunks documents at configurable size (default 512 tokens, overlap 50)
 - [ ] [backend] ChromaDB collection contains embeddings within 30s of ingest for <10MB file
 - [ ] [backend] GET /api/v1/rag/chat streams SSE events with role=assistant and source citations
-- [ ] [backend] Chat endpoint returns 400 when question is empty or session_id missing
-- [ ] [backend] Multi-turn: second question in same session_id has access to prior context
-- [ ] [backend] DELETE /api/v1/rag/session/{id} clears memory and returns 204
+- [ ] [backend] Chat endpoint returns 400 when question is empty or run_id missing
+- [ ] [backend] Multi-turn: second question in same run_id has access to prior context
+- [ ] [backend] DELETE /api/v1/rag/run/{id} clears memory and returns 204
 - [ ] [qa] pytest covers ingestor chunking logic with 3 fixture documents (PDF, MD, TXT)
 - [ ] [qa] Integration test: ingest → query returns at least 1 source citation
 - [ ] [qa] ChromaDB tests use in-memory client (no external service required)
@@ -101,15 +101,15 @@ Conversation history is maintained per session for multi-turn context.
 | 1 | architect | Design ingestion pipeline + retrieval chain architecture + OpenAPI contracts for /ingest and /chat | — | — |
 | 2 | backend | Implement document ingestor: load PDF/MD/TXT, recursive text splitter, embed with configured model, store in ChromaDB | 1 | — |
 | 3 | backend | Implement FastAPI retrieval endpoint with LCEL chain (retriever → prompt → LLM) + SSE streaming response | 2 | — |
-| 4 | backend | Implement conversation memory: per-session buffer store, inject history into chain prompt, DELETE session endpoint | 3 | — |
+| 4 | backend | Implement conversation memory: per-run buffer store, inject history into chain prompt, DELETE run endpoint | 3 | — |
 | 5 | qa | Write pytest suite: unit tests for chunking logic, integration tests for ingest→query flow using in-memory ChromaDB | 4 | — |
 | 6 | docs | Write API reference (docs/api/rag.md) + deployment guide (env vars, ChromaDB setup, model selection) | 5 | — |
 
-## Session Breakdown
+## Run Breakdown
 
 This EPIC fits in a single orchestrated run.
 
-### Session 1: Full RAG Implementation
+### Run 1: Full RAG Implementation
 **Goal:** Complete ingestion pipeline, retrieval chain, memory, tests, and docs.
 **Deliverables:** All 3 endpoints live, pytest suite green, API docs written.
 

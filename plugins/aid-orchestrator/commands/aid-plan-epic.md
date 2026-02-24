@@ -4,7 +4,7 @@ description: Generate Plan JSON from EPIC or Plan specification
 user_invocable: true
 ---
 
-Parse an EPIC **or Plan** file and generate a Plan JSON + Session file for the Controller state machine.
+Parse an EPIC **or Plan** file and generate a Plan JSON + Run file for the Controller state machine.
 
 This command is the unified entry point to orchestration. It handles two input paths seamlessly:
 
@@ -26,7 +26,7 @@ After plan generation completes, the command asks the PM whether to run the EPIC
 /aid-plan-epic workspace/workflow/epics/active/EPIC-TEST-0001-DUMMY.md
 ```
 
-Both input formats produce the same output: a plan.json, plan_progress.json, and session file ready for `/aid-run-epic`. When given a Plan file, the command adds an intermediate EPIC generation step and shows it to the PM for review before continuing.
+Both input formats produce the same output: a plan.json, plan_progress.json, and run file ready for `/aid-run-epic`. When given a Plan file, the command adds an intermediate EPIC generation step and shows it to the PM for review before continuing.
 
 ## Prerequisites
 
@@ -144,14 +144,14 @@ If no phase context is provided (standard /aid-plan-epic invocation), process al
 
 > **Reference:** Read `skills/planner.md` for the complete algorithm (dependency graph, parallel groups, ordering rules).
 
-1. Find the **Steps** section in the EPIC (may be called "Steps", "Steps (Role Pipeline)", or "Sessions")
+1. Find the **Steps** section in the EPIC (may be called "Steps", "Steps (Role Pipeline)", or "Runs")
 2. For each step, extract:
    - **Role** — must be one of: `architect`, `domain`, `backend`, `frontend`, `qa`, `security`, `observability`, `docs`, `release`
    - **Objective** — what the step must accomplish
    - **Dependencies** — which steps must complete first (from "Depends On" column)
    - **Parallel Group** — which steps can run concurrently (from "Parallel Group" column)
 3. If EPIC has explicit steps table → use it directly
-4. If EPIC has only Sessions section → extract roles from session descriptions, apply default ordering
+4. If EPIC has only Runs section → extract roles from run descriptions, apply default ordering
 
 **Dependency Graph Construction** (per `skills/planner.md` Section 1):
 1. Parse steps into (step_id, role, objective, depends_on[])
@@ -339,44 +339,44 @@ plan task detail supplements it. Never override EPIC constraints with plan data.
    ```
 5. Copy EPIC to evidence: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
 
-### Step 8: Generate Session File (Session Creation Protocol)
+### Step 8: Generate Run File (Run Creation Protocol)
 
-The session file is the human-readable operational document for this EPIC run.
+The run file is the human-readable operational document for this EPIC run.
 It must be **detailed enough** that any agent reading it understands the full scope,
 their role, inputs/outputs, and acceptance criteria — without needing to parse plan.json.
 
 #### 8a. Gather Sources
 
-Before creating the session file, read ALL of the following:
+Before creating the run file, read ALL of the following:
 
 1. **EPIC file** (already loaded from Step 3) — goal, scope, constraints, affected areas
 2. **Plan JSON** (generated in Step 6) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
 3. **Plan file** (`.aid-o/01-plans/` or `workspace/workflow/plans/` if referenced in EPIC) — broader project context
-4. **Previous session** (if `epic_session > 1`) — what was delivered, lessons learned
+4. **Previous run** (if `epic_run > 1`) — what was delivered, lessons learned
 5. **Relevant source code** — scan inputs/outputs from plan steps, read key files to understand current state
 6. **Decision policies** (`.aid-o/03-config/policies/decision-policies.yaml`) — auto_decisions, escalation_triggers
 
-#### 8b. Create Session File
+#### 8b. Create Run File
 
-1. Generate session ID: `S-{YYYYMMDD}-{4char-hash}`
-2. Use template from `.aid-o/03-config/templates/session-new-feature.md` (or type-appropriate template)
+1. Generate run ID: `R-{YYYYMMDD}-{4char-hash}`
+2. Use template from `.aid-o/03-config/templates/run-new-feature.md` (or type-appropriate template)
 3. Fill in frontmatter:
    ```yaml
-   id: S-{YYYYMMDD}-{hash}
+   id: R-{YYYYMMDD}-{hash}
    type: new-feature
    status: active
    priority: {from EPIC}
    started: {YYYY-MM-DD}
    epic_id: {epic_id}
-   epic_session: {N}
+   epic_run: {N}
    plan_ref: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
    source_plan: {from plan.json source_plan field, or null}
    orchestrated: true
    ```
 
-#### 8c. Map Plan JSON to Session Phases
+#### 8c. Map Plan JSON to Run Phases
 
-For EACH step in plan.json, create a Phase in the session file:
+For EACH step in plan.json, create a Phase in the run file:
 
 1. `step.objective` → **Phase Goal** — expand the objective into a full paragraph explaining what the phase accomplishes and why
 2. `step.role` → **Agent / Role** — the agent role that will execute this phase
@@ -402,28 +402,28 @@ When creating each Phase AND `source_plan` is available in plan.json:
 #### 8d. Fill Remaining Sections
 
 - **Objective:** 3-5 sentences from EPIC goal + scope. Include success criteria.
-- **Context:** Reference previous sessions (if epic_session > 1), current code state, what was delivered before.
+- **Context:** Reference previous runs (if epic_run > 1), current code state, what was delivered before.
 - **Scope:** IN list from EPIC scope (min 3 items), OUT list from EPIC constraints/exclusions (min 2 items).
 - **Dependencies:** Table from plan.json `dependencies` array — "Phase X depends on Phase Y because Z".
 - **Quality Gates:** List from plan.json `gates` array + relevant entries from decision-policies.yaml.
-- **Session Log:** Initialize with `| {date} | Session created from EPIC {epic_id}, {step_count} phases planned |`
+- **Run Log:** Initialize with `| {date} | Run created from EPIC {epic_id}, {step_count} phases planned |`
 
 #### 8e. Quality Check
 
-Before saving, verify the session file contains:
+Before saving, verify the run file contains:
 - [ ] Objective: 3+ sentences (not just a one-liner)
 - [ ] Context: references to previous work or "greenfield" statement
 - [ ] Scope: IN list (3+ items) and OUT list (2+ items)
 - [ ] Phases: each phase has all 6 subsections (Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
 - [ ] Dependencies: table with at least one entry (or "No inter-phase dependencies" for single-step plans)
 - [ ] Quality Gates: at least one gate listed
-- [ ] Session Log: initialized
+- [ ] Run Log: initialized
 
 If any check fails, fix before proceeding.
 
 #### 8f. Save
 
-Save to: `.aid-o/04-engine/sessions/S-{YYYYMMDD}-{hash}-{topic}.md`
+Save to: `.aid-o/04-engine/runs/R-{YYYYMMDD}-{hash}-{topic}.md`
 
 ### Step 9: Present Output
 
@@ -455,7 +455,7 @@ Files created:
   - Plan: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
   - Progress: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan_progress.json
   - EPIC copy: .aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md
-  - Session: .aid-o/04-engine/sessions/{session_file}
+  - Run: .aid-o/04-engine/runs/{run_file}
 
 Ready to execute?
   Want to run this EPIC now?  → /aid-run-epic {epic_id}
@@ -471,7 +471,7 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 - **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used for Plan-to-EPIC conversion in Step 2)
 - `skills/epic-orchestration.md` — Section "2. PLANNING" (plan generation rules, evidence structure)
 - `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema (includes `analysis_groups`)
-- `.aid-o/03-config/templates/session-new-feature.md` — Session file template
+- `.aid-o/03-config/templates/run-new-feature.md` — Run file template
 - `.aid-o/03-config/policies/decision-policies.yaml` — Architecture principles for step ordering
 - `.aid-o/03-config/policies/gates.yaml` — Available gates
 

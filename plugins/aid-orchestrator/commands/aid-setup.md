@@ -114,7 +114,7 @@ Search for indicator files in project root first, then inside `docs/` directory.
    Default .gitignore additions for AID:
    ```
    # AID Engine (internal state — not for version control)
-   .aid-o/04-engine/sessions/
+   .aid-o/04-engine/runs/
    .aid-o/04-engine/evidence/
    .aid-o/04-engine/memory/
    .aid-o/logs/
@@ -183,7 +183,7 @@ Setup Options Available
 ====================================
 
 1. Initialize .aid-o/ workspace
-   Creates the directory structure for plans, epics, sessions, and evidence.
+   Creates the directory structure for plans, epics, runs, and evidence.
    Required for all AID features. (Recommended: always)
 
 2. Customize gates.yaml
@@ -207,7 +207,7 @@ Setup Options Available
    (Recommended: yes for most projects)
 
 6. MCP Servers
-   a. Qdrant — vector memory for cross-session knowledge
+   a. Qdrant — vector memory for cross-run knowledge
    b. Context7 — framework documentation via MCP (knowledge acquisition)
    c. Slack — PM communication via Slack messages
    d. Docker — container management via MCP
@@ -356,7 +356,7 @@ If (B): present a numbered list for PM to select from (e.g., "Enter option numbe
   ```
   # AID Orchestrator — engine internals (optional: exclude from VCS)
   # .aid-o/04-engine/evidence/
-  # .aid-o/04-engine/sessions/archive/
+  # .aid-o/04-engine/runs/archive/
   ```
   Note: These are commented out by default — user decides what to track in git.
 
@@ -433,7 +433,7 @@ MCP Server Onboarding
 
 Context7 provides curated, up-to-date documentation for 1000+ libraries directly via MCP.
 It powers the knowledge-acquisition skill, enabling AID to research framework docs and serve
-relevant knowledge to brainstorming sessions and agent dispatch.
+relevant knowledge to brainstorming runs and agent dispatch.
 
 ```
 Why Context7?
@@ -973,7 +973,7 @@ AID can help you get started:
 Choose: (1/2/3)
 ```
 
-- **Option 1:** Start a brainstorming session → create Plan in `.aid-o/01-plans/`
+- **Option 1:** Start a brainstorming run → create Plan in `.aid-o/01-plans/`
 - **Option 2:** Ask for project type and generate basic scaffold
 - **Option 3:** Just run `/aid-init`
 
@@ -993,7 +993,7 @@ What to do next:
 
 If you have an idea but aren't sure how to build it:
   -> /aid-brainstorm "your idea"
-  This starts an interactive design session. AID asks questions,
+  This starts an interactive design run. AID asks questions,
   explores approaches, and produces a plan + EPIC draft.
 
 If you already know what to build:

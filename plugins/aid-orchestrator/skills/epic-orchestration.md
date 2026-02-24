@@ -2,7 +2,7 @@
 
 **Version:** 0.8.2
 **Skill:** epic-orchestration
-**Dependencies:** agent-core, quality-gates, session-management
+**Dependencies:** agent-core, quality-gates, run-management
 
 ---
 
@@ -101,7 +101,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 2. Read `.aid-o/03-config/policies/decision-policies.yaml` for architecture principles
 3. Read `.aid-o/03-config/policies/gates.yaml` for gate definitions
 4. Read relevant playbooks from `.aid-o/03-config/playbooks/`
-5. **Session Branch Creation:**
+5. **Run Branch Creation:**
    a. Check if git is initialized:
       - Run `git rev-parse --is-inside-work-tree` (suppress errors)
       - If not a git repo: skip branch management, log to stage_log:
@@ -110,7 +110,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
    b. If git is available:
       1. Ensure working tree is clean: `git status --porcelain`
          - If dirty: warn PM, suggest committing or stashing first
-      2. Create session branch from current HEAD:
+      2. Create run branch from current HEAD:
          `git checkout -b epic/{epic_id}`
       3. Log to stage_log:
          `{"state": "IDLE", "action": "branch_created", "branch": "epic/{epic_id}"}`
@@ -162,8 +162,8 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 3. Identify parallel groups (steps that can run concurrently)
 4. Generate Plan JSON conforming to `.aid-o/03-config/templates/plan.schema.json`
 5. Validate Plan JSON against schema
-6. Generate session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8)
-7. Validate session file completeness (see Session File Quality Check below)
+6. Generate run file following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8)
+7. Validate run file completeness (see Run File Quality Check below)
 
 **Plan Generation Rules:**
 - Architect always runs first (contracts before implementation)
@@ -173,16 +173,16 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 - Docs runs after implementation steps
 - Release runs last (needs all gates to pass)
 
-**Session File Quality Check:**
-Before transitioning to PLAN_REVIEW, verify the session file passes ALL checks:
+**Run File Quality Check:**
+Before transitioning to PLAN_REVIEW, verify the run file passes ALL checks:
 - Objective: 3+ sentences with success criteria (not a one-liner)
 - Scope: explicit IN (3+ items) and OUT (2+ items) lists
 - Phases: each phase has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+ items)
 - Dependencies: table present (or "No inter-phase dependencies" statement)
 - Quality Gates: at least one gate listed
-If any check fails, fix the session file before proceeding.
+If any check fails, fix the run file before proceeding.
 
-**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json` + session file
+**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json` + run file
 
 ### 3. PLAN_REVIEW
 
@@ -209,7 +209,7 @@ PLAN_REVIEW: EPIC {epic_id} — {title}
 Overview:
   Steps: {count} ({wave_count} waves, {analysis_group_count} analysis groups)
   Roles: {unique roles}
-  Sessions: {session_count}
+  Runs: {run_count}
   Gates: {gate list}
 
 Wave Execution Plan:
@@ -235,9 +235,9 @@ Optimization:
     - R1: frontend starts after architect (not domain) — needs contracts only
     - R4: security starts after auth step (not all backend)
 
-Session Breakdown:
-  Session 1 (waves 0-2, {N} steps): {goal} — {milestone}
-  Session 2 (waves 3-4, {N} steps): {goal} — {milestone}
+Run Breakdown:
+  Run 1 (waves 0-2, {N} steps): {goal} — {milestone}
+  Run 2 (waves 3-4, {N} steps): {goal} — {milestone}
 
 Acceptance Criteria: {total_count} across {category_count} categories
   - Auth: {count} criteria
@@ -293,11 +293,23 @@ default to `recommended` preset behavior.
 2. For sequential step:
    a. Create branch: `epic/{epic_id}/step_{N}_{role}` from `epic/{epic_id}/main`
    b. Load role playbook from `.aid-o/03-config/playbooks/{role}.md`
-   c. Load source plan detail (Variant B — see **Source Plan Integration** below)
+   c. **Resolve plan_ref and load source plan detail** (see **Source Plan Integration** below):
+      1. Read EPIC frontmatter → extract `plan_ref` field
+      2. If `plan_ref` is set and not null:
+         - Resolve plan file path (relative paths resolve against `.aid-o/01-plans/`)
+         - Read the source plan file
+         - Match current step to plan section (by step number, plan task ref, or objective keywords)
+         - Extract the matching section content
+      3. If `plan_ref` is null or missing:
+         - Check `plan.json` → `source_plan` field as fallback
+         - If `source_plan` is also null or file unreadable → skip (no error)
+      4. Store extracted section for inclusion in agent prompt (step 2d)
    d. Dispatch agent with context:
       - EPIC specification (relevant sections)
       - Plan step (objective, inputs, outputs, constraints)
-      - Source plan implementation detail (if available — see below)
+      - **Source plan implementation detail** (if resolved in step 2c — injected as
+        `## Source Plan — Implementation Detail` section in the prompt, placed after
+        `## Your Task` and before `## Scope`)
       - Previous step outputs (if dependency)
       - Allowed/forbidden paths
    e. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
@@ -305,7 +317,7 @@ default to `recommended` preset behavior.
         `qdrant-find` query = step objective + role + tech_stack
       - Include top `cross_project.max_results` entries in dispatch prompt
       - If Qdrant unavailable: skip silently (agent works normally)
-   e. Agent executes and produces outputs
+   f. Agent executes and produces outputs
 3. For parallel group (per `skills/parallel-dispatch.md`):
    a. Create branch per agent from `epic/{epic_id}/main` (same base commit)
    b. Add PARALLEL CONTEXT to each prompt (other agents, branch names, scope warning)
@@ -333,38 +345,99 @@ Key context to pass:
 - Backend → Security: code to review
 - All → Docs: what changed and why
 
-**Source Plan Integration (Variant B):**
+**Source Plan Integration (Variant B) — plan_ref Injection Protocol:**
 
-When dispatching an agent for a step, check if source plan detail is available:
+When dispatching an agent for a step, resolve and inject the source plan detail.
+This closes the information gap between the high-level EPIC (structured spec) and the
+detailed source plan (implementation guide). Agents receive the full design context
+for their specific step.
 
-1. Read `plan.json` → check for `source_plan` field (path to source .md plan file)
-2. If `source_plan` exists AND file is readable:
-   a. Read the source plan file
-   b. Find the matching task section:
-      - Match by step objective keywords against plan section headers
-      - Match by explicit plan task reference in step objective (e.g., "(Plan: Task A)")
-      - If step.id contains a number, try matching against "## Task {letter}" sections
-   c. Extract the full task section content (from header to next ## header)
-   d. Include in agent prompt as:
+**Step A — Resolve source plan file path:**
 
-   ```
-   ## Source Plan — Implementation Detail
+1. Read EPIC frontmatter → extract `plan_ref` field
+2. If `plan_ref` is set and not null:
+   a. Resolve file path:
+      - If relative (no leading `/` or `.`): resolve against `.aid-o/01-plans/`
+      - If starts with `.aid-o/` or is absolute: use as-is
+   b. Verify file exists and is readable
+   c. If file not found: log warning to stage_log, fall through to step 3
+3. If `plan_ref` is null/missing OR file not found in step 2:
+   a. Read `plan.json` → check `source_plan` field (fallback)
+   b. If `source_plan` is set and file is readable: use that path
+   c. If `source_plan` is also null or unreadable: skip injection entirely
+      → Agent proceeds with plan.json step data only (backward compatible)
+      → No error, no warning — standalone EPICs work as before
 
-   The following is the detailed implementation guide from the source plan.
-   Use this as your primary reference for WHAT to change and HOW.
-   The step definition above provides the structured constraints (allowed paths,
-   acceptance criteria). This section provides the implementation specifics.
+**Step B — Match current step to plan section:**
 
-   {extracted_plan_task_section}
-   ```
+Given the source plan file content, find the section relevant to the current step.
+Try these matching strategies in order (first match wins):
 
-3. If `source_plan` does not exist or is unreadable:
-   → Agent proceeds with plan.json step data only (backward compatible)
-   → No error, no warning — standalone EPICs work as before
+1. **Explicit plan task reference in step objective:**
+   - Look for pattern `(Plan: Step N)` or `(Plan: Task N)` or `(Plan Task: N)` in the
+     step's `objective` field from plan.json
+   - If found, search the plan file for headers matching: `## Step N`, `**Step N**`,
+     `### Step N`, `## Task N`, `N.` at line start, or `## N.` patterns
+   - Example: objective = "Implement API routes (Plan: Step 3)" → find "## Step 3" or
+     "### 3." or "**Step 3**" in the plan
 
-4. IMPORTANT: The source plan section is ADDITIVE — it enriches the agent prompt
-   but does NOT override plan.json constraints (allowed_paths, forbidden_paths,
-   acceptance_criteria). If there's a conflict, plan.json wins.
+2. **Step number to plan section number mapping:**
+   - Extract the step number from `step.id` (e.g., `step_2_backend` → `2`)
+   - Search plan for section headers matching that number:
+     `## Step 2`, `### 2.`, `**2.`, `## Task 2`, `## Phase 2`
+   - Also try: `## High-Level Steps` → find numbered item `2.` within that section
+
+3. **Keyword matching (fallback):**
+   - Extract key terms from step objective (role name, action verbs, domain terms)
+   - Scan plan section headers for best keyword overlap
+   - Require at least 2 keyword matches to accept
+
+4. **No match found:**
+   - If no section matches after all strategies: skip injection for this step
+   - Log to stage_log: `{"state": "EXECUTING", "action": "plan_ref_match",
+     "step_id": "{step_id}", "result": "no_match", "reason": "no matching section found"}`
+   - Agent proceeds without source plan detail (still functional)
+
+**Step C — Extract section content:**
+
+1. Extract the full matched section: from the matched header line to the next header
+   of the same or higher level (e.g., from `## Step 3` to the next `## Step 4` or `# ...`)
+2. Include all sub-headers, code blocks, lists, and prose within the section
+3. If the section exceeds 3000 lines: truncate with a note
+   `[Section truncated — {N} lines omitted. Full plan at: {plan_file_path}]`
+
+**Step D — Include in agent prompt:**
+
+Insert the extracted section into the agent dispatch prompt, placed AFTER `## Your Task`
+and BEFORE `## Scope`:
+
+```
+## Source Plan — Implementation Detail
+
+From the plan: "{first line or title of extracted section}"
+
+The following is the detailed implementation guide from the source plan.
+Use this as your primary reference for WHAT to change and HOW.
+The step definition above provides the structured constraints (allowed paths,
+acceptance criteria). This section provides the implementation specifics.
+
+{extracted_plan_task_section}
+```
+
+**Important rules:**
+
+- The source plan section is ADDITIVE — it enriches the agent prompt but does NOT
+  override plan.json constraints (allowed_paths, forbidden_paths, acceptance_criteria).
+  If there's a conflict, plan.json wins.
+- If `plan_ref` resolution, section matching, or file reading fails at any point,
+  the agent dispatch MUST continue without the plan section. Plan injection is
+  best-effort and MUST NOT block agent execution.
+- Log all plan_ref resolution outcomes to stage_log.jsonl for traceability:
+  ```json
+  {"state": "EXECUTING", "action": "plan_ref_inject", "step_id": "{step_id}",
+   "source": "plan_ref|source_plan|none", "matched_section": "{header or null}",
+   "chars_injected": 0}
+  ```
 
 **Evidence:** For each step:
 - `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/output.md`
@@ -392,7 +465,7 @@ When dispatching an agent for a step, check if source plan detail is available:
    c. Merge analysis improvement_notes into step evidence (for Curator)
 5. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
    a. Read agent's `output.md` from `evidence/steps/step_{N}_{role}/output.md`
-   b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + session file acceptance items
+   b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + run file acceptance items
    c. For each acceptance criterion, evaluate:
       - Verifiable from output.md + `git diff`? → verify directly
       - Requires domain knowledge beyond Controller's scope? → mark `needs_review`
@@ -414,7 +487,7 @@ When dispatching an agent for a step, check if source plan detail is available:
       - **HIGH:** Log to `evidence/discovered_issues/`. Forward to later step if natural fit, else create `backlog.md` entry. PM Slack notification (informational). NOT blocking.
       - **MEDIUM/INFO:** Log to `evidence/discovered_issues/`. Add to `improvement_notes` (Curator picks up). NOT blocking.
    e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
-   f. Session file: add CRITICAL/HIGH issues to Session Log
+   f. Run file: add CRITICAL/HIGH issues to Run Log
 
 #### Diff Generation (after output verification)
 
@@ -607,7 +680,7 @@ if gate_fails:
       - Gate results: `evidence/{epic_id}/{run_id}/gates_report.json`
       - Final report: `evidence/{epic_id}/{run_id}/final_report.md`
    b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`, model: haiku) with:
-      - Active session file
+      - Active run file
       - Git log and diff
    c. Log:
       ```json
@@ -818,33 +891,33 @@ interacting with the Curator summary at all.
 
 **Actions:**
 1. If approved:
-   a. **Session File Status Update** (BEFORE archive — MANDATORY):
-      1. Read the active session file from `.aid-o/04-engine/sessions/S-*.md`
+   a. **Run File Status Update** (BEFORE archive — MANDATORY):
+      1. Read the active run file from `.aid-o/04-engine/runs/S-*.md`
       2. Update YAML frontmatter:
          - `status: completed`
          - `completed: {ISO 8601 timestamp}`
       3. Update the `Completion:` line in the body to `100%`
       4. Update the last phase status to `done`
-      5. Write the updated session file
+      5. Write the updated run file
       6. THEN proceed with archive (copy to archive/ directory)
 
-      The archived copy MUST reflect the completed status. Never archive a session
+      The archived copy MUST reflect the completed status. Never archive a run
       that still shows `status: active`.
 
-   b. **Session Branch Merge** (if git available):
-      If a session branch was created (check plan_progress.json -> branch):
+   b. **Run Branch Merge** (if git available):
+      If a run branch was created (check plan_progress.json -> branch):
       1. Verify all gates passed and PM approved
       2. Switch to base branch: `git checkout {default_branch}`
-      3. Merge session branch: `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+      3. Merge run branch: `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
       4. If merge conflict: escalate to PM (do NOT auto-resolve)
-      5. Delete session branch: `git branch -d epic/{epic_id}`
+      5. Delete run branch: `git branch -d epic/{epic_id}`
       6. Log to stage_log:
          `{"state": "DONE", "action": "branch_merged", "branch": "epic/{epic_id}"}`
 
-      If no session branch (git not available): skip this step.
+      If no run branch (git not available): skip this step.
 
    c. Update EPIC file status to "Completed"
-   d. Archive session file to `.aid-o/04-engine/sessions/archive/`
+   d. Archive run file to `.aid-o/04-engine/runs/archive/`
    e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
 3. **POST-PROCESSING (Auditor):**
@@ -980,18 +1053,18 @@ interacting with the Curator summary at all.
 
 6. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
 
-   1. **Archive session:**
-      - Move to `.aid-o/04-engine/sessions/archive/{filename}`
+   1. **Archive run:**
+      - Move to `.aid-o/04-engine/runs/archive/{filename}`
       - Update frontmatter: `status: completed`, `completed: {timestamp}`
 
    2. **Update EPIC counter:**
-      - Increment `sessions_completed += 1` in EPIC frontmatter
+      - Increment `runs_completed += 1` in EPIC frontmatter
 
    3. **Archive EPIC (conditional):**
-      - IF `sessions_completed == sessions_total`:
+      - IF `runs_completed == runs_total`:
         - Set `status: completed`, `completed: {timestamp}`
         - Move to `.aid-o/02-epics/archive/{filename}`
-      - ELSE: EPIC stays active, log "session {N}/{total} done"
+      - ELSE: EPIC stays active, log "run {N}/{total} done"
 
    4. **Update Plan counter (conditional):**
       - IF EPIC archived AND `plan_ref` exists:
@@ -1002,8 +1075,8 @@ interacting with the Curator summary at all.
 
    5. **Stage log:**
       ```json
-      {"state": "DONE", "action": "archive", "session_archived": true,
-       "epic_archived": true, "epic_sessions": "2/2",
+      {"state": "DONE", "action": "archive", "run_archived": true,
+       "epic_archived": true, "epic_runs": "2/2",
        "plan_archived": false, "plan_epics": "1/3"}
       ```
 
@@ -1068,7 +1141,7 @@ interacting with the Curator summary at all.
      3. Continue building -- run /aid-plan-epic with a new EPIC
      4. Check quality -- run /aid-audit for a project health assessment
      5. Analyze performance -- run /aid-analytics to see bottlenecks and optimization tips
-     6. Archive -- the session has been archived to sessions/archive/
+     6. Archive -- the run has been archived to runs/archive/
 
    Lessons learned: processed in CURATOR_RESOLVE (see curator_resolve_report.json)
    Backlog proposals: {proposal_count} new entries (review with /aid-backlog)
@@ -1461,7 +1534,7 @@ The DONE state sends audit summaries (Type F). Curator proposals (Type D) and re
 Status updates (Type G) are sent at key orchestration points (non-blocking, fire-and-forget).
 
 If Slack MCP is not configured (`.aid-o/03-config/policies/slack-config.yaml` missing or
-`slack.enabled: false`), all communication falls back to chat-based presentation (pre-Session 6 behavior).
+`slack.enabled: false`), all communication falls back to chat-based presentation (pre-Run 6 behavior).
 
 The DONE state checks `.aid-o/04-engine/epic-queue.yaml` (per `skills/epic-queue.md`) and
 auto-starts the next queued EPIC if available.
@@ -1481,7 +1554,7 @@ auto-starts the next queued EPIC if available.
 - **Playbooks:** `.aid-o/03-config/playbooks/{role}.md`
 - **Evidence:** `.aid-o/04-engine/evidence/`
 - **Epic queue:** `.aid-o/04-engine/epic-queue.yaml`
-- **Sessions:** `.aid-o/04-engine/sessions/`
+- **Runs:** `.aid-o/04-engine/runs/`
 - **Memory:** `.aid-o/04-engine/memory/active-work.md`
 - **Dispatch strategy:** `.aid-o/03-config/policies/dispatch-strategy.yaml`
 - **Memory config:** `.aid-o/03-config/policies/memory-config.yaml`
@@ -1492,36 +1565,36 @@ auto-starts the next queued EPIC if available.
 
 ---
 
-## Integration with Session Management
+## Integration with Run Management
 
-The Controller creates and maintains a session file for each EPIC run:
+The Controller creates and maintains a run file for each EPIC run:
 
-1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8):
-   - Read sources: EPIC, Plan JSON, plan file, previous session, source code, decision policies
-   - Map plan.json steps → session phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
-   - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Session Log
+1. **On PLANNING:** Create run file following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8):
+   - Read sources: EPIC, Plan JSON, plan file, previous run, source code, decision policies
+   - Map plan.json steps → run phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
+   - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Run Log
    - Validate completeness before proceeding to PLAN_REVIEW
 
-2. **On each PHASE_CHECK:** Update session file:
+2. **On each PHASE_CHECK:** Update run file:
    - Mark completed phase acceptance items as checked/failed based on acceptance validation
    - If review dispatched: log review result (approved/rejected + feedback summary)
-   - If discovered issues: log CRITICAL/HIGH issues to Session Log with severity and status
-   - Add step status + commit hash to Session Log
+   - If discovered issues: log CRITICAL/HIGH issues to Run Log with severity and status
+   - Add step status + commit hash to Run Log
 
-3. **On analysis complete:** Log analysis_report summary to Session Log
+3. **On analysis complete:** Log analysis_report summary to Run Log
 
-4. **On GATES:** Update session file:
+4. **On GATES:** Update run file:
    - Add gate results to Quality Gates section (pass/fail per gate)
-   - Update Session Log
+   - Update Run Log
 
-5. **On DONE:** Complete session file:
+5. **On DONE:** Complete run file:
    - Set `status: completed` in frontmatter
-   - Final Session Log entry
+   - Final Run Log entry
    - Archive to completed/
 
-Session file frontmatter:
+Run file frontmatter:
 ```yaml
-id: S-{YYYYMMDD}-{hash}
+id: R-{YYYYMMDD}-{hash}
 type: new-feature
 status: active
 epic_id: {epic_id}
@@ -1548,6 +1621,88 @@ orchestrated: true  # marks this as Controller-managed
 | Analysis critical findings | PHASE_CHECK | ESCALATION (PM must acknowledge) |
 | Analysis agent failure | EXECUTING | Skip agent, log warning, proceed |
 | PM rejects final | PM_APPROVAL | ESCALATION with feedback |
+
+---
+
+## ID Generation
+
+This section defines the ID format specification and generation protocol for all AID entities. IDs are deterministic, sequential, and encode parent-child relationships.
+
+### ID Format Specification
+
+| Entity | Format | Example | Description |
+|--------|--------|---------|-------------|
+| Plan | `P{NNN}` | P001, P002 | Zero-padded 3-digit from `plan` counter |
+| EPIC from plan | `E-{NNN}-{phase}_{total}` | E-001-1_3 | Plan number + phase X of Y total phases |
+| Ad-hoc EPIC (no plan) | `E-{NNN}` | E-001, E-002 | Standalone sequential from `epic` counter |
+| Single-phase EPIC | `E-{NNN}-1_1` | E-001-1_1 | Plan number + "1 of 1" phase notation |
+| Run | `R-{EPIC_ID}-{run_number}` | R-001-1_3-1 | EPIC ID + sequential run number |
+
+Where `NNN` = zero-padded 3-digit number from `.aid-o/03-config/counter.yaml`.
+
+### Counter File
+
+Location: `.aid-o/03-config/counter.yaml`
+
+The counter file tracks the last-assigned sequential ID for each entity type. Initial values are `0`, meaning the next entity created gets ID `1` (formatted as `001`).
+
+```yaml
+plan: 0       # Last assigned plan number. Next: P001
+epic: 0       # Last assigned ad-hoc EPIC number. Next: E-001
+```
+
+Notes:
+- Plan-linked EPICs derive their number from the `plan` counter + phase info, so they do not need a separate counter.
+- Runs derive their number from the EPIC (sequential within that EPIC), so no separate counter is needed.
+- This is a single-user tool; no concurrency control is required.
+
+### ID Generation Protocol
+
+1. Read `.aid-o/03-config/counter.yaml`
+2. Increment the appropriate counter by 1
+3. Write updated counter back to file
+4. Use the new value to construct the ID
+
+**When to generate each ID type:**
+
+| ID Type | Generated During | Trigger |
+|---------|-----------------|---------|
+| Plan ID (`P{NNN}`) | `/aid-plan-epic` (PLANNING state) or `/aid-brainstorm` | New plan creation |
+| EPIC ID (from plan) | EPIC creation from a plan | Plan approved, EPICs generated |
+| EPIC ID (ad-hoc) | Ad-hoc EPIC creation (no parent plan) | `/aid-run-epic` with standalone EPIC |
+| Run ID | `/aid-run-epic` (IDLE state) | New run of an existing EPIC |
+
+### Relationship Encoding
+
+The ID scheme encodes parent-child relationships directly in the identifier:
+
+- **Plan number in EPIC ID** links the EPIC to its parent plan. `E-001-2_3` belongs to plan `P001`.
+- **EPIC ID in Run ID** links the run to its parent EPIC. `R-001-1_3-1` is a run of EPIC `E-001-1_3`.
+- **Ad-hoc EPICs** (created without a plan) get a standalone sequential number from the `epic` counter. They have no plan linkage.
+- **Phase notation** (`{phase}_{total}`) encodes "phase X of Y total phases" from the parent plan.
+
+### Examples
+
+```
+Plan P001 has 3 EPICs:
+  E-001-1_3  (phase 1 of 3)
+  E-001-2_3  (phase 2 of 3)
+  E-001-3_3  (phase 3 of 3)
+
+Each EPIC can have multiple runs:
+  R-001-1_3-1  (first run of E-001-1_3)
+  R-001-1_3-2  (second run, if first failed/was aborted)
+
+Ad-hoc EPIC (no plan):
+  E-002        (standalone, epic counter incremented)
+
+Single-phase plan:
+  P002 -> E-002-1_1 -> R-002-1_1-1
+```
+
+### Migration Note
+
+Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of the refactoring plan. The `counter.yaml` initial values (`0`) assume migration will set them to the correct starting point after accounting for existing entities.
 
 ---
 

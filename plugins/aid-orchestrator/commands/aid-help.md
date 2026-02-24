@@ -20,7 +20,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 ```
 /aid-help                   # full overview
 /aid-help commands          # detail on every command
-/aid-help workflow          # Plan → EPIC → Session flow
+/aid-help workflow          # Plan → EPIC → Run flow
 /aid-help epic              # how to write an EPIC
 /aid-help agents            # 18 agent roles + specialists
 /aid-help planning          # planner, parallelization, analysis groups
@@ -41,7 +41,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 ### Step 1: Check Environment
 
 1. Check if `.aid-o/` exists in current project
-2. If exists: note active EPICs count, sessions count (for dynamic info)
+2. If exists: note active EPICs count, runs count (for dynamic info)
 3. If not exists: include recommendation to run `/aid-init` or `/aid-setup`
 
 ### Step 2: Display Based on Topic
@@ -72,7 +72,7 @@ Commands (11):
   /aid-setup         Interactive project onboarding
   /aid-brainstorm    9-step interactive brainstorming flow
   /aid-help          This help
-  /aid-plan-epic     EPIC or Plan → Plan JSON + session file
+  /aid-plan-epic     EPIC or Plan → Plan JSON + run file
   /aid-research      On-demand documentation research (topic, URL, --deep)
   /aid-run-epic      Start orchestration (state machine)
   /aid-epic-status   Show pipeline status
@@ -91,7 +91,7 @@ Where things live:
   .aid-o/01-plans/      Plans (brainstorming)
   .aid-o/02-epics/      EPICs (task specs)
   .aid-o/03-config/     Configuration
-  .aid-o/04-engine/     AI internals (sessions, evidence, memory)
+  .aid-o/04-engine/     AI internals (runs, evidence, memory)
   .aid-o/05-inputs/     Sample data files for brainstorming
 
 Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | research | analytics | inputs | examples | faq
@@ -100,7 +100,7 @@ Topics: /aid-help commands | workflow | epic | agents | planning | gates | evide
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
 {If .aid-o/ found:}
 
-  Status: {N} active EPICs, {M} sessions
+  Status: {N} active EPICs, {M} runs
 ```
 
 ---
@@ -148,17 +148,17 @@ SETUP COMMANDS:
       deep:  /aid-research --deep LangGraph            (extended API reference)
       url:   /aid-research https://docs.celery.dev/    (index specific page)
     Requires: .aid-o/ workspace. Optional: Qdrant, Context7 MCP.
-    Stores: documentation chunks in Qdrant (or session-only without Qdrant).
+    Stores: documentation chunks in Qdrant (or run-only without Qdrant).
 
 ORCHESTRATION COMMANDS:
 
   /aid-plan-epic <path>
     Unified Plan→EPIC→Plan entry point: accepts an EPIC or a Plan file and
-    generates a Plan JSON + session file ready for /aid-run-epic.
+    generates a Plan JSON + run file ready for /aid-run-epic.
     Accepts:
       EPIC file: /aid-plan-epic .aid-o/02-epics/E-YYYYMMDD-xxxx.md  (standard)
       Plan file: /aid-plan-epic .aid-o/01-plans/2026-02-19-plan.md   (auto-generates EPIC first)
-    Output: plan.json, plan_progress.json, session file
+    Output: plan.json, plan_progress.json, run file
     When given a Plan, the command auto-generates an EPIC using the EPIC
     Subagent Template, shows it to PM for review, then proceeds with plan
     generation — all in one invocation. After plan generation, PM is asked
@@ -212,7 +212,7 @@ QUALITY COMMANDS:
 #### Topic: workflow
 
 ```
-AID Workflow — Plan → EPIC → Session
+AID Workflow — Plan → EPIC → Run
 ====================================
 
 The AID workflow has three layers:
@@ -221,7 +221,7 @@ The AID workflow has three layers:
     ↓ PM + AI collaborate on approach
   EPIC (specification)
     ↓ PM + AI detail the task
-  SESSION (execution)
+  RUN (execution)
     ↓ AI executes autonomously
 
 1. PLAN (.aid-o/01-plans/)
@@ -236,11 +236,11 @@ The AID workflow has three layers:
    - Each step defines a role (architect, backend, qa, etc.)
    - Naming: E-{YYYYMMDD}-{hash}-{topic}.md
 
-3. SESSION (.aid-o/04-engine/sessions/)
+3. RUN (.aid-o/04-engine/runs/)
    - Auto-generated from EPIC by /aid-plan-epic
    - Tracks progress, commits, decisions
-   - One session per EPIC run (or per sub-session for multi-session EPICs)
-   - Naming: S-{YYYYMMDD}-{hash}-{topic}.md
+   - One run per EPIC run (or per sub-run for multi-run EPICs)
+   - Naming: R-{YYYYMMDD}-{hash}-{topic}.md
 
 Orchestration Flow:
   /aid-plan-epic → generates Plan JSON from EPIC
@@ -288,11 +288,11 @@ Epic Queue (autonomous pipeline):
   After DONE → auto-pickup next EPIC from queue
   /aid-epic-queue pause/resume → control auto-pickup
 
-Multi-Session EPICs:
+Multi-Run EPICs:
   For larger EPICs (7+ steps), the Planner automatically splits execution into
-  multiple sessions optimized for speed and quality. Each session runs
-  independently with handoff state preserved. Use /aid-run-epic E-xxx --session N
-  to run a specific session. The Planner decides the optimal split — PM approves.
+  multiple runs optimized for speed and quality. Each run runs
+  independently with handoff state preserved. Use /aid-run-epic E-xxx --run N
+  to run a specific run. The Planner decides the optimal split — PM approves.
 
 Everything else is autonomous (auto-decisions from decision-policies.yaml).
 ```
@@ -443,7 +443,7 @@ SPECIALIST AGENTS (3) — triggered by specific events:
 UTILITY AGENTS (6) — support functions:
 
   code-reviewer, docs-reviewer, quality-gates-runner,
-  session-validator, lessons-extractor, gate-fixer
+  run-validator, lessons-extractor, gate-fixer
 ```
 
 ---
@@ -697,7 +697,7 @@ Templates (.aid-o/03-config/templates/):
   plan.md              Plan document template
   epic.md              EPIC template
   plan.schema.json     JSON schema for Plan JSON
-  session-*.md         Session file templates (4 types)
+  run-*.md         Run file templates (4 types)
 
 Playbooks (.aid-o/03-config/playbooks/):
   9 role playbooks (architect.md through release.md) + e2e.md.
@@ -835,7 +835,7 @@ SAFETY:
   - Max 1 EPIC runs at a time (no parallel EPIC execution)
   - Failed EPIC → queue auto-pauses (PM must investigate)
   - /aid-epic-queue pause → stops next pickup (running EPIC continues)
-  - Queue persists in YAML (survives session restarts)
+  - Queue persists in YAML (survives run restarts)
 ```
 
 #### Topic: memory
@@ -844,7 +844,7 @@ SAFETY:
 Memory — Qdrant Vector Memory (Optional)
 ====================================
 
-AID can use Qdrant MCP for long-term semantic memory across sessions.
+AID can use Qdrant MCP for long-term semantic memory across runs.
 Agents learn from past decisions, patterns, and lessons automatically.
 
 Skill: skills/memory-mcp.md
@@ -866,8 +866,8 @@ SETUP:
 
 WHAT GETS INDEXED:
 
-  At session-end:
-    - Decisions from session log (type: decision)
+  At run-end:
+    - Decisions from run log (type: decision)
     - Lessons learned (type: lesson)
     - Working commands (type: command)
 
@@ -885,7 +885,7 @@ HOW AGENTS USE IT:
 
   Before each agent dispatch in EXECUTING state:
     1. Controller searches Qdrant for relevant past knowledge
-    2. Results injected as "## MEMORY CONTEXT (from past sessions)"
+    2. Results injected as "## MEMORY CONTEXT (from past runs)"
     3. Agent uses as reference (not blindly followed)
     4. If Qdrant unavailable → skip silently, agent works normally
 
@@ -977,7 +977,7 @@ Input Files — Sample Data for Brainstorming
 ====================================
 
 Place sample data files in .aid-o/05-inputs/ for AID to analyze during
-brainstorming sessions.
+brainstorming runs.
 
 SUPPORTED FORMATS:
 
@@ -996,7 +996,7 @@ HOW IT WORKS:
       JSON: schema + top-level keys
   - You can also point AID to files outside this directory during brainstorming
   - Files are read-only — AID never modifies or moves your input files
-  - Maximum 10 files are analyzed per session
+  - Maximum 10 files are analyzed per run
 
 ALTERNATIVE:
 

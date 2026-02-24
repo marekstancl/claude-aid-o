@@ -91,8 +91,8 @@ artifacts agree, and the stage log is internally consistent.
 | # | Check | Severity | Deduction | Rule |
 |---|-------|----------|-----------|------|
 | 1 | EPIC status is completed | High | -10 | `epic.status == "completed"` in EPIC frontmatter |
-| 2 | At least one session completed | Medium | -5 | `epic.sessions_completed > 0` in EPIC frontmatter |
-| 3 | Completed EPIC is archived | Low | -2 | If `sessions_completed == sessions_total`: EPIC file exists in `02-epics/archive/`. Skip check if sessions are not all completed. |
+| 2 | At least one run completed | Medium | -5 | `epic.runs_completed > 0` in EPIC frontmatter |
+| 3 | Completed EPIC is archived | Low | -2 | If `runs_completed == runs_total`: EPIC file exists in `02-epics/archive/`. Skip check if runs are not all completed. |
 
 #### F.2) Evidence Completeness (6 checks)
 

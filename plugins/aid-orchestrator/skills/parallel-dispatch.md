@@ -23,9 +23,9 @@ Key principles:
 
 ## 1. Branch Strategy
 
-### Session Branch (created by Controller at IDLE)
+### Run Branch (created by Controller at IDLE)
 
-The Controller creates a single session branch `epic/{epic_id}` at IDLE state
+The Controller creates a single run branch `epic/{epic_id}` at IDLE state
 (see `skills/epic-orchestration.md` Section 1). This is the base for all work
 in this EPIC. If the Controller did not create a branch (git not available),
 all branching in this skill is skipped — agents work without version control.

@@ -314,7 +314,7 @@ RULE 7: .aid-o/05-inputs/ scan happens BEFORE WF4 (data question).
 RULE 8: Total question count: standard (3-7) + workflow inserts (3-5) = max 12.
         If the standard flow used 7 questions, workflow inserts are limited to 5.
         If the standard flow used 3 questions, workflow inserts can use up to 5.
-        Never exceed 12 total questions in a single brainstorming session.
+        Never exceed 12 total questions in a single brainstorming run.
         WF7 does not count as a question (RULE 5).
 ```
 
@@ -841,10 +841,10 @@ INLINE RESEARCH (for specific questions during design, Step 4-5):
      TIMEOUT: 10 seconds.
   3. IF Context7 returned nothing:
      Note in plan: "Requires further research: {specific question}"
-     Do NOT block the brainstorming session.
+     Do NOT block the brainstorming run.
 
 RULES:
-  - Inline research happens AT MOST twice per brainstorming session.
+  - Inline research happens AT MOST twice per brainstorming run.
   - Never block PM waiting for research results.
   - If research takes >10 seconds, skip and note for later.
   - Research results are informational — PM makes the final decision.
@@ -862,10 +862,10 @@ RULES:
 | Qdrant returns stale results          | Use them (stale > nothing). Note staleness   |
 |                                       | internally for potential re-research.        |
 | Context7 returns irrelevant results   | Discard. Fall through to static.             |
-| All enrichment times out              | Use static fallback. Session unaffected.     |
+| All enrichment times out              | Use static fallback. Run unaffected.     |
 ```
 
-In every degradation scenario, the brainstorming session proceeds without
+In every degradation scenario, the brainstorming run proceeds without
 interruption. PM never sees error messages related to knowledge retrieval.
 The static fallback in this skill file guarantees that AID always has platform
 knowledge available.
