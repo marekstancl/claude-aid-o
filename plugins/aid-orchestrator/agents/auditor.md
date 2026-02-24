@@ -121,7 +121,59 @@ All paths are relative to `evidence/{epic_id}/{run_id}/`.
 |---|-------|----------|-----------|------|
 | 13 | Timestamps in chronological order | Medium | -5 | All timestamps in `stage_log.jsonl` are non-decreasing when compared at **minute granularity** (truncate seconds). A single out-of-order pair triggers the deduction once. |
 
-- **Scoring factors:** lifecycle state + evidence completeness + cross-validation agreement + log integrity
+#### F.5) Evidence Incomplete Detection — `evidence_incomplete` finding type
+
+**Purpose:** Detect completed steps that are missing required evidence artifacts in the
+flat evidence structure. This produces structured `evidence_incomplete` findings (severity:
+**warning**, non-blocking) that complement check #9 in F.2 with richer diagnostics.
+
+**Finding type:** `evidence_incomplete`
+**Severity:** Warning (non-blocking — does not prevent Epic completion)
+**Deduction:** -3 per finding (warning-level)
+
+**Detection logic (step-by-step):**
+
+1. **Read `plan_progress.json`** from `evidence/{epic_id}/{run_id}/plan_progress.json`.
+   Parse the steps array. Each step has a `status` field.
+
+2. **Identify completed steps only.** Filter to steps where `status == "completed"`.
+   Do **NOT** flag steps with status `in_progress`, `pending`, `blocked`, or `skipped`.
+   Only completed steps are expected to have full evidence.
+
+3. **For each completed step, verify `output.md` exists** at the expected path:
+   ```
+   evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md
+   ```
+   Where `{N}` is the step number and `{role}` is the step role (e.g., `backend`,
+   `frontend`, `qa`, `devops`), both taken from the step entry in `plan_progress.json`.
+
+4. **Check for empty step directories.** If the directory
+   `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/` exists but contains **zero files**
+   (directory is empty), flag it as `evidence_incomplete` even if the step is completed.
+   An empty directory indicates the agent ran but produced no output.
+
+5. **Generate findings.** For each violation, produce a finding with:
+   ```yaml
+   - area: "evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/"
+     audit_type: process
+     finding_type: evidence_incomplete
+     finding: "Completed step {N} ({role}) is missing output.md"
+       # OR: "Completed step {N} ({role}) has an empty step directory"
+     recommendation: "Re-run the step agent or manually create output.md with step results"
+     effort: small
+     severity: warning
+   ```
+
+6. **Edge cases:**
+   - If `plan_progress.json` does not exist, skip this check entirely (F.2 check #5
+     will already flag the missing file as a High severity issue).
+   - If the `steps/` directory does not exist at all, produce a single
+     `evidence_incomplete` finding: "Steps directory missing — no step evidence found."
+   - If a step directory does not exist at all for a completed step (not even an empty
+     directory), flag it as `evidence_incomplete` with finding: "Step directory missing
+     for completed step {N} ({role})."
+
+- **Scoring factors:** lifecycle state + evidence completeness + cross-validation agreement + log integrity + evidence incomplete findings
 
 ---
 
