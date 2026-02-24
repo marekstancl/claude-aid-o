@@ -282,43 +282,40 @@ Display the following banner. Replace all `{placeholders}` with actual session v
 The banner MUST be output exactly as shown (preserving alignment and box-drawing characters).
 
 ```
-        _______________
-       |   ___         |
-       |  |   |  +  +  |
-       |  | F |  +  +  |
-       |  | A |  +  +  |
-       |  |___|  +  +  |
-       |_______/====\__|
-               |    |
-               | // |
-               | // |
-               |    |
-          _____|    |_____
-         /    \======/    \
-        /  F I R S T  A I D \
-       /________________________\
-
-  Fully Integrated Autonomous Development
-  ========================================
-
-  AUTONOMOUS MODE ACTIVE
-
-  Session:       {session_id}
-  EPICs queued:  {count} ({total_estimated_steps} estimated steps)
-  Permissions:   Elevated ({source}, {allow_count} entries)
-  Escalation:    Budget {budget} | Used 0
-
-  Queue:
-    #  Priority   EPIC ID                  Title
-    -- ---------- ------------------------ ---------------------------
-    1. {priority}  {epic_id_1}              {title_1}
-    2. {priority}  {epic_id_2}              {title_2}
-    ...
-
-  Stop command:  /aid-stop to disengage
-
-  ========================================
-  Injecting autonomous execution...
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║                                                                    ║
+  ║      ███████╗██╗██████╗ ███████╗████████╗     █████╗ ██╗██████╗    ║
+  ║      ██╔════╝██║██╔══██╗██╔════╝╚══██╔══╝    ██╔══██╗██║██╔══██╗   ║
+  ║      █████╗  ██║██████╔╝███████╗   ██║       ███████║██║██║  ██║   ║
+  ║      ██╔══╝  ██║██╔══██╗╚════██║   ██║       ██╔══██║██║██║  ██║   ║
+  ║      ██║     ██║██║  ██║███████║   ██║       ██║  ██║██║██████╔╝   ║
+  ║      ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝       ╚═╝  ╚═╝╚═╝╚═════╝    ║
+  ║                                                                    ║
+  ║          ┌───┐     Fully Integrated Autonomous Development         ║
+  ║          │ + │     ════════════════════════════════════════         ║
+  ║          └───┘     AUTONOMOUS MODE ACTIVE                          ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Session:      {session_id}                                        ║
+  ║  EPICs queued: {count} ({total_estimated_steps} estimated steps)   ║
+  ║  Permissions:  Elevated ({source}, {allow_count} entries)          ║
+  ║  Escalation:   Budget {budget} | Used 0                            ║
+  ║                                                                    ║
+  ║  Queue:                                                            ║
+  ║  ┌────┬────────────┬──────────────────────────┬─────────────────┐  ║
+  ║  │ #  │ Priority   │ EPIC ID                  │ Title           │  ║
+  ║  ├────┼────────────┼──────────────────────────┼─────────────────┤  ║
+  ║  │ 1. │ {priority} │ {epic_id_1}              │ {title_1}       │  ║
+  ║  │ 2. │ {priority} │ {epic_id_2}              │ {title_2}       │  ║
+  ║  │ .. │            │                          │ ... and {N} more│  ║
+  ║  └────┴────────────┴──────────────────────────┴─────────────────┘  ║
+  ║                                                                    ║
+  ║  Stop command:  /aid-stop to disengage                             ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  Injecting autonomous execution...                                 ║
+  ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
 **Banner variable reference:**
@@ -333,12 +330,16 @@ The banner MUST be output exactly as shown (preserving alignment and box-drawing
 | `{budget}` | `session.escalation.budget` |
 | `{priority}` | Queue entry priority (`critical`, `high`, `medium`, `low`) |
 | `{epic_id_N}` | EPIC ID from queue entry |
-| `{title_N}` | EPIC title (first 27 chars, truncated with `...` if longer) |
+| `{title_N}` | EPIC title (first 17 chars, truncated with `...` if longer) |
 
 **Alignment rules:**
-- The syringe ASCII art is center-aligned relative to the text block below it
-- Queue table columns are left-aligned; truncate long titles to fit 80-char terminal width
-- If more than 5 EPICs are queued, show the first 5 and append: `    ... and {N} more`
+- The entire banner is enclosed in a Unicode box-drawing frame (double-line outer, single-line inner table)
+- The FIRST AID block lettering uses Unicode full-block characters for visual weight
+- The first aid cross icon (+ in a box) appears beside the subtitle for medical/aid branding
+- Queue table columns are left-aligned; truncate long titles to fit within the frame
+- If more than 5 EPICs are queued, show the first 5 and replace the last row with: `│ .. │            │                          │ ... and {N} more│`
+- Right-pad all content lines with spaces to maintain consistent frame width (70 inner chars)
+- Terminal width assumed: 80 columns (frame is 72 chars including 2-space left indent)
 
 **Send Slack Status Update (Type G):**
 `:rocket: FIRST AID started — {count} EPICs queued. Session {session_id}.`
@@ -575,94 +576,100 @@ exactly as shown (preserving alignment and box-drawing characters).
 - `error` -> `[ERR!]`
 
 ```
-  ========================================
-  FIRST AID  --  Session Report
-  ========================================
-
-  Session:   {session_id}
-  Status:    {status_icon} {completed|aborted|stopped|error}
-  Duration:  {total_duration} ({started_at} -> {completed_at})
-  Mode:      Autonomous
-
-  ----------------------------------------
-  QUEUE RESULTS
-  ----------------------------------------
-
-  EPICs completed:  {completed} / {total}
-  EPICs failed:     {failed}
-  EPICs remaining:  {remaining}
-
-  +-----+----------------------------+--------+-------+--------+----------+-----------+
-  | #   | EPIC                       | Steps  | Gates | Escal. | Release  | Duration  |
-  +-----+----------------------------+--------+-------+--------+----------+-----------+
-  |  1  | E-xxx (Title)              | 3/3    | 4/4   | 0      | deferred | 12m 34s   |
-  |  2  | E-yyy (Title)              | 5/5    | 4/4   | 1      | deferred | 28m 01s   |
-  |  3  | E-zzz (Title)              | 2/2    | 3/3   | 0      | v0.9.0   | 15m 12s   |
-  +-----+----------------------------+--------+-------+--------+----------+-----------+
-  | SUM |                            | 10/10  | 11/11 | 1      |          | 55m 47s   |
-  +-----+----------------------------+--------+-------+--------+----------+-----------+
-
-  ----------------------------------------
-  QUALITY METRICS
-  ----------------------------------------
-
-  Steps executed:     {executed} ({skipped} skipped)
-  Gate runs:          {gate_runs} total ({gate_retries} retries)
-  Escalations:        {escalation_count} / {escalation_budget} budget
-  Curator proposals:  {curator_total}
-    Implemented:      {implemented}
-    Rejected:         {rejected}
-    Deferred:         {deferred}
-  Lessons learned:    {lessons_count} new entries
-
-  ----------------------------------------
-  VERSION & RELEASE
-  ----------------------------------------
-
-  Version bump:     {version_info}
-  Files updated:    {files_count}
-  Git tag:          {tag_status}
-  GitHub release:   {release_status}
-
-  Version bumps this session:
-  {version_bump_list_or_none}
-
-  ----------------------------------------
-  PERMISSIONS
-  ----------------------------------------
-
-  Elevated at:   {elevated_timestamp}
-  Restored at:   {restored_timestamp}
-  Source:         {source}
-  Learned:       {learned_count} new permissions added
-
-  ----------------------------------------
-  EVIDENCE ARTIFACTS
-  ----------------------------------------
-
-  Session log:     .aid-o/04-engine/evidence/FIRST-AID-{session_id}/stage_log.jsonl
-  Session report:  .aid-o/04-engine/evidence/FIRST-AID-{session_id}/summary-report.md
-  Session state:   .aid-o/04-engine/auto-mode-state.yaml
-
-  Per-EPIC evidence:
-    {epic_id_1}:  .aid-o/04-engine/evidence/{epic_id_1}/{run_id_1}/
-    {epic_id_2}:  .aid-o/04-engine/evidence/{epic_id_2}/{run_id_2}/
-    ...
-
-  ----------------------------------------
-  WHAT'S NEXT?
-  ----------------------------------------
-
-  1. Review changes  ->  git log --oneline, /aid-review
-  2. Push to remote  ->  git push (if not auto-pushed)
-  3. New queue       ->  /aid-epic-queue add, then /aid-first-aid
-  4. Analytics       ->  /aid-analytics
-  5. Audit           ->  /aid-audit
-
-  ========================================
-  FIRST AID session {session_id} -- {status}
-  ========================================
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║                                                                    ║
+  ║          ┌───┐     FIRST AID  --  Session Report                   ║
+  ║          │ + │     ════════════════════════════════                 ║
+  ║          └───┘                                                     ║
+  ║                                                                    ║
+  ║  Session:   {session_id}                                           ║
+  ║  Status:    {status_icon} {completed|aborted|stopped|error}        ║
+  ║  Duration:  {total_duration} ({started_at} -> {completed_at})      ║
+  ║  Mode:      Autonomous                                             ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  QUEUE RESULTS                                                     ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  EPICs completed:  {completed} / {total}                           ║
+  ║  EPICs failed:     {failed}                                        ║
+  ║  EPICs remaining:  {remaining}                                     ║
+  ║                                                                    ║
+  ║  ┌─────┬────────────────────────────┬────────┬───────┬────────┬──────────┬───────────┐  ║
+  ║  │ #   │ EPIC                       │ Steps  │ Gates │ Escal. │ Release  │ Duration  │  ║
+  ║  ├─────┼────────────────────────────┼────────┼───────┼────────┼──────────┼───────────┤  ║
+  ║  │  1  │ E-xxx (Title)              │ 3/3    │ 4/4   │ 0      │ deferred │ 12m 34s   │  ║
+  ║  │  2  │ E-yyy (Title)              │ 5/5    │ 4/4   │ 1      │ deferred │ 28m 01s   │  ║
+  ║  │  3  │ E-zzz (Title)              │ 2/2    │ 3/3   │ 0      │ v0.9.0   │ 15m 12s   │  ║
+  ║  ├─────┼────────────────────────────┼────────┼───────┼────────┼──────────┼───────────┤  ║
+  ║  │ SUM │                            │ 10/10  │ 11/11 │ 1      │          │ 55m 47s   │  ║
+  ║  └─────┴────────────────────────────┴────────┴───────┴────────┴──────────┴───────────┘  ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  QUALITY METRICS                                                   ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Steps executed:     {executed} ({skipped} skipped)                ║
+  ║  Gate runs:          {gate_runs} total ({gate_retries} retries)    ║
+  ║  Escalations:        {escalation_count} / {escalation_budget}      ║
+  ║  Curator proposals:  {curator_total}                               ║
+  ║    Implemented:      {implemented}                                 ║
+  ║    Rejected:         {rejected}                                    ║
+  ║    Deferred:         {deferred}                                    ║
+  ║  Lessons learned:    {lessons_count} new entries                    ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  VERSION & RELEASE                                                 ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Version bump:     {version_info}                                  ║
+  ║  Files updated:    {files_count}                                   ║
+  ║  Git tag:          {tag_status}                                    ║
+  ║  GitHub release:   {release_status}                                ║
+  ║                                                                    ║
+  ║  Version bumps this session:                                       ║
+  ║  {version_bump_list_or_none}                                       ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  PERMISSIONS                                                       ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Elevated at:   {elevated_timestamp}                               ║
+  ║  Restored at:   {restored_timestamp}                               ║
+  ║  Source:         {source}                                          ║
+  ║  Learned:       {learned_count} new permissions added              ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  EVIDENCE ARTIFACTS                                                ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Session log:     .../FIRST-AID-{session_id}/stage_log.jsonl       ║
+  ║  Session report:  .../FIRST-AID-{session_id}/summary-report.md     ║
+  ║  Session state:   .aid-o/04-engine/auto-mode-state.yaml            ║
+  ║                                                                    ║
+  ║  Per-EPIC evidence:                                                ║
+  ║    {epic_id_1}:  .../evidence/{epic_id_1}/{run_id_1}/             ║
+  ║    {epic_id_2}:  .../evidence/{epic_id_2}/{run_id_2}/             ║
+  ║    ...                                                             ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  WHAT'S NEXT?                                                      ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  1. Review changes  ->  git log --oneline, /aid-review             ║
+  ║  2. Push to remote  ->  git push (if not auto-pushed)              ║
+  ║  3. New queue       ->  /aid-epic-queue add, then /aid-first-aid   ║
+  ║  4. Analytics       ->  /aid-analytics                             ║
+  ║  5. Audit           ->  /aid-audit                                 ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  FIRST AID session {session_id} -- {status}                        ║
+  ╚══════════════════════════════════════════════════════════════════════╝
 ```
+
+**Evidence path shorthand:** In the report, `.../` is shorthand for `.aid-o/04-engine/evidence/`.
+The full paths MUST be used in the saved `summary-report.md` file (Section 4 below). The
+shorthand is only used in the terminal display to fit within the 70-char frame width.
 
 **Summary report variable reference:**
 
@@ -797,21 +804,26 @@ RESUME_SESSION:
         "session_id": "{id}", "epics_remaining": N}
      e. Display resume banner:
 
-        "========================================
-         FIRST AID  --  Session Resumed
-         ========================================
-
-         AUTONOMOUS MODE RE-ENGAGED
-
-         Session:    {session_id}
-         Remaining:  {N} EPICs ({estimated_steps} estimated steps)
-         Progress:   {completed}/{total} EPICs done
-         Escalation: Budget {budget} | Used {used}
-
-         Stop command:  /aid-stop to disengage
-
-         ========================================
-         Re-injecting autonomous execution..."
+        ```
+        ╔══════════════════════════════════════════════════════════════════════╗
+        ║                                                                    ║
+        ║          ┌───┐     FIRST AID  --  Session Resumed                  ║
+        ║          │ + │     ══════════════════════════════                   ║
+        ║          └───┘     AUTONOMOUS MODE RE-ENGAGED                      ║
+        ║                                                                    ║
+        ╠══════════════════════════════════════════════════════════════════════╣
+        ║                                                                    ║
+        ║  Session:    {session_id}                                          ║
+        ║  Remaining:  {N} EPICs ({estimated_steps} estimated steps)         ║
+        ║  Progress:   {completed}/{total} EPICs done                        ║
+        ║  Escalation: Budget {budget} | Used {used}                         ║
+        ║                                                                    ║
+        ║  Stop command:  /aid-stop to disengage                             ║
+        ║                                                                    ║
+        ╠══════════════════════════════════════════════════════════════════════╣
+        ║  Re-injecting autonomous execution...                              ║
+        ╚══════════════════════════════════════════════════════════════════════╝
+        ```
      f. Transition to QUEUE_PROCESSING
 
   4. IF PM declines:
