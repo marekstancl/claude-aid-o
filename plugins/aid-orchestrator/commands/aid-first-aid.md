@@ -278,28 +278,67 @@ session:
 
 #### 10. Display FIRST AID Banner
 
+Display the following banner. Replace all `{placeholders}` with actual session values.
+The banner MUST be output exactly as shown (preserving alignment and box-drawing characters).
+
 ```
- _______ _____ ____   _____ _______      _    _____ _____
-|  _____|_   _|  _ \ / ____|__   __|    / \  |_   _|  __ \
-| |__     | | | |_) | (___    | |      / _ \   | | | |  | |
-|  __|    | | |  _ < \___ \   | |     / ___ \  | | | |  | |
-| |      _| |_| |_) |____) |  | |    / /   \ \_| |_| |__| |
-|_|     |_____|____/|_____/   |_|   /_/     \_\_____|_____/
+        _______________
+       |   ___         |
+       |  |   |  +  +  |
+       |  | F |  +  +  |
+       |  | A |  +  +  |
+       |  |___|  +  +  |
+       |_______/====\__|
+               |    |
+               | // |
+               | // |
+               |    |
+          _____|    |_____
+         /    \======/    \
+        /  F I R S T  A I D \
+       /________________________\
 
-Fully Integrated Autonomous Development
-====================================
-Session:      {session_id}
-EPICs queued: {count}
-Permissions:  Elevated ({source}, {allow_count} entries)
-Escalation:   Budget {max_escalations_per_session}
+  Fully Integrated Autonomous Development
+  ========================================
 
-Queue:
-  1. {epic_id_1} ({priority}) — {title}
-  2. {epic_id_2} ({priority}) — {title}
+  AUTONOMOUS MODE ACTIVE
 
-Starting autonomous execution...
-====================================
+  Session:       {session_id}
+  EPICs queued:  {count} ({total_estimated_steps} estimated steps)
+  Permissions:   Elevated ({source}, {allow_count} entries)
+  Escalation:    Budget {budget} | Used 0
+
+  Queue:
+    #  Priority   EPIC ID                  Title
+    -- ---------- ------------------------ ---------------------------
+    1. {priority}  {epic_id_1}              {title_1}
+    2. {priority}  {epic_id_2}              {title_2}
+    ...
+
+  Stop command:  /aid-stop to disengage
+
+  ========================================
+  Injecting autonomous execution...
 ```
+
+**Banner variable reference:**
+
+| Placeholder | Source |
+|-------------|--------|
+| `{session_id}` | `auto-mode-state.yaml` -> `session.session_id` |
+| `{count}` | Length of `valid_epics` list |
+| `{total_estimated_steps}` | Sum of estimated steps across queued EPICs (from EPIC files if available, otherwise `?`) |
+| `{source}` | Permission source: `project`, `defaults`, or `generated` |
+| `{allow_count}` | Number of effective_allow entries after elevation |
+| `{budget}` | `session.escalation.budget` |
+| `{priority}` | Queue entry priority (`critical`, `high`, `medium`, `low`) |
+| `{epic_id_N}` | EPIC ID from queue entry |
+| `{title_N}` | EPIC title (first 27 chars, truncated with `...` if longer) |
+
+**Alignment rules:**
+- The syringe ASCII art is center-aligned relative to the text block below it
+- Queue table columns are left-aligned; truncate long titles to fit 80-char terminal width
+- If more than 5 EPICs are queued, show the first 5 and append: `    ... and {N} more`
 
 **Send Slack Status Update (Type G):**
 `:rocket: FIRST AID started — {count} EPICs queued. Session {session_id}.`
@@ -525,58 +564,147 @@ warn PM and continue with remaining completion actions.
 
 #### 3. Generate Cross-EPIC Summary Report
 
-Read aggregate data from `auto-mode-state.yaml` and compile:
+Read aggregate data from `auto-mode-state.yaml` and compile the summary report.
+Replace all `{placeholders}` with actual session values. The report MUST be output
+exactly as shown (preserving alignment and box-drawing characters).
+
+**Status indicator:** Use the appropriate status icon based on session outcome:
+- `completed` -> `[DONE]`
+- `aborted` -> `[ABRT]`
+- `stopped` -> `[STOP]`
+- `error` -> `[ERR!]`
 
 ```
-FIRST AID Session Complete
-====================================
-Session:  {session_id}
-Status:   {completed|aborted|stopped|error}
-Duration: {started_at} -> {completed_at} ({total_duration})
-Mode:     Autonomous
+  ========================================
+  FIRST AID  --  Session Report
+  ========================================
 
-Queue Results:
-  EPICs completed: {completed}/{total}
-  EPICs failed:    {failed}
+  Session:   {session_id}
+  Status:    {status_icon} {completed|aborted|stopped|error}
+  Duration:  {total_duration} ({started_at} -> {completed_at})
+  Mode:      Autonomous
 
-  +----------------------------+--------+-------+--------+----------+
-  | EPIC                       | Steps  | Gates | Escal. | Release  |
-  +----------------------------+--------+-------+--------+----------+
-  | E-xxx (Title)              | 3/3    | 4/4   | 0      | deferred |
-  | E-yyy (Title)              | 5/5    | 4/4   | 1      | deferred |
-  | E-zzz (Title)              | 2/2    | 3/3   | 0      | v0.9.0   |
-  +----------------------------+--------+-------+--------+----------+
+  ----------------------------------------
+  QUEUE RESULTS
+  ----------------------------------------
 
-Quality:
-  Total gate runs:    {count} ({retries} retries)
-  Escalations:        {count}/{budget} budget
-  Curator proposals:  {implemented} implemented, {rejected} rejected, {deferred} deferred
-  Lessons learned:    {count} new
+  EPICs completed:  {completed} / {total}
+  EPICs failed:     {failed}
+  EPICs remaining:  {remaining}
 
-Version:
-  {version info or "No version bump (all deferred)" or "v{old} -> v{new}"}
-  Files updated: {count}
-  Git tag: {created|skipped}
-  GitHub release: {created|skipped}
+  +-----+----------------------------+--------+-------+--------+----------+-----------+
+  | #   | EPIC                       | Steps  | Gates | Escal. | Release  | Duration  |
+  +-----+----------------------------+--------+-------+--------+----------+-----------+
+  |  1  | E-xxx (Title)              | 3/3    | 4/4   | 0      | deferred | 12m 34s   |
+  |  2  | E-yyy (Title)              | 5/5    | 4/4   | 1      | deferred | 28m 01s   |
+  |  3  | E-zzz (Title)              | 2/2    | 3/3   | 0      | v0.9.0   | 15m 12s   |
+  +-----+----------------------------+--------+-------+--------+----------+-----------+
+  | SUM |                            | 10/10  | 11/11 | 1      |          | 55m 47s   |
+  +-----+----------------------------+--------+-------+--------+----------+-----------+
 
-Permissions:
-  Elevated at:  {timestamp}
-  Restored at:  {timestamp}
-  Source:       {project|defaults|generated}
-  Learned:      {count} new permissions
+  ----------------------------------------
+  QUALITY METRICS
+  ----------------------------------------
 
-Evidence:
-  Per-EPIC: .aid-o/04-engine/evidence/{epic_id}/{run_id}/
-  Session:  .aid-o/04-engine/evidence/FIRST-AID-{session_id}/
+  Steps executed:     {executed} ({skipped} skipped)
+  Gate runs:          {gate_runs} total ({gate_retries} retries)
+  Escalations:        {escalation_count} / {escalation_budget} budget
+  Curator proposals:  {curator_total}
+    Implemented:      {implemented}
+    Rejected:         {rejected}
+    Deferred:         {deferred}
+  Lessons learned:    {lessons_count} new entries
 
-What's next?
-  1. Review changes: git log, /aid-review
-  2. Push to remote: git push (if not auto-pushed)
-  3. Start new queue: /aid-epic-queue add, then /aid-first-aid
-  4. Analyze performance: /aid-analytics
-  5. Audit results: /aid-audit
-====================================
+  ----------------------------------------
+  VERSION & RELEASE
+  ----------------------------------------
+
+  Version bump:     {version_info}
+  Files updated:    {files_count}
+  Git tag:          {tag_status}
+  GitHub release:   {release_status}
+
+  Version bumps this session:
+  {version_bump_list_or_none}
+
+  ----------------------------------------
+  PERMISSIONS
+  ----------------------------------------
+
+  Elevated at:   {elevated_timestamp}
+  Restored at:   {restored_timestamp}
+  Source:         {source}
+  Learned:       {learned_count} new permissions added
+
+  ----------------------------------------
+  EVIDENCE ARTIFACTS
+  ----------------------------------------
+
+  Session log:     .aid-o/04-engine/evidence/FIRST-AID-{session_id}/stage_log.jsonl
+  Session report:  .aid-o/04-engine/evidence/FIRST-AID-{session_id}/summary-report.md
+  Session state:   .aid-o/04-engine/auto-mode-state.yaml
+
+  Per-EPIC evidence:
+    {epic_id_1}:  .aid-o/04-engine/evidence/{epic_id_1}/{run_id_1}/
+    {epic_id_2}:  .aid-o/04-engine/evidence/{epic_id_2}/{run_id_2}/
+    ...
+
+  ----------------------------------------
+  WHAT'S NEXT?
+  ----------------------------------------
+
+  1. Review changes  ->  git log --oneline, /aid-review
+  2. Push to remote  ->  git push (if not auto-pushed)
+  3. New queue       ->  /aid-epic-queue add, then /aid-first-aid
+  4. Analytics       ->  /aid-analytics
+  5. Audit           ->  /aid-audit
+
+  ========================================
+  FIRST AID session {session_id} -- {status}
+  ========================================
 ```
+
+**Summary report variable reference:**
+
+| Placeholder | Source |
+|-------------|--------|
+| `{session_id}` | `auto-mode-state.yaml` -> `session.session_id` |
+| `{status_icon}` | Mapped from session status (see status indicator above) |
+| `{total_duration}` | Computed: `completed_at - started_at`, formatted as `Xh Ym Zs` |
+| `{started_at}` | `session.started_at` |
+| `{completed_at}` | Now (ISO 8601) |
+| `{completed}` | `session.aggregate.epics_completed` |
+| `{total}` | `session.progress.epics_total` |
+| `{failed}` | `session.aggregate.epics_failed` |
+| `{remaining}` | `total - completed - failed` |
+| `{executed}` | `session.aggregate.total_steps_executed` |
+| `{skipped}` | `session.aggregate.total_steps_skipped` |
+| `{gate_runs}` | `session.aggregate.total_gate_runs` |
+| `{gate_retries}` | `session.aggregate.total_gate_retries` |
+| `{escalation_count}` | `session.escalation.count` |
+| `{escalation_budget}` | `session.escalation.budget` |
+| `{curator_total}` | `session.aggregate.total_curator_proposals` |
+| `{implemented}` | `session.aggregate.total_curator_implemented` |
+| `{rejected}` | `session.aggregate.total_curator_rejected` |
+| `{deferred}` | `session.aggregate.total_curator_deferred` |
+| `{lessons_count}` | `session.aggregate.total_lessons_learned` |
+| `{version_info}` | `"No version bump (all deferred)"` or `"v{old} -> v{new}"` |
+| `{files_count}` | Count of files in version bump commits |
+| `{tag_status}` | `"created (v{version})"` or `"skipped"` |
+| `{release_status}` | `"created"` or `"skipped"` |
+| `{version_bump_list_or_none}` | Bulleted list from `session.aggregate.version_bumps[]` or `"  (none -- all releases deferred)"` |
+| `{source}` | `session.permissions.source` |
+| `{learned_count}` | Length of `session.permissions.learned_permissions` |
+
+**Table formatting rules:**
+- EPIC column: show EPIC ID and title. Truncate title at 20 chars with `...` if longer
+- Steps column: `{completed}/{total}` from per-EPIC data
+- Gates column: `{passed}/{total}` from per-EPIC data
+- Escal. column: integer count of escalations for that EPIC
+- Release column: `deferred` or `v{X.Y.Z}` (the version bumped to)
+- Duration column: formatted as `Xm Ys` or `Xh Ym` for EPICs over 1 hour
+- SUM row: aggregates across all EPICs; Release cell left blank in SUM row
+- If an EPIC failed, prefix its row with a `!` indicator: `| !3  | E-zzz (Title) ...`
 
 #### 4. Save Summary Report
 
@@ -667,14 +795,23 @@ RESUME_SESSION:
      c. Set session.progress.current_state = "QUEUE_PROCESSING"
      d. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
         "session_id": "{id}", "epics_remaining": N}
-     e. Display banner:
-        "FIRST AID Resumed
-         ====================================
-         Session:   {session_id}
-         Remaining: {N} EPICs
-         Progress:  {completed}/{total}
-         ====================================
-         Continuing autonomous execution..."
+     e. Display resume banner:
+
+        "========================================
+         FIRST AID  --  Session Resumed
+         ========================================
+
+         AUTONOMOUS MODE RE-ENGAGED
+
+         Session:    {session_id}
+         Remaining:  {N} EPICs ({estimated_steps} estimated steps)
+         Progress:   {completed}/{total} EPICs done
+         Escalation: Budget {budget} | Used {used}
+
+         Stop command:  /aid-stop to disengage
+
+         ========================================
+         Re-injecting autonomous execution..."
      f. Transition to QUEUE_PROCESSING
 
   4. IF PM declines:
