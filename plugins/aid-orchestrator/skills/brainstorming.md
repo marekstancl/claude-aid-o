@@ -1084,8 +1084,6 @@ through /aid-plan-epic and /aid-run-epic.
 
    ### Constraints
    - Copy from plan's Constraints section.
-   - Add budget estimate based on step count:
-     Steps 1-5: $15, Steps 6-9: $25, Steps 10+: $40
 
    ### DoD Gates
    - Default: tests_pass, lint_pass, security_scan_pass, docs_updated

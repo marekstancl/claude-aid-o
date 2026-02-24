@@ -67,7 +67,6 @@ operations produce structured audit logs and OpenTelemetry traces.
 - Audit trail: yes (created_by, updated_by, timestamps)
 - Outbox pattern: no (not event-driven)
 - Structured outputs: yes
-- Budget: $15 max LLM cost
 
 ## DoD Gates
 
