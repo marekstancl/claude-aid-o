@@ -2,5 +2,7 @@
 # This file tracks the last-assigned sequential ID for each entity type.
 # To generate a new ID: read counter, increment by 1, write back, use new value.
 
-plan: 0       # Last assigned plan number. Next: P001
+plan: 6       # Last assigned plan number. Next: P007
 epic: 0       # Last assigned ad-hoc EPIC number. Next: E-001
+                # Note: Both existing EPICs are plan-linked (E-002-1_1, E-005-1_1),
+                # so the ad-hoc counter remains at 0.
