@@ -1058,8 +1058,14 @@ IF mode == auto:
         a. Gates passed: gates_report.json overall == "pass"                     required
         b. No unresolved CRITICAL issues: check backlog.md for open CRITICAL items required
         c. Escalation budget: escalation_count < 3 (from auto-mode-state.yaml)  required
-        d. Auditor trend: last audit overall score >= previous audit score - 5   required
+        d. Auditor trend: Compare current audit overall score vs PRIOR EPIC      required
            (allows up to 5-point dip; beyond that indicates quality regression)
+           • Read from MOST RECENT PRIOR EPIC:
+             evidence/{prev_epic_id}/{prev_run_id}/audit-report.md
+           • Extract prior overall score
+           • IF no prior audit report exists: skip this guardrail check with log
+             "No prior audit report found — auditor_trend guardrail skipped"
+           • IF prior exists: current_score >= prior_score - 5
      → IF all guardrails pass:
         → Auto-approve with guardrails
         → Save pm_decision.json:
