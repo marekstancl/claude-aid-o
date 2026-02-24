@@ -14,7 +14,7 @@ ai-orchestrator/
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
     commands/                   # 13 slash commands
-    skills/                     # 17 skills (orchestration, brainstorming, gates, etc.)
+    skills/                     # 20 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, run-*.md
@@ -158,8 +158,9 @@ head -6 CHANGELOG.md plugins/aid-orchestrator/CHANGELOG.md
 4. Update root `README.md` Roadmap section (add new version line, move previous down)
 5. Commit: `release: vX.Y.Z — one-line summary`
 6. Tag: `git tag vX.Y.Z`
-7. Push: `git push && git push --tags`
-8. **Update plugin in all projects** (see below)
+7. GitHub Release: `gh release create vX.Y.Z --title "vX.Y.Z — summary" --notes "{CHANGELOG section for this version}"`
+8. Push: `git push && git push --tags`
+9. **Update plugin in all projects** (see below)
 
 ### Plugin Update — MANDATORY after every push
 

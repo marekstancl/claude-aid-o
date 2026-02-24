@@ -1,238 +1,128 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).**
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v0.9.2
 
-You come with an idea, AID walks you through the entire process — from concept to reviewed, merged code.
+You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
 ---
 
-## Why AID?
+## 30-Second Demo
 
-Today you chat with AI on a single thread, manually coordinate what it should do, and on anything bigger than a small feature it falls apart — you lose context, forget about tests, have no overview of what's done.
+```bash
+/aid-brainstorm "Build a REST API with auth and CRUD"
+# → 9-step interactive dialog: context, approaches, trade-offs, architecture, plan
 
-AID gives you an entire dev team under one command. You're the PM — you approve the plan and the final merge, everything else runs autonomously.
-
-## How It Works
-
-1. **You come with an idea** — `/aid-brainstorm "Build a REST API with auth and CRUD"`. AID walks you through a 9-step interactive dialog: asks about your stack, proposes approaches, compares trade-offs, and together you arrive at an architecture and plan.
-
-2. **AID generates the task spec** — from the brainstorm, AID produces a structured specification (EPIC) with steps, dependencies, acceptance criteria, and quality gates. You just review and approve.
-
-3. **You launch the pipeline** — `/aid-run-epic` and AID takes over:
-   - Generates an execution plan with dependency graph and parallel groups
-   - Dispatches work to 9 role-based agents (architect → domain → backend + frontend → QA + security → docs → release)
-   - Parallelizes what it can — backend + frontend run simultaneously on separate git worktrees
-   - After each step, checks outputs and scope compliance
-   - Runs quality gates (tests, lint, security scan) with auto-retry — gate-fixer agent patches and re-runs (max 3 attempts)
-   - Requests your PM approval and merges
-
-```
-/aid-brainstorm "topic"            ← 9-step dialog: context → questions → approaches → design → plan
-                                   ← AID offers to generate an EPIC from the conclusions
-/aid-plan-epic path/to/epic.md    ← generates JSON plan + session file
-/aid-run-epic                      ← orchestrator takes control
+/aid-run-epic
+# → AID takes over: architect → backend + frontend (parallel) → QA → gates → merge
 ```
 
-The entire process is governed by a state machine: IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → GATES → CURATOR_RESOLVE → PM_APPROVAL → DONE. The **control flow is deterministic** — defined by YAML/JSON configuration. The **content is AI-generated** — each agent produces code, tests, docs via LLM.
+Or go fully autonomous:
+
+```bash
+/aid-epic-queue add epic1.md epic2.md epic3.md
+/aid-first-aid
+# → AID processes the entire queue unattended, pausing only on genuine issues
+```
 
 ## Installation
 
-Requires [Claude Code](https://claude.com/claude-code) CLI.
-
 ```bash
-# Add marketplace
+# In Claude Code CLI:
 /plugin marketplace add marekstancl/claude-aid-o
-
-# Install plugin
 /plugin install aid-orchestrator@claude-aid-o
-
-# Onboarding — detects tech stack, configures gates, sets permissions
-/aid-setup
+/aid-setup    # detects your stack, configures gates and permissions
 ```
 
-## Quick Start
+## What You Get
 
-```bash
-# Brainstorm with AI — 9-step interactive flow
-/aid-brainstorm "Build a REST API with auth and CRUD operations"
+**9 role agents** — Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release — dispatched automatically based on your plan's dependency graph. Backend and Frontend run in parallel on separate git worktrees.
 
-# AID generates EPIC from your brainstorm → review and approve
-# Or write one manually from the template in .aid-o/02-epics/
+**Quality gates with auto-fix** — tests, lint, security scan run after implementation. Gate failures trigger a fixer agent that patches and re-runs (up to 3 attempts) before escalating to you.
 
-# Generate execution plan
-/aid-plan-epic .aid-o/02-epics/my-epic.md
+**FIRST AID mode** — `/aid-first-aid` starts autonomous queue execution. PM approvals are replaced by agent-driven checks. Permissions are elevated for the session and restored on completion or `/aid-stop`. The only mandatory human touchpoint is escalation on genuine failures.
 
-# Run the orchestrator
-/aid-run-epic
-```
+**Evidence trail** — every prompt, output, gate result, and PM decision is recorded in `.aid-o/04-engine/evidence/`. Full auditability.
 
-**Try one of these prompts:**
+**Qdrant memory** (optional) — agents learn from past runs. Decisions, patterns, and lessons are indexed and injected into future agent prompts. Works without Qdrant using file-based fallback.
 
-| Prompt | What you get |
-|--------|-------------|
-| `"Build a REST API with database, auth, and CRUD operations"` | Endpoints, DB schema, auth strategy, 6-8 step EPIC |
-| `"Build a CLI tool that does X"` (fill in X) | Command structure, flags, config, 4-6 step EPIC |
-| `"Build a full-stack web app with React frontend and API backend"` | Components, API contracts, DB design, 8-10 step EPIC |
+## Commands
 
-Run `/aid-help examples` for detailed walkthroughs.
+| Command | What it does |
+|---------|-------------|
+| `/aid-brainstorm [topic]` | 9-step interactive brainstorming → plan + optional EPIC |
+| `/aid-plan-epic <path>` | Generate execution plan from EPIC or Plan |
+| `/aid-run-epic [id]` | Run the full orchestration pipeline |
+| `/aid-first-aid` | Start autonomous mode (EPIC queue execution with guardrails) |
+| `/aid-stop` | Emergency stop — restore permissions, save progress |
+| `/aid-setup` | Project onboarding — detect stack, configure AID |
+| `/aid-init` | Initialize `.aid-o/` workspace |
+| `/aid-epic-queue [sub]` | Queue management (add, remove, pause, resume) |
+| `/aid-epic-status [id]` | Pipeline status — steps, gates, budget |
+| `/aid-analytics [scope]` | Performance metrics and optimization recommendations |
+| `/aid-audit` | Project health audit (0-100 score) |
+| `/aid-research [topic]` | On-demand documentation research |
+| `/aid-help [topic]` | AID documentation and help |
 
-## What's Inside
-
-| Component | Count | Description |
-|-----------|-------|-------------|
-| **Commands** | 10 | `/aid-setup`, `/aid-brainstorm`, `/aid-run-epic`, `/aid-plan-epic`, `/aid-analytics`, `/aid-epic-queue`, `/aid-audit`... |
-| **Agents** | 18 | 9 role + 3 specialist + 6 utility |
-| **Skills** | 16 | State machine, planner, brainstorming, parallel dispatch, gates engine, cost optimization, analytics... |
-| **Playbooks** | 11 | Role-specific instructions (customizable per project) |
-
-### Role Agents
-
-| Agent | Responsibility | Runs |
-|-------|---------------|------|
-| **Architect** | API contracts, ADRs, system design | Always first |
-| **Domain** | Domain models, entities, invariants | After architect |
-| **Backend** | Server-side code, APIs, services | Parallel with frontend |
-| **Frontend** | UI components, pages, client logic | Parallel with backend |
-| **QA** | Unit, integration, e2e tests | After implementation |
-| **Security** | OWASP review, vulnerability scanning | After implementation |
-| **Observability** | Logging, metrics, tracing | After implementation |
-| **Docs** | API docs, guides, changelogs | After implementation |
-| **Release** | Versioning, deployment config | Last |
-
-### Specialist Agents
-
-| Agent | Purpose |
-|-------|---------|
-| **Curator** | After each EPIC, collects improvement notes from all agents, deduplicates, proposes improvements to backlog |
-| **Auditor** | Post-EPIC audit (code, security, docs, process compliance) with scoring |
-| **Project Scanner** | Analyzes tech stack, structure, conventions → `project-profile.yaml` |
-
-## Integrations
-
-- **Slack MCP** — PM communication via Slack (plan approval, escalation, merge approval, 7 message types with timeout/reminder logic). Chat fallback when Slack is not configured.
-- **Qdrant Memory** (optional) — Agents remember past decisions and lessons learned, improving with every EPIC. Powers the knowledge acquisition pipeline: documentation ingestion (Phase 1), pattern extraction from completed EPICs (Phase 2), and example EPIC auto-extraction with feedback tracking (Phase 3). File-based fallback when Qdrant is unavailable.
-- **Epic Queue** — `/aid-epic-queue add` to stack EPICs, AID processes them one by one autonomously.
-- **Project Scanner** — `/aid-setup` analyzes your project (tech stack, structure, conventions) → generates `project-profile.yaml`, configures gates for your stack.
-
-## Example EPICs
-
-AID ships with community example EPICs for common project types in `defaults/examples/`:
-
-| Example | Archetype | Frameworks | Steps |
-|---------|-----------|------------|-------|
-| `langchain-rag-chatbot.md` | RAG Chatbot | LangChain, ChromaDB, FastAPI | 6 |
-| `fastapi-crud-service.md` | CRUD API | FastAPI, SQLAlchemy, Alembic | 6 |
-| `react-dashboard.md` | Dashboard | React, TypeScript, Recharts | 6 |
-
-Examples are offered during `/aid-brainstorm` when your project matches. AID also auto-extracts patterns from your completed EPICs to build a project-specific example library.
-
-## Controller State Machine
+## How the Pipeline Works
 
 ```
-IDLE → PLANNING → PLAN_REVIEW → EXECUTING → PHASE_CHECK → NEXT_PHASE
-                      ↑               ↑                        │
-                      │ revise         └────────────────────────┘
-                      │                                         │
-                      │                                  all steps done
-                      │                                         ↓
-                      │                         GATES → GATE_RETRY (max 3)
-                      │                           │
-                      │                       all pass
-                      │                           ↓
-                      │                     PM_APPROVAL
-                      │                           │
-                      │                       approved
-                      │                           ↓
-                      │                         DONE
-                      │                    (Curator + Auditor)
-                      │                           │
-                      │                    queue not empty?
-                      │                           ↓
-                      │                  auto-start next EPIC
-                      └──── PM says REVISE
+/aid-brainstorm → Plan → EPIC → /aid-run-epic       OR  /aid-first-aid (autonomous queue)
+                                      │                         │
+                                      ├─────────────────────────┘
+                                      ↓
+                      IDLE → PLANNING → PLAN_REVIEW ──────────────────┐
+                                          │                           │
+                                  Manual: PM approves        Auto: validated by AI
+                                          │                           │
+                                          ├───────────────────────────┘
+                                          ↓
+                      EXECUTING ←──── NEXT_PHASE ←── PHASE_CHECK
+                         │                                │
+                    dispatch agents              check outputs + scope
+                    (parallel where possible)
+                         │
+                   all steps done
+                         ↓
+                      GATES → GATE_RETRY (auto-fix, max 3) → ESCALATION (PM always)
+                         │
+                     all pass
+                         ↓
+                  CURATOR_RESOLVE (improvement proposals, lessons learned)
+                         ↓
+                   PM_APPROVAL ───────────────────────────┐
+                         │                                │
+                 Manual: PM approves merge       Auto: 4 guardrails check
+                         │                                │
+                         ├────────────────────────────────┘
+                         ↓
+                       DONE (auditor, release, archive, next EPIC from queue)
 ```
 
-**PM checkpoints** (via Slack or chat fallback):
-- **PLAN_REVIEW** — approve execution plan (GO / REVISE / ABORT)
-- **ESCALATION** — handle failures (Fix / Skip / Abort)
-- **PM_APPROVAL** — approve merge (APPROVE / REJECT / REVISE)
+**Manual mode** — 3 PM touchpoints: PLAN_REVIEW, ESCALATION, PM_APPROVAL (via Slack or chat).
+**FIRST AID mode** — only ESCALATION requires PM; plan review and merge are agent-validated.
 
 ## Configuration
 
-Everything is customizable via YAML/JSON configs in `.aid-o/03-config/`:
+`/aid-setup` auto-configures everything. Fine-tune in `.aid-o/03-config/`:
 
 | File | Controls |
 |------|----------|
-| `gates.yaml` | Which gates run, commands, retry limits, budget |
-| `decision-policies.yaml` | What Controller decides autonomously vs. escalates to PM |
-| `slack-config.yaml` | Slack channel, timeouts, reminder intervals |
-| `memory-config.yaml` | Qdrant vector memory settings |
+| `gates.yaml` | Gate commands, retry limits, budget |
+| `decision-policies.yaml` | What the Controller decides vs. escalates |
 | `dispatch-strategy.yaml` | Parallel isolation — worktrees / branches / sequential |
-| `language.yaml` | Document language — ISO 639-1 code (default: EN) |
-| `playbooks/*.md` | Role-specific agent behavior for your project |
+| `slack-config.yaml` | Slack channel, timeouts, reminders |
+| `memory-config.yaml` | Qdrant vector memory settings |
+| `playbooks/*.md` | Role-specific agent instructions |
 
-`/aid-setup` auto-configures everything based on your detected tech stack.
+## Changelog
 
-## Workspace Structure
+- **v0.9.2** — FIRST AID autonomous mode (`/aid-first-aid`, `/aid-stop`), permission sandwich, auto-escalation, auto-release
+- **v0.9.1** — Brainstorming enhancement, release sub-phase, per-file version cleanup
+- **v0.9.0** — Core structure refactoring (SESSION→RUN rename, flat evidence)
+- **v0.8.2** — Housekeeping, untrusted-content framing, version alignment
+- **v0.8.0** — Workflow intelligence, Docker/MCP recommendations, process audit
 
-`/aid-init` creates in your project:
-
-```
-.aid-o/
-  01-plans/              Plans (brainstorming output)
-  02-epics/              EPICs (task specifications)
-  03-config/
-    policies/            gates.yaml, decision-policies.yaml, slack-config.yaml
-    templates/           EPIC template, session templates, plan schema
-    playbooks/           11 role playbooks (customizable)
-  04-engine/
-    sessions/            Active + archived session files
-    memory/              project-profile.yaml, active-work.md
-    evidence/            Execution evidence (per EPIC, per run)
-```
-
-## Evidence Trail
-
-Every EPIC run produces in `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`:
-
-```
-epic_input.md           Original EPIC (immutable copy)
-plan.json               Execution plan
-plan_progress.json      Step completion tracker
-stage_log.jsonl         State transition log (every event timestamped)
-gates_report.json       Gate results with retry history
-final_report.md         Human-readable summary
-prompts/                Agent prompts sent
-steps/                  Agent outputs + diffs
-gates/                  Gate command outputs
-```
-
-## All Commands
-
-| Command | Description |
-|---------|-------------|
-| `/aid-init` | Initialize `.aid-o/` workspace |
-| `/aid-setup` | Interactive project onboarding (tech stack detection) |
-| `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
-| `/aid-help [topic]` | Documentation (commands, workflow, agents, gates, config...) |
-| `/aid-analytics [scope]` | Analyze orchestration performance metrics |
-| `/aid-plan-epic <path>` | EPIC or Plan → Plan JSON + session file |
-| `/aid-run-epic [id]` | Full orchestration pipeline |
-| `/aid-epic-status [id]` | Pipeline status (steps, gates, budget) |
-| `/aid-epic-queue [sub]` | EPIC queue management (add, remove, pause, resume) |
-| `/aid-audit` | Project health audit (0-100 score) |
-
-## Roadmap
-
-- **v0.9.2** (current) — FIRST AID autonomous orchestration mode: `/aid-first-aid` command, permission sandwich, auto-escalation, auto-release, queue transitions
-- **v0.9.1** — Brainstorming enhancement (analysis phase, options protocol, EPIC lookup fix), release sub-phase, per-file version cleanup
-- **v0.9.0** — Core structure refactoring: SESSION→RUN rename, sequential ID generation, plan-ref injection, flat evidence structure, budget removal
-- **v0.8.2** — Housekeeping, untrusted-content framing, version alignment, Czech→English translation fixes
-- **v0.8.0** — Workflow Intelligence + Docker/MCP Preference Phase 1, process audit type for auditor
-- **v0.6.0** — Workflow intelligence: seed research (147 Qdrant chunks across LangChain/LangGraph, N8N, LangFlow), 19 example EPICs (12 AI workflows + 7 common projects), platform detection, domain-specific questioning, Docker/MCP recommendations, knowledge-augmented brainstorming with example EPIC lookup
-- **v0.5.0** — Knowledge acquisition pipeline (Phases 1-3): Context7 MCP documentation ingestion, quality-gated storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, auto-extraction of reusable patterns, community example EPIC templates, feedback tracking, command prefix standardization (`aid-*`)
-- **v0.4.2** — `/plan-epic` and `/aid-brainstorm` step renumbering, `/aid-init [path]` parameter, phase selection for scoped EPIC generation
-- **v0.4.1** — `/aid-init` upgrade mode with manifest-based version tracking, config checksum detection, dynamic defaults scanning, release automation protocol
+See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ## Requirements
 
