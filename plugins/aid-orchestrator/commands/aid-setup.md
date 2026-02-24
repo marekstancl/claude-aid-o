@@ -133,6 +133,89 @@ Search for indicator files in project root first, then inside `docs/` directory.
      gitignore: true|false
    ```
 
+5. Parse remote URL for hosting, visibility, and organization:
+
+   **Skip condition:** If `remote` is empty (no remote configured), skip this step entirely.
+
+   **a. Extract owner and repo from the remote URL.**
+
+   Supported formats:
+   - HTTPS: `https://github.com/{owner}/{repo}.git` or `https://github.com/{owner}/{repo}`
+   - SSH: `git@github.com:{owner}/{repo}.git` or `git@github.com:{owner}/{repo}`
+   - HTTPS with port: `https://git.example.com:8443/{owner}/{repo}.git`
+
+   Parse logic:
+   - For SSH (`git@{host}:{owner}/{repo}.git`): split on `:`, then split path on `/`
+   - For HTTPS (`https://{host}/{owner}/{repo}.git`): parse URL path, split on `/`
+   - Strip trailing `.git` from repo name if present
+
+   **b. Determine hosting platform** from the parsed host:
+
+   | Host | `hosting` value |
+   |------|-----------------|
+   | `github.com` | `"github"` |
+   | `gitlab.com` | `"gitlab"` |
+   | `bitbucket.org` | `"bitbucket"` |
+   | Any other host | `"other"` |
+
+   **c. Determine repository visibility** (GitHub only; skip for other platforms):
+
+   If `gh` CLI is available, run:
+   ```
+   gh repo view {owner}/{repo} --json isPrivate -q '.isPrivate'
+   ```
+   - If returns `true` → visibility: `"private"`
+   - If returns `false` → visibility: `"public"`
+   - If `gh` is not installed or command fails → ask PM:
+     ```
+     Could not determine repository visibility automatically (gh CLI unavailable).
+     Is this repository public or private?
+     (A) Public
+     (B) Private
+     ```
+
+   For non-GitHub platforms, set visibility: `"unknown"` (detection not supported).
+
+   **d. Determine organization type** (GitHub only; skip for other platforms):
+
+   If `gh` CLI is available, run:
+   ```
+   gh api /users/{owner} --jq '.type'
+   ```
+   - If returns `"Organization"` → organization: `"{owner}"`
+   - If returns `"User"` → organization: `"personal"`
+   - If `gh` is not installed or command fails → ask PM:
+     ```
+     Could not determine if "{owner}" is a personal account or an organization (gh CLI unavailable).
+     Is "{owner}" a GitHub organization or your personal account?
+     (A) Organization
+     (B) Personal account
+     ```
+
+   For non-GitHub platforms, set organization: `"unknown"`.
+
+   **e. Store extended fields** in project-profile.yaml under the existing `git:` section:
+   ```yaml
+   git:
+     initialized: true
+     default_branch: "main"
+     remote: "git@github.com:org/repo.git"
+     gitignore: true
+     hosting: "github"         # NEW — github | gitlab | bitbucket | other
+     visibility: "public"      # NEW — public | private | unknown
+     organization: "org-name"  # NEW — org name string, "personal", or "unknown"
+   ```
+
+   **f. Fallback on parse failure:**
+
+   If the remote URL does not match any recognized HTTPS or SSH pattern:
+   ```
+   Could not parse remote URL: {url}
+   Skipping remote detection. You can set git hosting details manually in project-profile.yaml.
+   ```
+   Set `hosting: "unknown"`, `visibility: "unknown"`, `organization: "unknown"` and continue.
+   This is non-blocking — setup proceeds normally.
+
 ### Step 2: Detect Project Type
 
 Based on scan results, classify:
@@ -171,7 +254,14 @@ Structure:
 Git:
   Branch: {current branch}
   Remote: {origin URL}
+  Hosting: {github | gitlab | bitbucket | other}
+  Visibility: {public | private | unknown}
+  Organization: {org name | personal | unknown}
   Commits: {total count}
+
+Claude Code:
+  Plan recommendation: Max plan (4x Opus) — optimal for orchestrated workflows
+  Note: Pro plan works but may hit rate limits with parallel agents
 ```
 
 ### Step 4: Present Options with Details (Chat-First)
@@ -233,12 +323,24 @@ Setup Options Available
    - Branches: lighter isolation, shared filesystem
    - Sequential: no parallelism (safest, slowest)
    (Recommended: Worktrees if git available, Sequential otherwise)
+
+10. Documentation Platform Setup
+    Recommends a docs platform based on your project type and scaffolds the
+    basic structure (dirs + config skeleton).
+    Current docs detection: {detected docs.platform or "none"}
+    (Recommended: yes, if no docs platform detected)
+
+11. Skill Conflict Detection
+    Scans for installed plugins that conflict with AID skills.
+    Detected conflicts are auto-denied in .claude/settings.json.
+    Conflicts are reversible — you can remove deny rules manually.
+    (Recommended: yes)
 ```
 
 THEN ask PM:
 ```
 Which options would you like to configure?
-(A) All recommended (options 1,2,3,6a,6b,6d,7,8,9)
+(A) All recommended (options 1,2,3,6a,6b,6d,7,8,9{",10" if docs.platform is "none" or "generic-markdown"},11)
 (B) Let me pick specific options
 (C) Everything (all options)
 ```
@@ -326,6 +428,9 @@ If (B): present a numbered list for PM to select from (e.g., "Enter option numbe
   git:
     default_branch: "{branch}"
     remote: "{origin URL}"
+    hosting: "{github | gitlab | bitbucket | other}"
+    visibility: "{public | private | unknown}"
+    organization: "{org name | personal | unknown}"
   initialized: true
   scanned_at: "{ISO 8601}"
   scan_type: "quick"
@@ -919,6 +1024,178 @@ Select strategy: (1/2/3) [1]
     .aid-o/03-config/policies/dispatch-strategy.yaml
   ```
 
+**Option 10: Documentation Platform Setup**
+
+**Skip condition:** If Step 1 detected an existing documentation platform (`docs.platform` is NOT `"none"` and NOT `"generic-markdown"`), display:
+```
+Documentation platform already detected: {docs.platform}
+Skipping platform recommendation. To change, edit project-profile.yaml.
+```
+and skip this option.
+
+**If no platform detected:**
+
+1. Determine recommendation based on project type (from Step 2):
+
+| Project Type | Recommendation | Reasoning |
+|-------------|----------------|-----------|
+| Single app (Node.js/TS) | MkDocs Material or Docusaurus | Needs good API docs and guides |
+| Monorepo (split) | Docusaurus | Best for multi-package docs |
+| Monorepo (workspace) | Docusaurus | Best for multi-package docs |
+| Python project | MkDocs Material | MkDocs native to Python ecosystem |
+| Systems project (Go/Rust) | MkDocs Material | Clean, fast, markdown-native |
+| Plugin / extension | GitHub Pages or MkDocs | Lightweight, easy to maintain |
+| Custom / Mixed | Plain Markdown | Start simple, upgrade later |
+| New project | Plain Markdown | Start simple, upgrade later |
+
+**Visibility upgrade:** If `git.visibility` is `"public"` (from Git Detection step 5) AND the recommendation is "Plain Markdown", upgrade to "MkDocs Material" — public/open-source projects benefit from a proper docs site.
+
+2. Present to PM:
+
+```
+Documentation Platform Setup
+====================================
+Based on your project type ({type}), we recommend: {recommendation}
+
+Choose a documentation platform:
+(A) Plain Markdown — docs/ directory with .md files. No build step. Simple and universal.
+(B) GitHub Pages — Static site from docs/ via GitHub Actions. Supports Jekyll themes.
+(C) MkDocs Material — Feature-rich static site. Excellent search, navigation, and theming.
+(D) Docusaurus — React-based docs framework. Versioning, i18n, blog support. Best for large projects.
+(E) Skip — Keep current setup (or no docs)
+
+Select: (A/B/C/D/E)
+```
+
+3. Scaffold based on choice:
+
+**(A) Plain Markdown:**
+- Create `docs/` directory
+- Create `docs/README.md` with:
+  ```markdown
+  # {project_name}
+
+  Project documentation.
+  ```
+
+**(B) GitHub Pages:**
+- Create `docs/` directory
+- Create `docs/index.md` with project name header
+- Create `.github/workflows/pages.yml` skeleton:
+  ```yaml
+  name: Deploy to GitHub Pages
+  on:
+    push:
+      branches: [main]
+      paths: ['docs/**']
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/configure-pages@v4
+        - uses: actions/upload-pages-artifact@v3
+          with:
+            path: docs/
+        - uses: actions/deploy-pages@v4
+  ```
+
+**(C) MkDocs Material:**
+- Create `docs/` directory
+- Create `docs/index.md` with project name header
+- Create `mkdocs.yml` skeleton:
+  ```yaml
+  site_name: {project_name}
+  theme:
+    name: material
+    palette:
+      scheme: default
+  nav:
+    - Home: index.md
+  ```
+- Display: "Run `pip install mkdocs-material` to install, then `mkdocs serve` to preview."
+
+**(D) Docusaurus:**
+- Create `docs/` directory
+- Create `docs/intro.md` with project name header
+- Display:
+  ```
+  Docusaurus scaffolding is minimal. For a full setup, run:
+    npx create-docusaurus@latest docs-site classic
+  This creates a complete Docusaurus project with default configuration.
+  ```
+
+**(E) Skip:**
+- Do nothing. Display: "Skipped documentation platform setup."
+
+4. Update `project-profile.yaml` `docs:` section:
+```yaml
+docs:
+  platform: "{chosen platform — markdown | github-pages | mkdocs | docusaurus | none}"
+  path: "docs/"
+  format: "{md | mdx}"
+  build_command: "{platform-specific or null}"
+  frontmatter_required: false
+  recommended_by: "aid-setup"
+  chosen_at: "{ISO 8601 timestamp}"
+```
+
+5. Confirm to PM:
+```
+Documentation platform set to: {platform}
+Scaffold created: {list of files/dirs created}
+Stored in: project-profile.yaml → docs section
+```
+
+**Option 11: Skill Conflict Detection**
+
+a. **Load conflict registry:**
+   - First check `.aid-o/03-config/policies/skill-conflicts.yaml` (project-level override)
+   - If not found, read `defaults/policies/skill-conflicts.yaml` (plugin default)
+   - If neither exists, display "No conflict registry found. Skipping." and continue.
+
+b. **Scan for conflicts:**
+   For each entry in `conflicts:` array:
+   1. Check if both skills listed in `skills:` are available (present in the installed plugins/skills list visible in the conversation context)
+   2. If both are present → conflict detected
+   3. If only one or neither is present → no conflict, skip
+
+c. **Apply deny rules:**
+   For each detected conflict:
+   1. Read `.claude/settings.json` (create with `{"permissions":{"deny":[]}}` if file does not exist)
+   2. Check if `"Skill({deny_skill} *)"` is already in `permissions.deny[]`
+   3. If not present → append it
+   4. Write updated `.claude/settings.json`
+
+d. **Report to PM:**
+   If conflicts were found and resolved:
+   ```
+   Skill Conflict Detection
+   ====================================
+
+   Detected conflicts:
+     - {skills[0]} vs {skills[1]}
+       Action: Denied "{deny}" in .claude/settings.json
+       Reason: {reason}
+       Preferred: {prefer}
+
+   {count} conflict(s) resolved. Denied skills will not be invoked.
+
+   To reverse: remove the Skill() entry from .claude/settings.json → permissions.deny
+   ```
+
+   If no conflicts detected:
+   ```
+   Skill Conflict Detection
+   ====================================
+   No conflicts detected. All installed skills are compatible.
+   ```
+
+e. **Important notes:**
+   - Target file is `.claude/settings.json` (NOT `.claude/settings.local.json`)
+   - Deny rules are additive — never remove existing entries
+   - PM can manually reverse any deny by editing the file
+
 ### Step 5b: Additional Options Followup
 
 After all recommended options complete, if PM selected "(A) All recommended":
@@ -949,6 +1226,9 @@ Additional options available:
 
   (6f) Custom MCP — Add your own MCP servers manually
 
+  (10) Documentation Platform — Recommend and scaffold a docs platform
+       Based on your project type. Creates docs/ + config skeleton.
+
 Configure any of these? (select numbers, or Enter to skip)
 ```
 
@@ -957,6 +1237,8 @@ If PM presses Enter/skips: continue to Step 6.
 
 NOTE: Option 5 (.gitignore) is NOT offered here — it becomes automatic
 after Task A (selective .aid-o gitignore is applied during init).
+NOTE: Option 11 (Skill Conflict Detection) is NOT offered here — it is
+always included in the recommended batch.
 
 ### Step 6: New Project Flow
 
@@ -1016,6 +1298,7 @@ actionable next steps with command examples.
 ## Reference Files
 
 - `commands/aid-init.md` — workspace initialization (called internally)
+- `defaults/policies/skill-conflicts.yaml` — known skill conflict pairs (used by Option 11)
 - Plan P-20260216-b3a1, sections D-006 (Project Scanner) and D-007 (/aid-setup)
 
 ## Important
