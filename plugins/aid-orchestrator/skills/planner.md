@@ -1,6 +1,6 @@
 # Planner — Plan Generation from EPIC
 
-**Version:** 0.8.2
+**Version:** 0.9.0
 **Skill:** planner
 **Dependencies:** epic-orchestration
 
@@ -1323,5 +1323,5 @@ And sets EPIC frontmatter: `runs_total: 2`
 
 ---
 
-**Version:** 0.8.2
+**Version:** 0.9.0
 **Last Updated:** 2026-02-23

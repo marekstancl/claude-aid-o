@@ -489,4 +489,4 @@ Project configuration is stored in `.aid-o/04-engine/memory/project-profile.yaml
 
 ---
 
-**Version:** 0.8.2 | **Philosophy:** Context → Role → Decision → Action | **Approach:** On-Demand + Think-First + Quality Gates
+**Version:** 0.9.0 | **Philosophy:** Context → Role → Decision → Action | **Approach:** On-Demand + Think-First + Quality Gates

@@ -224,7 +224,8 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.8.2** (current) — Housekeeping, untrusted-content framing, version alignment, Czech→English translation fixes
+- **v0.9.0** (current) — Core structure refactoring: SESSION→RUN rename, sequential ID generation, plan-ref injection, flat evidence structure, budget removal
+- **v0.8.2** — Housekeeping, untrusted-content framing, version alignment, Czech→English translation fixes
 - **v0.8.0** — Workflow Intelligence + Docker/MCP Preference Phase 1, process audit type for auditor
 - **v0.6.0** — Workflow intelligence: seed research (147 Qdrant chunks across LangChain/LangGraph, N8N, LangFlow), 19 example EPICs (12 AI workflows + 7 common projects), platform detection, domain-specific questioning, Docker/MCP recommendations, knowledge-augmented brainstorming with example EPIC lookup
 - **v0.5.0** — Knowledge acquisition pipeline (Phases 1-3): Context7 MCP documentation ingestion, quality-gated storage, knowledge-augmented brainstorming, KNOWLEDGE CONTEXT block in agent dispatch, auto-extraction of reusable patterns, community example EPIC templates, feedback tracking, command prefix standardization (`aid-*`)
@@ -238,4 +239,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.8.2
+MIT — v0.9.0
