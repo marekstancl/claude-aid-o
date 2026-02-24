@@ -357,11 +357,11 @@ IF defaults/examples/ directory does NOT exist OR is empty:
   -> Skip SOURCE 1 silently. No error, no log, no message to PM.
   -> Proceed to SOURCE 2.
 ELSE:
-  FOR EACH file IN defaults/examples/:
+  FOR EACH file IN defaults/examples/**/*.md:
     frontmatter = parse_frontmatter(file)
     # Expected frontmatter fields: type, archetype, frameworks, platforms,
     #   ui, complexity, description
-    IF frontmatter.type != "example_epic":
+    IF frontmatter.type != "example":
       SKIP file
 
     score = 0
