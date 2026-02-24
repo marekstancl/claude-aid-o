@@ -71,11 +71,9 @@ When users run `/aid-init`, it creates:
 
 When modifying plugin files (`plugins/aid-orchestrator/`), always update:
 
-1. **Version numbers** — bump in `plugin.json`, `marketplace.json`, skill headers/footers, plugin README, `aid-help.md`
-2. **CHANGELOG.md** — both root and `plugins/aid-orchestrator/CHANGELOG.md` — **must be identical** (see format below)
-3. **README.md** — root `README.md` Roadmap section (move current version down, add new), plugin `README.md` version badge
-4. **Skill footers** — update `Last Updated` date and version in modified skill files
-5. **`defaults/` sync** — if defaults files changed, note in CHANGELOG; `.aid-o/` in target projects will catch up via `/aid-init` upgrade
+1. **CHANGELOG.md** — both root and `plugins/aid-orchestrator/CHANGELOG.md` — **must be identical** (see format below)
+2. **`Last Updated` date** — in modified skill files (footer `**Last Updated:** YYYY-MM-DD`)
+3. **`defaults/` sync** — if defaults files changed, note in CHANGELOG; `.aid-o/` in target projects will catch up via `/aid-init` upgrade
 
 ### CHANGELOG Format Standard
 
@@ -119,49 +117,64 @@ When releasing a new version, update the `## Roadmap` section in root `README.md
 
 Keep the 3 most recent versions. Older versions are documented only in CHANGELOG.
 
-## Release Workflow
+## Version Management
 
-1. Ensure all feature work is committed on a feature branch
-2. Run `/plugin validate .` from repo root
-3. Run `claude plugin validate plugins/aid-orchestrator`
-4. Bump version in: `plugin.json`, `marketplace.json` (2 places), plugin `README.md`, `aid-help.md`, modified skill headers/footers
-5. Write CHANGELOG entry in root `CHANGELOG.md`, copy to `plugins/aid-orchestrator/CHANGELOG.md`
-6. Update root `README.md` Roadmap section
-7. Commit release: `release: bump version to X.Y.Z`
-8. Merge feature branch to main (use `--no-ff` for merge commit)
-9. Tag: `git tag vX.Y.Z`
-10. Push: `git push && git push --tags`
-11. **Sync marketplace cache** (see below)
+### Single Source of Truth
 
-### Marketplace Cache Sync — MANDATORY after every release
+The **CHANGELOG header** (`## [X.Y.Z]`) is the single source of truth for the plugin version.
+Individual skill/agent/command files do NOT contain version numbers — only `**Last Updated:**` dates.
 
-Claude Code loads plugin commands from a **cached copy**, not from this dev repo.
-If the cache is stale, commands will be missing new features (e.g., Steps 0.5/0.7 in `/aid-plan-epic`).
+### Version File Registry — ALL files that contain a version number
 
-**Cache location:** `~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/{version}/`
-**Marketplace repo:** `~/.claude/plugins/marketplaces/claude-aid-o/` (git clone of `marekstancl/claude-aid-o`)
+Every push to main MUST ensure these 8 locations are in sync:
 
-**After every release, run these steps:**
+| # | File | Field | Update Method |
+|---|------|-------|---------------|
+| 1 | `CHANGELOG.md` | `## [X.Y.Z]` header | Manual (source of truth) |
+| 2 | `plugins/aid-orchestrator/CHANGELOG.md` | `## [X.Y.Z]` header | Manual (copy of #1) |
+| 3 | `.claude-plugin/marketplace.json` | `metadata.version` | JSON field |
+| 4 | `.claude-plugin/marketplace.json` | `plugins[0].version` | JSON field |
+| 5 | `plugins/aid-orchestrator/.claude-plugin/plugin.json` | `version` | JSON field |
+| 6 | `plugins/aid-orchestrator/README.md` | `- **Plugin:** X.Y.Z` | Regex |
+| 7 | `README.md` | `- **vX.Y.Z** (current)` | Regex |
+| 8 | `README.md` | `MIT — vX.Y.Z` | Regex |
 
+These are also defined in `defaults/policies/release-policy.yaml` → `version_files[]`.
+The Release Sub-Phase in `skills/epic-orchestration.md` automates this during EPIC runs.
+
+**Pre-push check:** Before every `git push`, verify all 8 files show the same version:
 ```bash
-# 1. Sync marketplace repo with dev repo
-cd ~/.claude/plugins/marketplaces/claude-aid-o
-git pull origin main          # get latest from GitHub (after dev repo pushed)
-
-# 2. Verify version matches
-grep '"version"' plugins/aid-orchestrator/.claude-plugin/plugin.json
-# Should show the new version
-
-# 3. Force cache rebuild — delete old cache entries
-rm -rf ~/.claude/plugins/cache/claude-aid-o/aid-orchestrator/
-
-# 4. Restart Claude Code — it will recreate cache from marketplace repo
-# (close and reopen the IDE/terminal session)
+grep -n '"version"' .claude-plugin/marketplace.json plugins/aid-orchestrator/.claude-plugin/plugin.json
+grep -n 'Plugin:' plugins/aid-orchestrator/README.md
+grep -n '(current)' README.md
+head -6 CHANGELOG.md plugins/aid-orchestrator/CHANGELOG.md
 ```
 
-**Why this is needed:** Claude Code clones the marketplace repo from GitHub, caches a versioned snapshot, and loads commands from cache. If the dev repo is ahead of GitHub (unpushed commits), or if the cache wasn't invalidated after a version bump, Claude Code serves stale commands.
+## Release Workflow
 
-**Verification:** After restart, invoke any updated command (e.g., `/aid-plan-epic`) and check that new features are present in the loaded content.
+1. Write CHANGELOG entry in root `CHANGELOG.md` with new `## [X.Y.Z]` header
+2. Copy entry to `plugins/aid-orchestrator/CHANGELOG.md` (must be identical)
+3. Bump version in all 6 remaining files (#3-#8 from registry above)
+4. Update root `README.md` Roadmap section (add new version line, move previous down)
+5. Commit: `release: vX.Y.Z — one-line summary`
+6. Tag: `git tag vX.Y.Z`
+7. Push: `git push && git push --tags`
+8. **Update plugin in all projects** (see below)
+
+### Plugin Update — MANDATORY after every push
+
+After pushing to GitHub, update the plugin in every project that uses it:
+
+```bash
+claude plugin update aid-orchestrator@claude-aid-o
+```
+
+Then restart Claude Code (close and reopen IDE/terminal) to load the new version.
+
+**Why:** Claude Code caches plugins. The `plugin update` command pulls the latest version
+from the GitHub marketplace. Without it, projects serve stale commands/skills.
+
+**Verification:** After restart, run `/aid-help` and check the version matches.
 
 <!-- AID-O START -->
 ## AID Orchestrator
