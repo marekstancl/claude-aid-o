@@ -615,6 +615,8 @@ After a step passes PHASE_CHECK, check for pending analysis:
 - **REVISE** (`response_type: "revise"`) → return to EXECUTING with PM's revision instructions (`response.feedback`)
 - **Timeout** (`response.auto: true`) → execute `timeout_actions.merge_approval` from config
 
+After approval, the DONE state runs: version bump (if needed) → merge → archive → audit → metrics.
+
 **Evidence:** Append to `pm_decision.json` (with `channel` and `latency_minutes` fields).
 
 ---
@@ -623,12 +625,52 @@ After a step passes PHASE_CHECK, check for pending analysis:
 
 **Actions:**
 1. If status = approved:
-   a. Merge step branches (or note for manual PR creation)
+   a. **Run File Status Update** (BEFORE archive — MANDATORY): read active run file, update
+      frontmatter (`status: completed`, `completed: {timestamp}`), update Completion line to `100%`,
+      update last phase status to `done`, write file. The archived copy must reflect completed status.
+   b. **Release Sub-Phase** (per `skills/epic-orchestration.md` DONE state — action 1b):
+      1. **Detect version mismatch** — read `release-policy.yaml` for configuration and
+         `changelog_header_pattern`; parse the CHANGELOG(s) for the latest version header
+         (`## [x.y.z]`); read current versions from each entry in `version_files`; if CHANGELOG
+         version matches version files → skip (log "versions current") and proceed to 1c.
+      2. **Multi-phase plan check** — if a version bump is needed, read EPIC frontmatter fields
+         `plan_ref`, `plan_epics_total`, and `runs_completed` to determine the EPIC's position:
+         - **Standalone or last EPIC** (no `plan_ref`, or `runs_completed == plan_epics_total`) →
+           version bump is mandatory; proceed to step 5.
+         - **Intermediate EPIC** (`runs_completed < plan_epics_total`) → PM choice required (step 3).
+      3. **Intermediate EPIC deferral decision**:
+         - **Manual mode** — ask PM: "Release now or defer to final phase?" Log PM decision to
+           evidence. If deferred → log "version bump deferred" and proceed to 1c.
+         - **FIRST AID auto-mode** — auto-defer (no PM interaction); log "version bump deferred
+           (auto-mode, intermediate phase)".
+      4. If deferred → skip remaining release steps, proceed to 1c.
+      5. **Update version files** — for each entry in `version_files` from `release-policy.yaml`,
+         apply the configured update strategy:
+         - `json_field` — parse JSON file, set the specified field to the new version, write back.
+         - `regex` — match the configured pattern, replace with the template (substituting
+           `{version}`).
+      6. **Commit** — `git add -A && git commit -m "release: v{version} — {one-line summary}"`.
+         The summary is taken from the EPIC title or CHANGELOG entry.
+      7. **Git tag** (conditional — `release.git_tag: true` in `release-policy.yaml`):
+         `git tag v{version}`. In FIRST AID auto-mode, this is controlled by `auto_tag`.
+      8. **GitHub Release** (conditional — `release.github_release: true`):
+         `gh release create v{version} --notes "{extracted CHANGELOG section}"`. Extract the
+         CHANGELOG section for this version (text between this version header and the next).
+         In FIRST AID auto-mode, controlled by `auto_release`.
+      9. **Stage log and PM summary** — log release action to `stage_log.jsonl`:
+         `{"state": "DONE", "action": "release", "version": "{version}", "result": "bumped|deferred|skipped"}`.
+         Present to PM: "Version bumped: v{old} → v{new}" or "Version bump deferred" or
+         "Versions already current".
+
+      **Error handling:** If `release-policy.yaml` is missing or CHANGELOG has no version header
+      (non-standard format), skip the release sub-phase gracefully (log warning) and proceed to 1c.
+      The release sub-phase MUST NOT block the DONE state.
+   c. Merge step branches (or note for manual PR creation)
       - If merge fails (conflict, permissions): create PR instead of merging, log warning, note in final report
-   b. Update EPIC file status to "Completed"
+   d. Update EPIC file status to "Completed"
       - If EPIC file write fails: log warning, do not block DONE completion
-   c. Archive run file: `mkdir -p .aid-o/04-engine/runs/archive/` then move
-   d. Update `.aid-o/04-engine/memory/active-work.md`
+   e. Archive run file: `mkdir -p .aid-o/04-engine/runs/archive/` then move
+   f. Update `.aid-o/04-engine/memory/active-work.md`
 2. If status = aborted:
    a. Log abort reason
    b. Update EPIC file with abort note

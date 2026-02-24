@@ -1,0 +1,262 @@
+# AID Release Policy Configuration
+# Defines versioning rules, version file registry, SemVer determination,
+# multi-phase plan handling, and release settings.
+#
+# This policy is read by the Controller during the DONE state release sub-phase
+# (after PM_APPROVAL, before branch merge). The CHANGELOG is the source of truth
+# for all version numbers — version files are mirrors that must stay in sync.
+#
+# See: skills/epic-orchestration.md section 12 for release sub-phase logic.
+
+# ─── Versioning Mode ──────────────────────────────────────────────────
+# Controls how many independent version tracks exist.
+#
+# "single" (default): One version track. One CHANGELOG. One set of version files.
+#   - Suitable for most projects.
+#   - CHANGELOG.md is the single source of truth.
+#
+# "dual" (monorepo): Two independent version tracks for projects where the
+#   project version and plugin/package version can diverge.
+#   - Each track has its own CHANGELOG as source of truth.
+#   - Each track lists its own version files to update.
+#   - Uncomment the "tracks" section below to configure dual mode.
+
+versioning:
+  mode: single                    # single | dual
+
+  # ── Single mode configuration ──
+  # When mode is "single", this CHANGELOG is the source of truth.
+  changelog: CHANGELOG.md
+
+  # ── Dual mode configuration ──
+  # Uncomment below and set mode: dual to enable independent version tracks.
+  # Each track has its own CHANGELOG and set of version files.
+  #
+  # tracks:
+  #   - name: project
+  #     description: "Top-level project version (marketplace, README)"
+  #     changelog: CHANGELOG.md
+  #     files:
+  #       - path: ".claude-plugin/marketplace.json"
+  #         field: "metadata.version"
+  #         update_method: json_field
+  #       - path: "README.md"
+  #         field: "roadmap_current"
+  #         update_method: regex
+  #         pattern: '^\- \*\*v[\d.]+\*\* \(current\)'
+  #       - path: "README.md"
+  #         field: "license_footer"
+  #         update_method: regex
+  #         pattern: 'MIT — v[\d.]+'
+  #
+  #   - name: plugin
+  #     description: "Plugin version (plugin.json, marketplace plugins array)"
+  #     changelog: plugins/aid-orchestrator/CHANGELOG.md
+  #     files:
+  #       - path: "plugins/aid-orchestrator/.claude-plugin/plugin.json"
+  #         field: "version"
+  #         update_method: json_field
+  #       - path: ".claude-plugin/marketplace.json"
+  #         field: "plugins[0].version"
+  #         update_method: json_field
+
+# ─── Version File Registry ────────────────────────────────────────────
+# Lists every file that must be updated when a version bump occurs.
+# In single mode, all files are updated to the same version.
+# In dual mode, this section is ignored — use tracks[].files instead.
+#
+# Each entry defines:
+#   path           — relative path from project root
+#   field          — JSON field path or logical field name
+#   track          — which version track this file belongs to (informational in single mode)
+#   update_method  — how to update the version in this file
+#     json_field   — parse as JSON, update the field at the given path, write back
+#     regex        — find and replace using the given pattern
+
+version_files:
+  - path: ".claude-plugin/marketplace.json"
+    field: "metadata.version"
+    track: project
+    update_method: json_field
+    description: "Marketplace manifest — top-level project version"
+
+  - path: ".claude-plugin/marketplace.json"
+    field: "plugins[0].version"
+    track: plugin
+    update_method: json_field
+    description: "Marketplace manifest — plugin version in plugins array"
+
+  - path: "plugins/aid-orchestrator/.claude-plugin/plugin.json"
+    field: "version"
+    track: plugin
+    update_method: json_field
+    description: "Plugin manifest — plugin version"
+
+  - path: "README.md"
+    field: "roadmap_current"
+    track: project
+    update_method: regex
+    pattern: '^\- \*\*v[\d.]+\*\* \(current\)'
+    replacement: '- **v${version}** (current)'
+    description: "README Roadmap section — current version entry"
+
+  - path: "README.md"
+    field: "license_footer"
+    track: project
+    update_method: regex
+    pattern: 'MIT — v[\d.]+'
+    replacement: 'MIT — v${version}'
+    description: "README license footer — version reference"
+
+# ─── SemVer Determination Rules ───────────────────────────────────────
+# Defines which change types trigger which version bump level.
+# These rules guide the Controller when determining the bump type from
+# CHANGELOG entries. The CHANGELOG header provides the target version;
+# these rules are used for validation and PM guidance.
+#
+# AID follows Semantic Versioning 2.0.0 (https://semver.org/).
+# While in 0.x.y (pre-1.0), MINOR bumps may include breaking changes.
+
+semver:
+  # Pre-1.0 flag: when true, breaking changes bump MINOR instead of MAJOR.
+  # Set to false after the project reaches 1.0.0 stable.
+  pre_release: true
+
+  rules:
+    major:
+      description: "Breaking API, config, or behavior change"
+      triggers:
+        - "Renamed or removed commands"
+        - "Removed features or capabilities"
+        - "Changed configuration file format (breaking)"
+        - "Changed API contract (breaking)"
+        - "Backward-incompatible state machine changes"
+      note: "While pre_release is true, these trigger MINOR instead of MAJOR"
+
+    minor:
+      description: "New user-visible feature or capability"
+      triggers:
+        - "New skill, agent, or command added"
+        - "New default templates or example EPICs"
+        - "New configuration options (non-breaking)"
+        - "New integrations (MCP servers, tools)"
+        - "Multiple new features in one EPIC (one MINOR bump, not one per feature)"
+
+    patch:
+      description: "Bug fix, refactoring, or documentation-only change"
+      triggers:
+        - "Bug fix (gate logic, template rendering, etc.)"
+        - "Internal refactoring with no user-visible impact"
+        - "Documentation-only changes (README, help topics)"
+        - "Typo fixes in commands or templates"
+        - "Performance optimizations (no behavior change)"
+
+  # CHANGELOG version header format used for detection.
+  # The Controller parses the first H2 matching this pattern.
+  changelog_header_pattern: '## \[(\d+\.\d+\.\d+)\]'
+
+# ─── Multi-Phase Plan Handling ────────────────────────────────────────
+# When a Plan has multiple EPICs (phases), intermediate EPICs may defer
+# their version bump to the final EPIC. The last EPIC always bumps.
+#
+# Detection: The Controller reads the EPIC frontmatter for plan_ref and
+# plan_epics_total to determine position within the plan.
+
+multi_phase:
+  # Last EPIC of a multi-phase plan: version bump is mandatory.
+  # No deferral option — the plan is complete, version must be published.
+  last_epic: mandatory
+
+  # Intermediate EPIC (not the last in a multi-phase plan):
+  # PM decides whether to release now or defer to the final EPIC.
+  intermediate_epic: pm_choice           # pm_choice | always_release | always_defer
+
+  # Standalone EPIC (no plan, or single-phase plan):
+  # Version bump is always mandatory — there is no "later" to defer to.
+  standalone_epic: mandatory
+
+  # How to detect plan position:
+  # The Controller reads these EPIC frontmatter fields.
+  detection:
+    plan_ref_field: plan_ref             # EPIC frontmatter field linking to source plan
+    epics_total_field: plan_epics_total  # Total EPICs in the plan
+    runs_completed_field: runs_completed # How many runs (EPICs) are already done
+
+# ─── FIRST AID Mode (Autonomous) ─────────────────────────────────────
+# In FIRST AID (autonomous) mode, the release sub-phase operates without
+# PM interaction. These settings control automatic behavior.
+#
+# Manual mode always asks the PM at decision points.
+# FIRST AID mode uses these defaults instead.
+
+first_aid:
+  # Intermediate EPIC: auto-defer (skip version bump, wait for final EPIC).
+  intermediate_action: defer             # defer | release
+
+  # Last/standalone EPIC: always bump + tag + release (no PM confirmation).
+  last_epic_action: release              # release (always — not configurable, documented for clarity)
+
+  # When version detection fails or CHANGELOG is malformed:
+  on_error: escalate                     # escalate to PM (even in auto mode)
+
+# ─── Release Settings ─────────────────────────────────────────────────
+# Controls what happens after version files are updated.
+
+release:
+  # Git tag creation: runs "git tag vX.Y.Z" after version bump commit.
+  git_tag: true
+
+  # GitHub Release creation: runs "gh release create" with CHANGELOG section as notes.
+  github_release: true
+
+  # Draft mode: if true, GitHub Release is created as draft (not published).
+  draft_release: false
+
+  # FIRST AID mode: tag automatically without PM confirmation.
+  auto_tag: true
+
+  # FIRST AID mode: create GitHub Release automatically without PM confirmation.
+  auto_release: true
+
+  # Manual mode: ask PM before creating git tag.
+  # "Create git tag v0.9.0? (Y/N)"
+  confirm_before_tag: true
+
+# ─── Commit Format ────────────────────────────────────────────────────
+# Defines the commit message format for version bump commits.
+# Placeholders:
+#   ${version}         — new version number (e.g., 0.9.0)
+#   ${summary}         — one-line EPIC goal summary
+
+commit:
+  message_template: "release: v${version} — ${summary}"
+  # Examples:
+  #   release: v0.7.0 — Workflow intelligence with seed research and example EPICs
+  #   release: v0.9.0 — Core structure refactoring (SESSION to RUN rename)
+
+# ─── Skip Conditions ──────────────────────────────────────────────────
+# Conditions under which the release sub-phase is skipped entirely.
+
+skip_when:
+  # No version header found in CHANGELOG (not all EPICs update CHANGELOGs).
+  no_changelog_version: true
+
+  # All version files already match the CHANGELOG version.
+  versions_current: true
+
+# ─── Stage Log Entry ──────────────────────────────────────────────────
+# Template for the stage_log entry written after release sub-phase completes.
+# The Controller populates these fields and appends to the run's stage_log.
+
+stage_log:
+  state: DONE
+  action: release
+  fields:
+    - changelog_version                  # Version found in CHANGELOG header
+    - previous_version                   # Version in files before bump
+    - bump_type                          # major | minor | patch | skipped | deferred
+    - files_updated                      # List of files that were modified
+    - git_tag_created                    # true | false
+    - github_release_created             # true | false
+    - deferred                           # true | false (for intermediate EPICs)
+    - reason                             # Human-readable explanation of what happened

@@ -854,6 +854,8 @@ if gate_fails:
      2. Override rejected: "fix IMP-{NNN}" — Orchestrator dispatches fix agent
      3. Teach rule: "always approve {type/area}" — added to auto-rules + Qdrant
      4. REJECT — do not merge
+
+   After approval: version bump (if needed) → merge → archive → audit → metrics
    ```
 
 3. Send to PM via `send_pm_message("merge_approval", payload)`:
@@ -915,7 +917,165 @@ interacting with the Curator summary at all.
       The archived copy MUST reflect the completed status. Never archive a run
       that still shows `status: active`.
 
-   b. **Run Branch Merge** (if git available):
+   b. **Release Sub-Phase** (BEFORE branch merge — version bump if needed):
+
+      This sub-phase detects version mismatches between CHANGELOG headers and version
+      files, and bumps versions when required. It runs inside the DONE state as a
+      sub-phase — no new top-level FSM state is introduced.
+
+      **Configuration:** Read `release-policy.yaml` from `.aid-o/03-config/policies/`.
+      If the file does not exist, skip the entire release sub-phase gracefully (log
+      `"release-policy.yaml not found — release sub-phase skipped"`).
+
+      **Step 1 — Detect version mismatch:**
+      1. Read the CHANGELOG file specified in `versioning.changelog` (default: `CHANGELOG.md`)
+      2. Extract the latest version header using `semver.changelog_header_pattern`
+         (default regex: `## \[(\d+\.\d+\.\d+)\]`)
+         - Parse the first H2 line matching the pattern
+         - Extract the version number (e.g., `0.9.0`)
+      3. If NO version header found in CHANGELOG:
+         - Skip the entire release sub-phase
+         - Log to stage_log:
+           ```json
+           {"state": "DONE", "action": "release", "bump_type": "skipped",
+            "reason": "No version header found in CHANGELOG — skipping release sub-phase"}
+           ```
+         - Present to PM: "Release sub-phase skipped — no version header in CHANGELOG"
+         - Proceed to action 1c (branch merge)
+      4. Read each file listed in `version_files[]`:
+         - For `update_method: json_field`: parse the file as JSON, read the field at `field` path
+         - For `update_method: regex`: search for the `pattern`, extract the version number
+      5. Compare CHANGELOG version to each file's current version:
+         - If CHANGELOG version > file version for ANY file: bump needed
+         - If ALL files already match CHANGELOG version: versions are current
+
+      **Step 2 — If no bump needed (versions current):**
+      - Skip the rest of the release sub-phase
+      - Log to stage_log:
+        ```json
+        {"state": "DONE", "action": "release", "bump_type": "skipped",
+         "changelog_version": "{version}", "previous_version": "{version}",
+         "reason": "All version files already match CHANGELOG version"}
+        ```
+      - Present to PM: "Versions already current ({version}) — no bump needed"
+      - Proceed to action 1c (branch merge)
+
+      **Step 3 — If bump needed, check multi-phase plan status:**
+      1. Read EPIC frontmatter fields defined in `multi_phase.detection`:
+         - `plan_ref` — source plan reference (if any)
+         - `plan_epics_total` — total EPICs in the plan
+         - `runs_completed` — how many runs/EPICs are already done
+      2. Determine EPIC position:
+         - **Standalone EPIC:** `plan_epics_total` is 1, absent, or `plan_ref` is empty
+           → version bump is **mandatory** (per `multi_phase.standalone_epic`)
+         - **Last EPIC of multi-phase plan:** `runs_completed + 1 >= plan_epics_total`
+           → version bump is **mandatory** (per `multi_phase.last_epic`)
+         - **Intermediate EPIC:** `plan_epics_total > 1` AND `runs_completed + 1 < plan_epics_total`
+           → proceed to Step 4 (PM choice / FIRST AID deferral)
+      3. If detection fields are missing or unparseable: treat as standalone (fallback)
+
+      **Step 4 — Intermediate EPIC deferral decision:**
+      - Check the current orchestration mode:
+        - **Manual mode** (default): Ask PM —
+          "Version bump needed: {previous_version} → {changelog_version}.
+          This is an intermediate EPIC ({runs_completed + 1}/{plan_epics_total}).
+          Release now or defer to final EPIC?"
+          - If PM chooses **"Release now"**: proceed to Step 5 (bump)
+          - If PM chooses **"Defer"**: skip bump, go to deferral logging below
+        - **FIRST AID mode** (autonomous): auto-defer per `first_aid.intermediate_action`
+          (default: `defer`). No PM interaction.
+      - If deferred:
+        - Log to stage_log:
+          ```json
+          {"state": "DONE", "action": "release", "bump_type": "deferred",
+           "changelog_version": "{version}", "previous_version": "{previous}",
+           "deferred": true, "reason": "Intermediate EPIC — version bump deferred",
+           "epic_position": "{N}/{total}", "mode": "manual|first_aid"}
+          ```
+        - Present to PM: "Version bump deferred (intermediate EPIC, {N}/{total} complete).
+          Bump will be mandatory on final EPIC."
+        - Proceed to action 1c (branch merge)
+
+      **Step 5 — Update version files:**
+      For each entry in `version_files[]`:
+      1. **json_field method:**
+         - Read the file, parse as JSON
+         - Navigate to the field path (e.g., `metadata.version`, `plugins[0].version`)
+         - Set the field value to the CHANGELOG version
+         - Write the file back (preserve formatting where possible)
+      2. **regex method:**
+         - Read the file contents
+         - Apply the `pattern` regex to find the current version string
+         - Replace with `replacement` template, substituting `${version}` with the
+           CHANGELOG version (e.g., `- **v0.9.0** (current)`)
+         - Write the file back
+      3. Track all updated files for the stage_log entry
+
+      **Step 6 — Commit version bump:**
+      - Stage all modified version files
+      - Commit using the template from `commit.message_template`:
+        `release: v{version} — {summary}`
+        Where `{summary}` is the one-line EPIC goal from the EPIC frontmatter/title
+      - Example: `release: v0.9.0 — Automated release protocol`
+
+      **Step 7 — Git tag (conditional):**
+      - Check `release.git_tag` in release-policy.yaml
+      - If `git_tag: false`: skip tagging
+      - If `git_tag: true`:
+        - **Manual mode:** If `release.confirm_before_tag: true`, ask PM:
+          "Create git tag v{version}? (Y/N)"
+          - If PM declines: skip tag, log reason
+        - **FIRST AID mode:** If `release.auto_tag: true`, create tag automatically
+          without PM confirmation
+        - Create tag: `git tag v{version}`
+
+      **Step 8 — GitHub Release (conditional):**
+      - Check `release.github_release` in release-policy.yaml
+      - If `github_release: false`: skip
+      - If `github_release: true`:
+        - **Manual mode:** If `release.confirm_before_tag: true`, ask PM:
+          "Create GitHub Release v{version}? (Y/N)"
+          - If PM declines: skip release, log reason
+        - **FIRST AID mode:** If `release.auto_release: true`, create release
+          automatically without PM confirmation
+        - Extract the CHANGELOG section for this version (text between the matched
+          `## [x.y.z]` header and the next `## [` header or end of file)
+        - Create release: `gh release create v{version} --title "v{version}" --notes "{changelog_section}"`
+        - If `release.draft_release: true`: add `--draft` flag
+        - If `gh` CLI is unavailable or fails: log warning, do NOT block the DONE state
+
+      **Step 9 — Stage log and summary:**
+      - Log the complete release result to stage_log:
+        ```json
+        {"state": "DONE", "action": "release",
+         "changelog_version": "{version}",
+         "previous_version": "{previous_version}",
+         "bump_type": "major|minor|patch",
+         "files_updated": ["path1", "path2", "..."],
+         "git_tag_created": true,
+         "github_release_created": true,
+         "deferred": false,
+         "reason": "Version files updated to match CHANGELOG"}
+        ```
+      - Present release summary to PM:
+        ```
+        Release: v{version}
+        ─────────────────────
+        Bump: {previous_version} → {version} ({bump_type})
+        Files updated: {count} ({file_list})
+        Git tag: v{version} {created|skipped}
+        GitHub Release: v{version} {created|skipped|draft}
+        ```
+
+      **Error handling:**
+      - If version detection fails (malformed CHANGELOG, unparseable version files):
+        - **Manual mode:** Escalate to PM with error details
+        - **FIRST AID mode:** Escalate per `first_aid.on_error` (default: `escalate`)
+        - Do NOT block the DONE state — log the error and proceed to branch merge
+      - If `git tag` or `gh release` fails: log warning, continue (non-blocking)
+      - The release sub-phase MUST NOT block on external services
+
+   c. **Run Branch Merge** (if git available):
       If a run branch was created (check plan_progress.json -> branch):
       1. Verify all gates passed and PM approved
       2. Switch to base branch: `git checkout {default_branch}`
@@ -927,9 +1087,9 @@ interacting with the Curator summary at all.
 
       If no run branch (git not available): skip this step.
 
-   c. Update EPIC file status to "Completed"
-   d. Archive run file to `.aid-o/04-engine/runs/archive/`
-   e. Update `.aid-o/04-engine/memory/active-work.md`
+   d. Update EPIC file status to "Completed"
+   e. Archive run file to `.aid-o/04-engine/runs/archive/`
+   f. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
 3. **POST-PROCESSING (Auditor):**
 
