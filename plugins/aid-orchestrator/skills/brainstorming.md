@@ -73,6 +73,61 @@ Minimize cognitive load on PM. Every interaction should be easy to process.
 
 ---
 
+## Initial Analysis Phase
+
+Before asking any questions, the AI must present a brief structured analysis of the PM's topic. This ensures shared understanding, surfaces misinterpretations early, and makes subsequent questions more targeted.
+
+### When It Triggers
+
+This phase activates after the AI has read the PM's topic description and all gathered context (project profile, knowledge results, input files) but **before** the questioning phase (Step 1) begins. It is mandatory for every brainstorming run.
+
+### Analysis Protocol
+
+```
+RULE 1: After reading the PM's topic and all available context, PRESENT a structured
+        analysis BEFORE asking any questions. This is mandatory.
+RULE 2: The analysis output must be 5-8 lines maximum. Conciseness is critical —
+        PM's attention is the bottleneck.
+RULE 3: Structure the analysis with these four elements:
+        - "What I understand from your topic" — paraphrase the request + key aspects identified
+        - "Key dimensions I see" — technical, organizational, integration, risk dimensions
+        - "Potential challenges" — what could go wrong, what needs careful decisions
+        - "What I need to clarify" — preview of question areas (not the questions themselves)
+RULE 4: After presenting the analysis, WAIT for PM confirmation before proceeding
+        to questions. Ask: "Is this understanding correct, or should I adjust
+        my focus before we continue?"
+RULE 5: If PM corrects misunderstandings, ACKNOWLEDGE the correction, briefly restate
+        the corrected understanding, and then proceed to questioning.
+RULE 6: For trivial or straightforward topics, state "Straightforward topic, minimal
+        analysis needed" and keep the analysis to 3-4 lines. Skip dimensions or
+        challenges that do not apply.
+RULE 7: Do NOT turn this phase into a mini-brainstorm. No solution proposals,
+        no architecture suggestions — only understanding and scoping.
+RULE 8: The analysis must reflect knowledge context when available. If knowledge
+        search returned relevant patterns or past decisions, reference them briefly
+        (e.g., "I see a similar feature was built in project X").
+```
+
+### Example Output
+
+```
+**What I understand from your topic:** You want to add webhook support so external
+services can subscribe to events in the system — primarily for integration partners.
+
+**Key dimensions I see:** API design (endpoint structure, auth), event model (which
+events, payload format), reliability (retry logic, delivery guarantees), security.
+
+**Potential challenges:** Ensuring at-least-once delivery without duplicates; scaling
+webhook dispatch without blocking the main request path; secret rotation for signatures.
+
+**What I need to clarify:** Target consumers and their technical sophistication;
+expected event volume; whether this replaces or supplements existing polling APIs.
+
+Is this understanding correct, or should I adjust my focus before we continue?
+```
+
+---
+
 ## Knowledge-Augmented Brainstorming
 
 When knowledge acquisition is configured, the brainstorming run is augmented with
