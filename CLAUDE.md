@@ -17,7 +17,7 @@ ai-orchestrator/
     skills/                     # 17 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
-      templates/                # plan.md, epic.md, plan.schema.json, session-*.md
+      templates/                # plan.md, epic.md, plan.schema.json, run-*.md
       playbooks/                # 11 role-based playbooks
     README.md                   # Plugin documentation
   CHANGELOG.md                  # Version history
@@ -45,7 +45,7 @@ When users run `/aid-init`, it creates:
   01-plans/          # PM + AI brainstorming → plans (archive/ for completed)
   02-epics/          # PM + AI detail → specifications (archive/ for completed)
   03-config/         # PM-customizable (policies, templates, playbooks)
-  04-engine/         # AI internal (sessions, memory, backlog, evidence)
+  04-engine/         # AI internal (runs, memory, backlog, evidence)
 ```
 
 ## Key Commands
