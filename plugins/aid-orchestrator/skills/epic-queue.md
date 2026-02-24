@@ -1,6 +1,5 @@
 # Epic Queue — Autonomous EPIC Pipeline
 
-**Version:** 0.1.0
 **Skill:** epic-queue
 **Dependencies:** epic-orchestration, slack-mcp
 

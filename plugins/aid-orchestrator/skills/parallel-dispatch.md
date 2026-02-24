@@ -1,6 +1,5 @@
 # Parallel Dispatch — Branch Management & Concurrent Agent Execution
 
-**Version:** 0.1.0
 **Skill:** parallel-dispatch
 **Dependencies:** epic-orchestration, planner
 
@@ -692,5 +691,4 @@ See `skills/cost-optimization.md` for the full agent-to-model mapping.
 
 ---
 
-**Version:** 0.4.0
 **Last Updated:** 2026-02-20

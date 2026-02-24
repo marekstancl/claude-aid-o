@@ -1,7 +1,5 @@
 # AID Gates Engine
 
-Version: 1.0.0 — Post-EPIC-steps quality validation engine.
-
 **Purpose:** Parse `gates.yaml`, execute quality gates (command-based and rule-based),
 generate structured `gates_report.json` with retry history, store evidence.
 

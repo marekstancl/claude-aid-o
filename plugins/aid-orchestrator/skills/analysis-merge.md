@@ -1,6 +1,5 @@
 # Analysis Merge — Multi-Perspective Finding Consolidation
 
-**Version:** 0.1.0
 **Skill:** analysis-merge
 **Dependencies:** parallel-dispatch, improvement-proposals
 
@@ -441,5 +440,4 @@ configuration. PM can override during PLAN_REVIEW.
 
 ---
 
-**Version:** 0.1.0
 **Last Updated:** 2026-02-17

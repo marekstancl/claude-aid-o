@@ -1,6 +1,5 @@
 # Workflow Intelligence — Platform Detection, Workflow Questioning, and UI Derivation
 
-**Version:** 0.6.0
 **Skill:** workflow-intelligence
 **Dependencies:** brainstorming, knowledge-acquisition, memory-mcp
 
@@ -992,5 +991,4 @@ EPIC Draft (Step 8)
 
 ---
 
-**Version:** 0.6.0
 **Last Updated:** 2026-02-23

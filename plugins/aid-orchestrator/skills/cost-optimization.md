@@ -1,6 +1,5 @@
 # Cost Optimization -- Token & Latency Efficiency
 
-**Version:** 0.1.0
 **Skill:** cost-optimization
 **Dependencies:** epic-orchestration, parallel-dispatch, agent-core
 
@@ -241,5 +240,4 @@ For BMK-001 (140 min active compute): optimized run ~**70-100 min** estimated.
 
 ---
 
-**Version:** 0.1.0
 **Last Updated:** 2026-02-19

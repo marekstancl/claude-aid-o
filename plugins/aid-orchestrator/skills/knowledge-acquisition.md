@@ -1,6 +1,5 @@
 # Knowledge Acquisition — Research, Storage, and Consumption Protocol
 
-**Version:** 0.5.0
 **Skill:** knowledge-acquisition
 **Dependencies:** memory-mcp, run-management, epic-orchestration
 
@@ -1948,5 +1947,4 @@ IF memory-config.yaml has no knowledge: section:
 
 ---
 
-**Version:** 0.5.0
 **Last Updated:** 2026-02-22

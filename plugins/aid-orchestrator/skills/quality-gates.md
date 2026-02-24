@@ -1,6 +1,5 @@
 # Quality Gates - Instructions
 
-**Version:** 4.0.0
 **Skill:** quality-gates
 **Dependencies:** agent-core
 
@@ -304,5 +303,4 @@ quality_gates:
 
 ---
 
-**Version:** 4.0.0
 **Last Updated:** 2026-02-11

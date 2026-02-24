@@ -488,5 +488,3 @@ Project configuration is stored in `.aid-o/04-engine/memory/project-profile.yaml
 - Epic ID: `E-{YYYYMMDD}-{4char-hash}`
 
 ---
-
-**Version:** 0.9.0 | **Philosophy:** Context → Role → Decision → Action | **Approach:** On-Demand + Think-First + Quality Gates

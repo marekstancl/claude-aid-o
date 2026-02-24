@@ -1,6 +1,5 @@
 # Run Management - Instructions
 
-**Version:** 0.9.0
 **Skill:** run-management
 **Dependencies:** agent-core
 
@@ -579,5 +578,4 @@ Standard `.aid-o/` paths (created by `/aid-init`):
 
 ---
 
-**Version:** 0.9.0
 **Last Updated:** 2026-02-23

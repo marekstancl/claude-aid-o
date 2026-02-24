@@ -1,6 +1,5 @@
 # Memory MCP Integration — Long-Term Vector Memory Protocol
 
-**Version:** 0.5.0
 **Skill:** memory-mcp
 **Dependencies:** run-management, epic-orchestration
 

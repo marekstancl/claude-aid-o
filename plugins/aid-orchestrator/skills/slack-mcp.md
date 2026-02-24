@@ -1,6 +1,5 @@
 # Slack MCP Integration — PM Communication Protocol
 
-**Version:** 0.1.0
 **Skill:** slack-mcp
 **Dependencies:** epic-orchestration
 

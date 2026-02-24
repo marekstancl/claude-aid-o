@@ -1,6 +1,5 @@
 # Brainstorming — Interactive Design and Planning Skill
 
-**Version:** 0.7.0
 **Skill:** brainstorming
 **Dependencies:** run-management, planner, workflow-intelligence
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
@@ -1509,5 +1508,4 @@ Reference: skills/workflow-intelligence.md for full protocol details
 
 ---
 
-**Version:** 0.7.0
 **Last Updated:** 2026-02-24

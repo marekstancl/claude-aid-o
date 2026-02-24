@@ -92,6 +92,14 @@ version_files:
     update_method: json_field
     description: "Plugin manifest — plugin version"
 
+  - path: "plugins/aid-orchestrator/README.md"
+    field: "plugin_version"
+    track: plugin
+    update_method: regex
+    pattern: '^\- \*\*Plugin:\*\* [\d.]+'
+    replacement: '- **Plugin:** ${version}'
+    description: "Plugin README — plugin version badge"
+
   - path: "README.md"
     field: "roadmap_current"
     track: project
