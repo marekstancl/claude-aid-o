@@ -66,8 +66,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 2. Read and validate EPIC (same validation as `/aid-plan-epic` Step 3)
 3. Read `.aid-o/03-config/policies/decision-policies.yaml`
 4. Read `.aid-o/03-config/policies/gates.yaml`
-5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/`
-   (also create subdirectories: `steps/`, `prompts/`, `gates/`, `analysis/`, `discovered_issues/`, `reviews/`, `parallel_groups/`)
+5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/`
 6. Find existing Plan JSON (in evidence directory) or generate one:
    - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id` (most recent by directory name — run IDs use ISO timestamp prefix)
    - If plan.json exists → load it
@@ -327,15 +326,17 @@ After a step passes PHASE_CHECK, check for pending analysis:
    h. Medium/low/info → proceed normally
 4. Continue to NEXT_PHASE
 
-**Evidence per step:**
-- Save prompt: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/prompts/step_{N}_{role}.md`
-- Save output: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
-- Generate diff: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/diff.patch`
+**Evidence per step** (all files go into `steps/step_{N}_{role}/`):
+- `output.md` — agent output (MANDATORY)
+- `prompt.md` — dispatch prompt sent to agent
+- `diff.patch` — generated diff of file changes
+- `review.md` — review feedback (if review was dispatched)
+- `gate_result.md` — gate results (if applicable)
 - Append to `stage_log.jsonl`
 
-**Evidence per analysis group (additional):**
-- Raw agent outputs: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/analysis/analysis_{N}_{purpose}/raw_{agent}.yaml`
-- Merged report: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/analysis/analysis_{N}_{purpose}/analysis_report.yaml`
+**Evidence per analysis group** (stored in the target step's directory):
+- `steps/step_{N}_{role}/analysis_{purpose}_raw_{agent}.yaml` — raw analysis agent output
+- `steps/step_{N}_{role}/analysis_{purpose}_report.yaml` — merged analysis report
 
 **Transition:** → PHASE_CHECK
 
@@ -375,7 +376,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
      If clean → git merge --abort (was just a test)
    ```
 4. If all dry-run merges clean → actually merge branches (same order)
-5. Record merge results in `evidence/parallel_groups/group_{N}/merge_log.json`
+5. Record merge results in `evidence/steps/parallel_group_{N}_merge_log.json`
 
 4. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
    - Read agent's `output.md` from evidence
@@ -383,6 +384,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
    - Auto-accept: simple roles (docs, config, release), ≤3 criteria, all verifiable
    - Review required: complex roles (architect, backend, frontend, security), 5+ criteria, unclear items
    - If review needed: dispatch `code-reviewer` agent with output.md + plan criteria + git diff
+   - Review result saved to `steps/step_{N}_{role}/review.md`
    - Review result: APPROVED → proceed; REJECTED → re-dispatch original agent with feedback
    - Max 2 review-fix cycles, then ESCALATION
 
@@ -391,7 +393,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
    - CRITICAL → check auto_fix_patterns → dispatch fix agent or ESCALATION (step blocked)
    - HIGH → log to evidence + backlog.md + PM Slack (non-blocking)
    - MEDIUM/INFO → log to evidence + improvement_notes (non-blocking)
-   - Evidence: `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
+   - Evidence: `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/discovered_issues.md`
 
 **Evidence:** Append check result to `stage_log.jsonl`.
 

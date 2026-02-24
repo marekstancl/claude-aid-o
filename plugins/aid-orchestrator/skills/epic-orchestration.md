@@ -78,7 +78,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 | **IDLE** | Load EPIC file, validate structure | EPIC parsed successfully | `epic_input.md` saved |
 | **PLANNING** | Read EPIC → generate Plan JSON per `plan.schema.json` | Valid Plan JSON produced | `plan.json` saved |
 | **PLAN_REVIEW** | Send plan to PM via Slack (or chat fallback), show steps + dependencies + parallel groups | PM says GO | `pm_plan_approval.json` |
-| **EXECUTING** | Dispatch current step's agent (per role playbook); dispatch analysis_groups post-step (per `parallel-dispatch.md`) | Step produces expected outputs; analysis reports generated | `stage_log.jsonl` entry, `diffs/`, `analysis/` |
+| **EXECUTING** | Dispatch current step's agent (per role playbook); dispatch analysis_groups post-step (per `parallel-dispatch.md`) | Step produces expected outputs; analysis reports generated | `stage_log.jsonl` entry, step evidence in `steps/step_N_role/` |
 | **PHASE_CHECK** | Verify step outputs; merge analysis results; check parallel conflicts (per `parallel-dispatch.md`) | Auto-decision per `decision-policies.yaml`; critical analysis findings → ESCALATION | Check result in `stage_log.jsonl` |
 | **NEXT_PHASE** | Advance to next step (or next parallel group) | Next step ready | Updated `plan_progress.json` |
 | **GATES** | Run all gates from `gates.yaml` | All required gates pass | `gates_report.json` |
@@ -328,14 +328,14 @@ default to `recommended` preset behavior.
    b. If no analysis groups → skip
    c. If found: dispatch analysis agents (read-only, no branches) in parallel
    d. Collect outputs, apply merge strategy (`skills/analysis-merge.md`)
-   e. Generate `analysis_report`, save to `evidence/analysis/`
+   e. Generate `analysis_report`, save to `evidence/steps/step_{N}_{role}/`
    f. Critical findings → ESCALATION; high findings → PM warning; others → continue
 5. Transition to PHASE_CHECK
 
 **Context Passing Between Steps:**
 ```
-Step N outputs → saved to .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/
-Step N+1 inputs → read from .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/
+Step N outputs → saved to .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/
+Step N+1 inputs → read from .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/
 ```
 
 Key context to pass:
@@ -439,11 +439,22 @@ acceptance criteria). This section provides the implementation specifics.
    "chars_injected": 0}
   ```
 
-**Evidence:** For each step:
-- `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/output.md`
-- `.aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}/diff.patch`
-- `.aid-o/04-engine/evidence/{epic_id}/{run_id}/prompts/step_{N}_prompt.md`
+**Evidence:** For each step (all files in `steps/step_{N}_{role}/`):
+- `output.md` — agent output (MANDATORY)
+- `prompt.md` — dispatch prompt sent to agent
+- `diff.patch` — generated diff of file changes
+- `review.md` — review feedback (if review dispatched)
+- `gate_result.md` — gate results (if applicable)
 - Entry in `.aid-o/04-engine/evidence/{epic_id}/{run_id}/stage_log.jsonl`
+
+**Step Evidence File Types:**
+| File | Required | Description |
+|------|----------|-------------|
+| `output.md` | MANDATORY | Agent output — must always be written |
+| `prompt.md` | optional | The dispatch prompt sent to the agent |
+| `review.md` | optional | Review feedback from code-reviewer agent |
+| `gate_result.md` | optional | Gate check results for this step |
+| `diff.patch` | optional | Git diff of changes made by the agent |
 
 ### 5. PHASE_CHECK
 
@@ -464,7 +475,7 @@ acceptance criteria). This section provides the implementation specifics.
    b. Check for high findings → log warning to PM
    c. Merge analysis improvement_notes into step evidence (for Curator)
 5. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
-   a. Read agent's `output.md` from `evidence/steps/step_{N}_{role}/output.md`
+   a. Read agent's `output.md` from `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
    b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + run file acceptance items
    c. For each acceptance criterion, evaluate:
       - Verifiable from output.md + `git diff`? → verify directly
@@ -476,7 +487,7 @@ acceptance criteria). This section provides the implementation specifics.
         - Reviewer REJECTED (with feedback) → re-dispatch original agent with reviewer feedback
         - Max `max_review_fix_cycles` (default 2) → then ESCALATION
       - Any criterion clearly NOT met → re-dispatch agent with specific feedback (max 2 cycles → ESCALATION)
-   e. Evidence: save review to `evidence/{epic_id}/{run_id}/reviews/step_{N}_{role}_review_{cycle}.md`
+   e. Evidence: save review to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/review.md`
    f. Update `plan_progress.json`: increment `steps[step_id].review_cycles`, set `steps[step_id].last_review` to review result summary
 6. **Discovered Issues Triage** (per `decision-policies.yaml` → `discovered_issues`):
    a. Parse `## DISCOVERED ISSUES` section from agent's `output.md` (if present)
@@ -484,9 +495,9 @@ acceptance criteria). This section provides the implementation specifics.
    c. For each issue, extract: severity (`[CRITICAL]`/`[HIGH]`/`[MEDIUM]`/`[INFO]`), description, impact, recommendation
    d. Triage per severity:
       - **CRITICAL:** Check `auto_fix_patterns` → match → dispatch fix agent; no match → ESCALATION. Current step BLOCKED.
-      - **HIGH:** Log to `evidence/discovered_issues/`. Forward to later step if natural fit, else create `backlog.md` entry. PM Slack notification (informational). NOT blocking.
-      - **MEDIUM/INFO:** Log to `evidence/discovered_issues/`. Add to `improvement_notes` (Curator picks up). NOT blocking.
-   e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
+      - **HIGH:** Log to `evidence/steps/step_{N}_{role}/discovered_issues.md`. Forward to later step if natural fit, else create `backlog.md` entry. PM Slack notification (informational). NOT blocking.
+      - **MEDIUM/INFO:** Log to `evidence/steps/step_{N}_{role}/discovered_issues.md`. Add to `improvement_notes` (Curator picks up). NOT blocking.
+   e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/discovered_issues.md`
    f. Run file: add CRITICAL/HIGH issues to Run Log
 
 #### Diff Generation (after output verification)
@@ -1229,6 +1240,9 @@ When generating the `final_report.md`, the orchestrator enriches it with data fr
 
 ## Evidence Store Structure
 
+All step evidence is stored directly in `steps/step_{N}_{role}/`. There are no separate
+top-level subdirectories for prompts, reviews, analysis, or discovered issues.
+
 ```
 .aid-o/04-engine/evidence/{epic_id}/{run_id}/
   epic_input.md              # Original EPIC
@@ -1239,34 +1253,46 @@ When generating the `final_report.md`, the orchestrator enriches it with data fr
   stage_log.jsonl            # Structured log of all state transitions
   gates_report.json          # Gate results with retry history
   final_report.md            # Summary report
-  prompts/                   # All prompts sent to agents
-    step_1_architect.md
-    step_2_domain.md
-    ...
-  steps/                     # Step outputs
+  steps/                     # All step evidence (flat structure)
     step_1_architect/
-      output.md
-      diff.patch
+      output.md              # Agent output (MANDATORY)
+      prompt.md              # Dispatch prompt sent to agent
+      diff.patch             # Git diff of changes
+      review.md              # Review feedback (if review dispatched)
+      gate_result.md         # Gate results (if applicable)
+      discovered_issues.md   # Discovered issues (if any reported)
+      analysis_{purpose}_raw_{agent}.yaml   # Raw analysis output (if analysis group)
+      analysis_{purpose}_report.yaml        # Merged analysis report (if analysis group)
     step_2_domain/
       output.md
+      prompt.md
       diff.patch
-    ...
-  parallel_groups/            # Parallel execution evidence
-    group_{N}/
-      dispatch_log.json       # Dispatch times, prompts
-      merge_log.json          # Merge order, conflict checks
-      branch_status.json      # Branch names, base commit
-  analysis/                   # Multi-perspective analysis results
-    analysis_{N}_{purpose}/
-      raw_{agent_role}.yaml   # Raw output from each analysis agent
-      analysis_report.yaml    # Merged report (per analysis-merge.md)
-      dispatch_log.json       # Analysis dispatch times
+      ...
+    step_3_backend/
+      output.md
+      prompt.md
+      diff.patch
+      ...
+    parallel_group_{N}_merge_log.json   # Parallel group merge evidence
   gates/                     # Gate command outputs
     tests_pass.txt
     lint_pass.txt
     security_scan_pass.txt
     ...
 ```
+
+### Step Evidence File Types
+
+| File | Required | Description |
+|------|----------|-------------|
+| `output.md` | **MANDATORY** | Agent output — must always be written after agent execution |
+| `prompt.md` | optional | The dispatch prompt sent to the agent |
+| `review.md` | optional | Review feedback from code-reviewer agent |
+| `gate_result.md` | optional | Gate check results for this step |
+| `diff.patch` | optional | Git diff of changes made by the agent |
+| `discovered_issues.md` | optional | Issues discovered by the agent during execution |
+| `analysis_*_raw_*.yaml` | optional | Raw output from analysis agents (if analysis group targets this step) |
+| `analysis_*_report.yaml` | optional | Merged analysis report (if analysis group targets this step) |
 
 **Rules:**
 - No secrets in evidence (redact before saving)
@@ -1297,8 +1323,26 @@ Each line is a JSON object:
    - Constraints: allowed_paths, forbidden_paths
 3. Dispatch via Task tool (subagent_type matching role or general-purpose)
 4. Collect output
-5. Save to .aid-o/04-engine/evidence/
+5. Save to .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/
 ```
+
+#### Mandatory Evidence Write Checklist
+
+After every agent execution, the Controller MUST complete this checklist before
+transitioning to PHASE_CHECK. Evidence is written to `steps/step_{N}_{role}/`.
+
+```
+POST-DISPATCH EVIDENCE CHECKLIST:
+  [x] output.md written to steps/step_{N}_{role}/        ← MANDATORY (fail if missing)
+  [ ] prompt.md written to steps/step_{N}_{role}/         ← if prompt was saved
+  [ ] review.md written to steps/step_{N}_{role}/         ← if review was dispatched
+  [ ] gate_result.md written to steps/step_{N}_{role}/    ← if gate results exist
+  [ ] diff.patch written to steps/step_{N}_{role}/        ← if agent modified files
+  [ ] stage_log.jsonl appended                            ← MANDATORY
+```
+
+If `output.md` cannot be written (agent produced no output or error), the Controller
+MUST NOT transition to PHASE_CHECK — instead transition directly to ESCALATION.
 
 **SECURITY — Untrusted Content Framing (required in all dispatch prompts):**
 
@@ -1390,7 +1434,7 @@ Post-Dispatch (after parallel group completes and PHASE_CHECK passes):
 5. If any agent failed and dispatch.worktrees.cleanup_on_failure: false →
    preserve worktree for debugging (do NOT remove)
 6. Record worktree lifecycle in evidence:
-   parallel_groups/group_{N}/worktree_status.json
+   steps/parallel_group_{N}_worktree_status.json
    { step_id, worktree_path, created_at, merged_at, cleaned_up, fallback_used }
 ```
 
@@ -1417,7 +1461,7 @@ Key difference: Analysis agents are READ-ONLY — no branches, no code changes
 4. Collect analysis_output YAML from each agent
 5. Apply merge strategy (union|consensus|weighted) per analysis-merge.md
 6. Generate consolidated analysis_report
-7. Save to evidence/analysis/
+7. Save to evidence/steps/step_{N}_{role}/ (target step's directory)
 8. Critical findings → ESCALATION
 ```
 
