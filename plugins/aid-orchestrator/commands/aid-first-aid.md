@@ -798,11 +798,14 @@ RESUME_SESSION:
 
   3. IF PM confirms:
      a. Execute Permission Sandwich — Backup + Elevate (same as fresh init)
-     b. Set session.mode = "auto"
-     c. Set session.progress.current_state = "QUEUE_PROCESSING"
-     d. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
+     b. **Reset interrupted EPIC status** — scan `epic-queue.yaml` for entries with `status: "running"`:
+        - If found: reset status to `"queued"`, log: `"Reset interrupted EPIC {epic_id} from running → queued for resume pickup"`
+        - This ensures QUEUE_PROCESSING next() finds the interrupted EPIC
+     c. Set session.mode = "auto"
+     d. Set session.progress.current_state = "QUEUE_PROCESSING"
+     e. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
         "session_id": "{id}", "epics_remaining": N}
-     e. Display resume banner:
+     g. Display resume banner:
 
         ```
         ╔══════════════════════════════════════════════════════════════════════╗
@@ -824,7 +827,7 @@ RESUME_SESSION:
         ║  Re-injecting autonomous execution...                              ║
         ╚══════════════════════════════════════════════════════════════════════╝
         ```
-     f. Transition to QUEUE_PROCESSING
+     h. Transition to QUEUE_PROCESSING
 
   4. IF PM declines:
      → STOP (no changes)
