@@ -1,6 +1,6 @@
 # Input Files
 
-Place sample data files here for AID to analyze during brainstorming sessions.
+Place sample data files here for AID to analyze during brainstorming runs.
 
 ## Supported Formats
 
@@ -18,5 +18,5 @@ When you run `/aid-brainstorm`, AID automatically scans this directory and prese
 
 - Files here are **read-only** — AID never modifies or moves them
 - You can also point AID to files outside this directory during brainstorming
-- Maximum 10 files are analyzed per session
+- Maximum 10 files are analyzed per run
 - This directory is created by `/aid-init`

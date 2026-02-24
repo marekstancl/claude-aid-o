@@ -154,7 +154,7 @@ Automatic priority adjustments:
 |-----------|--------|
 | 3+ agents report same area + type | Escalate to `high` priority |
 | `security` type with any priority | Minimum `medium` priority |
-| Same note persists across 2+ sessions | Escalate one level (low→medium, medium→high) |
+| Same note persists across 2+ runs | Escalate one level (low→medium, medium→high) |
 | Note matches a `lessons-learned.md` pattern | Flag as "recurring — needs systemic fix" |
 
 ### Step 5: Update Backlog
@@ -237,7 +237,7 @@ Generate a proposal when:
 - Priority is `high`
 - 3+ sources report the same issue
 - Security type with `medium` or `high` priority
-- Note persists across 2+ sessions without resolution
+- Note persists across 2+ runs without resolution
 
 ### Proposal Format
 
@@ -265,9 +265,9 @@ proposal:
 
 | Effort | Description |
 |--------|-------------|
-| `small` | < 1 session, localized change, no architecture impact |
-| `medium` | 1-2 sessions, touches multiple files, minor architecture change |
-| `large` | 3+ sessions, significant refactoring, architecture change |
+| `small` | < 1 run, localized change, no architecture impact |
+| `medium` | 1-2 runs, touches multiple files, minor architecture change |
+| `large` | 3+ runs, significant refactoring, architecture change |
 
 ---
 

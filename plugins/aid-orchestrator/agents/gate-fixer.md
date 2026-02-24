@@ -174,5 +174,5 @@ gate_fix_result:
   fix the implementation, not the test.
 - If you cannot determine the root cause after analyzing the output,
   set status: `unable` and explain what you tried.
-- You will be replaced by specialized role agents in Session 4 for domain-specific
+- You will be replaced by specialized role agents in Run 4 for domain-specific
   fixes. Until then, you handle all gate types.

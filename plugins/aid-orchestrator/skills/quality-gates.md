@@ -11,7 +11,7 @@
 1. **RUN all 6 gates** before EVERY commit (no exceptions)
 2. **ANY gate fails** → Fix → Re-run from Gate 1
 3. **ALL gates pass** → Commit allowed
-4. **DOCUMENT** gate results in session file
+4. **DOCUMENT** gate results in run file
 5. **ESCALATE** uncertainties to PM (especially Gate 2)
 
 ---
@@ -59,7 +59,7 @@ Replace commands per `{project.tech_stack}` (React → `npm run dev`, Vue → `n
 | No NEW warnings | Build fails |
 | Server responds to requests | New critical warnings |
 
-Pre-existing warnings: document in session file as "Known Warnings (Pre-Existing)".
+Pre-existing warnings: document in run file as "Known Warnings (Pre-Existing)".
 
 **If fails:** Read error message → identify file + line → fix → re-run Gate 1.
 
@@ -152,7 +152,7 @@ See `documentation-protocol` skill for full documentation rules.
 | Temp files | `*.tmp`, `*.bak`, `*.swp`, `*~` | Delete |
 | Debug statements | `console.log`, `print()`, `debugger`, `pdb.set_trace()` | Delete (keep `logger.*`) |
 | Commented code | Large commented blocks | Delete (use git history) |
-| TODO/FIXME | In production code | Move to bugs.md or session file |
+| TODO/FIXME | In production code | Move to bugs.md or run file |
 | Hardcoded credentials | `password`, `api_key`, `secret` literals | Replace with `os.getenv()` / `process.env` |
 | Test data | Mock data in production code | Move to tests/fixtures/ |
 
@@ -185,7 +185,7 @@ git diff --cached  # Review staged changes
 | All code files with changes | `.env` files |
 | Updated documentation | `node_modules/` |
 | CHANGELOG.md (if feat/fix) | `__pycache__/` |
-| Session file (if session-based) | `.venv/` or `venv/` |
+| Run file (if run-based) | `.venv/` or `venv/` |
 | Test files (if tests added) | `dist/` or `build/` |
 | | `*.log`, secrets, `.DS_Store` |
 
@@ -296,7 +296,7 @@ quality_gates:
 | Skill | How |
 |-------|-----|
 | agent-core | Absolute Rule #0.2: "Quality gates before EVERY commit" |
-| session-management | Gate checklist in session files, track metrics |
+| run-management | Gate checklist in run files, track metrics |
 | git-workflow | Gate 5 enforces commit message format |
 | documentation-protocol | Gate 2 references full documentation protocol |
 | testing-workflow | Gate 6 integrates test requirements, Playwright UI testing details |

@@ -1,22 +1,22 @@
 ---
-id: S-{YYYYMMDD}-{4char-hash}
-session_id: {YYYY-MM-DD}-exploration-{short-description}
+id: R-{YYYYMMDD}-{4char-hash}
+run_id: {YYYY-MM-DD}-exploration-{short-description}
 type: exploration
 status: active
 priority: critical|high|medium|low
 started: YYYY-MM-DD HH:MM CET
 completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
-epic_id: {epic-id} (if epic session)
-epic_session: {N} of {M} (if epic session)
-epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+epic_id: {epic-id} (if epic run)
+epic_run: {N} of {M} (if epic run)
+epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # Exploration: {Research Question Title}
 
-> **Multi-Session Work?** If exploration findings suggest 3+ sessions for implementation, consider creating an **Epic Breakdown** using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Run Work?** If exploration findings suggest 3+ runs for implementation, consider creating an **Epic Breakdown** using `.aid-o/03-config/templates/epic.md`.
 
 ## Research Question
 <!-- MIN: 3-5 sentences. State WHAT you're investigating, WHY the question arose, and what a GOOD ANSWER looks like.
@@ -28,11 +28,11 @@ orchestrated: true|false (if orchestrated by Controller)
             a clear go/no-go recommendation with estimated implementation cost." -->
 
 ## Context
-<!-- What preceded this exploration. Reference previous sessions, known pain points, stakeholder requests.
-     For orchestrated sessions: which EPIC session is this, what was discovered before.
+<!-- What preceded this exploration. Reference previous runs, known pain points, stakeholder requests.
+     For orchestrated runs: which EPIC run is this, what was discovered before.
      For non-orchestrated: what triggered this investigation, any related ongoing work. -->
 
-**Previous work:** {reference prior sessions or "N/A — new investigation"}
+**Previous work:** {reference prior runs or "N/A — new investigation"}
 **Current state:** {what exists now that prompted this exploration}
 **Trigger:** {why this exploration is needed now — user request, performance issue, tech debt, etc.}
 
@@ -55,7 +55,7 @@ orchestrated: true|false (if orchestrated by Controller)
 - {Specific thing to investigate}
 
 ### Out of Scope
-<!-- MIN: 2 items. Explicitly exclude related areas you will NOT investigate in this session. -->
+<!-- MIN: 2 items. Explicitly exclude related areas you will NOT investigate in this run. -->
 - {What we're NOT investigating}
 - {What we're NOT investigating}
 
@@ -71,10 +71,10 @@ orchestrated: true|false (if orchestrated by Controller)
 ## Research Phase
 
 <!-- Record everything you discover. Even negative results are valuable — they prevent re-investigation.
-     Cite sources, link to docs, reference code paths. Future sessions will rely on this section. -->
+     Cite sources, link to docs, reference code paths. Future runs will rely on this section. -->
 
 ### Existing Knowledge
-<!-- What do we already know? Check previous sessions, project docs, codebase. -->
+<!-- What do we already know? Check previous runs, project docs, codebase. -->
 {What is already known from prior work, existing docs, or codebase analysis}
 
 ### External Sources
@@ -121,7 +121,7 @@ orchestrated: true|false (if orchestrated by Controller)
 
 ## Phases
 
-<!-- Each phase = one research stage. Exploration sessions follow a research progression:
+<!-- Each phase = one research stage. Exploration runs follow a research progression:
      literature review → analysis → prototype → recommendation.
      Not all phases are required — skip Prototype if the question can be answered without code.
      Every phase MUST have all 6 subsections below. Do not skip any. -->
@@ -130,13 +130,13 @@ orchestrated: true|false (if orchestrated by Controller)
 
 **Goal:**
 <!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the exploration context. -->
-{Gather existing knowledge from project docs, codebase, external sources, and prior sessions. Establish what is already known and identify gaps that need deeper investigation. This phase prevents redundant work and ensures the analysis builds on solid foundations.}
+{Gather existing knowledge from project docs, codebase, external sources, and prior runs. Establish what is already known and identify gaps that need deeper investigation. This phase prevents redundant work and ensures the analysis builds on solid foundations.}
 
 **Agent / Role:** researcher
 
 **Inputs:**
 <!-- Files, context, or prior knowledge that this phase needs. -->
-- {project docs, prior session references, external documentation}
+- {project docs, prior run references, external documentation}
 
 **Outputs:**
 <!-- Artifacts produced. Include expected file paths or section references. -->
@@ -205,7 +205,7 @@ orchestrated: true|false (if orchestrated by Controller)
 
 **Goal:**
 <!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters. -->
-{Synthesize all findings into a clear, actionable recommendation. The recommendation must reference evidence from previous phases and include an implementation plan if proceeding. This is the primary deliverable of the exploration session.}
+{Synthesize all findings into a clear, actionable recommendation. The recommendation must reference evidence from previous phases and include an implementation plan if proceeding. This is the primary deliverable of the exploration run.}
 
 **Agent / Role:** analyst
 
@@ -216,7 +216,7 @@ orchestrated: true|false (if orchestrated by Controller)
 **Outputs:**
 - Written recommendation with rationale
 - Implementation plan with effort estimate (if proceeding)
-- Follow-up session or epic creation (if needed)
+- Follow-up run or epic creation (if needed)
 
 **Constraints:**
 - {constraint — e.g., "Recommendation must address all Success Criteria"}
@@ -243,13 +243,13 @@ orchestrated: true|false (if orchestrated by Controller)
 
 ## Completion Criteria
 
-<!-- Exploration sessions don't have automated quality gates. Instead, verify that all
+<!-- Exploration runs don't have automated quality gates. Instead, verify that all
      Success Criteria from the Scope section are met. Reference each criterion explicitly. -->
 
 - [ ] All Success Criteria from Scope section are satisfied
 - [ ] Research question has a clear, evidence-backed answer
 - [ ] Findings are documented well enough for a different agent to act on them
-- [ ] If recommending implementation: effort estimate and session plan provided
+- [ ] If recommending implementation: effort estimate and run plan provided
 - [ ] If recommending no action: rationale documented for future reference
 
 ---
@@ -267,12 +267,12 @@ orchestrated: true|false (if orchestrated by Controller)
 ## References
 
 **External Sources:** [Source](url)
-**Related Sessions:** [Previous session](../archive/{session-id}.md)
+**Related Runs:** [Previous run](../archive/{run-id}.md)
 **Commits:** `{hash}` - {message} (if prototype created)
 
 ---
 
-## AI Session Log
+## AI Run Log
 
 **{Timestamp}** - {Action/Decision}
 
@@ -286,11 +286,11 @@ orchestrated: true|false (if orchestrated by Controller)
 - [ ] Recommendation provided with rationale
 - [ ] Findings documented for future reference
 
-### Session Closure:
+### Run Closure:
 - [ ] Commit messages follow conventions
-- [ ] Session file archived to completed/
-- [ ] Handoff protocol executed (see `skills/session-management.md`)
-- [ ] Session log updated
+- [ ] Run file archived to completed/
+- [ ] Handoff protocol executed (see `skills/run-management.md`)
+- [ ] Run log updated
 
 ---
 
@@ -300,9 +300,9 @@ orchestrated: true|false (if orchestrated by Controller)
 - Review recommendations and evidence
 - Decide on implementation approach
 
-**For AI (if session continues):**
+**For AI (if run continues):**
 - Implement recommended approach
-- Create epic breakdown for implementation (if multi-session)
+- Create epic breakdown for implementation (if multi-run)
 
 ---
 

@@ -135,7 +135,7 @@ IF channel_info.mode = "slack":
   return { mode: "slack", message_id: result.message_id }
 
 ELSE (chat fallback):
-  Present message in chat using existing format (pre-Session 6 behavior)
+  Present message in chat using existing format (pre-Run 6 behavior)
   return { mode: "chat" }
 ```
 
@@ -424,7 +424,7 @@ EPIC execution for a status update failure).
 IF .aid-o/03-config/policies/slack-config.yaml does not exist
    OR slack.enabled = false:
 
-  → Use chat-based communication (pre-Session 6 behavior)
+  → Use chat-based communication (pre-Run 6 behavior)
   → All message types fall back to presenting content in the conversation
   → No Slack MCP tools are called
   → Log once: "Slack MCP not configured, using chat fallback"

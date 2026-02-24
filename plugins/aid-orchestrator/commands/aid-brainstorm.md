@@ -4,7 +4,7 @@ description: 10-step interactive brainstorming flow
 user_invocable: true
 ---
 
-Interactive brainstorming session — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
+Interactive brainstorming run — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
 
 This command guides PM through a structured 10-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
 
@@ -239,7 +239,7 @@ Generate an EPIC draft from the approved plan using the EPIC subagent prompt tem
      - **Acceptance Criteria** — from plan Success Criteria, expanded into testable checkboxes
      - **Dependencies** — from plan Constraints + project context
      - **Steps (Role Pipeline)** — map plan steps to AID roles (architect, backend, frontend, qa, etc.) with dependencies and parallel groups
-     - **Session Breakdown** — estimate single vs. multi-session based on step count and complexity
+     - **Run Breakdown** — estimate single vs. multi-run based on step count and complexity
    - Apply YAGNI: do not add steps or roles that the plan does not require
 7. Write EPIC draft to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md`
 8. Confirm:
@@ -256,7 +256,7 @@ After the EPIC draft is written, offer PM the option to generate the execution p
    EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
 
    Would you like to generate the execution plan now?
-   (Y) Generate Plan JSON + Session file → ready for /aid-run-epic
+   (Y) Generate Plan JSON + Run file → ready for /aid-run-epic
    (N) Stop here → review the EPIC draft, then run /aid-plan-epic manually
 
    Generating now saves a step but skips manual EPIC review.
@@ -275,13 +275,13 @@ After the EPIC draft is written, offer PM the option to generate the execution p
       - Step 5: Generate Analysis Groups
       - Step 6: Build Plan JSON
       - Step 7: Save Plan JSON (plan.json + plan_progress.json + epic_input.md)
-      - Step 8: Generate Session File
+      - Step 8: Generate Run File
       - Step 9: Present Output
    d. After plan-epic completes → proceed to Step 10 (handoff — present A-D options)
 
 ### Step 10: Handoff
 
-Present interactive options based on the completed brainstorming session.
+Present interactive options based on the completed brainstorming run.
 
 1. Parse the plan's High-Level Steps and group them into logical phases (by dependency/domain)
 2. Display phases:
@@ -352,7 +352,7 @@ Next steps:
 - `defaults/templates/plan.md` — plan document template
 - `defaults/templates/epic.md` — EPIC template
 - `defaults/templates/epic-example.md` — EPIC example for reference
-- `skills/session-management.md` — lifecycle protocols (End of Brainstorming Protocol)
+- `skills/run-management.md` — lifecycle protocols (End of Brainstorming Protocol)
 - `.aid-o/03-config/language.yaml` — document language configuration
 
 ## Important

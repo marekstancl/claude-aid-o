@@ -2,7 +2,7 @@
 
 **Version:** 0.8.2
 **Skill:** epic-orchestration
-**Dependencies:** agent-core, quality-gates, session-management
+**Dependencies:** agent-core, quality-gates, run-management
 
 ---
 
@@ -101,7 +101,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
 2. Read `.aid-o/03-config/policies/decision-policies.yaml` for architecture principles
 3. Read `.aid-o/03-config/policies/gates.yaml` for gate definitions
 4. Read relevant playbooks from `.aid-o/03-config/playbooks/`
-5. **Session Branch Creation:**
+5. **Run Branch Creation:**
    a. Check if git is initialized:
       - Run `git rev-parse --is-inside-work-tree` (suppress errors)
       - If not a git repo: skip branch management, log to stage_log:
@@ -110,7 +110,7 @@ The Controller is a state machine. Every transition produces evidence. Failures 
    b. If git is available:
       1. Ensure working tree is clean: `git status --porcelain`
          - If dirty: warn PM, suggest committing or stashing first
-      2. Create session branch from current HEAD:
+      2. Create run branch from current HEAD:
          `git checkout -b epic/{epic_id}`
       3. Log to stage_log:
          `{"state": "IDLE", "action": "branch_created", "branch": "epic/{epic_id}"}`
@@ -162,8 +162,8 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 3. Identify parallel groups (steps that can run concurrently)
 4. Generate Plan JSON conforming to `.aid-o/03-config/templates/plan.schema.json`
 5. Validate Plan JSON against schema
-6. Generate session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8)
-7. Validate session file completeness (see Session File Quality Check below)
+6. Generate run file following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8)
+7. Validate run file completeness (see Run File Quality Check below)
 
 **Plan Generation Rules:**
 - Architect always runs first (contracts before implementation)
@@ -173,16 +173,16 @@ Before generating the plan, search Qdrant for relevant cross-project knowledge:
 - Docs runs after implementation steps
 - Release runs last (needs all gates to pass)
 
-**Session File Quality Check:**
-Before transitioning to PLAN_REVIEW, verify the session file passes ALL checks:
+**Run File Quality Check:**
+Before transitioning to PLAN_REVIEW, verify the run file passes ALL checks:
 - Objective: 3+ sentences with success criteria (not a one-liner)
 - Scope: explicit IN (3+ items) and OUT (2+ items) lists
 - Phases: each phase has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+ items)
 - Dependencies: table present (or "No inter-phase dependencies" statement)
 - Quality Gates: at least one gate listed
-If any check fails, fix the session file before proceeding.
+If any check fails, fix the run file before proceeding.
 
-**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json` + session file
+**Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json` + run file
 
 ### 3. PLAN_REVIEW
 
@@ -209,7 +209,7 @@ PLAN_REVIEW: EPIC {epic_id} — {title}
 Overview:
   Steps: {count} ({wave_count} waves, {analysis_group_count} analysis groups)
   Roles: {unique roles}
-  Sessions: {session_count}
+  Runs: {run_count}
   Gates: {gate list}
 
 Wave Execution Plan:
@@ -235,9 +235,9 @@ Optimization:
     - R1: frontend starts after architect (not domain) — needs contracts only
     - R4: security starts after auth step (not all backend)
 
-Session Breakdown:
-  Session 1 (waves 0-2, {N} steps): {goal} — {milestone}
-  Session 2 (waves 3-4, {N} steps): {goal} — {milestone}
+Run Breakdown:
+  Run 1 (waves 0-2, {N} steps): {goal} — {milestone}
+  Run 2 (waves 3-4, {N} steps): {goal} — {milestone}
 
 Acceptance Criteria: {total_count} across {category_count} categories
   - Auth: {count} criteria
@@ -465,7 +465,7 @@ acceptance criteria). This section provides the implementation specifics.
    c. Merge analysis improvement_notes into step evidence (for Curator)
 5. **Acceptance Validation** (per `decision-policies.yaml` → `content_quality`):
    a. Read agent's `output.md` from `evidence/steps/step_{N}_{role}/output.md`
-   b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + session file acceptance items
+   b. Read step's acceptance criteria from `plan.json` → `steps[N].outputs` + run file acceptance items
    c. For each acceptance criterion, evaluate:
       - Verifiable from output.md + `git diff`? → verify directly
       - Requires domain knowledge beyond Controller's scope? → mark `needs_review`
@@ -487,7 +487,7 @@ acceptance criteria). This section provides the implementation specifics.
       - **HIGH:** Log to `evidence/discovered_issues/`. Forward to later step if natural fit, else create `backlog.md` entry. PM Slack notification (informational). NOT blocking.
       - **MEDIUM/INFO:** Log to `evidence/discovered_issues/`. Add to `improvement_notes` (Curator picks up). NOT blocking.
    e. Evidence: save all issues to `evidence/{epic_id}/{run_id}/discovered_issues/step_{N}.md`
-   f. Session file: add CRITICAL/HIGH issues to Session Log
+   f. Run file: add CRITICAL/HIGH issues to Run Log
 
 #### Diff Generation (after output verification)
 
@@ -680,7 +680,7 @@ if gate_fails:
       - Gate results: `evidence/{epic_id}/{run_id}/gates_report.json`
       - Final report: `evidence/{epic_id}/{run_id}/final_report.md`
    b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`, model: haiku) with:
-      - Active session file
+      - Active run file
       - Git log and diff
    c. Log:
       ```json
@@ -891,33 +891,33 @@ interacting with the Curator summary at all.
 
 **Actions:**
 1. If approved:
-   a. **Session File Status Update** (BEFORE archive — MANDATORY):
-      1. Read the active session file from `.aid-o/04-engine/sessions/S-*.md`
+   a. **Run File Status Update** (BEFORE archive — MANDATORY):
+      1. Read the active run file from `.aid-o/04-engine/runs/S-*.md`
       2. Update YAML frontmatter:
          - `status: completed`
          - `completed: {ISO 8601 timestamp}`
       3. Update the `Completion:` line in the body to `100%`
       4. Update the last phase status to `done`
-      5. Write the updated session file
+      5. Write the updated run file
       6. THEN proceed with archive (copy to archive/ directory)
 
-      The archived copy MUST reflect the completed status. Never archive a session
+      The archived copy MUST reflect the completed status. Never archive a run
       that still shows `status: active`.
 
-   b. **Session Branch Merge** (if git available):
-      If a session branch was created (check plan_progress.json -> branch):
+   b. **Run Branch Merge** (if git available):
+      If a run branch was created (check plan_progress.json -> branch):
       1. Verify all gates passed and PM approved
       2. Switch to base branch: `git checkout {default_branch}`
-      3. Merge session branch: `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+      3. Merge run branch: `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
       4. If merge conflict: escalate to PM (do NOT auto-resolve)
-      5. Delete session branch: `git branch -d epic/{epic_id}`
+      5. Delete run branch: `git branch -d epic/{epic_id}`
       6. Log to stage_log:
          `{"state": "DONE", "action": "branch_merged", "branch": "epic/{epic_id}"}`
 
-      If no session branch (git not available): skip this step.
+      If no run branch (git not available): skip this step.
 
    c. Update EPIC file status to "Completed"
-   d. Archive session file to `.aid-o/04-engine/sessions/archive/`
+   d. Archive run file to `.aid-o/04-engine/runs/archive/`
    e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
 3. **POST-PROCESSING (Auditor):**
@@ -1053,18 +1053,18 @@ interacting with the Curator summary at all.
 
 6. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
 
-   1. **Archive session:**
-      - Move to `.aid-o/04-engine/sessions/archive/{filename}`
+   1. **Archive run:**
+      - Move to `.aid-o/04-engine/runs/archive/{filename}`
       - Update frontmatter: `status: completed`, `completed: {timestamp}`
 
    2. **Update EPIC counter:**
-      - Increment `sessions_completed += 1` in EPIC frontmatter
+      - Increment `runs_completed += 1` in EPIC frontmatter
 
    3. **Archive EPIC (conditional):**
-      - IF `sessions_completed == sessions_total`:
+      - IF `runs_completed == runs_total`:
         - Set `status: completed`, `completed: {timestamp}`
         - Move to `.aid-o/02-epics/archive/{filename}`
-      - ELSE: EPIC stays active, log "session {N}/{total} done"
+      - ELSE: EPIC stays active, log "run {N}/{total} done"
 
    4. **Update Plan counter (conditional):**
       - IF EPIC archived AND `plan_ref` exists:
@@ -1075,8 +1075,8 @@ interacting with the Curator summary at all.
 
    5. **Stage log:**
       ```json
-      {"state": "DONE", "action": "archive", "session_archived": true,
-       "epic_archived": true, "epic_sessions": "2/2",
+      {"state": "DONE", "action": "archive", "run_archived": true,
+       "epic_archived": true, "epic_runs": "2/2",
        "plan_archived": false, "plan_epics": "1/3"}
       ```
 
@@ -1141,7 +1141,7 @@ interacting with the Curator summary at all.
      3. Continue building -- run /aid-plan-epic with a new EPIC
      4. Check quality -- run /aid-audit for a project health assessment
      5. Analyze performance -- run /aid-analytics to see bottlenecks and optimization tips
-     6. Archive -- the session has been archived to sessions/archive/
+     6. Archive -- the run has been archived to runs/archive/
 
    Lessons learned: processed in CURATOR_RESOLVE (see curator_resolve_report.json)
    Backlog proposals: {proposal_count} new entries (review with /aid-backlog)
@@ -1534,7 +1534,7 @@ The DONE state sends audit summaries (Type F). Curator proposals (Type D) and re
 Status updates (Type G) are sent at key orchestration points (non-blocking, fire-and-forget).
 
 If Slack MCP is not configured (`.aid-o/03-config/policies/slack-config.yaml` missing or
-`slack.enabled: false`), all communication falls back to chat-based presentation (pre-Session 6 behavior).
+`slack.enabled: false`), all communication falls back to chat-based presentation (pre-Run 6 behavior).
 
 The DONE state checks `.aid-o/04-engine/epic-queue.yaml` (per `skills/epic-queue.md`) and
 auto-starts the next queued EPIC if available.
@@ -1554,7 +1554,7 @@ auto-starts the next queued EPIC if available.
 - **Playbooks:** `.aid-o/03-config/playbooks/{role}.md`
 - **Evidence:** `.aid-o/04-engine/evidence/`
 - **Epic queue:** `.aid-o/04-engine/epic-queue.yaml`
-- **Sessions:** `.aid-o/04-engine/sessions/`
+- **Runs:** `.aid-o/04-engine/runs/`
 - **Memory:** `.aid-o/04-engine/memory/active-work.md`
 - **Dispatch strategy:** `.aid-o/03-config/policies/dispatch-strategy.yaml`
 - **Memory config:** `.aid-o/03-config/policies/memory-config.yaml`
@@ -1565,36 +1565,36 @@ auto-starts the next queued EPIC if available.
 
 ---
 
-## Integration with Session Management
+## Integration with Run Management
 
-The Controller creates and maintains a session file for each EPIC run:
+The Controller creates and maintains a run file for each EPIC run:
 
-1. **On PLANNING:** Create session file following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8):
-   - Read sources: EPIC, Plan JSON, plan file, previous session, source code, decision policies
-   - Map plan.json steps → session phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
-   - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Session Log
+1. **On PLANNING:** Create run file following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8):
+   - Read sources: EPIC, Plan JSON, plan file, previous run, source code, decision policies
+   - Map plan.json steps → run phases (1:1, with all 6 subsections per phase: Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
+   - Fill Objective (3+ sentences), Context, Scope (IN/OUT), Dependencies, Quality Gates, Run Log
    - Validate completeness before proceeding to PLAN_REVIEW
 
-2. **On each PHASE_CHECK:** Update session file:
+2. **On each PHASE_CHECK:** Update run file:
    - Mark completed phase acceptance items as checked/failed based on acceptance validation
    - If review dispatched: log review result (approved/rejected + feedback summary)
-   - If discovered issues: log CRITICAL/HIGH issues to Session Log with severity and status
-   - Add step status + commit hash to Session Log
+   - If discovered issues: log CRITICAL/HIGH issues to Run Log with severity and status
+   - Add step status + commit hash to Run Log
 
-3. **On analysis complete:** Log analysis_report summary to Session Log
+3. **On analysis complete:** Log analysis_report summary to Run Log
 
-4. **On GATES:** Update session file:
+4. **On GATES:** Update run file:
    - Add gate results to Quality Gates section (pass/fail per gate)
-   - Update Session Log
+   - Update Run Log
 
-5. **On DONE:** Complete session file:
+5. **On DONE:** Complete run file:
    - Set `status: completed` in frontmatter
-   - Final Session Log entry
+   - Final Run Log entry
    - Archive to completed/
 
-Session file frontmatter:
+Run file frontmatter:
 ```yaml
-id: S-{YYYYMMDD}-{hash}
+id: R-{YYYYMMDD}-{hash}
 type: new-feature
 status: active
 epic_id: {epic_id}

@@ -665,11 +665,11 @@ This is the master procedure the Planner follows when `/aid-plan-epic` is invoke
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
 10. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
-11. SESSION BOUNDARIES:
-      a. Apply wave-based session boundary algorithm (Section 11)
-      b. Write ## Session Breakdown into EPIC file
-      c. Set EPIC frontmatter: sessions_total: N
-      d. Log: session_count, steps_per_session[]
+11. RUN BOUNDARIES:
+      a. Apply wave-based run boundary algorithm (Section 11)
+      b. Write ## Run Breakdown into EPIC file
+      c. Set EPIC frontmatter: runs_total: N
+      d. Log: run_count, steps_per_run[]
 12. VALIDATE → V-01 through V-23 → fix + re-validate on failure (max 3 attempts → escalation)
 13. OUTPUT → save plan.json + plan_progress.json + epic_input.md to evidence dir → present summary
 ```
@@ -1048,12 +1048,12 @@ specific EPICs: `epics_total: 1` (default -- single EPIC assumed).
 status: active
 plan_ref: bookmark-plan.md   # parent plan (null for standalone)
 plan_epics_total: 3      # copied from plan for quick reference
-sessions_total: 1        # from Session Breakdown (1 = single session)
-sessions_completed: 0    # incremented at each session DONE
+runs_total: 1        # from Run Breakdown (1 = single run)
+runs_completed: 0    # incremented at each run DONE
 ```
 
-If EPIC has `## Session Breakdown` with N sessions: `sessions_total: N`.
-Otherwise default `sessions_total: 1`.
+If EPIC has `## Run Breakdown` with N runs: `runs_total: N`.
+Otherwise default `runs_total: 1`.
 
 If EPIC is standalone (no parent plan): `plan_ref: null`, `plan_epics_total: null`.
 
@@ -1104,7 +1104,7 @@ Not step count. Not token count. WALL-CLOCK TIME.
 
 ```
 Wall-clock time ≈ critical_path_length × avg_step_duration
-                + session_transitions × ~2 min each
+                + run_transitions × ~2 min each
                 + overhead (merges, phase checks, wave transitions)
 ```
 
@@ -1121,10 +1121,10 @@ Wall-clock time ≈ critical_path_length × avg_step_duration
    - 4 agents in parallel ≈ same wall-clock time as 1 agent
    - Target: average wave utilization > 2.5 steps/wave
 
-3. **SESSION COMPACTNESS** — minimize session count
-   - Each session transition costs: context reload + state verify ≈ 2 min
-   - Fewer sessions = less overhead
-   - Target: total_steps / session_count >= 4
+3. **RUN COMPACTNESS** — minimize run count
+   - Each run transition costs: context reload + state verify ≈ 2 min
+   - Fewer runs = less overhead
+   - Target: total_steps / run_count >= 4
 
 4. **QUALITY** — ensure outputs meet acceptance criteria
    - Every step has clear, verifiable acceptance criteria
@@ -1172,7 +1172,7 @@ Every plan.json MUST include an `optimization_metrics` object:
   "optimization_metrics": {
     "total_steps": 14,
     "wave_count": 8,
-    "session_count": 3,
+    "run_count": 3,
     "critical_path_length": 5,
     "critical_path_ratio": 0.36,
     "avg_wave_density": 1.75,
@@ -1190,45 +1190,45 @@ These metrics are:
 - Fed to /aid-analytics (for cross-EPIC optimization tracking)
 - Used by Planner self-improvement (compare metrics across EPICs via Qdrant)
 
-### Session Split Decision (Wave-Based)
+### Run Split Decision (Wave-Based)
 
-**Core principle:** Sessions = contiguous sequences of waves that fit context window.
+**Core principle:** Runs = contiguous sequences of waves that fit context window.
 NEVER split by domain. NEVER split inside a wave.
 
-#### Session Boundary Algorithm
+#### Run Boundary Algorithm
 
 ```
 1. Start with waves[] from Wave Assembly (Section 2)
 
-2. Assign waves to sessions greedily:
-   session_steps = 0
-   current_session = []
+2. Assign waves to runs greedily:
+   run_steps = 0
+   current_run = []
 
    FOR each wave W in waves[]:
-     IF session_steps + len(W) <= MAX_STEPS_PER_SESSION:
-       current_session.append(W)
-       session_steps += len(W)
+     IF run_steps + len(W) <= MAX_STEPS_PER_RUN:
+       current_run.append(W)
+       run_steps += len(W)
      ELSE:
-       Flush current_session → new session
-       current_session = [W]
-       session_steps = len(W)
+       Flush current_run → new run
+       current_run = [W]
+       run_steps = len(W)
 
-3. Validate sessions:
+3. Validate runs:
    a. NEVER split inside a wave (wave with 2+ steps = parallel group)
-   b. Each session must contain at least 1 gate-worthy milestone
-   c. First session always starts with architect
-   d. Last session always ends with release (if present)
-   e. Each session produces independently testable deliverables
+   b. Each run must contain at least 1 gate-worthy milestone
+   c. First run always starts with architect
+   d. Last run always ends with release (if present)
+   e. Each run produces independently testable deliverables
 ```
 
-#### MAX_STEPS_PER_SESSION heuristic
+#### MAX_STEPS_PER_RUN heuristic
 
-| Total EPIC steps | Max per session | Rationale |
+| Total EPIC steps | Max per run | Rationale |
 |------------------|-----------------|-----------|
-| 1-6              | 6 (= 1 session) | Fits single context window |
-| 7-10             | 6-7             | 2 sessions, balanced |
-| 11-15            | 6               | 2-3 sessions |
-| 16+              | 5-6             | 3+ sessions, tighter bounds |
+| 1-6              | 6 (= 1 run) | Fits single context window |
+| 7-10             | 6-7             | 2 runs, balanced |
+| 11-15            | 6               | 2-3 runs |
+| 16+              | 5-6             | 3+ runs, tighter bounds |
 
 Note: "steps" counts sub-steps from decomposition (Section 2b).
 A wave of 4 parallel steps counts as 4 steps for this limit.
@@ -1249,46 +1249,46 @@ Waves (from Wave Assembly):
   wave 6: [step_9_qa, step_10_security, step_11_docs]
   wave 7: [step_12_release]
 
-Sessions (MAX_STEPS_PER_SESSION = 6):
-  Session 1 (waves 0-2, 6 steps):
+Runs (MAX_STEPS_PER_RUN = 6):
+  Run 1 (waves 0-2, 6 steps):
     architect → [domain ‖ backend-data] → [backend-API ‖ frontend-scaffold]
     Milestone: working API + frontend scaffold
 
-  Session 2 (waves 3-5, 4 steps):
+  Run 2 (waves 3-5, 4 steps):
     [search ‖ extension] → frontend-pages → frontend-polish
     Milestone: complete frontend + all features
 
-  Session 3 (waves 6-7, 4 steps):
+  Run 3 (waves 6-7, 4 steps):
     [QA ‖ security ‖ docs] → release
     Milestone: validated + released
 
 vs. OLD approach (sequential domains):
-  Session 1: architect → domain → backend (all 5 steps sequentially)
-  Session 2: frontend (all 4 steps sequentially)
-  Session 3: QA → security → docs → release
+  Run 1: architect → domain → backend (all 5 steps sequentially)
+  Run 2: frontend (all 4 steps sequentially)
+  Run 3: QA → security → docs → release
 
 Result: 3 waves of parallel work vs 0 in old approach.
 ```
 
-### Session Breakdown Generation
+### Run Breakdown Generation
 
-The Planner writes `## Session Breakdown` into the EPIC file:
+The Planner writes `## Run Breakdown` into the EPIC file:
 
 ```markdown
-## Session Breakdown
+## Run Breakdown
 
-### Session 1: Core Implementation (waves 0-2, 6 steps)
+### Run 1: Core Implementation (waves 0-2, 6 steps)
 **Goal:** Build working API with data model
 **Waves:** wave 0 [architect] → wave 1 [domain ‖ backend-data] → wave 2 [backend-API ‖ frontend]
 **Deliverables:** Working endpoints, database, basic UI
 
-### Session 2: Quality & Release (waves 3-4, 4 steps)
+### Run 2: Quality & Release (waves 3-4, 4 steps)
 **Goal:** Verify, secure, document, release
 **Waves:** wave 3 [QA ‖ security ‖ docs] → wave 4 [release]
 **Deliverables:** Test suite (90%+ coverage), security review, documentation
 ```
 
-And sets EPIC frontmatter: `sessions_total: 2`
+And sets EPIC frontmatter: `runs_total: 2`
 
 ---
 
@@ -1305,7 +1305,7 @@ And sets EPIC frontmatter: `sessions_total: 2`
 9. **ALWAYS assign sequential analysis group IDs** — no gaps, no duplicates
 10. **ALWAYS preserve EPIC-defined analysis groups** even if no auto-trigger rules match
 11. **NEVER hardcode gates** — ALWAYS read from gates.yaml and include all required gates (V-16)
-12. **ALWAYS write frontmatter counters** when creating plans (epics_total) and EPICs (sessions_total)
+12. **ALWAYS write frontmatter counters** when creating plans (epics_total) and EPICs (runs_total)
 13. **NEVER add Docker steps when docker_recommended is false or absent** — Docker is opt-in only (Section 7.4)
 14. **NEVER create a separate MCP step** — MCP configuration is always part of the Docker step (Section 7.4)
 15. **ALWAYS respect "PM decided: no Docker"** constraint — overrides docker_recommended flag

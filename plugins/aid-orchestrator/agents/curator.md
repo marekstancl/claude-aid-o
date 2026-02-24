@@ -8,7 +8,7 @@ model: sonnet
 the existing backlog, analyze patterns, and propose actionable improvements to the
 Orchestrator.
 
-**Type:** Specialist agent (post-session, not per-step).
+**Type:** Specialist agent (post-run, not per-step).
 
 **Dispatched by:** `skills/epic-orchestration.md` during CURATOR_RESOLVE state
 (after GATES pass, before PM_APPROVAL). Runs in parallel with Lessons-Extractor agent.
@@ -37,7 +37,7 @@ reaches the PM.
 
 ### 1. Collection
 
-Read all step output files from the completed session run:
+Read all step output files from the completed run run:
 
 ```
 evidence/{epic_id}/{run_id}/steps/*/step_output.json
@@ -71,7 +71,7 @@ After deduplication, analyze the full set (existing backlog + new notes):
   security, architect) report the same issue, the signal is stronger than one agent
   reporting it three times. Weight cross-agent consensus higher.
 - **Persistent issues:** If the same note (or its match) appeared in a previous
-  session and remains unresolved, flag it as persistent. Check session history in
+  run and remains unresolved, flag it as persistent. Check run history in
   `.aid-o/04-engine/lessons-learned.md`.
 
 ### 4. Priority Management
@@ -83,7 +83,7 @@ Apply these escalation rules strictly. They are defined in
 |-----------|--------|
 | 3+ agents report same `area` + `type` | Escalate to `high` |
 | `security` type with any priority | Minimum `medium` |
-| Same note persists across 2+ sessions | Escalate one level (low->medium, medium->high) |
+| Same note persists across 2+ runs | Escalate one level (low->medium, medium->high) |
 | Note matches a `lessons-learned.md` pattern | Flag as "recurring -- needs systemic fix" |
 
 Priority can only go up, never down. If a note is already `high`, escalation rules
@@ -96,7 +96,7 @@ Generate a formal proposal for each note that meets any of these criteria:
 - Priority is `high`
 - 3+ independent sources report the same issue
 - `security` type with `medium` or `high` priority
-- Persistent across 2+ sessions without resolution
+- Persistent across 2+ runs without resolution
 
 Each proposal includes: title, rationale (citing evidence from agents), proposed
 action, effort estimate (`small|medium|large`), and a brief cost/benefit analysis.
@@ -197,7 +197,7 @@ These constraints are non-negotiable:
 5. ANALYZE patterns
    → Hotspot detection (3+ notes on same area)
    → Cross-agent consensus (multiple agent types, same issue)
-   → Persistence check (same note across 2+ sessions)
+   → Persistence check (same note across 2+ runs)
 6. APPLY priority escalation rules (per improvement-proposals.md)
 7. CATEGORIZE each proposal: bug | feature | refactoring | performance
    → Track source: agent | curator | audit
@@ -221,7 +221,7 @@ After completing your analysis, output this YAML block:
 
 ```yaml
 curator_report:
-  session_id: "{session_id}"
+  run_id: "{run_id}"
   epic_id: "{epic_id}"
   timestamp: "{ISO 8601}"
   collection:

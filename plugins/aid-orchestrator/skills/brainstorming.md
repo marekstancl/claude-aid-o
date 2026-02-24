@@ -2,14 +2,14 @@
 
 **Version:** 0.6.0
 **Skill:** brainstorming
-**Dependencies:** session-management, planner, workflow-intelligence
+**Dependencies:** run-management, planner, workflow-intelligence
 **Attribution:** Inspired by [superpowers:brainstorming](https://github.com/jessevincent/claude-superpowers) (MIT License, Jesse Vincent)
 
 ---
 
 ## TL;DR
 
-This skill defines how AID conducts interactive brainstorming sessions with the PM. It governs the questioning protocol, approach exploration, incremental design validation, plan document generation, and automatic EPIC draft creation. When knowledge acquisition is configured, brainstorming is augmented with relevant documentation, patterns, and lessons from past projects to inform questions (Step 1) and approach proposals (Step 3).
+This skill defines how AID conducts interactive brainstorming runs with the PM. It governs the questioning protocol, approach exploration, incremental design validation, plan document generation, and automatic EPIC draft creation. When knowledge acquisition is configured, brainstorming is augmented with relevant documentation, patterns, and lessons from past projects to inform questions (Step 1) and approach proposals (Step 3).
 
 The brainstorming skill is invoked by the `/aid-brainstorm` command and produces two artifacts: a validated plan document and an EPIC draft ready for `/aid-plan-epic`.
 
@@ -75,12 +75,12 @@ Minimize cognitive load on PM. Every interaction should be easy to process.
 
 ## Knowledge-Augmented Brainstorming
 
-When knowledge acquisition is configured, the brainstorming session is augmented with
+When knowledge acquisition is configured, the brainstorming run is augmented with
 relevant knowledge from past projects, stored documentation, patterns, and lessons learned.
 This gives the brainstorming agent awareness of existing context before asking questions and
 proposing approaches.
 
-**Principle:** Knowledge retrieval is strictly non-blocking. It enriches the session when
+**Principle:** Knowledge retrieval is strictly non-blocking. It enriches the run when
 available but never delays or degrades it when unavailable.
 
 ### Pre-Brainstorming Knowledge Search (Step 1 Integration)
@@ -105,7 +105,7 @@ IF mem_config.knowledge.enabled:
 
   IF results (non-empty):
     Display to PM:
-      "Found relevant knowledge from past sessions:"
+      "Found relevant knowledge from past runs:"
       FOR EACH result IN results:
         - "[{result.metadata.type}] {result summary}"
           "Source: {result.metadata.project_name OR result.metadata.framework} ({result.metadata.indexed_at})"
@@ -186,21 +186,21 @@ WHEN: Step 1 (Context Gathering), AFTER reading project context and knowledge se
 
    IF no files found or directory missing: say nothing. No message to PM.
 
-4. Store analysis results in brainstorming session state for use in:
+4. Store analysis results in brainstorming run state for use in:
    - WF4 (Data & Inputs) question — reference analyzed files instead of asking
      PM to describe data from scratch (see "Workflow Question Inserts" → WF4)
    - Step 3 (Approaches) — inform architecture proposals with data
      characteristics (volume, format, schema complexity)
    - Plan document — include data profile in Constraints or Context section
 
-5. Accept arbitrary file paths from PM during the session:
+5. Accept arbitrary file paths from PM during the run:
    - IF PM says "also look at ./data/customers.json" or provides any file path:
      → Read and analyze the file using the same type-detection logic above
      → Add to the stored analysis results
      → Present the single-file summary to PM
      → Do NOT copy the file to .aid-o/05-inputs/
      → Do NOT modify or move the original file
-   - This can happen at any point in the session (not just Step 1)
+   - This can happen at any point in the run (not just Step 1)
 ```
 
 #### File Analysis Rules
@@ -222,7 +222,7 @@ RULE F6: File scan must not block brainstorming.
          present partial results, and continue to Step 2.
 RULE F7: PM-provided file paths are analyzed on demand.
          Same type-detection logic, same read-only constraint, no file limit
-         (PM explicitly chose these files). Added to session state incrementally.
+         (PM explicitly chose these files). Added to run state incrementally.
 RULE F8: File analysis results carry forward to plan and EPIC.
          When writing the plan document, include a "Data Profile" or "Input Files"
          subsection summarizing the analyzed files if they influenced the design.
@@ -430,10 +430,10 @@ RULE 1: All knowledge_find() calls use a 5-second timeout.
 RULE 2: Knowledge retrieval failures are NEVER shown to PM as errors.
         No "knowledge unavailable" messages, no degraded UX indicators.
 RULE 3: When knowledge is unavailable, brainstorming works exactly as before.
-        The session is identical to a non-knowledge-augmented session.
+        The run is identical to a non-knowledge-augmented run.
 RULE 4: Knowledge informs but never overrides PM input.
         If PM contradicts a past decision or known pattern, follow PM's direction.
-RULE 5: Knowledge calls happen at most three times per session:
+RULE 5: Knowledge calls happen at most three times per run:
         (1) Step 1 pre-brainstorming search, (2) Step 3 approach-informed knowledge search,
         (3) Step 3 example EPIC lookup.
         No additional calls during questioning, design validation, or document generation.
@@ -442,7 +442,7 @@ RULE 6: File scan (.aid-o/05-inputs/) uses a 10-second total timeout.
 RULE 7: File scan failures are NEVER shown to PM as errors.
         Missing directory, empty directory, unreadable files — all handled silently.
         Individual file analysis failures are noted in the summary as "unable to analyze"
-        but do not block the session.
+        but do not block the run.
 RULE 8: File analysis from PM-provided paths follows the same non-blocking guarantee.
         If a PM-provided file cannot be read, inform PM briefly and continue.
 ```
@@ -471,22 +471,22 @@ RULE 8: File analysis from PM-provided paths follows the same non-blocking guara
 | File in `.aid-o/05-inputs/` unreadable | Note "unable to analyze" for that file. Continue with remaining files. |
 | File scan exceeds 10-second timeout | Present partial results for files analyzed so far. Continue to Step 2. |
 | More than 10 files in `.aid-o/05-inputs/` | Analyze first 10 (alphabetical). Note remaining count to PM. |
-| PM-provided file path does not exist | Inform PM briefly ("File not found: {path}"). Continue session. |
-| PM-provided file cannot be parsed | Note "unable to analyze" to PM. Continue session. |
+| PM-provided file path does not exist | Inform PM briefly ("File not found: {path}"). Continue run. |
+| PM-provided file cannot be parsed | Note "unable to analyze" to PM. Continue run. |
 
-In every degradation scenario, PM sees no difference from a standard brainstorming session.
+In every degradation scenario, PM sees no difference from a standard brainstorming run.
 The knowledge and file analysis layers are invisible when they have nothing to contribute.
 
 ---
 
 ## Workflow Detection Integration
 
-When a workflow/agent project is detected, the brainstorming session is supplemented with
+When a workflow/agent project is detected, the brainstorming run is supplemented with
 workflow-specific questioning and platform recommendation. Detection runs automatically
 before the first question. Non-workflow projects are completely unaffected.
 
 **Principle:** Workflow detection is non-blocking and backward-compatible. When no workflow
-is detected, the brainstorming session proceeds identically to its behavior before this
+is detected, the brainstorming run proceeds identically to its behavior before this
 integration existed.
 
 For full protocol details, see `skills/workflow-intelligence.md`.
@@ -662,7 +662,7 @@ These rules are **cross-cutting** and apply to ALL projects, regardless of type.
 same rules still apply based on service count, external dependencies, and reproducibility needs.
 
 **Principle:** Docker and MCP recommendations are always presented as suggestions. PM has
-final authority. Once PM declines, the topic is closed for the remainder of the session.
+final authority. Once PM declines, the topic is closed for the remainder of the run.
 
 ### Docker Preference Rules
 
@@ -726,7 +726,7 @@ WHEN: Step 3 (Approaches), BEFORE presenting approaches to PM.
 
 4. IF docker_recommended == false:
    - Do not mention Docker. No step, no compose, no question.
-   - Docker is invisible in the session.
+   - Docker is invisible in the run.
 ```
 
 ### MCP Server Preference Rules
@@ -877,22 +877,22 @@ IF PM declines Docker:
   2. Remove Docker Compose from all approach architectures.
   3. Remove "Docker Compose setup" from planner steps.
   4. If MCP was recommended: MCP servers run locally (not in containers).
-  5. Do not mention Docker again in this brainstorming session.
+  5. Do not mention Docker again in this brainstorming run.
   6. Do not ask again, do not hint, do not include as "optional."
 
 IF PM declines MCP:
   1. Record constraint: "PM decided: no MCP servers, direct SDK/libraries."
   2. Remove MCP server references from all approach architectures.
   3. Replace with native SDK/library alternatives where applicable.
-  4. Do not mention MCP again in this brainstorming session.
+  4. Do not mention MCP again in this brainstorming run.
 
 IF PM declines both:
   1. Record both constraints.
   2. Approaches use local setup with direct dependencies.
-  3. Session proceeds as if Docker/MCP rules do not exist.
+  3. Run proceeds as if Docker/MCP rules do not exist.
 
 CONSTRAINT RECORDING:
-  Constraints are stored in the brainstorming session state and carry forward to:
+  Constraints are stored in the brainstorming run state and carry forward to:
   - Plan document (Constraints section)
   - EPIC draft (Constraints section)
   - Planner step generation (omit Docker/MCP steps)
@@ -1060,7 +1060,7 @@ through /aid-plan-epic and /aid-run-epic.
    ### Frontmatter
    - Set `plan_ref: {plan_filename}` (the source plan's filename, e.g., `P-20260219-task-mgmt.md`)
    - Set `plan_epics_total: 1` (or as specified in plan)
-   - Set `sessions_total:` based on Session Breakdown rules
+   - Set `runs_total:` based on Run Breakdown rules
 
    ### Context
    - Reference the plan: "This EPIC implements Plan P-{plan_id}."
@@ -1124,10 +1124,10 @@ through /aid-plan-epic and /aid-run-epic.
    - Assign parallel groups where possible (backend+frontend, qa+security+observability).
    - YAGNI: only include roles the plan requires. If no frontend work, omit frontend role.
 
-   ### Session Breakdown
+   ### Run Breakdown
    - Steps 1-6: "single orchestrated run"
-   - Steps 7-9: "consider 2 sessions"
-   - Steps 10+: "recommend session split" with suggested grouping
+   - Steps 7-9: "consider 2 runs"
+   - Steps 10+: "recommend run split" with suggested grouping
 
 3. Write in {document_language} language. Technical terms (API, REST, SQL, etc.)
    remain in English regardless of document language.
@@ -1210,9 +1210,9 @@ When generating an EPIC from a plan, the brainstorming handoff (Step 10) determi
 
 ---
 
-## Brainstorming Session Lifecycle
+## Brainstorming Run Lifecycle
 
-### Starting a Brainstorming Session
+### Starting a Brainstorming Run
 
 ```
 1. PM invokes /aid-brainstorm [topic]
@@ -1222,7 +1222,7 @@ When generating an EPIC from a plan, the brainstorming handoff (Step 10) determi
 5. End with handoff (Step 9)
 ```
 
-### Aborting a Brainstorming Session
+### Aborting a Brainstorming Run
 
 PM can abort at any point by saying "stop", "cancel", "abort", or similar.
 
@@ -1243,7 +1243,7 @@ If abort AFTER Step 8:
   → Both files exist. Both are drafts. PM can edit or delete manually.
 ```
 
-### Re-opening a Brainstorming Session
+### Re-opening a Brainstorming Run
 
 When PM selects Option A ("Add more items to plan") in Step 10:
 
@@ -1263,7 +1263,7 @@ When PM selects Option A ("Add more items to plan") in Step 10:
 7. **Re-generate EPIC draft** — Generate a new EPIC from the updated plan (Step 8)
 8. **Return to Step 10** — Present handoff options again
 
-**State management:** The brainstorming session maintains a list of approved sections and their content. When re-opening, this list is loaded to prevent re-asking about already-decided items.
+**State management:** The brainstorming run maintains a list of approved sections and their content. When re-opening, this list is loaded to prevent re-asking about already-decided items.
 
 **Abort during re-open:** If PM says "stop" or "cancel" during a re-open loop, the most recently written plan file is preserved. No rollback occurs.
 
@@ -1274,7 +1274,7 @@ After brainstorming completes, two paths are available:
 ```
 /aid-brainstorm → Plan + EPIC draft
     ├── (Y at Step 9) Direct pipeline:
-    │     EPIC → Plan JSON + Session → ready for /aid-run-epic
+    │     EPIC → Plan JSON + Run → ready for /aid-run-epic
     │
     └── (N at Step 9) Manual review:
           PM reviews EPIC draft → /aid-plan-epic → /aid-run-epic
@@ -1284,7 +1284,7 @@ Additionally, `/aid-plan-epic` accepts Plan files directly:
 
 ```
 PM writes plan in .aid-o/01-plans/
-    → /aid-plan-epic → auto-generates EPIC → Plan JSON + Session → /aid-run-epic
+    → /aid-plan-epic → auto-generates EPIC → Plan JSON + Run → /aid-run-epic
 ```
 
 ---
@@ -1426,7 +1426,7 @@ Reference: skills/workflow-intelligence.md for full protocol details
 11. **ALWAYS run Platform Detection Protocol before the first question** — when workflow is detected, inserts activate transparently; when not, brainstorming is unchanged
 12. **NEVER exceed 12 total questions** — standard questions (3-7) plus workflow inserts (0-5) combined
 13. **ALWAYS recommend Docker Compose when project has 2+ services** — PM can decline but recommendation is mandatory; applies to ALL project types, not just workflows
-14. **NEVER mention Docker/MCP again after PM declines** — record as constraint once, respect PM's decision for the entire session, do not hint or include as optional
+14. **NEVER mention Docker/MCP again after PM declines** — record as constraint once, respect PM's decision for the entire run, do not hint or include as optional
 
 ---
 
@@ -1437,7 +1437,7 @@ Reference: skills/workflow-intelligence.md for full protocol details
 - `defaults/templates/epic.md` — EPIC template
 - `defaults/templates/epic-example.md` — EPIC example for reference
 - `skills/planner.md` — how plans become Plan JSON (downstream from brainstorming)
-- `skills/session-management.md` — End of Brainstorming Protocol (lifecycle integration)
+- `skills/run-management.md` — End of Brainstorming Protocol (lifecycle integration)
 - `skills/knowledge-acquisition.md` — knowledge pipeline: `knowledge_find()`, `find_relevant_examples()`, and `adapt_example()` used in Steps 1 and 3
 - `skills/workflow-intelligence.md` — Platform Detection Protocol, Workflow Questioning Protocol (WF1-WF7), UI Derivation Logic, platform-specific knowledge
 - `defaults/examples/` — community example EPICs (static files) for Step 3 example lookup; directory may be empty or missing until Phase 2 (handled silently)

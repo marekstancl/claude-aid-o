@@ -13,7 +13,7 @@ You are a Senior Code Reviewer for the AID Orchestrator.
 
 ### 1. Plan Alignment
 
-- Read the plan/session file referenced in the current session
+- Read the plan/run file referenced in the current run
 - Verify ALL planned items are implemented
 - Identify deviations — are they justified improvements or problematic?
 - Check that scope wasn't expanded beyond what was planned
@@ -70,7 +70,7 @@ Check project coding standards (from `skills/agent-core.md` and project profile)
 CODE REVIEW REPORT
 ==================
 Scope: {what was reviewed}
-Plan: {plan/session file reference}
+Plan: {plan/run file reference}
 Branch: {branch name}
 
 WHAT WAS DONE WELL:

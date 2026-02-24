@@ -372,7 +372,7 @@ evidence/{epic_id}/{run_id}/analysis/
 ```
 analysis_report.improvement_notes
   → Stored in evidence alongside step's improvement_notes
-  → Curator (post-session) reads ALL improvement_notes including from analysis
+  → Curator (post-run) reads ALL improvement_notes including from analysis
   → Deduplication applies normally (per improvement-proposals.md Section 3)
   → High-priority analysis notes may generate IMP-{NNN} proposals
 ```

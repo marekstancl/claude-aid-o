@@ -52,7 +52,7 @@ all endpoints are covered by unit and integration tests.
 - `{project_root}/CHANGELOG.md`
 
 ### Forbidden zones
-- `{backend_dir}/app/core/` (shared DB session, auth, base models — import only)
+- `{backend_dir}/app/core/` (shared DB run, auth, base models — import only)
 - `{backend_dir}/app/users/` (separate bounded context)
 - `{backend_dir}/alembic/env.py` (migration environment — do not modify)
 
@@ -112,11 +112,11 @@ all endpoints are covered by unit and integration tests.
 | 5 | security | Review AuthZ: verify tenant scoping on all queries, check for IDOR, run SAST on routes.py | 3 | group-verify |
 | 6 | docs | Write API documentation (docs/api/{resource}.md) + update CHANGELOG.md | 4, 5 | — |
 
-## Session Breakdown
+## Run Breakdown
 
 This EPIC fits in a single orchestrated run.
 
-### Session 1: Full CRUD Implementation
+### Run 1: Full CRUD Implementation
 **Goal:** Complete models, migrations, routes, tests, security review, and docs.
 **Deliverables:** All 5 endpoints, Alembic migration, pytest suite green, docs written.
 
@@ -126,9 +126,9 @@ This EPIC fits in a single orchestrated run.
 - complexity: medium
 - parallelism_potential: medium (steps 4 and 5 can run in parallel after step 3)
 - notes: >
-    Repository pattern preferred over direct session usage in routes — keeps
+    Repository pattern preferred over direct run usage in routes — keeps
     routes thin and service layer testable. Use SQLAlchemy 2.0 style
-    (`async with session.begin()`). For soft delete, add `is_deleted` bool column
+    (`async with run.begin()`). For soft delete, add `is_deleted` bool column
     and filter it in `list()` and `get()` repository methods. Pydantic v2 style:
     use `model_config = ConfigDict(from_attributes=True)` for ORM mode.
     TestClient tests should use an in-memory SQLite URL via pytest fixture override.

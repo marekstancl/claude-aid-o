@@ -2,7 +2,7 @@
 
 **Version:** 0.5.0
 **Skill:** knowledge-acquisition
-**Dependencies:** memory-mcp, session-management, epic-orchestration
+**Dependencies:** memory-mcp, run-management, epic-orchestration
 
 ---
 
@@ -12,11 +12,11 @@ This skill defines how AID actively acquires, quality-gates, stores, and serves 
 documentation and technical knowledge. It extends the existing memory-mcp skill with a new
 `documentation` document type, a multi-source research pipeline (Context7 primary, WebSearch
 fallback), 4 mandatory quality gates, and consumption functions that feed knowledge into
-brainstorming sessions and agent dispatch.
+brainstorming runs and agent dispatch.
 
 **Principle:** Knowledge acquisition is non-blocking. Every operation degrades gracefully --
-Context7 unavailable falls back to WebSearch, WebSearch fails falls back to in-session-only,
-Qdrant unavailable means results are useful in the current session but not persisted. No
+Context7 unavailable falls back to WebSearch, WebSearch fails falls back to in-run-only,
+Qdrant unavailable means results are useful in the current run but not persisted. No
 research failure ever blocks a workflow.
 
 **Primary source:** Context7 MCP (curated, up-to-date documentation for 1000+ libraries).
@@ -377,7 +377,7 @@ WebFetch fails for URL    -> skip that URL, log, continue with next URL
 No quality sources found  -> log warning, store nothing (no data > bad data)
 Context7 MCP unavailable  -> fall back to WebSearch silently
 Context7 library not found -> fall back to WebSearch for that library
-Qdrant MCP unavailable    -> knowledge is useful in-session only, not persisted
+Qdrant MCP unavailable    -> knowledge is useful in-run only, not persisted
 All sources fail          -> log warning, proceed without knowledge
                              (brainstorming and agents work without it)
 
@@ -1467,7 +1467,7 @@ Two ways for PM to trigger manual source addition:
 
 1. **Via `/aid-research` URL mode:** `/aid-research https://wiki.company.com/auth-lib`
    (handled by `commands/aid-research.md` Step 4)
-2. **Via conversation:** PM says "add docs for X at URL Y" during any session
+2. **Via conversation:** PM says "add docs for X at URL Y" during any run
 
 ### Conversational Trigger Detection
 
@@ -1657,7 +1657,7 @@ All manual source operations follow the same non-blocking error policy:
 URL unreachable       -> report to PM, abort that URL, suggest alternatives
 No useful content     -> report to PM ("page may require auth or be empty")
 No chunks pass gates  -> report to PM ("content too generic or already indexed")
-Qdrant unavailable    -> display results in session, warn PM they are not persisted
+Qdrant unavailable    -> display results in run, warn PM they are not persisted
 PM declines           -> abort gracefully, log, no error
 Framework ambiguous   -> ask PM to clarify before proceeding
 ```
@@ -1679,8 +1679,8 @@ extract_example_epic(epic_id, run_id, epic_file, final_report):
     log("extract_example_epic: skipped — status={status}, not completed")
     RETURN null
 
-  IF frontmatter.sessions_completed < frontmatter.sessions_total:
-    log("extract_example_epic: skipped — sessions incomplete")
+  IF frontmatter.runs_completed < frontmatter.runs_total:
+    log("extract_example_epic: skipped — runs incomplete")
     RETURN null
 
   stage_log = read_jsonl(evidence_path + "/stage_log.jsonl")
@@ -1705,7 +1705,7 @@ extract_example_epic(epic_id, run_id, epic_file, final_report):
 
   # STAGE 3 — ABSTRACT
   # Replace project paths with placeholders: {source_dir}/, {backend_dir}/
-  # Remove EPIC IDs, session IDs, credentials, URLs
+  # Remove EPIC IDs, run IDs, credentials, URLs
   # Keep: framework names, architectural patterns, role assignments, step ordering
 
   # STAGE 4 — BUILD information text (max 500 words)
@@ -1899,8 +1899,8 @@ IF memory-config.yaml knowledge.context7.available = false
 IF memory.enabled = false OR Qdrant MCP unavailable:
 
   -> Research still runs (Context7 or WebSearch)
-  -> Results are useful IN-SESSION only (displayed to PM, used by current agents)
-  -> NOT persisted to Qdrant (no cross-session or cross-project knowledge)
+  -> Results are useful IN-RUN only (displayed to PM, used by current agents)
+  -> NOT persisted to Qdrant (no cross-run or cross-project knowledge)
   -> knowledge-base.yaml is NOT updated (no reference index without Qdrant)
   -> No error, no warning (consistent with memory-mcp fallback behavior)
 ```

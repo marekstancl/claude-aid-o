@@ -27,7 +27,7 @@ memory:
 
   # What gets auto-indexed
   auto_index:
-    session_end: true                     # Decisions, lessons, commands from completed sessions
+    run_end: true                     # Decisions, lessons, commands from completed runs
     epic_done: true                       # EPIC summary, arch decisions, patterns, audit findings
     gate_results: false                   # Gate pass/fail details (verbose, opt-in)
 

@@ -1,22 +1,22 @@
 ---
-id: S-{YYYYMMDD}-{4char-hash}
-session_id: {YYYY-MM-DD}-refactoring-{short-description}
+id: R-{YYYYMMDD}-{4char-hash}
+run_id: {YYYY-MM-DD}-refactoring-{short-description}
 type: refactoring
 status: active
 priority: critical|high|medium|low
 started: YYYY-MM-DD HH:MM CET
 completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
-epic_id: {epic-id} (if epic session)
-epic_session: {N} of {M} (if epic session)
-epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic session)
+epic_id: {epic-id} (if epic run)
+epic_run: {N} of {M} (if epic run)
+epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # Refactoring: {Title}
 
-> **Multi-Session Work?** If this refactoring requires 3+ sessions or touches multiple layers, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Run Work?** If this refactoring requires 3+ runs or touches multiple layers, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
 
 ## Objective
 <!-- MIN: 3-5 sentences. State WHAT you're refactoring, WHY the current design is insufficient, and what SUCCESS looks like.
@@ -28,13 +28,13 @@ orchestrated: true|false (if orchestrated by Controller)
             added via config, existing tests stay green, and no public API changes." -->
 
 ## Context
-<!-- What preceded this work. Reference previous sessions, state of the codebase, dependencies.
-     For orchestrated sessions: which EPIC session is this, what was delivered before.
+<!-- What preceded this work. Reference previous runs, state of the codebase, dependencies.
+     For orchestrated runs: which EPIC run is this, what was delivered before.
      For non-orchestrated: what's the current project state, any related ongoing work. -->
 
-**Previous work:** {reference prior sessions or "N/A — greenfield"}
-**Current state:** {what exists now that this session refactors}
-**Dependencies:** {external systems, libraries, or other sessions this depends on}
+**Previous work:** {reference prior runs or "N/A — greenfield"}
+**Current state:** {what exists now that this run refactors}
+**Dependencies:** {external systems, libraries, or other runs this depends on}
 
 ## Scope
 <!-- Explicit IN/OUT lists prevent scope creep. Be specific — name files, modules, layers. -->
@@ -47,8 +47,8 @@ orchestrated: true|false (if orchestrated by Controller)
 
 **Out of Scope:**
 <!-- MIN: 2 items -->
-- {what will NOT be touched in this session}
-- {what will NOT be touched in this session}
+- {what will NOT be touched in this run}
+- {what will NOT be touched in this run}
 
 ---
 
@@ -106,7 +106,7 @@ graph TB
 ### Phase 1: {Phase Title}
 
 **Goal:**
-<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the session context. -->
+<!-- MIN: 1 full paragraph. What this phase accomplishes and why it matters in the run context. -->
 {Describe what this phase solves — not just "extract X" but why, what it enables, what changes.}
 
 **Agent / Role:** {role name — e.g., architect, backend, qa}
@@ -135,7 +135,7 @@ graph TB
 
 ## Dependencies
 
-<!-- Which phases depend on which and why. For single-phase sessions, write "No inter-phase dependencies." -->
+<!-- Which phases depend on which and why. For single-phase runs, write "No inter-phase dependencies." -->
 
 | Phase | Depends On | Reason |
 |-------|-----------|--------|
@@ -145,7 +145,7 @@ graph TB
 
 ## Quality Gates
 
-<!-- What automated checks run after this session's work. Reference specific gate names from gates.yaml. -->
+<!-- What automated checks run after this run's work. Reference specific gate names from gates.yaml. -->
 
 - **{gate name}** — {what it verifies}
 
@@ -191,12 +191,12 @@ graph TB
 
 **Related Issues:** #{issue_number}
 **Related PRs:** #{pr_number}
-**Related Sessions:** [Previous session](../archive/{session-id}.md)
+**Related Runs:** [Previous run](../archive/{run-id}.md)
 **Commits:** `{hash}` - {message}
 
 ---
 
-## AI Session Log
+## AI Run Log
 
 **{Timestamp}** - {Action/Decision}
 
@@ -210,11 +210,11 @@ graph TB
 - [ ] Documentation updated
 - [ ] Performance maintained or improved
 
-### Session Closure:
+### Run Closure:
 - [ ] Commit messages follow conventions
-- [ ] Session file archived to completed/
-- [ ] Handoff protocol executed (see `skills/session-management.md`)
-- [ ] Session log updated
+- [ ] Run file archived to completed/
+- [ ] Handoff protocol executed (see `skills/run-management.md`)
+- [ ] Run log updated
 
 ---
 
@@ -224,7 +224,7 @@ graph TB
 - Review PR #{pr_number}
 - Validate refactoring in staging
 
-**For AI (if session continues):**
+**For AI (if run continues):**
 - Monitor for related issues
 - Consider further optimizations
 
