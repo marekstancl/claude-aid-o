@@ -1,0 +1,258 @@
+# FIRST AID Auto-Mode Permissions
+# Default permission template for autonomous orchestration (/aid-first-aid).
+#
+# Purpose:
+#   This file defines what Claude Code auto-allows during FIRST AID mode.
+#   It is the "elevated" permission set in the Permission Sandwich pattern:
+#     1. BACKUP  — save current .claude/settings.json
+#     2. ELEVATE — replace permissions.allow[] with entries from this file
+#     3. RESTORE — restore original settings.json when auto-mode ends
+#
+# How it works:
+#   - The Controller reads this file during /aid-first-aid initialization.
+#   - Entries in allow[] are written to .claude/settings.json → permissions.allow[]
+#   - Entries in deny[] are enforced by the Controller at elevation time:
+#     any allow entry matching a deny pattern is silently removed.
+#   - The hard-deny list is enforced REGARDLESS of this file's contents.
+#     Even if someone adds a hard-deny pattern to allow[], the Controller strips it.
+#
+# Resolution order:
+#   1. Project-specific: .aid-o/03-config/permissions-auto.yaml
+#   2. Plugin defaults:  defaults/policies/permissions-auto.yaml (this file)
+#
+# Customization:
+#   - Copy this file to .aid-o/03-config/permissions-auto.yaml
+#   - Add or remove entries as needed for your project
+#   - The learned[] section is auto-managed by the Permission Learning Protocol
+#
+# Relationship to permissions.yaml presets:
+#   This template is a SUPERSET of the "recommended" preset. It adds:
+#   - git push/tag (needed for release sub-phase)
+#   - Package install (npm install, pip install)
+#   - GitHub CLI (gh — needed for GitHub release creation)
+#   - Security scanners (bandit, npm audit, pip-audit)
+#   - MCP tools (GitHub, Minio, Docker, Playwright, Qdrant, Context7)
+#
+# See: Architect design — Permission Sandwich Flow (EPIC E-20260224-fa01, Section 3)
+
+# ─── ALLOW LIST ──────────────────────────────────────────────────────────
+# Permissions granted to agents during FIRST AID autonomous execution.
+# Each entry maps to a Claude Code tool or Bash command pattern.
+#
+# Format:
+#   "ToolName"          — allow all invocations of the tool
+#   "ToolName(*)"       — allow all invocations with any argument (MCP tools)
+#   "Bash(command:*)"   — allow Bash with commands starting with "command"
+#
+# The allow list is intentionally broad to prevent VS Code/Claude Code
+# permission prompts that would block autonomous execution. Safety is
+# enforced by the deny list and hard-deny patterns, not by omission.
+
+allow:
+  # --- Claude Code Built-in Tools ---
+  # These are the standard Claude Code tools for file operations, search,
+  # task management, and web access. All are safe for autonomous use since
+  # they operate within the project directory scope.
+  - "Glob(*)"
+  - "Grep(*)"
+  - "Read(*)"
+  - "Edit(*)"
+  - "Write(*)"
+  - "NotebookEdit(*)"
+  - "Task(*)"
+  - "TodoWrite(*)"
+  - "WebSearch(*)"
+  - "WebFetch(*)"
+
+  # --- Git (local operations) ---
+  # Local git operations are safe: they modify only the working tree and
+  # local repository. No destructive operations (--force, --hard) are
+  # included here — those are on the hard-deny list.
+  - "Bash(git add:*)"
+  - "Bash(git commit:*)"
+  - "Bash(git branch:*)"
+  - "Bash(git checkout:*)"
+  - "Bash(git diff:*)"
+  - "Bash(git log:*)"
+  - "Bash(git status:*)"
+  - "Bash(git stash:*)"
+  - "Bash(git merge:*)"
+  - "Bash(git worktree:*)"
+
+  # --- Git (release operations) ---
+  # These are elevated beyond the "recommended" preset. They are needed
+  # for the DONE state release sub-phase: tagging versions and pushing
+  # the completed branch to the remote.
+  # Safety: git push --force and git push -f are on the hard-deny list.
+  # Only non-force push is permitted here.
+  - "Bash(git tag:*)"
+  - "Bash(git push:*)"
+
+  # --- Testing & Linting ---
+  # Test runners and linters are essential for gate execution. Agents must
+  # be able to run tests, check code quality, and verify type correctness
+  # without human intervention.
+  - "Bash(pytest:*)"
+  - "Bash(python -m pytest:*)"
+  - "Bash(ruff check:*)"
+  - "Bash(ruff format:*)"
+  - "Bash(npm test:*)"
+  - "Bash(npm run build:*)"
+  - "Bash(npx vitest:*)"
+  - "Bash(npx tsc:*)"
+
+  # --- Security Scanning ---
+  # Security agents need to run scanners during gate checks. These tools
+  # are read-only analysis tools that do not modify the codebase.
+  - "Bash(bandit:*)"
+  - "Bash(npm audit:*)"
+  - "Bash(pip-audit:*)"
+
+  # --- Test Coverage ---
+  # Coverage measurement for quality gate enforcement. Read-only analysis.
+  - "Bash(coverage:*)"
+
+  # --- Package Management ---
+  # Elevated beyond "recommended" preset. Needed when EPIC steps introduce
+  # new dependencies. Limited to standard install commands.
+  # Safety: these install from public registries only. No --global or
+  # system-level installs (those require sudo, which is hard-denied).
+  - "Bash(npm install:*)"
+  - "Bash(npm ci:*)"
+  - "Bash(pip install:*)"
+  - "Bash(pip install -r:*)"
+
+  # --- Filesystem (read + basic write) ---
+  # Standard filesystem operations for directory navigation, file copying,
+  # and content inspection. These complement the Claude Code built-in
+  # tools (Read, Write, Edit) for cases where Bash commands are needed.
+  # Safety: rm is NOT included. Only non-destructive operations are allowed.
+  # Agents use Edit/Write for file creation and modification.
+  - "Bash(ls:*)"
+  - "Bash(mkdir:*)"
+  - "Bash(cp:*)"
+  - "Bash(mv:*)"
+  - "Bash(cat:*)"
+  - "Bash(head:*)"
+  - "Bash(tail:*)"
+  - "Bash(find:*)"
+  - "Bash(grep:*)"
+  - "Bash(wc:*)"
+  - "Bash(diff:*)"
+  - "Bash(touch:*)"
+  - "Bash(dirname:*)"
+  - "Bash(basename:*)"
+  - "Bash(realpath:*)"
+  - "Bash(tree:*)"
+
+  # --- GitHub CLI ---
+  # The gh CLI is needed for GitHub release creation, PR management,
+  # and issue tracking during the release sub-phase and EPIC workflow.
+  # Safety: gh operates through authenticated GitHub API with the user's
+  # existing token. It cannot escalate privileges beyond the user's
+  # GitHub permissions.
+  - "Bash(gh:*)"
+
+  # --- MCP Tools ---
+  # MCP (Model Context Protocol) tools provide integrations with external
+  # services. Each MCP server is configured separately and has its own
+  # authentication. Wildcard patterns allow all operations within each
+  # MCP server's scope.
+  #
+  # Qdrant memory: vector storage for decisions, lessons, patterns.
+  # Used by memory-mcp.md skill for cross-project knowledge sharing.
+  - "mcp__qdrant-memory__qdrant-store(*)"
+  - "mcp__qdrant-memory__qdrant-find(*)"
+  #
+  # GitHub MCP: repository operations (PRs, issues, branches, releases).
+  # Superset of gh CLI with structured MCP interface.
+  - "mcp__shared-github__*(*)"
+  #
+  # Minio MCP: object storage for artifacts, evidence, large files.
+  - "mcp__shared-minio__*(*)"
+  #
+  # Docker MCP: container management for build/test environments.
+  - "mcp__shared-docker__*(*)"
+  #
+  # Playwright MCP: browser automation for frontend testing.
+  - "mcp__shared-playwright__*(*)"
+  #
+  # Context7 MCP: framework documentation lookup.
+  # Used by knowledge-acquisition.md skill for research.
+  - "mcp__plugin_context7_context7__*(*)"
+
+# ─── DENY LIST ───────────────────────────────────────────────────────────
+# Patterns that are ALWAYS blocked during auto-mode execution.
+# The Controller strips any allow entry that matches a deny pattern
+# before writing to .claude/settings.json.
+#
+# Two categories:
+#   1. HARD DENY — Dangerous commands that could cause irreversible damage.
+#      These cannot be overridden by the Permission Learning Protocol.
+#      Even if PM manually grants these during an auto-mode session, the
+#      Controller will NOT persist them to the learned[] section.
+#
+#   2. PATH DENY — System directories that agents should never access.
+#      Claude Code already sandboxes to the project directory, but these
+#      provide defense-in-depth against path traversal or misconfiguration.
+
+deny:
+  # --- HARD DENY: Destructive filesystem operations ---
+  # Recursive forced removal of root or system directories.
+  # These patterns catch both "rm -rf /" and "rm -rf /*" variants.
+  - "Bash(rm -rf /:*)"
+  - "Bash(rm -rf /*:*)"
+
+  # --- HARD DENY: Destructive git operations ---
+  # Force-push overwrites remote history. In a team environment, this can
+  # destroy other developers' work. Non-force push (allowed above) is safe
+  # because it fails on conflict rather than overwriting.
+  - "Bash(git push --force:*)"
+  - "Bash(git push -f:*)"
+  # Hard reset discards all uncommitted changes and moves HEAD. This can
+  # lose work that has not been committed or stashed.
+  - "Bash(git reset --hard:*)"
+
+  # --- HARD DENY: Privilege escalation ---
+  # sudo/su can execute any command as root, bypassing all filesystem
+  # and permission boundaries. Never needed for development tasks.
+  - "Bash(sudo:*)"
+  - "Bash(su:*)"
+
+  # --- HARD DENY: Dangerous permission changes ---
+  # chmod 777 makes files world-readable/writable/executable — a security
+  # risk if applied to scripts or sensitive files.
+  # chown changes file ownership, which can break access controls.
+  - "Bash(chmod 777:*)"
+  - "Bash(chown:*)"
+
+  # --- PATH DENY: System directories ---
+  # Agents should never read from or write to system configuration,
+  # credential stores, or system binaries. Claude Code sandboxing is
+  # the primary defense; these are a secondary safety net.
+  - path: "/etc/*"             # System configuration files
+  - path: "/usr/*"             # System binaries and libraries
+  - path: "~/.ssh/*"           # SSH keys and known_hosts
+  - path: "~/.aws/*"           # AWS credentials and configuration
+  - path: "~/.gnupg/*"         # GPG keys and trust database
+  - path: "~/.config/claude/*" # Claude's own configuration (prevent self-modification)
+
+# ─── LEARNED PERMISSIONS ─────────────────────────────────────────────────
+# Auto-managed by the Permission Learning Protocol (see Architect design 3.5).
+#
+# When PM manually grants a new permission during an auto-mode session
+# (by clicking "Allow" on a Claude Code prompt), the Controller:
+#   1. Detects the new entry by diffing settings.json against applied permissions
+#   2. Validates the entry is NOT on the hard-deny list
+#   3. Appends it here with a timestamp comment
+#   4. Updates the applied permissions in auto-mode-state.yaml
+#
+# On the next /aid-first-aid invocation, learned entries are included
+# automatically, so PM does not have to grant the same permission twice.
+#
+# Learned entries persist across sessions. To reset, clear this list manually
+# or delete the project-specific .aid-o/03-config/permissions-auto.yaml.
+#
+# Format of learned entries (appended by Controller, not edited manually):
+#   - "Bash(some-command:*)"   # Learned: session FA-YYYYMMDDTHHMMSSZ, YYYY-MM-DD
+learned: []

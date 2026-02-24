@@ -202,6 +202,32 @@ expects a reply, and how PM responses are parsed.
 _Reply with A, B, or C (or start a thread for discussion)_
 ```
 
+#### Auto-Mode Extension: Option D (Continue Manual)
+
+When `mode == auto` (auto-escalation), a fourth option D is appended to the Slack message:
+
+```
+:rotating_light: *AUTO-MODE ESCALATION — {trigger_reason}*
+━━━━━━━━━━━━━━━━
+*EPIC:* `{epic_id}` — {epic_title}
+*State:* {current_state}
+*Progress:* {completed_steps}/{total_steps} steps
+
+:clipboard: *Details:*
+{failure_details — max 500 chars}
+
+:dart: *Options:*
+> :white_check_mark: *A)* {fix option — from decision-policies.yaml}
+> :next_track_button: *B)* {skip option}
+> :stop_sign: *C)* Abort EPIC
+> :arrows_counterclockwise: *D)* Continue manual — finish this EPIC in manual mode
+
+:bulb: *Recommendation:* {auto recommendation}
+:bar_chart: *Session:* Escalation {escalation_count}/{max_escalations_per_session}
+
+_Reply with A, B, C, or D (or start a thread for discussion)_
+```
+
 **Response parsing:**
 
 | PM says | Parsed as |
@@ -209,10 +235,13 @@ _Reply with A, B, or C (or start a thread for discussion)_
 | `A`, `a`, `fix`, `retry` | `{ response_type: "fix" }` |
 | `B`, `b`, `skip` | `{ response_type: "skip" }` |
 | `C`, `c`, `abort` | `{ response_type: "abort" }` |
+| `D`, `d`, `manual`, `continue-manual`, `continue manual` | `{ response_type: "continue_manual" }` |
 | Thread reply (other text) | `{ response_type: "discussion", message: "<text>" }` |
 
 If `response_type: "discussion"`, the Orchestrator includes the PM's text as context
 and re-presents options (do NOT auto-decide from discussion text).
+
+**Option D (Continue Manual) Execution Flow:** See `skills/auto-escalation.md` Section 6.4 for detailed execution flow including state restoration, EPIC continuation in manual mode, and queue behavior. Option D allows PM to switch control from autonomous to manual orchestration while finishing the current EPIC (differs from Option C: Abort which stops immediately).
 
 ---
 

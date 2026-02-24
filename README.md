@@ -224,7 +224,8 @@ gates/                  Gate command outputs
 
 ## Roadmap
 
-- **v0.9.1** (current) — Brainstorming enhancement (analysis phase, options protocol, EPIC lookup fix), release sub-phase, per-file version cleanup
+- **v1.0.0** (current) — FIRST AID autonomous orchestration mode: `/aid-first-aid` command, permission sandwich, auto-escalation, auto-release, queue transitions
+- **v0.9.1** — Brainstorming enhancement (analysis phase, options protocol, EPIC lookup fix), release sub-phase, per-file version cleanup
 - **v0.9.0** — Core structure refactoring: SESSION→RUN rename, sequential ID generation, plan-ref injection, flat evidence structure, budget removal
 - **v0.8.2** — Housekeeping, untrusted-content framing, version alignment, Czech→English translation fixes
 - **v0.8.0** — Workflow Intelligence + Docker/MCP Preference Phase 1, process audit type for auditor
@@ -240,4 +241,4 @@ gates/                  Gate command outputs
 
 ## License
 
-MIT — v0.9.1
+MIT — v1.0.0

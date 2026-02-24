@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.0.0] — 2026-02-24
+
+### Added
+
+- **FIRST AID Autonomous Mode** — `/aid-first-aid` starts autonomous EPIC queue execution with agent-driven quality checks replacing PM approval points; `/aid-stop` disengages immediately, restoring manual mode at the current natural pause point
+- **Permission Sandwich** (`skills/permission-sandwich.md`) — automatic permission backup, elevation, and restoration for autonomous execution with crash recovery and permission learning; permissions are scoped to the auto-mode session and restored unconditionally on exit
+- **Auto-Mode Escalation Protocol** (`skills/auto-escalation.md`) — 16 trigger conditions with severity classification, pause/resume flow, escalation budget tracking (max 3 before mandatory PM review), and `continue-manual` handoff option
+- **Auto-Mode DONE State** (`skills/auto-done-state.md`) — automatic release decisions (defer intermediate, mandatory bump on last EPIC), queue transitions, and cross-EPIC summary aggregation to `auto-mode-state.yaml`
+- **FIRST AID command** (`commands/aid-first-aid.md`) — PM-facing command to activate autonomous mode: queue confirmation, permission elevation, and auto-mode-state initialization
+- **Aid-Stop command** (`commands/aid-stop.md`) — immediate autonomous mode stop command; safe mid-EPIC stop after current step completes
+
+### Changed
+
+- **PLAN_REVIEW** (`skills/epic-orchestration.md` Section 3) — auto-mode: schema, completeness, dependency graph, and run file quality validation replace PM prompt; validation failure triggers ESCALATION; manual mode unchanged
+- **PHASE_CHECK** (`skills/epic-orchestration.md` Section 5) — auto-mode: adds one "fresh approach" retry cycle after `max_review_fix_cycles` exhausted before escalating; manual mode unchanged
+- **ESCALATION** (`skills/epic-orchestration.md` Section 9) — auto-mode: pauses mode, saves progress snapshot, increments escalation counter, presents extended PM options including `continue-manual`; manual mode unchanged
+- **PM_APPROVAL** (`skills/epic-orchestration.md` Section 11) — auto-mode: intermediate EPICs auto-approved; last/standalone EPIC auto-approved only after 4 guardrails pass (gates, no critical issues, escalation budget, auditor trend); rule teaching suppressed in auto-mode; manual mode unchanged
+- **DONE state** (`skills/epic-orchestration.md` Section 12) — auto-mode: intermediate EPIC version bump auto-deferred, last EPIC auto-bumped; queue transition loads next EPIC automatically; auto-mode exits and restores permissions when queue is exhausted; manual mode unchanged
+
 ## [0.9.1] — 2026-02-24
 
 ### Added

@@ -13,7 +13,7 @@ ai-orchestrator/
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
-    commands/                   # 11 slash commands
+    commands/                   # 13 slash commands
     skills/                     # 17 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
@@ -163,16 +163,21 @@ head -6 CHANGELOG.md plugins/aid-orchestrator/CHANGELOG.md
 
 ### Plugin Update — MANDATORY after every push
 
-After pushing to GitHub, update the plugin in every project that uses it:
+After pushing to GitHub, update the plugin cache in every project that uses it:
 
 ```bash
+# Step 1: Try the standard update command
 claude plugin update aid-orchestrator@claude-aid-o
+
+# Step 2: If step 1 reports "already at latest" but version is wrong, force-refresh:
+git -C ~/.claude/plugins/marketplaces/claude-aid-o fetch origin && git -C ~/.claude/plugins/marketplaces/claude-aid-o reset --hard origin/main
 ```
 
 Then restart Claude Code (close and reopen IDE/terminal) to load the new version.
 
-**Why:** Claude Code caches plugins. The `plugin update` command pulls the latest version
-from the GitHub marketplace. Without it, projects serve stale commands/skills.
+**Why:** Claude Code caches plugins as shallow git clones in `~/.claude/plugins/marketplaces/`.
+The `plugin update` command runs `git fetch` but may not update the working tree (known issue).
+The force-refresh command resets the cached clone to match the remote.
 
 **Verification:** After restart, run `/aid-help` and check the version matches.
 
