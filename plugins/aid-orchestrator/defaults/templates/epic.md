@@ -58,7 +58,6 @@ runs_completed: 0      # incremented at each run DONE
 - Audit trail: yes/no
 - Outbox pattern: yes/no
 - Structured outputs: yes/no
-- Budget: $XX max LLM cost
 
 ## DoD Gates
 
