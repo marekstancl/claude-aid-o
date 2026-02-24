@@ -961,7 +961,9 @@ CONSTRAINT RECORDING:
 
 ```
 RULE 1: ONE question at a time. Never ask 2+ questions in one message.
-RULE 2: Prefer MULTIPLE CHOICE (A/B/C). Open-ended only when options are unknowable.
+RULE 2: ALWAYS use MULTIPLE CHOICE with recommendation (A/B/C — recommended: X because Y).
+        Open-ended ONLY for factual questions (names, URLs, numbers) where options
+        cannot be predicted.
 RULE 3: After each answer, ACKNOWLEDGE and SUMMARIZE before next question.
 RULE 4: 3-7 questions total. Stop when you can propose approaches.
 RULE 5: If PM gives a short answer, INFER defaults and CONFIRM:
@@ -975,6 +977,11 @@ RULE 9: When workflow_detected == true, interleave workflow inserts (WF1-WF6)
         at the points defined in "Workflow Question Inserts" above.
         Total questions (standard + workflow) must not exceed 12.
         See skills/workflow-intelligence.md for insert details.
+RULE 10: Every question that involves a directional choice MUST present 2-3
+         structured options with labels (A/B/C), descriptions, and a
+         recommendation with reasoning.
+RULE 11: For each recommended option, briefly state why the alternatives are
+         less suitable — not just why the recommendation is good.
 ```
 
 ### Approach Exploration Protocol
@@ -1480,6 +1487,9 @@ Reference: skills/workflow-intelligence.md for full protocol details
 12. **NEVER exceed 12 total questions** — standard questions (3-7) plus workflow inserts (0-5) combined
 13. **ALWAYS recommend Docker Compose when project has 2+ services** — PM can decline but recommendation is mandatory; applies to ALL project types, not just workflows
 14. **NEVER mention Docker/MCP again after PM declines** — record as constraint once, respect PM's decision for the entire run, do not hint or include as optional
+15. **ALWAYS present initial analysis before first question** — the AI must demonstrate understanding of the topic before asking anything (see Initial Analysis Phase section)
+16. **ALWAYS present 2-3 options with recommendation at every directional decision point** — questions involving direction, approach, or trade-off choices must use structured options with labeled alternatives and a recommended choice with reasoning
+17. **ALWAYS explain why alternatives are less suitable** — for each recommendation, state not just why the chosen option is good but specifically why the other options are less appropriate for this context
 
 ---
 
