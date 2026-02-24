@@ -174,7 +174,7 @@ Change the priority of a queued EPIC.
 ## Important
 
 - Queue file is created automatically on first `/aid-epic-queue add` if it doesn't exist
-- The queue persists across sessions (YAML file on disk)
+- The queue persists across runs (YAML file on disk)
 - Auto-pickup only happens in the Orchestrator's DONE state — not triggered by this command
 - `/aid-epic-queue pause` does NOT abort a running EPIC — it prevents the next one from starting
 - If the queue file doesn't exist when the Orchestrator checks (DONE state), it simply skips auto-pickup

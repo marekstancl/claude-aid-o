@@ -3,8 +3,8 @@ status: active
 plan_ref: null             # REQUIRED when EPIC comes from a plan (set to plan filename)
                            # null ONLY for standalone EPICs (no source plan)
 plan_epics_total: null     # copied from plan for quick reference (null for standalone)
-sessions_total: 1          # from Session Breakdown (1 = single session)
-sessions_completed: 0      # incremented at each session DONE
+runs_total: 1          # from Run Breakdown (1 = single run)
+runs_completed: 0      # incremented at each run DONE
 ---
 
 <!-- plan_ref: Links this EPIC to its source plan in .aid-o/01-plans/.
@@ -98,15 +98,15 @@ sessions_completed: 0      # incremented at each session DONE
 | 8 | docs | Update documentation + changelog | backend | group-3 |
 | 9 | release | Deployment config + smoke tests | qa, security | group-3 |
 
-## Session Breakdown
+## Run Breakdown
 
-<!-- For multi-session EPICs, plan the session split -->
+<!-- For multi-run EPICs, plan the run split -->
 
-### Session 1: <Topic>
+### Run 1: <Topic>
 **Goal:** ...
 **Deliverables:** ...
 
-### Session 2: <Topic>
+### Run 2: <Topic>
 **Goal:** ...
 **Deliverables:** ...
 

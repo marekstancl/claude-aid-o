@@ -45,7 +45,7 @@ output than Opus, making model selection a SPEED optimization, not a cost one.
 | auditor | opus | **sonnet** | Project health analysis |
 | gate-fixer | opus | **haiku** | Simple lint/format fixes |
 | lessons-extractor | opus | **haiku** | Extract and format text |
-| session-validator | opus | **haiku** | Schema validation |
+| run-validator | opus | **haiku** | Schema validation |
 | quality-gates-runner | opus | **haiku** | Run commands, check exit codes |
 | project-scanner | opus | **sonnet** | Codebase analysis |
 | observability | opus | **sonnet** | Monitoring setup |

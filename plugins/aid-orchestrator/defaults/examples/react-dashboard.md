@@ -112,11 +112,11 @@ The layout is responsive down to 1024px wide.
 | 5 | qa | Write Vitest + Testing Library tests for KpiCard, DataTable sort/filter, and useDashboardMetrics hook (MSW or vi.mock for API) + axe accessibility checks on DashboardPage | 3, 4 | — |
 | 6 | docs | Write component documentation (docs/components/dashboard.md) with props tables + deployment guide (env vars, build output, CDN config) + update CHANGELOG.md | 5 | — |
 
-## Session Breakdown
+## Run Breakdown
 
 This EPIC fits in a single orchestrated run.
 
-### Session 1: Full Dashboard Implementation
+### Run 1: Full Dashboard Implementation
 **Goal:** Complete layout, charts, data table, API hooks, tests, and docs.
 **Deliverables:** DashboardPage rendering real API data, Vitest suite green, docs written.
 

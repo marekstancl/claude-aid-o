@@ -95,8 +95,8 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 1. If Plan JSON doesn't exist, generate it (same logic as `/aid-plan-epic` Steps 4-7)
 2. Validate plan against `.aid-o/03-config/templates/plan.schema.json`
 3. Save plan to evidence
-4. **Generate session file** following Session Creation Protocol (`commands/aid-plan-epic.md` Step 8)
-5. **Validate session file** completeness (per `skills/epic-orchestration.md` Session File Quality Check):
+4. **Generate run file** following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8)
+5. **Validate run file** completeness (per `skills/epic-orchestration.md` Run File Quality Check):
    - Objective: 3+ sentences with success criteria
    - Scope: explicit IN (3+) and OUT (2+) lists
    - Phases: each has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+)
@@ -104,7 +104,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - Quality Gates listed
    - If any check fails → fix before proceeding
 
-**Evidence:** `plan.json` + session file saved.
+**Evidence:** `plan.json` + run file saved.
 
 **Transition:** → PLAN_REVIEW
 
@@ -183,7 +183,7 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - IF `memory.enabled` AND `memory.search.pre_step_search`:
      - `qdrant-find(query=step.objective, collection_name=config.collection_name)`
      - Filter by `min_score`, limit to `top_k`
-     - Format as `## MEMORY CONTEXT (from past sessions)` block
+     - Format as `## MEMORY CONTEXT (from past runs)` block
    - IF disabled or unavailable → skip (empty string), proceed normally
 5. Build agent prompt:
    ```
@@ -212,8 +212,8 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    {Read and include outputs from dependency steps in evidence/steps/}
 
    {IF memory_context is not empty:}
-   ## MEMORY CONTEXT (from past sessions)
-   _The following knowledge was retrieved from past sessions via vector memory.
+   ## MEMORY CONTEXT (from past runs)
+   _The following knowledge was retrieved from past runs via vector memory.
    Use as reference — do not blindly follow if project context has changed._
 
    {memory_context from step 4}
@@ -408,7 +408,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
 2. Check dependency graph for next available step(s):
    - Find steps where ALL dependencies are "done"
    - If multiple independent steps available → they form an ad-hoc parallel group
-3. Update session file with step completion
+3. Update run file with step completion
 
 **Transition:**
 - If more steps pending → EXECUTING
@@ -563,7 +563,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
 1. Dispatch **Curator agent** (`agents/curator.md`, model: sonnet) and **Lessons-Extractor agent**
    (`agents/lessons-extractor.md`, model: haiku) in parallel:
    - Curator inputs: all step outputs, gate results, final report
-   - LE inputs: active session file, git log and diff
+   - LE inputs: active run file, git log and diff
    - Log: `{"state": "CURATOR_RESOLVE", "action": "dispatch_parallel", "details": "Curator + Lessons-Extractor dispatched"}`
 2. Process Curator output — for each proposal, run **Auto-Evaluate Algorithm**
    (3-tier: YAML rules → Qdrant history → default action) per `decision-policies.yaml` → `curator_auto_rules`
@@ -625,7 +625,7 @@ After a step passes PHASE_CHECK, check for pending analysis:
       - If merge fails (conflict, permissions): create PR instead of merging, log warning, note in final report
    b. Update EPIC file status to "Completed"
       - If EPIC file write fails: log warning, do not block DONE completion
-   c. Archive session file: `mkdir -p .aid-o/04-engine/sessions/archive/` then move
+   c. Archive run file: `mkdir -p .aid-o/04-engine/runs/archive/` then move
    d. Update `.aid-o/04-engine/memory/active-work.md`
 2. If status = aborted:
    a. Log abort reason
@@ -672,8 +672,8 @@ After a step passes PHASE_CHECK, check for pending analysis:
      - IF `memory.auto_index.gate_results`: index gates summary → `qdrant-store` (type: audit_finding)
    - IF disabled or fails → skip silently, DONE continues normally
 6. **Archive Logic** (per `skills/epic-orchestration.md` DONE state item 6):
-   - Archive session, update EPIC counter, conditionally archive EPIC and plan
-   - EPIC archived only when `sessions_completed == sessions_total`
+   - Archive run, update EPIC counter, conditionally archive EPIC and plan
+   - EPIC archived only when `runs_completed == runs_total`
    - Plan archived only when `epics_completed == epics_total`
 7. **Completion Summary** (per `skills/epic-orchestration.md` DONE state item 8):
    Present the structured Completion Summary from `skills/epic-orchestration.md`

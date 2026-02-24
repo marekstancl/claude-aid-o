@@ -2,8 +2,8 @@
 status: active
 plan_ref: 2026-02-15-task-management-plan.md
 plan_epics_total: 1
-sessions_total: 1
-sessions_completed: 0
+runs_total: 1
+runs_completed: 0
 ---
 
 # EPIC: EXAMPLE-0001 — Task Management Module
@@ -114,11 +114,11 @@ operations produce structured audit logs and OpenTelemetry traces.
 | 8 | docs | Update API docs + CHANGELOG + architecture overview | 3, 4 | -- |
 | 9 | release | Deployment config + smoke test definition | 5, 6 | -- |
 
-## Session Breakdown
+## Run Breakdown
 
-This EPIC fits in a single orchestrated run (no session split needed).
+This EPIC fits in a single orchestrated run (no run split needed).
 
-### Session 1: Full Implementation
+### Run 1: Full Implementation
 **Goal:** Complete task management module end-to-end.
 **Deliverables:** All artifacts listed above.
 

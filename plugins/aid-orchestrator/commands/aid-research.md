@@ -25,10 +25,10 @@ This command provides three modes: **topic** (quick research on a framework/topi
 
 ## Prerequisites
 
-- `.aid-o/` workspace should exist (run `/aid-init` first; if missing, warn but proceed with in-session-only results)
+- `.aid-o/` workspace should exist (run `/aid-init` first; if missing, warn but proceed with in-run-only results)
 - For persistent storage: Qdrant MCP configured (see `/aid-setup` Option 6a)
 - For Context7 source: Context7 MCP configured (see `/aid-setup` Option 6b)
-- Without Qdrant: research results are useful in the current session but not persisted
+- Without Qdrant: research results are useful in the current run but not persisted
 - Without Context7: WebSearch fallback is used automatically
 
 ## Flow
@@ -80,7 +80,7 @@ ELSE:
    - `knowledge.research.*` -- depth limits, chunk limits, source tiers
 3. Read `.aid-o/04-engine/memory/knowledge-base.yaml` for existing source index
 4. Check Qdrant availability:
-   - If Qdrant unavailable: warn PM that results will be session-only, continue
+   - If Qdrant unavailable: warn PM that results will be run-only, continue
 
 **Present to PM:**
 ```
@@ -90,7 +90,7 @@ Mode: {topic | deep | url}
 {Framework: {framework} | URL: {url}}
 {Topic: {topic} (if provided)}
 Source: {context7 | websearch} (primary)
-Storage: {qdrant | session-only}
+Storage: {qdrant | run-only}
 
 Researching...
 ```
@@ -237,7 +237,7 @@ URL: {url (if URL mode)}
 
 Chunks stored: {N} ({M} rejected by quality gates)
 {Library ID: {id} (if Context7)}
-Storage: {qdrant (persistent) | session-only}
+Storage: {qdrant (persistent) | run-only}
 
 {IF N > 0:}
 Key topics indexed:
@@ -297,7 +297,7 @@ Suggestions:
 **Qdrant unavailable output (appended to any result):**
 ```
 Note: Qdrant is not available. Research results are useful in this
-session only and will NOT be persisted for future sessions or projects.
+run only and will NOT be persisted for future runs or projects.
 Run /aid-setup to configure Qdrant for persistent knowledge storage.
 ```
 
@@ -311,7 +311,7 @@ All errors are non-blocking. No research failure ever blocks the PM workflow.
 | Context7 library not found | Fall back to WebSearch for that framework |
 | WebSearch returns no Tier 1/2 results | Report "no quality sources", store nothing |
 | WebFetch fails for URL | Report "URL unreachable", abort that URL |
-| Qdrant MCP unavailable | Results are session-only, warn PM |
+| Qdrant MCP unavailable | Results are run-only, warn PM |
 | All sources fail | Report, proceed without knowledge |
 | knowledge-base.yaml missing | Create it from template, continue |
 | memory-config.yaml missing knowledge section | Use defaults (context7 if available, websearch otherwise) |
@@ -333,5 +333,5 @@ All errors are non-blocking. No research failure ever blocks the PM workflow.
 - **No re-fetch:** If a framework is already actively indexed with sufficient depth, do not re-fetch unless a specific topic is requested or a depth upgrade is needed.
 - **Cross-project reuse:** Before fetching, check Qdrant for existing global chunks from other projects. Reuse if sufficient.
 - **URL mode is PM-initiated.** The PM vouches for URL relevance by providing it. Assign at least "medium" confidence.
-- **Session-only fallback:** If Qdrant is unavailable, research still runs and results are displayed to PM. They are useful in the current session even without persistence.
-- If `.aid-o/` does not exist, warn PM and proceed with session-only results (no YAML updates, no persistent storage).
+- **Run-only fallback:** If Qdrant is unavailable, research still runs and results are displayed to PM. They are useful in the current run even without persistence.
+- If `.aid-o/` does not exist, warn PM and proceed with run-only results (no YAML updates, no persistent storage).

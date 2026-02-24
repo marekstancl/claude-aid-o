@@ -354,7 +354,7 @@ IF overall == "fail":
 | `/aid-epic-status` | `gates_report.json` for display |
 | `/aid-run-epic` PM_APPROVAL | Gate results for final summary |
 | `/aid-run-epic` DONE | Gate results for final report |
-| Auditor agent (Session 4) | Gate history for trend tracking |
+| Auditor agent (Run 4) | Gate history for trend tracking |
 
 ---
 

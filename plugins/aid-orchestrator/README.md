@@ -41,7 +41,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `/aid-brainstorm [topic]` | 9-step interactive brainstorming flow → plan + optional EPIC draft |
 | `/aid-help [topic]` | Show AID documentation (commands, workflow, agents, FAQ) |
 | `/aid-analytics [scope]` | Analyze orchestration performance metrics and get optimization recommendations |
-| `/aid-plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + session file |
+| `/aid-plan-epic <path>` | Parse EPIC or Plan → generate Plan JSON + run file |
 | `/aid-research [topic\|url]` | On-demand documentation research — topic, URL, or --deep mode |
 | `/aid-run-epic [id]` | Run Controller state machine for full EPIC orchestration |
 | `/aid-epic-status [id]` | Show EPIC pipeline status — steps, gates, budget |
@@ -79,8 +79,8 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `code-reviewer` | Reviews code against plan + coding standards |
 | `docs-reviewer` | Reviews docs for format compliance |
 | `quality-gates-runner` | Runs 6-gate pre-commit protocol |
-| `session-validator` | Validates session file completeness |
-| `lessons-extractor` | Extracts lessons from completed sessions |
+| `run-validator` | Validates run file completeness |
+| `lessons-extractor` | Extracts lessons from completed runs |
 | `gate-fixer` | Analyzes gate failures, applies targeted fixes |
 
 ## Skills (17)
@@ -91,7 +91,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `brainstorming` | 9-step brainstorming process, EPIC subagent prompt template |
 | `agent-core` | Core agent behavior, roles, workflow routing |
 | `quality-gates` | 6-gate pre-commit protocol |
-| `session-management` | Session lifecycle, handoffs, epic tracking |
+| `run-management` | Run lifecycle, handoffs, epic tracking |
 | `gates-engine` | Post-step gates — YAML parsing, execution, reporting |
 | `retry-engine` | Gate failure retry — analysis, fix dispatch, escalation |
 | `planner` | Plan generation — dependency graph, parallel groups, analysis groups |
@@ -160,12 +160,12 @@ claude mcp add qdrant-memory \
 ```
 
 **What gets indexed:**
-- Session-end: decisions, lessons learned, working commands
+- Run-end: decisions, lessons learned, working commands
 - EPIC completion: architectural decisions, code patterns, audit findings
 - Per-agent metrics: step duration, complexity, bottleneck flags
 
 **What agents receive:** Before each step, the Controller searches memory for relevant
-past knowledge and injects it as `## MEMORY CONTEXT (from past sessions)` in the agent prompt.
+past knowledge and injects it as `## MEMORY CONTEXT (from past runs)` in the agent prompt.
 
 **Cross-project knowledge:** All Qdrant entries include `project_name` metadata. When
 multiple projects share the same Qdrant collection, agents can discover patterns and
@@ -174,13 +174,13 @@ lessons from related projects. Use `/aid-analytics global` to compare across pro
 **Without Qdrant:** Plugin works identically using file-based memory only (active-work.md,
 lessons-learned.md, command-history.md). Qdrant is supplementary, never required.
 
-## Multi-Session EPICs
+## Multi-Run EPICs
 
 For larger EPICs (7+ steps), the Planner automatically splits execution into multiple
-sessions optimized for speed and quality. Each session runs independently with handoff
-state preserved between them. Use `/aid-run-epic E-xxx --session N` to run a specific session.
+runs optimized for speed and quality. Each run executes independently with handoff
+state preserved between them. Use `/aid-run-epic E-xxx --run N` to run a specific run.
 The Planner decides the optimal split based on dependency analysis and parallel opportunity
-detection — PM approves the session plan.
+detection — PM approves the run plan.
 
 ## Cost Optimization
 
@@ -202,10 +202,10 @@ Use `/aid-analytics` to review cost trends and identify optimization opportuniti
   02-epics/              EPICs (task specifications)
   03-config/
     policies/            gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
-    templates/           EPIC template, session templates, plan schema
+    templates/           EPIC template, run templates, plan schema
     playbooks/           9 role playbooks + 2 docs platform playbooks
   04-engine/
-    sessions/            Active + archived session files
+    runs/                Active + archived run files
     memory/              project-profile.yaml, active-work.md, decisions.yaml
     evidence/            EPIC execution evidence (per epic, per run)
     backlog.md           Discovered issues backlog
