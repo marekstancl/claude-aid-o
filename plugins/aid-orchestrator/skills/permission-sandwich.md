@@ -205,7 +205,7 @@ HARD_DENY_COMMANDS:
   - "Bash(git push -f:*)"
   - "Bash(git reset --hard:*)"
   - "Bash(sudo:*)"
-  - "Bash(su :*)"
+  - "Bash(su:*)"
   - "Bash(chmod 777:*)"
   - "Bash(chown:*)"
 ```
@@ -564,7 +564,7 @@ deny:
   - "Bash(git push -f:*)"
   - "Bash(git reset --hard:*)"
   - "Bash(sudo:*)"
-  - "Bash(su :*)"
+  - "Bash(su:*)"
   - "Bash(chmod 777:*)"
   - "Bash(chown:*)"
 
