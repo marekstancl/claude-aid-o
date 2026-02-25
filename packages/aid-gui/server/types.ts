@@ -861,3 +861,134 @@ export interface PathClassification {
   /** Whether this file should be excluded from the general watcher. */
   excluded: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// 14. REST API Response Types (EPIC E-005-3_4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Standard API success response envelope.
+ */
+export interface ApiResponse<T> {
+  ok: true;
+  data: T;
+  meta?: {
+    total?: number;
+    warnings?: string[];
+  };
+}
+
+/**
+ * Standard API error response.
+ */
+export interface ApiError {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+}
+
+/**
+ * An entry in the evidence tree — represents an EPIC directory.
+ */
+export interface EvidenceEpicEntry {
+  epicId: string;
+  runs: EvidenceRunEntry[];
+}
+
+/**
+ * An entry in the evidence tree — represents a single run directory.
+ */
+export interface EvidenceRunEntry {
+  runId: string;
+  files: string[];
+  hasStageLog: boolean;
+  hasPlan: boolean;
+  hasGatesReport: boolean;
+}
+
+/**
+ * Summary of a parsed evidence file served via the files/* endpoint.
+ */
+export interface EvidenceFileResponse {
+  filePath: string;
+  format: 'json' | 'yaml' | 'jsonl' | 'markdown' | 'text' | 'raw';
+  content: unknown;
+}
+
+/**
+ * EPIC list entry (summary, not full spec).
+ */
+export interface EpicListEntry {
+  epicId: string;
+  title: string;
+  status: string;
+  planRef: string;
+}
+
+/**
+ * Plan list entry (summary from frontmatter).
+ */
+export interface PlanListEntry {
+  planId: string;
+  title: string;
+  filename: string;
+}
+
+/**
+ * Config summary returned by GET /config.
+ */
+export interface ConfigSummary {
+  files: Array<{
+    filename: string;
+    parsed: unknown;
+  }>;
+}
+
+/**
+ * Knowledge inventory item.
+ */
+export interface KnowledgeItem {
+  type: 'agent' | 'skill' | 'command';
+  name: string;
+  description: string;
+  filename: string;
+}
+
+/**
+ * Pending decision — an evidence directory that expects a pm_decision.json.
+ */
+export interface PendingDecision {
+  epicId: string;
+  runId: string;
+  state: string;
+  evidencePath: string;
+}
+
+/**
+ * Request body for POST /decisions.
+ */
+export interface DecisionWriteRequest {
+  epicId: string;
+  runId: string;
+  decision: string;
+  feedback?: string;
+}
+
+/**
+ * Usage summary computed from stage_log.jsonl files.
+ */
+export interface UsageSummary {
+  totalEvents: number;
+  agentDispatches: number;
+  gateEvaluations: number;
+  escalations: number;
+  perEpic: Array<{
+    epicId: string;
+    runId: string;
+    events: number;
+    durationSeconds: number;
+  }>;
+}
