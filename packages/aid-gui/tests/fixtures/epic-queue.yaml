@@ -1,0 +1,37 @@
+# Epic Queue — managed by Orchestrator + /epic-queue command
+# Do not edit manually while an EPIC is running.
+
+paused: false
+
+queue:
+  - epic_id: "E-005-1_4-gui-foundation"
+    path: ".aid-o/02-epics/E-005-1_4-gui-foundation.md"
+    priority: high
+    status: running
+    added_at: "2026-02-25T14:00:00Z"
+    started_at: "2026-02-25T14:00:05Z"
+    completed_at: null
+
+  - epic_id: "E-005-2_4-gui-realtime"
+    path: ".aid-o/02-epics/E-005-2_4-gui-realtime.md"
+    priority: high
+    status: queued
+    added_at: "2026-02-25T14:00:01Z"
+    started_at: null
+    completed_at: null
+
+  - epic_id: "E-005-3_4-gui-rest-api"
+    path: ".aid-o/02-epics/E-005-3_4-gui-rest-api.md"
+    priority: high
+    status: queued
+    added_at: "2026-02-25T14:00:02Z"
+    started_at: null
+    completed_at: null
+
+  - epic_id: "E-005-4_4-gui-features-cli"
+    path: ".aid-o/02-epics/E-005-4_4-gui-features-cli.md"
+    priority: high
+    status: queued
+    added_at: "2026-02-25T14:00:03Z"
+    started_at: null
+    completed_at: null

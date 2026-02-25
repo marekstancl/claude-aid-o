@@ -1,0 +1,5 @@
+{"timestamp": "2026-02-24T14:40:00Z", "state": "IDLE", "action": "load_epic", "result": "pass"}
+this is not valid json at all
+{"timestamp": "2026-02-24T14:40:02Z", "state": "IDLE", "action": "load_plan", "result": "pass"}
+{incomplete json
+{"timestamp": "2026-02-24T14:40:04Z", "state": "EXECUTING", "action": "dispatch_agent", "result": "pending"}
