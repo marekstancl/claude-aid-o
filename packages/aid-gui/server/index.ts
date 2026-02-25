@@ -18,6 +18,8 @@ import decisionsRouter from "./api/decisions.ts";
 import auditRouter from "./api/audit.ts";
 import queueRouter from "./api/queue.ts";
 import usageRouter from "./api/usage.ts";
+import ideasRouter from "./api/ideas.ts";
+import projectsRouter from "./api/projects.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,13 +130,21 @@ export function createApp() {
   app.use(`${apiBase}/audit`, projectResolver, auditRouter);
   app.use(`${apiBase}/queue`, projectResolver, queueRouter);
   app.use(`${apiBase}/usage`, projectResolver, usageRouter);
+  app.use(`${apiBase}/ideas`, projectResolver, ideasRouter);
+
+  // Projects router — NOT behind projectResolver (it manages projects themselves)
+  app.use("/api/projects", projectsRouter);
 
   return app;
 }
 
-async function startServer() {
+export interface ServerConfig {
+  port?: number;
+}
+
+export async function startServer(config?: ServerConfig): Promise<void> {
   const app = createApp();
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = config?.port || Number(process.env.PORT) || 4200;
   const aidoPath = resolveAidoPath();
 
   // ---------------------------------------------------------------------------
@@ -276,4 +286,10 @@ async function startServer() {
   process.on("SIGTERM", shutdown);
 }
 
-startServer();
+// Auto-start when this file is run directly (not imported by CLI or tests)
+const _runFile = process.argv[1]?.replace(/\\/g, "/") ?? "";
+const _isMainModule =
+  _runFile.endsWith("server/index.ts") || _runFile.endsWith("server/index.js");
+if (_isMainModule) {
+  startServer();
+}

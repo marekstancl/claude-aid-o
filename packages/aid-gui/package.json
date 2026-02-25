@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "aid-gui": "./bin/aid-gui.ts"
+  },
   "scripts": {
     "dev": "tsx server/index.ts",
     "start": "node server/index.ts",
@@ -22,6 +25,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "chokidar": "^5.0.0",
     "clsx": "^2.1.1",
+    "commander": "^13.1.0",
     "express": "^4.21.2",
     "gray-matter": "^4.0.3",
     "highlight.js": "^11.11.1",
@@ -29,6 +33,7 @@
     "lucide-react": "^0.546.0",
     "marked": "^17.0.3",
     "motion": "^12.23.24",
+    "open": "^10.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router": "^7.13.1",

@@ -1,15 +1,19 @@
 /**
- * Queue API router — CRUD operations on the EPIC execution queue.
+ * Queue API router — CRUD operations on the EPIC execution queue
+ * and scheduling engine endpoints.
  *
  * Reads and writes `.aid-o/04-engine/epic-queue.yaml`.
  * All mutations use atomic write (write to .tmp, then rename) to avoid
  * partial writes on crash.
  *
  * Routes:
- *   GET    /  — Read current queue state
- *   POST   /  — Add an entry to the queue
- *   PUT    /:epicId — Update an existing queue entry
- *   DELETE /:epicId — Remove a queued entry
+ *   GET    /            — Read current queue state
+ *   POST   /            — Add an entry to the queue
+ *   PUT    /:epicId     — Update an existing queue entry
+ *   DELETE /:epicId     — Remove a queued entry
+ *   GET    /schedule        — Get schedule config for current project
+ *   PUT    /schedule        — Update schedule config
+ *   GET    /schedule/status — Get current scheduler status snapshot
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -18,7 +22,12 @@ import * as path from 'node:path';
 import yaml from 'js-yaml';
 import { sendOk, send400, send404, sendError } from './middleware.ts';
 import { parseYaml } from '../parsers/index.ts';
-import type { EpicQueue, QueueSchedule } from '../types.ts';
+import type { EpicQueue, QueueSchedule, ScheduleConfig } from '../types.ts';
+import {
+  queueScheduler,
+  readConfigForProject,
+  DEFAULT_CONFIG,
+} from '../scheduling/scheduler.ts';
 
 const router = Router();
 
@@ -183,6 +192,131 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// Schedule endpoints — registered BEFORE parameterized /:epicId routes
+// so that "/schedule" is not captured as an epicId parameter.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// GET /schedule — Get schedule config for current project
+// ---------------------------------------------------------------------------
+
+router.get('/schedule', async (req: Request, res: Response) => {
+  try {
+    const config = await readConfigForProject(req.aidoPath);
+    sendOk(res, config);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to read schedule config';
+    sendError(res, 500, 'INTERNAL_ERROR', message);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /schedule/status — Get current scheduler status snapshot
+// ---------------------------------------------------------------------------
+
+router.get('/schedule/status', (_req: Request, res: Response) => {
+  try {
+    const status = queueScheduler.getStatus();
+    sendOk(res, status);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to read schedule status';
+    sendError(res, 500, 'INTERNAL_ERROR', message);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /schedule — Update schedule config
+// ---------------------------------------------------------------------------
+
+router.put('/schedule', async (req: Request, res: Response) => {
+  try {
+    const body = req.body ?? {};
+    const updates: Partial<ScheduleConfig> = {};
+    const errors: string[] = [];
+
+    // Validate and pick known fields from the request body.
+
+    if ('enabled' in body) {
+      if (typeof body.enabled !== 'boolean') {
+        errors.push('enabled must be a boolean');
+      } else {
+        updates.enabled = body.enabled;
+      }
+    }
+
+    if ('cooldownSeconds' in body) {
+      if (typeof body.cooldownSeconds !== 'number' || body.cooldownSeconds < 0) {
+        errors.push('cooldownSeconds must be a number >= 0');
+      } else {
+        updates.cooldownSeconds = body.cooldownSeconds;
+      }
+    }
+
+    if ('maxConcurrent' in body) {
+      if (typeof body.maxConcurrent !== 'number' || body.maxConcurrent < 1 || !Number.isInteger(body.maxConcurrent)) {
+        errors.push('maxConcurrent must be an integer >= 1');
+      } else {
+        updates.maxConcurrent = body.maxConcurrent;
+      }
+    }
+
+    if ('delayedStartAt' in body) {
+      if (body.delayedStartAt !== null && typeof body.delayedStartAt !== 'string') {
+        errors.push('delayedStartAt must be an ISO 8601 string or null');
+      } else if (typeof body.delayedStartAt === 'string' && isNaN(Date.parse(body.delayedStartAt))) {
+        errors.push('delayedStartAt must be a valid ISO 8601 date string');
+      } else {
+        updates.delayedStartAt = body.delayedStartAt;
+      }
+    }
+
+    if ('autoPauseAtCcLimit' in body) {
+      if (typeof body.autoPauseAtCcLimit !== 'boolean') {
+        errors.push('autoPauseAtCcLimit must be a boolean');
+      } else {
+        updates.autoPauseAtCcLimit = body.autoPauseAtCcLimit;
+      }
+    }
+
+    if ('ccLimitThreshold' in body) {
+      if (typeof body.ccLimitThreshold !== 'number' || body.ccLimitThreshold < 0) {
+        errors.push('ccLimitThreshold must be a number >= 0');
+      } else {
+        updates.ccLimitThreshold = body.ccLimitThreshold;
+      }
+    }
+
+    if ('lastRunCompletedAt' in body) {
+      if (body.lastRunCompletedAt !== null && typeof body.lastRunCompletedAt !== 'string') {
+        errors.push('lastRunCompletedAt must be an ISO 8601 string or null');
+      } else if (typeof body.lastRunCompletedAt === 'string' && isNaN(Date.parse(body.lastRunCompletedAt))) {
+        errors.push('lastRunCompletedAt must be a valid ISO 8601 date string');
+      } else {
+        updates.lastRunCompletedAt = body.lastRunCompletedAt;
+      }
+    }
+
+    // Reject if any validation errors occurred.
+    if (errors.length > 0) {
+      send400(res, errors.join('; '));
+      return;
+    }
+
+    // Reject if no valid fields were provided.
+    if (Object.keys(updates).length === 0) {
+      send400(res, 'At least one valid schedule config field must be provided');
+      return;
+    }
+
+    const updated = await queueScheduler.updateConfig(req.aidoPath, updates);
+    sendOk(res, updated);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to update schedule config';
+    sendError(res, 500, 'INTERNAL_ERROR', message);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // PUT /:epicId — Update an existing queue entry
 // ---------------------------------------------------------------------------
 
@@ -273,4 +407,5 @@ router.delete('/:epicId', async (req: Request, res: Response) => {
   }
 });
 
+export { queueScheduler };
 export default router;
