@@ -1,26 +1,145 @@
-import React, { useState } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { useStore } from '../store';
+import { createApiClient } from '../api/client';
 import { cn } from '../lib/utils';
 import { Archive, FileText, Search, ChevronRight, Book, Folder, FileJson, FileCode, Hash } from 'lucide-react';
+import type { ApiError } from '../types/api';
+
+const client = createApiClient('default');
 
 export const EvidenceVault: React.FC = () => {
-  const [selectedEpic, setSelectedEpic] = useState('E-005');
-  const [selectedRun, setSelectedRun] = useState('Run 1');
+  const evidenceEpics = useStore((s) => s.evidenceEpics);
+  const selectedEvidenceEpic = useStore((s) => s.selectedEvidenceEpic);
+  const selectedEvidenceRun = useStore((s) => s.selectedEvidenceRun);
+  const selectedEvidenceFile = useStore((s) => s.selectedEvidenceFile);
+  const evidenceFileContent = useStore((s) => s.evidenceFileContent);
+  const evidenceLoading = useStore((s) => s.evidenceLoading);
+  const setEvidenceEpics = useStore((s) => s.setEvidenceEpics);
+  const setEvidenceSelection = useStore((s) => s.setEvidenceSelection);
+  const setEvidenceFileContent = useStore((s) => s.setEvidenceFileContent);
+  const setEvidenceLoading = useStore((s) => s.setEvidenceLoading);
 
-  const epics = [
-    { id: 'E-005', name: 'Auth System Refactor', runs: ['Run 1', 'Run 2'] },
-    { id: 'E-004', name: 'Dashboard UI', runs: ['Run 1'] },
-    { id: 'E-003', name: 'API V2 Migration', runs: ['Run 1', 'Run 2', 'Run 3'] },
-  ];
+  // Fetch evidence tree on mount
+  useEffect(() => {
+    let cancelled = false;
+    const fetchEvidence = async () => {
+      setEvidenceLoading(true);
+      const result = await client.getEvidence();
+      if (cancelled) return;
+      if (result.ok) {
+        setEvidenceEpics(result.data);
+      } else {
+        console.error('Failed to fetch evidence:', (result as ApiError).error.message);
+      }
+      setEvidenceLoading(false);
+    };
+    fetchEvidence();
+    return () => { cancelled = true; };
+  }, [setEvidenceEpics, setEvidenceLoading]);
 
-  const files = [
-    { name: 'plan.json', type: 'json', size: '12kb' },
-    { name: 'stage_log.jsonl', type: 'jsonl', size: '450kb' },
-    { name: 'agent_output.md', type: 'md', size: '24kb' },
-    { name: 'changes.patch', type: 'diff', size: '1.2mb' },
-    { name: 'audit_report.yaml', type: 'yaml', size: '8kb' },
-  ];
+  // Fetch file content when a file is selected
+  const handleFileSelect = useCallback(async (filePath: string) => {
+    if (!selectedEvidenceEpic || !selectedEvidenceRun) return;
+    setEvidenceSelection(selectedEvidenceEpic, selectedEvidenceRun, filePath);
+    setEvidenceLoading(true);
+    const result = await client.getEvidenceFile(selectedEvidenceEpic, selectedEvidenceRun, filePath);
+    if (result.ok) {
+      setEvidenceFileContent(result.data);
+    } else {
+      console.error('Failed to fetch evidence file:', (result as ApiError).error.message);
+      setEvidenceFileContent(null);
+    }
+    setEvidenceLoading(false);
+  }, [selectedEvidenceEpic, selectedEvidenceRun, setEvidenceSelection, setEvidenceFileContent, setEvidenceLoading]);
+
+  // Derive the selected run's file list
+  const selectedEpicEntry = evidenceEpics.find((e) => e.epicId === selectedEvidenceEpic);
+  const selectedRunEntry = selectedEpicEntry?.runs.find((r) => r.runId === selectedEvidenceRun);
+  const files = selectedRunEntry?.files ?? [];
+
+  // Determine file icon based on extension
+  const getFileIcon = (fileName: string) => {
+    if (fileName.endsWith('.json')) return <FileJson size={16} />;
+    if (fileName.endsWith('.jsonl')) return <Hash size={16} />;
+    if (fileName.endsWith('.yaml') || fileName.endsWith('.yml')) return <FileCode size={16} />;
+    if (fileName.endsWith('.md')) return <FileText size={16} />;
+    return <FileCode size={16} />;
+  };
+
+  // Render file content based on format
+  const renderContent = () => {
+    if (evidenceLoading && selectedEvidenceFile) {
+      return (
+        <div className="flex items-center justify-center h-full text-white/40">
+          <div className="text-center space-y-4">
+            <div className="w-12 h-12 rounded-full border-4 border-white/10 border-t-white/40 animate-spin mx-auto" />
+            <p className="text-sm">Loading file...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (!evidenceFileContent) {
+      return (
+        <div className="flex items-center justify-center h-full text-white/20">
+          <div className="text-center space-y-4">
+            <Archive size={48} className="mx-auto" />
+            <p className="text-sm">Select a file to view its contents</p>
+          </div>
+        </div>
+      );
+    }
+
+    const { format, content, filePath } = evidenceFileContent;
+
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="glass rounded-2xl border border-white/10 overflow-hidden">
+          <div className="bg-white/5 px-6 py-3 border-b border-white/10 flex items-center justify-between">
+            <span className="text-xs font-mono text-white/40">{filePath}</span>
+            <div className="flex gap-2">
+              <div className="w-2 h-2 rounded-full bg-white/10" />
+              <div className="w-2 h-2 rounded-full bg-white/10" />
+              <div className="w-2 h-2 rounded-full bg-white/10" />
+            </div>
+          </div>
+          <div className="p-8">
+            {(format === 'json' || format === 'yaml') && (
+              <pre className="text-xs font-mono text-white/70 whitespace-pre-wrap overflow-x-auto">
+                {typeof content === 'string' ? content : JSON.stringify(content, null, 2)}
+              </pre>
+            )}
+            {format === 'markdown' && (
+              <pre className="text-sm text-white/60 whitespace-pre-wrap leading-relaxed">
+                {typeof content === 'string' ? content : String(content)}
+              </pre>
+            )}
+            {format === 'jsonl' && (
+              <div className="space-y-3">
+                {(Array.isArray(content) ? content : []).map((line, i) => (
+                  <div key={i} className="flex gap-4 items-start border-l-2 border-white/10 pl-4 py-1">
+                    <span className="text-[10px] font-mono text-white/20 shrink-0 mt-0.5">{String(i + 1).padStart(3, '0')}</span>
+                    <pre className="text-xs font-mono text-white/60 whitespace-pre-wrap overflow-x-auto">
+                      {typeof line === 'string' ? line : JSON.stringify(line, null, 2)}
+                    </pre>
+                  </div>
+                ))}
+                {(!Array.isArray(content) || content.length === 0) && (
+                  <p className="text-xs text-white/40">No entries found.</p>
+                )}
+              </div>
+            )}
+            {(format === 'text' || format === 'raw') && (
+              <pre className="text-xs font-mono text-white/60 whitespace-pre-wrap overflow-x-auto">
+                {typeof content === 'string' ? content : String(content)}
+              </pre>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="h-full flex overflow-hidden">
@@ -30,46 +149,57 @@ export const EvidenceVault: React.FC = () => {
           <h2 className="text-xl font-bold tracking-tight mb-4">Evidence Vault</h2>
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20" />
-            <input 
-              type="text" 
-              placeholder="Search evidence..." 
+            <input
+              type="text"
+              placeholder="Search evidence..."
               className="w-full bg-white/5 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-xs focus:outline-none focus:border-white/20"
             />
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-6">
-          {epics.map(epic => (
-            <div key={epic.id} className="space-y-2">
-              <div className="flex items-center gap-2 px-2 text-[10px] font-bold uppercase tracking-widest text-white/40">
-                <Book size={12} />
-                <span>EPIC {epic.id}</span>
-              </div>
-              <div className="space-y-1">
-                {epic.runs.map(run => (
-                  <button
-                    key={run}
-                    onClick={() => {
-                      setSelectedEpic(epic.id);
-                      setSelectedRun(run);
-                    }}
-                    className={cn(
-                      "w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all",
-                      selectedEpic === epic.id && selectedRun === run 
-                        ? "bg-white/10 text-white shadow-sm" 
-                        : "text-white/40 hover:text-white hover:bg-white/5"
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Folder size={14} className={selectedEpic === epic.id && selectedRun === run ? "text-state-executing" : ""} />
-                      <span>{run}</span>
-                    </div>
-                    {selectedEpic === epic.id && selectedRun === run && <ChevronRight size={14} />}
-                  </button>
-                ))}
-              </div>
+          {evidenceLoading && evidenceEpics.length === 0 ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-8 h-8 rounded-full border-2 border-white/10 border-t-white/40 animate-spin" />
             </div>
-          ))}
+          ) : evidenceEpics.length === 0 ? (
+            <div className="text-center py-12 text-white/30">
+              <Archive size={32} className="mx-auto mb-3" />
+              <p className="text-xs">No evidence data available</p>
+            </div>
+          ) : (
+            evidenceEpics.map(epic => (
+              <div key={epic.epicId} className="space-y-2">
+                <div className="flex items-center gap-2 px-2 text-[10px] font-bold uppercase tracking-widest text-white/40">
+                  <Book size={12} />
+                  <span>EPIC {epic.epicId}</span>
+                </div>
+                <div className="space-y-1">
+                  {epic.runs.map(run => (
+                    <button
+                      key={run.runId}
+                      onClick={() => {
+                        setEvidenceSelection(epic.epicId, run.runId, null);
+                        setEvidenceFileContent(null);
+                      }}
+                      className={cn(
+                        "w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-all",
+                        selectedEvidenceEpic === epic.epicId && selectedEvidenceRun === run.runId
+                          ? "bg-white/10 text-white shadow-sm"
+                          : "text-white/40 hover:text-white hover:bg-white/5"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Folder size={14} className={selectedEvidenceEpic === epic.epicId && selectedEvidenceRun === run.runId ? "text-state-executing" : ""} />
+                        <span>{run.runId}</span>
+                      </div>
+                      {selectedEvidenceEpic === epic.epicId && selectedEvidenceRun === run.runId && <ChevronRight size={14} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </aside>
 
@@ -78,10 +208,18 @@ export const EvidenceVault: React.FC = () => {
         <div className="h-14 border-b border-white/5 flex items-center justify-between px-6">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-white/40">Evidence</span>
-            <ChevronRight size={14} className="text-white/20" />
-            <span className="text-white/40">EPIC {selectedEpic}</span>
-            <ChevronRight size={14} className="text-white/20" />
-            <span className="font-medium">{selectedRun}</span>
+            {selectedEvidenceEpic && (
+              <>
+                <ChevronRight size={14} className="text-white/20" />
+                <span className="text-white/40">EPIC {selectedEvidenceEpic}</span>
+              </>
+            )}
+            {selectedEvidenceRun && (
+              <>
+                <ChevronRight size={14} className="text-white/20" />
+                <span className="font-medium">{selectedEvidenceRun}</span>
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-medium transition-all">
@@ -93,20 +231,37 @@ export const EvidenceVault: React.FC = () => {
         <div className="flex-1 flex">
           {/* File List */}
           <div className="w-64 border-r border-white/5 p-4 space-y-1 overflow-y-auto">
-            {files.map(file => (
+            {files.length === 0 && selectedEvidenceRun && (
+              <div className="text-center py-8 text-white/30">
+                <p className="text-xs">No files in this run</p>
+              </div>
+            )}
+            {!selectedEvidenceRun && (
+              <div className="text-center py-8 text-white/30">
+                <p className="text-xs">Select a run to view files</p>
+              </div>
+            )}
+            {files.map(fileName => (
               <button
-                key={file.name}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left hover:bg-white/5 transition-all group"
+                key={fileName}
+                onClick={() => handleFileSelect(fileName)}
+                className={cn(
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all group",
+                  selectedEvidenceFile === fileName
+                    ? "bg-white/10 text-white"
+                    : "hover:bg-white/5"
+                )}
               >
-                <div className="p-2 rounded-lg bg-white/5 text-white/40 group-hover:text-white transition-colors">
-                  {file.type === 'json' || file.type === 'jsonl' ? <FileJson size={16} /> :
-                   file.type === 'md' ? <FileText size={16} /> :
-                   file.type === 'diff' ? <Hash size={16} /> :
-                   <FileCode size={16} />}
+                <div className={cn(
+                  "p-2 rounded-lg bg-white/5 transition-colors",
+                  selectedEvidenceFile === fileName
+                    ? "text-white"
+                    : "text-white/40 group-hover:text-white"
+                )}>
+                  {getFileIcon(fileName)}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-xs font-medium truncate">{file.name}</div>
-                  <div className="text-[10px] text-white/20 uppercase tracking-widest">{file.size}</div>
+                  <div className="text-xs font-medium truncate">{fileName}</div>
                 </div>
               </button>
             ))}
@@ -114,34 +269,7 @@ export const EvidenceVault: React.FC = () => {
 
           {/* Content Viewer */}
           <div className="flex-1 p-8 overflow-y-auto">
-            <div className="max-w-4xl mx-auto">
-              <div className="glass rounded-2xl border border-white/10 overflow-hidden">
-                <div className="bg-white/5 px-6 py-3 border-b border-white/10 flex items-center justify-between">
-                  <span className="text-xs font-mono text-white/40">agent_output.md</span>
-                  <div className="flex gap-2">
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                    <div className="w-2 h-2 rounded-full bg-white/10" />
-                  </div>
-                </div>
-                <div className="p-8 prose prose-invert prose-sm max-w-none">
-                  <h1 className="text-2xl font-bold mb-4">Implementation Summary</h1>
-                  <p className="text-white/60 mb-6">
-                    I have successfully refactored the authentication system to use the new permission-sandwich pattern. 
-                    This change improves security by enforcing checks at both the API gateway and the service layer.
-                  </p>
-                  <h2 className="text-lg font-bold mb-3">Key Changes</h2>
-                  <ul className="list-disc list-inside text-white/60 space-y-2 mb-6">
-                    <li>Updated <code>auth-service.ts</code> to handle JWT validation</li>
-                    <li>Implemented <code>PermissionGuard</code> middleware</li>
-                    <li>Added 12 new unit tests for edge cases</li>
-                  </ul>
-                  <div className="bg-black/40 rounded-xl p-4 font-mono text-xs border border-white/5">
-                    <span className="text-state-executing">const</span> auth = <span className="text-state-pm-approval">await</span> verifyToken(token);
-                  </div>
-                </div>
-              </div>
-            </div>
+            {renderContent()}
           </div>
         </div>
       </main>
