@@ -1,20 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore, stateColors } from '../store';
 import { cn } from '../lib/utils';
-import { 
-  User, 
-  Database, 
-  Layout, 
-  ShieldCheck, 
-  FileText, 
-  CheckCircle2, 
-  Clock, 
+import {
+  User,
+  Database,
+  Layout,
+  ShieldCheck,
+  FileText,
+  CheckCircle2,
+  Clock,
   ChevronRight,
   Play,
   Pause,
-  RotateCcw
+  RotateCcw,
+  WifiOff,
+  AlertTriangle
 } from 'lucide-react';
+import type { PlanStep } from '../types/api';
+import type { StepStatus } from '../types/store';
 
 interface Step {
   id: string;
@@ -32,16 +36,86 @@ const roleIcons: Record<string, any> = {
   docs: FileText,
 };
 
+/**
+ * Map a PlanStep and its StepStatus into the local Step interface used
+ * for rendering. Falls back to 'pending' when no status is available.
+ */
+function mapPlanStepToStep(planStep: PlanStep, stepStatus: StepStatus | undefined, currentStepId: string | null): Step {
+  let status: Step['status'] = 'pending';
+
+  if (stepStatus) {
+    switch (stepStatus.status) {
+      case 'done':
+        status = 'completed';
+        break;
+      case 'executing':
+        status = 'active';
+        break;
+      case 'failed':
+        status = 'failed';
+        break;
+      case 'skipped':
+        status = 'skipped';
+        break;
+      default:
+        status = 'pending';
+    }
+  }
+
+  // If the pipeline currentStepId matches this step and it is still pending,
+  // mark it as active (covers the case where stepStatuses hasn't caught up yet).
+  if (currentStepId === planStep.id && status === 'pending') {
+    status = 'active';
+  }
+
+  // Compute a human-readable duration if timing is available
+  let duration: string | undefined;
+  if (stepStatus?.startedAt && stepStatus?.completedAt) {
+    const startMs = new Date(stepStatus.startedAt).getTime();
+    const endMs = new Date(stepStatus.completedAt).getTime();
+    const diffSec = Math.round((endMs - startMs) / 1000);
+    if (diffSec < 60) {
+      duration = `${diffSec}s`;
+    } else {
+      const mins = Math.floor(diffSec / 60);
+      const secs = diffSec % 60;
+      duration = `${mins}m ${secs}s`;
+    }
+  }
+
+  return {
+    id: planStep.id,
+    label: planStep.objective.length > 40 ? planStep.objective.slice(0, 37) + '...' : planStep.objective,
+    role: planStep.role,
+    status,
+    duration,
+  };
+}
+
 export const PipelineTheater: React.FC = () => {
-  const [steps, setSteps] = useState<Step[]>([]);
+  const planSteps = useStore((s) => s.steps);
+  const stepStatuses = useStore((s) => s.stepStatuses);
+  const currentStepId = useStore((s) => s.currentStepId);
   const { fsmState, progress } = useStore();
+  const wsStatus = useStore((s) => s.wsStatus);
+  const pipelineProgress = useStore((s) => s.pipelineProgress);
+
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
 
-  useEffect(() => {
-    fetch('/api/pipeline/steps')
-      .then(res => res.json())
-      .then(setSteps);
-  }, []);
+  const isLoading = wsStatus === 'connecting';
+  const isDisconnected = wsStatus === 'disconnected';
+  const isReconnecting = wsStatus === 'reconnecting';
+  const hasSteps = planSteps.length > 0;
+
+  // Derive the renderable steps from store data
+  const steps: Step[] = useMemo(() => {
+    return planSteps.map((ps) => mapPlanStepToStep(ps, stepStatuses[ps.id], currentStepId));
+  }, [planSteps, stepStatuses, currentStepId]);
+
+  // Compute estimated remaining from pipeline progress
+  const completedCount = pipelineProgress.stepsCompleted;
+  const totalCount = pipelineProgress.stepsTotal;
+  const remainingSteps = Math.max(0, totalCount - completedCount);
 
   return (
     <div className="h-full flex flex-col p-8 relative">
@@ -51,9 +125,23 @@ export const PipelineTheater: React.FC = () => {
           <p className="text-sm text-white/40">Visualizing the river of orchestration</p>
         </div>
         <div className="flex items-center gap-4">
+          {/* Connection warning badges */}
+          {(isDisconnected || isReconnecting) && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full">
+              <WifiOff size={14} className="text-red-400" />
+              <span className="text-xs font-mono text-red-400/80">
+                {isDisconnected ? 'Disconnected' : 'Reconnecting...'}
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5">
-            <div className="w-2 h-2 rounded-full bg-state-executing animate-pulse" />
-            <span className="text-xs font-mono uppercase tracking-widest">Live Execution</span>
+            <div className={cn(
+              "w-2 h-2 rounded-full",
+              wsStatus === 'connected' ? "bg-state-executing animate-pulse" : "bg-white/20"
+            )} />
+            <span className="text-xs font-mono uppercase tracking-widest">
+              {wsStatus === 'connected' ? 'Live Execution' : 'Offline'}
+            </span>
           </div>
         </div>
       </div>
@@ -76,11 +164,11 @@ export const PipelineTheater: React.FC = () => {
               </feMerge>
             </filter>
           </defs>
-          <motion.path 
-            d="M 0,200 Q 200,180 400,200 T 800,200 T 1200,200" 
-            fill="none" 
-            stroke="url(#riverGrad)" 
-            strokeWidth="40" 
+          <motion.path
+            d="M 0,200 Q 200,180 400,200 T 800,200 T 1200,200"
+            fill="none"
+            stroke="url(#riverGrad)"
+            strokeWidth="40"
             filter="url(#glow)"
             animate={{ d: ["M 0,200 Q 200,180 400,200 T 800,200 T 1200,200", "M 0,200 Q 200,220 400,200 T 800,200 T 1200,200", "M 0,200 Q 200,180 400,200 T 800,200 T 1200,200"] }}
             transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
@@ -98,66 +186,104 @@ export const PipelineTheater: React.FC = () => {
           ))}
         </svg>
 
-        <div className="flex items-center gap-16 px-20 relative z-10">
-          {steps.map((step, index) => (
-            <React.Fragment key={step.id}>
-              {/* Step Island */}
-              <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
-                onClick={() => setSelectedStep(step)}
-                className={cn(
-                  "relative group cursor-pointer",
-                  step.status === 'active' && "animate-pulse-subtle"
+        {/* Loading Skeleton State */}
+        {isLoading && !hasSteps && (
+          <div className="flex items-center gap-16 px-20 relative z-10">
+            {[...Array(5)].map((_, i) => (
+              <React.Fragment key={i}>
+                <div className="relative">
+                  <div className="w-20 h-20 rounded-3xl bg-white/5 border-2 border-white/10 animate-pulse" />
+                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
+                    <div className="h-2.5 w-14 bg-white/5 rounded animate-pulse" />
+                    <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
+                  </div>
+                </div>
+                {i < 4 && (
+                  <div className="w-16 h-1 bg-white/5 rounded-full animate-pulse" />
                 )}
-              >
-                <div className={cn(
-                  "w-20 h-20 rounded-3xl flex items-center justify-center transition-all duration-500 border-2",
-                  step.status === 'completed' ? "bg-state-done/20 border-state-done shadow-[0_0_15px_rgba(34,197,94,0.3)]" :
-                  step.status === 'active' ? "bg-state-executing/20 border-state-executing shadow-[0_0_20px_rgba(0,180,216,0.4)]" :
-                  "bg-white/5 border-white/10 opacity-40"
-                )}>
-                  {roleIcons[step.role] ? React.createElement(roleIcons[step.role], { size: 32 }) : <User size={32} />}
-                </div>
-                
-                <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-center">
-                  <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-0.5">{step.role}</div>
-                  <div className="text-xs font-medium">{step.label}</div>
-                </div>
+              </React.Fragment>
+            ))}
+          </div>
+        )}
 
-                {step.duration && (
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-white/10 px-2 py-0.5 rounded text-[10px] font-mono text-white/60">
-                    {step.duration}
+        {/* Empty state when connected but no steps */}
+        {!isLoading && !hasSteps && (
+          <div className="flex flex-col items-center gap-4 relative z-10">
+            <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+              <AlertTriangle size={24} className="text-white/20" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-white/40">No pipeline steps loaded</p>
+              <p className="text-xs text-white/20 mt-1">Start an EPIC run to see the execution flow</p>
+            </div>
+          </div>
+        )}
+
+        {/* Real steps */}
+        {hasSteps && (
+          <div className="flex items-center gap-16 px-20 relative z-10">
+            {steps.map((step, index) => (
+              <React.Fragment key={step.id}>
+                {/* Step Island */}
+                <motion.div
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  onClick={() => setSelectedStep(step)}
+                  className={cn(
+                    "relative group cursor-pointer",
+                    step.status === 'active' && "animate-pulse-subtle"
+                  )}
+                >
+                  <div className={cn(
+                    "w-20 h-20 rounded-3xl flex items-center justify-center transition-all duration-500 border-2",
+                    step.status === 'completed' ? "bg-state-done/20 border-state-done shadow-[0_0_15px_rgba(34,197,94,0.3)]" :
+                    step.status === 'active' ? "bg-state-executing/20 border-state-executing shadow-[0_0_20px_rgba(0,180,216,0.4)]" :
+                    step.status === 'failed' ? "bg-red-500/20 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]" :
+                    step.status === 'skipped' ? "bg-yellow-500/10 border-yellow-500/40 opacity-50" :
+                    "bg-white/5 border-white/10 opacity-40"
+                  )}>
+                    {roleIcons[step.role] ? React.createElement(roleIcons[step.role], { size: 32 }) : <User size={32} />}
+                  </div>
+
+                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-center">
+                    <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-0.5">{step.role}</div>
+                    <div className="text-xs font-medium">{step.label}</div>
+                  </div>
+
+                  {step.duration && (
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-white/10 px-2 py-0.5 rounded text-[10px] font-mono text-white/60">
+                      {step.duration}
+                    </div>
+                  )}
+                </motion.div>
+
+                {/* Connector / Water Flow */}
+                {index < steps.length - 1 && (
+                  <div className="w-16 h-1 bg-white/5 relative overflow-hidden rounded-full">
+                    <motion.div
+                      className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
+                      animate={{ x: ['-100%', '100%'] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    />
+                    {step.status === 'completed' && (
+                      <div className="absolute inset-0 bg-state-done/40" />
+                    )}
                   </div>
                 )}
-              </motion.div>
+              </React.Fragment>
+            ))}
 
-              {/* Connector / Water Flow */}
-              {index < steps.length - 1 && (
-                <div className="w-16 h-1 bg-white/5 relative overflow-hidden rounded-full">
-                  <motion.div 
-                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                    animate={{ x: ['-100%', '100%'] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                  />
-                  {step.status === 'completed' && (
-                    <div className="absolute inset-0 bg-state-done/40" />
-                  )}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-
-          {/* Final Gate */}
-          <div className="ml-8 flex flex-col items-center gap-4 opacity-40">
-            <div className="w-16 h-32 border-2 border-dashed border-white/20 rounded-2xl flex flex-col items-center justify-center gap-4">
-              <div className="w-8 h-8 rounded-lg bg-white/5" />
-              <div className="w-8 h-8 rounded-lg bg-white/5" />
+            {/* Final Gate */}
+            <div className="ml-8 flex flex-col items-center gap-4 opacity-40">
+              <div className="w-16 h-32 border-2 border-dashed border-white/20 rounded-2xl flex flex-col items-center justify-center gap-4">
+                <div className="w-8 h-8 rounded-lg bg-white/5" />
+                <div className="w-8 h-8 rounded-lg bg-white/5" />
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Quality Gates</span>
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Quality Gates</span>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Controls Bar */}
@@ -175,14 +301,14 @@ export const PipelineTheater: React.FC = () => {
             <button className="p-1 rounded hover:bg-white/10 text-[10px] font-mono text-white/40 hover:text-white">4x</button>
           </div>
         </div>
-        
+
         <div className="flex-1 space-y-2">
           <div className="flex justify-between text-[10px] font-mono text-white/40 uppercase tracking-widest">
             <span>Overall Progress</span>
             <span>{Math.round(progress * 100)}%</span>
           </div>
           <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-            <motion.div 
+            <motion.div
               className="h-full bg-state-executing shadow-[0_0_10px_rgba(0,180,216,0.5)]"
               animate={{ width: `${progress * 100}%` }}
             />
@@ -190,8 +316,14 @@ export const PipelineTheater: React.FC = () => {
         </div>
 
         <div className="text-right">
-          <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Est. Remaining</div>
-          <div className="text-sm font-bold">~14m 20s</div>
+          <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Remaining</div>
+          {isLoading ? (
+            <div className="h-5 w-16 bg-white/5 rounded animate-pulse mt-1" />
+          ) : (
+            <div className="text-sm font-bold">
+              {totalCount > 0 ? `${remainingSteps} / ${totalCount} steps` : '--'}
+            </div>
+          )}
         </div>
       </div>
 
@@ -199,7 +331,7 @@ export const PipelineTheater: React.FC = () => {
       <AnimatePresence>
         {selectedStep && (
           <>
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -223,7 +355,7 @@ export const PipelineTheater: React.FC = () => {
                     <p className="text-[10px] uppercase tracking-widest text-white/40">{selectedStep.role}</p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => setSelectedStep(null)}
                   className="p-2 hover:bg-white/5 rounded-lg transition-colors"
                 >
@@ -239,6 +371,8 @@ export const PipelineTheater: React.FC = () => {
                       "w-2 h-2 rounded-full",
                       selectedStep.status === 'completed' ? "bg-state-done" :
                       selectedStep.status === 'active' ? "bg-state-executing animate-pulse" :
+                      selectedStep.status === 'failed' ? "bg-red-500" :
+                      selectedStep.status === 'skipped' ? "bg-yellow-500" :
                       "bg-white/20"
                     )} />
                     <span className="text-sm capitalize">{selectedStep.status}</span>
@@ -248,8 +382,10 @@ export const PipelineTheater: React.FC = () => {
                 <section>
                   <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-3">Agent Output</h4>
                   <div className="bg-white/5 rounded-xl p-4 font-mono text-xs leading-relaxed text-white/60">
-                    {selectedStep.status === 'pending' ? 'Waiting for dispatch...' : 
+                    {selectedStep.status === 'pending' ? 'Waiting for dispatch...' :
                      selectedStep.status === 'active' ? 'Processing instructions and generating code artifacts...' :
+                     selectedStep.status === 'failed' ? 'Step execution failed. Check evidence vault for details.' :
+                     selectedStep.status === 'skipped' ? 'Step was skipped during this run.' :
                      'Successfully implemented the requested changes. Verified with unit tests.'}
                   </div>
                 </section>
