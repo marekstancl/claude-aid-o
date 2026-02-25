@@ -740,6 +740,7 @@ export type EventTopic =
   | 'queue'
   | 'audit'
   | 'usage'
+  | 'queue.schedule'
   | 'system';
 
 /**
@@ -755,6 +756,7 @@ export const ALL_EVENT_TOPICS: EventTopic[] = [
   'queue',
   'audit',
   'usage',
+  'queue.schedule',
   'system',
 ];
 
@@ -991,4 +993,115 @@ export interface UsageSummary {
     events: number;
     durationSeconds: number;
   }>;
+}
+
+// ---------------------------------------------------------------------------
+// 15. Ideas JSON Storage (EPIC E-005-4_4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single idea in the JSON storage format.
+ * Stored per-project in ~/.aid-gui/ideas.json.
+ */
+export interface StoredIdea {
+  id: string;
+  title: string;
+  description: string;
+  tags: string[];
+  priority: 'low' | 'medium' | 'high';
+  status: 'idea' | 'exploring' | 'planned' | 'done';
+  linkedPlan: string | null;
+  linkedEpic: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Per-project ideas collection inside the ideas.json file.
+ */
+export interface ProjectIdeas {
+  counter: number;
+  ideas: StoredIdea[];
+}
+
+/**
+ * Root structure of ~/.aid-gui/ideas.json.
+ */
+export interface IdeasStorage {
+  version: number;
+  projects: Record<string, ProjectIdeas>;
+}
+
+/**
+ * Request body for creating a new idea.
+ */
+export interface IdeaCreateRequest {
+  title: string;
+  description?: string;
+  tags?: string[];
+  priority?: 'low' | 'medium' | 'high';
+  linkedPlan?: string;
+  linkedEpic?: string;
+}
+
+/**
+ * Request body for updating an existing idea.
+ */
+export interface IdeaUpdateRequest {
+  title?: string;
+  description?: string;
+  tags?: string[];
+  priority?: 'low' | 'medium' | 'high';
+  status?: 'idea' | 'exploring' | 'planned' | 'done';
+  linkedPlan?: string | null;
+  linkedEpic?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// 16. Queue Scheduling Engine (EPIC E-005-4_4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-project schedule configuration.
+ */
+export interface ScheduleConfig {
+  enabled: boolean;
+  cooldownSeconds: number;
+  maxConcurrent: number;
+  delayedStartAt: string | null;
+  autoPauseAtCcLimit: boolean;
+  ccLimitThreshold: number;
+  lastRunCompletedAt: string | null;
+}
+
+/**
+ * Root structure of ~/.aid-gui/schedules.json.
+ */
+export interface SchedulesStorage {
+  version: number;
+  schedules: Record<string, ScheduleConfig>;
+}
+
+/**
+ * Schedule status broadcast via WebSocket topic queue.schedule.
+ */
+export interface ScheduleStatusEvent {
+  type: 'schedule_status';
+  topic: 'queue.schedule';
+  state: 'idle' | 'cooldown' | 'waiting' | 'ready' | 'paused';
+  remainingSeconds: number | null;
+  config: ScheduleConfig;
+  timestamp: string;
+}
+
+// ---------------------------------------------------------------------------
+// 17. Projects Storage (EPIC E-005-4_4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Root structure of ~/.aid-gui/projects.json.
+ */
+export interface ProjectsStorage {
+  version: number;
+  projects: Project[];
 }
