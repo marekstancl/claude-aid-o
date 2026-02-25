@@ -143,7 +143,22 @@ When auto-mode cannot proceed autonomously (validation failures, guardrail viola
 2. Read `.aid-o/03-config/policies/decision-policies.yaml` for architecture principles
 3. Read `.aid-o/03-config/policies/gates.yaml` for gate definitions
 4. Read relevant playbooks from `.aid-o/03-config/playbooks/`
-5. **Run Branch Creation:**
+5. **Memory System Probe** (non-blocking):
+   a. Read `.aid-o/03-config/policies/memory-config.yaml`
+   b. IF `memory.enabled: true`:
+      1. Attempt `qdrant-store` tool availability check (ping/list operation)
+      2. IF tool available: log to stage_log:
+         `{"state": "IDLE", "action": "memory_probe", "status": "available"}`
+      3. IF tool unavailable: log WARNING to stage_log:
+         `{"state": "IDLE", "action": "memory_probe", "status": "unavailable", "warning": "Qdrant MCP server not reachable — memory features degraded"}`
+         Continue without memory (graceful degradation).
+   c. IF `memory.enabled: false`:
+      Log to stage_log:
+      `{"state": "IDLE", "action": "memory_probe", "status": "disabled"}`
+   d. This probe validates Qdrant availability early, before any step attempts
+      to store metrics or query cross-project knowledge. Failures are warnings
+      only — they never block EPIC execution.
+6. **Run Branch Creation:**
    a. Check if git is initialized:
       - Run `git rev-parse --is-inside-work-tree` (suppress errors)
       - If not a git repo: skip branch management, log to stage_log:
@@ -171,7 +186,7 @@ When auto-mode cannot proceed autonomously (validation failures, guardrail viola
       - Do NOT push to remote
       - Do NOT switch branches
       ```
-6. Transition to PLANNING
+7. Transition to PLANNING
 
 #### Cross-Project Knowledge Read (IDLE state)
 
@@ -391,14 +406,51 @@ default to `recommended` preset behavior.
    b. Add PARALLEL CONTEXT to each prompt (other agents, branch names, scope warning)
    c. Dispatch all agents in the group concurrently (use Task tool with parallel calls)
    d. Collect all outputs
-4. Post-step analysis (analysis_groups — per `skills/parallel-dispatch.md` + `skills/analysis-merge.md`):
+4. **For wiring steps** (step.wiring == true):
+   Use the standard sequential step dispatch (same as item 2 above), but add wiring
+   context to the agent prompt. When dispatching a wiring step, include the following
+   block in the agent prompt after the standard step context:
+
+   ```
+   ## Wiring Context
+
+   You are a WIRING step. Your job is to integrate changes from multiple parallel steps
+   that modified shared files.
+
+   **Shared files:** {wiring_context.shared_files}
+   **Contributing steps:** {wiring_context.contributing_steps}
+   **Expected actions:** {wiring_context.expected_actions}
+
+   **Instructions:**
+   1. Read each shared file — it may contain changes from the last-merged parallel branch
+   2. Read the output summaries from each contributing step (in evidence/steps/)
+   3. Integrate all changes so the shared file is internally consistent
+   4. Do NOT rewrite from scratch — preserve all contributing changes
+   5. After integration, run type-check/lint to validate:
+      - If project has TypeScript: `npx tsc --noEmit`
+      - If project has Python: `ruff check {shared_files}`
+      - If neither: skip
+   6. Report any conflicts that required manual resolution
+   ```
+
+   **Wiring step detection logic:**
+   When the Controller picks the next step to execute, check `step.wiring`:
+   - If `step.wiring == true` AND `step.wiring_context` is present:
+     → dispatch as wiring step (sequential, with wiring context block above)
+   - If `step.wiring == true` but `step.wiring_context` is missing:
+     → log WARNING: "Wiring step {step.id} missing wiring_context — dispatching as normal step"
+     → dispatch as normal sequential step (fallback)
+   - If `step.wiring` is absent or false:
+     → dispatch as normal sequential or parallel step (existing behavior)
+
+5. Post-step analysis (analysis_groups — per `skills/parallel-dispatch.md` + `skills/analysis-merge.md`):
    a. After step passes PHASE_CHECK, check `plan.analysis_groups` for groups targeting this step
    b. If no analysis groups → skip
    c. If found: dispatch analysis agents (read-only, no branches) in parallel
    d. Collect outputs, apply merge strategy (`skills/analysis-merge.md`)
    e. Generate `analysis_report`, save to `evidence/steps/step_{N}_{role}/`
    f. Critical findings → ESCALATION; high findings → PM warning; others → continue
-5. Transition to PHASE_CHECK
+6. Transition to PHASE_CHECK
 
 **Context Passing Between Steps:**
 ```
@@ -525,6 +577,52 @@ acceptance criteria). This section provides the implementation specifics.
 | `diff.patch` | optional | Git diff of changes made by the agent |
 
 ### 5. PHASE_CHECK
+
+#### Agent Output Validation (pre-check)
+
+Before evaluating step outputs normally, validate agent output integrity:
+
+1. **Empty/null output check:**
+   - If agent returned empty or null output → status: INCOMPLETE
+   - Action: re-dispatch agent (max 1 retry), then ESCALATION
+
+2. **Credit exhaustion detection:**
+   Check agent output for Claude Code credit error strings:
+   - "You've exceeded your usage limit"
+   - "rate limit exceeded"
+   - "insufficient credits"
+   - "usage cap reached"
+   - "token limit exceeded for your plan"
+
+   IF any match found → status: CREDIT_EXHAUSTED
+   Action:
+   a. Save interrupted state immediately:
+      - Write `interrupted_step_context.json` to evidence:
+        ```json
+        {
+          "epic_id": "{epic_id}",
+          "run_id": "{run_id}",
+          "interrupted_step": "{step_id}",
+          "interrupted_at": "{ISO 8601}",
+          "step_status_before": "running",
+          "agent_partial_output": "{first 500 chars of output if any}",
+          "git_stash_ref": "{stash ref if stashed}",
+          "plan_progress_snapshot": "{copy of plan_progress.json state}"
+        }
+        ```
+      - Run `git stash --include-untracked` to save any uncommitted work
+      - Update plan_progress.json: step status → "interrupted"
+      - Update auto-mode-state.yaml: mode → "paused", reason → "credit_exhaustion"
+   b. Log: {"state": "PHASE_CHECK", "action": "credit_exhaustion_detected", "step": "{step_id}"}
+   c. STOP gracefully — do NOT attempt any more agent dispatches
+
+3. **Truncation warning:**
+   - If output length < 20% of expected length (based on acceptance criteria count * estimated min output):
+     Log WARNING: "Agent output may be truncated (length: {N} chars, expected: {M}+ chars)"
+     Flag: POSSIBLY_TRUNCATED (non-blocking warning only)
+     Continue with normal evaluation
+
+---
 
 **Actions:**
 1. Verify step produced expected outputs (from plan step definition)
@@ -693,7 +791,7 @@ ELSE (mode == manual):
 2. For each required gate:
    a. Run gate command (or check rule)
    b. Record pass/fail + output
-3. If ALL required gates pass: transition to PM_APPROVAL
+3. If ALL required gates pass: transition to CURATOR_RESOLVE
 4. If ANY required gate fails: transition to GATE_RETRY
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/gates_report.json`:
@@ -957,6 +1055,40 @@ ELSE (mode == manual):
    ```
 
 **Evidence:** Save `.aid-o/04-engine/evidence/{epic_id}/{run_id}/curator_resolve_report.json`
+
+#### CURATOR_RESOLVE — Auto-Mode Behavior
+
+```
+IF mode == auto:
+  1. Dispatch Curator + LE in parallel (same as manual — sub-steps 1-2 above)
+  2. Auto-evaluate proposals via 3-tier algorithm (same as manual — sub-step 3)
+  3. For each APPROVED proposal:
+     - IF effort == S: dispatch fix agent inline (same as manual — sub-step 5)
+       - If fix fails: auto-defer the proposal
+         (status: deferred, reason: "fix attempt failed in auto-mode")
+         Continue with remaining proposals (non-blocking).
+     - IF effort == M or L: auto-defer to backlog (do NOT dispatch fix agent)
+       - Set urgency: HIGH for effort:M, MEDIUM for effort:L
+       - Update backlog.md: status → "deferred", urgency → "{urgency}",
+         reason → "auto-mode guardrail: effort:{effort} deferred to backlog"
+       - Log:
+         {"state": "CURATOR_RESOLVE", "action": "auto_defer",
+          "proposal": "IMP-{NNN}", "effort": "{effort}", "urgency": "{urgency}",
+          "reason": "auto-mode guardrail: effort:{effort} deferred to backlog"}
+  4. Process LE output (same as manual — sub-step 4)
+  5. Compile curator_resolve_report.json (same format as manual — sub-step 6)
+     - Deferred entries include auto-mode reason when applicable
+  6. Transition → PM_APPROVAL (auto-mode will auto-approve at PM_APPROVAL)
+
+ELSE (mode == manual):
+  {existing behavior: all approved proposals get fix agents regardless of effort size}
+```
+
+> **Rationale:** In auto-mode, only effort:S proposals are safe for inline fixes
+> because they are small, low-risk, and fast. Effort:M/L proposals require human
+> judgment on scope and timing, so they are deferred to the backlog with urgency
+> tags for the PM to triage later. If even an effort:S fix fails, the proposal is
+> silently deferred rather than escalating — this keeps auto-mode flowing.
 
 ### 11. PM_APPROVAL
 
@@ -1420,8 +1552,10 @@ ELSE (mode == manual):
 6. **Archive Logic** (runs AFTER all file writes, BEFORE final commit):
 
    1. **Archive run:**
-      - Move to `.aid-o/04-engine/runs/archive/{filename}`
+      - Ensure archive directory: `mkdir -p .aid-o/04-engine/runs/archive/`
       - Update frontmatter: `status: completed`, `completed: {timestamp}`
+      - Move to `.aid-o/04-engine/runs/archive/{filename}`
+      - If move fails (file not found, permissions): log WARNING, continue (non-blocking)
 
    2. **Update EPIC counter:**
       - Increment `runs_completed += 1` in EPIC frontmatter
@@ -1429,14 +1563,25 @@ ELSE (mode == manual):
    3. **Archive EPIC (conditional):**
       - IF `runs_completed == runs_total`:
         - Set `status: completed`, `completed: {timestamp}`
+        - Ensure archive directory: `mkdir -p .aid-o/02-epics/archive/`
         - Move to `.aid-o/02-epics/archive/{filename}`
+        - Log: `{"state": "DONE", "action": "archive_epic", "details": "Archived {epic_id} to 02-epics/archive/"}`
+        - If move fails (file not found, permissions): log WARNING, continue (non-blocking)
       - ELSE: EPIC stays active, log "run {N}/{total} done"
+
+      NOTE: Evidence directory is NOT moved -- it stays in `evidence/{epic_id}/{run_id}/`
+      for reference. The queue (`epic-queue.yaml`) references `epic_id`, not file path,
+      so archival does not break the queue.
 
    4. **Update Plan counter (conditional):**
       - IF EPIC archived AND `plan_ref` exists:
         - Increment `epics_completed += 1` in plan frontmatter
         - IF `epics_completed == epics_total`:
-          - Set `status: completed`, move to `.aid-o/01-plans/archive/`
+          - Set `status: completed`, `completed: {timestamp}`
+          - Ensure archive directory: `mkdir -p .aid-o/01-plans/archive/`
+          - Move to `.aid-o/01-plans/archive/{filename}`
+          - Log: `{"state": "DONE", "action": "archive_plan", "details": "Archived plan {plan_id} to 01-plans/archive/ -- all {epics_total} EPICs completed"}`
+          - If move fails (file not found, permissions): log WARNING, continue (non-blocking)
         - ELSE: plan stays active, log "plan: {N}/{total} EPICs done"
 
    5. **Stage log:**
@@ -1449,8 +1594,9 @@ ELSE (mode == manual):
    6. **Final commit** (includes all archive moves + all DONE writes):
       `git add -A && git commit -m "done({epic_id}): completed, archived [list]"`
 
-   Archive = MOVE (copy + delete original). Active dirs = only pending work.
+   Archive = MOVE (not copy). Active directories contain only pending work.
    All archive ops happen BEFORE commit -- one clean commit for entire DONE state.
+   Every `mkdir -p` call is idempotent and safe to run even if the directory exists.
 
 7. **Example EPIC Extraction (optional — when Qdrant enabled)**
 

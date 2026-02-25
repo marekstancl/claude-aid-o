@@ -109,6 +109,9 @@ step_4_frontend  → [step_7_docs]
 6. BACKWARD COMPATIBILITY:
    parallel_groups = waves with 2+ steps (for plan.json schema)
    Single-step waves produce no parallel_groups entry.
+
+7. POST_WAVE_WIRING_CHECK (for each wave with 2+ steps):
+   → see Section 2a below
 ```
 
 ### Example — Waves from the 7-Step Dependency Graph
@@ -121,6 +124,109 @@ Level 3: [step_5_qa, step_6_security, step_7_docs] → wave 3 (3 steps — paral
 
 Result: waves = [[step_1], [step_2, step_4], [step_3], [step_5, step_6, step_7]]
 Parallel groups: [[step_2, step_4], [step_5, step_6, step_7]]
+```
+
+---
+
+## 2a. POST_WAVE_WIRING_CHECK
+
+After assembling each parallel wave (group of steps with the same dependency set that
+can run concurrently), check for shared file conflicts:
+
+### Algorithm
+
+```
+For each wave W in waves[] where len(W) >= 2:
+
+  1. COLLECT allowed_paths from all steps in W:
+     all_paths = { step_id: step.allowed_paths for step in W }
+
+  2. FIND shared files — paths appearing in 2+ steps' allowed_paths:
+     shared = []
+     For each path P across all_paths values:
+       contributors = [step_id for step_id, paths in all_paths if P in paths]
+       IF len(contributors) >= 2:
+         shared.append({ "path": P, "contributors": contributors })
+
+  3. IF shared is non-empty:
+     a. Auto-generate a wiring step inserted immediately after the parallel wave:
+        {
+          "id": "step_{N}_wiring",
+          "role": "backend",
+          "objective": "Wire parallel outputs: integrate shared files modified by parallel steps",
+          "wiring": true,
+          "wiring_context": {
+            "shared_files": ["{path}" for each shared entry],
+            "contributing_steps": [unique step_ids from all shared contributors],
+            "expected_actions": [
+              "Merge changes from all contributing steps",
+              "Resolve any conflicts in shared files",
+              "Ensure consistent state across integrated files"
+            ]
+          },
+          "inputs": ["Outputs from {contributing_steps}"],
+          "outputs": ["Integrated shared files with consistent state"],
+          "constraints": [
+            "Integrate, don't rewrite from scratch",
+            "Run type-check/lint after integration",
+            "Preserve all changes from contributing steps"
+          ],
+          "allowed_paths": ["{shared_files}"],
+          "forbidden_paths": [],
+          "acceptance_criteria": [
+            "All shared files are internally consistent",
+            "Changes from all contributing steps are preserved",
+            "Type-check/lint passes after integration"
+          ]
+        }
+
+     b. Add dependencies: wiring step depends on ALL steps in the wave.
+        For each step_id in W:
+          dependencies.append({ "before": step_id, "after": "step_{N}_wiring",
+                                "reason": "Wiring step integrates parallel outputs" })
+
+     c. Re-wire downstream dependencies: any step that originally depended on
+        a wave step now depends on the wiring step instead.
+        For each dep in dependencies where dep.before in W and dep.after not in W:
+          dep.before = "step_{N}_wiring"
+
+     d. Log: "Wiring step generated for wave {wave_index}: {len(shared)} shared
+        files across {len(contributing_steps)} steps"
+
+  4. IF shared is empty:
+     No wiring step needed. Continue to next wave.
+```
+
+### Wiring Step ID Assignment
+
+The wiring step receives the next sequential step number after the last step in the
+wave. Example: if wave contains `step_2_backend` and `step_3_frontend`, the wiring
+step is `step_4_wiring`. Subsequent step IDs are NOT renumbered — the wiring step
+is inserted with a new ID and the dependency graph is updated accordingly.
+
+### Example — Wiring Step for Shared Files
+
+```
+Wave 1: [step_2_backend, step_3_frontend]
+  step_2_backend.allowed_paths:  ["src/api/", "src/shared/types.ts"]
+  step_3_frontend.allowed_paths: ["src/ui/", "src/shared/types.ts"]
+
+  Shared files: ["src/shared/types.ts"]
+  → Generate step_4_wiring:
+    wiring: true
+    wiring_context:
+      shared_files: ["src/shared/types.ts"]
+      contributing_steps: ["step_2_backend", "step_3_frontend"]
+      expected_actions: ["Merge type definitions from both steps", "Resolve any conflicts", "Ensure consistent state"]
+    allowed_paths: ["src/shared/types.ts"]
+
+  Dependencies added:
+    step_2_backend → step_4_wiring (wiring integrates parallel outputs)
+    step_3_frontend → step_4_wiring (wiring integrates parallel outputs)
+
+  Downstream re-wiring:
+    step_5_qa originally depended on step_2_backend → now depends on step_4_wiring
+    step_6_docs originally depended on step_3_frontend → now depends on step_4_wiring
 ```
 
 ---
@@ -635,7 +741,12 @@ This is the master procedure the Planner follows when `/aid-plan-epic` is invoke
       c. Group same-level steps into candidate waves
       d. Split waves with 5+ steps into sub-waves of max 4
       e. Output: waves[] array + parallel_groups (backward compat)
-      f. Log: wave_count, max_wave_size, parallel_step_count
+      f. POST_WAVE_WIRING_CHECK per wave (Section 2a):
+         - Collect allowed_paths from all steps in each multi-step wave
+         - Find shared files (paths in 2+ steps)
+         - IF shared files found → auto-generate wiring step after wave
+         - Re-wire downstream dependencies through wiring step
+      g. Log: wave_count, max_wave_size, parallel_step_count, wiring_steps_generated
  6.1. CRITICAL PATH ANALYSIS (opt-in, Section 2c):
       IF total_steps >= 7:
         a. Compute critical path (longest DAG chain)

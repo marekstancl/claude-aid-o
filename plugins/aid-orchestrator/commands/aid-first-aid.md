@@ -276,28 +276,67 @@ session:
     per_epic: []
 ```
 
-#### 10. Display FIRST AID Banner
+#### 10. Display FIRST AID Startup Animation
 
-Display the following banner. Replace all `{placeholders}` with actual session values.
-The banner MUST be output exactly as shown (preserving alignment and box-drawing characters).
+Display the following 4-frame animation progressively. Output each frame with a
+brief pause between them (the Controller outputs them sequentially). Replace all
+`{placeholders}` in Frame 4 with actual session values. All frames MUST be output
+exactly as shown (preserving alignment and box-drawing characters).
+
+**Frame 1 -- Syringe appears (the instrument materializes):**
+
+```
+           ___________________
+          |   A . I . D .     |
+          |___________________|
+               ||
+               ||
+               ||
+              _||_
+             |++++|
+             |++++|
+             |____|
+```
+
+**Frame 2 -- Syringe targets Claude Code (needle makes contact):**
+
+```
+           ___________________
+          |   A . I . D .     |=====> [ CLAUDE CODE ]
+          |___________________|
+               ||
+              _||_
+             |++++|
+             |____|
+```
+
+**Frame 3 -- Injection complete (steroids enter the system):**
+
+```
+      * * * * * * * * * * * * * * * * * * * *
+      *                                     *
+      *    ╔═══════════════════════════╗     *
+      *    ║   A.I.D. STEROIDS        ║     *
+      *    ║        INJECTED           ║     *
+      *    ╚═══════════════════════════╝     *
+      *                                     *
+      * * * * * * * * * * * * * * * * * * * *
+```
+
+**Frame 4 -- Final static banner with session info (remains on screen):**
 
 ```
   ╔══════════════════════════════════════════════════════════════════════╗
   ║                                                                    ║
-  ║      ███████╗██╗██████╗ ███████╗████████╗     █████╗ ██╗██████╗    ║
-  ║      ██╔════╝██║██╔══██╗██╔════╝╚══██╔══╝    ██╔══██╗██║██╔══██╗   ║
-  ║      █████╗  ██║██████╔╝███████╗   ██║       ███████║██║██║  ██║   ║
-  ║      ██╔══╝  ██║██╔══██╗╚════██║   ██║       ██╔══██║██║██║  ██║   ║
-  ║      ██║     ██║██║  ██║███████║   ██║       ██║  ██║██║██████╔╝   ║
-  ║      ╚═╝     ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝       ╚═╝  ╚═╝╚═╝╚═════╝    ║
-  ║                                                                    ║
-  ║          ┌───┐     Fully Integrated Autonomous Development         ║
-  ║          │ + │     ════════════════════════════════════════         ║
-  ║          └───┘     AUTONOMOUS MODE ACTIVE                          ║
+  ║         ╔═══╗    F I R S T   A I D                                 ║
+  ║         ║ + ║    Fully Integrated Autonomous Development           ║
+  ║         ╚═══╝    ═══════════════════════════════════               ║
+  ║                  AUTONOMOUS MODE ACTIVE                            ║
   ║                                                                    ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║                                                                    ║
   ║  Session:      {session_id}                                        ║
+  ║  Mode:         Autonomous                                          ║
   ║  EPICs queued: {count} ({total_estimated_steps} estimated steps)   ║
   ║  Permissions:  Elevated ({source}, {allow_count} entries)          ║
   ║  Escalation:   Budget {budget} | Used 0                            ║
@@ -311,14 +350,30 @@ The banner MUST be output exactly as shown (preserving alignment and box-drawing
   ║  │ .. │            │                          │ ... and {N} more│  ║
   ║  └────┴────────────┴──────────────────────────┴─────────────────┘  ║
   ║                                                                    ║
+  ║  Permissions elevated. Steroids loaded. Let's go.                  ║
   ║  Stop command:  /aid-stop to disengage                             ║
   ║                                                                    ║
-  ╠══════════════════════════════════════════════════════════════════════╣
-  ║  Injecting autonomous execution...                                 ║
   ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
-**Banner variable reference:**
+**Animation behavior:**
+- Frames 1-3 are transient -- each is displayed briefly then cleared/overwritten
+  by the next frame. The Controller outputs them sequentially with a short pause
+  (~300ms per frame) to create a visual injection sequence.
+- Frame 4 is the final static banner -- it remains on screen for the duration
+  of the session and is the authoritative startup display.
+- If the terminal does not support frame clearing, output all 4 frames
+  sequentially (the visual effect degrades gracefully to a scrolling animation).
+
+**Syringe visual language:**
+- Frame 1: Full syringe (|++++| = loaded with steroids), needle pointing down
+- Frame 2: Syringe rotated horizontally, needle aimed at [CLAUDE CODE] target,
+  plunger partially depressed (barrel shrinks from 2 rows to 1)
+- Frame 3: Burst effect (* border) confirms injection, steroids now in system
+- Frame 4: The syringe icon reduces to the compact cross glyph (+ in a box)
+  that persists as the FIRST AID brand mark throughout the session
+
+**Banner variable reference (Frame 4):**
 
 | Placeholder | Source |
 |-------------|--------|
@@ -333,12 +388,11 @@ The banner MUST be output exactly as shown (preserving alignment and box-drawing
 | `{title_N}` | EPIC title (first 17 chars, truncated with `...` if longer) |
 
 **Alignment rules:**
-- The entire banner is enclosed in a Unicode box-drawing frame (double-line outer, single-line inner table)
-- The FIRST AID block lettering uses Unicode full-block characters for visual weight
-- The first aid cross icon (+ in a box) appears beside the subtitle for medical/aid branding
+- The entire Frame 4 banner is enclosed in a Unicode box-drawing frame (double-line outer, single-line inner table)
+- The syringe cross icon (+ in a double-line box) appears beside the title for medical/aid branding
 - Queue table columns are left-aligned; truncate long titles to fit within the frame
 - If more than 5 EPICs are queued, show the first 5 and replace the last row with: `│ .. │            │                          │ ... and {N} more│`
-- Right-pad all content lines with spaces to maintain consistent frame width (70 inner chars)
+- Right-pad all content lines with spaces to maintain consistent frame width (68 inner chars)
 - Terminal width assumed: 80 columns (frame is 72 chars including 2-space left indent)
 
 **Send Slack Status Update (Type G):**
@@ -480,9 +534,41 @@ Per `skills/auto-escalation.md`:
    b. Increment aggregate counters from EPIC's final_report.md
    c. IF status == "completed": epics_completed += 1
    d. IF status == "failed": epics_failed += 1
+   e. IF EPIC was archived in DONE state: epics_archived += 1
 ```
 
-#### 2. Handle Failed EPIC
+#### 2. Plan Archival Check
+
+After each completed EPIC (before picking up next EPIC or transitioning to
+FIRST_AID_COMPLETE), check if the parent plan should be archived:
+
+```
+1. Read the completed EPIC's `plan_ref` from its frontmatter
+2. IF no plan_ref: skip (standalone EPIC, no plan to archive)
+3. IF plan_ref exists:
+   a. Search for all EPICs that reference this plan:
+      - Scan .aid-o/02-epics/ for active EPICs with matching plan_ref
+      - Scan .aid-o/02-epics/archive/ for archived EPICs with matching plan_ref
+   b. Count: {total} total EPICs for this plan, {archived} in archive (completed)
+   c. IF all EPICs for this plan are archived (archived == total):
+      - Ensure archive directory: `mkdir -p .aid-o/01-plans/archive/`
+      - Move plan: `mv .aid-o/01-plans/{plan_file} .aid-o/01-plans/archive/{plan_file}`
+      - Log: {"state": "QUEUE_ADVANCE", "action": "archive_plan",
+              "details": "Archived plan {plan_id} -- all {total} EPICs completed"}
+      - Update auto-mode-state.yaml: session.aggregate.plans_archived += 1
+      - If move fails (file not found, already archived, permissions):
+        log WARNING, continue (non-blocking)
+   d. IF some EPICs still pending:
+      - Log: "Plan {plan_id}: {archived}/{total} EPICs done, archival deferred"
+```
+
+NOTE: This check complements the plan archival in `skills/epic-orchestration.md`
+DONE state (section 6.4). The DONE state archives based on frontmatter counters;
+this check provides a safety net using actual file system state (scanning for
+archived EPICs). Both paths are idempotent -- if the plan was already archived
+in DONE, the move here will fail gracefully (file not found) and log a warning.
+
+#### 3. Handle Failed EPIC
 
 Per `skills/epic-queue.md` Auto-Pickup Protocol step 4:
 
@@ -503,7 +589,7 @@ IF result_status == "failed":
     - "continue-manual" → restore permissions, exit auto
 ```
 
-#### 3. Check Queue
+#### 4. Check Queue
 
 ```
 1. Read mode flag from disk (may have changed via /aid-stop)
@@ -563,11 +649,64 @@ RESTORE_PERMISSIONS:
 **Per permission-sandwich.md MUST Rule 5:** Restore is non-blocking. If it fails,
 warn PM and continue with remaining completion actions.
 
-#### 3. Generate Cross-EPIC Summary Report
+#### 3. Display Completion Banner and Generate Summary Report
 
-Read aggregate data from `auto-mode-state.yaml` and compile the summary report.
-Replace all `{placeholders}` with actual session values. The report MUST be output
-exactly as shown (preserving alignment and box-drawing characters).
+First, display the completion banner. Then generate the full summary report.
+
+**Completion Banner -- Depleted Syringe:**
+
+The syringe is empty -- the steroids have been fully delivered. Display this
+single-frame banner immediately when entering FIRST_AID_COMPLETE, before
+generating the summary report. Replace `{placeholders}` with session values.
+
+```
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║                                                                    ║
+  ║         ╔═══╗    F I R S T   A I D   --   Complete                 ║
+  ║         ║   ║    ═══════════════════════════════                   ║
+  ║         ╚═══╝    Steroids depleted. Patient survived.              ║
+  ║                                                                    ║
+  ║  {completed}/{total} EPICs completed    Duration: {total_duration} ║
+  ║                                                                    ║
+  ║  CURATOR FINDINGS:                                                 ║
+  ║    [OK] Implemented:  {curator_implemented}  (effort:S)            ║
+  ║    [!!] Deferred:     {curator_deferred_review}  (effort:M/L)      ║
+  ║    [..] Deferred:     {curator_deferred_low}  (low priority)       ║
+  ║    [--] Rejected:     {curator_rejected}                           ║
+  ║                                                                    ║
+  ╚══════════════════════════════════════════════════════════════════════╝
+```
+
+**Depleted syringe visual language:**
+- The syringe symbol shows empty contents: `║   ║` (three spaces) instead of
+  `║ + ║` (the loaded cross from the startup banner). This signals that the
+  A.I.D. injection is spent -- all steroids have been consumed by the session.
+- The tagline "Steroids depleted. Patient survived." reinforces the medical
+  metaphor: Claude Code received its full treatment and the session is over.
+- The CURATOR FINDINGS summary uses the status markers from the Curator agent
+  report format ([OK], [!!], [..], [--]) to give the PM an instant read on
+  which improvement proposals were handled and which need follow-up.
+
+**Completion banner variable reference:**
+
+| Placeholder | Source |
+|-------------|--------|
+| `{completed}` | `session.aggregate.epics_completed` |
+| `{total}` | `session.progress.epics_total` |
+| `{total_duration}` | Computed: `completed_at - started_at`, formatted as `Xh Ym Zs` |
+| `{curator_implemented}` | `session.aggregate.total_curator_implemented` |
+| `{curator_deferred_review}` | `session.aggregate.total_curator_deferred_review` |
+| `{curator_deferred_low}` | `session.aggregate.total_curator_deferred_low` |
+| `{curator_rejected}` | `session.aggregate.total_curator_rejected` |
+
+---
+
+**Full Summary Report:**
+
+After the completion banner, generate the detailed summary report. Read aggregate
+data from `auto-mode-state.yaml` and compile the report. Replace all
+`{placeholders}` with actual session values. The report MUST be output exactly as
+shown (preserving alignment and box-drawing characters).
 
 **Status indicator:** Use the appropriate status icon based on session outcome:
 - `completed` -> `[DONE]`
@@ -595,15 +734,15 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║  EPICs failed:     {failed}                                        ║
   ║  EPICs remaining:  {remaining}                                     ║
   ║                                                                    ║
-  ║  ┌─────┬────────────────────────────┬────────┬───────┬────────┬──────────┬───────────┐  ║
-  ║  │ #   │ EPIC                       │ Steps  │ Gates │ Escal. │ Release  │ Duration  │  ║
-  ║  ├─────┼────────────────────────────┼────────┼───────┼────────┼──────────┼───────────┤  ║
-  ║  │  1  │ E-xxx (Title)              │ 3/3    │ 4/4   │ 0      │ deferred │ 12m 34s   │  ║
-  ║  │  2  │ E-yyy (Title)              │ 5/5    │ 4/4   │ 1      │ deferred │ 28m 01s   │  ║
-  ║  │  3  │ E-zzz (Title)              │ 2/2    │ 3/3   │ 0      │ v0.9.0   │ 15m 12s   │  ║
-  ║  ├─────┼────────────────────────────┼────────┼───────┼────────┼──────────┼───────────┤  ║
-  ║  │ SUM │                            │ 10/10  │ 11/11 │ 1      │          │ 55m 47s   │  ║
-  ║  └─────┴────────────────────────────┴────────┴───────┴────────┴──────────┴───────────┘  ║
+  ║  ┌─────┬──────────────────────┬───────┬───────┬──────┬──────────┐  ║
+  ║  │ #   │ EPIC                 │ Steps │ Gates │ Esc  │ Release  │  ║
+  ║  ├─────┼──────────────────────┼───────┼───────┼──────┼──────────┤  ║
+  ║  │ 1   │ E-xxx (Title)        │ 3/3   │ 4/4   │ 0    │ deferred │  ║
+  ║  │ 2   │ E-yyy (Title)        │ 5/5   │ 4/4   │ 1    │ deferred │  ║
+  ║  │ 3   │ E-zzz (Title)        │ 2/2   │ 3/3   │ 0    │ v0.9.0   │  ║
+  ║  ├─────┼──────────────────────┼───────┼───────┼──────┼──────────┤  ║
+  ║  │ SUM │                      │ 10/10 │ 11/11 │ 1    │          │  ║
+  ║  └─────┴──────────────────────┴───────┴───────┴──────┴──────────┘  ║
   ║                                                                    ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║  QUALITY METRICS                                                   ║
@@ -617,6 +756,19 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║    Rejected:         {rejected}                                    ║
   ║    Deferred:         {deferred}                                    ║
   ║  Lessons learned:    {lessons_count} new entries                    ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  CURATOR FINDINGS                                                  ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Total proposals:    {curator_total}                               ║
+  ║    [OK] Implemented: {curator_implemented} (effort:S, inline fix)  ║
+  ║    [!!] Deferred:    {curator_deferred_review} (effort:M/L)        ║
+  ║    [..] Deferred:    {curator_deferred_low} (low priority)         ║
+  ║    [--] Rejected:    {curator_rejected}                            ║
+  ║                                                                    ║
+  ║  Per-EPIC breakdown:                                               ║
+  ║  {curator_per_epic_table}                                          ║
   ║                                                                    ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║  VERSION & RELEASE                                                 ║
@@ -638,6 +790,13 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║  Restored at:   {restored_timestamp}                               ║
   ║  Source:         {source}                                          ║
   ║  Learned:       {learned_count} new permissions added              ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  ARCHIVAL                                                          ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  EPICs archived:    {epics_archived_count} to 02-epics/archive/    ║
+  ║  Plans archived:    {plans_archived_count} to 01-plans/archive/    ║
   ║                                                                    ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║  EVIDENCE ARTIFACTS                                                ║
@@ -694,6 +853,11 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
 | `{implemented}` | `session.aggregate.total_curator_implemented` |
 | `{rejected}` | `session.aggregate.total_curator_rejected` |
 | `{deferred}` | `session.aggregate.total_curator_deferred` |
+| `{curator_implemented}` | `session.aggregate.total_curator_implemented` (same as `{implemented}`, used in CURATOR FINDINGS section) |
+| `{curator_deferred_review}` | `session.aggregate.total_curator_deferred_review` — count of effort:M/L proposals deferred for PM review |
+| `{curator_deferred_low}` | `session.aggregate.total_curator_deferred_low` — count of low-priority proposals deferred |
+| `{curator_rejected}` | `session.aggregate.total_curator_rejected` (same as `{rejected}`, used in CURATOR FINDINGS section) |
+| `{curator_per_epic_table}` | Formatted table: one row per EPIC showing implemented/deferred/rejected counts. Format: `{epic_id}: {impl} implemented, {def} deferred, {rej} rejected`. Fallback: `"(no curator proposals this session)"` |
 | `{lessons_count}` | `session.aggregate.total_lessons_learned` |
 | `{version_info}` | `"No version bump (all deferred)"` or `"v{old} -> v{new}"` |
 | `{files_count}` | Count of files in version bump commits |
@@ -702,16 +866,20 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
 | `{version_bump_list_or_none}` | Bulleted list from `session.aggregate.version_bumps[]` or `"  (none -- all releases deferred)"` |
 | `{source}` | `session.permissions.source` |
 | `{learned_count}` | Length of `session.permissions.learned_permissions` |
+| `{epics_archived_count}` | `session.aggregate.epics_archived` — count of EPICs moved to `02-epics/archive/` during this session. Incremented in DONE state archive logic. |
+| `{plans_archived_count}` | `session.aggregate.plans_archived` — count of plans moved to `01-plans/archive/` during this session. Incremented in QUEUE_ADVANCE plan archival check or DONE state archive logic. |
 
 **Table formatting rules:**
 - EPIC column: show EPIC ID and title. Truncate title at 20 chars with `...` if longer
 - Steps column: `{completed}/{total}` from per-EPIC data
 - Gates column: `{passed}/{total}` from per-EPIC data
-- Escal. column: integer count of escalations for that EPIC
+- Esc column: integer count of escalations for that EPIC
 - Release column: `deferred` or `v{X.Y.Z}` (the version bumped to)
-- Duration column: formatted as `Xm Ys` or `Xh Ym` for EPICs over 1 hour
 - SUM row: aggregates across all EPICs; Release cell left blank in SUM row
 - If an EPIC failed, prefix its row with a `!` indicator: `| !3  | E-zzz (Title) ...`
+- Note: the Duration column is omitted from the terminal table to fit within the
+  72-column frame. Per-EPIC duration is available in the per-EPIC evidence and
+  `auto-mode-state.yaml` → `session.aggregate.per_epic[]`.
 
 #### 4. Save Summary Report
 
@@ -805,32 +973,62 @@ RESUME_SESSION:
      d. Set session.progress.current_state = "QUEUE_PROCESSING"
      e. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
         "session_id": "{id}", "epics_remaining": N}
-     g. Display resume banner:
+     g. Display resume banner (re-injection theme):
+
+        The syringe is partially refilled -- re-loading for continued treatment.
+        The `~` symbol inside the syringe represents a fluid level that is being
+        topped up (partial fill), distinguishing it from the full `+` of a fresh
+        start and the empty `   ` of a completed session.
 
         ```
-        ╔══════════════════════════════════════════════════════════════════════╗
-        ║                                                                    ║
-        ║          ┌───┐     FIRST AID  --  Session Resumed                  ║
-        ║          │ + │     ══════════════════════════════                   ║
-        ║          └───┘     AUTONOMOUS MODE RE-ENGAGED                      ║
-        ║                                                                    ║
-        ╠══════════════════════════════════════════════════════════════════════╣
-        ║                                                                    ║
-        ║  Session:    {session_id}                                          ║
-        ║  Remaining:  {N} EPICs ({estimated_steps} estimated steps)         ║
-        ║  Progress:   {completed}/{total} EPICs done                        ║
-        ║  Escalation: Budget {budget} | Used {used}                         ║
-        ║                                                                    ║
-        ║  Stop command:  /aid-stop to disengage                             ║
-        ║                                                                    ║
-        ╠══════════════════════════════════════════════════════════════════════╣
-        ║  Re-injecting autonomous execution...                              ║
-        ╚══════════════════════════════════════════════════════════════════════╝
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║                                                                    ║
+          ║         ╔═══╗    F I R S T   A I D   --   Resuming                 ║
+          ║         ║ ~ ║    Re-injecting from saved state...                  ║
+          ║         ╚═══╝    ══════════════════════════════                    ║
+          ║                                                                    ║
+          ╠══════════════════════════════════════════════════════════════════════╣
+          ║                                                                    ║
+          ║  Session:    {session_id}                                          ║
+          ║  Resuming:   {current_epic_id} (step {current_step})               ║
+          ║  Progress:   {completed}/{total} EPICs done                        ║
+          ║  Remaining:  {N} EPICs ({estimated_steps} estimated steps)         ║
+          ║  Escalation: Budget {budget} | Used {used}                         ║
+          ║                                                                    ║
+          ║  Permissions re-elevated. Syringe reloaded.                        ║
+          ║  Stop command:  /aid-stop to disengage                             ║
+          ║                                                                    ║
+          ╚══════════════════════════════════════════════════════════════════════╝
         ```
+
+        **Resume banner syringe states across the session lifecycle:**
+        - Startup:    `║ + ║`  -- full syringe, loaded and ready
+        - Resume:     `║ ~ ║`  -- partially refilled, re-loading
+        - Completion: `║   ║`  -- empty/depleted, treatment finished
      h. Transition to QUEUE_PROCESSING
 
   4. IF PM declines:
      → STOP (no changes)
+
+RESUME_INTERRUPTED_STEP:
+  1. Check for interrupted_step_context.json in evidence/{epic_id}/{run_id}/
+  2. IF found:
+     a. Read interrupted context
+     b. Log: "Detected interrupted step: {step_id} (reason: {reason})"
+     c. Recover git state:
+        - Run `git stash list` to find the stash
+        - Run `git stash pop` to restore uncommitted work
+        - If stash pop fails (conflict): log WARNING, continue without stashed changes
+     d. Update plan_progress.json: step status → "running" (was "interrupted")
+     e. Re-dispatch the interrupted step's agent with:
+        - Full original prompt
+        - Additional context: "This is a RESUME after credit exhaustion.
+          Previous partial output (if any): {partial_output}.
+          Continue from where you left off."
+     f. Delete interrupted_step_context.json after successful re-dispatch
+     g. Continue normal orchestration loop
+  3. IF not found:
+     Continue normal resume (no interrupted step)
 ```
 
 ---

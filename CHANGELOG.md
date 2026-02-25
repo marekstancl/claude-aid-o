@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.3] — 2026-02-25
+
+### Fixed
+
+- **GATES → CURATOR_RESOLVE transition** (`skills/epic-orchestration.md`) — GATES state now correctly transitions to CURATOR_RESOLVE instead of skipping directly to PM_APPROVAL; restores the full state machine flow (GATES → CURATOR_RESOLVE → PM_APPROVAL) so Curator proposals are processed for every EPIC
+- **Qdrant config unification** — `memory-config.yaml` is now the single source of truth for `memory.enabled`; removed duplicate flag from `project-profile.yaml`; added non-blocking Qdrant startup probe in IDLE state for early availability detection
+
+### Added
+
+- **CURATOR_RESOLVE auto-mode conditionals** (`skills/epic-orchestration.md`) — in FIRST AID mode, effort:S proposals get inline fixes while effort:M/L are auto-deferred to backlog with urgency tags; failed inline fixes silently defer (non-blocking)
+- **Credit exhaustion detection** (`skills/epic-orchestration.md`) — PHASE_CHECK now validates agent output before evaluation; detects 5 Claude Code credit error patterns via string matching; auto-pauses with `interrupted_step_context.json` + git stash; FIRST AID resume recovers interrupted steps
+- **Wiring step generation** (`skills/planner.md`) — POST_WAVE_WIRING_CHECK detects shared files across parallel wave steps and auto-generates a wiring step with context (shared_files, contributing_steps, expected_actions); new `wiring` and `wiring_context` fields in `plan.schema.json`; EXECUTING state recognizes wiring steps with specialized dispatch prompt
+- **EPIC & plan archival** (`skills/epic-orchestration.md`, `commands/aid-first-aid.md`) — DONE state archives completed EPICs to `02-epics/archive/`; QUEUE_ADVANCE archives plans when all plan EPICs complete; non-blocking with `mkdir -p` safety
+- **FIRST AID ASCII art animations** (`commands/aid-first-aid.md`) — 4-frame syringe-themed startup animation, depleted-syringe completion banner with CURATOR FINDINGS summary, re-injection resume banner
+- **CURATOR FINDINGS section** in FIRST AID completion report — shows implemented/deferred/rejected proposal breakdown with per-EPIC table
+
 ## [0.9.2] — 2026-02-24
 
 ### Added

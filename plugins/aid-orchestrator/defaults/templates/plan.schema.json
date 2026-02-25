@@ -79,6 +79,34 @@
             "type": "array",
             "items": { "type": "string" },
             "description": "Verifiable criteria that must be met for this step to pass acceptance validation. Each criterion should be specific and testable."
+          },
+          "wiring": {
+            "type": "boolean",
+            "default": false,
+            "description": "Indicates this is an auto-generated wiring step that integrates shared files from parallel steps. Set to true only by the Planner's POST_WAVE_WIRING_CHECK."
+          },
+          "wiring_context": {
+            "type": "object",
+            "description": "Context for wiring steps (only present when wiring=true). Describes which files are shared, which steps produced them, and what integration actions are expected.",
+            "properties": {
+              "shared_files": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "File paths that were modified by multiple parallel steps and need integration."
+              },
+              "contributing_steps": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Step IDs of the parallel steps that produced changes to the shared files."
+              },
+              "expected_actions": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Descriptions of what the wiring step should do to integrate the shared files."
+              }
+            },
+            "required": ["shared_files", "contributing_steps", "expected_actions"],
+            "additionalProperties": false
           }
         },
         "additionalProperties": false
