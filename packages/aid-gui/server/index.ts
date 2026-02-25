@@ -7,6 +7,17 @@ import { FileWatcher } from "./watchers/file-watcher.ts";
 import { StageLogStream } from "./watchers/stage-log-stream.ts";
 import { AidWebSocket } from "./ws/websocket.ts";
 import type { FileChangeEvent } from "./types.ts";
+import { projectResolver } from "./api/middleware.ts";
+import pipelineRouter from "./api/pipeline.ts";
+import evidenceRouter from "./api/evidence.ts";
+import epicsRouter from "./api/epics.ts";
+import plansRouter from "./api/plans.ts";
+import configRouter from "./api/config.ts";
+import knowledgeRouter from "./api/knowledge.ts";
+import decisionsRouter from "./api/decisions.ts";
+import auditRouter from "./api/audit.ts";
+import queueRouter from "./api/queue.ts";
+import usageRouter from "./api/usage.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -104,8 +115,19 @@ export function createApp() {
 
   app.use(express.json());
 
-  // TODO: Mount API routes here (EPIC E-005-1_4, Step 3+)
-  // Example: app.use("/api", apiRouter);
+  // Mount REST API routes behind project resolution middleware.
+  // URL pattern: /api/p/:projectId/<resource>
+  const apiBase = "/api/p/:projectId";
+  app.use(`${apiBase}/pipeline`, projectResolver, pipelineRouter);
+  app.use(`${apiBase}/evidence`, projectResolver, evidenceRouter);
+  app.use(`${apiBase}/epics`, projectResolver, epicsRouter);
+  app.use(`${apiBase}/plans`, projectResolver, plansRouter);
+  app.use(`${apiBase}/config`, projectResolver, configRouter);
+  app.use(`${apiBase}/knowledge`, projectResolver, knowledgeRouter);
+  app.use(`${apiBase}/decisions`, projectResolver, decisionsRouter);
+  app.use(`${apiBase}/audit`, projectResolver, auditRouter);
+  app.use(`${apiBase}/queue`, projectResolver, queueRouter);
+  app.use(`${apiBase}/usage`, projectResolver, usageRouter);
 
   return app;
 }
