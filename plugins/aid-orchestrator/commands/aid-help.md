@@ -229,19 +229,19 @@ The AID workflow has three layers:
    - PM describes what they want
    - AI brainstorms approaches, trade-offs
    - Result: Plan document with chosen approach
-   - Naming: P-{YYYYMMDD}-{hash}-{topic}.md
+   - Naming: P{NNN}-{topic}.md (e.g., P005-gui-backend.md)
 
 2. EPIC (.aid-o/02-epics/)
    - Detailed specification of the work
    - Sections: Goal, Scope, Constraints, DoD, Acceptance Criteria, Steps
    - Each step defines a role (architect, backend, qa, etc.)
-   - Naming: E-{YYYYMMDD}-{hash}-{topic}.md
+   - Naming: E-{NNN}-{phase}_{total}-{topic}.md (e.g., E-005-1_4-gui-foundation.md)
 
 3. RUN (.aid-o/04-engine/runs/)
    - Auto-generated from EPIC by /aid-plan-epic
    - Tracks progress, commits, decisions
    - One run per EPIC run (or per sub-run for multi-run EPICs)
-   - Naming: R-{YYYYMMDD}-{hash}-{topic}.md
+   - Naming: R-{EPIC_ID}-{run_number}-{topic}.md (e.g., R-005-1_4-1-gui-foundation.md)
 
 Orchestration Flow:
   /aid-plan-epic → generates Plan JSON from EPIC

@@ -1,5 +1,5 @@
 ---
-id: R-{YYYYMMDD}-{4char-hash}
+id: R-{EPIC_ID}-{run_number}
 run_id: {YYYY-MM-DD}-exploration-{short-description}
 type: exploration
 status: active

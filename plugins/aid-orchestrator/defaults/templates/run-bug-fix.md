@@ -1,5 +1,5 @@
 ---
-id: R-{YYYYMMDD}-{4char-hash}
+id: R-{EPIC_ID}-{run_number}
 run_id: {YYYY-MM-DD}-bug-fix-{short-description}
 type: bug-fix
 status: active

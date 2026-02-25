@@ -1022,7 +1022,9 @@ RULE 4: Include all design details from the approved sections — do not summari
         or omit details that were approved.
 RULE 5: If PM approved a modification, the modified version goes into the document
         (not the original).
-RULE 6: Generate proper IDs (P-{YYYYMMDD}-{hash}, E-{YYYYMMDD}-{hash}).
+RULE 6: Generate proper IDs per `skills/epic-orchestration.md` ID Generation section:
+        Plan: P{NNN} (from counter.yaml). EPIC from plan: E-{NNN}-{phase}_{total}.
+        Ad-hoc EPIC: E-{NNN} (from counter.yaml epic counter).
 RULE 7: Cross-reference: EPIC draft references the plan in its Context section.
 ```
 
@@ -1265,7 +1267,7 @@ When generating an EPIC from a plan, the brainstorming handoff (Step 10) determi
 - Restrict `Allowed files/paths` to files relevant to this phase only
 - In `## Dependencies`, list steps from OTHER phases that this phase depends on as external dependencies
 - Add to `## Context`: "This EPIC covers Phase {N} of {total} from plan {plan_id}. External dependencies from other phases are listed but not executed in this EPIC."
-- EPIC filename includes phase: `E-{YYYYMMDD}-{hash}-{topic}-phase-{N}.md`
+- EPIC filename includes phase: `E-{NNN}-{phase}_{total}-{topic}.md` (e.g., `E-005-2_4-gui-realtime.md`)
 
 ---
 

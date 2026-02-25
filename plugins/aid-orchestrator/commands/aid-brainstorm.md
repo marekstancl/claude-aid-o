@@ -208,14 +208,15 @@ Final design approval from PM.
 
 Write the validated design to a plan file.
 
-1. Generate plan ID: `P-{YYYYMMDD}-{4char-hash}` (hash: `echo $(date +%s%N | md5sum | head -c 4)`)
+1. Generate plan ID per `skills/epic-orchestration.md` ID Generation section:
+   - Read `.aid-o/03-config/counter.yaml` → increment `plan` counter → `P{NNN}` (zero-padded 3 digits)
 2. Generate topic slug from the brainstorming topic (lowercase, hyphens, max 40 chars)
 3. Determine output language:
    - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
    - If `scope.plans: true`: write the plan document in the configured `document_language`
    - If `scope.plans: false` or config missing: write in English
    - **Note:** The conversation with PM stays in PM's language regardless of document language
-4. Write plan to `.aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md` using the plan template structure:
+4. Write plan to `.aid-o/01-plans/{plan_id}-{topic}.md` using the plan template structure:
    - Frontmatter: id, type (plan), status (draft), created, author (PM + AI)
    - Context: why this plan exists (from Step 1-3)
    - Goal: one-sentence desired outcome
@@ -229,7 +230,7 @@ Write the validated design to a plan file.
    - Next Steps: suggest creating EPIC
 5. Confirm to PM:
    ```
-   Plan written: .aid-o/01-plans/P-{YYYYMMDD}-{hash}-{topic}.md
+   Plan written: .aid-o/01-plans/{plan_id}-{topic}.md
    ```
 
 ### Step 9: EPIC Subagent
@@ -243,7 +244,7 @@ Generate an EPIC draft from the approved plan using the EPIC subagent prompt tem
 5. Determine output language:
    - Same logic as Step 8: use `language.yaml` → `document_language` if `scope.plans: true`
 6. Generate EPIC draft:
-   - EPIC ID: `E-{YYYYMMDD}-{4char-hash}`
+   - EPIC ID: per `skills/epic-orchestration.md` ID Generation (e.g., `E-{NNN}-1_1` for single-phase plan)
    - Fill all EPIC template sections from the approved plan:
      - **Context** — from plan Context + Approach Decision
      - **Goal** — from plan Goal (1-3 sentences, specific, testable)
@@ -256,10 +257,10 @@ Generate an EPIC draft from the approved plan using the EPIC subagent prompt tem
      - **Steps (Role Pipeline)** — map plan steps to AID roles (architect, backend, frontend, qa, etc.) with dependencies and parallel groups
      - **Run Breakdown** — estimate single vs. multi-run based on step count and complexity
    - Apply YAGNI: do not add steps or roles that the plan does not require
-7. Write EPIC draft to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md`
+7. Write EPIC draft to `.aid-o/02-epics/{epic_id}-{topic}.md`
 8. Confirm:
    ```
-   EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
+   EPIC draft written: .aid-o/02-epics/{epic_id}-{topic}.md
    ```
 
 ### Step 10: Execution Plan Option
@@ -268,7 +269,7 @@ After the EPIC draft is written, offer PM the option to generate the execution p
 
 1. Ask PM:
    ```
-   EPIC draft written: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
+   EPIC draft written: .aid-o/02-epics/{epic_id}-{topic}.md
 
    Would you like to generate the execution plan now?
    (Y) Generate Plan JSON + Run file → ready for /aid-run-epic
@@ -344,7 +345,7 @@ Present interactive options based on the completed brainstorming run.
    - Set `plan_epics_total` in EPIC frontmatter to total phase count
    - List external dependencies from other phases
    - Add context note: "This EPIC covers Phase {N} of {total}"
-3. Save phase-specific EPIC to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}-phase-{N}.md`
+3. Save phase-specific EPIC to `.aid-o/02-epics/{epic_id}-{topic}.md` (ID encodes phase: `E-{NNN}-{N}_{total}`)
 4. Proceed to Step 10 (Execution Plan Option)
 
 **Option D — Stop here:**

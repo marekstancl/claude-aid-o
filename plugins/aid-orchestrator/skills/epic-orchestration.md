@@ -2040,7 +2040,7 @@ The Controller creates and maintains a run file for each EPIC run:
 
 Run file frontmatter:
 ```yaml
-id: R-{YYYYMMDD}-{hash}
+id: R-{EPIC_ID}-{run_number}
 type: new-feature
 status: active
 epic_id: {epic_id}

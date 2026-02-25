@@ -21,9 +21,9 @@ After plan generation completes, the command asks the PM whether to run the EPIC
 
 **Examples:**
 ```
-/aid-plan-epic .aid-o/02-epics/E-20260216-c2d1-user-auth.md          # EPIC input (standard)
-/aid-plan-epic .aid-o/01-plans/2026-02-19-aido-v040.md                # Plan input → auto-generates EPIC, then Plan JSON
-/aid-plan-epic workspace/workflow/epics/active/EPIC-TEST-0001-DUMMY.md
+/aid-plan-epic .aid-o/02-epics/E-001-1_1-user-auth.md                # EPIC input (standard)
+/aid-plan-epic .aid-o/01-plans/P005-C-aid-gui-backend.md              # Plan input → auto-generates EPIC, then Plan JSON
+/aid-plan-epic .aid-o/02-epics/E-002-task-management.md               # Ad-hoc EPIC (no plan)
 ```
 
 Both input formats produce the same output: a plan.json, plan_progress.json, and run file ready for `/aid-run-epic`. When given a Plan file, the command adds an intermediate EPIC generation step and shows it to the PM for review before continuing.
@@ -66,24 +66,28 @@ EPIC Subagent Prompt Template from `skills/brainstorming.md`.
 5. Determine output language:
    - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
 6. Extract plan_id:
-   - From frontmatter `id` field if present (e.g., `P-20260218-v020`)
-   - From filename if no frontmatter (e.g., `2026-02-19-aido-v040` → `P-20260219`)
-   - Fallback: `P-{YYYYMMDD}-{4char-hash}`
+   - From frontmatter `id` field if present (e.g., `P006`)
+   - From filename if contains `P{NNN}` pattern (e.g., `P005-C-aid-gui.md` → `P005`)
+   - Fallback: Read `.aid-o/03-config/counter.yaml` → increment `plan` counter → `P{NNN}` (zero-padded 3 digits)
 7. Generate EPIC using the EPIC Subagent Prompt Template:
    - Substitute `{plan_content}` with the plan file content
    - Substitute `{project_profile_yaml}` with the project profile
    - Substitute `{epic_template}` with the EPIC template
    - Substitute `{document_language}` with the resolved language
    - Substitute `{plan_id}` with the extracted plan ID
-8. Generate EPIC ID: `E-{YYYYMMDD}-{4char-hash}`
+8. Generate EPIC ID per `skills/epic-orchestration.md` ID Generation section:
+   - Extract plan number (NNN) from plan_id (e.g., `P005` → `005`)
+   - If plan has multiple phases: `E-{NNN}-{phase}_{total}` (e.g., `E-005-1_4`)
+   - If plan has single phase: `E-{NNN}-1_1` (e.g., `E-005-1_1`)
+   - If ad-hoc EPIC (no plan): Read `counter.yaml` → increment `epic` counter → `E-{NNN}`
 9. Generate topic slug from plan title (lowercase, hyphens, max 40 chars)
-10. Save EPIC to `.aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md`
+10. Save EPIC to `.aid-o/02-epics/{epic_id}-{topic}.md`
 11. Present to PM:
     ```
     Input detected as a Plan (not an EPIC).
     ====================================
     Plan: {plan_file_path}
-    Generated EPIC: .aid-o/02-epics/E-{id}-{topic}.md
+    Generated EPIC: .aid-o/02-epics/{epic_id}-{topic}.md
 
     The EPIC was auto-generated from your plan using the standard template.
     Review it below, then I'll proceed with plan generation.
@@ -136,8 +140,10 @@ If no phase context is provided (standard /aid-plan-epic invocation), process al
    Template: .aid-o/03-config/templates/epic.md
    ```
 4. Extract `epic_id` from filename:
-   - `EPIC-TEST-0001-DUMMY.md` → `TEST-0001`
-   - `E-20260216-c2d1-user-auth.md` → `E-20260216-c2d1`
+   - `E-005-1_4-gui-foundation.md` → `E-005-1_4`
+   - `E-002-task-management.md` → `E-002`
+   - `E-001-1_1-user-auth.md` → `E-001-1_1`
+   - Legacy format `E-20260216-c2d1-user-auth.md` → `E-20260216-c2d1` (backwards-compatible)
    - Fallback: use full filename without `.md`
 
 ### Step 4: Analyze Steps, Dependencies, and Parallel Groups
@@ -310,7 +316,10 @@ plan task detail supplements it. Never override EPIC constraints with plan data.
 
 ### Step 7: Save Plan JSON
 
-1. Generate `run_id`: `run_{YYYYMMDD}_{4char-hash}` (hash from `echo $(date +%s%N | md5sum | head -c 4)`)
+1. Generate `run_id` per `skills/epic-orchestration.md` ID Generation section:
+   - Format: `R-{EPIC_ID}-{run_number}` (e.g., `R-005-1_4-1` for first run of `E-005-1_4`)
+   - Run number is sequential within the EPIC (1, 2, 3...)
+   - For evidence directory: use `run_{epic_id}_{run_number}` (e.g., `run_E-005-1_4_1`)
 2. Create evidence directory: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`
 3. Save plan to: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json`
 4. Initialize progress tracker: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan_progress.json`:
@@ -358,11 +367,11 @@ Before creating the run file, read ALL of the following:
 
 #### 8b. Create Run File
 
-1. Generate run ID: `R-{YYYYMMDD}-{4char-hash}`
+1. Use the run_id already generated in Step 7 (`R-{EPIC_ID}-{run_number}`)
 2. Use template from `.aid-o/03-config/templates/run-new-feature.md` (or type-appropriate template)
 3. Fill in frontmatter:
    ```yaml
-   id: R-{YYYYMMDD}-{hash}
+   id: {run_id}
    type: new-feature
    status: active
    priority: {from EPIC}
@@ -423,7 +432,7 @@ If any check fails, fix before proceeding.
 
 #### 8f. Save
 
-Save to: `.aid-o/04-engine/runs/R-{YYYYMMDD}-{hash}-{topic}.md`
+Save to: `.aid-o/04-engine/runs/{run_id}-{topic}.md`
 
 ### Step 9: Present Output
 

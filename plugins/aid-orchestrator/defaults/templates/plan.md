@@ -1,5 +1,5 @@
 ---
-id: P-{YYYYMMDD}-{4char-hash}
+id: P{NNN}
 type: plan
 status: draft
 created: YYYY-MM-DD

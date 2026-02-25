@@ -118,7 +118,7 @@ Show the current status of an EPIC pipeline — steps progress, gate results, bu
 No EPICs found.
 
 To get started:
-1. Create an EPIC: .aid-o/02-epics/E-{YYYYMMDD}-{hash}-{topic}.md
+1. Create an EPIC: .aid-o/02-epics/E-{NNN}-{phase}_{total}-{topic}.md
    Template: .aid-o/03-config/templates/epic.md
 2. Generate plan: /aid-plan-epic <path-to-epic>
 3. Run: /aid-run-epic

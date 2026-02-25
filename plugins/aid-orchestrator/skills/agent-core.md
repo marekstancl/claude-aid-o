@@ -484,7 +484,7 @@ Project configuration is stored in `.aid-o/04-engine/memory/project-profile.yaml
 **Conventions:**
 - Branch prefix: `run/`
 - Commit format: `type(scope): description (YYYY-MM-DD HH:MM TZ)`
-- Run ID: `R-{YYYYMMDD}-{4char-hash}`
-- Epic ID: `E-{YYYYMMDD}-{4char-hash}`
+- Run ID: `R-{EPIC_ID}-{run_number}` (e.g., `R-005-1_4-1`)
+- Epic ID: `E-{NNN}-{phase}_{total}` or `E-{NNN}` for ad-hoc (see `skills/epic-orchestration.md` ID Generation)
 
 ---

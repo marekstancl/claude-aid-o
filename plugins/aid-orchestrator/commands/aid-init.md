@@ -462,4 +462,4 @@ This project uses AID for multi-agent orchestration.
 - **Dynamic file scanning** — do not hardcode the defaults file list; scan `defaults/` directories so new files in future versions are automatically picked up
 - If `$ARGUMENTS` contains a path, use that as the target directory instead of current directory
 - After initialization, remind the user to customize `03-config/policies/` files for their project
-- Naming conventions: Plans `P-{YYYYMMDD}-{hash}`, Epics `E-{YYYYMMDD}-{hash}`, Runs `R-{YYYYMMDD}-{hash}`
+- Naming conventions: Plans `P{NNN}`, Epics `E-{NNN}-{phase}_{total}`, Runs `R-{EPIC_ID}-{run_number}` (see `skills/epic-orchestration.md` ID Generation)

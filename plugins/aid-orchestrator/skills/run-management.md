@@ -68,30 +68,34 @@ NEVER:
 
 ## ID System
 
+> **Authoritative reference:** `skills/epic-orchestration.md` → "ID Generation" section.
+> This section is a summary. If in doubt, follow epic-orchestration.md.
+
 ### Format
 
+IDs are sequential, derived from `.aid-o/03-config/counter.yaml`, and encode parent-child relationships.
+
 ```
-{PREFIX}-{YYYYMMDD}-{4char-hash}
+Plan:              P{NNN}                        (P001, P006)
+EPIC from plan:    E-{NNN}-{phase}_{total}       (E-005-1_4, E-006-1_1)
+Ad-hoc EPIC:       E-{NNN}                       (E-001, E-002)
+Run:               R-{EPIC_ID}-{run_number}      (R-005-1_4-1, R-001-1_1-1)
 
-PREFIX:
-- R = Run
-- E = Epic
-
-Hash generation:
-  echo $(date +%s%N | md5sum | head -c 4)
+Where NNN = zero-padded 3-digit number from counter.yaml.
 
 Examples:
-- R-20260210-a3f2
-- E-20260210-b5c1
+- Plan P005 with 4 phases → E-005-1_4, E-005-2_4, E-005-3_4, E-005-4_4
+- First run of E-005-1_4 → R-005-1_4-1
+- Ad-hoc EPIC (no plan) → E-001 (epic counter incremented)
 ```
 
 ### Usage
 
-- **Run file name:** `R-20260211-1f8c-run-mgmt-templates-debugging.md`
-- **Epic file name:** `E-20260210-44f1-skills-refactoring-v4.md`
-- **Frontmatter:** `id: R-20260211-1f8c`
-- **Branch:** `run/R-20260211-1f8c-run-mgmt-templates-debugging`
-- **Cross-reference:** `epic_id: E-20260210-44f1` in run file
+- **Run file name:** `R-005-1_4-1-gui-foundation.md`
+- **Epic file name:** `E-005-1_4-gui-foundation.md`
+- **Frontmatter:** `id: R-005-1_4-1`
+- **Branch:** `run/R-005-1_4-1-gui-foundation`
+- **Cross-reference:** `epic_id: E-005-1_4` in run file
 
 ---
 
@@ -138,11 +142,11 @@ Testing/QA only? → Verification run
 7. Determine: NEW run or CONTINUATION of existing?
 8. If NEW:
    a. **Assess complexity first:** Could this require 3+ runs? If yes → suggest Epic workflow to PM before proceeding. PM decides.
-   b. Generate run ID: `R-{YYYYMMDD}-{4char-hash}`
+   b. Generate run ID per `skills/epic-orchestration.md` ID Generation section
    c. Identify run type (see table above)
    d. Create run file from template:
       - Location: `{project.paths.runs_active}/`
-      - Naming: `{id}-{topic}.md` (e.g., `R-20260211-1f8c-run-mgmt-templates-debugging.md`)
+      - Naming: `{id}-{topic}.md` (e.g., `R-005-1_4-1-gui-foundation.md`)
       - Template: `{project.paths.templates}/run-{type}.md`
    e. Fill run file with DETAILED plan — objectives, approach, affected files, risks
    f. If epic run: reference epic file, note which run # this is, review what previous runs accomplished
@@ -350,7 +354,7 @@ During long runs (roughly every 2-3 phases or every major transition):
 ### Structure
 ```
 .aid-o/02-epics/
-└── E-{YYYYMMDD}-{hash}-{topic}.md    # Epic file (plan + progress + run log)
+└── E-{NNN}-{phase}_{total}-{topic}.md  # Epic file (plan + progress + run log)
 ```
 
 Run files for epic runs are stored in the standard `{project.paths.runs_active}/` location, linked to the epic via `epic_id` in frontmatter.
@@ -363,7 +367,7 @@ Run files for epic runs are stored in the standard `{project.paths.runs_active}/
 5. Epic completion: all runs done, status = Completed, move to `.aid-o/02-epics/archive/`
 
 ### Cross-References
-- **Run → Epic:** `epic_id: E-20260210-44f1` in frontmatter + link in References section
+- **Run → Epic:** `epic_id: E-005-1_4` in frontmatter + link in References section
 - **Epic → Runs:** Run Log section in epic file with links to each run file
 
 ---
@@ -558,9 +562,9 @@ Standard `.aid-o/` paths (created by `/aid-init`):
 ```
 
 **Conventions:**
-- Run file: `{id}-{topic}.md` (e.g., `R-20260211-1f8c-user-auth.md`)
-- Run ID: `R-{YYYYMMDD}-{4char-hash}`
-- Epic ID: `E-{YYYYMMDD}-{4char-hash}`
+- Run file: `{id}-{topic}.md` (e.g., `R-005-1_4-1-user-auth.md`)
+- Run ID: `R-{EPIC_ID}-{run_number}` (e.g., `R-005-1_4-1`)
+- Epic ID: `E-{NNN}-{phase}_{total}` or `E-{NNN}` for ad-hoc (e.g., `E-005-1_4`)
 - Branch: `run/{id}-{topic}`
 
 ---
