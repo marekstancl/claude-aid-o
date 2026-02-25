@@ -719,3 +719,145 @@ export interface Project {
   /** Whether the GUI can read the .aid-o/ directory for this project. */
   accessible: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// 13. Event Pipeline Types (EPIC E-005-2_4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Semantic topic for classifying file change events.
+ *
+ * Topics form a flat namespace with one level of dot-separated nesting.
+ * Subscribing to `pipeline` does NOT include `pipeline.stage_log` — they
+ * are independent subscriptions.
+ */
+export type EventTopic =
+  | 'pipeline'
+  | 'pipeline.stage_log'
+  | 'evidence'
+  | 'decisions'
+  | 'config'
+  | 'queue'
+  | 'audit'
+  | 'usage'
+  | 'system';
+
+/**
+ * All available EventTopic values as a runtime array, for validation
+ * and subscription management.
+ */
+export const ALL_EVENT_TOPICS: EventTopic[] = [
+  'pipeline',
+  'pipeline.stage_log',
+  'evidence',
+  'decisions',
+  'config',
+  'queue',
+  'audit',
+  'usage',
+  'system',
+];
+
+/**
+ * A file change detected by the Chokidar watcher, after classification
+ * and parsing.
+ *
+ * Emitted by the FileWatcher on the internal event bus.
+ */
+export interface FileChangeEvent {
+  /** Discriminant for the event union. */
+  type: 'file_change';
+  /** Semantic topic this event belongs to. */
+  topic: EventTopic;
+  /** Absolute path of the changed file. */
+  filePath: string;
+  /** Kind of filesystem change that occurred. */
+  changeType: 'add' | 'change' | 'unlink';
+  /** Parsed data from the file, or null if parsing failed or file was deleted. */
+  parsedData: unknown | null;
+  /** ISO 8601 timestamp when the event was created. */
+  timestamp: string;
+}
+
+/**
+ * A single new entry appended to a `stage_log.jsonl` file, detected by
+ * the tail-follow streamer.
+ *
+ * Emitted by the StageLogStream on the internal event bus.
+ */
+export interface StageLogEvent {
+  /** Discriminant for the event union. */
+  type: 'stage_log';
+  /** Always "pipeline.stage_log" for stage log entries. */
+  topic: 'pipeline.stage_log';
+  /** The parsed stage log entry. */
+  entry: StageLogEntry;
+  /** The EPIC ID this entry belongs to (extracted from the file path). */
+  epicId: string;
+  /** The run ID this entry belongs to (extracted from the file path). */
+  runId: string;
+  /** ISO 8601 timestamp when the event was created. */
+  timestamp: string;
+}
+
+/**
+ * Periodic heartbeat sent to all connected WebSocket clients to keep
+ * connections alive and allow clients to detect stale connections.
+ */
+export interface HeartbeatEvent {
+  /** Discriminant for the event union. */
+  type: 'heartbeat';
+  /** Always "system" for heartbeat events. */
+  topic: 'system';
+  /** ISO 8601 timestamp of the heartbeat. */
+  timestamp: string;
+  /** Number of clients currently connected. */
+  clientCount: number;
+}
+
+/**
+ * Sent to a client immediately after a successful WebSocket connection,
+ * providing initial state and the list of available topics.
+ */
+export interface ConnectionEvent {
+  /** Discriminant for the event union. */
+  type: 'connected';
+  /** Always "system" for connection events. */
+  topic: 'system';
+  /** ISO 8601 timestamp of the connection. */
+  timestamp: string;
+  /** Available topics the client can subscribe to. */
+  availableTopics: EventTopic[];
+}
+
+/**
+ * Discriminated union of all internal event types.
+ * Switch on the `type` field to narrow the type.
+ */
+export type InternalEvent =
+  | FileChangeEvent
+  | StageLogEvent
+  | HeartbeatEvent
+  | ConnectionEvent;
+
+/**
+ * Configuration options for the FileWatcher.
+ */
+export interface WatcherOptions {
+  /** Additional glob patterns to ignore (merged with defaults). */
+  ignorePatterns?: string[];
+  /** Debounce threshold in milliseconds (default: 50). */
+  debounceMs?: number;
+}
+
+/**
+ * Result of classifying a file path to a topic and parser strategy.
+ */
+export interface PathClassification {
+  /** Topic this file belongs to. */
+  topic: EventTopic;
+  /** Which parser function to use. Null means skip parsing (use raw or extension-based). */
+  parser: 'yaml' | 'json' | 'jsonl' | 'markdown' | 'epicSpec' | null;
+  /** Whether this file should be excluded from the general watcher. */
+  excluded: boolean;
+}
