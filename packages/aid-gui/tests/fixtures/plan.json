@@ -1,0 +1,54 @@
+{
+  "epic_id": "E-005-1_4-gui-foundation",
+  "run_id": "20260225T140000Z",
+  "generated_at": "2026-02-25T14:00:10Z",
+  "source_plan": ".aid-o/01-plans/P005-C-aid-gui-backend-post-prototype.md",
+  "total_steps": 6,
+  "waves": [
+    {"wave": 0, "steps": ["step_0_backend"]},
+    {"wave": 1, "steps": ["step_1_architect"]},
+    {"wave": 2, "steps": ["step_2_backend"]},
+    {"wave": 3, "steps": ["step_3_domain"]},
+    {"wave": 4, "steps": ["step_4_backend"]},
+    {"wave": 5, "steps": ["step_5_qa"]}
+  ],
+  "gates": ["tests_pass", "lint_pass", "type_check"],
+  "steps": [
+    {
+      "id": "step_0_backend",
+      "wave": 0,
+      "role": "backend",
+      "objective": "Monorepo migration: Copy AID-GUI contents into packages/aid-gui/",
+      "depends_on": [],
+      "inputs": ["AID-GUI repo at /opt/_home/small-personal-projetcs/AID-GUI/"],
+      "outputs": ["packages/aid-gui/ directory with all AID-GUI contents"],
+      "allowed_paths": ["package.json", "packages/aid-gui/", ".gitignore"],
+      "forbidden_paths": ["plugins/", ".git/", "node_modules/"],
+      "acceptance": ["AID-GUI contents in packages/aid-gui/", "Root package.json with workspaces"]
+    },
+    {
+      "id": "step_1_architect",
+      "wave": 1,
+      "role": "architect",
+      "objective": "Design server directory layout, define type contracts for .aid-o/ entities",
+      "depends_on": ["step_0_backend"],
+      "inputs": ["packages/aid-gui/ structure", "EPIC specification"],
+      "outputs": ["ADR document", "Type contracts specification"],
+      "allowed_paths": ["packages/aid-gui/docs/", "packages/aid-gui/server/"],
+      "forbidden_paths": ["packages/aid-gui/src/", "plugins/"],
+      "acceptance": ["ADR documenting monorepo migration + directory structure"]
+    },
+    {
+      "id": "step_5_qa",
+      "wave": 5,
+      "role": "qa",
+      "objective": "Write and run unit tests for all parsers using real .aid-o/ fixture files",
+      "depends_on": ["step_4_backend"],
+      "inputs": ["server/parsers/", "Real .aid-o/ files as fixtures"],
+      "outputs": ["tests/server/parsers/ test files", "tests/fixtures/ with real data"],
+      "allowed_paths": ["packages/aid-gui/tests/"],
+      "forbidden_paths": ["packages/aid-gui/src/", "plugins/"],
+      "acceptance": ["Unit tests for each parser", "All tests pass"]
+    }
+  ]
+}

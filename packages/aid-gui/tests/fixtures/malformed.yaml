@@ -1,0 +1,4 @@
+key: valid
+another_key: [unclosed bracket
+  bad_indent:
+  : missing key
