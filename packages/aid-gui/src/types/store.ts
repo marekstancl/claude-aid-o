@@ -18,7 +18,22 @@
  *                  & LegacySlice
  */
 
-import type { FSMState, PlanStep, StageLogEntryResponse } from './api';
+import type {
+  FSMState,
+  PlanStep,
+  StageLogEntryResponse,
+  PendingDecisionEntry,
+  DecisionEntry,
+  EvidenceEpicEntry,
+  EvidenceFileResponse,
+  AuditReportResponse,
+  StoredIdea,
+  QueueScheduleEntry,
+  ScheduleConfig,
+  ScheduleStatusResponse,
+  UsageResponse,
+  KnowledgeItem,
+} from './api';
 import type { WsConnectionStatus, EventTopic } from './ws';
 
 // ---------------------------------------------------------------------------
@@ -350,9 +365,250 @@ export type LegacySliceState = Omit<LegacySlice, 'setProject' | 'setFSMState' | 
  * }));
  * ```
  */
+// ---------------------------------------------------------------------------
+// DecisionsSlice — Decision Hub data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages pending decisions and decision history for the Decision Hub screen.
+ */
+export interface DecisionsSlice {
+  // --- State ---
+
+  /** Pending decisions requiring PM action. */
+  pendingDecisionsList: PendingDecisionEntry[];
+
+  /** Historical decision records, newest first. */
+  decisionHistory: DecisionEntry[];
+
+  /** Whether the decisions data is currently loading. */
+  decisionsLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the pending decisions list. */
+  setPendingDecisionsList: (decisions: PendingDecisionEntry[]) => void;
+
+  /** Replace the decision history. */
+  setDecisionHistory: (history: DecisionEntry[]) => void;
+
+  /** Set decisions loading state. */
+  setDecisionsLoading: (loading: boolean) => void;
+
+  /** Add a new decision to history (optimistic update). */
+  addDecisionToHistory: (decision: DecisionEntry) => void;
+
+  /** Remove a pending decision by epicId+runId (after approve/reject). */
+  removePendingDecision: (epicId: string, runId: string) => void;
+}
+
+// ---------------------------------------------------------------------------
+// EvidenceSlice — Evidence Vault data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages evidence tree and file content for the Evidence Vault screen.
+ */
+export interface EvidenceSlice {
+  // --- State ---
+
+  /** EPIC evidence entries with their runs. */
+  evidenceEpics: EvidenceEpicEntry[];
+
+  /** Currently selected EPIC ID in the evidence browser. */
+  selectedEvidenceEpic: string | null;
+
+  /** Currently selected run ID in the evidence browser. */
+  selectedEvidenceRun: string | null;
+
+  /** Currently selected file path in the evidence browser. */
+  selectedEvidenceFile: string | null;
+
+  /** Content of the currently selected evidence file. */
+  evidenceFileContent: EvidenceFileResponse | null;
+
+  /** Whether evidence data is loading. */
+  evidenceLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the evidence EPIC list. */
+  setEvidenceEpics: (epics: EvidenceEpicEntry[]) => void;
+
+  /** Set the selected EPIC/run/file in the evidence browser. */
+  setEvidenceSelection: (epicId: string | null, runId: string | null, file: string | null) => void;
+
+  /** Set the file content for the selected evidence file. */
+  setEvidenceFileContent: (content: EvidenceFileResponse | null) => void;
+
+  /** Set evidence loading state. */
+  setEvidenceLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
+// AuditSlice — Health Observatory data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages audit report data for the Health Observatory screen.
+ */
+export interface AuditSlice {
+  // --- State ---
+
+  /** All available audit reports (most recent first). */
+  auditReports: AuditReportResponse[];
+
+  /** The latest audit report (first in auditReports). */
+  latestAudit: AuditReportResponse | null;
+
+  /** Whether audit data is loading. */
+  auditLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the audit reports list. */
+  setAuditReports: (reports: AuditReportResponse[]) => void;
+
+  /** Set audit loading state. */
+  setAuditLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
+// IdeasSlice — Ideas to Execution data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages idea items for the Ideas to Execution Kanban screen.
+ */
+export interface IdeasSlice {
+  // --- State ---
+
+  /** All ideas. */
+  ideas: StoredIdea[];
+
+  /** Whether ideas data is loading. */
+  ideasLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the full ideas list. */
+  setIdeas: (ideas: StoredIdea[]) => void;
+
+  /** Add a new idea (from Quick Capture). */
+  addIdea: (idea: StoredIdea) => void;
+
+  /** Update an existing idea (status change, edit, etc.). */
+  updateIdea: (ideaId: string, updates: Partial<StoredIdea>) => void;
+
+  /** Remove an idea by ID. */
+  removeIdea: (ideaId: string) => void;
+
+  /** Set ideas loading state. */
+  setIdeasLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
+// QueueDetailSlice — Queue Scheduler data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages detailed queue data for the Queue Scheduler screen.
+ *
+ * This extends the basic SatelliteSlice queue data with full entry details,
+ * schedule configuration, and usage metrics.
+ */
+export interface QueueDetailSlice {
+  // --- State ---
+
+  /** Full queue entries with all details. */
+  queueEntries: QueueScheduleEntry[];
+
+  /** Schedule configuration. */
+  scheduleConfig: ScheduleConfig | null;
+
+  /** Current scheduler status. */
+  scheduleStatus: ScheduleStatusResponse | null;
+
+  /** Detailed usage data. */
+  usageData: UsageResponse | null;
+
+  /** Whether queue detail data is loading. */
+  queueDetailLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the full queue entries list. */
+  setQueueEntries: (entries: QueueScheduleEntry[]) => void;
+
+  /** Update the schedule configuration. */
+  setScheduleConfig: (config: ScheduleConfig | null) => void;
+
+  /** Update the scheduler status. */
+  setScheduleStatus: (status: ScheduleStatusResponse | null) => void;
+
+  /** Update the usage data. */
+  setUsageData: (usage: UsageResponse | null) => void;
+
+  /** Set queue detail loading state. */
+  setQueueDetailLoading: (loading: boolean) => void;
+
+  /** Reorder a queue entry (move to new index). */
+  reorderQueueEntry: (epicId: string, newIndex: number) => void;
+}
+
+// ---------------------------------------------------------------------------
+// KnowledgeSlice — Knowledge Base data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages knowledge base items for the Knowledge Base screen.
+ */
+export interface KnowledgeSlice {
+  // --- State ---
+
+  /** All knowledge items (agents, skills, commands). */
+  knowledgeItems: KnowledgeItem[];
+
+  /** Whether knowledge data is loading. */
+  knowledgeLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the knowledge items list. */
+  setKnowledgeItems: (items: KnowledgeItem[]) => void;
+
+  /** Set knowledge loading state. */
+  setKnowledgeLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
+// DashboardStore — combined store type
+// ---------------------------------------------------------------------------
+
+/**
+ * The complete Zustand store type.
+ *
+ * This is the intersection of all slices. Components can select individual
+ * fields or entire slices using Zustand selectors:
+ *
+ * @example
+ * ```ts
+ * const wsStatus = useStore((s) => s.wsStatus);
+ * const { currentState, currentEpicId } = useStore((s) => ({
+ *   currentState: s.currentState,
+ *   currentEpicId: s.currentEpicId,
+ * }));
+ * ```
+ */
 export type DashboardStore =
   & ConnectionSlice
   & PipelineSlice
   & StageLogSlice
   & SatelliteSlice
-  & LegacySlice;
+  & LegacySlice
+  & DecisionsSlice
+  & EvidenceSlice
+  & AuditSlice
+  & IdeasSlice
+  & QueueDetailSlice
+  & KnowledgeSlice;

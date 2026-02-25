@@ -63,6 +63,15 @@ export type {
   // Evidence
   EvidenceRunEntry,
   EvidenceEpicEntry,
+  EvidenceFileResponse,
+
+  // Ideas
+  StoredIdea,
+  IdeaCreateRequest,
+  IdeaUpdateRequest,
+
+  // Knowledge
+  KnowledgeItem,
 
   // Projects
   Project,
@@ -128,6 +137,12 @@ export type {
   LegacySliceState,
   LegacyFSMState,
   LegacyProject,
+  DecisionsSlice,
+  EvidenceSlice,
+  AuditSlice,
+  IdeasSlice,
+  QueueDetailSlice,
+  KnowledgeSlice,
 
   // Combined store
   DashboardStore,

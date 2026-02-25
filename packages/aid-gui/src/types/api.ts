@@ -681,3 +681,98 @@ export interface Project {
   /** Whether the GUI can read the .aid-o/ directory. */
   accessible: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Evidence file content
+// ---------------------------------------------------------------------------
+
+/**
+ * Response from GET /api/p/:projectId/evidence/:epicId/:runId/files/*
+ *
+ * The server parses the file and returns its content in the appropriate format.
+ */
+export interface EvidenceFileResponse {
+  /** Relative path to the file within the run directory. */
+  filePath: string;
+  /** Detected format of the file content. */
+  format: 'json' | 'yaml' | 'jsonl' | 'markdown' | 'text' | 'raw';
+  /** Parsed file content. JSON/YAML return objects, JSONL returns array, others return string. */
+  content: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Ideas
+// ---------------------------------------------------------------------------
+
+/**
+ * A stored idea with full metadata.
+ *
+ * Returned from GET/POST/PUT /api/p/:projectId/ideas.
+ */
+export interface StoredIdea {
+  /** Idea identifier (e.g., "I-001"). */
+  id: string;
+  /** Idea title. */
+  title: string;
+  /** Full description (Markdown). */
+  description: string;
+  /** Category or topic tags. */
+  tags: string[];
+  /** Priority level. */
+  priority: 'low' | 'medium' | 'high';
+  /** Lifecycle status. */
+  status: 'idea' | 'exploring' | 'planned' | 'done';
+  /** Linked plan reference, or null. */
+  linkedPlan: string | null;
+  /** Linked EPIC reference, or null. */
+  linkedEpic: string | null;
+  /** ISO 8601 creation timestamp. */
+  createdAt: string;
+  /** ISO 8601 last update timestamp. */
+  updatedAt: string;
+}
+
+/**
+ * Request body for POST /api/p/:projectId/ideas.
+ */
+export interface IdeaCreateRequest {
+  title: string;
+  description?: string;
+  tags?: string[];
+  priority?: 'low' | 'medium' | 'high';
+  linkedPlan?: string;
+  linkedEpic?: string;
+}
+
+/**
+ * Request body for PUT /api/p/:projectId/ideas/:ideaId.
+ */
+export interface IdeaUpdateRequest {
+  title?: string;
+  description?: string;
+  tags?: string[];
+  priority?: 'low' | 'medium' | 'high';
+  status?: 'idea' | 'exploring' | 'planned' | 'done';
+  linkedPlan?: string | null;
+  linkedEpic?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge
+// ---------------------------------------------------------------------------
+
+/**
+ * A knowledge base item (agent, skill, or command).
+ *
+ * Returned from GET /api/p/:projectId/knowledge.
+ */
+export interface KnowledgeItem {
+  /** Item type. */
+  type: 'agent' | 'skill' | 'command';
+  /** Item name (e.g., "architect", "epic-orchestration", "/aid-run-epic"). */
+  name: string;
+  /** Human-readable description extracted from the Markdown file. */
+  description: string;
+  /** Source filename (e.g., "architect.md"). */
+  filename: string;
+}

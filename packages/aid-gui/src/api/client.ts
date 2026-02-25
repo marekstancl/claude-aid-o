@@ -32,8 +32,20 @@ import type {
   StageLogEntryResponse,
   QueueResponse,
   DecisionsResponse,
+  PendingDecisionsResponse,
+  DecisionWriteRequest,
+  DecisionEntry,
   UsageResponse,
   AuditReportResponse,
+  EvidenceEpicEntry,
+  EvidenceFileResponse,
+  StoredIdea,
+  IdeaCreateRequest,
+  IdeaUpdateRequest,
+  ScheduleConfig,
+  ScheduleStatusResponse,
+  QueueScheduleEntry,
+  KnowledgeItem,
 } from '../types/api';
 
 // ---------------------------------------------------------------------------
@@ -149,6 +161,69 @@ async function typedFetch<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Core request wrapper (supports all HTTP methods)
+// ---------------------------------------------------------------------------
+
+async function typedRequest<T>(
+  url: string,
+  timeoutMs: number,
+  method: string,
+  body?: unknown,
+): Promise<ApiResult<T>> {
+  let response: Response;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    const init: RequestInit = {
+      method,
+      headers: {
+        'Accept': 'application/json',
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      signal: controller.signal,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    };
+
+    response = await fetch(url, init);
+    clearTimeout(timeoutId);
+  } catch (err: unknown) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return makeApiError('TIMEOUT', `Request timed out after ${timeoutMs}ms: ${url}`);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return makeApiError('NETWORK_ERROR', `Network error: ${message}`);
+  }
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    if (!response.ok) {
+      return makeApiError(
+        `HTTP_${response.status}`,
+        `Server returned ${response.status} ${response.statusText} with non-JSON body`,
+      );
+    }
+    return makeApiError(
+      'INVALID_RESPONSE',
+      `Expected JSON response from ${url} but received ${response.headers.get('content-type') ?? 'unknown content type'}`,
+    );
+  }
+
+  if (typeof responseBody === 'object' && responseBody !== null && 'ok' in responseBody) {
+    return responseBody as ApiResult<T>;
+  }
+
+  if (response.ok) {
+    return { ok: true, data: responseBody as T };
+  }
+
+  return makeApiError(`HTTP_${response.status}`, `Server returned ${response.status} with unexpected JSON shape`, responseBody);
+}
+
+// ---------------------------------------------------------------------------
 // API client interface
 // ---------------------------------------------------------------------------
 
@@ -179,6 +254,55 @@ export interface ApiClient {
 
   /** GET /api/p/:projectId/audit */
   getAuditHealth(): Promise<ApiResult<AuditReportResponse>>;
+
+  // ----- Decisions -----
+
+  /** GET /api/p/:projectId/decisions/pending */
+  getDecisionsPending(): Promise<ApiResult<PendingDecisionsResponse>>;
+
+  /** POST /api/p/:projectId/decisions */
+  postDecision(request: DecisionWriteRequest): Promise<ApiResult<DecisionEntry>>;
+
+  // ----- Evidence -----
+
+  /** GET /api/p/:projectId/evidence */
+  getEvidence(): Promise<ApiResult<EvidenceEpicEntry[]>>;
+
+  /** GET /api/p/:projectId/evidence/:epicId/:runId/files/:filePath */
+  getEvidenceFile(epicId: string, runId: string, filePath: string): Promise<ApiResult<EvidenceFileResponse>>;
+
+  // ----- Ideas -----
+
+  /** GET /api/p/:projectId/ideas */
+  getIdeas(): Promise<ApiResult<StoredIdea[]>>;
+
+  /** POST /api/p/:projectId/ideas */
+  createIdea(request: IdeaCreateRequest): Promise<ApiResult<StoredIdea>>;
+
+  /** PUT /api/p/:projectId/ideas/:ideaId */
+  updateIdea(ideaId: string, request: IdeaUpdateRequest): Promise<ApiResult<StoredIdea>>;
+
+  /** DELETE /api/p/:projectId/ideas/:ideaId */
+  deleteIdea(ideaId: string): Promise<ApiResult<{ deleted: boolean }>>;
+
+  // ----- Queue Schedule -----
+
+  /** GET /api/p/:projectId/queue/schedule */
+  getQueueSchedule(): Promise<ApiResult<ScheduleConfig>>;
+
+  /** PUT /api/p/:projectId/queue/schedule */
+  updateQueueSchedule(config: Partial<ScheduleConfig>): Promise<ApiResult<ScheduleConfig>>;
+
+  /** PUT /api/p/:projectId/queue/:epicId */
+  updateQueueEntry(epicId: string, updates: Partial<QueueScheduleEntry>): Promise<ApiResult<QueueScheduleEntry>>;
+
+  /** GET /api/p/:projectId/queue/schedule/status */
+  getQueueScheduleStatus(): Promise<ApiResult<ScheduleStatusResponse>>;
+
+  // ----- Knowledge -----
+
+  /** GET /api/p/:projectId/knowledge */
+  getKnowledge(): Promise<ApiResult<KnowledgeItem[]>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,5 +352,57 @@ export function createApiClient(
 
     getAuditHealth: () =>
       typedFetch<AuditReportResponse>(`${base}/audit`, timeoutMs),
+
+    // ----- Decisions -----
+
+    getDecisionsPending: () =>
+      typedFetch<PendingDecisionsResponse>(`${base}/decisions/pending`, timeoutMs),
+
+    postDecision: (request: DecisionWriteRequest) =>
+      typedRequest<DecisionEntry>(`${base}/decisions`, timeoutMs, 'POST', request),
+
+    // ----- Evidence -----
+
+    getEvidence: () =>
+      typedFetch<EvidenceEpicEntry[]>(`${base}/evidence`, timeoutMs),
+
+    getEvidenceFile: (epicId: string, runId: string, filePath: string) =>
+      typedFetch<EvidenceFileResponse>(
+        `${base}/evidence/${encodeURIComponent(epicId)}/${encodeURIComponent(runId)}/files/${filePath}`,
+        timeoutMs,
+      ),
+
+    // ----- Ideas -----
+
+    getIdeas: () =>
+      typedFetch<StoredIdea[]>(`${base}/ideas`, timeoutMs),
+
+    createIdea: (request: IdeaCreateRequest) =>
+      typedRequest<StoredIdea>(`${base}/ideas`, timeoutMs, 'POST', request),
+
+    updateIdea: (ideaId: string, request: IdeaUpdateRequest) =>
+      typedRequest<StoredIdea>(`${base}/ideas/${encodeURIComponent(ideaId)}`, timeoutMs, 'PUT', request),
+
+    deleteIdea: (ideaId: string) =>
+      typedRequest<{ deleted: boolean }>(`${base}/ideas/${encodeURIComponent(ideaId)}`, timeoutMs, 'DELETE'),
+
+    // ----- Queue Schedule -----
+
+    getQueueSchedule: () =>
+      typedFetch<ScheduleConfig>(`${base}/queue/schedule`, timeoutMs),
+
+    updateQueueSchedule: (config: Partial<ScheduleConfig>) =>
+      typedRequest<ScheduleConfig>(`${base}/queue/schedule`, timeoutMs, 'PUT', config),
+
+    updateQueueEntry: (epicId: string, updates: Partial<QueueScheduleEntry>) =>
+      typedRequest<QueueScheduleEntry>(`${base}/queue/${encodeURIComponent(epicId)}`, timeoutMs, 'PUT', updates),
+
+    getQueueScheduleStatus: () =>
+      typedFetch<ScheduleStatusResponse>(`${base}/queue/schedule/status`, timeoutMs),
+
+    // ----- Knowledge -----
+
+    getKnowledge: () =>
+      typedFetch<KnowledgeItem[]>(`${base}/knowledge`, timeoutMs),
   };
 }

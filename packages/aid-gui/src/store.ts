@@ -26,8 +26,27 @@ import type {
   LegacyProject,
   DashboardStore,
   StepStatus,
+  DecisionsSlice,
+  EvidenceSlice,
+  AuditSlice,
+  IdeasSlice,
+  QueueDetailSlice,
+  KnowledgeSlice,
 } from './types/store';
-import type { StageLogEntryResponse } from './types/api';
+import type {
+  StageLogEntryResponse,
+  PendingDecisionEntry,
+  DecisionEntry,
+  EvidenceEpicEntry,
+  EvidenceFileResponse,
+  AuditReportResponse,
+  StoredIdea,
+  QueueScheduleEntry,
+  ScheduleConfig,
+  ScheduleStatusResponse,
+  UsageResponse,
+  KnowledgeItem,
+} from './types/api';
 import type { WsConnectionStatus, EventTopic } from './types/ws';
 
 // ---------------------------------------------------------------------------
@@ -245,6 +264,200 @@ const createLegacySlice: StateCreator<
 });
 
 // ---------------------------------------------------------------------------
+// DecisionsSlice
+// ---------------------------------------------------------------------------
+
+const createDecisionsSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  DecisionsSlice
+> = (set) => ({
+  pendingDecisionsList: [] as PendingDecisionEntry[],
+  decisionHistory: [] as DecisionEntry[],
+  decisionsLoading: false,
+
+  setPendingDecisionsList: (decisions: PendingDecisionEntry[]) =>
+    set({ pendingDecisionsList: decisions }),
+
+  setDecisionHistory: (history: DecisionEntry[]) =>
+    set({ decisionHistory: history }),
+
+  setDecisionsLoading: (loading: boolean) =>
+    set({ decisionsLoading: loading }),
+
+  addDecisionToHistory: (decision: DecisionEntry) =>
+    set((state) => ({
+      decisionHistory: [decision, ...state.decisionHistory],
+    })),
+
+  removePendingDecision: (epicId: string, runId: string) =>
+    set((state) => ({
+      pendingDecisionsList: state.pendingDecisionsList.filter(
+        (d) => !(d.epicId === epicId && d.runId === runId),
+      ),
+      pendingDecisions: Math.max(0, state.pendingDecisions - 1),
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// EvidenceSlice
+// ---------------------------------------------------------------------------
+
+const createEvidenceSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  EvidenceSlice
+> = (set) => ({
+  evidenceEpics: [] as EvidenceEpicEntry[],
+  selectedEvidenceEpic: null,
+  selectedEvidenceRun: null,
+  selectedEvidenceFile: null,
+  evidenceFileContent: null,
+  evidenceLoading: false,
+
+  setEvidenceEpics: (epics: EvidenceEpicEntry[]) =>
+    set({ evidenceEpics: epics }),
+
+  setEvidenceSelection: (epicId: string | null, runId: string | null, file: string | null) =>
+    set({
+      selectedEvidenceEpic: epicId,
+      selectedEvidenceRun: runId,
+      selectedEvidenceFile: file,
+      evidenceFileContent: file === null ? null : undefined as unknown as EvidenceFileResponse | null,
+    }),
+
+  setEvidenceFileContent: (content: EvidenceFileResponse | null) =>
+    set({ evidenceFileContent: content }),
+
+  setEvidenceLoading: (loading: boolean) =>
+    set({ evidenceLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
+// AuditSlice
+// ---------------------------------------------------------------------------
+
+const createAuditSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  AuditSlice
+> = (set) => ({
+  auditReports: [] as AuditReportResponse[],
+  latestAudit: null,
+  auditLoading: false,
+
+  setAuditReports: (reports: AuditReportResponse[]) =>
+    set({
+      auditReports: reports,
+      latestAudit: reports.length > 0 ? reports[0] : null,
+      healthScore: reports.length > 0 ? reports[0].scores.overall : null,
+    }),
+
+  setAuditLoading: (loading: boolean) =>
+    set({ auditLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
+// IdeasSlice
+// ---------------------------------------------------------------------------
+
+const createIdeasSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  IdeasSlice
+> = (set) => ({
+  ideas: [] as StoredIdea[],
+  ideasLoading: false,
+
+  setIdeas: (ideas: StoredIdea[]) =>
+    set({ ideas }),
+
+  addIdea: (idea: StoredIdea) =>
+    set((state) => ({ ideas: [...state.ideas, idea] })),
+
+  updateIdea: (ideaId: string, updates: Partial<StoredIdea>) =>
+    set((state) => ({
+      ideas: state.ideas.map((i) =>
+        i.id === ideaId ? { ...i, ...updates } : i,
+      ),
+    })),
+
+  removeIdea: (ideaId: string) =>
+    set((state) => ({
+      ideas: state.ideas.filter((i) => i.id !== ideaId),
+    })),
+
+  setIdeasLoading: (loading: boolean) =>
+    set({ ideasLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
+// QueueDetailSlice
+// ---------------------------------------------------------------------------
+
+const createQueueDetailSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  QueueDetailSlice
+> = (set) => ({
+  queueEntries: [] as QueueScheduleEntry[],
+  scheduleConfig: null,
+  scheduleStatus: null,
+  usageData: null,
+  queueDetailLoading: false,
+
+  setQueueEntries: (entries: QueueScheduleEntry[]) =>
+    set({ queueEntries: entries }),
+
+  setScheduleConfig: (config: ScheduleConfig | null) =>
+    set({ scheduleConfig: config }),
+
+  setScheduleStatus: (status: ScheduleStatusResponse | null) =>
+    set({ scheduleStatus: status }),
+
+  setUsageData: (usage: UsageResponse | null) =>
+    set({ usageData: usage }),
+
+  setQueueDetailLoading: (loading: boolean) =>
+    set({ queueDetailLoading: loading }),
+
+  reorderQueueEntry: (epicId: string, newIndex: number) =>
+    set((state) => {
+      const entries = [...state.queueEntries];
+      const currentIndex = entries.findIndex((e) => e.epicId === epicId);
+      if (currentIndex === -1 || currentIndex === newIndex) return {};
+      const [entry] = entries.splice(currentIndex, 1);
+      entries.splice(newIndex, 0, entry);
+      return { queueEntries: entries };
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// KnowledgeSlice
+// ---------------------------------------------------------------------------
+
+const createKnowledgeSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  KnowledgeSlice
+> = (set) => ({
+  knowledgeItems: [] as KnowledgeItem[],
+  knowledgeLoading: false,
+
+  setKnowledgeItems: (items: KnowledgeItem[]) =>
+    set({ knowledgeItems: items }),
+
+  setKnowledgeLoading: (loading: boolean) =>
+    set({ knowledgeLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
 // Combined store
 // ---------------------------------------------------------------------------
 
@@ -254,6 +467,12 @@ export const useStore = create<DashboardStore>((...args) => ({
   ...createStageLogSlice(...args),
   ...createSatelliteSlice(...args),
   ...createLegacySlice(...args),
+  ...createDecisionsSlice(...args),
+  ...createEvidenceSlice(...args),
+  ...createAuditSlice(...args),
+  ...createIdeasSlice(...args),
+  ...createQueueDetailSlice(...args),
+  ...createKnowledgeSlice(...args),
 }));
 
 // ---------------------------------------------------------------------------
