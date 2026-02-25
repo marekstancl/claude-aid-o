@@ -1,6 +1,6 @@
-import React, { useEffect, useCallback } from 'react';
-import { motion } from 'motion/react';
-import { Clock, GripVertical, AlertCircle, Play, Settings, Zap, TrendingUp, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Clock, GripVertical, AlertCircle, Play, Settings, Zap, TrendingUp, AlertTriangle, Rocket, X, CheckCircle, Loader2 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { cn } from '../lib/utils';
 import { useStore } from '../store';
@@ -316,8 +316,64 @@ export const QueueScheduler: React.FC = () => {
     }
   }, [setScheduleConfig]);
 
+  // ---------------------------------------------------------------------------
+  // Launch queue state & handlers
+  // ---------------------------------------------------------------------------
+
+  const [showLaunchConfirm, setShowLaunchConfirm] = useState(false);
+  const [launchLoading, setLaunchLoading] = useState(false);
+  const [launchFeedback, setLaunchFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  const isQueueEmpty = queueEntries.filter((e) => e.status === 'queued').length === 0;
+  const hasRunningEntry = queueEntries.some((e) => e.status === 'running');
+  const isLaunchDisabled = isQueueEmpty || hasRunningEntry || launchLoading;
+
   const handleLaunchQueue = useCallback(() => {
-    console.log('LAUNCH QUEUE clicked — placeholder');
+    setLaunchFeedback(null);
+    setShowLaunchConfirm(true);
+  }, []);
+
+  const handleLaunchConfirm = useCallback(async () => {
+    setLaunchLoading(true);
+    setLaunchFeedback(null);
+
+    const result = await client.launchQueue();
+
+    setLaunchLoading(false);
+    setShowLaunchConfirm(false);
+
+    if (result.ok) {
+      const epicLabel = result.data.epicId ? ` (${result.data.epicId})` : '';
+      setLaunchFeedback({
+        type: 'success',
+        message: `Queue launched successfully${epicLabel}`,
+      });
+
+      // Refresh queue data after successful launch
+      const refreshResult = await client.getQueue();
+      if (refreshResult.ok) {
+        setQueueEntries(refreshResult.data.queue);
+      }
+      const statusRefresh = await client.getQueueScheduleStatus();
+      if (statusRefresh.ok) {
+        setScheduleStatus(statusRefresh.data);
+      }
+
+      // Auto-dismiss success feedback after 4 seconds
+      setTimeout(() => setLaunchFeedback(null), 4000);
+    } else {
+      setLaunchFeedback({
+        type: 'error',
+        message: (result as ApiError).error.message ?? 'Failed to launch queue',
+      });
+    }
+  }, [setQueueEntries, setScheduleStatus]);
+
+  const handleLaunchCancel = useCallback(() => {
+    setShowLaunchConfirm(false);
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -640,11 +696,53 @@ export const QueueScheduler: React.FC = () => {
                 </div>
 
                 <button
-                  className="w-full mt-4 bg-state-executing hover:bg-state-executing/90 text-bg-base font-bold py-3 rounded-xl transition-all shadow-lg shadow-state-executing/20 flex items-center justify-center gap-2"
+                  className={cn(
+                    "w-full mt-4 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2",
+                    isLaunchDisabled
+                      ? "bg-white/5 text-white/20 cursor-not-allowed"
+                      : "bg-state-executing hover:bg-state-executing/90 text-bg-base shadow-lg shadow-state-executing/20"
+                  )}
                   onClick={handleLaunchQueue}
+                  disabled={isLaunchDisabled}
+                  title={
+                    isQueueEmpty
+                      ? 'Queue is empty'
+                      : hasRunningEntry
+                        ? 'An EPIC is already running'
+                        : 'Launch the queue'
+                  }
                 >
-                  <Play size={16} fill="currentColor" /> LAUNCH QUEUE
+                  <Rocket size={16} /> LAUNCH QUEUE
                 </button>
+
+                {/* Launch feedback toast */}
+                <AnimatePresence>
+                  {launchFeedback && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className={cn(
+                        "mt-3 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center gap-2 border",
+                        launchFeedback.type === 'success'
+                          ? "bg-state-done/10 border-state-done/20 text-state-done"
+                          : "bg-state-error/10 border-state-error/20 text-state-error"
+                      )}
+                    >
+                      {launchFeedback.type === 'success'
+                        ? <CheckCircle size={14} />
+                        : <AlertCircle size={14} />
+                      }
+                      {launchFeedback.message}
+                      <button
+                        onClick={() => setLaunchFeedback(null)}
+                        className="ml-auto p-0.5 hover:bg-white/10 rounded transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
@@ -714,6 +812,94 @@ export const QueueScheduler: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Launch Confirmation Dialog */}
+      <AnimatePresence>
+        {showLaunchConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            onClick={handleLaunchCancel}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="glass p-6 rounded-2xl border border-white/10 w-[420px] shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-state-executing/20 flex items-center justify-center">
+                    <Rocket size={20} className="text-state-executing" />
+                  </div>
+                  <h3 className="text-lg font-bold">Launch Queue</h3>
+                </div>
+                <button
+                  onClick={handleLaunchCancel}
+                  className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-white transition-colors"
+                  disabled={launchLoading}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-sm text-white/60 mb-2">
+                This will start executing the queue sequentially. The first queued EPIC will begin immediately.
+              </p>
+
+              <div className="bg-white/5 rounded-xl p-4 border border-white/5 mb-6">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-white/40">Queued EPICs</span>
+                  <span className="font-bold font-mono">{queuedCount}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-2">
+                  <span className="text-white/40">Estimated time</span>
+                  <span className="font-bold font-mono">{estTimeStr}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-2">
+                  <span className="text-white/40">Cooldown between EPICs</span>
+                  <span className="font-bold font-mono">{cooldownMinutes}m</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleLaunchCancel}
+                  disabled={launchLoading}
+                  className="flex-1 py-2.5 rounded-xl border border-white/10 text-sm font-medium text-white/60 hover:bg-white/5 hover:text-white transition-all disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLaunchConfirm}
+                  disabled={launchLoading}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2",
+                    launchLoading
+                      ? "bg-state-executing/50 text-bg-base cursor-wait"
+                      : "bg-state-executing hover:bg-state-executing/90 text-bg-base shadow-lg shadow-state-executing/20"
+                  )}
+                >
+                  {launchLoading ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Launching...
+                    </>
+                  ) : (
+                    <>
+                      <Rocket size={16} />
+                      Confirm Launch
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
