@@ -41,3 +41,6 @@ docs/plans/
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 .aid-o/
+
+# Claude Code local settings
+.claude/
