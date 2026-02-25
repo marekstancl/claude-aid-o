@@ -111,10 +111,10 @@ version_files:
   - path: "README.md"
     field: "license_footer"
     track: project
-    update_method: regex
-    pattern: 'MIT — v[\d.]+'
-    replacement: 'MIT — v${version}'
-    description: "README license footer — version reference"
+    update_method: exact
+    pattern: 'AGPL-3.0-only — see [LICENSE](LICENSE)'
+    replacement: 'AGPL-3.0-only — see [LICENSE](LICENSE)'
+    description: "README license footer — static, no version in license line"
 
 # ─── SemVer Determination Rules ───────────────────────────────────────
 # Defines which change types trigger which version bump level.

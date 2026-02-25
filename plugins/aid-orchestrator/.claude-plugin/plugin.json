@@ -5,6 +5,6 @@
   "author": {
     "name": "Marek Stancl"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management"]
 }

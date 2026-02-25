@@ -131,4 +131,4 @@ See [CHANGELOG.md](CHANGELOG.md) for full history.
 
 ## License
 
-MIT — v0.9.2
+AGPL-3.0-only — see [LICENSE](LICENSE)

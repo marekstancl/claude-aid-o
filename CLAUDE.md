@@ -137,7 +137,7 @@ Every push to main MUST ensure these 8 locations are in sync:
 | 5 | `plugins/aid-orchestrator/.claude-plugin/plugin.json` | `version` | JSON field |
 | 6 | `plugins/aid-orchestrator/README.md` | `- **Plugin:** X.Y.Z` | Regex |
 | 7 | `README.md` | `- **vX.Y.Z** (current)` | Regex |
-| 8 | `README.md` | `MIT — vX.Y.Z` | Regex |
+| 8 | `README.md` | `AGPL-3.0-only — see [LICENSE](LICENSE)` | Exact |
 
 These are also defined in `defaults/policies/release-policy.yaml` → `version_files[]`.
 The Release Sub-Phase in `skills/epic-orchestration.md` automates this during EPIC runs.
