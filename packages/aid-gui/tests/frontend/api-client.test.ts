@@ -19,6 +19,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createApiClient } from '../../src/api/client.ts';
 import type { ApiClient } from '../../src/api/client.ts';
+import type { ApiError } from '../../src/types/api.ts';
 import type {
   PipelineStateResponse,
   PipelineStepsResponse,
@@ -283,8 +284,8 @@ describe('createApiClient — error responses', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('NOT_FOUND');
-      expect(result.error.message).toBe('Project not found');
+      expect((result as ApiError).error.code).toBe('NOT_FOUND');
+      expect((result as ApiError).error.message).toBe('Project not found');
     }
   });
 
@@ -300,7 +301,7 @@ describe('createApiClient — error responses', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('INTERNAL_ERROR');
+      expect((result as ApiError).error.code).toBe('INTERNAL_ERROR');
     }
   });
 
@@ -312,8 +313,8 @@ describe('createApiClient — error responses', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('HTTP_404');
-      expect(result.error.message).toContain('404');
+      expect((result as ApiError).error.code).toBe('HTTP_404');
+      expect((result as ApiError).error.message).toContain('404');
     }
   });
 
@@ -325,7 +326,7 @@ describe('createApiClient — error responses', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('HTTP_500');
+      expect((result as ApiError).error.code).toBe('HTTP_500');
     }
   });
 
@@ -337,7 +338,7 @@ describe('createApiClient — error responses', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('INVALID_RESPONSE');
+      expect((result as ApiError).error.code).toBe('INVALID_RESPONSE');
     }
   });
 });
@@ -355,8 +356,8 @@ describe('createApiClient — network errors and timeouts', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('NETWORK_ERROR');
-      expect(result.error.message).toContain('Failed to fetch');
+      expect((result as ApiError).error.code).toBe('NETWORK_ERROR');
+      expect((result as ApiError).error.message).toContain('Failed to fetch');
     }
   });
 
@@ -368,8 +369,8 @@ describe('createApiClient — network errors and timeouts', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('NETWORK_ERROR');
-      expect(result.error.message).toContain('Connection refused');
+      expect((result as ApiError).error.code).toBe('NETWORK_ERROR');
+      expect((result as ApiError).error.message).toContain('Connection refused');
     }
   });
 
@@ -382,8 +383,8 @@ describe('createApiClient — network errors and timeouts', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('TIMEOUT');
-      expect(result.error.message).toContain('100ms');
+      expect((result as ApiError).error.code).toBe('TIMEOUT');
+      expect((result as ApiError).error.message).toContain('100ms');
     }
   });
 });
@@ -429,7 +430,7 @@ describe('createApiClient — JSON envelope edge cases', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('HTTP_500');
+      expect((result as ApiError).error.code).toBe('HTTP_500');
     }
   });
 });
