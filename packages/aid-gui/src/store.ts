@@ -32,6 +32,9 @@ import type {
   IdeasSlice,
   QueueDetailSlice,
   KnowledgeSlice,
+  ProjectsSlice,
+  ReplaySlice,
+  ReplayState,
 } from './types/store';
 import type {
   StageLogEntryResponse,
@@ -46,6 +49,7 @@ import type {
   ScheduleStatusResponse,
   UsageResponse,
   KnowledgeItem,
+  Project as ApiProject,
 } from './types/api';
 import type { WsConnectionStatus, EventTopic } from './types/ws';
 
@@ -461,6 +465,70 @@ const createKnowledgeSlice: StateCreator<
 // Combined store
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// ProjectsSlice
+// ---------------------------------------------------------------------------
+
+const createProjectsSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  ProjectsSlice
+> = (set) => ({
+  projects: [] as ApiProject[],
+  activeProject: null,
+  projectsLoading: false,
+
+  setProjects: (projects: ApiProject[]) =>
+    set({ projects }),
+
+  setActiveProject: (project: ApiProject | null) =>
+    set({ activeProject: project }),
+
+  setProjectsLoading: (loading: boolean) =>
+    set({ projectsLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
+// ReplaySlice
+// ---------------------------------------------------------------------------
+
+const createReplaySlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  ReplaySlice
+> = (set) => ({
+  replayState: 'idle' as ReplayState,
+  replayEvents: [] as StageLogEntryResponse[],
+  replayIndex: 0,
+  playbackSpeed: 1,
+
+  setReplayState: (state: ReplayState) =>
+    set({ replayState: state }),
+
+  setReplayEvents: (events: StageLogEntryResponse[]) =>
+    set({ replayEvents: events }),
+
+  setReplayIndex: (index: number) =>
+    set({ replayIndex: index }),
+
+  setPlaybackSpeed: (speed: number) =>
+    set({ playbackSpeed: speed }),
+
+  resetReplay: () =>
+    set({
+      replayState: 'idle' as ReplayState,
+      replayEvents: [] as StageLogEntryResponse[],
+      replayIndex: 0,
+      playbackSpeed: 1,
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Combined store
+// ---------------------------------------------------------------------------
+
 export const useStore = create<DashboardStore>((...args) => ({
   ...createConnectionSlice(...args),
   ...createPipelineSlice(...args),
@@ -473,6 +541,8 @@ export const useStore = create<DashboardStore>((...args) => ({
   ...createIdeasSlice(...args),
   ...createQueueDetailSlice(...args),
   ...createKnowledgeSlice(...args),
+  ...createProjectsSlice(...args),
+  ...createReplaySlice(...args),
 }));
 
 // ---------------------------------------------------------------------------

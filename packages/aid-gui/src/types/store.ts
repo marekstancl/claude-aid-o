@@ -33,6 +33,7 @@ import type {
   ScheduleStatusResponse,
   UsageResponse,
   KnowledgeItem,
+  Project,
 } from './api';
 import type { WsConnectionStatus, EventTopic } from './ws';
 
@@ -347,6 +348,80 @@ export interface LegacySlice {
 export type LegacySliceState = Omit<LegacySlice, 'setProject' | 'setFSMState' | 'updatePipeline'>;
 
 // ---------------------------------------------------------------------------
+// ProjectsSlice — multi-project management
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages the list of registered projects and the active project.
+ */
+export interface ProjectsSlice {
+  // --- State ---
+
+  /** All registered projects. */
+  projects: Project[];
+
+  /** The currently active project, or null. */
+  activeProject: Project | null;
+
+  /** Whether projects are loading. */
+  projectsLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the projects list. */
+  setProjects: (projects: Project[]) => void;
+
+  /** Set the active project. */
+  setActiveProject: (project: Project | null) => void;
+
+  /** Set projects loading state. */
+  setProjectsLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
+// ReplaySlice — Pipeline Theater replay state
+// ---------------------------------------------------------------------------
+
+/** Replay state machine states. */
+export type ReplayState = 'idle' | 'playing' | 'paused' | 'scrubbing';
+
+/**
+ * Manages Pipeline Theater replay state.
+ */
+export interface ReplaySlice {
+  // --- State ---
+
+  /** Current replay state. */
+  replayState: ReplayState;
+
+  /** Full stage log entries for replay. */
+  replayEvents: StageLogEntryResponse[];
+
+  /** Current event index in the replay. */
+  replayIndex: number;
+
+  /** Playback speed multiplier (1, 2, or 4). */
+  playbackSpeed: number;
+
+  // --- Actions ---
+
+  /** Set the replay state. */
+  setReplayState: (state: ReplayState) => void;
+
+  /** Load events for replay. */
+  setReplayEvents: (events: StageLogEntryResponse[]) => void;
+
+  /** Set the current replay index. */
+  setReplayIndex: (index: number) => void;
+
+  /** Set the playback speed. */
+  setPlaybackSpeed: (speed: number) => void;
+
+  /** Reset replay to initial state. */
+  resetReplay: () => void;
+}
+
+// ---------------------------------------------------------------------------
 // DashboardStore — combined store type
 // ---------------------------------------------------------------------------
 
@@ -611,4 +686,6 @@ export type DashboardStore =
   & AuditSlice
   & IdeasSlice
   & QueueDetailSlice
-  & KnowledgeSlice;
+  & KnowledgeSlice
+  & ProjectsSlice
+  & ReplaySlice;

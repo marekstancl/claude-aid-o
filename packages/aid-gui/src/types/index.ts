@@ -143,6 +143,9 @@ export type {
   IdeasSlice,
   QueueDetailSlice,
   KnowledgeSlice,
+  ProjectsSlice,
+  ReplaySlice,
+  ReplayState,
 
   // Combined store
   DashboardStore,
