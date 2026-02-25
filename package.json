@@ -1,0 +1,5 @@
+{
+  "name": "ai-orchestrator",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

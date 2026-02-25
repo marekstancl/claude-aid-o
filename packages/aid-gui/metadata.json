@@ -1,0 +1,7 @@
+{
+  "name": "AID GUI Dashboard v2 8/10",
+  "description": "Orchestration Cinema: A cinematic experience of AI orchestration and pipeline monitoring.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
