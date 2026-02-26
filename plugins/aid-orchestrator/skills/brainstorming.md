@@ -521,7 +521,7 @@ RULE 8: File analysis from PM-provided paths follows the same non-blocking guara
 | `knowledge.enabled: false` | Skip all knowledge calls. Brainstorm normally. |
 | Qdrant MCP unavailable | `knowledge_find()` returns empty. Brainstorm normally. |
 | `knowledge_find()` times out (>5s) | Discard result. Brainstorm normally. |
-| `knowledge_find()` returns empty | No knowledge displayed. Brainstorm normally. |
+| `knowledge_find()` returns empty | Display "No knowledge indexed yet" to PM (Step 1). Brainstorm normally. |
 | Partial results (Step 1 works, Step 3 times out) | Use Step 1 results, skip Step 3 enrichment. |
 | `defaults/examples/` directory missing | Skip static example lookup silently. Qdrant lookup still runs (if enabled). |
 | `defaults/examples/` directory empty | Skip static example lookup silently. Qdrant lookup still runs (if enabled). |
