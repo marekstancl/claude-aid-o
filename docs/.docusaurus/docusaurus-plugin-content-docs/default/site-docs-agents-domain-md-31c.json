@@ -1,0 +1,28 @@
+{
+  "id": "agents/domain",
+  "title": "Domain Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/domain.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/domain",
+  "permalink": "/ai-orchestrator/cs/agents/domain",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/domain.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "domain",
+    "title": "Domain Agent",
+    "sidebar_label": "Domain Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Docs Writer Agent",
+    "permalink": "/ai-orchestrator/cs/agents/docs-writer"
+  },
+  "next": {
+    "title": "Frontend Agent",
+    "permalink": "/ai-orchestrator/cs/agents/frontend"
+  }
+}

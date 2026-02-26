@@ -1,0 +1,28 @@
+{
+  "id": "skills/agent-core",
+  "title": "Agent Core",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/agent-core.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/agent-core",
+  "permalink": "/ai-orchestrator/cs/skills/agent-core",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/agent-core.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "agent-core",
+    "title": "Agent Core",
+    "sidebar_label": "Agent Core"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Skills Overview",
+    "permalink": "/ai-orchestrator/cs/skills/overview"
+  },
+  "next": {
+    "title": "Analysis Merge",
+    "permalink": "/ai-orchestrator/cs/skills/analysis-merge"
+  }
+}

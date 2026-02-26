@@ -1,0 +1,28 @@
+{
+  "id": "agents/overview",
+  "title": "Agents Overview",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/overview.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/overview",
+  "permalink": "/ai-orchestrator/cs/agents/overview",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/overview.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "overview",
+    "title": "Agents Overview",
+    "sidebar_label": "Agents Overview"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Agents",
+    "permalink": "/ai-orchestrator/cs/agents"
+  },
+  "next": {
+    "title": "Architect Agent",
+    "permalink": "/ai-orchestrator/cs/agents/architect"
+  }
+}

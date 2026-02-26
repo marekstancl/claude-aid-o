@@ -1,0 +1,28 @@
+{
+  "id": "commands/aid-analytics",
+  "title": "/aid-analytics",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/commands/aid-analytics.md",
+  "sourceDirName": "commands",
+  "slug": "/commands/aid-analytics",
+  "permalink": "/ai-orchestrator/cs/commands/aid-analytics",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/commands/aid-analytics.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "aid-analytics",
+    "title": "/aid-analytics",
+    "sidebar_label": "/aid-analytics"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Commands",
+    "permalink": "/ai-orchestrator/cs/commands"
+  },
+  "next": {
+    "title": "/aid-audit",
+    "permalink": "/ai-orchestrator/cs/commands/aid-audit"
+  }
+}

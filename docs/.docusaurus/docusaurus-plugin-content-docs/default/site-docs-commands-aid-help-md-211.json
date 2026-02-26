@@ -1,0 +1,28 @@
+{
+  "id": "commands/aid-help",
+  "title": "/aid-help",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/commands/aid-help.md",
+  "sourceDirName": "commands",
+  "slug": "/commands/aid-help",
+  "permalink": "/ai-orchestrator/cs/commands/aid-help",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/commands/aid-help.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "aid-help",
+    "title": "/aid-help",
+    "sidebar_label": "/aid-help"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "/aid-first-aid",
+    "permalink": "/ai-orchestrator/cs/commands/aid-first-aid"
+  },
+  "next": {
+    "title": "/aid-init",
+    "permalink": "/ai-orchestrator/cs/commands/aid-init"
+  }
+}

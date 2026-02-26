@@ -1,0 +1,28 @@
+{
+  "id": "agents/quality-gates-runner",
+  "title": "Quality Gates Runner Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/quality-gates-runner.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/quality-gates-runner",
+  "permalink": "/ai-orchestrator/cs/agents/quality-gates-runner",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/quality-gates-runner.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "quality-gates-runner",
+    "title": "Quality Gates Runner Agent",
+    "sidebar_label": "Quality Gates Runner Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Qa Agent",
+    "permalink": "/ai-orchestrator/cs/agents/qa"
+  },
+  "next": {
+    "title": "Release Agent",
+    "permalink": "/ai-orchestrator/cs/agents/release"
+  }
+}

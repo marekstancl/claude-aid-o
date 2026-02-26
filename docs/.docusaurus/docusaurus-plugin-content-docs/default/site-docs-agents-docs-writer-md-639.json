@@ -1,0 +1,28 @@
+{
+  "id": "agents/docs-writer",
+  "title": "Docs Writer Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/docs-writer.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/docs-writer",
+  "permalink": "/ai-orchestrator/cs/agents/docs-writer",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/docs-writer.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "docs-writer",
+    "title": "Docs Writer Agent",
+    "sidebar_label": "Docs Writer Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Docs Reviewer Agent",
+    "permalink": "/ai-orchestrator/cs/agents/docs-reviewer"
+  },
+  "next": {
+    "title": "Domain Agent",
+    "permalink": "/ai-orchestrator/cs/agents/domain"
+  }
+}

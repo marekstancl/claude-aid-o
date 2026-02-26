@@ -1,0 +1,28 @@
+{
+  "id": "agents/auditor",
+  "title": "Auditor Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/auditor.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/auditor",
+  "permalink": "/ai-orchestrator/cs/agents/auditor",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/auditor.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "auditor",
+    "title": "Auditor Agent",
+    "sidebar_label": "Auditor Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Architect Agent",
+    "permalink": "/ai-orchestrator/cs/agents/architect"
+  },
+  "next": {
+    "title": "Backend Agent",
+    "permalink": "/ai-orchestrator/cs/agents/backend"
+  }
+}

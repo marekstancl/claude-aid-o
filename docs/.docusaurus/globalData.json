@@ -1,0 +1,338 @@
+{
+  "docusaurus-plugin-content-docs": {
+    "default": {
+      "path": "/ai-orchestrator/cs/",
+      "versions": [
+        {
+          "name": "current",
+          "label": "Next",
+          "isLast": true,
+          "path": "/ai-orchestrator/cs/",
+          "mainDocId": "intro",
+          "docs": [
+            {
+              "id": "agents/architect",
+              "path": "/ai-orchestrator/cs/agents/architect",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/auditor",
+              "path": "/ai-orchestrator/cs/agents/auditor",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/backend",
+              "path": "/ai-orchestrator/cs/agents/backend",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/code-reviewer",
+              "path": "/ai-orchestrator/cs/agents/code-reviewer",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/curator",
+              "path": "/ai-orchestrator/cs/agents/curator",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/docs-reviewer",
+              "path": "/ai-orchestrator/cs/agents/docs-reviewer",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/docs-writer",
+              "path": "/ai-orchestrator/cs/agents/docs-writer",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/domain",
+              "path": "/ai-orchestrator/cs/agents/domain",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/frontend",
+              "path": "/ai-orchestrator/cs/agents/frontend",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/gate-fixer",
+              "path": "/ai-orchestrator/cs/agents/gate-fixer",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/lessons-extractor",
+              "path": "/ai-orchestrator/cs/agents/lessons-extractor",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/observability",
+              "path": "/ai-orchestrator/cs/agents/observability",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/overview",
+              "path": "/ai-orchestrator/cs/agents/overview",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/project-scanner",
+              "path": "/ai-orchestrator/cs/agents/project-scanner",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/qa",
+              "path": "/ai-orchestrator/cs/agents/qa",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/quality-gates-runner",
+              "path": "/ai-orchestrator/cs/agents/quality-gates-runner",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/release",
+              "path": "/ai-orchestrator/cs/agents/release",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/run-validator",
+              "path": "/ai-orchestrator/cs/agents/run-validator",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "agents/security",
+              "path": "/ai-orchestrator/cs/agents/security",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-analytics",
+              "path": "/ai-orchestrator/cs/commands/aid-analytics",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-audit",
+              "path": "/ai-orchestrator/cs/commands/aid-audit",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-brainstorm",
+              "path": "/ai-orchestrator/cs/commands/aid-brainstorm",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-epic-queue",
+              "path": "/ai-orchestrator/cs/commands/aid-epic-queue",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-epic-status",
+              "path": "/ai-orchestrator/cs/commands/aid-epic-status",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-first-aid",
+              "path": "/ai-orchestrator/cs/commands/aid-first-aid",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-help",
+              "path": "/ai-orchestrator/cs/commands/aid-help",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-init",
+              "path": "/ai-orchestrator/cs/commands/aid-init",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-plan-epic",
+              "path": "/ai-orchestrator/cs/commands/aid-plan-epic",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-research",
+              "path": "/ai-orchestrator/cs/commands/aid-research",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-run-epic",
+              "path": "/ai-orchestrator/cs/commands/aid-run-epic",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-setup",
+              "path": "/ai-orchestrator/cs/commands/aid-setup",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "commands/aid-stop",
+              "path": "/ai-orchestrator/cs/commands/aid-stop",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "getting-started/configuration",
+              "path": "/ai-orchestrator/cs/getting-started/configuration",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "getting-started/installation",
+              "path": "/ai-orchestrator/cs/getting-started/installation",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "getting-started/quick-start",
+              "path": "/ai-orchestrator/cs/getting-started/quick-start",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "intro",
+              "path": "/ai-orchestrator/cs/",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/agent-core",
+              "path": "/ai-orchestrator/cs/skills/agent-core",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/analysis-merge",
+              "path": "/ai-orchestrator/cs/skills/analysis-merge",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/analytics",
+              "path": "/ai-orchestrator/cs/skills/analytics",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/auto-done-state",
+              "path": "/ai-orchestrator/cs/skills/auto-done-state",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/auto-escalation",
+              "path": "/ai-orchestrator/cs/skills/auto-escalation",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/brainstorming",
+              "path": "/ai-orchestrator/cs/skills/brainstorming",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/cost-optimization",
+              "path": "/ai-orchestrator/cs/skills/cost-optimization",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/epic-orchestration",
+              "path": "/ai-orchestrator/cs/skills/epic-orchestration",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/epic-queue",
+              "path": "/ai-orchestrator/cs/skills/epic-queue",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/gates-engine",
+              "path": "/ai-orchestrator/cs/skills/gates-engine",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/improvement-proposals",
+              "path": "/ai-orchestrator/cs/skills/improvement-proposals",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/knowledge-acquisition",
+              "path": "/ai-orchestrator/cs/skills/knowledge-acquisition",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/memory-mcp",
+              "path": "/ai-orchestrator/cs/skills/memory-mcp",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/overview",
+              "path": "/ai-orchestrator/cs/skills/overview",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/parallel-dispatch",
+              "path": "/ai-orchestrator/cs/skills/parallel-dispatch",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/permission-sandwich",
+              "path": "/ai-orchestrator/cs/skills/permission-sandwich",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/planner",
+              "path": "/ai-orchestrator/cs/skills/planner",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/quality-gates",
+              "path": "/ai-orchestrator/cs/skills/quality-gates",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/retry-engine",
+              "path": "/ai-orchestrator/cs/skills/retry-engine",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/run-management",
+              "path": "/ai-orchestrator/cs/skills/run-management",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/slack-mcp",
+              "path": "/ai-orchestrator/cs/skills/slack-mcp",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "skills/workflow-intelligence",
+              "path": "/ai-orchestrator/cs/skills/workflow-intelligence",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "/getting-started",
+              "path": "/ai-orchestrator/cs/getting-started",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "/commands",
+              "path": "/ai-orchestrator/cs/commands",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "/agents",
+              "path": "/ai-orchestrator/cs/agents",
+              "sidebar": "docsSidebar"
+            },
+            {
+              "id": "/skills",
+              "path": "/ai-orchestrator/cs/skills",
+              "sidebar": "docsSidebar"
+            }
+          ],
+          "draftIds": [],
+          "sidebars": {
+            "docsSidebar": {
+              "link": {
+                "path": "/ai-orchestrator/cs/",
+                "label": "intro"
+              }
+            }
+          }
+        }
+      ],
+      "breadcrumbs": true
+    }
+  }
+}

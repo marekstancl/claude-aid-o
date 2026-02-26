@@ -1,0 +1,28 @@
+{
+  "id": "skills/planner",
+  "title": "Planner",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/planner.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/planner",
+  "permalink": "/ai-orchestrator/cs/skills/planner",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/planner.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "planner",
+    "title": "Planner",
+    "sidebar_label": "Planner"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Permission Sandwich",
+    "permalink": "/ai-orchestrator/cs/skills/permission-sandwich"
+  },
+  "next": {
+    "title": "Quality Gates",
+    "permalink": "/ai-orchestrator/cs/skills/quality-gates"
+  }
+}

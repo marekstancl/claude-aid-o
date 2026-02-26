@@ -1,0 +1,31 @@
+{
+  "defaultLocale": "en",
+  "locales": [
+    "en",
+    "cs"
+  ],
+  "path": "i18n",
+  "currentLocale": "cs",
+  "localeConfigs": {
+    "en": {
+      "label": "English",
+      "direction": "ltr",
+      "htmlLang": "en",
+      "calendar": "gregory",
+      "path": "en",
+      "translate": false,
+      "url": "https://your-org.github.io",
+      "baseUrl": "/ai-orchestrator/"
+    },
+    "cs": {
+      "label": "Čeština",
+      "direction": "ltr",
+      "htmlLang": "cs",
+      "calendar": "gregory",
+      "path": "cs",
+      "translate": true,
+      "url": "https://your-org.github.io",
+      "baseUrl": "/ai-orchestrator/cs/"
+    }
+  }
+}

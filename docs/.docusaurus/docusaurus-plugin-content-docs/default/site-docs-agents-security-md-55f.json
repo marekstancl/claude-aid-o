@@ -1,0 +1,28 @@
+{
+  "id": "agents/security",
+  "title": "Security Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/security.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/security",
+  "permalink": "/ai-orchestrator/cs/agents/security",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/security.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "security",
+    "title": "Security Agent",
+    "sidebar_label": "Security Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Run Validator Agent",
+    "permalink": "/ai-orchestrator/cs/agents/run-validator"
+  },
+  "next": {
+    "title": "Skills",
+    "permalink": "/ai-orchestrator/cs/skills"
+  }
+}

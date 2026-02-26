@@ -1,0 +1,28 @@
+{
+  "id": "skills/analysis-merge",
+  "title": "Analysis Merge",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/analysis-merge.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/analysis-merge",
+  "permalink": "/ai-orchestrator/cs/skills/analysis-merge",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/analysis-merge.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "analysis-merge",
+    "title": "Analysis Merge",
+    "sidebar_label": "Analysis Merge"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Agent Core",
+    "permalink": "/ai-orchestrator/cs/skills/agent-core"
+  },
+  "next": {
+    "title": "Analytics",
+    "permalink": "/ai-orchestrator/cs/skills/analytics"
+  }
+}

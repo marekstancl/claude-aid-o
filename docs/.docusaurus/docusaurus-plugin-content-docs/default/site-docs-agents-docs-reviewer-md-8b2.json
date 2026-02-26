@@ -1,0 +1,28 @@
+{
+  "id": "agents/docs-reviewer",
+  "title": "Docs Reviewer Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/docs-reviewer.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/docs-reviewer",
+  "permalink": "/ai-orchestrator/cs/agents/docs-reviewer",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/docs-reviewer.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "docs-reviewer",
+    "title": "Docs Reviewer Agent",
+    "sidebar_label": "Docs Reviewer Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Curator Agent",
+    "permalink": "/ai-orchestrator/cs/agents/curator"
+  },
+  "next": {
+    "title": "Docs Writer Agent",
+    "permalink": "/ai-orchestrator/cs/agents/docs-writer"
+  }
+}

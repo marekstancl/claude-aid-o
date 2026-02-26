@@ -1,0 +1,28 @@
+{
+  "id": "agents/project-scanner",
+  "title": "Project Scanner Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/project-scanner.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/project-scanner",
+  "permalink": "/ai-orchestrator/cs/agents/project-scanner",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/project-scanner.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "project-scanner",
+    "title": "Project Scanner Agent",
+    "sidebar_label": "Project Scanner Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Observability Agent",
+    "permalink": "/ai-orchestrator/cs/agents/observability"
+  },
+  "next": {
+    "title": "Qa Agent",
+    "permalink": "/ai-orchestrator/cs/agents/qa"
+  }
+}

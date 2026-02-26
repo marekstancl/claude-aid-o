@@ -1,0 +1,28 @@
+{
+  "id": "skills/overview",
+  "title": "Skills Overview",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/overview.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/overview",
+  "permalink": "/ai-orchestrator/cs/skills/overview",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/overview.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "overview",
+    "title": "Skills Overview",
+    "sidebar_label": "Skills Overview"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Skills",
+    "permalink": "/ai-orchestrator/cs/skills"
+  },
+  "next": {
+    "title": "Agent Core",
+    "permalink": "/ai-orchestrator/cs/skills/agent-core"
+  }
+}

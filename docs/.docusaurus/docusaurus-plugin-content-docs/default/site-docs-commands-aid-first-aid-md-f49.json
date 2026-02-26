@@ -1,0 +1,28 @@
+{
+  "id": "commands/aid-first-aid",
+  "title": "/aid-first-aid",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/commands/aid-first-aid.md",
+  "sourceDirName": "commands",
+  "slug": "/commands/aid-first-aid",
+  "permalink": "/ai-orchestrator/cs/commands/aid-first-aid",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/commands/aid-first-aid.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "aid-first-aid",
+    "title": "/aid-first-aid",
+    "sidebar_label": "/aid-first-aid"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "/aid-epic-status",
+    "permalink": "/ai-orchestrator/cs/commands/aid-epic-status"
+  },
+  "next": {
+    "title": "/aid-help",
+    "permalink": "/ai-orchestrator/cs/commands/aid-help"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "skills/slack-mcp",
+  "title": "Slack Mcp",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/slack-mcp.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/slack-mcp",
+  "permalink": "/ai-orchestrator/cs/skills/slack-mcp",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/slack-mcp.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "slack-mcp",
+    "title": "Slack Mcp",
+    "sidebar_label": "Slack Mcp"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Run Management",
+    "permalink": "/ai-orchestrator/cs/skills/run-management"
+  },
+  "next": {
+    "title": "Workflow Intelligence",
+    "permalink": "/ai-orchestrator/cs/skills/workflow-intelligence"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "commands/aid-research",
+  "title": "/aid-research",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/commands/aid-research.md",
+  "sourceDirName": "commands",
+  "slug": "/commands/aid-research",
+  "permalink": "/ai-orchestrator/cs/commands/aid-research",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/commands/aid-research.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "aid-research",
+    "title": "/aid-research",
+    "sidebar_label": "/aid-research"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "/aid-plan-epic",
+    "permalink": "/ai-orchestrator/cs/commands/aid-plan-epic"
+  },
+  "next": {
+    "title": "/aid-run-epic",
+    "permalink": "/ai-orchestrator/cs/commands/aid-run-epic"
+  }
+}

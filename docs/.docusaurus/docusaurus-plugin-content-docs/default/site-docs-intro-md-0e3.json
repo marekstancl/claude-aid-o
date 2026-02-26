@@ -1,0 +1,27 @@
+{
+  "id": "intro",
+  "title": "AID Orchestrator",
+  "description": "Multi-Agent Development Orchestration for Claude Code.",
+  "source": "@site/docs/intro.md",
+  "sourceDirName": ".",
+  "slug": "/",
+  "permalink": "/ai-orchestrator/cs/",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/intro.md",
+  "tags": [],
+  "version": "current",
+  "sidebarPosition": 1,
+  "frontMatter": {
+    "id": "intro",
+    "title": "AID Orchestrator",
+    "sidebar_label": "Introduction",
+    "sidebar_position": 1,
+    "slug": "/"
+  },
+  "sidebar": "docsSidebar",
+  "next": {
+    "title": "Getting Started",
+    "permalink": "/ai-orchestrator/cs/getting-started"
+  }
+}

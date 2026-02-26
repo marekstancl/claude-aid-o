@@ -1,0 +1,28 @@
+{
+  "id": "skills/auto-escalation",
+  "title": "Auto Escalation",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/auto-escalation.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/auto-escalation",
+  "permalink": "/ai-orchestrator/cs/skills/auto-escalation",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/auto-escalation.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "auto-escalation",
+    "title": "Auto Escalation",
+    "sidebar_label": "Auto Escalation"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Auto Done State",
+    "permalink": "/ai-orchestrator/cs/skills/auto-done-state"
+  },
+  "next": {
+    "title": "Brainstorming",
+    "permalink": "/ai-orchestrator/cs/skills/brainstorming"
+  }
+}

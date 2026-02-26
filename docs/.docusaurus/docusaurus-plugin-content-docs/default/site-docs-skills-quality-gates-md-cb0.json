@@ -1,0 +1,28 @@
+{
+  "id": "skills/quality-gates",
+  "title": "Quality Gates",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/skills/quality-gates.md",
+  "sourceDirName": "skills",
+  "slug": "/skills/quality-gates",
+  "permalink": "/ai-orchestrator/cs/skills/quality-gates",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/skills/quality-gates.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "quality-gates",
+    "title": "Quality Gates",
+    "sidebar_label": "Quality Gates"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Planner",
+    "permalink": "/ai-orchestrator/cs/skills/planner"
+  },
+  "next": {
+    "title": "Retry Engine",
+    "permalink": "/ai-orchestrator/cs/skills/retry-engine"
+  }
+}

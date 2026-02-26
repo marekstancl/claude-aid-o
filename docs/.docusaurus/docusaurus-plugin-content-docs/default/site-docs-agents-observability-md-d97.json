@@ -1,0 +1,28 @@
+{
+  "id": "agents/observability",
+  "title": "Observability Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/observability.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/observability",
+  "permalink": "/ai-orchestrator/cs/agents/observability",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/observability.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "observability",
+    "title": "Observability Agent",
+    "sidebar_label": "Observability Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Lessons Extractor Agent",
+    "permalink": "/ai-orchestrator/cs/agents/lessons-extractor"
+  },
+  "next": {
+    "title": "Project Scanner Agent",
+    "permalink": "/ai-orchestrator/cs/agents/project-scanner"
+  }
+}

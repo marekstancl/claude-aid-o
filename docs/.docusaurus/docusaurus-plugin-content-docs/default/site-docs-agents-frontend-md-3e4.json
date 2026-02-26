@@ -1,0 +1,28 @@
+{
+  "id": "agents/frontend",
+  "title": "Frontend Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/frontend.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/frontend",
+  "permalink": "/ai-orchestrator/cs/agents/frontend",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/frontend.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "frontend",
+    "title": "Frontend Agent",
+    "sidebar_label": "Frontend Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Domain Agent",
+    "permalink": "/ai-orchestrator/cs/agents/domain"
+  },
+  "next": {
+    "title": "Gate Fixer Agent",
+    "permalink": "/ai-orchestrator/cs/agents/gate-fixer"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "commands/aid-stop",
+  "title": "/aid-stop",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/commands/aid-stop.md",
+  "sourceDirName": "commands",
+  "slug": "/commands/aid-stop",
+  "permalink": "/ai-orchestrator/cs/commands/aid-stop",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/commands/aid-stop.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "aid-stop",
+    "title": "/aid-stop",
+    "sidebar_label": "/aid-stop"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "/aid-setup",
+    "permalink": "/ai-orchestrator/cs/commands/aid-setup"
+  },
+  "next": {
+    "title": "Agents",
+    "permalink": "/ai-orchestrator/cs/agents"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "agents/release",
+  "title": "Release Agent",
+  "description": "This page is a placeholder and will be populated in a later step.",
+  "source": "@site/docs/agents/release.md",
+  "sourceDirName": "agents",
+  "slug": "/agents/release",
+  "permalink": "/ai-orchestrator/cs/agents/release",
+  "draft": false,
+  "unlisted": false,
+  "editUrl": "https://github.com/your-org/ai-orchestrator/tree/main/docs/docs/agents/release.md",
+  "tags": [],
+  "version": "current",
+  "frontMatter": {
+    "id": "release",
+    "title": "Release Agent",
+    "sidebar_label": "Release Agent"
+  },
+  "sidebar": "docsSidebar",
+  "previous": {
+    "title": "Quality Gates Runner Agent",
+    "permalink": "/ai-orchestrator/cs/agents/quality-gates-runner"
+  },
+  "next": {
+    "title": "Run Validator Agent",
+    "permalink": "/ai-orchestrator/cs/agents/run-validator"
+  }
+}
