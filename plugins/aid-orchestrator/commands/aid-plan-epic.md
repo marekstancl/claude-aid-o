@@ -35,6 +35,56 @@ Both input formats produce the same output: a plan.json, plan_progress.json, and
 
 ## Flow
 
+### Step 0: Version Pre-check
+
+Before doing anything else, check whether the local plugin version matches the
+latest published release. This is a **non-blocking warning** — the command always
+continues to Step 1 regardless of the result.
+
+1. **Read local version:**
+   - Parse `plugins/aid-orchestrator/.claude-plugin/plugin.json`
+   - Extract the `version` field (e.g., `"0.9.3"`)
+   - Prefix with `v` for display (e.g., `v0.9.3`)
+
+2. **Fetch latest release from GitHub:**
+   - Run: `gh api repos/marekstancl/claude-aid-o/releases/latest --jq '.tag_name'`
+   - This returns the tag name of the latest release (e.g., `v0.10.0`)
+
+3. **Compare versions:**
+   - Strip the `v` prefix from both versions for comparison
+   - Split on `.` and compare numerically: major, then minor, then patch
+   - Determine: outdated (local < latest), up-to-date (equal), or ahead (local > latest)
+
+4. **Display result:**
+
+   **If outdated** (local < latest):
+   ```
+   Version Check
+   ====================================
+   Local:   v{local_version}
+   Latest:  v{latest_version}
+   Status:  ⚠ Update available
+
+   Run: claude plugin update aid-orchestrator@claude-aid-o
+   ====================================
+   ```
+
+   **If up to date or ahead** (local >= latest):
+   ```
+   Version Check: v{local_version} (up to date)
+   ```
+
+5. **Error handling — skip gracefully:**
+   If the `gh` command fails for any reason (not installed, not authenticated,
+   network offline, no releases exist, API rate-limited), do NOT abort. Instead
+   display:
+   ```
+   Version check skipped (gh API unavailable)
+   ```
+   Then proceed to Step 1 normally.
+
+After displaying the version check result, proceed to Step 1.
+
 ### Step 1: Input Format Detection
 
 Before validating EPIC sections, detect whether the input file is a Plan or an EPIC.
