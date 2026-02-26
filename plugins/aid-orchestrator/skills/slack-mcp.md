@@ -518,7 +518,7 @@ Format (one JSON object per line):
 - `agents/curator.md` — Curator → Orchestrator → PM flow (proposal consumer)
 - `agents/auditor.md` — Auditor → Orchestrator → PM flow (summary consumer)
 - `defaults/policies/decision-policies.yaml` — escalation_triggers, auto_decisions
-- `workspace/workflow/plans/WORKFLOWS.md` WF-13 — Slack Integration workflow
+- `.aid-o/01-plans/WORKFLOWS.md` WF-13 — Slack Integration workflow (if present in project)
 
 ---
 

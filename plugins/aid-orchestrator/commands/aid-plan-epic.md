@@ -360,7 +360,7 @@ Before creating the run file, read ALL of the following:
 
 1. **EPIC file** (already loaded from Step 3) — goal, scope, constraints, affected areas
 2. **Plan JSON** (generated in Step 6) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
-3. **Plan file** (`.aid-o/01-plans/` or `workspace/workflow/plans/` if referenced in EPIC) — broader project context
+3. **Plan file** (`.aid-o/01-plans/`) — broader project context
 4. **Previous run** (if `epic_run > 1`) — what was delivered, lessons learned
 5. **Relevant source code** — scan inputs/outputs from plan steps, read key files to understand current state
 6. **Decision policies** (`.aid-o/03-config/policies/decision-policies.yaml`) — auto_decisions, escalation_triggers
