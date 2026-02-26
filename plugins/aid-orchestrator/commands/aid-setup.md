@@ -301,9 +301,10 @@ Setup Options Available
    b. Context7 — framework documentation via MCP (knowledge acquisition)
    c. Slack — PM communication via Slack messages
    d. Docker — container management via MCP
-   e. Auto-detect — {list detected MCPs based on stack}
-   f. Custom — add your own MCP servers
-   (Recommended: at minimum Qdrant local)
+   e. GitHub — repository operations, PR management, issue tracking
+   f. Auto-detect — {list detected MCPs based on stack}
+   g. Custom — add your own MCP servers
+   (Recommended: at minimum Qdrant local + GitHub for GitHub-hosted projects)
 
 7. Permission Preset
    Controls what agents can do:
@@ -340,7 +341,7 @@ Setup Options Available
 THEN ask PM:
 ```
 Which options would you like to configure?
-(A) All recommended (options 1,2,3,6a,6b,6d,7,8,9{",10" if docs.platform is "none" or "generic-markdown"},11)
+(A) All recommended (options 1,2,3,6a,6b,6d,6e,7,8,9{",10" if docs.platform is "none" or "generic-markdown"},11)
 (B) Let me pick specific options
 (C) Everything (all options)
 ```
@@ -839,19 +840,153 @@ Docker MCP Troubleshooting
    Then log out and back in.
 ```
 
-**6e. Auto-detect Tech MCPs**
+**6e. GitHub MCP -- Repository & PR Management (Recommended)**
 
-Based on the project stack detected in Step 1, suggest relevant MCP servers:
+GitHub MCP gives AID agents direct access to GitHub operations: repository metadata,
+pull request management, issue tracking, code search, and more. For any project hosted
+on GitHub, this eliminates manual context-switching for common GitHub workflows.
+
+```
+Why GitHub MCP?
+====================================
+Without GitHub MCP:
+  - Agents cannot read PRs, issues, or repository metadata
+  - PR creation and review must be done manually
+  - No way to search code across GitHub from Claude Code
+
+With GitHub MCP:
+  - Create, read, and update pull requests and issues
+  - Search code across repositories
+  - Read file contents and commit history from GitHub
+  - Agents can verify branch status and CI checks
+  - Works with both public and private repositories (with gh auth)
+
+GitHub MCP uses your existing gh CLI authentication. No extra tokens needed.
+```
+
+**Setup flow:**
+
+1. **Detection:** Check if the project is hosted on GitHub.
+   - If `git.hosting` is `"github"` (from Git Detection): proceed to step 2.
+   - If `git.hosting` is NOT `"github"` or no remote configured:
+     ```
+     GitHub hosting not detected for this project.
+     GitHub MCP is still useful for cross-repo search and issue management.
+     Install anyway?
+     (A) Yes
+     (B) No — skip
+     ```
+     If B: skip, continue to next option.
+
+2. **Auto-detect:** Check if GitHub MCP is already available.
+   ```
+   TRY: get_me()   (GitHub MCP tool)
+   IF tool exists AND returns user info:
+     -> GitHub MCP already configured, skip to confirmation
+   IF tool_not_found:
+     -> GitHub MCP not installed, proceed to step 3
+   ```
+
+3. **Prerequisites:** Check that `gh` CLI is authenticated.
+   ```
+   TRY: gh auth status
+   IF authenticated:
+     -> Proceed to install
+   IF not authenticated:
+     -> Display:
+        GitHub MCP requires gh CLI authentication.
+        Run: gh auth login
+        Then retry /aid-setup and select Option 6e.
+     -> Skip (non-blocking), continue
+   ```
+
+4. **Install:** Present install option to PM.
+   ```
+   GitHub MCP Setup
+   ====================================
+
+   GitHub MCP provides repository operations, PR management,
+   and issue tracking via MCP.
+   Package: @anthropic/mcp-github
+
+   Install GitHub MCP? (Recommended for GitHub-hosted projects)
+   (A) Yes — user scope (recommended, shared across all projects)
+   (B) Yes — project scope (this project only)
+   (C) No — skip GitHub MCP
+
+   Scope explanation:
+     User scope:    Available in ALL your projects. Installed once.
+                    Command: claude mcp add github --scope user -- npx -y @anthropic/mcp-github
+     Project scope: Available only in THIS project. Creates .mcp.json entry.
+                    Command: claude mcp add github -- npx -y @anthropic/mcp-github
+   ```
+
+   - If A: run `claude mcp add github --scope user -- npx -y @anthropic/mcp-github`
+   - If B: run `claude mcp add github -- npx -y @anthropic/mcp-github`
+   - If C: skip, continue
+   - No environment variables needed (uses gh CLI auth).
+
+5. **Verification:** After install, confirm GitHub MCP is working.
+   ```
+   TRY: get_me()
+
+   IF returns user info:
+     -> Display: "GitHub MCP verified -- authenticated as @{username}."
+   IF tool_not_found OR error:
+     -> Display:
+        GitHub MCP verification failed.
+        Ensure gh CLI is authenticated: gh auth status
+        You can retry later by running /aid-setup and selecting Option 6e.
+     -> Continue (non-blocking)
+   ```
+
+6. **Configuration:** Update project-profile.yaml.
+   - Append `github` to `mcp_servers: [...]`
+
+**Common issues:**
+
+```
+GitHub MCP Troubleshooting
+====================================
+
+1. "gh auth status" fails
+   GitHub MCP relies on the gh CLI for authentication.
+   Install and authenticate:
+     macOS:   brew install gh && gh auth login
+     Linux:   https://github.com/cli/cli/blob/trunk/docs/install_linux.md
+   Then: gh auth login (follow interactive prompts)
+
+2. "npx: command not found"
+   GitHub MCP requires Node.js and npx. Install Node.js (v18+):
+     macOS:   brew install node
+     Linux:   curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt-get install -y nodejs
+
+3. "Resource not accessible by integration"
+   Your gh token may lack required scopes. Re-authenticate with:
+     gh auth login --scopes "repo,read:org"
+   This grants access to private repos and organization data.
+
+4. Rate limiting (403 errors)
+   GitHub API has rate limits. For authenticated requests, the limit is
+   5000 requests/hour. If you hit limits, wait or check:
+     gh api rate_limit --jq '.resources.core'
+```
+
+**6f. Auto-detect Tech MCPs**
+
+Based on the project stack detected in Step 1, suggest relevant MCP servers
+that were NOT already installed as recommended MCPs (skip Qdrant, Context7,
+Docker, and GitHub if already configured above):
 
 | Detected | MCP Server | Install Command |
 |----------|-----------|-----------------|
-| `.github/` or GitHub remote | GitHub MCP | `claude mcp add github -- npx -y @anthropic/mcp-github` |
 | PostgreSQL in deps | Postgres MCP | `claude mcp add postgres -e DATABASE_URL="{url}" -- npx -y @anthropic/mcp-postgres` |
 | Frontend framework (React/Vue/Angular/Svelte) or .tsx/.jsx/.vue files | Playwright MCP | `claude mcp add playwright -- npx -y @anthropic/mcp-playwright` |
+| MinIO/S3 in deps or docker-compose | MinIO MCP | `claude mcp add minio -- npx -y minio-mcp` |
 
 ```
 Auto-detected MCP servers for your stack:
-  [x] GitHub MCP (GitHub repository detected)
+  [x] Playwright MCP (detected: frontend framework)
 
 Install selected? (Y/N/select numbers)
 ```
@@ -859,7 +994,7 @@ Install selected? (Y/N/select numbers)
 - Install each selected MCP server using its command
 - Log installed MCPs to `project-profile.yaml` under `mcp_servers: [...]`
 
-**6f. Custom MCP Server**
+**6g. Custom MCP Server**
 
 ```
 Add a custom MCP server? (Y/N) [N]
@@ -1196,35 +1331,57 @@ e. **Important notes:**
    - Deny rules are additive — never remove existing entries
    - PM can manually reverse any deny by editing the file
 
-### Step 5b: Additional Options Followup
+### Step 5b: Optional MCP Follow-up
 
 After all recommended options complete, if PM selected "(A) All recommended":
 
-Run project-profile auto-detection for MCP candidates:
-  1. Check `.git` + remote → GitHub MCP candidate
-  2. Check `has_frontend: true` in project-profile → Playwright MCP candidate
-  3. Check `tech_stack.database` → Postgres/MySQL MCP candidate
+**Part 1: Optional MCP servers**
+
+Run project-profile auto-detection for optional MCP candidates:
+  1. Check `has_frontend: true` in project-profile → Playwright MCP candidate
+  2. Check `tech_stack.database` → Postgres/MySQL MCP candidate
+  3. Check `docker-compose.yml` for MinIO/S3 services → MinIO MCP candidate
+  4. Always include Slack as an optional MCP
+
+Build the optional MCP list dynamically. Only include MCPs that:
+  - Were NOT already installed as recommended (Qdrant, Context7, Docker, GitHub are excluded)
+  - Are relevant to the detected project stack OR are always-available options (Slack, Custom)
 
 Present to PM:
 
 ```
 Recommended setup complete!
 
+Would you also like to configure any optional MCPs?
+These are not required but can enhance your workflow:
+
+  [ ] Slack MCP — PM notifications and approvals via Slack
+      Requires: Slack app with bot token
+  [ ] Playwright MCP — browser automation and testing
+      {shown if: frontend framework detected}
+  [ ] Postgres MCP — direct database access from Claude
+      {shown if: PostgreSQL detected in deps or docker-compose}
+  [ ] MinIO MCP — S3-compatible object storage management
+      {shown if: MinIO/S3 detected in deps or docker-compose}
+  [ ] Custom — add your own MCP servers
+
+Select optional MCPs to install (comma-separated numbers, or Enter to skip):
+```
+
+- If PM selects any: process each using the corresponding Option 6 logic
+  (6c for Slack, 6f auto-detect for Playwright/Postgres/MinIO, 6g for Custom)
+- If PM presses Enter/skips: continue to Part 2
+
+**Part 2: Additional non-MCP options**
+
+After optional MCPs are handled (or skipped), present remaining options:
+
+```
 Additional options available:
 
   (4) CLAUDE.md — Generate project context file for Claude Code
       Adds AID markers to CLAUDE.md so Claude understands your project
       structure, conventions, and workflow.
-
-  (6c) Slack notifications — PM approvals and escalations via Slack
-       Requires: Slack app with bot token. See /aid-help slack for setup.
-
-  (6e) Auto-detected MCPs for your stack:
-       - GitHub MCP (detected: .git + remote origin)
-       - Playwright MCP (detected: has_frontend: true)
-       [dynamically generated from project-profile detection above]
-
-  (6f) Custom MCP — Add your own MCP servers manually
 
   (10) Documentation Platform — Recommend and scaffold a docs platform
        Based on your project type. Creates docs/ + config skeleton.
@@ -1232,7 +1389,7 @@ Additional options available:
 Configure any of these? (select numbers, or Enter to skip)
 ```
 
-Process selected options using existing Step 4 logic for each.
+Process selected options using existing Step 5 logic for each.
 If PM presses Enter/skips: continue to Step 6.
 
 NOTE: Option 5 (.gitignore) is NOT offered here — it becomes automatic
