@@ -158,17 +158,29 @@ IF mem_config.knowledge.enabled:
   TIMEOUT: 5 seconds. If slow, skip silently.
 
   IF results (non-empty):
+    # --- PM-facing knowledge summary (concise, max 5 lines) ---
+    doc_names = []
+    FOR EACH result IN results (max 5):
+      name = result.metadata.project_name OR result.metadata.framework OR result.metadata.type
+      source = "Qdrant"   # Step 1 uses knowledge_find() which queries Qdrant
+      doc_names.append('- "{name}" ({source})')
+
     Display to PM:
-      "Found relevant knowledge from past runs:"
-      FOR EACH result IN results:
-        - "[{result.metadata.type}] {result summary}"
-          "Source: {result.metadata.project_name OR result.metadata.framework} ({result.metadata.indexed_at})"
+      "Knowledge context loaded:"
+      "  Found {len(results)} relevant doc(s):"
+      FOR EACH entry IN doc_names:
+        "  {entry}"
+    # --- end PM-facing summary ---
 
     Use results as context for questioning:
       - Skip questions whose answers are already known from past decisions
       - Ask more targeted questions informed by known patterns
       - Reference relevant documentation when framing options
       - Do NOT skip the questioning phase entirely -- past knowledge informs, not replaces
+
+  IF results (empty) AND mem_config.knowledge.enabled:
+    Display to PM:
+      "No knowledge indexed yet. Use /aid-research to add project knowledge."
 
 IF mem_config missing OR knowledge.enabled == false OR knowledge unavailable:
   -> Skip silently. Proceed to questioning as before. No error, no message.
@@ -1519,6 +1531,7 @@ Reference: skills/workflow-intelligence.md for full protocol details
 15. **ALWAYS present initial analysis before first question** — the AI must demonstrate understanding of the topic before asking anything (see Initial Analysis Phase section)
 16. **ALWAYS present 2-3 options with recommendation at every directional decision point** — questions involving direction, approach, or trade-off choices must use structured options with labeled alternatives and a recommended choice with reasoning
 17. **ALWAYS explain why alternatives are less suitable** — for each recommendation, state not just why the chosen option is good but specifically why the other options are less appropriate for this context
+18. **ALWAYS run the Completeness Gate before finalizing the plan document** — enumerate all PM answers from Steps 3-6, verify each appears in the plan, and incorporate any missing items before writing to disk (see Document Generation Protocol RULE 8)
 
 ---
 
