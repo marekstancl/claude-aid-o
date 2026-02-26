@@ -1418,36 +1418,61 @@ Choose: (1/2/3)
 
 ### Step 7: Summary and Next Steps
 
-After all selected options are configured:
+After all selected options are configured, display the following styled
+completion banner. Replace `{placeholders}` with actual session values.
+Right-pad all content lines with spaces to maintain consistent frame width
+(68 inner characters). Terminal width assumed: 80 columns (frame is 72 chars
+including 2-space left indent).
 
 ```
-Setup Complete
-====================================
-Configured: {list of completed options}
-Workspace:  .aid-o/ (ready)
-Profile:    {detected_stack_summary}
-
-What to do next:
-====================================
-
-If you have an idea but aren't sure how to build it:
-  -> /aid-brainstorm "your idea"
-  This starts an interactive design run. AID asks questions,
-  explores approaches, and produces a plan + EPIC draft.
-
-If you already know what to build:
-  -> Create an EPIC file in .aid-o/02-epics/ (see template)
-  -> /aid-plan-epic .aid-o/02-epics/your-epic.md
-  -> /aid-run-epic
-
-For help and examples:
-  -> /aid-help           -- full documentation
-  -> /aid-help examples  -- step-by-step example workflows
-  -> /aid-help commands  -- all available commands
-
-Tip: Start with /aid-brainstorm -- it's the best way to explore ideas
-     and let AID help you design before coding.
+  ╔══════════════════════════════════════════════════════════════════════╗
+  ║                                                                    ║
+  ║         ╔═══╗    A.I.D. Setup Complete                             ║
+  ║         ║ + ║    ═════════════════════                             ║
+  ║         ╚═══╝    AI Development Orchestrator                       ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Configured:  {N}/{total} options                                  ║
+  ║  Workspace:   .aid-o/ (ready)                                      ║
+  ║  Profile:     {detected_stack_summary}                             ║
+  ║                                                                    ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║  WHAT'S NEXT?                                                      ║
+  ╠══════════════════════════════════════════════════════════════════════╣
+  ║                                                                    ║
+  ║  Have an idea?    ->  /aid-brainstorm "your idea"                  ║
+  ║                       Interactive design session -- AID asks        ║
+  ║                       questions and produces a plan + EPIC draft.   ║
+  ║                                                                    ║
+  ║  Ready to build?  ->  Create EPIC in .aid-o/02-epics/              ║
+  ║                   ->  /aid-plan-epic .aid-o/02-epics/your-epic.md  ║
+  ║                   ->  /aid-run-epic                                ║
+  ║                                                                    ║
+  ║  Need help?       ->  /aid-help            full documentation      ║
+  ║                   ->  /aid-help examples   step-by-step guides     ║
+  ║                   ->  /aid-help commands   all available commands   ║
+  ║                                                                    ║
+  ║  Tip: Start with /aid-brainstorm -- the best way to explore ideas  ║
+  ║       and let AID help you design before writing code.             ║
+  ║                                                                    ║
+  ╚══════════════════════════════════════════════════════════════════════╝
 ```
+
+**Banner variable reference:**
+
+| Placeholder | Source | Example |
+|---|---|---|
+| `{N}/{total}` | Count of configured options / total available | `5/12` |
+| `{detected_stack_summary}` | From `project-profile.yaml` detected stack | `Node.js 20 + TypeScript + React + Docker` |
+
+**Banner formatting rules:**
+- The outer frame uses double-line box-drawing characters (`╔ ═ ╗ ║ ╠ ╣ ╚ ╝`), matching the FIRST AID banner style for visual consistency across AID commands
+- The cross icon (`╔═══╗ ║ + ║ ╚═══╝`) is the AID branding mark -- it appears in a "loaded" state (with `+`) to signal a fresh, ready workspace
+- Section dividers use `╠══...══╣` to separate the status block from the next-steps block
+- All content lines are right-padded with spaces so the right border (`║`) aligns consistently
+- If `{detected_stack_summary}` is longer than 46 characters, truncate with `...` to fit within the frame
+- If no options were configured (user ran setup but skipped everything), show `0/{total} options` and still display the next-steps section
 
 **Do NOT** end with just "Your project is ready." Always provide concrete,
 actionable next steps with command examples.
