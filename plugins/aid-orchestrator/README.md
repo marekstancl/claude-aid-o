@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-A Claude Code plugin implementing **Controller + Workers** architecture for multi-agent software development. v0.9.2
+A Claude Code plugin implementing **Controller + Workers** architecture for multi-agent software development. v0.10.0
 
 ## How It Works
 
@@ -82,12 +82,13 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `run-validator` | Validates run file completeness |
 | `lessons-extractor` | Extracts lessons from completed runs |
 
-## Skills (20)
+## Skills (21)
 
 | Skill | Purpose |
 |-------|---------|
 | `epic-orchestration` | 12-state Controller FSM (includes FIRST AID auto-mode conditionals) |
 | `brainstorming` | 9-step brainstorming process |
+| `workflow-intelligence` | Workflow/agent project detection, domain questioning (WF1-WF7), platform recommendations, UI derivation |
 | `agent-core` | Core agent behavior, roles, workflow routing |
 | `planner` | Plan generation — dependency graph, parallel groups, analysis groups |
 | `parallel-dispatch` | Parallel agent dispatch — branches, conflict detection, merge |
@@ -196,6 +197,6 @@ Without Qdrant, the plugin works identically using file-based memory (active-wor
 
 ## Version
 
-- **Plugin:** 0.9.2
+- **Plugin:** 0.10.0
 - **Requires:** Claude Code >= 1.0.0
 - **License:** AGPL-3.0-only

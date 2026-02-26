@@ -1429,7 +1429,7 @@ And sets EPIC frontmatter: `runs_total: 2`
 - `skills/brainstorming.md` -- produces docker_recommended flag consumed by Section 7.4
 - `skills/workflow-intelligence.md` -- platform-specific Docker Compose templates for workflow projects (Section 7.4)
 - `defaults/templates/plan.schema.json` -- Plan JSON schema (includes analysis_groups)
-- `workspace/workflow/plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md` -- Plan D-011 (analysis_groups design decision)
+- `.aid-o/01-plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md` -- Plan D-011 (analysis_groups design decision)
 
 ---
 

@@ -32,7 +32,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help memory            # Qdrant vector memory + semantic search
 /aid-help analytics          # performance analysis of orchestration metrics
 /aid-help inputs            # input files for brainstorming
-/aid-help examples          # interactive project prompts to try /aid-brainstorm
+/aid-help examples          # 3 step-by-step workflows: brainstorm → plan → EPIC → run
 /aid-help faq               # frequently asked questions
 ```
 
@@ -95,7 +95,7 @@ Where things live:
   .aid-o/04-engine/     AI internals (runs, evidence, memory)
   .aid-o/05-inputs/     Sample data files for brainstorming
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | research | analytics | inputs | examples | faq
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | analytics | inputs | examples | faq
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -190,6 +190,30 @@ ORCHESTRATION COMMANDS:
            /aid-epic-queue reorder <id> --priority <level>
     Auto-pickup: after EPIC DONE, next queued EPIC starts automatically.
     Skill: skills/epic-queue.md
+
+AUTONOMOUS MODE COMMANDS:
+
+  /aid-first-aid [--resume | --dry-run]
+    Launch FIRST AID (Fully Integrated Autonomous Development) mode.
+    Processes the entire EPIC queue autonomously with elevated permissions,
+    agent-driven decision-making, and escalation-only PM interaction.
+    Usage: /aid-first-aid                  (process all queued EPICs)
+           /aid-first-aid --resume         (resume after crash or /aid-stop)
+           /aid-first-aid --dry-run        (validate queue and permissions without executing)
+    PM approves the queue before start. Once running, the Orchestrator handles
+    plan → execute → gate → merge → next for each EPIC. PM is contacted only
+    on escalation (16 defined triggers). Permissions are restored on completion.
+    WARNING: Grants elevated permissions — review queue and permissions-auto.yaml first.
+    Skill: skills/first-aid-mode.md
+
+  /aid-stop
+    Emergency stop — immediately disengage FIRST AID auto-mode.
+    Usage: /aid-stop
+    No arguments, no confirmation. Halts autonomous execution, restores
+    original permissions, saves progress for later resume via --resume,
+    and returns control to the PM. Designed to be fast and non-blocking —
+    every step is resilient to partial failures.
+    Skill: skills/permission-sandwich.md (Section 4: Restore Procedure)
 
 ANALYTICS COMMANDS:
 
@@ -1015,91 +1039,155 @@ SETUP:
 #### Topic: examples
 
 ```
-Interactive Project Prompts — Try /aid-brainstorm
+AID Workflows — End-to-End Step-by-Step Examples
 ====================================
 
-Pick a project below and run /aid-brainstorm with the prompt to see the
-9-step brainstorming flow in action. All examples demonstrate full-stack
-development — AID orchestrates backend AND frontend in parallel.
+Three common workflows showing the full AID pipeline in practice.
 
--------------------------------------------------------------
-1. REST API + Database + Admin UI
--------------------------------------------------------------
+=============================================================
+WORKFLOW 1: Greenfield Feature (most common path)
+=============================================================
 
-  Prompt:
-    /aid-brainstorm "Build a task management API with PostgreSQL storage
-    and a React admin dashboard for managing tasks, users, and analytics"
+  Use this when: you have an idea and want AI to help shape it
+  into a deliverable before writing a single line of code.
 
-  What happens:
-    Step 1 — Context: AI asks about your tech stack, DB preference, auth method
-    Step 2 — Questions: Clarifying questions (REST vs GraphQL? ORM? Deploy target?)
-    Step 3 — Approaches: Compare options (monolith vs separate services)
-    Step 4 — Design: API contracts, database schema, React components, routing
-    Step 5 — Sections: Plan outline for PM review
-    Step 6 — Approval: PM approves or requests changes
-    Step 7 — Document: Full plan written to .aid-o/01-plans/
-    Step 8 — EPIC draft: Optional EPIC generated from the plan
-    Step 9 — Handoff: Summary of decisions + next steps
+  Step 1 — Brainstorm
+    /aid-brainstorm "Build user authentication with JWT — login,
+    register, refresh tokens, and role-based access control"
 
-  Result: A detailed plan covering API endpoints, database schema, React
-  dashboard components, authentication, and a ready-to-execute EPIC with steps:
-  architect -> domain -> backend + frontend (parallel) -> qa + security -> docs
+    AID runs a 9-step interactive dialog:
+      Steps 1-2: Context + clarifying questions (stack? DB? social login?)
+      Steps 3-4: Compare approaches, produce design with API contracts
+      Steps 5-6: Present plan outline → PM reviews and approves
+      Steps 7-8: Write plan to .aid-o/01-plans/ → generate EPIC draft
+      Step 9:    Handoff with decisions summary and next steps
 
--------------------------------------------------------------
-2. CLI Tool + Interactive TUI
--------------------------------------------------------------
+    Output: .aid-o/01-plans/P-NNN-jwt-auth.md
+            .aid-o/02-epics/E-NNN-1_1-jwt-auth.md  (if you accepted the draft)
 
-  Prompt:
-    /aid-brainstorm "Create a git repository analytics CLI tool with
-    an interactive terminal UI showing commit stats, contributor graphs,
-    and branch visualization"
+  Step 2 — Review and edit the EPIC
+    Open .aid-o/02-epics/E-NNN-1_1-jwt-auth.md and verify:
+    - Goal is specific and testable
+    - Scope lists the files agents may touch
+    - Steps table has the right roles (architect, backend, qa, security)
+    - Acceptance criteria are checkboxes you can actually verify
 
-  What happens:
-    Step 1 — Context: AI asks about target platform, language, distribution
-    Step 2 — Questions: Interactivity level? Output format? Dependencies?
-    Step 3 — Approaches: Compare (pure CLI vs TUI framework: textual/rich/blessed)
-    Step 4 — Design: Command structure, data pipeline, TUI layout, chart rendering
-    Step 5 — Sections: Plan outline for PM review
-    Step 6 — Approval: PM approves or requests changes
-    Step 7 — Document: Full plan written to .aid-o/01-plans/
-    Step 8 — EPIC draft: Optional EPIC generated from the plan
-    Step 9 — Handoff: Summary of decisions + next steps
+  Step 3 — Generate the execution plan
+    /aid-plan-epic .aid-o/02-epics/E-NNN-1_1-jwt-auth.md
 
-  Result: A plan covering CLI architecture, data extraction pipeline, TUI
-  component layout, chart rendering, and a ready-to-execute EPIC with
-  appropriate roles for both backend logic and interactive UI.
+    AID generates a dependency graph, detects parallel groups, and writes:
+      .aid-o/04-engine/runs/plan.json
+      .aid-o/04-engine/runs/plan_progress.json
+    Then asks: run now / review plan / execute single step?
 
--------------------------------------------------------------
-3. Full-Stack SaaS Application
--------------------------------------------------------------
+  Step 4 — Run the EPIC
+    /aid-run-epic
 
-  Prompt:
-    /aid-brainstorm "Build a bookmark manager with tagging, full-text
-    search, a responsive web UI with dark mode, and browser extension
-    for one-click saving"
+    AID progresses through the state machine:
+      PLANNING → PLAN_REVIEW (you approve) → EXECUTING
+      → architect → backend + qa (parallel) → security → docs
+      → GATES (tests, lint, security scan) → CURATOR_RESOLVE
+      → PM_APPROVAL (you approve merge) → DONE
 
-  What happens:
-    Step 1 — Context: AI asks about auth method, search engine, UI framework
-    Step 2 — Questions: Browser targets? Sync strategy? Offline support?
-    Step 3 — Approaches: Tech stack options, architecture patterns, deployment
-    Step 4 — Design: Complete full-stack architecture including REST API,
-             database, React/Vue frontend with responsive layouts,
-             browser extension manifest
-    Step 5 — Sections: Plan outline for PM review
-    Step 6 — Approval: PM approves or requests changes
-    Step 7 — Document: Full plan written to .aid-o/01-plans/
-    Step 8 — EPIC draft: Optional EPIC generated from the plan
-    Step 9 — Handoff: Summary of decisions + next steps
+  Step 5 — Review changes and merge
+    Check the branch epic/E-NNN-1_1-jwt-auth/main, review the
+    final_report.md in evidence/, then merge to main.
 
-  Result: A comprehensive plan covering all layers — API, database, web UI,
-  browser extension — with a ready-to-execute EPIC covering the full pipeline:
-  architect -> domain -> backend + frontend (parallel) -> qa + security
-  + e2e (parallel) -> docs
+  Total PM interaction: ~3 checkpoints (plan approval, any escalation,
+  merge approval). Everything else runs autonomously.
 
--------------------------------------------------------------
+=============================================================
+WORKFLOW 2: Quick Fix or Small Task (skip brainstorming)
+=============================================================
 
-Tip: You can brainstorm ANY project — these are just starting points.
-     Run /aid-brainstorm with your own idea to begin.
+  Use this when: the task is clear enough that you don't need AI
+  to help shape it — just execute it.
+
+  Step 1 — Create the EPIC from template
+    Copy .aid-o/03-config/templates/epic.md to .aid-o/02-epics/
+    and fill it in:
+
+      Goal: Add request rate limiting to all public API endpoints
+      Scope: src/middleware/, src/routes/, config/
+      Steps:
+        1. architect — design rate-limit strategy and config schema
+        2. backend   — implement middleware + tests (depends: architect)
+        3. docs      — update API docs with rate limit headers (depends: backend)
+
+    Save as .aid-o/02-epics/E-NNN-1_1-rate-limiting.md
+
+  Step 2 — Run the EPIC directly
+    /aid-run-epic
+
+    AID detects the queued EPIC, generates a plan, asks for approval,
+    then executes. For a 3-step EPIC like this:
+    architect → backend → docs → GATES → done.
+
+  Total time: 10–15 minutes for a focused 3-step EPIC.
+  PM interaction: plan approval + merge approval (2 checkpoints).
+
+=============================================================
+WORKFLOW 3: Multi-Phase Project with FIRST AID (autonomous)
+=============================================================
+
+  Use this when: you have multiple EPICs to execute and want to
+  walk away while AID processes the entire queue.
+
+  Step 1 — Brainstorm the project scope
+    /aid-brainstorm "Redesign the API layer — add versioning,
+    pagination, OpenAPI docs, and a client SDK"
+
+    The brainstorm produces a plan covering all phases. If the
+    project is large, the plan will suggest splitting into multiple
+    EPICs (e.g., one per phase).
+
+  Step 2 — Create and queue the EPICs
+    Create each EPIC from the plan (or from brainstorm EPIC drafts):
+      .aid-o/02-epics/E-010-1_3-api-versioning.md
+      .aid-o/02-epics/E-010-2_3-api-pagination.md
+      .aid-o/02-epics/E-010-3_3-client-sdk.md
+
+    Add them to the queue in dependency order:
+      /aid-epic-queue add .aid-o/02-epics/E-010-1_3-api-versioning.md --priority high
+      /aid-epic-queue add .aid-o/02-epics/E-010-2_3-api-pagination.md
+      /aid-epic-queue add .aid-o/02-epics/E-010-3_3-client-sdk.md
+
+    Review the queue:
+      /aid-epic-queue
+
+  Step 3 — Launch FIRST AID autonomous mode
+    /aid-first-aid
+
+    AID asks you to review the queue and grant elevated permissions.
+    Once you approve, it processes all three EPICs sequentially:
+      E-010-1_3: plan → execute → gates → merge → DONE
+      E-010-2_3: plan → execute → gates → merge → DONE  (auto-pickup)
+      E-010-3_3: plan → execute → gates → merge → DONE  (auto-pickup)
+
+    You are only contacted on escalation (16 defined triggers:
+    gate max retries, scope violation, budget exceeded, etc.).
+    All other decisions are made autonomously.
+
+  Step 4 — Review the final summary report
+    After the queue empties, AID produces a summary:
+      - Steps executed per EPIC
+      - Gate results and any escalations
+      - Improvement proposals from the Curator
+      - Audit scores for project health
+
+    Permissions are automatically restored to normal after completion.
+
+  WARNING: FIRST AID grants elevated auto-permissions. Review
+  .aid-o/03-config/policies/permissions-auto.yaml before starting.
+  Use /aid-stop at any time to halt and restore normal permissions.
+
+=============================================================
+
+See also:
+  /aid-help workflow    — state machine diagram, PM checkpoints
+  /aid-help epic        — how to write an EPIC spec
+  /aid-help queue       — epic queue commands and priority levels
+  /aid-help commands    — full command reference
 ```
 
 ---
