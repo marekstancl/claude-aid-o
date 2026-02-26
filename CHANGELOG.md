@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.10.0] — 2026-02-26
+## [1.0.0] — 2026-02-26
 
 ### Added
 
@@ -21,7 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - **Stale Paths** — replaced three remaining `workspace/workflow/` references with `.aid-o/` equivalents in `planner.md`, `aid-plan-epic.md`, and `slack-mcp.md`
-- **README Version** — synced README version from stale 0.9.2 to 0.9.3 (now bumped to 0.10.0 with this release)
+- **README Version** — synced README version from stale 0.9.2 to 0.9.3 (now bumped to 1.0.0 with this release)
 - **Command Frontmatter** — verified all 13 commands have `user_invocable: true`
 
 ## [0.99.0] — 2026-02-26

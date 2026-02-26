@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v0.10.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.0.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -131,7 +131,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v0.10.0** (current) — Plugin DX housekeeping: GitHub MCP in setup wizard, setup completion banner, version pre-check in plan-epic, help workflow examples, autonomous mode commands in help, stale path fixes
+- **v1.0.0** (current) — Plugin DX housekeeping: GitHub MCP in setup wizard, setup completion banner, version pre-check in plan-epic, help workflow examples, autonomous mode commands in help, stale path fixes
 - **v0.99.0** — AID Server backend (`packages/aid-server`), Docker deployment, Docusaurus docs site on GitHub Pages, GUI frontend polish
 - **v0.9.3** — GATES→CURATOR_RESOLVE fix, Qdrant config unification, FIRST AID animations, EPIC/plan archival
 
