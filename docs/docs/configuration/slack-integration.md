@@ -295,7 +295,7 @@ After the timeout period plus all reminders are exhausted:
 1. AID reads `timeout_actions` from `slack-config.yaml`
 2. Executes the configured action
 3. Logs the timeout event to `slack_log.jsonl` in the evidence directory
-4. Sends a final message to Slack: "Timeout reached for {message_type}. Auto-action: {action}"
+4. Sends a final message to Slack: `"Timeout reached for {message_type}. Auto-action: {action}"`
 
 ---
 

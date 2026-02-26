@@ -5,6 +5,21 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
+      label: 'Getting Started',
+      link: {
+        type: 'generated-index',
+        title: 'Getting Started',
+        description: 'Learn how to install and configure AID Orchestrator.',
+        slug: '/getting-started',
+      },
+      items: [
+        'getting-started/installation',
+        'getting-started/quick-start',
+        'getting-started/configuration',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Architecture',
       link: {
         type: 'generated-index',
@@ -18,21 +33,6 @@ const sidebars: SidebarsConfig = {
         'architecture/quality-gates',
         'architecture/memory-system',
         'architecture/first-aid-mode',
-      ],
-    },
-    {
-      type: 'category',
-      label: 'Getting Started',
-      link: {
-        type: 'generated-index',
-        title: 'Getting Started',
-        description: 'Learn how to install and configure AID Orchestrator.',
-        slug: '/getting-started',
-      },
-      items: [
-        'getting-started/installation',
-        'getting-started/quick-start',
-        'getting-started/configuration',
       ],
     },
     {
@@ -123,6 +123,53 @@ const sidebars: SidebarsConfig = {
         'skills/run-management',
         'skills/slack-mcp',
         'skills/workflow-intelligence',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Configuration',
+      link: {
+        type: 'generated-index',
+        title: 'Configuration',
+        description: 'Detailed configuration references for AID policy files.',
+        slug: '/configuration',
+      },
+      items: [
+        'configuration/gates-yaml',
+        'configuration/decision-policies',
+        'configuration/dispatch-strategy',
+        'configuration/slack-integration',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Contributing',
+      link: {
+        type: 'generated-index',
+        title: 'Contributing',
+        description: 'How to contribute to AID Orchestrator.',
+        slug: '/contributing',
+      },
+      items: [
+        'contributing/how-to-contribute',
+        'contributing/plugin-structure',
+        'contributing/adding-commands',
+        'contributing/adding-agents',
+        'contributing/code-style',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Troubleshooting',
+      link: {
+        type: 'generated-index',
+        title: 'Troubleshooting',
+        description: 'Common issues, solutions, and frequently asked questions.',
+        slug: '/troubleshooting',
+      },
+      items: [
+        'troubleshooting/common-issues',
+        'troubleshooting/faq',
       ],
     },
   ],

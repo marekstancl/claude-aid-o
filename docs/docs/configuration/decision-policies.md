@@ -438,7 +438,7 @@ always_approve:
   - { area: "docs/*" }                   # All documentation improvements — always safe
 ```
 
-You can teach the Curator new auto-approval rules during PM approval. When you respond "always approve {type: performance}" at a PM_APPROVAL prompt, the Curator adds it here.
+You can teach the Curator new auto-approval rules during PM approval. When you respond `"always approve {type: performance}"` at a PM_APPROVAL prompt, the Curator adds it here.
 
 ### `always_reject`
 
