@@ -52,7 +52,7 @@ Auto-mode starts with `/aid-first-aid` and stops with `/aid-stop`. Escalation is
 ### Evidence Trail
 
 Every state transition writes to the EPIC's evidence directory:
-```
+```text
 .aid-o/04-engine/evidence/{epic_id}/{run_id}/
   stage_log.jsonl          — timestamped state transitions
   plan_progress.json       — step completion status

@@ -1,7 +1,6 @@
 ---
-id: project-scanner
+sidebar_position: 14
 title: "Project Scanner Agent"
-sidebar_label: "Project Scanner Agent"
 description: "Analyze projects to understand tech stack, architecture, and conventions. Produce a structured project-profile.yaml."
 ---
 

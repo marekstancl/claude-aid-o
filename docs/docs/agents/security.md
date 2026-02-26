@@ -1,7 +1,6 @@
 ---
-id: security
+sidebar_position: 19
 title: "Security Agent"
-sidebar_label: "Security Agent"
 description: "Audit security vulnerabilities, implement security controls, and maintain the security posture of the codebase."
 ---
 

@@ -92,7 +92,7 @@ All files are saved under `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`:
 
 After the plan is generated, the command asks:
 
-```
+```text
 Ready to execute?
   Want to run this EPIC now?  → /aid-run-epic {epic_id}
   Review plan first?          → open .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json

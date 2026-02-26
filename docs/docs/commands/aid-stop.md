@@ -39,7 +39,7 @@ The stop sequence always runs to completion, even if individual steps fail:
 
 ## Output
 
-```
+```text
 FIRST AID disengaged.
 ━━━━━━━━━━━━━━━━━━━━
 

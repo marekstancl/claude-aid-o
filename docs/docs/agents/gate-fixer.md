@@ -1,7 +1,6 @@
 ---
-id: gate-fixer
+sidebar_position: 11
 title: "Gate Fixer Agent"
-sidebar_label: "Gate Fixer Agent"
 description: "Fix failing quality gates by analyzing error output, identifying root cause, and making minimal targeted changes."
 ---
 

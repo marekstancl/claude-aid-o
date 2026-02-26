@@ -66,7 +66,7 @@ Manage the EPIC execution queue. Add, remove, reorder, pause, and monitor EPICs 
 
 The `list` subcommand (default) shows all EPICs with their status and priority:
 
-```
+```text
 EPIC Queue
 ━━━━━━━━━━━━━
  RUNNING: E-20260217-a1b2-user-auth (high) — started 2h ago

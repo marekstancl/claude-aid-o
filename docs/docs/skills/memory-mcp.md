@@ -56,7 +56,7 @@ Qdrant data is stored centrally, not per-project:
 
 When `pre_step_search: true`, the Controller searches memory before each agent dispatch:
 
-```
+```text
 IF memory.enabled AND memory.search.pre_step_search:
   results = qdrant-find(query=step_objective, collection="aid-memory")
   filtered = [r for r in results if r.score >= min_score]

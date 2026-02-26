@@ -49,7 +49,7 @@ This is the top-level autonomous command. It wraps the entire EPIC lifecycle: pe
 
 FIRST AID has its own state machine that wraps the per-EPIC orchestration loop:
 
-```
+```text
 FIRST_AID_INIT → QUEUE_PROCESSING → [per-EPIC: IDLE→...→DONE] → QUEUE_ADVANCE → FIRST_AID_COMPLETE
                                                                        ↑               |
                                                                        └── more EPICs ──┘

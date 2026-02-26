@@ -1,7 +1,6 @@
 ---
-id: observability
+sidebar_position: 13
 title: "Observability Agent"
-sidebar_label: "Observability Agent"
 description: "Add logging, metrics, tracing, health checks, dashboards, and alerting configuration."
 ---
 

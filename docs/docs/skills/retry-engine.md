@@ -69,7 +69,7 @@ When `attempts >= max_attempts` and the gate is still failing:
 ## How It Works
 
 The retry loop is:
-```
+```text
 Gate fails
 → retry-engine analyzes failure
 → dispatches gate-fixer with context

@@ -1,7 +1,6 @@
 ---
-id: auditor
+sidebar_position: 3
 title: "Auditor Agent"
-sidebar_label: "Auditor Agent"
 description: "Post-Epic comprehensive project health assessment, scoring, and trend tracking."
 ---
 

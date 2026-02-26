@@ -1,7 +1,6 @@
 ---
-id: architect
+sidebar_position: 2
 title: "Architect Agent"
-sidebar_label: "Architect Agent"
 description: "Design API contracts, event schemas, ADRs, and module boundaries."
 ---
 

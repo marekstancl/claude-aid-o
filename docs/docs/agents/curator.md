@@ -1,7 +1,6 @@
 ---
-id: curator
+sidebar_position: 6
 title: "Curator Agent"
-sidebar_label: "Curator Agent"
 description: "Collect improvement observations from agents, deduplicate against backlog, and propose actionable improvements."
 ---
 
@@ -53,7 +52,7 @@ Generates a formal proposal for each note that is: priority `high`, reported by 
 
 ### Backlog Management
 
-Updates `.aid-o/04-engine/backlog.md` with new entries assigned sequential `IMP-{NNN}` IDs. Never deletes entries — they only change status. Proposals are written to the correct category section: Bugs, Features, Refactoring/Tech Debt, or Performance.
+Updates `.aid-o/04-engine/backlog.md` with new entries assigned sequential `IMP-NNN` IDs (for example, `IMP-001`, `IMP-002`). Never deletes entries — they only change status. Proposals are written to the correct category section: Bugs, Features, Refactoring/Tech Debt, or Performance.
 
 ## Tools Available
 
@@ -64,7 +63,7 @@ Read access to all `evidence/{epic_id}/{run_id}/steps/*/step_output.json` files.
 - **Never modifies source code.** Analyzes and proposes only.
 - **Never communicates directly with the PM.** Always routes through the Orchestrator.
 - **Preserves backlog history.** Entries are never deleted, only status-changed.
-- **IMP-{NNN} IDs are sequential and never reused**, even for rejected or implemented proposals.
+- **IMP-NNN IDs are sequential and never reused**, even for rejected or implemented proposals.
 - **Deduplication threshold is >80% observation overlap.** Below 80% is treated as a separate issue.
 - The Orchestrator auto-evaluates proposals using a 3-tier algorithm: explicit YAML rules → Qdrant past-decision similarity → default action.
 - Approved proposals may be fixed immediately within the same EPIC by dispatching fix agents during CURATOR_RESOLVE.

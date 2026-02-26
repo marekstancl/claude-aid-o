@@ -59,7 +59,7 @@ Reads the latest run evidence from `.aid-o/04-engine/evidence/{epic_id}/` and di
 
 Lists all EPICs found in `.aid-o/02-epics/` along with their run status:
 
-```
+```text
 Active EPICs
 ====================================
 1. E-005-1_1 — Add Health Check Endpoint    [EXECUTING] step 3/7

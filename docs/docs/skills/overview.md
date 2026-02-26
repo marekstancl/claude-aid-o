@@ -104,7 +104,7 @@ These skills handle external system communication:
 
 Skills are loaded on demand. The `agent-core` skill's on-demand loading table lists which skill to load for each situation:
 
-```
+```text
 Run start/end, handoffs          → run-management
 Pre-commit quality check         → quality-gates
 EPIC execution (Controller)      → epic-orchestration

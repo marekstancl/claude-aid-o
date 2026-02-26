@@ -56,7 +56,7 @@ If `permissions-backup.json` exists when a new session starts:
 1. The previous session crashed without restoring permissions
 2. The Controller does NOT auto-resume the previous session
 3. Permissions are restored from the backup
-4. A warning is presented: "Previous auto-mode session did not complete cleanly. {N} EPICs completed. Review auto-mode-state.yaml for details."
+4. A warning is presented: "Previous auto-mode session did not complete cleanly. N EPICs completed. Review auto-mode-state.yaml for details."
 5. PM must decide whether to re-queue remaining EPICs and run `/aid-first-aid` again
 
 ## How It Works

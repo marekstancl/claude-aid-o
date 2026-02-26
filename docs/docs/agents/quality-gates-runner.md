@@ -1,7 +1,6 @@
 ---
-id: quality-gates-runner
+sidebar_position: 16
 title: "Quality Gates Runner Agent"
-sidebar_label: "Quality Gates Runner Agent"
 description: "Run the 6-gate pre-commit quality protocol autonomously before any git commit."
 ---
 

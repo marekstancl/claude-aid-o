@@ -1,7 +1,6 @@
 ---
-id: run-validator
+sidebar_position: 18
 title: "Run Validator Agent"
-sidebar_label: "Run Validator Agent"
 description: "Validate run file completeness at phase-end and run-end checkpoints."
 ---
 

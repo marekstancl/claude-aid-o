@@ -1,7 +1,6 @@
 ---
-id: docs-writer
+sidebar_position: 8
 title: "Docs Writer Agent"
-sidebar_label: "Docs Writer Agent"
 description: "Write and maintain documentation — API docs, guides, changelogs, and inline docs."
 ---
 

@@ -1,8 +1,7 @@
 ---
-id: intro
-title: AID Orchestrator
-sidebar_label: Introduction
 sidebar_position: 1
+title: AID Orchestrator
+description: "Multi-Agent Development Orchestration for Claude Code — Controller + Workers architecture for AI-driven software development."
 slug: /
 ---
 
@@ -46,6 +45,3 @@ AID follows a **Controller + Workers** pattern:
 3. **Quality Gates** enforce standards between phases -- code review, security checks, test coverage.
 4. **Evidence Trails** capture every decision, artifact, and outcome for auditability.
 
----
-
-*This documentation is a work in progress. Pages will be populated as the documentation site is built out.*

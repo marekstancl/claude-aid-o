@@ -1,7 +1,6 @@
 ---
-id: qa
+sidebar_position: 15
 title: "QA Agent"
-sidebar_label: "QA Agent"
 description: "Write tests, validate quality, and ensure coverage targets are met."
 ---
 

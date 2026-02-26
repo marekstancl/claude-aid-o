@@ -86,7 +86,7 @@ After PM approves the merge, the DONE state:
 
 ## Branch Strategy
 
-```
+```text
 Base branch:     epic/{epic_id}/main    (created from main at EPIC start)
 Per-step:        epic/{epic_id}/step_{N}_{role}
 Parallel steps:  all fork from epic/{epic_id}/main (same base commit)
@@ -98,7 +98,7 @@ Final:           epic/{epic_id}/main → PR to project main branch
 
 Every state transition is logged to `stage_log.jsonl`. All artifacts are stored under:
 
-```
+```text
 .aid-o/04-engine/evidence/{epic_id}/{run_id}/
   plan.json                           # Execution plan
   plan_progress.json                  # Live progress tracker

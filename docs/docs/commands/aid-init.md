@@ -53,7 +53,7 @@ When `/aid-init` runs, it automatically determines what to do:
 
 Creates the following directory structure:
 
-```
+```text
 .aid-o/
   01-plans/
     archive/

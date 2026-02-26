@@ -1,7 +1,6 @@
 ---
-id: code-reviewer
+sidebar_position: 5
 title: "Code Reviewer Agent"
-sidebar_label: "Code Reviewer Agent"
 description: "Review completed implementation against the plan and project coding standards."
 ---
 

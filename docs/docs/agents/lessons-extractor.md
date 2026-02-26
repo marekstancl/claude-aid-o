@@ -1,7 +1,6 @@
 ---
-id: lessons-extractor
+sidebar_position: 12
 title: "Lessons Extractor Agent"
-sidebar_label: "Lessons Extractor Agent"
 description: "Extract reusable lessons, working commands, and project-specific gotchas from completed EPIC runs."
 ---
 

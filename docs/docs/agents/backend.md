@@ -1,7 +1,6 @@
 ---
-id: backend
+sidebar_position: 4
 title: "Backend Agent"
-sidebar_label: "Backend Agent"
 description: "Implement server-side logic — APIs, services, data access, and integrations."
 ---
 

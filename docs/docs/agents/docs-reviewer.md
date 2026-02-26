@@ -1,7 +1,6 @@
 ---
-id: docs-reviewer
+sidebar_position: 7
 title: "Docs Reviewer Agent"
-sidebar_label: "Docs Reviewer Agent"
 description: "Review documentation changes for compliance, frontmatter, and completeness."
 ---
 

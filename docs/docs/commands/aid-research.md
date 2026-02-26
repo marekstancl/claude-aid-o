@@ -78,7 +78,7 @@ Trigger on-demand research for any framework topic or documentation URL. Fetches
 
 If the framework is already indexed at the requested depth, the command reports the existing index state and suggests refinements:
 
-```
+```text
 FastAPI already researched (42 chunks, context7).
 Use --deep to fetch extended API reference, or provide a specific topic.
 ```

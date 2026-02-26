@@ -27,7 +27,7 @@ The time investment is 3-5 minutes per commit. That is the cost. The benefit is 
 
 Gates must run in order. If any gate fails, fix the issue and restart from Gate 1:
 
-```
+```text
 Code ready → Gate 1 → Gate 2 → Gate 3 → Gate 4 → Gate 5 → Gate 6 → Commit
                  ↑_____________if any fails, restart from Gate 1____________|
 ```

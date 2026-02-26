@@ -1,7 +1,6 @@
 ---
-id: overview
+sidebar_position: 1
 title: "Agent System Overview"
-sidebar_label: "Agent System Overview"
 description: "Overview of AID's 18 specialized agents and the multi-agent architecture."
 ---
 

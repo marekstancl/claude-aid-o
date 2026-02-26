@@ -1,7 +1,6 @@
 ---
-id: domain
+sidebar_position: 9
 title: "Domain Agent"
-sidebar_label: "Domain Agent"
 description: "Model the business domain — entities, aggregates, value objects, business rules, and ubiquitous language."
 ---
 

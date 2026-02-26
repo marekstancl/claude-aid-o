@@ -1,7 +1,6 @@
 ---
-id: frontend
+sidebar_position: 10
 title: "Frontend Agent"
-sidebar_label: "Frontend Agent"
 description: "Implement UI — components, pages, client-side logic, and state management."
 ---
 

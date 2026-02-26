@@ -1,7 +1,6 @@
 ---
-id: release
+sidebar_position: 17
 title: "Release Agent"
-sidebar_label: "Release Agent"
 description: "Prepare releases — semantic versioning, changelogs, migrations, CI/CD configuration, and rollback planning."
 ---
 

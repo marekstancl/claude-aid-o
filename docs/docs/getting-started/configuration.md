@@ -12,7 +12,7 @@ You can fine-tune any of these files at any time. AID reads them fresh at the st
 
 ## Directory Structure
 
-```
+```text
 .aid-o/
   03-config/
     policies/
@@ -266,13 +266,13 @@ The agent reads these conventions at the start of its step and applies them alon
 
 When you update the AID plugin, your customized config files are preserved. Run `/aid-init` after updating to pick up new default files:
 
-```
+```text
 /aid-init
 ```
 
 AID shows you a classified upgrade plan:
 
-```
+```text
 Upgrade Plan (v0.9.1 → v0.9.2)
 ====================================
 

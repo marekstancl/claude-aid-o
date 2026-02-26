@@ -24,13 +24,13 @@ The whole workflow takes about 15 minutes the first time. After that, you can go
 
 Run `/aid-init` in your project root to create the `.aid-o/` workspace:
 
-```
+```text
 /aid-init
 ```
 
 AID creates the workspace directory structure and copies default configuration files:
 
-```
+```text
 AID Workspace Initialized (.aid-o/)
 ====================================
 
@@ -54,7 +54,7 @@ Next steps:
 
 After initialization, run `/aid-setup` to let AID scan your project's tech stack and configure the gates and tooling for your language and framework:
 
-```
+```text
 /aid-setup
 ```
 
@@ -68,7 +68,7 @@ See [Configuration](./configuration) for details on what gets set up and how to 
 
 Use `/aid-brainstorm` to explore an idea interactively and produce a plan document and EPIC draft:
 
-```
+```text
 /aid-brainstorm "add pagination to the users API"
 ```
 
@@ -76,7 +76,7 @@ AID opens an 11-step structured brainstorming dialog. It asks you one question a
 
 A typical session looks like this:
 
-```
+```text
 Brainstorming: add pagination to the users API
 ====================================
 Project: my-api
@@ -108,13 +108,13 @@ See [`/aid-brainstorm` command reference](../commands/aid-brainstorm) for the fu
 
 Once you are happy with your EPIC draft, generate the execution plan:
 
-```
+```text
 /aid-plan-epic .aid-o/02-epics/E-001-1_1-add-pagination-to-users-api.md
 ```
 
 AID reads the EPIC, analyzes the steps and their dependencies, identifies which steps can run in parallel, and produces a Plan JSON:
 
-```
+```text
 Plan Generated for EPIC: E-001-1_1
 ====================================
 Steps: 5
@@ -152,7 +152,7 @@ See [`/aid-plan-epic` command reference](../commands/aid-plan-epic) for details 
 
 Run the EPIC to start the orchestration pipeline:
 
-```
+```text
 /aid-run-epic E-001-1_1
 ```
 
@@ -164,7 +164,7 @@ The Controller state machine takes over. It works through the steps in order, di
 
 A typical run looks like this:
 
-```
+```text
 EPIC E-001-1_1 — add pagination to the users API
 ====================================
 State: PLAN_REVIEW

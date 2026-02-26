@@ -21,13 +21,13 @@ Before installing, make sure you have the following:
 
 Open a terminal in any project directory and run these two commands inside Claude Code:
 
-```
+```text
 /plugin marketplace add marekstancl/claude-aid-o
 ```
 
 This registers the AID marketplace source with your Claude Code installation. You only need to do this once — it is available for all future projects afterward.
 
-```
+```text
 /plugin install aid-orchestrator@claude-aid-o
 ```
 
@@ -37,7 +37,7 @@ This installs the AID Orchestrator plugin from the registered marketplace. Claud
 
 Run the help command to confirm the plugin loaded correctly:
 
-```
+```text
 /aid-help
 ```
 
