@@ -23,11 +23,14 @@ function resetStore(): void {
 }
 
 /** Minimal ApiProject factory — matches the server Project shape. */
-function makeProject(overrides: { id?: string; name?: string; path?: string; active?: boolean } = {}) {
+function makeProject(overrides: { id?: string; name?: string; path?: string; active?: boolean; aidoPath?: string; registeredAt?: string; accessible?: boolean } = {}) {
   return {
     id: 'proj-001',
     name: 'My Project',
     path: '/workspace/my-project',
+    aidoPath: '/workspace/my-project/.aid-o',
+    registeredAt: '2026-01-01T00:00:00Z',
+    accessible: true,
     active: false,
     ...overrides,
   };
