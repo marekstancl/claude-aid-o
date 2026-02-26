@@ -15,7 +15,7 @@ export interface ServerConfig {
 
 export function loadConfig(): ServerConfig {
   return {
-    port: parseInt(process.env.AID_PORT ?? '3001', 10),
+    port: parseInt(process.env.AID_PORT ?? '9911', 10),
     host: process.env.AID_HOST ?? '0.0.0.0',
     projectRoot: process.env.AID_PROJECT_ROOT ?? process.cwd(),
     corsOrigins: (process.env.AID_CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3000').split(','),
