@@ -17,7 +17,8 @@ import { KnowledgeBase } from './screens/KnowledgeBase';
 
 import { useNavigate } from 'react-router';
 import { AICompanion } from './components/AICompanion';
-import { sounds } from './lib/sounds';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 
 export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -76,54 +77,46 @@ export default function App() {
           duration: data.duration
         });
       });
-      
-    // Mock state changes for sound demo
-    const interval = setInterval(() => {
-      const state = useStore.getState();
-      if (state.fsmState === 'EXECUTING') {
-        sounds.stepComplete();
-      }
-    }, 15000);
-    
-    return () => clearInterval(interval);
   }, [setProject]);
 
   return (
-    <div 
-      className="min-h-screen flex bg-bg-base text-white/90"
-      style={{ 
-        // @ts-ignore
-        '--state-color': `var(--color-state-${fsmState.toLowerCase().replace('_', '-')})`,
-        '--state-glow-color': `var(--color-state-${fsmState.toLowerCase().replace('_', '-')})44`
-      }}
-    >
-      <Sidebar 
-        isCollapsed={isSidebarCollapsed} 
-        onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
-      />
-      
-      <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
-        <Topbar onSearchClick={() => setIsCompanionOpen(true)} />
-        
-        <main className="flex-1 mt-14 relative overflow-hidden">
-          <AnimatePresence mode="wait">
-            <Routes>
-              <Route path="/" element={<PageWrapper><CommandCenter /></PageWrapper>} />
-              <Route path="/pipeline" element={<PageWrapper><PipelineTheater /></PageWrapper>} />
-              <Route path="/activity" element={<PageWrapper><ActivityStream /></PageWrapper>} />
-              <Route path="/decisions" element={<PageWrapper><DecisionHub /></PageWrapper>} />
-              <Route path="/evidence" element={<PageWrapper><EvidenceVault /></PageWrapper>} />
-              <Route path="/health" element={<PageWrapper><HealthObservatory /></PageWrapper>} />
-              <Route path="/ideas" element={<PageWrapper><IdeasToExecution /></PageWrapper>} />
-              <Route path="/queue" element={<PageWrapper><QueueScheduler /></PageWrapper>} />
-              <Route path="/knowledge" element={<PageWrapper><KnowledgeBase /></PageWrapper>} />
-            </Routes>
-          </AnimatePresence>
-        </main>
-      </div>
+    <ToastProvider>
+      <div
+        className="min-h-screen flex bg-bg-base text-white/90"
+        style={{
+          // @ts-ignore
+          '--state-color': `var(--color-state-${fsmState.toLowerCase().replace('_', '-')})`,
+          '--state-glow-color': `var(--color-state-${fsmState.toLowerCase().replace('_', '-')})44`
+        }}
+      >
+        <Sidebar
+          isCollapsed={isSidebarCollapsed}
+          onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        />
 
-      <AICompanion isOpen={isCompanionOpen} onClose={() => setIsCompanionOpen(false)} />
-    </div>
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
+          <Topbar onSearchClick={() => setIsCompanionOpen(true)} />
+
+          <main className="flex-1 mt-14 relative overflow-hidden">
+            <AnimatePresence mode="wait">
+              <Routes>
+                <Route path="/" element={<ErrorBoundary><PageWrapper><CommandCenter /></PageWrapper></ErrorBoundary>} />
+                <Route path="/pipeline" element={<ErrorBoundary><PageWrapper><PipelineTheater /></PageWrapper></ErrorBoundary>} />
+                <Route path="/activity" element={<ErrorBoundary><PageWrapper><ActivityStream /></PageWrapper></ErrorBoundary>} />
+                <Route path="/decisions" element={<ErrorBoundary><PageWrapper><DecisionHub /></PageWrapper></ErrorBoundary>} />
+                <Route path="/evidence" element={<ErrorBoundary><PageWrapper><EvidenceVault /></PageWrapper></ErrorBoundary>} />
+                <Route path="/health" element={<ErrorBoundary><PageWrapper><HealthObservatory /></PageWrapper></ErrorBoundary>} />
+                <Route path="/ideas" element={<ErrorBoundary><PageWrapper><IdeasToExecution /></PageWrapper></ErrorBoundary>} />
+                <Route path="/queue" element={<ErrorBoundary><PageWrapper><QueueScheduler /></PageWrapper></ErrorBoundary>} />
+                <Route path="/knowledge" element={<ErrorBoundary><PageWrapper><KnowledgeBase /></PageWrapper></ErrorBoundary>} />
+              </Routes>
+            </AnimatePresence>
+          </main>
+        </div>
+
+        <AICompanion isOpen={isCompanionOpen} onClose={() => setIsCompanionOpen(false)} />
+      </div>
+    </ToastProvider>
   );
 }
 

@@ -46,6 +46,7 @@ import type {
   ScheduleStatusResponse,
   QueueScheduleEntry,
   KnowledgeItem,
+  Project,
 } from '../types/api';
 
 // ---------------------------------------------------------------------------
@@ -303,6 +304,24 @@ export interface ApiClient {
 
   /** GET /api/p/:projectId/knowledge */
   getKnowledge(): Promise<ApiResult<KnowledgeItem[]>>;
+
+  // ----- Launch -----
+
+  /** POST /api/p/:projectId/queue/launch */
+  launchQueue(): Promise<ApiResult<{ launched: boolean; epicId?: string }>>;
+}
+
+// ---------------------------------------------------------------------------
+// Standalone API functions (not project-scoped)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch all registered projects.
+ * GET /api/projects
+ */
+export function getProjects(config?: ApiClientConfig): Promise<ApiResult<Project[]>> {
+  const { baseUrl, timeoutMs } = { ...DEFAULT_CONFIG, ...config };
+  return typedFetch<Project[]>(`${baseUrl}/api/projects`, timeoutMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -404,5 +423,10 @@ export function createApiClient(
 
     getKnowledge: () =>
       typedFetch<KnowledgeItem[]>(`${base}/knowledge`, timeoutMs),
+
+    // ----- Launch -----
+
+    launchQueue: () =>
+      typedRequest<{ launched: boolean; epicId?: string }>(`${base}/queue/launch`, timeoutMs, 'POST'),
   };
 }
