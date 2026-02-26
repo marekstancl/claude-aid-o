@@ -997,6 +997,21 @@ RULE 7: If all approaches have similar tradeoffs, say so and explain what
 RULE 8: When workflow_detected == true, apply "Workflow-Aware Approaches"
         rules (W1-W5) from the Workflow Detection Integration section.
         Both recommended and alternative platform variants are required.
+RULE 9 (Hard Gate): Before presenting approaches to PM, validate count >= 2.
+        If fewer than 2 approaches generated, DO NOT proceed to presentation.
+        Generate additional approaches until minimum 2 are available.
+        This is a blocking validation — the approach presentation step cannot
+        complete without at least 2 genuinely different approaches.
+        Self-check: COUNT(approaches) >= 2 → proceed. Otherwise → loop back
+        and generate more approaches. No exceptions.
+RULE 10 (Anti-Shortcut): NEVER skip approach exploration, even for topics
+        that appear to have an obvious or clear-best-choice solution. Every
+        topic gets 2-3 approaches with full trade-off analysis. "Obvious"
+        solutions still have alternatives worth exploring — infrastructure
+        choices, library options, architectural patterns, build-vs-buy.
+        Skipping approach exploration is NEVER acceptable. If the topic seems
+        trivial, the alternatives may be lighter-weight or simpler variants,
+        but they must still be presented with pros, cons, effort, and risk.
 ```
 
 ### Design Validation Protocol
@@ -1026,6 +1041,19 @@ RULE 6: Generate proper IDs per `skills/epic-orchestration.md` ID Generation sec
         Plan: P{NNN} (from counter.yaml). EPIC from plan: E-{NNN}-{phase}_{total}.
         Ad-hoc EPIC: E-{NNN} (from counter.yaml epic counter).
 RULE 7: Cross-reference: EPIC draft references the plan in its Context section.
+RULE 8: COMPLETENESS GATE (Step 8) — Before finalizing the plan document, perform
+        this verification:
+        1. Enumerate all PM decisions and answers from Steps 3-6 as a checklist:
+           - Step 3 (Questions): PM's answers to every clarification question
+           - Step 4 (Approaches): PM's chosen approach and any modifications
+           - Step 5 (Design): PM's answers to implementation detail questions
+           - Step 6 (Sections): PM's section-by-section approvals and modification requests
+        2. For each item in the checklist, verify it is reflected in the plan document.
+        3. If any PM answer is missing or underrepresented, incorporate it before proceeding.
+        4. Only after ALL items are verified present may the plan be finalized.
+        This is a HARD GATE — the plan document MUST NOT be written to disk until every
+        PM answer from Steps 3-6 is accounted for. This prevents the common failure mode
+        where brainstorming discussions are rich but the plan summary loses specifics.
 ```
 
 ---
@@ -1510,4 +1538,4 @@ Reference: skills/workflow-intelligence.md for full protocol details
 
 ---
 
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-26
