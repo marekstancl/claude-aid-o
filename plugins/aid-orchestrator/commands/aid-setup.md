@@ -1032,6 +1032,8 @@ Choose a permission level for AID agents:
 
   3. Advanced   — Full access. Push, web, all MCP servers.
                   Tools: everything enabled, nothing blocked
+                  MCP: GitHub, MinIO, Docker, Playwright, Context7,
+                       Qdrant memory
                   Best for: trusted CI, experienced users
 
 Comparison:
@@ -1045,7 +1047,7 @@ Comparison:
   | git push          |  N   |      N      |    Y     |
   | Web access        |  Y*  |      N      |    Y     |
   | Qdrant memory     |  N   |      Y      |    Y     |
-  | Slack MCP         |  N   |      N      |    Y     |
+  | All MCP servers   |  N   |      N      |    Y     |
   | Destructive cmds  |  N   |      N      |    Y     |
   +-------------------+------+-------------+----------+
   * Safe allows WebSearch (read-only) but not WebFetch

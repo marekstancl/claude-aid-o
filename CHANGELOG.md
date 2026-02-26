@@ -12,6 +12,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **adapt_example() Implementation** — 7-step function in knowledge-acquisition.md replaces path placeholders, updates framework versions, handles Docker sections, aligns platforms, merges constraints, adjusts step count, and writes adapted EPIC
 - **Knowledge Results Display** — brainstorming Step 1 now shows PM what knowledge was found ("Found N relevant docs: [names]") or "No knowledge indexed yet"
 - **`/aid-help knowledge` Topic** — lists all example EPICs by category, explains search flow (Context7 → Qdrant → static), and documents indexing and research triggers
+- **RESUME_SESSION safety net** — QUEUE_PROCESSING next() now filters on `status in ["queued", "running"]` with preference for running entries, so an interrupted EPIC is automatically resumed even when the RESUME_SESSION reset was skipped
+- **Permission snapshot and restore** — `auto-mode-state.yaml` gains an `original_permissions_snapshot` field; RESTORE_PERMISSIONS now uses a two-tier fallback (backup file, then inline snapshot) across all three restore paths (COMPLETE, /aid-stop, crash recovery)
+- **Permission grant log** — `auto-mode-state.yaml` gains a `permissions.grant_log[]` audit trail field recording each dynamic permission grant with permission, source, actor, step_ref, timestamp, and reason; PHASE_CHECK permission learning dual-writes to both `learned_permissions[]` and `grant_log[]`
+- **Multi-agent parallel execution** — QUEUE_PROCESSING gains a complete parallel dispatch protocol: independence detection via EPIC scope analysis, Task agent dispatch in worktree isolation, sequential merge with shared escalation budget, failure isolation per agent, and a safety cap of 3 concurrent agents
+
+### Changed
+
+- **FIRST AID disclaimer** — reframed from alarmist "USE AT YOUR OWN RISK" to "Experimental Autonomous Mode"; added explicit `/aid-stop` emergency stop reference and `/aid-epic-queue` for queue review so users know how to intervene safely
+- **Setup MCP advanced permissions preset** — replaced the broad `mcp__*` wildcard with 7 explicit tool patterns (`mcp__shared-github__*(*)`, etc.) matching auto-mode format; updated setup wizard comparison matrix to reflect the change
 
 ## [1.0.0] — 2026-02-26
 

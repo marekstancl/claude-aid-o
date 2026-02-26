@@ -91,7 +91,14 @@ presets:
       - "WebSearch"
       - "WebFetch"
       - "Bash(*:*)"
-      - "mcp__*"
+      # MCP tools — explicit patterns for Claude Code auto-allow
+      - "mcp__qdrant-memory__qdrant-store(*)"
+      - "mcp__qdrant-memory__qdrant-find(*)"
+      - "mcp__shared-github__*(*)"
+      - "mcp__shared-minio__*(*)"
+      - "mcp__shared-docker__*(*)"
+      - "mcp__shared-playwright__*(*)"
+      - "mcp__plugin_context7_context7__*(*)"
     notes: |
       ⚠ USE AT YOUR OWN RISK — This preset grants unrestricted access. Agents can execute
       arbitrary commands (rm -rf, git push --force), install packages, send messages via

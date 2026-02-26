@@ -6,18 +6,18 @@ user_invocable: true
 
 Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomous EPIC queue execution with elevated permissions, agent-driven decision-making, and escalation-only PM interaction.
 
-> **⚠ DISCLAIMER — USE AT YOUR OWN RISK**
+> **DISCLAIMER — Experimental Autonomous Mode**
 >
-> FIRST AID grants Claude Code **elevated permissions** for the duration of the session.
-> Claude will autonomously edit files, run shell commands, install packages, push code
-> to remote repositories, create GitHub releases, and call MCP tools — **without asking
-> for confirmation**. A hard-deny list blocks the most dangerous operations (`rm -rf /`,
-> `git push --force`, `sudo`, `chmod 777`, etc.), but autonomous AI execution carries
-> inherent risk and can produce unexpected results. Safety mechanisms reduce but do not
-> eliminate risk. **You are responsible for all actions performed in your environment.**
+> FIRST AID is an **experimental** feature. It grants Claude Code **elevated permissions**
+> for the duration of the session. The AI will execute commands, modify files, install
+> packages, push code, create GitHub releases, and call MCP tools — **without asking for
+> confirmation**. A hard-deny list blocks dangerous operations (`rm -rf /`,
+> `git push --force`, `sudo`, `chmod 777`, etc.), but no automated safeguard is
+> exhaustive. **You are responsible for all actions performed in your environment.**
 >
-> Before starting: review your EPIC queue, run `--dry-run` to preview, check
-> `permissions-auto.yaml` for the full permission list, and keep `/aid-stop` in mind.
+> Before starting: review your EPIC queue (`/aid-epic-queue`) and run `--dry-run` to
+> preview execution. Use `/aid-stop` as the emergency stop to halt autonomous execution
+> at any point.
 
 The PM approves the EPIC queue before invocation. Once started, the Orchestrator processes every queued EPIC end-to-end: plan, execute, gate, merge, pick up next. PM is only contacted on escalation (16 defined triggers). Permissions are elevated for the duration and restored on completion.
 
@@ -256,7 +256,18 @@ session:
     source: "{project|defaults|generated}"
     applied_permissions: [{list of effective_allow entries}]
     applied_permissions_count: {N}
+    original_permissions_snapshot:
+      allow: [{original allow entries from settings.json BEFORE elevation}]
+      deny: [{original deny entries from settings.json BEFORE elevation, or empty list}]
     learned_permissions: []
+    grant_log: []
+    # Each entry records a dynamic permission grant during the session:
+    # - permission: "Bash(npm test:*)"
+    #   source: "pm_escalation"       # pm_escalation | auto_learn | manual
+    #   actor: "pm"                    # pm | controller | agent
+    #   step_ref: "E-011_step_3"      # which step triggered the grant
+    #   timestamp: "2026-02-26T20:15:00Z"
+    #   reason: "PM approved npm test during E1 escalation"
 
   escalation:
     budget: 3
@@ -448,19 +459,315 @@ READ_MODE:
 ```
 1. Read .aid-o/04-engine/epic-queue.yaml (from disk, not cached)
 2. Call next() logic from skills/epic-queue.md:
-   → Filter status == "queued"
-   → Sort by priority (critical > high > medium > low), then added_at (FIFO)
+   → Filter status in ["queued", "running"]
+     (includes "running" as safety net — covers interrupted EPICs
+      whose status was not reset during resume, e.g. crash mid-resume)
+   → Prefer "running" entries first (they are interrupted EPICs that need to resume)
+   → Then "queued" entries sorted by priority (critical > high > medium > low), then added_at (FIFO)
    → Return first entry
-3. IF no queued EPIC found:
+3. IF selected entry has status == "running":
+   → Log: "Resuming interrupted EPIC {epic_id} (was still marked running)"
+   → This is a safety net — normally RESUME_SESSION resets running → queued
+4. IF no matching EPIC found:
    → Transition to FIRST_AID_COMPLETE
-4. IF queued EPIC found:
+5. IF matching EPIC found:
    → Call start(epic_id) — set status: "running", started_at: now
+     (if already "running", refresh started_at to mark the new attempt)
    → Update auto-mode-state.yaml:
      session.progress.current_epic_id = epic_id
      session.progress.current_state = "EXECUTING"
 ```
 
-#### 3. Check Escalation Budget Guardrail
+#### 3. Multi-Agent Parallel Execution
+
+Before executing the selected EPIC sequentially, check whether multiple queued
+EPICs can be processed in parallel. Independent EPICs — those with non-overlapping
+file scopes and no declared dependencies — can each run in an isolated git worktree
+simultaneously, reducing total queue processing time.
+
+**When to evaluate:** After selecting the next EPIC (step 2) and before executing
+it (step 5). This check inspects the remaining queue for parallelism opportunities.
+
+##### 3.1 Independence Detection Algorithm
+
+```
+DETECT_INDEPENDENT_EPICS(selected_epic, queue):
+  1. Build candidate list:
+     candidates = [selected_epic]
+     remaining  = [entries in queue where status == "queued",
+                   ordered by priority then added_at,
+                   excluding selected_epic]
+
+  2. For each candidate_epic in remaining (up to MAX_PARALLEL_AGENTS - 1 more):
+
+     a. READ candidate EPIC file from its queue entry path
+        - IF file missing or unreadable:
+          → Skip candidate (uncertain scope — cannot prove independence)
+          → Log: "Skipping {epic_id} for parallel detection: file unreadable"
+          → Continue to next candidate
+
+     b. EXTRACT scope sets:
+        - allowed_paths = parse "### Allowed files/paths" section → set of path patterns
+        - forbidden_zones = parse "### Forbidden zones" section → set of path patterns
+        - dependencies = parse "## Dependencies" section → list of referenced EPIC IDs
+        - IF "### Allowed files/paths" section is missing or empty:
+          → Skip candidate (uncertain scope — fall back to sequential)
+          → Log: "Skipping {epic_id} for parallel detection: no Allowed files/paths"
+          → Continue to next candidate
+
+     c. CHECK dependency declarations:
+        For each existing member of candidates:
+          - IF candidate_epic.dependencies references member.epic_id
+            OR member.dependencies references candidate_epic.epic_id:
+            → EPICs are dependent — skip candidate
+            → Log: "Skipping {epic_id}: declared dependency on {member.epic_id}"
+            → Continue to next candidate
+
+     d. CHECK file scope overlap (pairwise against all current candidates):
+        For each existing member of candidates:
+          - overlap = candidate.allowed_paths INTERSECT member.allowed_paths
+          - cross_forbidden_a = candidate.allowed_paths INTERSECT member.forbidden_zones
+          - cross_forbidden_b = member.allowed_paths INTERSECT candidate.forbidden_zones
+          - IF overlap is non-empty
+            OR cross_forbidden_a is non-empty
+            OR cross_forbidden_b is non-empty:
+            → EPICs are NOT independent — skip candidate
+            → Log: "Skipping {epic_id}: scope overlap with {member.epic_id}
+                     (overlap: {overlap}, forbidden cross: {cross_a}, {cross_b})"
+            → Continue to next candidate
+
+     e. IF all checks pass:
+        → Add candidate_epic to candidates list
+        → Log: "EPIC {epic_id} is independent — eligible for parallel execution"
+
+  3. Return candidates list
+     - IF len(candidates) >= 2: parallelism opportunity detected
+     - IF len(candidates) == 1: no parallelism — continue sequential
+```
+
+**Path intersection rules:**
+- Paths are compared as directory prefixes. `src/api/` overlaps with `src/api/routes.py`.
+- A specific file path (`src/api/auth.py`) overlaps with a directory path (`src/api/`)
+  if the file is under that directory.
+- Glob patterns (`src/**/*.ts`) are expanded conceptually: if two globs could match
+  the same file, they overlap.
+- When in doubt (complex globs, relative paths, symlinks), treat as overlapping
+  (conservative — prefer sequential over incorrect parallel).
+
+##### 3.2 Parallel Dispatch Protocol
+
+```
+PARALLEL_DISPATCH(candidates):
+  Precondition: len(candidates) >= 2 AND len(candidates) <= MAX_PARALLEL_AGENTS
+
+  1. Log to stage_log.jsonl:
+     {"state": "QUEUE_PROCESSING", "epic_id": null,
+      "action": "parallel_dispatch",
+      "details": "Detected {N} independent EPICs, spawning parallel execution:
+                  {[epic_ids]}",
+      "result": "pending"}
+
+  2. Send Slack Status Update (Type G):
+     ":zap: Parallel execution: {N} independent EPICs detected.
+      Spawning {N} isolated agents: {epic_id_1}, {epic_id_2}, ...
+      Session {session_id}."
+
+  3. Update auto-mode-state.yaml:
+     session.progress.current_state = "PARALLEL_EXECUTING"
+     session.parallel_execution = {
+       active: true,
+       started_at: "{ISO 8601}",
+       agents: [
+         { epic_id: "{epic_id_1}", worktree: null, status: "dispatching" },
+         { epic_id: "{epic_id_2}", worktree: null, status: "dispatching" },
+         ...
+       ]
+     }
+
+  4. Mark all candidate EPICs as "running" in epic-queue.yaml:
+     For each candidate:
+       → Call start(epic_id) — set status: "running", started_at: now
+
+  5. Spawn isolated agents:
+     For each candidate epic in candidates:
+       a. Dispatch a Task agent with worktree isolation:
+          → Task tool call with description:
+            "Execute EPIC {epic_id} in isolated worktree.
+             Run the full /aid-run-epic orchestration loop.
+             Auto-mode overrides apply (same as sequential execution).
+             Report result as: completed | failed | aborted."
+          → The Task agent:
+            - Gets its own git worktree (isolated working copy)
+            - Reads the EPIC file and runs the 11-state machine
+            - Has read access to .aid-o/ for shared config
+            - Writes evidence to its own evidence directory
+            - Commits to its worktree branch independently
+
+       b. Update auto-mode-state.yaml:
+          session.parallel_execution.agents[i].status = "running"
+          session.parallel_execution.agents[i].worktree = "{worktree_path}"
+
+  6. Controller waits for ALL parallel agents to complete.
+     → Each agent reports its result independently.
+     → The Controller collects results as they arrive.
+```
+
+##### 3.3 Coordination Protocol
+
+**Result collection and sequential merge:**
+
+```
+PARALLEL_COORDINATION(agents):
+  1. WAIT for all agents to report completion (completed | failed | aborted).
+     → Agents may complete at different times.
+     → As each agent completes, log its result immediately:
+        {"state": "QUEUE_PROCESSING", "epic_id": "{epic_id}",
+         "action": "parallel_agent_completed",
+         "details": "Agent for {epic_id} finished: {result}",
+         "result": "{pass|fail}"}
+
+  2. SEQUENTIAL MERGE — process completed agents one at a time:
+     For each agent that reported "completed" (in original queue order):
+       a. Switch to agent's worktree branch
+       b. Merge worktree branch to main:
+          → git checkout main
+          → git merge {worktree_branch} --no-ff
+              -m "merge: {epic_id} — parallel execution (session {session_id})"
+       c. IF merge conflict:
+          → Do NOT auto-resolve. Mark this EPIC as "failed" with reason
+            "merge_conflict_after_parallel".
+          → Log: "Merge conflict for {epic_id}. Marking failed."
+          → Continue to next agent (other merges may still succeed).
+       d. IF merge succeeds:
+          → Log: "Successfully merged {epic_id} to main."
+
+  3. COLLECT RESULTS — update aggregate metrics:
+     For each agent:
+       a. Read agent's final_report.md from its evidence directory
+       b. Update auto-mode-state.yaml:
+          - session.aggregate.per_epic[] += agent result data
+          - Increment aggregate counters (steps, gates, escalations, etc.)
+          - IF status == "completed": epics_completed += 1
+          - IF status == "failed": epics_failed += 1
+
+  4. UPDATE parallel execution state:
+     session.parallel_execution.active = false
+     session.parallel_execution.completed_at = "{ISO 8601}"
+     For each agent:
+       session.parallel_execution.agents[i].status = "{final_status}"
+       session.parallel_execution.agents[i].merge_result = "merged|conflict|skipped"
+```
+
+**Escalation handling during parallel execution:**
+
+```
+PARALLEL_ESCALATION:
+  IF any parallel agent triggers an escalation (any of the 16 triggers from
+  skills/auto-escalation.md):
+    1. PAUSE ALL parallel agents:
+       → Set session.mode = "paused" in auto-mode-state.yaml
+       → All agents read mode from disk at their next decision point
+       → Each agent pauses at its next mode check
+    2. Notify PM with combined context:
+       "Escalation during parallel execution.
+        Triggering EPIC: {epic_id}
+        Trigger: {escalation_trigger}
+        Parallel EPICs in flight: {list of epic_ids and their current states}
+        Session {session_id}."
+    3. PM responds with standard 4 options:
+       - Fix (A): resume ALL agents after fix applied
+       - Skip (B): mark triggering EPIC as failed, resume others
+       - Abort (C): abort ALL parallel agents, transition to QUEUE_ADVANCE
+       - Continue Manual (D): abort parallel execution, restore permissions,
+         PM drives remaining EPICs
+    4. ON resume:
+       → Set session.mode = "auto"
+       → Agents resume at their next mode check
+
+  Escalation budget is SHARED across parallel agents:
+    → session.escalation.count increments regardless of which agent triggered
+    → If budget is exceeded, E12 fires for all agents (same as sequential)
+```
+
+**Failure handling:**
+
+```
+PARALLEL_FAILURE:
+  IF a parallel agent fails (EPIC reaches failed state):
+    1. Only that EPIC is marked failed — other agents continue.
+    2. The failed agent's worktree is cleaned up (step 3.4).
+    3. The failed EPIC is NOT merged to main.
+    4. After ALL agents complete, if ANY failed:
+       → Queue auto-pauses (same as sequential failure in QUEUE_ADVANCE step 3)
+       → PM is notified with the combined results:
+         "Parallel execution complete with failures.
+          Completed: {completed_epic_ids}
+          Failed: {failed_epic_ids}
+          Queue auto-paused. Session {session_id}."
+       → PM decides: resume / abort / continue-manual
+```
+
+##### 3.4 Safety Guards
+
+```
+PARALLEL_SAFETY:
+  1. MAX_PARALLEL_AGENTS = 3
+     → Never spawn more than 3 parallel agents.
+     → If 4+ independent EPICs are detected, process the first 3 in parallel,
+       then process remaining in the next queue iteration.
+
+  2. UNCERTAIN_SCOPE_FALLBACK:
+     → If an EPIC has no "### Allowed files/paths" section: exclude from parallel.
+     → If an EPIC's scope uses only wildcards with no directory prefix
+       (e.g., "**/*.md"): exclude from parallel (too broad to prove independence).
+     → If the candidate list reduces to 1 EPIC: fall back to sequential.
+
+  3. WORKTREE_CLEANUP (mandatory):
+     After each parallel agent completes (success or failure):
+       a. Remove the agent's git worktree:
+          → git worktree remove {worktree_path} --force
+       b. Remove the agent's worktree branch (if not merged):
+          → git branch -d {worktree_branch}  (only if merged)
+          → git branch -D {worktree_branch}  (if failed / not merged)
+       c. Verify cleanup:
+          → git worktree list — confirm worktree is removed
+       d. IF cleanup fails:
+          → Log WARNING: "Worktree cleanup failed for {epic_id}: {error}"
+          → Continue (non-blocking — manual cleanup may be needed)
+
+  4. RESOURCE_GUARD:
+     → Before spawning, verify disk space is sufficient for N worktrees
+       (each worktree is a full copy of the repo's working tree).
+     → Heuristic: check that available disk space > N * (repo size on disk).
+     → IF insufficient: reduce parallel count or fall back to sequential.
+     → Log: "Disk space check: {available}MB available, {needed}MB needed
+             for {N} worktrees."
+```
+
+##### 3.5 Integration with QUEUE_PROCESSING Flow
+
+```
+After selecting next EPIC (step 2):
+  1. Call DETECT_INDEPENDENT_EPICS(selected_epic, queue)
+  2. IF len(candidates) >= 2:
+     → Log: "Detected {N} independent EPICs, spawning parallel execution"
+     → Call PARALLEL_DISPATCH(candidates)
+     → Call PARALLEL_COORDINATION(dispatched_agents)
+     → Perform WORKTREE_CLEANUP for all agents
+     → IF any EPIC failed: execute PARALLEL_FAILURE handling
+     → Transition to QUEUE_ADVANCE (skip steps 4-5 for these EPICs —
+       they were already executed in parallel)
+  3. IF len(candidates) == 1:
+     → No parallelism opportunity
+     → Log: "No independent EPICs found — continuing sequential execution"
+     → Continue with step 4 (Check Escalation Budget Guardrail) as normal
+```
+
+**Evidence:** Parallel execution state in `auto-mode-state.yaml`,
+per-agent evidence in `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`,
+`stage_log.jsonl` entries for dispatch/completion/merge events.
+
+#### 4. Check Escalation Budget Guardrail
 
 Per `skills/auto-escalation.md` Section 8:
 
@@ -476,7 +783,7 @@ Per `skills/auto-escalation.md` Section 8:
 3. IF count < budget: proceed
 ```
 
-#### 4. Execute EPIC
+#### 5. Execute EPIC
 
 Delegate to the `/aid-run-epic` orchestration loop. The Controller runs the full
 11-state machine from `skills/epic-orchestration.md` with the following auto-mode
@@ -492,6 +799,8 @@ EXECUTE_EPIC(epic_id):
        Section 1 (Decision Point Mapping)
      - Escalation triggers follow skills/auto-escalation.md
      - Permission learning runs at each PHASE_CHECK per skills/permission-sandwich.md
+       Each learned permission is appended to both session.permissions.learned_permissions[]
+       AND session.permissions.grant_log[] (with source: "auto_learn", actor: "controller")
   3. On EPIC completion (DONE state reached):
      → The DONE state handles: release, merge, Curator, Auditor, memory indexing
      → auto-mode-specific DONE behaviors apply (auto-defer intermediate release,
@@ -508,6 +817,38 @@ EXECUTE_EPIC(epic_id):
 | GATES | Auto-retry up to max_attempts | Identical to manual |
 | PM_APPROVAL | PM approves APPROVE/REJECT/REVISE | Auto-approve; guardrail check on last EPIC (E12 if budget exceeded) |
 | DONE release | PM chooses release now/defer | Auto-defer intermediate; mandatory bump on last EPIC |
+
+**PM_APPROVAL Guardrail (auto-mode):**
+
+The PM_APPROVAL auto-approve is conditional on the previous EPIC's audit quality.
+The check reads the **previous** EPIC's audit report, not the current one (which
+has not been generated yet at PM_APPROVAL time).
+
+```
+For the FIRST EPIC in the queue:
+  → Auto-approve unconditionally (no previous EPIC exists to check).
+
+For each subsequent EPIC:
+  1. Identify the previous EPIC's ID from epic-queue.yaml ordering.
+  2. Locate its audit report:
+     .aid-o/04-engine/evidence/{prev_epic_id}/*/audit-report.md
+     (use the most recent run_id if multiple exist)
+  3. Read the audit score from the report.
+
+  IF audit-report.md found AND audit score < 60:
+    → Trigger E11 escalation:
+      "Previous EPIC {prev_epic_id} had low audit score ({score}/100).
+       Review quality before continuing with next EPIC."
+    → PM receives standard 4 options (Fix / Skip / Abort / Continue Manual).
+
+  IF audit-report.md NOT found (skipped, failed, or never generated):
+    → Log WARNING in session log:
+      "No audit report found for {prev_epic_id}. Auto-approving with caution."
+    → Auto-approve and continue.
+
+  IF audit-report.md found AND audit score >= 60:
+    → Auto-approve, continue execution.
+```
 
 **On escalation during EPIC execution:**
 
@@ -612,7 +953,7 @@ IF result_status == "failed":
 2. Read epic-queue.yaml from disk
    IF paused == true: → wait (should not reach here, but safety check)
 
-3. Filter status == "queued"
+3. Filter status in ["queued", "running"]  (consistent with QUEUE_PROCESSING next() safety net)
    IF count > 0:
      → Send Slack Status Update:
        ":arrows_counterclockwise: EPIC {completed_epic_id} done.
@@ -650,14 +991,35 @@ Per `skills/permission-sandwich.md` Section 4:
 ```
 RESTORE_PERMISSIONS:
   1. Read .aid-o/03-config/permissions-backup.json
-     - IF missing or corrupted: WARN PM (non-blocking), continue
+     - IF file exists and valid JSON: use as restore source → go to step 2
+     - IF missing or corrupted:
+       a. Log WARNING: "Backup file missing or corrupted. Attempting snapshot fallback."
+       b. Read .aid-o/04-engine/auto-mode-state.yaml →
+          session.permissions.original_permissions_snapshot
+       c. IF snapshot exists and contains allow[]:
+          → Reconstruct settings.json content from snapshot:
+            {
+              "permissions": {
+                "allow": [{snapshot allow entries}],
+                "deny": [{snapshot deny entries}]
+              }
+            }
+          → Use reconstructed content as restore source → go to step 2
+          → Log: {"state": "FIRST_AID_COMPLETE", "action": "permissions_snapshot_fallback",
+             "source": "auto-mode-state.yaml"}
+       d. IF snapshot also missing or empty:
+          → WARN PM: "Cannot restore permissions — backup file AND snapshot both
+            unavailable. Current .claude/settings.json retains elevated permissions.
+            Manually review .claude/settings.json."
+          → Log WARNING and continue (non-blocking)
+          → Skip steps 2-3, proceed to step 4
   2. Atomic write restore:
-     a. Write backup content to .claude/settings.json.tmp
-     b. Validate temp file
+     a. Write restore source content to .claude/settings.json.tmp
+     b. Validate temp file is valid JSON
      c. Rename to .claude/settings.json
-  3. Delete backup file (.aid-o/03-config/permissions-backup.json)
+  3. Delete backup file (.aid-o/03-config/permissions-backup.json) if it exists
   4. Log: {"state": "FIRST_AID_COMPLETE", "action": "permissions_restored",
-     "entries_restored": {N}}
+     "entries_restored": {N}, "restore_source": "{backup_file|snapshot_fallback}"}
 ```
 
 **Per permission-sandwich.md MUST Rule 5:** Restore is non-blocking. If it fails,
@@ -1064,7 +1426,11 @@ AID_STOP (during FIRST AID):
      - This prevents partial state corruption
 
   3. Restore permissions:
-     Execute RESTORE_PERMISSIONS per skills/permission-sandwich.md Section 4
+     Execute RESTORE_PERMISSIONS per skills/permission-sandwich.md Section 4.
+     Use the same fallback chain as FIRST_AID_COMPLETE step 2:
+       primary:  .aid-o/03-config/permissions-backup.json
+       fallback: auto-mode-state.yaml → session.permissions.original_permissions_snapshot
+     Restore is non-blocking — if both sources are unavailable, warn PM and continue.
 
   4. Save progress:
      → auto-mode-state.yaml already has latest progress
@@ -1104,7 +1470,11 @@ ON_UNRECOVERABLE_ERROR(error):
      → Stash uncommitted work if dirty working tree
 
   3. Restore permissions:
-     Execute RESTORE_PERMISSIONS (non-blocking)
+     Execute RESTORE_PERMISSIONS (non-blocking).
+     Use the same fallback chain as FIRST_AID_COMPLETE step 2:
+       primary:  .aid-o/03-config/permissions-backup.json
+       fallback: auto-mode-state.yaml → session.permissions.original_permissions_snapshot
+     If both sources are unavailable, warn PM and continue.
 
   4. Update state:
      → session.mode = "aborted"
@@ -1195,6 +1565,9 @@ Per-EPIC execution also logs to the EPIC-specific stage log at
   produces a `final_report.md`. The session produces a `summary-report.md`.
 - **Permission learning is automatic.** If PM grants a permission during auto-mode,
   it is persisted for future sessions (unless it is on the hard-deny list).
+  Every grant (from PM escalation, auto-learn, or manual) is recorded in
+  `session.permissions.grant_log[]` with permission, source, actor, step_ref,
+  timestamp, and reason.
 - **The hard-deny list is non-negotiable.** It cannot be overridden by configuration,
   by PM grants, or by any other mechanism.
 - If `$ARGUMENTS` is empty: start fresh auto-mode with current queue (equivalent to
