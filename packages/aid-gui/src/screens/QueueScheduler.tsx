@@ -190,7 +190,7 @@ function formatTimeAgo(date: Date): string {
 
 export const QueueScheduler: React.FC = () => {
   // Store state
-  const queueEntries = useStore((s) => s.queueEntries);
+  const queueEntries = useStore((s) => s.queueEntries) ?? [];
   const scheduleConfig = useStore((s) => s.scheduleConfig);
   const scheduleStatus = useStore((s) => s.scheduleStatus);
   const usageData = useStore((s) => s.usageData);

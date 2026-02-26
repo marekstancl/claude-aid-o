@@ -22,7 +22,7 @@ app.use(cors({ origin: config.corsOrigins }));
 app.use(express.json());
 
 // --- Health check ---
-app.get('/health', (_req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -40,6 +40,11 @@ app.use('/api/p/:projectId/audit', auditRoutes(registry));
 app.use('/api/p/:projectId/ideas', ideaRoutes(registry));
 app.use('/api/p/:projectId/usage', usageRoutes(registry));
 app.use('/api/p/:projectId/knowledge', knowledgeRoutes(registry));
+
+// --- API catch-all 404 (must come before static fallback) ---
+app.all('/api/*', (_req, res) => {
+  res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'API route not found' } });
+});
 
 // --- Serve GUI static files in production ---
 // Check multiple possible locations: Docker (/app/gui-dist), dev (../aid-gui/dist)

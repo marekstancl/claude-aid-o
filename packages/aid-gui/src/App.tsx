@@ -19,12 +19,20 @@ import { useNavigate } from 'react-router';
 import { AICompanion } from './components/AICompanion';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
+import { useWebSocket } from './hooks/useWebSocket';
+
+const MOBILE_BREAKPOINT = 768;
 
 export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isCompanionOpen, setIsCompanionOpen] = useState(false);
-  const { setProject, fsmState } = useStore();
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
+  const { setProject, fsmState, currentProject } = useStore();
   const navigate = useNavigate();
+
+  // Connect WebSocket — the hook manages connection lifecycle, reconnection,
+  // and dispatches all incoming events to the Zustand store automatically.
+  useWebSocket(currentProject?.id ?? null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -58,25 +66,51 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isCompanionOpen, navigate]);
 
+  // Detect mobile viewport and auto-collapse sidebar
   useEffect(() => {
-    // Initial data fetch
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+
+    const handleChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const mobile = e.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+
+    // Set initial state
+    handleChange(mediaQuery);
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  useEffect(() => {
+    // Initial data fetch — API returns { ok, data } envelope
     fetch('/api/projects')
       .then(res => res.json())
-      .then(data => {
-        if (data.length > 0) setProject(data[0]);
-      });
-
-    fetch('/api/pipeline/status')
-      .then(res => res.json())
-      .then(data => {
-        useStore.getState().updatePipeline({
-          fsmState: data.state,
-          progress: data.progress,
-          activeStep: data.activeStep,
-          epic: data.epic,
-          duration: data.duration
-        });
-      });
+      .then(result => {
+        const projects = result.ok ? result.data : result;
+        if (Array.isArray(projects) && projects.length > 0) {
+          setProject(projects[0]);
+          // Fetch pipeline state for the selected project
+          fetch(`/api/p/${encodeURIComponent(projects[0].id)}/pipeline`)
+            .then(r => r.json())
+            .then(pResult => {
+              if (pResult.ok && pResult.data) {
+                const d = pResult.data;
+                useStore.getState().updatePipeline({
+                  fsmState: d.currentState,
+                  progress: d.progress,
+                  activeStep: d.currentStepId,
+                  epic: d.currentEpicId,
+                });
+              }
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, [setProject]);
 
   return (
@@ -92,9 +126,10 @@ export default function App() {
         <Sidebar
           isCollapsed={isSidebarCollapsed}
           onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          isMobile={isMobile}
         />
 
-        <div className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
+        <div className={`flex-1 flex flex-col transition-all duration-300 ${isMobile ? 'ml-0' : isSidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
           <Topbar onSearchClick={() => setIsCompanionOpen(true)} />
 
           <main className="flex-1 mt-14 relative overflow-hidden">

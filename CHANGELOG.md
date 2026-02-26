@@ -16,6 +16,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 - **MDX expression errors** — escaped `{type: performance}` in `decision-policies.md` and `{message_type}`/`{action}` in `slack-integration.md` that broke Docusaurus MDX compilation
 - **GitHub Pages config** — replaced all placeholder values in `docusaurus.config.ts` (`your-org` → `marekstancl`, `your-project` → `claude-aid-o`)
+- **GUI Page Crashes** — added null guards to QueueScheduler, KnowledgeBase, and HealthObservatory to prevent TypeError crashes on empty data
+- **WebSocket Connection** — connected useWebSocket hook in App.tsx so real-time events flow to all dashboard screens
+- **CC Usage Gauge Visibility** — removed responsive hiding so CC Usage gauge is always visible in topbar, even when disconnected
+- **Mobile Connection Banner** — removed `hidden md:flex` so connection status banner shows on mobile viewports
+- **Project Selector Z-Index** — added z-50 to dropdown container so it renders above the sidebar overlay
+- **Sidebar Responsive Collapse** — sidebar auto-collapses to icon mode on viewports below 768px with hamburger toggle and backdrop overlay
+- **Pipeline Theater Empty State** — shows "No pipeline data" message instead of stale replay counter when no runs exist
+- **SVG Path Animation Error** — suppressed motion.path rendering when no pipeline data is displayed, eliminating console errors
+- **API JSON Fallback** — added /api/* catch-all route returning JSON 404 before static file fallback, preventing HTML responses for unknown API routes
+- **Notification/Settings Buttons** — added "Coming soon" tooltips and safe click handlers to prevent crashes
+- **Project Fetch Response Parsing** — fixed App.tsx legacy fetch that expected raw array but API returns `{ ok, data }` envelope, so currentProject was never set and WebSocket never connected
+- **Health Observatory Audit Data** — fixed double-wrapping of audit reports array that caused latestAudit to be an array instead of an object, breaking score display
+- **Health Check Route Collision** — moved Express health-check endpoint from `/health` to `/api/health` so the GUI's `/health` route (Health Observatory page) is served by the SPA fallback instead of returning raw JSON
 
 ### Changed
 

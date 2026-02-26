@@ -40,7 +40,7 @@ export const KnowledgeBase: React.FC = () => {
 
   // Filter and search items
   const filteredItems = useMemo(() => {
-    let items = knowledgeItems;
+    let items = knowledgeItems ?? [];
 
     // Apply type filter
     if (activeFilter !== 'all') {
@@ -102,7 +102,7 @@ export const KnowledgeBase: React.FC = () => {
   ];
 
   // Skeleton loading state
-  if (knowledgeLoading && knowledgeItems.length === 0) {
+  if (knowledgeLoading && (knowledgeItems ?? []).length === 0) {
     return (
       <div className="h-full flex flex-col overflow-hidden">
         <div className="p-8 border-b border-white/5 flex items-center justify-between bg-surface-1/20">
@@ -302,7 +302,7 @@ export const KnowledgeBase: React.FC = () => {
                 <section className="space-y-4">
                   <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Related Concepts</h4>
                   <div className="space-y-2">
-                    {knowledgeItems
+                    {(knowledgeItems ?? [])
                       .filter((item) => item.name !== selectedNode.name && item.type === selectedNode.type)
                       .slice(0, 3)
                       .map((rel) => (

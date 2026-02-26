@@ -3,6 +3,54 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.99.0] — 2026-02-26
+
+### Added
+
+- **AID Server** (`packages/aid-server`) — Express + WebSocket backend serving the AID GUI dashboard; 18 REST API endpoints covering projects, pipeline state, EPIC queue, decisions, evidence, audit, ideas, usage metrics, and knowledge; real-time WebSocket pub/sub with chokidar file watching on `.aid-o/`; topic-based subscriptions with heartbeat and idle timeout
+- **Docker deployment** — multi-stage Dockerfile (gui-build → server-build → production) and docker-compose.yml; single `docker compose up --build` serves both GUI and API on port 9911; health check included
+- **Docusaurus documentation site** — full docs site with architecture, configuration, contributing, troubleshooting, reference docs, and Getting Started guides; deployed to GitHub Pages via GitHub Actions; EN + CS locales
+- **GUI frontend polish** — AI Companion panel, replay controls, error boundaries, production build optimization (FIRST AID EPIC session, 5 EPICs completed autonomously)
+
+### Fixed
+
+- **MDX expression errors** — escaped `{type: performance}` in `decision-policies.md` and `{message_type}`/`{action}` in `slack-integration.md` that broke Docusaurus MDX compilation
+- **GitHub Pages config** — replaced all placeholder values in `docusaurus.config.ts` (`your-org` → `marekstancl`, `your-project` → `claude-aid-o`)
+- **GUI Page Crashes** — added null guards to QueueScheduler, KnowledgeBase, and HealthObservatory to prevent TypeError crashes on empty data
+- **WebSocket Connection** — connected useWebSocket hook in App.tsx so real-time events flow to all dashboard screens
+- **CC Usage Gauge Visibility** — removed responsive hiding so CC Usage gauge is always visible in topbar, even when disconnected
+- **Mobile Connection Banner** — removed `hidden md:flex` so connection status banner shows on mobile viewports
+- **Project Selector Z-Index** — added z-50 to dropdown container so it renders above the sidebar overlay
+- **Sidebar Responsive Collapse** — sidebar auto-collapses to icon mode on viewports below 768px with hamburger toggle and backdrop overlay
+- **Pipeline Theater Empty State** — shows "No pipeline data" message instead of stale replay counter when no runs exist
+- **SVG Path Animation Error** — suppressed motion.path rendering when no pipeline data is displayed, eliminating console errors
+- **API JSON Fallback** — added /api/* catch-all route returning JSON 404 before static file fallback, preventing HTML responses for unknown API routes
+- **Notification/Settings Buttons** — added "Coming soon" tooltips and safe click handlers to prevent crashes
+- **Project Fetch Response Parsing** — fixed App.tsx legacy fetch that expected raw array but API returns `{ ok, data }` envelope, so currentProject was never set and WebSocket never connected
+- **Health Observatory Audit Data** — fixed double-wrapping of audit reports array that caused latestAudit to be an array instead of an object, breaking score display
+- **Health Check Route Collision** — moved Express health-check endpoint from `/health` to `/api/health` so the GUI's `/health` route (Health Observatory page) is served by the SPA fallback instead of returning raw JSON
+
+### Changed
+
+- **Default port** — server default port changed to 9911 (config.ts, Dockerfile, docker-compose.yml)
+- **Version bump** — all packages bumped to 0.99.0 (aid-server, aid-gui, docs)
+
+## [0.9.3] — 2026-02-25
+
+### Fixed
+
+- **GATES → CURATOR_RESOLVE transition** (`skills/epic-orchestration.md`) — GATES state now correctly transitions to CURATOR_RESOLVE instead of skipping directly to PM_APPROVAL; restores the full state machine flow (GATES → CURATOR_RESOLVE → PM_APPROVAL) so Curator proposals are processed for every EPIC
+- **Qdrant config unification** — `memory-config.yaml` is now the single source of truth for `memory.enabled`; removed duplicate flag from `project-profile.yaml`; added non-blocking Qdrant startup probe in IDLE state for early availability detection
+
+### Added
+
+- **CURATOR_RESOLVE auto-mode conditionals** (`skills/epic-orchestration.md`) — in FIRST AID mode, effort:S proposals get inline fixes while effort:M/L are auto-deferred to backlog with urgency tags; failed inline fixes silently defer (non-blocking)
+- **Credit exhaustion detection** (`skills/epic-orchestration.md`) — PHASE_CHECK now validates agent output before evaluation; detects 5 Claude Code credit error patterns via string matching; auto-pauses with `interrupted_step_context.json` + git stash; FIRST AID resume recovers interrupted steps
+- **Wiring step generation** (`skills/planner.md`) — POST_WAVE_WIRING_CHECK detects shared files across parallel wave steps and auto-generates a wiring step with context (shared_files, contributing_steps, expected_actions); new `wiring` and `wiring_context` fields in `plan.schema.json`; EXECUTING state recognizes wiring steps with specialized dispatch prompt
+- **EPIC & plan archival** (`skills/epic-orchestration.md`, `commands/aid-first-aid.md`) — DONE state archives completed EPICs to `02-epics/archive/`; QUEUE_ADVANCE archives plans when all plan EPICs complete; non-blocking with `mkdir -p` safety
+- **FIRST AID ASCII art animations** (`commands/aid-first-aid.md`) — 4-frame syringe-themed startup animation, depleted-syringe completion banner with CURATOR FINDINGS summary, re-injection resume banner
+- **CURATOR FINDINGS section** in FIRST AID completion report — shows implemented/deferred/rejected proposal breakdown with per-EPIC table
+
 ## [0.9.2] — 2026-02-24
 
 ### Added
@@ -63,11 +111,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Czech-language content removed** — translated all Czech text to English in `agents/lessons-extractor.md`, `skills/run-management.md`, `skills/agent-core.md`
+- **Czech-language content removed** — translated all Czech text to English in `agents/lessons-extractor.md`, `skills/session-management.md`, `skills/agent-core.md`
 - **Broken skill reference in `aid-epic-queue.md`** — `skills/aid-epic-queue.md` → `skills/epic-queue.md`, `aid-epic-queue.yaml` → `epic-queue.yaml`
-- **Stale `workspace/workflow/` paths** — 12 legacy path references replaced with `.aid-o/` equivalents in `skills/run-management.md`
+- **Stale `workspace/workflow/` paths** — 12 legacy path references replaced with `.aid-o/` equivalents in `skills/session-management.md`
 - **Stale command prefixes** — `/run-epic` → `/aid-run-epic`, `/plan-epic` → `/aid-plan-epic` in `skills/retry-engine.md`, `skills/planner.md`, `defaults/templates/epic-example.md`
-- **Version mismatches** — header/footer versions aligned to 0.8.2 in `run-management.md`, `epic-orchestration.md`, `retry-engine.md`, `planner.md`, `agent-core.md`
+- **Version mismatches** — header/footer versions aligned to 0.8.2 in `session-management.md`, `epic-orchestration.md`, `retry-engine.md`, `planner.md`, `agent-core.md`
 - **Hardcoded Slack channel ID** — replaced `C0AFP2GP459` with `YOUR_CHANNEL_ID` placeholder in `commands/aid-setup.md`
 - **Plugin README version** — updated from 0.4.1 to 0.8.2
 
@@ -95,53 +143,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
-- **CURATOR_RESOLVE state** (`skills/epic-orchestration.md` section 10) — new state between GATES and PM_APPROVAL; dispatches Curator + Lessons-Extractor in parallel, auto-evaluates proposals via 3-tier algorithm (YAML rules → Qdrant history → default), dispatches fix agents for approved proposals, writes lessons with 3-layer dedup, presents compact summary to PM
-- **`curator_auto_rules`** in `decision-policies.yaml` — explicit rules (always_approve dx + security/high + docs/*, always_defer architecture), Qdrant learning settings (similarity 0.80, min 3 decisions), configurable default action
-- **PM override at PM_APPROVAL** — PM can override rejected proposals ("fix IMP-{NNN}") and teach new auto-rules ("always approve {type/area}"); decisions stored in Qdrant for future learning
-- **Improvement Pipeline analytics** (`skills/analytics.md`) — Report Type 4 with EPIC-level and Project-level sections; Qdrant query pattern for `curator_decision` type
-- **3-layer Lessons-Extractor dedup** (`agents/lessons-extractor.md`) — Layer 1: exact text >90%, Layer 2: semantic >80%, Layer 3: Qdrant cross-project >0.85; output tagged with dedup_status (NEW/DUPLICATE/CROSS_PROJECT)
+- **CURATOR_RESOLVE state** — new state between GATES and PM_APPROVAL in the epic-orchestration state machine; auto-evaluates Curator proposals via 3-tier algorithm (YAML rules → Qdrant history → default), dispatches fix agents, writes lessons with 3-layer dedup
+- **`curator_auto_rules`** in `decision-policies.yaml` — configurable auto-resolution rules for improvement proposals
+- **PM override + rule teaching** at PM_APPROVAL — PM can override rejected proposals and teach new auto-rules that persist via YAML + Qdrant
+- **Improvement Pipeline analytics** — Report Type 4 in `/aid-analytics` for curator pipeline metrics
+- **3-layer Lessons-Extractor dedup** — text, semantic, and Qdrant cross-project deduplication
 
 ### Changed
 
-- **State machine** — 11 states → 12 states; CURATOR_RESOLVE inserted between GATES and PM_APPROVAL; section numbering: 10=CURATOR_RESOLVE, 11=PM_APPROVAL, 12=DONE
-- **PM_APPROVAL** extended with Curator summary block (implemented/rejected/deferred counts), PM override handling, PM rule teaching, Qdrant decision storage
-- **DONE state simplified** — Curator dispatch, Lessons-Extractor dispatch, and lessons/command-history file writes moved to CURATOR_RESOLVE; Auditor remains in DONE; items renumbered 1-11; migration note added
-- **`curator.md`** — dispatch context updated to CURATOR_RESOLVE (was POST_PROCESSING/run-end); Orchestrator Integration section rewritten with auto-evaluate flow
-- **`lessons-extractor.md`** — dispatch context updated to CURATOR_RESOLVE; 3-layer dedup protocol added
-- **`improvement-proposals.md`** — Section 6 rewritten with 3-tier auto-evaluate algorithm; Section 7 integration points updated
-- **`aid-run-epic.md`** — CURATOR_RESOLVE state handling added; GATES transition updated; DONE simplified (Auditor only)
-- **`aid-help.md`** — state machine diagram updated; Curator description updated; PM override/rule teaching documented
-- **`backlog.md`** — 19 PROP-* IDs migrated to IMP-{NNN}; legacy alias table added
+- **State machine**: 11 → 12 states (CURATOR_RESOLVE inserted)
+- **DONE state simplified**: Curator + Lessons-Extractor moved to CURATOR_RESOLVE
+- **`backlog.md`**: PROP-* IDs migrated to IMP-{NNN} with legacy alias table
+- 9 files updated across agents, skills, commands, and policies
 
 ## [0.7.0] — 2026-02-23
 
 ### Added
 
 **Phase 2 — Seed Research + Example EPICs:**
-- **Qdrant seed research: LangChain/LangGraph** — 64 chunks covering architecture (21), code (15), Docker (10), best practices (12), UI (6) from 14+ repos including langchain-ai/langchain, langchain-ai/langgraph, aws-samples/langgraph-multi-agent
-- **Qdrant seed research: N8N** — 48 chunks covering workflow (18), AI node (10), Docker (7), custom node (5), best practices (8) from n8n-io/n8n-docs, Zie619/n8n-workflows
-- **Qdrant seed research: LangFlow** — 35 chunks covering flow (11), deployment (8), embedding (6), custom component (4), best practices (6) from langflow-ai/langflow, community tutorials
-- **AI workflow example EPICs** (`defaults/examples/ai-workflows/`) — 12 templates: langchain-rag-chatbot, langgraph-multi-agent, langgraph-react-agent, n8n-ai-automation, langflow-rag-pipeline, doc-qa-chatbot, email-assistant, pdf-invoice-processor, meeting-summarizer, content-generator, code-review-agent, data-extraction-pipeline
-- **Common project example EPICs** (`defaults/examples/common-projects/`) — 7 templates: fastapi-crud-service, nextjs-fullstack, react-dashboard, landing-page, saas-starter, ecommerce-store, api-with-auth
-- **Context7 + Qdrant verification** — live research returns relevant results for all platforms; Qdrant retrieval confirmed functional with correct metadata
+- **Qdrant seed research** — 147 Qdrant chunks stored across 3 platforms: LangChain/LangGraph (64 chunks from 14+ repos), N8N (48 chunks from 5+ repos), LangFlow (35 chunks from 5+ sources)
+- **AI workflow example EPICs** — 12 example EPICs in `defaults/examples/ai-workflows/` covering RAG chatbot, multi-agent systems, code review agent, data extraction pipeline, and more
+- **Common project example EPICs** — 7 example EPICs in `defaults/examples/common-projects/` covering FastAPI CRUD, Next.js fullstack, React dashboard, SaaS starter, e-commerce, and more
+- **Context7 live research verified** — all 4 platforms (LangChain, LangGraph, N8N, LangFlow) return relevant documentation via Context7 MCP
+- **Qdrant knowledge retrieval verified** — seed research patterns retrievable via qdrant-find with correct metadata
 
 ## [0.6.0] — 2026-02-23
 
 ### Added
 
-- **Workflow Intelligence skill** (`skills/workflow-intelligence.md`) — platform detection (LangChain/LangGraph, N8N, LangFlow, generic-workflow), domain-specific questioning (WF1-WF7) inserted transparently into the brainstorming flow, UI derivation from interaction model and output type, platform-specific knowledge and Docker Compose templates, three-tier knowledge enrichment (Qdrant → Context7 → static fallback)
-- **Docker/MCP preference rules** in `brainstorming.md` — cross-cutting recommendation logic for Docker Compose (triggered when project has 2+ services) and MCP servers (DB, GitHub, Filesystem, Context7, Playwright); PM may decline once and the topic is closed for the run
-- **Docker/MCP step injection** in `planner.md` (Section 7.4) — automatic "Docker Compose setup" step injected into the plan when `docker_recommended == true` in the brainstorming plan; MCP configuration is included in the same step, never as a separate step
-- **Sample file analysis** in `brainstorming.md` — automatic scan of `.aid-o/05-inputs/` during Step 1; supports PDF, CSV, JSON, and image files; silent when directory is missing or empty; results used by WF4 (workflow projects) and Step 3 approach proposals
-- **Example EPIC lookup** in `brainstorming.md` — weighted scoring search against `defaults/examples/` frontmatter during Step 3; integrates workflow context (platform hint, WF7 recommendation) when `workflow_detected == true`; PM offered: Adapt, Browse all, or Start fresh
-- **Input files support** — `/aid-init` creates `.aid-o/05-inputs/` directory and copies `defaults/templates/inputs-readme.md` as README; `/aid-help inputs` documents supported formats and usage
-
-### Changed
-
-- **`brainstorming.md`** extended with workflow detection integration, Docker/MCP preference rules, 05-inputs auto-scan protocol, and example EPIC lookup (804 → 1450 lines); version bumped to 0.6.0
-- **`planner.md`** extended with Docker/MCP step injection rules in new Section 7.4; version bumped to 0.6.0
-- **`aid-init.md`** creates `05-inputs/` directory and copies inputs README during fresh init; upgrade mode includes the new directory and template file
-- **`aid-help.md`** includes new `inputs` help topic; version display updated to 0.6.0
+**Phase 2 — Seed Research + Example EPICs:**
+- **Qdrant seed research** — 147 Qdrant chunks stored across 3 platforms: LangChain/LangGraph (64 chunks from 14+ repos), N8N (48 chunks from 5+ repos), LangFlow (35 chunks from 5+ sources)
+- **AI workflow example EPICs** — 12 example EPICs in `defaults/examples/ai-workflows/` covering RAG chatbot, multi-agent systems, code review agent, data extraction pipeline, and more
+- **Common project example EPICs** — 7 example EPICs in `defaults/examples/common-projects/` covering FastAPI CRUD, Next.js fullstack, React dashboard, SaaS starter, e-commerce, and more
+- **Context7 live research verified** — all 4 platforms (LangChain, LangGraph, N8N, LangFlow) return relevant documentation via Context7 MCP
+- **Qdrant knowledge retrieval verified** — seed research patterns retrievable via qdrant-find with correct metadata
 
 ## [0.5.0] — 2026-02-22
 
@@ -178,7 +213,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **`/aid-help` command description** — updated `/aid-plan-epic` entry to "Unified Plan→EPIC→Plan entry point"
 - **DONE state in `epic-orchestration.md`** — new step 9b triggers example extraction after Curator; completion summary includes archetype when pattern is stored
 - **`memory-mcp.md` document types** — expanded from 6 to 8 types (added Proposal, Example EPIC); feedback tracking hook in `memory_find()`
-- **`brainstorming.md` non-blocking guarantee** — knowledge calls updated from 2 to 3 per run (Step 1 search + Step 3 knowledge + Step 3 examples); 7 new graceful degradation scenarios
+- **`brainstorming.md` non-blocking guarantee** — knowledge calls updated from 2 to 3 per session (Step 1 search + Step 3 knowledge + Step 3 examples); 7 new graceful degradation scenarios
+
+## [0.4.2] — 2026-02-21
+
+### Changed
+- **`/plan-epic` step numbering** — renumbered all steps from fractional (0.5, 0.7, 2.5) to clean integers (1-9); internal cross-references updated
+- **`/aid-brainstorm` step numbering** — renumbered Step 8b→9 and Step 9→10; new Step 10 presents interactive A-D handoff options (add items, all-phases EPIC, specific-phase EPIC, manual)
+- **Cross-references** — updated plan-epic step references in run-epic.md (3 occurrences) and epic-orchestration.md (2 occurrences); updated aid-brainstorm.md and brainstorming.md internal refs
+
+### Added
+- **`/aid-init [path]` parameter** — documented optional path parameter in aid-init.md Usage section with examples for relative and absolute paths; updated aid-help.md entry
+- **Phase selection** — plan-epic.md Step 2 now handles all-phases vs specific-phase EPIC generation when invoked from brainstorming with phase context
+- **Re-opening protocol** — brainstorming.md documents how Option A (add items) works: load existing plan, display approved sections, return to Step 2, re-generate EPIC
+- **Phase Selection section** — brainstorming.md EPIC Subagent Prompt Template includes phase handling for scoped EPIC generation
 
 ## [0.4.1] — 2026-02-20
 
@@ -196,26 +244,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [0.4.0] — 2026-02-20
 
 ### Added
-- **Zero Detail Loss Pipeline (Variant B)** — EPIC references source plan via `plan_ref`; all pipeline stages (plan.json, run file, agent dispatch) read both EPIC and source plan; agents receive `## Source Plan — Implementation Detail` sections
+- **Zero Detail Loss Pipeline (Variant B)** — EPIC references source plan via `plan_ref`; all pipeline stages (plan.json, session, agent dispatch) read both EPIC and source plan; agents receive `## Source Plan — Implementation Detail` sections
 - **Wave-based execution model** — planner groups steps by DAG level into waves (max 4 per wave) for parallel execution; replaces flat parallel group detection
 - **Step decomposition** — layer-based splitting of monolithic steps (data → schema → API → test) to enable cross-domain parallelism; supports dev, docs, and infra decomposition types
 - **Critical path analysis** — opt-in for 7+ step EPICs; computes critical path ratio, applies 5 relaxation rules (R1–R5) to shorten it; PM can reject individual relaxations at PLAN_REVIEW
-- **Parallelism-first optimization** — 5-priority strategy (parallelism > wave density > run compactness > quality > efficiency); plan quality metrics in `optimization_metrics`; validation rules V-20–V-23
+- **Parallelism-first optimization** — 5-priority strategy (parallelism > wave density > session compactness > quality > efficiency); plan quality metrics in `optimization_metrics`; validation rules V-20–V-23
 - **`/plan-epic` accepts Plan files** — 3-tier format detection (frontmatter → header → section fingerprinting); auto-generates EPIC from Plan using EPIC Subagent Template
-- **`/aid-brainstorm` inline execution** — Step 8b offers to generate Plan JSON + Run file immediately after EPIC draft; Step 9 split into 9a (standard handoff) / 9b (full pipeline handoff)
-- **Wave-based run boundaries** — runs are contiguous sequences of waves; never split by domain or inside a wave
+- **`/aid-brainstorm` inline execution** — Step 8b offers to generate Plan JSON + Session immediately after EPIC draft; Step 9 split into 9a (standard handoff) / 9b (full pipeline handoff)
+- **Wave-based session boundaries** — sessions are contiguous sequences of waves; never split by domain or inside a wave
 - **Shorthand commands** — all 18 commands have `user_invocable: true` frontmatter enabling `/aid-setup` instead of `/aid-orchestrator:aid-setup`
 - **Setup followup** — after "All recommended", `/aid-setup` now offers additional options (CLAUDE.md, Slack, auto-detected MCPs)
-- **Selective `.aid-o/` gitignore** — plans, EPICs, and config are versioned; engine artifacts (runs, evidence) are ignored
+- **Selective `.aid-o/` gitignore** — plans, EPICs, and config are versioned; engine artifacts (sessions, evidence) are ignored
 - **Centralized Qdrant storage** — `~/.local/share/aid-orchestrator/qdrant-data` with `--scope user` for global MCP; migration check for old paths
 
 ### Changed
 - **EPIC template** — typed artifacts (`endpoint:`, `model:`, `component:`), `plan_ref` enforcement, Hints section, Scope with specific file paths
 - **EPIC Subagent Template** — frontmatter instructions, plan task ID preservation in steps, Variant B zero detail loss instruction
 - **Planner input validation** — REQUIRED/RECOMMENDED checks with typed artifact inference
-- **PLAN_REVIEW** — rich plan summary with wave execution plan, optimization metrics, run breakdown
+- **PLAN_REVIEW** — rich plan summary with wave execution plan, optimization metrics, session breakdown
 - **EXECUTING state** — agent dispatch enriched with source plan sections
-- **Plan generation flow** — 13-step procedure with decomposition (2.2), wave assembly (6), CPA (6.1), run boundaries (11)
+- **Plan generation flow** — 13-step procedure with decomposition (2.2), wave assembly (6), CPA (6.1), session boundaries (11)
 
 ## [0.3.0] — 2026-02-19
 
@@ -224,8 +272,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Per-agent metrics** — step duration, complexity self-report, bottleneck flags stored to Qdrant
 - **Cost optimization skill** — 4 axes: model selection, file scoping, dispatch prompt trimming, token tracking
 - **EPIC completion summary** — 5 next-step options presented to PM at DONE state
-- **Auto-archive** — multi-EPIC and multi-run counter awareness for run and EPIC files
-- **Multi-run flow** — planner optimization engine for EPICs with 7+ steps
+- **Auto-archive** — multi-EPIC and multi-session counter awareness for session and EPIC files
+- **Multi-session flow** — planner optimization engine for EPICs with 7+ steps
 - **Diff patches** — `diff.patch` generation for every file-modifying step, saved to evidence store
 - **Curator auto-invocation** — mandatory synchronous step in POST_PROCESSING
 - **Chat-first `/aid-setup`** — detailed option presentation and guided configuration
@@ -237,11 +285,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Backlog categorization** — by type (bug, enhancement, tech-debt, security, docs) and source agent
 - **`/aid-analytics`** — orchestration performance analysis command and skill
 - **Permission presets** — dual-write system keeping `.claude/settings.json` + `.aid-o` policies in sync
-- **Git branch integration** — one branch per EPIC run, auto-create and auto-merge
+- **Git branch integration** — one branch per EPIC session, auto-create and auto-merge
 - **Pre-Output Quality Check** — in all code-producing playbooks (ruff lint/format, debug artifact removal, import verification)
 
 ### Fixed
-- **DONE state** — now writes lessons to `lessons-learned.md`, updates run status to `completed`, writes commands to `command-history.md`, writes final `stage_log` entry with `result: success`
+- **DONE state** — now writes lessons to `lessons-learned.md`, updates session status to `completed`, writes commands to `command-history.md`, writes final `stage_log` entry with `result: success`
 - **Gate reconciliation** — `plan.json` gates now reconciled with `gates.yaml` definitions
 - **Qdrant isolation** — writes now include `project_name` metadata for cross-project isolation
 - **Slack MCP** — onboarding corrected to use `@anthropic/slack-mcp` package with proper scopes

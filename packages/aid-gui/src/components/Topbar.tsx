@@ -88,7 +88,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
     <header className="fixed top-0 right-0 left-0 h-14 bg-bg-base/80 backdrop-blur-md border-b border-white/5 z-30 flex items-center justify-between px-6 ml-16 md:ml-0 pl-[inherit]">
       <div className="flex items-center gap-4">
         {/* Project selector with connection status indicator */}
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative z-50" ref={dropdownRef}>
           <button
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/5 hover:bg-white/10 cursor-pointer transition-colors"
@@ -151,7 +151,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
         </div>
 
         {/* CC Usage Gauge */}
-        <div className="hidden lg:flex items-center gap-3 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
+        <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
           <Zap size={14} className="text-state-executing" />
           <div className="flex flex-col">
             <div className="flex items-center justify-between gap-4">
@@ -182,7 +182,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
 
         {/* Connection status text for small screens or when disconnected */}
         {(wsStatus === 'disconnected' || wsStatus === 'reconnecting') && (
-          <div className="hidden md:flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
             <span className={cn(
               "w-1.5 h-1.5 rounded-full",
               wsStatus === 'disconnected' ? "bg-red-400" : "bg-yellow-400"
@@ -216,11 +216,19 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
       </div>
 
       <div className="flex items-center gap-3">
-        <button className="p-2 rounded-xl hover:bg-white/5 text-white/40 hover:text-white transition-colors relative">
+        <button
+          title="Coming soon"
+          onClick={() => {}}
+          className="p-2 rounded-xl hover:bg-white/5 text-white/40 hover:text-white transition-colors relative"
+        >
           <Bell size={20} />
           <div className="absolute top-2 right-2 w-2 h-2 bg-state-pm-approval rounded-full border-2 border-bg-base" />
         </button>
-        <button className="p-2 rounded-xl hover:bg-white/5 text-white/40 hover:text-white transition-colors">
+        <button
+          title="Coming soon"
+          onClick={() => {}}
+          className="p-2 rounded-xl hover:bg-white/5 text-white/40 hover:text-white transition-colors"
+        >
           <Settings size={20} />
         </button>
       </div>

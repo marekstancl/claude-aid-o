@@ -24,7 +24,9 @@ export const HealthObservatory: React.FC = () => {
       const result = await client.getAuditHealth();
       if (cancelled) return;
       if (result.ok) {
-        setAuditReports([result.data]);
+        // API returns an array of reports; handle both array and single-report shapes
+        const reports = Array.isArray(result.data) ? result.data : [result.data];
+        setAuditReports(reports);
       } else {
         console.error('Failed to fetch audit data:', (result as ApiError).error.message);
       }
@@ -55,31 +57,31 @@ export const HealthObservatory: React.FC = () => {
     );
   }
 
-  const healthScore = latestAudit.scores.overall;
+  const healthScore = latestAudit.scores?.overall ?? 0;
 
   // Map real scores to the display categories
   const categories = [
     {
       name: 'Code Quality',
-      score: latestAudit.scores.codeQuality ?? 0,
+      score: latestAudit.scores?.codeQuality ?? 0,
       color: '#22c55e',
       icon: FileText,
     },
     {
       name: 'Security',
-      score: latestAudit.scores.security ?? 0,
+      score: latestAudit.scores?.security ?? 0,
       color: '#eab308',
       icon: Shield,
     },
     {
       name: 'Architecture',
-      score: latestAudit.scores.documentation ?? 0,
+      score: latestAudit.scores?.documentation ?? 0,
       color: '#00b4d8',
       icon: Database,
     },
     {
       name: 'Testing',
-      score: latestAudit.scores.process ?? 0,
+      score: latestAudit.scores?.process ?? 0,
       color: '#7c5cbf',
       icon: CheckCircle2,
     },
@@ -94,7 +96,7 @@ export const HealthObservatory: React.FC = () => {
   };
 
   // Build trend display
-  const trend = latestAudit.trend;
+  const trend = latestAudit.trend ?? null;
   const hasTrendData = trend && trend.scoreDelta !== null;
   const trendDelta = hasTrendData ? trend.scoreDelta! : 0;
   const trendSign = trendDelta >= 0 ? '+' : '';
@@ -221,14 +223,14 @@ export const HealthObservatory: React.FC = () => {
 
       <div className="space-y-4">
         <h3 className="text-lg font-bold tracking-tight mb-6">Critical Findings</h3>
-        {latestAudit.findings.length === 0 ? (
+        {(latestAudit.findings ?? []).length === 0 ? (
           <div className="text-center py-12 text-white/30">
             <CheckCircle2 size={32} className="mx-auto mb-3" />
             <p className="text-sm">No findings reported. Project health is clean.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {latestAudit.findings.map((finding, index) => (
+            {(latestAudit.findings ?? []).map((finding, index) => (
               <motion.div
                 key={`${finding.category}-${finding.severity}-${index}`}
                 whileHover={{ y: -4 }}

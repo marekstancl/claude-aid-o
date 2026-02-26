@@ -292,6 +292,28 @@ export const PipelineTheater: React.FC = () => {
   // Ref for the playback timer so we can cancel it
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Ref for the SVG container to guard against zero-width rendering
+  const svgContainerRef = useRef<HTMLDivElement | null>(null);
+  const [svgWidth, setSvgWidth] = useState(0);
+
+  // Track SVG container width to avoid invalid path rendering
+  useEffect(() => {
+    const el = svgContainerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setSvgWidth(entry.contentRect.width);
+      }
+    });
+
+    observer.observe(el);
+    // Initialize with current width
+    setSvgWidth(el.clientWidth);
+
+    return () => observer.disconnect();
+  }, []);
+
   const isLoading = wsStatus === 'connecting';
   const isDisconnected = wsStatus === 'disconnected';
   const isReconnecting = wsStatus === 'reconnecting';
@@ -536,44 +558,52 @@ export const PipelineTheater: React.FC = () => {
       </div>
 
       {/* River Flow Visualization */}
-      <div className="flex-1 flex items-center justify-center relative overflow-x-auto min-h-[400px]">
-        {/* Animated River SVG Background */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
-              <stop offset="50%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0.1" />
-              <stop offset="100%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
-            </linearGradient>
-            <filter id="glow">
-              <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-              <feMerge>
-                <feMergeNode in="coloredBlur"/>
-                <feMergeNode in="SourceGraphic"/>
-              </feMerge>
-            </filter>
-          </defs>
-          <motion.path
-            d="M 0,200 Q 200,180 400,200 T 800,200 T 1200,200"
-            fill="none"
-            stroke="url(#riverGrad)"
-            strokeWidth="40"
-            filter="url(#glow)"
-            animate={{ d: ["M 0,200 Q 200,180 400,200 T 800,200 T 1200,200", "M 0,200 Q 200,220 400,200 T 800,200 T 1200,200", "M 0,200 Q 200,180 400,200 T 800,200 T 1200,200"] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          />
-          {/* Particles */}
-          {[...Array(5)].map((_, i) => (
-            <motion.circle
-              key={i}
-              r="2"
-              fill={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'}
-              initial={{ cx: 0, cy: 200, opacity: 0 }}
-              animate={{ cx: 1200, cy: 200, opacity: [0, 1, 0] }}
-              transition={{ duration: 3, repeat: Infinity, delay: i * 0.6, ease: "linear" }}
+      <div ref={svgContainerRef} className="flex-1 flex items-center justify-center relative overflow-x-auto min-h-[400px]">
+        {/* Animated River SVG Background — only render when container has positive width and there's content to show */}
+        {svgWidth > 0 && (hasSteps || isReplaying) && (
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
+                <stop offset="50%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0.1" />
+                <stop offset="100%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+            <motion.path
+              d={`M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`}
+              fill="none"
+              stroke="url(#riverGrad)"
+              strokeWidth="40"
+              filter="url(#glow)"
+              animate={{
+                d: [
+                  `M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
+                  `M 0,200 Q ${svgWidth * 0.17},220 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
+                  `M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
+                ],
+              }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
             />
-          ))}
-        </svg>
+            {/* Particles */}
+            {[...Array(5)].map((_, i) => (
+              <motion.circle
+                key={i}
+                r="2"
+                fill={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'}
+                initial={{ cx: 0, cy: 200, opacity: 0 }}
+                animate={{ cx: svgWidth, cy: 200, opacity: [0, 1, 0] }}
+                transition={{ duration: 3, repeat: Infinity, delay: i * 0.6, ease: "linear" }}
+              />
+            ))}
+          </svg>
+        )}
 
         {/* Loading Skeleton State */}
         {isLoading && !hasSteps && (
@@ -602,8 +632,8 @@ export const PipelineTheater: React.FC = () => {
               <AlertTriangle size={24} className="text-white/20" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-white/40">No pipeline steps loaded</p>
-              <p className="text-xs text-white/20 mt-1">Start an EPIC run to see the execution flow</p>
+              <p className="text-sm font-medium text-white/40">No pipeline data</p>
+              <p className="text-xs text-white/20 mt-1">No pipeline data — start an EPIC run to see execution flow</p>
             </div>
           </div>
         )}
@@ -811,7 +841,7 @@ export const PipelineTheater: React.FC = () => {
             <>
               <div className="flex justify-between text-[10px] font-mono text-white/40 uppercase tracking-widest">
                 <span>
-                  Replay {hasReplayData ? `${replayIndex + 1} / ${replayEvents.length}` : ''}
+                  Replay {hasReplayData ? `${replayIndex + 1} / ${replayEvents.length}` : '0 / 0'}
                 </span>
                 <span>
                   {hasReplayData && replayEvents.length > 0
