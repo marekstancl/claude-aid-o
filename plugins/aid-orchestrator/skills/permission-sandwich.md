@@ -34,10 +34,27 @@ The pattern is: **backup --> elevate --> run --> restore** (the "sandwich").
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `settings.json` | `.claude/settings.json` | Claude Code permission file. Single source of truth for what Claude auto-allows without prompting. |
+| `settings.json` | `.claude/settings.json` | Claude Code global permission file. Controls what Claude auto-allows without prompting. |
+| `settings.local.json` | `.claude/settings.local.json` | Claude Code project-level permission file. CC merges both files — local can override global. |
 | `permissions-backup.json` | `.aid-o/03-config/permissions-backup.json` | Backup of original `settings.json` before elevation. Its presence signals an active or crashed auto-mode session. |
+| `permissions-local-backup.json` | `.aid-o/03-config/permissions-local-backup.json` | Backup of original `settings.local.json` before elevation. |
 | `permissions-auto.yaml` | `.aid-o/03-config/permissions-auto.yaml` (project) or `defaults/policies/permissions-auto.yaml` (plugin) | Auto-mode permission template. Project-specific overrides plugin defaults. |
 | `auto-mode-state.yaml` | `.aid-o/04-engine/auto-mode-state.yaml` | Tracks session state including applied permissions and learned permissions. |
+
+### Dual-File Architecture
+
+Claude Code reads permissions from TWO files and merges them:
+- `.claude/settings.json` — global (user-level)
+- `.claude/settings.local.json` — project-level (created by CC when PM clicks "Allow")
+
+Both files have `permissions.allow[]` and `permissions.deny[]`. CC merges both:
+allow = union(global.allow, local.allow), deny = union(global.deny, local.deny).
+**deny always wins over allow** — this is CC's hard enforcement.
+
+The Permission Sandwich must handle BOTH files to prevent:
+1. **Pattern mismatch** — local learned patterns (e.g., `"Bash(git push)"` without wildcard) don't match commands with different arguments
+2. **Deny interference** — local deny entries could block auto-mode operations
+3. **Phantom permissions** — local allow entries persisting from a previous session could conflict with the elevated set
 
 ---
 
@@ -62,15 +79,24 @@ BACKUP_PERMISSIONS:
           Fix it manually and try again."
        → Do NOT proceed. Do NOT attempt to fix the file.
 
-  2. Check for orphaned backup (crash recovery):
+  2. Read .claude/settings.local.json
+     - IF file does not exist:
+       → Note: no local settings to backup. Set local_exists = false.
+     - IF file exists but is not valid JSON:
+       → Log WARNING: "settings.local.json is not valid JSON. Will be neutralized."
+       → Set local_exists = true (still backup the broken file for restore).
+     - IF file exists and valid JSON:
+       → Set local_exists = true.
+
+  3. Check for orphaned backup (crash recovery):
      - IF .aid-o/03-config/permissions-backup.json already exists:
        → This means a previous auto-mode session did not complete cleanly.
        → Execute CRASH_RECOVERY protocol (see Section 5).
-       → After recovery resolves, continue to step 3.
+       → After recovery resolves, continue to step 4.
      - IF no backup exists:
-       → Proceed to step 3.
+       → Proceed to step 4.
 
-  3. Atomic write backup:
+  4. Atomic write backup (settings.json):
      a. Write the full content of settings.json to a temp file:
         .aid-o/03-config/permissions-backup.json.tmp
      b. Read temp file back and validate it is valid JSON.
@@ -81,10 +107,20 @@ BACKUP_PERMISSIONS:
      d. Read final backup file and verify content matches original.
         - IF mismatch: ABORT. Delete backup. Report error.
 
-  4. Log to stage_log:
+  5. Atomic write backup (settings.local.json) — only if local_exists:
+     a. Write the full content of settings.local.json to:
+        .aid-o/03-config/permissions-local-backup.json.tmp
+     b. Read temp file back and validate content preserved.
+     c. Rename to .aid-o/03-config/permissions-local-backup.json
+     d. IF any step fails: Log WARNING (non-blocking). Continue.
+        Local backup failure does NOT abort — settings.json backup is sufficient.
+
+  6. Log to stage_log:
      {"state": "FIRST_AID_INIT", "action": "permissions_backup",
       "backup_path": ".aid-o/03-config/permissions-backup.json",
-      "original_allow_count": {count of entries in permissions.allow[]}}
+      "local_backup_path": ".aid-o/03-config/permissions-local-backup.json" or null,
+      "original_allow_count": {count of entries in permissions.allow[]},
+      "local_backed_up": true/false}
 ```
 
 ### 1.2 Atomicity Guarantee
@@ -166,24 +202,38 @@ ELEVATE_SETTINGS:
   2. Build elevated settings:
      a. Start with the existing settings.json structure
      b. Replace permissions.allow[] with the validated effective_allow list
-     c. Preserve all other fields in settings.json (if any exist beyond permissions)
+     c. SET permissions.deny[] with the deny entries from permissions-auto.yaml
+        → This is the KEY CHANGE: deny[] is written to CC's settings.json
+        → CC deny ALWAYS overrides allow — hard enforcement by CC itself
+     d. Preserve all other fields in settings.json (enabledPlugins, etc.)
 
   3. Atomic write elevated settings.json:
      a. Write to .claude/settings.json.tmp
      b. Validate temp file is valid JSON
      c. Rename to .claude/settings.json
 
-  4. Record applied permissions in auto-mode-state.yaml:
+  4. Neutralize settings.local.json:
+     → Write {"permissions": {"allow": [], "deny": []}} to .claude/settings.local.json
+     → This prevents project-level learned permissions from interfering.
+     → The original is safe in permissions-local-backup.json.
+     → IF write fails: Log WARNING (non-blocking). The global settings.json
+       deny[] will still block dangerous commands.
+
+  5. Record applied permissions in auto-mode-state.yaml:
      → session.permissions.applied_permissions = effective_allow
+     → session.permissions.applied_deny = deny entries from permissions-auto.yaml
      → session.permissions.applied_permissions_count = len(effective_allow)
      → session.permissions.elevated_at = {now ISO 8601}
      → session.permissions.source = {source from 2.1}
+     → session.permissions.local_neutralized = true/false
 
-  5. Log to stage_log:
+  6. Log to stage_log:
      {"state": "FIRST_AID_INIT", "action": "permissions_elevated",
       "source": "{project|defaults|generated}",
       "entries_before": {count of original allow},
       "entries_after": {count of effective_allow},
+      "deny_entries": {count of deny patterns written to CC},
+      "local_neutralized": true/false,
       "hard_deny_removed": {count}}
 ```
 
@@ -193,19 +243,34 @@ ELEVATE_SETTINGS:
 
 These permissions are NEVER allowed in auto-mode, regardless of what appears in
 `permissions-auto.yaml`, regardless of PM grants, regardless of learned permissions.
-The hard-deny list is enforced at elevation time AND at permission learning time.
+
+**Enforcement is dual-layer:**
+1. **CC-level:** deny[] entries are written to `.claude/settings.json → permissions.deny[]`.
+   CC deny always overrides allow — hard enforcement by Claude Code itself.
+2. **Controller-level:** The Controller validates at elevation time and at permission
+   learning time. Any allow entry matching a hard-deny pattern is stripped.
 
 ### 3.1 Command Patterns (Always Blocked)
 
 ```
 HARD_DENY_COMMANDS:
+  # Destructive filesystem
   - "Bash(rm -rf /:*)"
   - "Bash(rm -rf /*:*)"
+  - "Bash(rm -r -f:*)"             # Flag reordering variant
+  - "Bash(rm --recursive --force:*)" # Long-form variant
+  - "Bash(find / -delete:*)"        # Recursive delete via find
+  - "Bash(mkfs:*)"                  # Format filesystem
+  - "Bash(dd if=/dev/zero:*)"       # Overwrite disk
+  - "Bash(dd if=/dev/random:*)"     # Overwrite disk
+  # Destructive git
   - "Bash(git push --force:*)"
   - "Bash(git push -f:*)"
   - "Bash(git reset --hard:*)"
+  # Privilege escalation
   - "Bash(sudo:*)"
   - "Bash(su:*)"
+  # Dangerous permissions
   - "Bash(chmod 777:*)"
   - "Bash(chown:*)"
 ```
@@ -239,9 +304,10 @@ is_hard_denied(permission_pattern):
 
 | Denied Pattern | Why |
 |----------------|-----|
-| `rm -rf /` | Catastrophic filesystem destruction |
-| `git push --force` | Irreversible remote history rewrite |
-| `git push -f` | Alias for force push |
+| `rm -rf /`, `rm -r -f`, `rm --recursive --force` | Catastrophic filesystem destruction (all flag variants) |
+| `find / -delete` | Recursive delete via find |
+| `mkfs`, `dd if=/dev/zero` | Filesystem format / disk overwrite |
+| `git push --force`, `git push -f` | Irreversible remote history rewrite |
 | `git reset --hard` | Discards uncommitted work silently |
 | `sudo` / `su` | Privilege escalation beyond project scope |
 | `chmod 777` | Opens files to all users (security hole) |
@@ -267,36 +333,46 @@ is_hard_denied(permission_pattern):
 
 ```
 RESTORE_PERMISSIONS:
-  1. Check backup exists:
+  1. Check global backup exists:
      a. Read .aid-o/03-config/permissions-backup.json
      b. IF file does not exist:
         → Log ERROR: "No permission backup found. Cannot restore."
         → WARN PM: "Permissions may be in elevated state.
            Review .claude/settings.json manually."
         → Continue (do NOT block other completion actions)
-        → RETURN
+        → SKIP to step 3 (still try to restore local)
      c. IF file exists but is not valid JSON:
         → Log ERROR: "Permission backup is corrupted: {parse error}"
         → WARN PM: "Permission backup is corrupted. Current .claude/settings.json
            may contain elevated auto-mode permissions.
            Review and fix .claude/settings.json manually."
         → Continue (do NOT block other completion actions)
-        → RETURN
+        → SKIP to step 3
 
-  2. Atomic write restore:
+  2. Atomic write restore (settings.json):
      a. Write backup content to .claude/settings.json.tmp
      b. Validate temp file is valid JSON
      c. Rename to .claude/settings.json
 
-  3. Delete backup file:
+  3. Restore settings.local.json:
+     a. Read .aid-o/03-config/permissions-local-backup.json
+     b. IF file does not exist:
+        → No local backup was created (original didn't exist). SKIP.
+     c. IF file exists:
+        → Write content to .claude/settings.local.json
+        → IF write fails: Log WARNING (non-blocking).
+
+  4. Delete backup files:
      a. Remove .aid-o/03-config/permissions-backup.json
-     b. IF remove fails:
+     b. Remove .aid-o/03-config/permissions-local-backup.json (if exists)
+     c. IF remove fails:
         → Log WARNING: "Could not delete backup file: {error}.
            Non-blocking. File can be deleted manually."
 
-  4. Log to stage_log:
+  5. Log to stage_log:
      {"state": "FIRST_AID_COMPLETE|AID_STOP|ABORT", "action": "permissions_restored",
-      "entries_restored": {count of original allow entries}}
+      "entries_restored": {count of original allow entries},
+      "local_restored": true/false}
 ```
 
 ### 4.2 Error Handling
@@ -385,6 +461,9 @@ On every startup, regardless of crash recovery:
 TEMP_FILE_CLEANUP:
   IF .aid-o/03-config/permissions-backup.json.tmp exists:
     → Delete it (leftover from incomplete backup write)
+    → Log: "Cleaned up orphaned temp file"
+  IF .aid-o/03-config/permissions-local-backup.json.tmp exists:
+    → Delete it (leftover from incomplete local backup write)
     → Log: "Cleaned up orphaned temp file"
   IF .claude/settings.json.tmp exists:
     → Delete it (leftover from incomplete elevation or restore)
@@ -482,7 +561,7 @@ for fully autonomous operation.
 ```yaml
 # FIRST AID Auto-Mode Permissions
 # Generated on first /aid-first-aid run. Customize per project.
-# Safety: hard-deny list is enforced regardless of these entries.
+# deny[] is written to CC's permissions.deny[] — CC hard enforcement.
 
 allow:
   # --- Claude Code Tools ---
@@ -496,57 +575,8 @@ allow:
   - "TodoWrite(*)"
   - "WebSearch(*)"
   - "WebFetch(*)"
-
-  # --- Git (local + remote for release) ---
-  - "Bash(git add:*)"
-  - "Bash(git commit:*)"
-  - "Bash(git branch:*)"
-  - "Bash(git checkout:*)"
-  - "Bash(git diff:*)"
-  - "Bash(git log:*)"
-  - "Bash(git status:*)"
-  - "Bash(git stash:*)"
-  - "Bash(git merge:*)"
-  - "Bash(git worktree:*)"
-  - "Bash(git tag:*)"             # Release sub-phase
-  - "Bash(git push:*)"            # Release sub-phase (non-force only; force is hard-denied)
-
-  # --- Testing & Linting ---
-  - "Bash(pytest:*)"
-  - "Bash(python -m pytest:*)"
-  - "Bash(ruff check:*)"
-  - "Bash(ruff format:*)"
-  - "Bash(npm test:*)"
-  - "Bash(npm run build:*)"
-  - "Bash(npx vitest:*)"
-  - "Bash(npx tsc:*)"
-  - "Bash(bandit:*)"              # Security scanning
-  - "Bash(npm audit:*)"           # Security scanning
-  - "Bash(pip-audit:*)"           # Security scanning
-  - "Bash(coverage:*)"            # Test coverage
-
-  # --- Package Management ---
-  - "Bash(npm install:*)"
-  - "Bash(npm ci:*)"
-  - "Bash(pip install:*)"
-  - "Bash(pip install -r:*)"
-
-  # --- Filesystem ---
-  - "Bash(ls:*)"
-  - "Bash(mkdir:*)"
-  - "Bash(cp:*)"
-  - "Bash(mv:*)"
-  - "Bash(cat:*)"
-  - "Bash(head:*)"
-  - "Bash(tail:*)"
-  - "Bash(find:*)"
-  - "Bash(grep:*)"
-  - "Bash(wc:*)"
-  - "Bash(diff:*)"
-
-  # --- GitHub CLI ---
-  - "Bash(gh:*)"                  # GitHub release creation
-
+  # --- All Bash (safety via deny[] below) ---
+  - "Bash(*)"
   # --- MCP Tools ---
   - "mcp__qdrant-memory__qdrant-store(*)"
   - "mcp__qdrant-memory__qdrant-find(*)"
@@ -557,9 +587,15 @@ allow:
   - "mcp__plugin_context7_context7__*(*)"
 
 deny:
-  # --- HARD DENY (cannot be overridden by learning) ---
+  # --- Written to CC permissions.deny[] — hard enforcement ---
   - "Bash(rm -rf /:*)"
   - "Bash(rm -rf /*:*)"
+  - "Bash(rm -r -f:*)"
+  - "Bash(rm --recursive --force:*)"
+  - "Bash(find / -delete:*)"
+  - "Bash(mkfs:*)"
+  - "Bash(dd if=/dev/zero:*)"
+  - "Bash(dd if=/dev/random:*)"
   - "Bash(git push --force:*)"
   - "Bash(git push -f:*)"
   - "Bash(git reset --hard:*)"
@@ -567,8 +603,7 @@ deny:
   - "Bash(su:*)"
   - "Bash(chmod 777:*)"
   - "Bash(chown:*)"
-
-  # --- Path deny (system directories) ---
+  # --- Path deny ---
   - path: "/etc/*"
   - path: "/usr/*"
   - path: "~/.ssh/*"
@@ -664,22 +699,26 @@ stateDiagram-v2
 | `defaults/policies/permissions-auto.yaml` | Plugin-level auto-mode defaults (fallback) |
 | `.aid-o/03-config/permissions-auto.yaml` | Project-level auto-mode permissions (overrides plugin defaults) |
 | `.aid-o/03-config/permissions-backup.json` | Backup of original settings.json |
+| `.aid-o/03-config/permissions-local-backup.json` | Backup of original settings.local.json |
 | `.aid-o/04-engine/auto-mode-state.yaml` | Session state including applied and learned permissions |
 
 ---
 
 ## 10. MUST Rules
 
-1. **ALWAYS backup before elevating.** No backup means no restore. If backup fails, ABORT.
+1. **ALWAYS backup BOTH files before elevating.** Backup `.claude/settings.json` (mandatory) and `.claude/settings.local.json` (if exists). No global backup means ABORT.
 2. **ALWAYS use atomic writes** (temp file then rename) for backup, elevation, and restore.
 3. **ALWAYS validate JSON** after writing and before renaming.
-4. **ALWAYS enforce the hard-deny list** at elevation time AND at permission learning time.
-5. **NEVER block the completion flow** on restore failure. Warn PM and continue.
-6. **NEVER modify plugin defaults** during permission learning. Only write to project-specific `permissions-auto.yaml`.
-7. **NEVER silently swallow a corrupted backup.** Always warn PM.
-8. **NEVER proceed with auto-mode if backup fails.** Abort is the only safe choice.
-9. **ALWAYS clean up temp files** on startup.
-10. **ALWAYS record applied permissions** in `auto-mode-state.yaml` so permission learning can compute diffs.
+4. **ALWAYS write deny[] to CC's permissions.deny[]** during elevation. CC deny overrides allow — this is the primary safety mechanism.
+5. **ALWAYS neutralize settings.local.json** during elevation. Write empty permissions to prevent local patterns from interfering.
+6. **ALWAYS restore BOTH files** on completion. Global + local.
+7. **ALWAYS enforce the hard-deny list** at elevation time AND at permission learning time.
+8. **NEVER block the completion flow** on restore failure. Warn PM and continue.
+9. **NEVER modify plugin defaults** during permission learning. Only write to project-specific `permissions-auto.yaml`.
+10. **NEVER silently swallow a corrupted backup.** Always warn PM.
+11. **NEVER proceed with auto-mode if global backup fails.** Abort is the only safe choice. (Local backup failure is non-blocking.)
+12. **ALWAYS clean up temp files** on startup (both global and local backup temps).
+13. **ALWAYS record applied permissions AND applied deny** in `auto-mode-state.yaml` so permission learning can compute diffs.
 
 ---
 
@@ -697,4 +736,4 @@ stateDiagram-v2
   not prevent the Controller from completing other DONE-state actions (auditing, archiving,
   queue transitions). The PM can always fix permissions manually.
 
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-26
