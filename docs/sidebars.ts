@@ -5,6 +5,23 @@ const sidebars: SidebarsConfig = {
     'intro',
     {
       type: 'category',
+      label: 'Architecture',
+      link: {
+        type: 'generated-index',
+        title: 'Architecture',
+        description: 'How AID Orchestrator is designed and how its components work together.',
+        slug: '/architecture',
+      },
+      items: [
+        'architecture/overview',
+        'architecture/orchestration-flow',
+        'architecture/quality-gates',
+        'architecture/memory-system',
+        'architecture/first-aid-mode',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Getting Started',
       link: {
         type: 'generated-index',
