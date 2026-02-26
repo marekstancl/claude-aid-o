@@ -108,14 +108,18 @@ allow:
 
 deny:
   # --- Destructive filesystem ---
-  - "Bash(rm -rf /:*)"
-  - "Bash(rm -rf /*:*)"
-  - "Bash(rm -r -f:*)"          # Flag reordering variant
-  - "Bash(rm --recursive --force:*)"  # Long-form variant
-  - "Bash(find / -delete:*)"    # Recursive delete via find
-  - "Bash(mkfs:*)"              # Format filesystem
-  - "Bash(dd if=/dev/zero:*)"   # Overwrite disk
-  - "Bash(dd if=/dev/random:*)" # Overwrite disk
+  # rm: all flag-order variants are listed explicitly so that reordering short
+  # or long flags cannot bypass the substring match used by the Controller.
+  - "Bash(rm -rf /:*)"                    # Standard recursive force on root
+  - "Bash(rm -rf /*:*)"                   # Glob root variant
+  - "Bash(rm -r -f:*)"                    # Separated flags variant
+  - "Bash(rm --recursive --force:*)"      # Long-form flags variant
+  - "Bash(rm -fr:*)"                      # Reversed short flags variant
+  - "Bash(find / -delete:*)"              # Recursive delete via find
+  - "Bash(mkfs:*)"                        # Format filesystem (any mkfs variant)
+  - "Bash(dd if=/dev/zero:*)"             # Overwrite disk with zeros
+  - "Bash(dd if=/dev/random:*)"           # Overwrite disk with random data
+  - "Bash(dd if=/dev/urandom:*)"          # Overwrite disk with urandom data
 
   # --- Destructive git ---
   - "Bash(git push --force:*)"

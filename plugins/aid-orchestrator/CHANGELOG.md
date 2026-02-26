@@ -16,11 +16,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Permission snapshot and restore** — `auto-mode-state.yaml` gains an `original_permissions_snapshot` field; RESTORE_PERMISSIONS now uses a two-tier fallback (backup file, then inline snapshot) across all three restore paths (COMPLETE, /aid-stop, crash recovery)
 - **Permission grant log** — `auto-mode-state.yaml` gains a `permissions.grant_log[]` audit trail field recording each dynamic permission grant with permission, source, actor, step_ref, timestamp, and reason; PHASE_CHECK permission learning dual-writes to both `learned_permissions[]` and `grant_log[]`
 - **Multi-agent parallel execution** — QUEUE_PROCESSING gains a complete parallel dispatch protocol: independence detection via EPIC scope analysis, Task agent dispatch in worktree isolation, sequential merge with shared escalation budget, failure isolation per agent, and a safety cap of 3 concurrent agents
+- **Untrusted content tags in dispatch templates** — all 10 user-supplied interpolation points in `aid-run-epic.md` dispatch prompts are wrapped in `<untrusted_content>` tags with source attributes; safety preamble added to both base and re-dispatch templates to prevent prompt injection
+- **Hardened deny-list entries** — `Bash(rm -fr:*)` (reversed short flags) and `Bash(dd if=/dev/urandom:*)` added to the hard-deny list in `permission-sandwich.md` and `permissions-auto.yaml` with inline rationale comments and updated Section 3.4 rationale table
+- **Planner parallelism rules** — 5 named Parallel Group Assignment Rules added to `planner.md`; backend and frontend agents can now parallelize after architect+domain steps when file scopes do not overlap; includes OVERLAP_CHECK algorithm and 3 worked examples
+- **Planner granularity heuristics** — HEURISTIC G1 (Layer Splitting) and G2 (Module Splitting) added to `planner.md` Section 2b with before/after examples and interaction rules; steps spanning 3+ layers or 3+ modules are automatically split
+- **Audit instruction quality checks** — Section G added to `auditor.md` with 5 checks for instruction file quality (intro presence, TODO/FIXME scan, frontmatter, cross-reference accuracy, files exceeding 800 lines); weighted at 10% and conditional on `plugins/aid-orchestrator/` existing
 
 ### Changed
 
 - **FIRST AID disclaimer** — reframed from alarmist "USE AT YOUR OWN RISK" to "Experimental Autonomous Mode"; added explicit `/aid-stop` emergency stop reference and `/aid-epic-queue` for queue review so users know how to intervene safely
 - **Setup MCP advanced permissions preset** — replaced the broad `mcp__*` wildcard with 7 explicit tool patterns (`mcp__shared-github__*(*)`, etc.) matching auto-mode format; updated setup wizard comparison matrix to reflect the change
+- **Epic orchestration skill split** — 2300-line `epic-orchestration.md` split into 5 modular files: slim orchestrator (138 lines), `epic-state-machine.md` (602), `dispatch-protocol.md` (498), `gate-evaluation.md` (509), and `first-aid-controller.md` (577); pure refactoring with no logic changes
+- **PLAN_REVIEW template enriched** — per-step detail table added to PLAN_REVIEW state with 7 columns (Files, Tech, AC count, Output, Deps) and 6 enforcement rules so plan review captures the full structure of each step
+- **DONE state release logic consolidated** — release behavior now exists in exactly one place (`auto-done-state.md`); `first-aid-controller.md` DONE state delegates to `auto-done-state.md` for all release steps, eliminating duplication
 
 ## [1.0.0] — 2026-02-26
 

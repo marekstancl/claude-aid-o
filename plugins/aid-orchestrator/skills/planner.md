@@ -9,9 +9,10 @@
 
 This skill defines how the Planner converts an EPIC specification into a validated Plan JSON.
 The Planner builds a dependency graph from EPIC steps, detects parallel groups via topological
-sort, applies default ordering rules when the EPIC is underspecified, and auto-generates
-`analysis_groups` for multi-perspective review of security-sensitive, high-complexity, or
-contract-changing steps.
+sort, applies default ordering rules when the EPIC is underspecified, applies granularity
+heuristics (G1: layer splitting, G2: module splitting) to decompose coarse-grained steps,
+and auto-generates `analysis_groups` for multi-perspective review of security-sensitive,
+high-complexity, or contract-changing steps.
 
 **Input:** EPIC file (role + objective + depends_on per step)
 **Output:** Plan JSON conforming to `plan.schema.json` (steps, dependencies, parallel_groups, analysis_groups, gates, budget)
@@ -327,6 +328,173 @@ Net effect: frontend starts 1-2 waves earlier.
 - Step is a leaf node with no downstream dependents → splitting doesn't enable new parallelism
 - EPIC type is documentation/infrastructure and step doesn't span multiple independent topics → topic-based split not applicable
 
+### Step Granularity Heuristics
+
+The following named heuristics help the Planner identify coarse-grained steps that
+should be split. They run as part of Step Decomposition (the algorithm above) and
+provide structured trigger conditions. Heuristics are **advisory** -- the Planner
+MAY override a heuristic if splitting would be counterproductive (e.g., breaking
+cohesion, exceeding 4 sub-steps, or adding overhead to a small EPIC). When overriding,
+the Planner MUST log the override reason in plan metadata.
+
+```
+HEURISTIC G1 — Layer Splitting
+  TRIGGER: Single step modifies files across 3+ architectural layers
+           (layers: data, schema, API, service, UI, test, config — see Layer Hierarchy above)
+  ACTION:  Split into one step per layer group, with dependencies following
+           the natural data flow:
+             data → schema → API/service → UI → test → config
+           Adjacent layers MAY be merged when tightly coupled (< 3 files each).
+  DEPENDENCIES:
+           First sub-step inherits the original step's depends_on.
+           Each subsequent sub-step depends on its predecessor.
+           Downstream steps that depended on the original now depend on the LAST sub-step.
+  OVERRIDE CONDITIONS (skip split if ANY is true):
+           - Total estimated files < 5 (step too small to benefit)
+           - Split would produce > 4 sub-steps (diminishing returns)
+           - All files are tightly coupled around a single feature slice
+             (one endpoint = model + schema + router + test)
+           - EPIC already has 15+ steps (overhead exceeds parallelism gain)
+  LOG:     "G1 applied to {step_id}: split into {N} sub-steps across layers {layer_list}"
+           OR "G1 override for {step_id}: {reason}"
+```
+
+**Example — G1 Layer Splitting (before/after):**
+
+```
+BEFORE (1 coarse step touching 4 layers):
+  step_3_backend: "Implement user registration with models, validation,
+                   service logic, and API endpoint"
+    depends_on: [step_2_domain]
+    allowed_paths: [src/models/, src/schemas/, src/services/, src/routers/]
+    → Touches: data, schema, service, API (4 layers) → G1 triggers
+
+AFTER (3 focused sub-steps, adjacent layers merged):
+  step_3a_backend: "Define user model and migration"
+    depends_on: [step_2_domain]
+    allowed_paths: [src/models/]
+    layers: data
+
+  step_3b_backend: "Implement registration service and validation schemas"
+    depends_on: [step_3a_backend]
+    allowed_paths: [src/services/, src/schemas/]
+    layers: service + schema (merged — tightly coupled validation logic)
+
+  step_3c_backend: "Create registration endpoint and route"
+    depends_on: [step_3b_backend]
+    allowed_paths: [src/routers/]
+    layers: API
+
+  Dependency chain: step_2_domain → step_3a → step_3b → step_3c
+  Net effect: downstream steps needing only data models can depend on step_3a
+  instead of waiting for the entire backend implementation.
+```
+
+```
+HEURISTIC G2 — Module Splitting
+  TRIGGER: Single step modifies files across 3+ independent modules
+           (modules = bounded functional areas with separate directories or namespaces,
+            e.g., auth/, billing/, notifications/, inventory/, reporting/)
+  DETECTION: Count distinct top-level module directories in step's allowed_paths
+             and objective references. Modules are "independent" when they:
+             a. Have separate directory trees (src/auth/ vs src/billing/)
+             b. Do not share mutable state or database tables
+             c. Communicate only through well-defined interfaces (events, APIs)
+  ACTION:  Split into one step per module. Assign dependencies:
+           - If modules are independent (no shared state) → sub-steps are PARALLEL
+             (all inherit original step's depends_on, none depends on siblings)
+           - If modules have ordering constraints (e.g., auth before billing
+             because billing needs user context) → chain sub-steps accordingly
+  DEPENDENCIES:
+           Independent modules: all sub-steps share the original depends_on.
+           Dependent modules: chain in natural order, first inherits original depends_on.
+           Downstream steps that depended on the original now depend on ALL sub-steps
+           (or on a wiring step if sub-steps produce shared outputs).
+  OVERRIDE CONDITIONS (skip split if ANY is true):
+           - Modules share significant mutable state (splitting would require
+             constant cross-step coordination)
+           - Step implements a cross-cutting concern that spans modules by nature
+             (e.g., "add logging to all modules", "apply rate limiting everywhere")
+           - Total estimated files < 5 (step too small to benefit)
+           - Fewer than 3 truly independent modules (2 modules rarely justifies split)
+  LOG:     "G2 applied to {step_id}: split into {N} module sub-steps {module_list},
+            parallelized: {yes|no}"
+           OR "G2 override for {step_id}: {reason}"
+```
+
+**Example — G2 Module Splitting (before/after):**
+
+```
+BEFORE (1 coarse step touching 3 independent modules):
+  step_4_backend: "Implement webhook handlers for auth, billing, and notifications"
+    depends_on: [step_3_backend]
+    allowed_paths: [src/auth/, src/billing/, src/notifications/, src/webhooks/]
+    → Touches: auth, billing, notifications (3 modules) → G2 triggers
+    → Modules are independent: separate directories, no shared state
+
+AFTER (3 parallel module sub-steps):
+  step_4a_backend: "Implement auth webhook handler"
+    depends_on: [step_3_backend]
+    allowed_paths: [src/auth/, src/webhooks/auth.py]
+
+  step_4b_backend: "Implement billing webhook handler"
+    depends_on: [step_3_backend]
+    allowed_paths: [src/billing/, src/webhooks/billing.py]
+
+  step_4c_backend: "Implement notifications webhook handler"
+    depends_on: [step_3_backend]
+    allowed_paths: [src/notifications/, src/webhooks/notifications.py]
+
+  All three sub-steps share the same depends_on → they form a PARALLEL GROUP.
+  Wave assembly places them in the same wave: [step_4a ‖ step_4b ‖ step_4c]
+  Net effect: 3x parallel execution instead of sequential within one agent.
+```
+
+**Example — G2 with dependent modules (sequential):**
+
+```
+BEFORE:
+  step_5_backend: "Implement order processing across auth, inventory, and billing"
+    depends_on: [step_4_backend]
+    allowed_paths: [src/auth/, src/inventory/, src/billing/]
+    → Touches 3 modules, BUT billing depends on inventory (stock check before charge)
+
+AFTER (3 sub-steps, partially chained):
+  step_5a_backend: "Implement auth context for order flow"
+    depends_on: [step_4_backend]
+    allowed_paths: [src/auth/]
+
+  step_5b_backend: "Implement inventory reservation"
+    depends_on: [step_4_backend]      ← parallel with step_5a (independent)
+    allowed_paths: [src/inventory/]
+
+  step_5c_backend: "Implement billing charge after inventory check"
+    depends_on: [step_5b_backend]     ← sequential after inventory (shared state)
+    allowed_paths: [src/billing/]
+
+  Wave assembly: [step_5a ‖ step_5b] → [step_5c]
+  Net effect: auth and inventory parallelize; billing waits for inventory only.
+```
+
+### Heuristic Interaction Rules
+
+```
+1. G1 and G2 are MUTUALLY EXCLUSIVE per step:
+   - If a step triggers BOTH G1 (3+ layers) and G2 (3+ modules), apply G2 FIRST.
+   - Then evaluate each G2 sub-step for G1 applicability (a module sub-step
+     may still span multiple layers within that module).
+   - Rationale: module boundaries are coarser and produce more parallelism
+     than layer boundaries within a single module.
+
+2. Heuristic evaluation runs ONCE per step during Step Decomposition (Section 2b,
+   step 2.2 in the master procedure). Sub-steps produced by G2 are re-evaluated
+   for G1 in the same pass. No recursive re-evaluation beyond one level.
+
+3. Total sub-steps from G1 + G2 combined MUST NOT exceed 6 for a single original
+   step. If combined splitting would exceed 6, prefer the heuristic that produces
+   more parallelism and skip the other.
+```
+
 ---
 
 ## 2c. Critical Path Analysis (opt-in, 7+ steps)
@@ -464,6 +632,171 @@ RULE 4: Role not in EPIC → skip (not all EPICs use all 9 roles).
         Docker step is only present when injected by Section 7.4 rules.
 RULE 5: Same-priority roles without explicit ordering → parallel group.
         Docker and domain run in parallel when both are present (both depend on architect).
+RULE 6: EPIC explicit backend→frontend (or frontend→backend) ordering is PRESERVED.
+        If the EPIC author wrote depends_on making one sequential after the other,
+        the Planner MUST NOT override this into a parallel group. Rule 1 applies.
+```
+
+### Parallel Group Assignment Rules
+
+After the dependency graph is resolved and levels are assigned (Section 2), the Planner
+applies these rules to determine which steps run in the same wave. These rules codify the
+parallelism strategy that the Wave Assembly algorithm (Section 2) uses during level grouping.
+
+```
+PARALLEL RULE 1: Foundation steps run first (wave 0 / sequential).
+  architect and domain steps MUST complete before implementation steps begin.
+  Architect is always wave 0. Domain is wave 1 (or wave 0 alongside architect
+  only if it has no dependency on architect — rare).
+
+PARALLEL RULE 2: After architect+domain complete, backend and frontend steps
+  CAN be parallelized into the same wave.
+  CONDITIONS (ALL must be true):
+    a. Both steps' dependencies are satisfied (architect and/or domain complete)
+    b. Their allowed_paths DO NOT overlap (no shared files)
+    c. The EPIC does not specify explicit ordering between them (Rule 1 / Rule 6)
+  IF conditions met → assign to same wave (parallel group).
+  IF allowed_paths overlap → assign sequentially; the step with more
+    dependencies on prior outputs goes first. Log:
+    "Backend/frontend sequential due to shared paths: {overlapping_paths}"
+  IF EPIC specifies explicit ordering → respect it (no override).
+
+PARALLEL RULE 3: Verification steps (qa, security, observability, e2e) run
+  after their implementation dependencies, and CAN be parallelized with each
+  other in the same wave.
+
+PARALLEL RULE 4: Within the same role, steps are sequential by default.
+  Two backend steps or two frontend steps run in sequence unless the EPIC
+  explicitly marks them as independent (no cross-dependency, non-overlapping
+  allowed_paths).
+
+PARALLEL RULE 5: docs steps run after implementation. release runs last.
+  These follow strict priority ordering and are never parallelized with
+  implementation steps.
+```
+
+#### File Scope Overlap Detection
+
+To evaluate PARALLEL RULE 2 condition (b), the Planner compares allowed_paths:
+
+```
+OVERLAP_CHECK(step_A, step_B):
+  paths_A = normalize(step_A.allowed_paths)   # expand globs, resolve dirs
+  paths_B = normalize(step_B.allowed_paths)
+  overlap = paths_A ∩ paths_B
+
+  IF overlap is empty → NO conflict → can parallelize
+  IF overlap contains only read-only/contract files (e.g., OpenAPI specs,
+     type definition files that both steps READ but neither MODIFIES):
+    → NO conflict → can parallelize
+    → Log: "Shared read-only paths ignored for parallelism: {overlap}"
+  IF overlap contains files that either step MODIFIES:
+    → CONFLICT → must be sequential or require wiring step (Section 2a)
+    → Log: "Parallel blocked by writable overlap: {overlap}"
+```
+
+### Example — Parallel Backend + Frontend
+
+```
+EPIC steps (no explicit backend→frontend ordering):
+  step_1_architect: depends_on: []
+  step_2_domain:    depends_on: [step_1_architect]
+  step_3_backend:   depends_on: [step_2_domain]
+    allowed_paths: ["src/api/", "src/services/", "src/models/"]
+  step_4_frontend:  depends_on: [step_1_architect]
+    allowed_paths: ["src/ui/", "src/components/", "src/pages/"]
+
+Level assignment (Section 2):
+  step_1_architect: level 0
+  step_2_domain:    level 1
+  step_3_backend:   level 2  (depends on domain at level 1)
+  step_4_frontend:  level 1  (depends on architect at level 0)
+
+Without PARALLEL RULE 2, frontend would run in wave 1 alongside domain,
+and backend would run alone in wave 2. This is valid but suboptimal
+when frontend COULD wait and run alongside backend.
+
+PARALLEL RULE 2 evaluation:
+  - step_3 deps satisfied after wave 1 (domain). step_4 deps satisfied after wave 0 (architect).
+  - Overlap check: src/api/ ∩ src/ui/ = empty → NO conflict.
+  - EPIC has no explicit ordering between step_3 and step_4.
+  - Frontend has no dependency on domain → it CAN start at wave 1.
+  - But grouping it with backend at wave 2 is ALSO valid (all deps satisfied).
+  → Planner decision: Level assignment governs. Frontend stays at its natural level.
+    Wave assembly produces:
+
+Wave assembly (natural levels):
+  wave 0: [step_1_architect]
+  wave 1: [step_2_domain, step_4_frontend]  ← parallel (both at level 1)
+  wave 2: [step_3_backend]
+
+NOTE: PARALLEL RULE 2 does NOT delay steps to create artificial groupings.
+It ensures that when backend and frontend ARE at the same level (same
+dependency depth), they get grouped into the same wave instead of being
+split sequentially. The level assignment from Section 2 determines natural
+placement; PARALLEL RULE 2 prevents the Planner from SPLITTING same-level
+backend+frontend into separate waves due to conservative heuristics.
+```
+
+### Example — Backend + Frontend at Same Level (Decomposed)
+
+```
+After step decomposition (Section 2b), backend is split:
+  step_3a_backend: "Database models + schemas"  depends_on: [step_2_domain]
+  step_3b_backend: "API routers + services"     depends_on: [step_3a_backend]
+  step_4_frontend:                              depends_on: [step_1_architect]
+
+Level assignment:
+  step_3a_backend: level 2
+  step_3b_backend: level 3
+  step_4_frontend: level 1
+
+But with dependency relaxation R1 (Section 2c), frontend depends on architect
+only. After domain+backend-data complete in wave 1-2, step_3b_backend and
+step_4_frontend can be in the same wave:
+
+Wave assembly (after decomposition + relaxation):
+  wave 0: [step_1_architect]
+  wave 1: [step_2_domain, step_4_frontend]
+  wave 2: [step_3a_backend]
+  wave 3: [step_3b_backend]
+
+OR with aggressive parallelism (frontend starts earlier):
+  wave 0: [step_1_architect]
+  wave 1: [step_2_domain, step_3a_backend]     ← domain ‖ backend-data
+  wave 2: [step_3b_backend, step_4_frontend]   ← backend-API ‖ frontend (PARALLEL RULE 2!)
+
+PARALLEL RULE 2 applies at wave 2: step_3b_backend and step_4_frontend:
+  - Both deps satisfied (architect for frontend, backend-data for backend-API).
+  - Overlap check: src/api/ ∩ src/ui/ = empty → NO conflict.
+  → Result: assigned to same wave.
+```
+
+### Example — Sequential Due to Shared Files
+
+```
+EPIC steps:
+  step_3_backend:   allowed_paths: ["src/api/", "src/shared/types.ts"]
+  step_4_frontend:  allowed_paths: ["src/ui/", "src/shared/types.ts"]
+
+PARALLEL RULE 2 evaluation:
+  - Overlap check: src/shared/types.ts in both → CONFLICT (writable).
+  → Result: sequential. Backend first (more deps on domain output), then frontend.
+  → Alternative: parallelize + auto-generate wiring step (Section 2a).
+    Planner chooses wiring step when both steps are large (5+ files each)
+    and the shared file set is small (< 3 files). Otherwise sequential.
+```
+
+### Example — Explicit EPIC Ordering Preserved
+
+```
+EPIC steps (PM explicitly ordered frontend after backend):
+  step_3_backend:   depends_on: [step_2_domain]
+  step_4_frontend:  depends_on: [step_3_backend]   ← explicit!
+
+PARALLEL RULE 2 does NOT apply — condition (c) fails.
+Rule 1 / Rule 6: EPIC explicit ordering preserved.
+→ Result: sequential. step_3 in wave 2, step_4 in wave 3.
 ```
 
 ### Example — Partial Specification
@@ -724,13 +1057,16 @@ This is the master procedure the Planner follows when `/aid-plan-epic` is invoke
       If workflow project → add workflow-intelligence.md template constraints
  2.2. STEP DECOMPOSITION (Section 2b):
       a. Detect EPIC type from artifacts (dev / docs / infra / mixed)
-      b. For each step, evaluate split criteria:
-         - Dev steps: layer-based (data → schema → API → service → UI → test → config)
-         - Docs steps: topic-based (API docs, user guide, architecture)
-         - Infra steps: scope-based (CI, deployment, monitoring)
-      c. IF criteria met → decompose into sub-steps
+      b. For each step, evaluate granularity heuristics:
+         - G2 (Module Splitting): 3+ independent modules → split by module, parallelize
+         - G1 (Layer Splitting): 3+ architectural layers → split by layer group
+         - G1 and G2 are mutually exclusive per step; G2 takes priority
+         - Sub-steps from G2 are re-evaluated for G1 (one level only)
+         - Non-dev steps: topic-based (docs) or scope-based (infra) splitting
+      c. IF heuristic triggers → decompose into sub-steps
       d. Update step list with sub-steps (original step replaced)
-      e. Log: decompositions_applied, sub_steps_created, epic_type
+      e. Log: decompositions_applied, sub_steps_created, epic_type,
+              heuristics_applied (G1/G2 per step), heuristics_overridden
  3. RESOLVE ordering:
       explicit deps → use as-is | partial → fill from defaults (Section 3) | none → full defaults
  4. BUILD dependency graph → adjacency list → dependencies[] with reasons (Section 1)
@@ -1259,10 +1595,17 @@ Wall-clock time ≈ critical_path_length × avg_step_duration
 
 #### Development-Specific Rules
 
-6. **Backend + Frontend ALWAYS parallelize** when contracts exist from architect
-   This is the #1 parallelism opportunity in most dev EPICs
-7. **Decompose large steps** (5+ files, 2+ layers) into sub-steps
-   WHEN this enables at least 1 new parallel pairing (Section 2b)
+6. **Backend + Frontend parallelize after architect+domain** when file scopes don't overlap.
+   This is the #1 parallelism opportunity in most dev EPICs.
+   Apply Parallel Group Assignment Rules (Section 3) — specifically PARALLEL RULE 2:
+   - Contracts exist from architect → both can start
+   - allowed_paths don't overlap → same wave (parallel)
+   - allowed_paths overlap → sequential, or parallel + wiring step (Section 2a)
+   - EPIC explicit backend→frontend ordering → sequential (Rule 1 / Rule 6 in Section 3)
+7. **Decompose large steps** using granularity heuristics (Section 2b):
+   - G1 (Layer Splitting): 3+ layers, 5+ files → split by layer group
+   - G2 (Module Splitting): 3+ independent modules → split by module, parallelize
+   WHEN this enables at least 1 new parallel pairing
 8. **Domain can parallelize with backend's first sub-step** IF:
    - Domain produces models/entities
    - Backend first sub-step is data layer (schemas, DB setup)
@@ -1419,6 +1762,8 @@ And sets EPIC frontmatter: `runs_total: 2`
 13. **NEVER add Docker steps when docker_recommended is false or absent** — Docker is opt-in only (Section 7.4)
 14. **NEVER create a separate MCP step** — MCP configuration is always part of the Docker step (Section 7.4)
 15. **ALWAYS respect "PM decided: no Docker"** constraint — overrides docker_recommended flag
+16. **ALWAYS check file scope overlap** before parallelizing backend + frontend — use OVERLAP_CHECK (Section 3) and respect EPIC explicit ordering (Application Rule 6)
+17. **ALWAYS evaluate granularity heuristics G1 and G2** during Step Decomposition (Section 2b) — log applied heuristics or override reasons in plan metadata
 
 ---
 
@@ -1433,4 +1778,4 @@ And sets EPIC frontmatter: `runs_total: 2`
 
 ---
 
-**Last Updated:** 2026-02-23
+**Last Updated:** 2026-02-26

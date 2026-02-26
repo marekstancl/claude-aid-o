@@ -7,9 +7,15 @@
 
 ## TL;DR
 
-This skill defines the **DONE state behavior for FIRST AID auto-mode** -- the autonomous
-EPIC execution mode where the Orchestrator processes an approved queue without PM
-involvement. In auto-mode, the DONE state makes release decisions automatically (no PM
+This skill is the **single source of truth for all release logic** in the DONE state
+(version bump, CHANGELOG detection, version file updates, git tagging, GitHub release
+creation). Both manual mode and FIRST AID auto-mode release behavior is defined here.
+The DONE state in `skills/first-aid-controller.md` delegates to Section 2 of this file
+for release execution.
+
+This skill also defines the **DONE state behavior for FIRST AID auto-mode** -- the
+autonomous EPIC execution mode where the Orchestrator processes an approved queue without
+PM involvement. In auto-mode, the DONE state makes release decisions automatically (no PM
 ask), transitions to the next queued EPIC, and aggregates summary data across all EPICs
 for a final session report when the queue completes.
 
@@ -42,12 +48,13 @@ decisions.
 
 ### 1.1 Standard DONE Actions (Preserved)
 
-These actions from `skills/epic-orchestration.md` Section 12 execute identically in
+These actions from `skills/first-aid-controller.md` DONE state execute identically in
 auto-mode. They are listed here for completeness but are NOT redefined:
 
 | Action | Description | Auto-Mode Change |
 |--------|-------------|-----------------|
 | Run file status update | Update frontmatter to `status: completed` | None |
+| **Release sub-phase** | Version bump, tag, release | **Defined here (Section 2)** |
 | Branch merge | Merge `epic/{epic_id}` to base branch | None |
 | EPIC file status update | Mark EPIC as "Completed" | None |
 | Run archive | Move run file to `runs/archive/` | None |
@@ -71,12 +78,46 @@ These DONE actions are modified or replaced in auto-mode:
 
 ---
 
-## 2. Release Decision Protocol (Auto-Mode)
+## 2. Release Sub-Phase — Single Source of Truth
 
-In auto-mode, the Controller makes release decisions without PM interaction. The decision
-is deterministic based on the EPIC's position in the queue.
+This section is the **single source of truth** for all release logic in the DONE state.
+Both manual mode and auto-mode release behavior is defined here. The DONE state in
+`skills/first-aid-controller.md` delegates to this section for release execution.
 
-### 2.1 EPIC Position Detection
+The release sub-phase detects version mismatches between CHANGELOG headers and version
+files, and bumps versions when required. It runs inside the DONE state as a sub-phase —
+no new top-level FSM state is introduced.
+
+### 2.1 Configuration
+
+Read `release-policy.yaml` from `.aid-o/03-config/policies/`.
+If the file does not exist, skip the entire release sub-phase gracefully (log
+`"release-policy.yaml not found — release sub-phase skipped"`).
+
+### 2.2 Step 1 — Detect Version Mismatch
+
+1. Read the CHANGELOG file specified in `versioning.changelog` (default: `CHANGELOG.md`)
+2. Extract the latest version header using `semver.changelog_header_pattern`
+   (default regex: `## \[(\d+\.\d+\.\d+)\]`)
+3. If NO version header found in CHANGELOG: skip, log, proceed to branch merge
+4. Read each file listed in `version_files[]` and compare versions
+5. If CHANGELOG version > file version for ANY file: bump needed
+
+### 2.3 Step 2 — No Bump Needed
+
+If no mismatch detected: skip, log, proceed to branch merge.
+
+### 2.4 Step 3 — Multi-Phase Plan Status Check
+
+If bump is needed, determine EPIC position:
+
+1. Read EPIC frontmatter fields: `plan_ref`, `plan_epics_total`, `runs_completed`
+2. Determine EPIC position:
+   - **Standalone EPIC:** bump is **mandatory**
+   - **Last EPIC of multi-phase plan:** bump is **mandatory**
+   - **Intermediate EPIC:** proceed to Step 4 (deferral decision)
+
+In auto-mode, position is detected from the queue instead of EPIC frontmatter:
 
 ```
 DETECT_EPIC_POSITION(epic_id):
@@ -96,7 +137,73 @@ DETECT_EPIC_POSITION(epic_id):
   5. RETURN position
 ```
 
-### 2.2 Release Decision Matrix
+### 2.5 Step 4 — Intermediate EPIC Deferral Decision
+
+| Mode | Behavior |
+|------|----------|
+| **Manual mode** | Ask PM — "Release now or defer to final EPIC?" |
+| **FIRST AID (auto) mode** | Auto-defer per `first_aid.intermediate_action` (default: `defer`) |
+
+If deferred: log, proceed to branch merge.
+
+Auto-mode logging for deferred bumps:
+```json
+{"state": "DONE", "action": "release", "bump_type": "deferred",
+ "changelog_version": "{version}", "previous_version": "{previous}",
+ "deferred": true, "reason": "Auto-mode: intermediate EPIC — version bump deferred",
+ "epic_position": "intermediate", "remaining_queued": "{N}",
+ "mode": "first_aid"}
+```
+
+Record in summary aggregation:
+`deferred_bump: {epic_id: "{epic_id}", version: "{changelog_version}"}`
+
+### 2.6 Step 5 — Update Version Files
+
+For each entry in `version_files[]`:
+1. **json_field method:** Parse JSON, navigate to field path, set version, write back
+2. **regex method:** Apply pattern regex, replace with version, write back
+3. Track all updated files for the stage_log entry
+
+### 2.7 Step 6 — Commit Version Bump
+
+`release: v{version} — {summary}`
+
+### 2.8 Step 7 — Git Tag (Conditional)
+
+Check `release.git_tag` in release-policy.yaml:
+
+| Mode | Behavior |
+|------|----------|
+| **Manual mode** | If `confirm_before_tag: true`, ask PM |
+| **FIRST AID (auto) mode** | If `auto_tag: true`, create automatically (no PM confirmation). Otherwise skip. |
+
+Create tag: `git tag v{version}`
+
+### 2.9 Step 8 — GitHub Release (Conditional)
+
+Check `release.github_release` in release-policy.yaml:
+
+| Mode | Behavior |
+|------|----------|
+| **Manual mode** | If `confirm_before_tag: true`, ask PM |
+| **FIRST AID (auto) mode** | If `auto_release: true`, create automatically (no PM confirmation). Otherwise skip. |
+
+Create: `gh release create v{version} --title "v{version}" --notes "{changelog_section}"`
+- If `draft_release: true`: add `--draft` flag
+- If `gh` CLI unavailable or fails: log warning, do NOT block
+
+### 2.10 Step 9 — Stage Log and Summary
+
+Log and present release summary to PM.
+
+Auto-mode recording in summary aggregation:
+```
+version_bump: {epic_id: "{epic_id}", version: "{version}",
+               bump_type: "{major|minor|patch}", tag_created: true|false}
+```
+
+### 2.11 Release Decision Matrix (Auto-Mode)
 
 | EPIC Position | Release Action | Version Bump | Git Tag | GitHub Release | PM Asked? |
 |--------------|----------------|-------------|---------|----------------|-----------|
@@ -104,58 +211,20 @@ DETECT_EPIC_POSITION(epic_id):
 | **Intermediate** (more EPICs queued) | Auto-DEFER | No | No | No | No |
 | **Last** (no more EPICs queued) | Mandatory bump | Yes | Per `release-policy.yaml` `auto_tag` | Per `release-policy.yaml` `auto_release` | No |
 
-### 2.3 Release Decision Algorithm
+### 2.12 Error Handling
 
-```
-AUTO_RELEASE_DECISION(epic_id):
+**All modes:**
+- Failures are non-blocking — log and proceed to branch merge.
 
-  1. Execute standard Release Sub-Phase Step 1 (detect version mismatch):
-     → Read CHANGELOG, compare to version_files[]
-     → IF no mismatch: skip release (same as manual mode)
-     → IF no CHANGELOG version header: skip release (same as manual mode)
+**Auto-mode specific:**
+- IF version detection fails (malformed CHANGELOG, unparseable files):
+  Trigger escalation E15 per auto-escalation.md.
+  Escalation pauses auto-mode, PM provides version info.
+  After PM response, resume release sub-phase.
+- IF git tag or gh release fails:
+  Log warning, continue (non-blocking). Do NOT escalate.
 
-  2. IF mismatch detected (bump needed):
-     a. position = DETECT_EPIC_POSITION(epic_id)
-
-     b. IF position == "intermediate":
-        → Auto-defer. No bump, no tag, no release.
-        → Log to stage_log:
-          {"state": "DONE", "action": "release", "bump_type": "deferred",
-           "changelog_version": "{version}", "previous_version": "{previous}",
-           "deferred": true, "reason": "Auto-mode: intermediate EPIC — version bump deferred",
-           "epic_position": "intermediate", "remaining_queued": {N},
-           "mode": "first_aid"}
-        → Record in summary aggregation:
-          deferred_bump: {epic_id: "{epic_id}", version: "{changelog_version}"}
-        → Proceed to branch merge (action 1c in epic-orchestration.md)
-
-     c. IF position == "standalone" OR position == "last":
-        → Mandatory bump. Execute Release Sub-Phase Steps 5-9 from
-          epic-orchestration.md without PM confirmation.
-        → Step 5: Update all version_files[] to CHANGELOG version
-        → Step 6: Commit version bump
-        → Step 7: IF release-policy.yaml -> release.auto_tag == true:
-          Create git tag automatically (no PM confirmation)
-          ELSE: Skip tag
-        → Step 8: IF release-policy.yaml -> release.auto_release == true:
-          Create GitHub Release automatically (no PM confirmation)
-          ELSE: Skip release
-        → Step 9: Log release result to stage_log
-        → Record in summary aggregation:
-          version_bump: {epic_id: "{epic_id}", version: "{version}",
-                         bump_type: "{major|minor|patch}", tag_created: true|false}
-
-  3. Error handling (auto-mode specific):
-     → IF version detection fails (malformed CHANGELOG, unparseable files):
-       → Trigger escalation E15 per auto-escalation.md
-       → Escalation pauses auto-mode, PM provides version info
-       → After PM response, resume release sub-phase
-     → IF git tag or gh release fails:
-       → Log warning, continue (non-blocking, same as manual mode)
-       → Do NOT escalate — tag/release failures are non-blocking
-```
-
-### 2.4 Deferred Bump Accumulation
+### 2.13 Deferred Bump Accumulation (Auto-Mode)
 
 When intermediate EPICs defer their version bump, the deferred state is tracked in
 `auto-mode-state.yaml` so the last EPIC knows a bump is pending:
@@ -731,12 +800,13 @@ DONE_STATE_WITH_AUTO_MODE():
 
   1-1a. Run file status update (unchanged)
 
-  1b. RELEASE SUB-PHASE:
+  1b. RELEASE SUB-PHASE (Section 2 of this file — single source of truth):
       IF mode == "first_aid":
-        → Use AUTO_RELEASE_DECISION (Section 2.3) instead of PM interaction
-        → Step 4 from epic-orchestration.md is replaced entirely
+        → Use deterministic release decision (Section 2.11) — no PM interaction
+        → Intermediate EPICs: auto-defer (Section 2.5)
+        → Last/standalone EPICs: mandatory bump (Sections 2.6-2.10)
       ELSE:
-        → Standard release sub-phase (PM asked for intermediates)
+        → Standard release sub-phase — PM asked for intermediates (Section 2.5)
 
   1c. Branch merge (unchanged)
   1d-1f. EPIC status, archive, active-work (unchanged)
@@ -839,7 +909,8 @@ If the Controller crashes mid-session, the next startup detects the state:
 
 | Caller | When | Notes |
 |--------|------|-------|
-| `skills/epic-orchestration.md` (DONE state) | After PM_APPROVAL in auto-mode | Release decision + queue transition |
+| `skills/first-aid-controller.md` (DONE state) | Release sub-phase (action 1b) | Release logic for both manual and auto-mode |
+| `skills/first-aid-controller.md` (DONE state) | After PM_APPROVAL in auto-mode | Queue transition + summary aggregation |
 | `commands/aid-run-epic.md` | Auto-mode EPIC execution | Session lifecycle management |
 
 ### 9.2 Calls To
@@ -850,7 +921,7 @@ If the Controller crashes mid-session, the next startup detects the state:
 | `skills/auto-escalation.md` | Guardrail check at EPIC boundary | E12 trigger if budget exceeded |
 | `skills/permission-sandwich.md` | Session complete | Restore permissions |
 | `skills/slack-mcp.md` | Session complete notification | Type G status update |
-| `skills/epic-orchestration.md` | Release sub-phase | Version bump execution |
+| `release-policy.yaml` | Release sub-phase (Section 2) | Version file registry, tag/release config |
 
 ### 9.3 Consumed By
 
@@ -879,4 +950,4 @@ If the Controller crashes mid-session, the next startup detects the state:
 
 ---
 
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-26

@@ -254,15 +254,20 @@ These permissions are NEVER allowed in auto-mode, regardless of what appears in
 
 ```
 HARD_DENY_COMMANDS:
-  # Destructive filesystem
-  - "Bash(rm -rf /:*)"
-  - "Bash(rm -rf /*:*)"
-  - "Bash(rm -r -f:*)"             # Flag reordering variant
-  - "Bash(rm --recursive --force:*)" # Long-form variant
-  - "Bash(find / -delete:*)"        # Recursive delete via find
-  - "Bash(mkfs:*)"                  # Format filesystem
-  - "Bash(dd if=/dev/zero:*)"       # Overwrite disk
-  - "Bash(dd if=/dev/random:*)"     # Overwrite disk
+  # Destructive filesystem — rm variants (flag-order-independent)
+  # Matching all commonly used flag orderings prevents bypass via flag reordering.
+  - "Bash(rm -rf /:*)"               # Standard recursive force on root
+  - "Bash(rm -rf /*:*)"              # Glob root variant
+  - "Bash(rm -r -f:*)"               # Separated flags variant
+  - "Bash(rm --recursive --force:*)" # Long-form flags variant
+  - "Bash(rm -fr:*)"                 # Reversed short flags variant
+  # Destructive filesystem — find delete
+  - "Bash(find / -delete:*)"         # Recursive delete via find
+  # Destructive filesystem — disk/filesystem operations
+  - "Bash(mkfs:*)"                   # Format filesystem (any mkfs variant)
+  - "Bash(dd if=/dev/zero:*)"        # Overwrite disk with zeros
+  - "Bash(dd if=/dev/random:*)"      # Overwrite disk with random data
+  - "Bash(dd if=/dev/urandom:*)"     # Overwrite disk with urandom data
   # Destructive git
   - "Bash(git push --force:*)"
   - "Bash(git push -f:*)"
@@ -304,17 +309,19 @@ is_hard_denied(permission_pattern):
 
 | Denied Pattern | Why |
 |----------------|-----|
-| `rm -rf /`, `rm -r -f`, `rm --recursive --force` | Catastrophic filesystem destruction (all flag variants) |
-| `find / -delete` | Recursive delete via find |
-| `mkfs`, `dd if=/dev/zero` | Filesystem format / disk overwrite |
+| `rm -rf /`, `rm -rf /*` | Catastrophic filesystem destruction from root |
+| `rm -r -f`, `rm --recursive --force`, `rm -fr` | Same destruction via flag reordering — all variants are explicitly denied so reordering flags cannot bypass the check |
+| `find / -delete` | Recursive delete of the entire filesystem via find |
+| `mkfs` | Formats a filesystem, irreversibly destroying all data on the target device |
+| `dd if=/dev/zero`, `dd if=/dev/random`, `dd if=/dev/urandom` | Overwrites a disk device with zeros or random data — all three device variants are denied because argument reordering (`of=... if=...`) is not caught by substring match |
 | `git push --force`, `git push -f` | Irreversible remote history rewrite |
-| `git reset --hard` | Discards uncommitted work silently |
+| `git reset --hard` | Discards all uncommitted work without confirmation |
 | `sudo` / `su` | Privilege escalation beyond project scope |
-| `chmod 777` | Opens files to all users (security hole) |
-| `chown` | Changes file ownership (requires root typically) |
-| `/etc/*`, `/usr/*` | System configuration, never project scope |
-| `~/.ssh/*`, `~/.aws/*` | Credentials and keys |
-| `~/.gnupg/*` | GPG keys |
+| `chmod 777` | Makes files world-writable — security exposure |
+| `chown` | Changes file ownership, typically requires root |
+| `/etc/*`, `/usr/*` | System configuration directories, never within project scope |
+| `~/.ssh/*`, `~/.aws/*` | SSH keys and AWS credentials |
+| `~/.gnupg/*` | GPG private keys |
 | `~/.config/claude/*` | Claude's own configuration (self-modification risk) |
 
 ---
@@ -588,14 +595,17 @@ allow:
 
 deny:
   # --- Written to CC permissions.deny[] — hard enforcement ---
+  # rm: all flag-order variants (flag reordering must not bypass the check)
   - "Bash(rm -rf /:*)"
   - "Bash(rm -rf /*:*)"
   - "Bash(rm -r -f:*)"
   - "Bash(rm --recursive --force:*)"
+  - "Bash(rm -fr:*)"
   - "Bash(find / -delete:*)"
   - "Bash(mkfs:*)"
   - "Bash(dd if=/dev/zero:*)"
   - "Bash(dd if=/dev/random:*)"
+  - "Bash(dd if=/dev/urandom:*)"
   - "Bash(git push --force:*)"
   - "Bash(git push -f:*)"
   - "Bash(git reset --hard:*)"
