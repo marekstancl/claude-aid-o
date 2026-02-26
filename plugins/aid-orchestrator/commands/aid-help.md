@@ -14,7 +14,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help [topic]
 ```
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `analytics`, `inputs`, `examples`, `faq`
+**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`, `evidence`, `config`, `slack`, `queue`, `memory`, `analytics`, `inputs`, `examples`, `knowledge`, `faq`
 
 **Examples:**
 ```
@@ -33,6 +33,7 @@ AID's self-knowledge command. Explains everything about how AID works, what comm
 /aid-help analytics          # performance analysis of orchestration metrics
 /aid-help inputs            # input files for brainstorming
 /aid-help examples          # 3 step-by-step workflows: brainstorm → plan → EPIC → run
+/aid-help knowledge         # knowledge system, example EPICs, research flow
 /aid-help faq               # frequently asked questions
 ```
 
@@ -95,7 +96,7 @@ Where things live:
   .aid-o/04-engine/     AI internals (runs, evidence, memory)
   .aid-o/05-inputs/     Sample data files for brainstorming
 
-Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | analytics | inputs | examples | faq
+Topics: /aid-help commands | workflow | epic | agents | planning | gates | evidence | config | slack | queue | memory | analytics | inputs | examples | knowledge | faq
 {If .aid-o/ not found:}
 
   ⚠ No .aid-o/ workspace found. Run /aid-setup to get started.
@@ -1192,6 +1193,141 @@ See also:
 
 ---
 
+#### Topic: knowledge
+
+```
+Knowledge System — Example EPICs, Research, and Indexing
+====================================
+
+AID includes a knowledge acquisition system that researches framework
+documentation, stores quality-gated chunks in Qdrant, and feeds them
+into brainstorming and agent dispatch automatically.
+
+Skill: skills/knowledge-acquisition.md
+Command: /aid-research
+Config: .aid-o/03-config/policies/memory-config.yaml
+Index: .aid-o/04-engine/memory/knowledge-base.yaml
+
+EXAMPLE EPICs:
+  AID ships example EPICs in defaults/examples/ organized by category.
+  Use these as templates when writing your own EPICs.
+
+  ai-workflows/ (12 examples — AI and LLM-based projects):
+    code-review-agent.md        Automated code review agent with multi-agent analysis and security scanning (LangGraph)
+    content-generator.md        AI content generation pipeline with multi-step drafting and refinement (LangGraph)
+    data-extraction-pipeline.md Structured data extraction from unstructured sources with validation (LangChain)
+    doc-qa-chatbot.md           Document Q&A chatbot with multi-format ingestion and vector retrieval (LangChain)
+    email-assistant.md          AI email assistant with classification, drafting, and human-in-the-loop approval (LangGraph)
+    langchain-rag-chatbot.md    RAG chatbot with document ingestion, LCEL retrieval chain, and streaming UI (LangChain)
+    langflow-rag-pipeline.md    Visual RAG pipeline with drag-and-drop document ingestion and retrieval (LangFlow)
+    langgraph-multi-agent.md    Multi-agent supervisor system with specialized workers and tool handoffs (LangGraph)
+    langgraph-react-agent.md    ReAct agent with tool calling, streaming, and checkpointed memory (LangGraph)
+    meeting-summarizer.md       Meeting transcript summarizer with action item extraction (LangChain)
+    n8n-ai-automation.md        AI-powered workflow automation with webhook triggers and LLM classification (N8N)
+    pdf-invoice-processor.md    PDF invoice extraction pipeline with structured output parsing (LangChain)
+
+  common-projects/ (7 examples — traditional web and API projects):
+    api-with-auth.md            REST API with JWT authentication, RBAC, and rate limiting (FastAPI)
+    ecommerce-store.md          E-commerce store with product catalog, cart, and Stripe payments (Next.js)
+    fastapi-crud-service.md     Production-ready FastAPI REST API with async CRUD and Alembic migrations
+    landing-page.md             Marketing landing page with CMS integration, forms, and SEO (Next.js)
+    nextjs-fullstack.md         Next.js 15 full-stack app with App Router, Server Actions, and Prisma ORM
+    react-dashboard.md          React admin dashboard with data visualization, TanStack Query, and Recharts
+    saas-starter.md             SaaS starter template with multi-tenancy, Stripe billing, and admin dashboard
+
+  Root-level examples (3 — quick-start templates):
+    fastapi-crud-service.md     REST API with CRUD operations and async SQLAlchemy
+    langchain-rag-chatbot.md    RAG chatbot with document ingestion and retrieval chain
+    react-dashboard.md          Analytics dashboard with charts, data tables, and REST API integration
+
+KNOWLEDGE SEARCH FLOW:
+
+  AID uses a multi-source pipeline with graceful fallback:
+
+    1. Context7 MCP (primary)
+       Curated, up-to-date documentation for 1000+ libraries.
+       resolve-library-id → query-docs → parse into chunks
+       Confidence: high
+
+    2. WebSearch + WebFetch (fallback)
+       Used when library is not in Context7 or Context7 is unavailable.
+       Searches official docs, GitHub READMEs (Tier 1-2 sources only).
+       Confidence: high (official docs) or medium (GitHub READMEs)
+
+    3. Qdrant storage (persistence)
+       Quality-gated chunks stored in aid-memory collection (type: documentation).
+       Shared globally across projects — no re-fetch for known frameworks.
+
+    4. Agent injection (consumption)
+       Before each agent dispatch in EXECUTING state, the Controller
+       searches Qdrant for relevant documentation and injects results
+       as "## MEMORY CONTEXT" in the agent prompt.
+
+  Failure handling: all research is non-blocking. Context7 down → WebSearch.
+  WebSearch fails → proceed without knowledge. Qdrant down → in-run only.
+  No research failure ever blocks a workflow.
+
+WHEN RESEARCH HAPPENS:
+
+  Automatic triggers:
+    - /aid-setup: researches detected frameworks (quick depth)
+    - /aid-brainstorm Step 1: researches frameworks mentioned in the topic
+    - /aid-run-epic EXECUTING state: agent dispatch checks for relevant knowledge
+
+  Manual triggers:
+    - /aid-research <framework> [topic]   Quick research (5-15 chunks)
+    - /aid-research --deep <framework>    Extended API reference (20-50 chunks)
+    - /aid-research <url>                 Index documentation from a specific URL
+
+WHAT GETS INDEXED PER PROJECT:
+
+  Per-project reference index:
+    .aid-o/04-engine/memory/knowledge-base.yaml
+    Tracks which frameworks are relevant to THIS project, their source,
+    version, indexing date, TTL (90 days), and chunk count in Qdrant.
+
+  What's indexed: framework docs, API references, architectural patterns,
+    code snippets, best practices, gotchas/caveats.
+
+  How Qdrant stores it:
+    Collection: aid-memory
+    Document type: documentation
+    Tags: framework, version, section, source, confidence, depth
+    Scope: project_name="global" (shared across all projects)
+    TTL: 90 days from indexing (valid_until field)
+
+  Quality gates (4 mandatory, in order):
+    1. Minimum informational value (reject marketing fluff)
+    2. Deduplication (prevent storing existing content)
+    3. Metadata completeness (required fields check)
+    4. Size limits (50-2000 tokens per chunk)
+
+HOW TO USE:
+
+  /aid-research FastAPI WebSockets       Research a specific topic (quick)
+  /aid-research --deep LangGraph         Extended API reference (deep)
+  /aid-research https://docs.celery.dev/ Index documentation from a URL
+  /aid-brainstorm                        Automatically uses indexed knowledge
+  /aid-run-epic                          Agents receive knowledge context automatically
+
+  Knowledge is used automatically during EPIC execution — no manual
+  intervention needed. Use /aid-research only for on-demand indexing.
+
+WITHOUT QDRANT:
+
+  The knowledge system works without Qdrant — research results are used
+  in the current run but not persisted for future runs. File-based memory
+  (active-work.md, lessons-learned.md) is always the primary source.
+  Qdrant adds semantic search and cross-project sharing on top.
+
+See also:
+  /aid-help memory      — Qdrant vector memory setup and document types
+  /aid-help config      — memory-config.yaml settings
+  /aid-help examples    — end-to-end workflow walkthroughs
+```
+
+---
+
 #### Topic: faq
 
 ```
@@ -1241,6 +1377,7 @@ project, AID will execute them.
 
 - `skills/epic-orchestration.md` — state machine, evidence, dispatch
 - `skills/memory-mcp.md` — vector memory protocol, document types, fallback
+- `skills/knowledge-acquisition.md` — research pipeline, quality gates, consumption protocol
 - `.claude-plugin/plugin.json` — registered commands, agents, skills
 - Plan P-20260216-b3a1, section D-008 (/aid-help)
 
@@ -1250,3 +1387,5 @@ project, AID will execute them.
 - Content is generated dynamically (reads plugin.json for command list, checks .aid-o/ for status)
 - If a topic is not recognized, show the full overview with available topics listed
 - Keep output concise but complete — this is the user's primary reference
+
+**Last Updated:** 2026-02-26
