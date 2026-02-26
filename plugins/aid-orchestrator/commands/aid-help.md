@@ -191,6 +191,30 @@ ORCHESTRATION COMMANDS:
     Auto-pickup: after EPIC DONE, next queued EPIC starts automatically.
     Skill: skills/epic-queue.md
 
+AUTONOMOUS MODE COMMANDS:
+
+  /aid-first-aid [--resume | --dry-run]
+    Launch FIRST AID (Fully Integrated Autonomous Development) mode.
+    Processes the entire EPIC queue autonomously with elevated permissions,
+    agent-driven decision-making, and escalation-only PM interaction.
+    Usage: /aid-first-aid                  (process all queued EPICs)
+           /aid-first-aid --resume         (resume after crash or /aid-stop)
+           /aid-first-aid --dry-run        (validate queue and permissions without executing)
+    PM approves the queue before start. Once running, the Orchestrator handles
+    plan → execute → gate → merge → next for each EPIC. PM is contacted only
+    on escalation (16 defined triggers). Permissions are restored on completion.
+    WARNING: Grants elevated permissions — review queue and permissions-auto.yaml first.
+    Skill: skills/first-aid-mode.md
+
+  /aid-stop
+    Emergency stop — immediately disengage FIRST AID auto-mode.
+    Usage: /aid-stop
+    No arguments, no confirmation. Halts autonomous execution, restores
+    original permissions, saves progress for later resume via --resume,
+    and returns control to the PM. Designed to be fast and non-blocking —
+    every step is resilient to partial failures.
+    Skill: skills/permission-sandwich.md (Section 4: Restore Procedure)
+
 ANALYTICS COMMANDS:
 
   /aid-analytics [scope]
