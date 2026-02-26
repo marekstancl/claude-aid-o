@@ -14,7 +14,7 @@ ai-orchestrator/
     .claude-plugin/plugin.json  # Plugin manifest
     agents/                     # 18 specialized agents
     commands/                   # 13 slash commands
-    skills/                     # 20 skills (orchestration, brainstorming, gates, etc.)
+    skills/                     # 21 skills (orchestration, brainstorming, gates, etc.)
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, run-*.md
