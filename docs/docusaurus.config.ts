@@ -8,10 +8,10 @@ const config: Config = {
   favicon: 'img/favicon.svg',
 
   // GitHub Pages deployment settings
-  url: 'https://your-org.github.io',
-  baseUrl: '/ai-orchestrator/',
-  organizationName: 'your-org',
-  projectName: 'ai-orchestrator',
+  url: 'https://marekstancl.github.io',
+  baseUrl: '/claude-aid-o/',
+  organizationName: 'marekstancl',
+  projectName: 'claude-aid-o',
   trailingSlash: false,
 
   onBrokenLinks: 'warn',
@@ -35,7 +35,7 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           routeBasePath: '/',
           editUrl:
-            'https://github.com/your-org/ai-orchestrator/tree/main/docs/',
+            'https://github.com/marekstancl/claude-aid-o/tree/main/docs/',
         },
         blog: false,
         theme: {
@@ -64,7 +64,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/your-org/ai-orchestrator',
+          href: 'https://github.com/marekstancl/claude-aid-o',
           label: 'GitHub',
           position: 'right',
         },
@@ -87,7 +87,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/your-org/ai-orchestrator',
+              href: 'https://github.com/marekstancl/claude-aid-o',
             },
           ],
         },

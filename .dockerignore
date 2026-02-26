@@ -1,0 +1,12 @@
+node_modules
+.git
+.aid-o/04-engine/evidence
+docs/build
+docs/node_modules
+docs/.docusaurus
+packages/aid-gui/node_modules
+packages/aid-gui/dist
+packages/aid-server/node_modules
+packages/aid-server/dist
+*.log
+.env

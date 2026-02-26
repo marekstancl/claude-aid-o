@@ -1,0 +1,36 @@
+# AID Orchestrator — Docker Compose
+#
+# Usage:
+#   docker compose up --build        # Build and start
+#   docker compose up -d             # Start in background
+#   docker compose down              # Stop
+#
+# GUI:  http://localhost:3001
+# API:  http://localhost:3001/api/projects
+# WS:   ws://localhost:3001/ws
+
+services:
+  aid-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aid-orchestrator
+    ports:
+      - "${AID_PORT:-3001}:3001"
+    volumes:
+      # Mount the project directory so the server can read .aid-o/
+      - .:/project:ro
+      # Mount .aid-o/ read-write for ideas, decisions, schedule writes
+      - ./.aid-o:/project/.aid-o
+    environment:
+      - AID_PORT=3001
+      - AID_HOST=0.0.0.0
+      - AID_PROJECT_ROOT=/project
+      - AID_CORS_ORIGINS=*
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
