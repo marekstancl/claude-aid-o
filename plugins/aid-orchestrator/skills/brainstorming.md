@@ -158,17 +158,29 @@ IF mem_config.knowledge.enabled:
   TIMEOUT: 5 seconds. If slow, skip silently.
 
   IF results (non-empty):
+    # --- PM-facing knowledge summary (concise, max 5 lines) ---
+    doc_names = []
+    FOR EACH result IN results (max 5):
+      name = result.metadata.project_name OR result.metadata.framework OR result.metadata.type
+      source = "Qdrant"   # Step 1 uses knowledge_find() which queries Qdrant
+      doc_names.append('- "{name}" ({source})')
+
     Display to PM:
-      "Found relevant knowledge from past runs:"
-      FOR EACH result IN results:
-        - "[{result.metadata.type}] {result summary}"
-          "Source: {result.metadata.project_name OR result.metadata.framework} ({result.metadata.indexed_at})"
+      "Knowledge context loaded:"
+      "  Found {len(results)} relevant doc(s):"
+      FOR EACH entry IN doc_names:
+        "  {entry}"
+    # --- end PM-facing summary ---
 
     Use results as context for questioning:
       - Skip questions whose answers are already known from past decisions
       - Ask more targeted questions informed by known patterns
       - Reference relevant documentation when framing options
       - Do NOT skip the questioning phase entirely -- past knowledge informs, not replaces
+
+  IF results (empty) AND mem_config.knowledge.enabled:
+    Display to PM:
+      "No knowledge indexed yet. Use /aid-research to add project knowledge."
 
 IF mem_config missing OR knowledge.enabled == false OR knowledge unavailable:
   -> Skip silently. Proceed to questioning as before. No error, no message.
@@ -509,7 +521,7 @@ RULE 8: File analysis from PM-provided paths follows the same non-blocking guara
 | `knowledge.enabled: false` | Skip all knowledge calls. Brainstorm normally. |
 | Qdrant MCP unavailable | `knowledge_find()` returns empty. Brainstorm normally. |
 | `knowledge_find()` times out (>5s) | Discard result. Brainstorm normally. |
-| `knowledge_find()` returns empty | No knowledge displayed. Brainstorm normally. |
+| `knowledge_find()` returns empty | Display "No knowledge indexed yet" to PM (Step 1). Brainstorm normally. |
 | Partial results (Step 1 works, Step 3 times out) | Use Step 1 results, skip Step 3 enrichment. |
 | `defaults/examples/` directory missing | Skip static example lookup silently. Qdrant lookup still runs (if enabled). |
 | `defaults/examples/` directory empty | Skip static example lookup silently. Qdrant lookup still runs (if enabled). |
@@ -997,6 +1009,21 @@ RULE 7: If all approaches have similar tradeoffs, say so and explain what
 RULE 8: When workflow_detected == true, apply "Workflow-Aware Approaches"
         rules (W1-W5) from the Workflow Detection Integration section.
         Both recommended and alternative platform variants are required.
+RULE 9 (Hard Gate): Before presenting approaches to PM, validate count >= 2.
+        If fewer than 2 approaches generated, DO NOT proceed to presentation.
+        Generate additional approaches until minimum 2 are available.
+        This is a blocking validation — the approach presentation step cannot
+        complete without at least 2 genuinely different approaches.
+        Self-check: COUNT(approaches) >= 2 → proceed. Otherwise → loop back
+        and generate more approaches. No exceptions.
+RULE 10 (Anti-Shortcut): NEVER skip approach exploration, even for topics
+        that appear to have an obvious or clear-best-choice solution. Every
+        topic gets 2-3 approaches with full trade-off analysis. "Obvious"
+        solutions still have alternatives worth exploring — infrastructure
+        choices, library options, architectural patterns, build-vs-buy.
+        Skipping approach exploration is NEVER acceptable. If the topic seems
+        trivial, the alternatives may be lighter-weight or simpler variants,
+        but they must still be presented with pros, cons, effort, and risk.
 ```
 
 ### Design Validation Protocol
@@ -1026,6 +1053,19 @@ RULE 6: Generate proper IDs per `skills/epic-orchestration.md` ID Generation sec
         Plan: P{NNN} (from counter.yaml). EPIC from plan: E-{NNN}-{phase}_{total}.
         Ad-hoc EPIC: E-{NNN} (from counter.yaml epic counter).
 RULE 7: Cross-reference: EPIC draft references the plan in its Context section.
+RULE 8: COMPLETENESS GATE (Step 8) — Before finalizing the plan document, perform
+        this verification:
+        1. Enumerate all PM decisions and answers from Steps 3-6 as a checklist:
+           - Step 3 (Questions): PM's answers to every clarification question
+           - Step 4 (Approaches): PM's chosen approach and any modifications
+           - Step 5 (Design): PM's answers to implementation detail questions
+           - Step 6 (Sections): PM's section-by-section approvals and modification requests
+        2. For each item in the checklist, verify it is reflected in the plan document.
+        3. If any PM answer is missing or underrepresented, incorporate it before proceeding.
+        4. Only after ALL items are verified present may the plan be finalized.
+        This is a HARD GATE — the plan document MUST NOT be written to disk until every
+        PM answer from Steps 3-6 is accounted for. This prevents the common failure mode
+        where brainstorming discussions are rich but the plan summary loses specifics.
 ```
 
 ---
@@ -1491,6 +1531,7 @@ Reference: skills/workflow-intelligence.md for full protocol details
 15. **ALWAYS present initial analysis before first question** — the AI must demonstrate understanding of the topic before asking anything (see Initial Analysis Phase section)
 16. **ALWAYS present 2-3 options with recommendation at every directional decision point** — questions involving direction, approach, or trade-off choices must use structured options with labeled alternatives and a recommended choice with reasoning
 17. **ALWAYS explain why alternatives are less suitable** — for each recommendation, state not just why the chosen option is good but specifically why the other options are less appropriate for this context
+18. **ALWAYS run the Completeness Gate before finalizing the plan document** — enumerate all PM answers from Steps 3-6, verify each appears in the plan, and incorporate any missing items before writing to disk (see Document Generation Protocol RULE 8)
 
 ---
 
@@ -1510,4 +1551,4 @@ Reference: skills/workflow-intelligence.md for full protocol details
 
 ---
 
-**Last Updated:** 2026-02-24
+**Last Updated:** 2026-02-26
