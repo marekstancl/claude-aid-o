@@ -1802,13 +1802,450 @@ find_relevant_examples(topic, project_profile):
 ```
 
 **Adaptation protocol:**
+
 ```
-adapt_example(example, project_profile):
-  1. Replace path placeholders with project-specific paths from project-profile
-  2. Update framework versions from project-profile.tech_stack
-  3. Add project-specific constraints
-  4. Ask PM about step count adjustment
-  5. Write adapted EPIC to .aid-o/02-epics/ after PM approval
+adapt_example(example_path, project_profile):
+  # INPUT:
+  #   example_path    — path to example EPIC file (from defaults/examples/ or Qdrant text)
+  #   project_profile — parsed project-profile.yaml object (or path to it)
+  #
+  # OUTPUT:
+  #   { adapted: true, epic_path: "<path to written EPIC>" }
+  #   OR { adapted: false, reason: "<why adaptation did not complete>" }
+
+  # LOAD INPUTS
+  example_content = read_file(example_path)
+  example_frontmatter = parse_yaml_frontmatter(example_content)
+  example_body = strip_frontmatter(example_content)
+
+  IF project_profile is a path:
+    project_profile = read_yaml(project_profile)
+
+  # Build a working copy that each step mutates
+  adapted = example_body
+
+  # ──────────────────────────────────────────────
+  # STEP 1 — PATH PLACEHOLDERS
+  # ──────────────────────────────────────────────
+  # Scan the example for path placeholders ({project_root}/, {source_dir}/,
+  # {backend_dir}/, {frontend_dir}/, {resource}, etc.) and replace them with
+  # the target project's actual paths from project_profile.directories.
+  #
+  # Mapping rules:
+  #   {project_root}  -> project_profile.directories.root  (default ".")
+  #   {backend_dir}   -> project_profile.directories.backend  OR PM input
+  #   {frontend_dir}  -> project_profile.directories.frontend OR PM input
+  #   {source_dir}    -> project_profile.directories.source   OR project_profile.directories.root
+  #   {resource}      -> Ask PM: "What is the resource/module name for this EPIC?"
+  #                      (e.g. "tasks", "invoices", "products")
+  #   {docs_dir}      -> project_profile.directories.docs OR "docs"
+  #
+  # For any placeholder NOT resolvable from project_profile:
+  #   Ask PM: "The example uses {placeholder_name}. What path should this map to
+  #            in your project?"
+  #
+  # Apply replacements:
+  placeholders_found = regex_find_all(adapted, r"\{[a-z_]+\}")
+  placeholder_map = {}
+
+  known_mappings = {
+    "{project_root}": project_profile.directories.root OR ".",
+    "{backend_dir}":  project_profile.directories.backend OR null,
+    "{frontend_dir}": project_profile.directories.frontend OR null,
+    "{source_dir}":   project_profile.directories.source OR project_profile.directories.root OR ".",
+    "{docs_dir}":     project_profile.directories.docs OR "docs"
+  }
+
+  FOR EACH placeholder IN deduplicate(placeholders_found):
+    IF placeholder IN known_mappings AND known_mappings[placeholder] is not null:
+      placeholder_map[placeholder] = known_mappings[placeholder]
+    ELSE:
+      # Ask PM for unmapped placeholders (e.g. {resource}, {backend_dir} when missing)
+      pm_answer = ask_pm(
+        "The example EPIC uses the placeholder `{placeholder}`.
+         What path or value should this map to in your project?"
+      )
+      IF pm_answer is empty OR PM declines:
+        RETURN { adapted: false, reason: "PM did not provide mapping for {placeholder}" }
+      placeholder_map[placeholder] = pm_answer
+
+  FOR EACH placeholder, replacement IN placeholder_map:
+    adapted = replace_all(adapted, placeholder, replacement)
+
+  # ──────────────────────────────────────────────
+  # STEP 2 — FRAMEWORK VERSIONS
+  # ──────────────────────────────────────────────
+  # Example EPICs use version ranges (e.g. "FastAPI 0.100+", "React 18+",
+  # "SQLAlchemy 2.0+"). Replace these with the target project's actual
+  # versions from project_profile.tech_stack.
+  #
+  # Read target versions:
+  target_frameworks = project_profile.tech_stack.frameworks OR []
+  # Note: project_profile may have exact versions ("FastAPI==0.115.6") or
+  # just names ("FastAPI"). If exact versions exist, use them.
+  #
+  # Scan adapted text for version range patterns:
+  #   Pattern: "<FrameworkName> <major>.<minor>+" (e.g. "FastAPI 0.100+")
+  #   Pattern: "<FrameworkName> <major>+"          (e.g. "React 18+")
+  #
+  # For each match:
+  #   IF framework is in target_frameworks with a pinned version:
+  #     Replace range with pinned version (e.g. "FastAPI 0.100+" -> "FastAPI 0.115.6")
+  #   ELIF framework is in target_frameworks without version:
+  #     Keep the range as-is (still valid as a minimum constraint)
+  #   ELIF framework is NOT in target_frameworks:
+  #     Flag for PM: "The example uses {framework}. Your project does not list it
+  #                   in tech_stack. Keep this reference, replace with an equivalent,
+  #                   or remove?"
+  #     Apply PM's decision (keep / replace name+version / remove section)
+
+  example_frameworks = example_frontmatter.frameworks OR []
+  FOR EACH fw IN example_frameworks:
+    match_in_target = find_case_insensitive(target_frameworks, fw)
+    IF match_in_target is null:
+      pm_decision = ask_pm(
+        "The example uses `{fw}`. Your project's tech stack does not include it.
+         Options: (K)eep as-is, (R)eplace with a different framework, (S)kip/remove references?"
+      )
+      IF pm_decision == "replace":
+        replacement_fw = ask_pm("Which framework should replace `{fw}`?")
+        adapted = replace_all_case_insensitive(adapted, fw, replacement_fw)
+      ELIF pm_decision == "skip":
+        # Mark for removal — Step 6 will handle removing related steps
+        log("Framework {fw} marked for removal from adapted EPIC")
+
+  # ──────────────────────────────────────────────
+  # STEP 3 — DOCKER SECTIONS
+  # ──────────────────────────────────────────────
+  # Determine whether the target project uses Docker by checking:
+  #   - project_profile.ci_cd contains "docker"
+  #   - project_profile.directories has a "docker" or "containers" key
+  #   - Dockerfile or docker-compose.yml exists in project root
+  #   - PM explicitly stated Docker usage during /aid-setup
+  #
+  target_uses_docker = (
+    "docker" IN lower(project_profile.ci_cd OR "")
+    OR project_profile.directories.docker is not null
+    OR file_exists(project_profile.directories.root + "/Dockerfile")
+    OR file_exists(project_profile.directories.root + "/docker-compose.yml")
+    OR file_exists(project_profile.directories.root + "/docker-compose.yaml")
+  )
+  #
+  # IF target does NOT use Docker:
+  #   Remove Docker-related content from adapted EPIC:
+  #   - Remove lines/sections mentioning Dockerfile, docker-compose, container build
+  #   - Remove Docker-specific steps from the Steps table (e.g. "Build Docker image")
+  #   - Remove Docker constraints (e.g. "Container must expose port 8000")
+  #   - Remove Docker acceptance criteria (e.g. "docker build completes without errors")
+  #   - Remove Docker artifacts (e.g. "config: Dockerfile, docker-compose.yml")
+  #   - Do NOT remove references to services that happen to run in Docker
+  #     (e.g. "PostgreSQL" is fine even if it runs in Docker — the app code doesn't change)
+  #
+  # IF target DOES use Docker:
+  #   Keep Docker sections as-is from the example.
+  #   IF example does NOT have Docker sections but target uses Docker:
+  #     Add a note in the Constraints section:
+  #       "- Docker: yes (project uses Docker — consider adding container build step)"
+  #     Do NOT auto-generate Docker steps — let the Planner handle that.
+
+  IF NOT target_uses_docker:
+    # Remove Docker-specific lines from Constraints, Artifacts, AC, Steps
+    adapted = remove_lines_matching(adapted,
+      patterns=["Dockerfile", "docker-compose", "docker build", "container image",
+                 "Docker:", "container build"])
+    # Clean up empty table rows if a Step was removed
+    adapted = clean_empty_table_rows(adapted)
+  ELSE:
+    # Check if example already has Docker content
+    IF "docker" NOT IN lower(adapted) AND "container" NOT IN lower(adapted):
+      # Add Docker note to Constraints section
+      adapted = append_to_section(adapted, "## Constraints",
+        "- Docker: yes (project uses Docker — consider adding container build step)")
+
+  # ──────────────────────────────────────────────
+  # STEP 4 — PLATFORM ALIGNMENT
+  # ──────────────────────────────────────────────
+  # Align platform-specific instructions to match the target project's
+  # environment: operating system, CI/CD provider, deployment target,
+  # language toolchain, and package manager.
+  #
+  # Read target platform context:
+  #   ci_cd        = project_profile.ci_cd                    (e.g. "github-actions", "none")
+  #   languages    = project_profile.tech_stack.languages     (e.g. ["Python", "TypeScript"])
+  #   test_tools   = project_profile.tech_stack.test          (e.g. ["pytest", "vitest"])
+  #   lint_tools   = project_profile.tech_stack.lint          (e.g. ["ruff", "eslint"])
+  #   build_tools  = project_profile.tech_stack.build         (e.g. ["vite", "webpack"])
+  #   type_check   = project_profile.tech_stack.type_check    (e.g. ["mypy", "tsc"])
+  #
+  # Replacements to apply:
+  #   - CI/CD: If example references a different CI provider (e.g. "GitLab CI" but target
+  #     uses "github-actions"), replace CI-specific instructions and file paths.
+  #     IF target ci_cd == "none": remove CI-specific steps/constraints entirely.
+  #   - Test runner: Replace test commands (e.g. "pytest" -> "vitest" if target is JS-only)
+  #   - Lint tool: Replace lint references (e.g. "flake8" -> "ruff")
+  #   - Build tool: Replace build commands if applicable
+  #   - Type checker: Replace type check references (e.g. "mypy" -> "tsc")
+  #   - Package manager: Replace "pip install" with "npm install" or vice versa,
+  #     based on target language.
+  #
+  # DoD Gates alignment:
+  #   Compare example's DoD Gates section with target project's gates from
+  #   project_profile or gates.yaml. Add any target-required gates not in the
+  #   example (e.g. if target requires "type_check" but example omits it).
+  #   Remove example gates that target project cannot run (e.g. "security_scan_pass"
+  #   if target has no SAST tool configured).
+
+  target_ci = project_profile.ci_cd OR "none"
+  target_test = project_profile.tech_stack.test OR []
+  target_lint = project_profile.tech_stack.lint OR []
+  target_build = project_profile.tech_stack.build OR []
+  target_type_check = project_profile.tech_stack.type_check OR []
+
+  # CI/CD alignment
+  IF target_ci == "none":
+    adapted = remove_lines_matching(adapted,
+      patterns=["CI pipeline", "CI/CD", ".github/workflows", ".gitlab-ci",
+                 "deploy step", "deployment config"])
+    # Remove CI-related steps from Steps table
+    adapted = remove_table_rows_matching(adapted, "## Steps",
+      patterns=["deploy", "CI", "pipeline"])
+  ELIF example references different CI provider than target_ci:
+    adapted = replace_ci_references(adapted, target_ci)
+
+  # Tool alignment — replace example tool names with target equivalents
+  IF target_test is not empty:
+    primary_test_tool = target_test[0]
+    adapted = replace_tool_references(adapted, category="test", target=primary_test_tool)
+  IF target_lint is not empty:
+    primary_lint_tool = target_lint[0]
+    adapted = replace_tool_references(adapted, category="lint", target=primary_lint_tool)
+  IF target_type_check is not empty:
+    primary_type_check = target_type_check[0]
+    adapted = replace_tool_references(adapted, category="type_check", target=primary_type_check)
+
+  # ──────────────────────────────────────────────
+  # STEP 5 — CONSTRAINT MERGE
+  # ──────────────────────────────────────────────
+  # Merge the example's Constraints section with the target project's
+  # existing constraints from project_profile and gates.yaml.
+  #
+  # Source of target constraints:
+  #   1. project_profile.yaml — architecture, databases, ci_cd imply constraints
+  #   2. .aid-o/03-config/policies/gates.yaml — required DoD gates
+  #   3. PM input during brainstorming — any constraints PM explicitly stated
+  #
+  # Merge rules:
+  #   - KEEP all example constraints that apply to the target project
+  #   - REMOVE example constraints that are irrelevant
+  #     (e.g. "Tenant-safe: yes" if target is single-tenant)
+  #   - ADD target-specific constraints not in the example:
+  #     - If target has databases: add relevant DB constraints
+  #     - If gates.yaml requires gates not in example DoD: add them
+  #     - If project_profile.architecture implies constraints: add them
+  #       (e.g. monorepo -> "Changes must not leak across package boundaries")
+  #
+  # Constraint categories to evaluate:
+  #   tenant_safety   — multi-tenant scoping (from project_profile.architecture)
+  #   audit_trail     — logging requirements
+  #   outbox_pattern  — event-driven constraints
+  #   budget          — LLM cost budget (keep from example or ask PM)
+  #   security        — auth/authz requirements
+  #   structured_out  — structured output requirements
+
+  # Read target gates
+  TRY:
+    gates_config = read_yaml(".aid-o/03-config/policies/gates.yaml")
+    required_gates = gates_config.gates OR []
+  CATCH:
+    required_gates = ["tests_pass", "lint_pass"]  # sensible defaults
+
+  # Parse example constraints section
+  example_constraints = parse_section(adapted, "## Constraints")
+  example_dod = parse_section(adapted, "## DoD Gates")
+
+  # Add missing required gates to DoD section
+  FOR EACH gate IN required_gates:
+    IF gate NOT IN example_dod:
+      adapted = append_to_section(adapted, "## DoD Gates", "- " + gate)
+
+  # Add project-specific constraints based on profile
+  IF project_profile.databases is not empty:
+    IF "database" NOT IN lower(example_constraints):
+      adapted = append_to_section(adapted, "## Constraints",
+        "- Database: " + join(project_profile.databases, ", "))
+
+  IF project_profile.architecture is not null:
+    IF "monorepo" IN lower(project_profile.architecture):
+      IF "monorepo" NOT IN lower(example_constraints):
+        adapted = append_to_section(adapted, "## Constraints",
+          "- Monorepo: changes scoped to designated package boundaries")
+
+  # ──────────────────────────────────────────────
+  # STEP 6 — STEP COUNT ADJUSTMENT
+  # ──────────────────────────────────────────────
+  # Adjust the number of steps in the Role Pipeline table based on the
+  # target project's complexity and requirements.
+  #
+  # Analysis:
+  #   1. Parse the current Steps table from the adapted EPIC
+  #   2. Identify steps that reference features/frameworks the target does NOT have:
+  #      - Frontend steps when target has no frontend directory
+  #      - Observability steps when target has no OTel/monitoring setup
+  #      - Security scan steps when target has no SAST tool
+  #      - Migration steps when target has no database
+  #      - Docker/deployment steps already removed in Step 3
+  #   3. Identify target-specific requirements that need NEW steps:
+  #      - Type checking step if target uses type_check tools but example has none
+  #      - API docs generation if target has docs.build_command but example omits it
+  #      - Additional test phases (e2e, contract tests) if target toolchain requires it
+  #
+  # Removal:
+  #   FOR EACH step IN parsed_steps:
+  #     IF step.role == "frontend" AND project_profile.directories.frontend is null:
+  #       Mark step for removal
+  #     IF step.role == "observability" AND target has no monitoring config:
+  #       Mark step for removal
+  #     IF step.role == "security" AND no SAST tool in target:
+  #       Mark step for removal (but keep if gates.yaml requires security_scan_pass)
+  #     IF step.objective references removed framework (from Step 2):
+  #       Mark step for removal
+  #
+  # Addition:
+  #   IF target has type_check tools AND no type-check step exists:
+  #     Add step: { role: "qa", objective: "Run type checker ({tool}) and fix type errors" }
+  #   IF target has docs.build_command AND no docs-build step exists:
+  #     Add step: { role: "docs", objective: "Build and verify documentation" }
+  #
+  # Present to PM:
+  present_to_pm = """
+  Step adjustment summary:
+    Original steps: {original_step_count}
+    Steps to remove: {removal_list with reasons}
+    Steps to add: {addition_list with reasons}
+    Resulting steps: {new_step_count}
+
+    Proceed with these adjustments? (Y)es / (E)dit manually / (K)eep original
+  """
+  #
+  # IF PM says Y: Apply removals and additions to the Steps table.
+  #   Renumber steps sequentially (1, 2, 3, ...).
+  #   Update "Depends On" references to reflect new numbering.
+  #   Reassign parallel groups based on new dependency graph.
+  # IF PM says E: Open adapted EPIC for PM manual editing, then continue to Step 7.
+  # IF PM says K: Keep the original step table unchanged.
+
+  pm_step_decision = ask_pm(present_to_pm)
+
+  IF pm_step_decision == "Y" OR pm_step_decision == "yes":
+    adapted = apply_step_removals(adapted, removal_list)
+    adapted = apply_step_additions(adapted, addition_list)
+    adapted = renumber_steps_table(adapted)
+    adapted = update_depends_on_references(adapted)
+  ELIF pm_step_decision == "E" OR pm_step_decision == "edit":
+    # PM will edit in Step 7 review — flag for manual editing
+    log("PM chose manual step editing — will present full EPIC for review in Step 7")
+  ELIF pm_step_decision == "K" OR pm_step_decision == "keep":
+    log("PM chose to keep original steps unchanged")
+
+  # Also update Run Breakdown and Hints sections to match adjusted step count
+  new_step_count = count_steps_in_table(adapted)
+  adapted = update_section_value(adapted, "## Hints", "expected_steps", str(new_step_count))
+
+  # ──────────────────────────────────────────────
+  # STEP 7 — WRITE ADAPTED EPIC
+  # ──────────────────────────────────────────────
+  # Build the final EPIC file with proper frontmatter and naming convention,
+  # present to PM for final approval, and write to .aid-o/02-epics/.
+  #
+  # Generate EPIC ID:
+  #   Pattern: E-<NNN> where NNN is the next sequential number.
+  #   Scan .aid-o/02-epics/ for existing EPIC files, extract highest E-NNN, increment.
+  #   IF no existing EPICs: start at E-001.
+  existing_epics = list_files(".aid-o/02-epics/", pattern="E-*.md")
+  max_id = max([extract_epic_number(f) for f in existing_epics]) OR 0
+  new_epic_id = format("E-%03d", max_id + 1)
+
+  # Generate title from PM input or example archetype
+  epic_title = ask_pm(
+    "Title for the adapted EPIC (based on '{example_frontmatter.archetype}' template):
+     Suggestion: {new_epic_id} — {capitalize(placeholder_map.get('{resource}', example_frontmatter.archetype))}
+     Enter title or press Enter to accept suggestion:"
+  )
+  IF epic_title is empty:
+    epic_title = new_epic_id + " — " + capitalize(
+      placeholder_map.get("{resource}", example_frontmatter.archetype)
+    )
+
+  # Build frontmatter for the new EPIC
+  new_frontmatter = """
+  ---
+  status: active
+  plan_ref: null
+  plan_epics_total: null
+  runs_total: 1
+  runs_completed: 0
+  ---
+  """
+
+  # Replace the example title line with the new EPIC title
+  adapted = regex_replace(adapted,
+    r"^# (Example )?EPIC:.*$",
+    "# EPIC: " + epic_title
+  )
+
+  # Remove the example NOTE block if present
+  adapted = remove_block(adapted,
+    start_pattern=r"^> \*\*NOTE:\*\*",
+    end_pattern=r"^$"  # until first blank line after the note
+  )
+
+  # Assemble final content
+  final_content = new_frontmatter + "\n" + adapted
+
+  # Present to PM for final approval
+  present_to_pm(
+    "Adapted EPIC ready for review:
+
+     File: .aid-o/02-epics/{new_epic_id}.md
+     Based on: {example_frontmatter.archetype} template
+     Frameworks: {target_frameworks}
+     Steps: {new_step_count}
+
+     --- Preview (first 40 lines) ---
+     {first_40_lines(final_content)}
+     ---
+
+     (A)pprove and write / (E)dit first / (C)ancel?"
+  )
+
+  pm_final = wait_for_pm_response()
+
+  IF pm_final == "C" OR pm_final == "cancel":
+    RETURN { adapted: false, reason: "pm_cancelled_at_final_review" }
+
+  IF pm_final == "E" OR pm_final == "edit":
+    # Write draft and let PM edit
+    draft_path = ".aid-o/02-epics/{new_epic_id}-draft.md"
+    write_file(draft_path, final_content)
+    present_to_pm(
+      "Draft written to {draft_path}. Edit the file, then confirm here when done.
+       The file will be renamed to {new_epic_id}.md on confirmation."
+    )
+    wait_for_pm_response()
+    final_content = read_file(draft_path)
+    delete_file(draft_path)
+
+  # Write final EPIC file
+  epic_filename = new_epic_id + ".md"
+  epic_path = ".aid-o/02-epics/" + epic_filename
+  write_file(epic_path, final_content)
+
+  Report to PM:
+    "EPIC written: {epic_path}
+     Based on: {example_frontmatter.archetype} template ({example_path})
+     Ready for: /aid-plan-epic {epic_filename} or /aid-run-epic {epic_filename}"
+
+  RETURN { adapted: true, epic_path: epic_path }
 ```
 
 ### Feedback Tracking Protocol
@@ -1947,4 +2384,4 @@ IF memory-config.yaml has no knowledge: section:
 
 ---
 
-**Last Updated:** 2026-02-22
+**Last Updated:** 2026-02-26
