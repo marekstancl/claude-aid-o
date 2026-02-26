@@ -3,6 +3,27 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.0] — 2026-02-26
+
+### Added
+
+- **GitHub MCP in Setup Wizard** — `/aid-setup` now includes GitHub MCP as recommended option 6e with full setup flow covering detection, auth check, install, verification, and troubleshooting
+- **Setup Completion Banner** — `/aid-setup` displays a professional styled ASCII art banner with AID branding after successful setup completion
+- **Version Pre-check in Plan Epic** — `/aid-plan-epic` Step 0 reads the local plugin version, compares it with the latest GitHub release via `gh api`, and warns if outdated (non-blocking)
+- **Help Workflow Examples** — `/aid-help examples` returns three step-by-step workflows: Greenfield Feature, Quick Fix, and Multi-Phase with FIRST AID
+- **Autonomous Mode Commands in Help** — `/aid-help commands` now includes detailed entries for `/aid-first-aid` and `/aid-stop` under a new AUTONOMOUS MODE COMMANDS section
+
+### Changed
+
+- **Setup MCP Options** — re-lettered MCP sub-options so GitHub MCP is 6e, Auto-detect is 6f, and Custom is 6g; restructured Step 5b as Optional MCP Follow-up
+- **Skill Count** — updated documented skills count from 20 to 21 in CLAUDE.md and README to include the previously unlisted `workflow-intelligence.md`
+
+### Fixed
+
+- **Stale Paths** — replaced three remaining `workspace/workflow/` references with `.aid-o/` equivalents in `planner.md`, `aid-plan-epic.md`, and `slack-mcp.md`
+- **README Version** — synced README version from stale 0.9.2 to 0.9.3 (now bumped to 0.10.0 with this release)
+- **Command Frontmatter** — verified all 13 commands have `user_invocable: true`
+
 ## [0.99.0] — 2026-02-26
 
 ### Added
