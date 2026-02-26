@@ -15,6 +15,8 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 **FIRST AID mode** (`/aid-first-aid`) — autonomous queue execution. PM approvals replaced by agent-driven checks. Permissions elevated via permission sandwich (backup → elevate → restore). Only escalation requires PM interaction. Disengage anytime with `/aid-stop`.
 
+> **Disclaimer:** FIRST AID mode grants Claude Code elevated permissions to execute commands **without confirmation prompts**. This includes file edits, shell commands, package installs, git push, GitHub releases, and MCP tool calls. A hard-deny list prevents the most dangerous operations (`rm -rf /`, `git push --force`, `sudo`, etc.), but autonomous execution carries inherent risk. **Use at your own risk.** Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` available. See `permissions-auto.yaml` for the full permission list. You are responsible for all actions performed in your environment.
+
 ## Quick Start
 
 ```bash

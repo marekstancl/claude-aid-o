@@ -6,6 +6,21 @@ You describe what you want to build. AID brainstorms the design with you, genera
 
 ---
 
+## Disclaimer — FIRST AID & Elevated Permissions
+
+> **USE AT YOUR OWN RISK.** FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** for the duration of the session. This means Claude can autonomously edit files, run shell commands, install packages, push code to remote repositories, create GitHub releases, and interact with configured MCP services — **all without asking for confirmation**.
+>
+> **What "elevated permissions" means in practice:**
+> - Claude executes commands defined in `permissions-auto.yaml` without VS Code/CLI prompts
+> - This includes `git push`, `npm install`, `gh release create`, and many others
+> - The full list is in `.aid-o/03-config/permissions-auto.yaml` (or the plugin defaults)
+>
+> **What Claude CANNOT do (hard-deny list, non-overridable):**
+> - `rm -rf /`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `chown`
+> - Access `~/.ssh`, `~/.aws`, `~/.gnupg`, `/etc`, or Claude's own config
+>
+> **Safety mechanisms exist** (permission sandwich, 16 escalation triggers, crash recovery), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind. You are responsible for the actions performed in your environment.
+
 ## 30-Second Demo
 
 ```bash

@@ -1,6 +1,20 @@
 # FIRST AID Auto-Mode Permissions
 # Default permission template for autonomous orchestration (/aid-first-aid).
 #
+# ┌──────────────────────────────────────────────────────────────────────┐
+# │  DISCLAIMER — USE AT YOUR OWN RISK                                  │
+# │                                                                      │
+# │  These permissions allow Claude Code to execute commands WITHOUT      │
+# │  confirmation prompts during FIRST AID autonomous mode. This         │
+# │  includes file edits, shell commands, git push, package installs,    │
+# │  GitHub releases, and MCP tool calls.                                │
+# │                                                                      │
+# │  A hard-deny list (see deny[] below) blocks the most dangerous       │
+# │  operations, but autonomous AI execution can produce unexpected      │
+# │  results. Review this file carefully before starting FIRST AID.      │
+# │  You are responsible for all actions performed in your environment.   │
+# └──────────────────────────────────────────────────────────────────────┘
+#
 # Purpose:
 #   This file defines what Claude Code auto-allows during FIRST AID mode.
 #   It is the "elevated" permission set in the Permission Sandwich pattern:

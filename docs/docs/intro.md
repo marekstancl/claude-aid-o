@@ -11,6 +11,12 @@ slug: /
 
 AID is a Claude Code plugin that implements a **Controller + Workers architecture** for AI-driven software development. It takes an EPIC specification, generates structured execution plans, dispatches specialized role-based agents, enforces quality gates, and maintains complete evidence trails.
 
+:::info Disclaimer — FIRST AID & Elevated Permissions
+
+FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** to execute commands autonomously — including file edits, shell commands, `git push`, package installs, GitHub releases, and MCP tool calls — **without asking for confirmation**. A hard-deny list blocks the most dangerous operations, but autonomous AI execution carries inherent risk. **Use at your own risk.** See the [FIRST AID Mode](/architecture/first-aid-mode) page for full safety details.
+
+:::
+
 ## Features
 
 - **13 slash commands** for planning, executing, auditing, and managing your development pipeline

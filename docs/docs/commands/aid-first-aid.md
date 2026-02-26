@@ -6,6 +6,12 @@ description: "Launch FIRST AID autonomous orchestration mode — process the ent
 
 # /aid-first-aid
 
+:::caution Elevated Permissions — Use at Your Own Risk
+
+This command grants Claude Code **elevated permissions** for the duration of the session. Claude will execute commands autonomously — including file edits, shell commands, `git push`, `npm install`, GitHub releases, and MCP tool calls — **without asking for confirmation**. A hard-deny list blocks destructive operations (`rm -rf /`, `git push --force`, `sudo`), but autonomous execution carries inherent risk. Review your EPIC queue before starting and use `--dry-run` to preview. See [FIRST AID Mode](/architecture/first-aid-mode) for full details.
+
+:::
+
 Launch **FIRST AID** (Fully Integrated Autonomous Development) mode. Once started, AID processes every queued EPIC end-to-end — plan, execute, gate, merge, pick up next — without requiring PM input, except for defined escalation triggers.
 
 This is the top-level autonomous command. It wraps the entire EPIC lifecycle: permission backup and elevation, mode flag management, queue iteration, per-EPIC orchestration, and a cross-EPIC summary report at completion.

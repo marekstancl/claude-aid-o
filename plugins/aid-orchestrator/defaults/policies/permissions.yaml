@@ -93,9 +93,11 @@ presets:
       - "Bash(*:*)"
       - "mcp__*"
     notes: |
-      WARNING: This preset grants unrestricted access. Agents can execute arbitrary
-      commands (rm -rf, git push --force), install packages, send messages via Slack/MCP,
-      and access all filesystem paths. Recommended only for trusted, isolated environments.
+      ⚠ USE AT YOUR OWN RISK — This preset grants unrestricted access. Agents can execute
+      arbitrary commands (rm -rf, git push --force), install packages, send messages via
+      Slack/MCP, and access all filesystem paths. Autonomous AI execution can produce
+      unexpected results. You are responsible for all actions performed in your environment.
+      Recommended only for trusted, isolated environments.
       Consider using 'recommended' preset for production work.
       PM should explicitly confirm this choice during /aid-setup.
 

@@ -6,6 +6,19 @@ user_invocable: true
 
 Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomous EPIC queue execution with elevated permissions, agent-driven decision-making, and escalation-only PM interaction.
 
+> **⚠ DISCLAIMER — USE AT YOUR OWN RISK**
+>
+> FIRST AID grants Claude Code **elevated permissions** for the duration of the session.
+> Claude will autonomously edit files, run shell commands, install packages, push code
+> to remote repositories, create GitHub releases, and call MCP tools — **without asking
+> for confirmation**. A hard-deny list blocks the most dangerous operations (`rm -rf /`,
+> `git push --force`, `sudo`, `chmod 777`, etc.), but autonomous AI execution carries
+> inherent risk and can produce unexpected results. Safety mechanisms reduce but do not
+> eliminate risk. **You are responsible for all actions performed in your environment.**
+>
+> Before starting: review your EPIC queue, run `--dry-run` to preview, check
+> `permissions-auto.yaml` for the full permission list, and keep `/aid-stop` in mind.
+
 The PM approves the EPIC queue before invocation. Once started, the Orchestrator processes every queued EPIC end-to-end: plan, execute, gate, merge, pick up next. PM is only contacted on escalation (16 defined triggers). Permissions are elevated for the duration and restored on completion.
 
 This is the **top-level autonomous command** — it wraps the entire lifecycle: permission sandwich, mode flag management, queue iteration, and cross-EPIC summary reporting.
@@ -350,8 +363,9 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║  │ .. │            │                          │ ... and {N} more│  ║
   ║  └────┴────────────┴──────────────────────────┴─────────────────┘  ║
   ║                                                                    ║
-  ║  Permissions elevated. Steroids loaded. Let's go.                  ║
-  ║  Stop command:  /aid-stop to disengage                             ║
+  ║  ⚠ USE AT YOUR OWN RISK — Elevated permissions active.              ║
+  ║  Claude will execute commands without confirmation prompts.         ║
+  ║  Stop command:  /aid-stop to disengage at any time                 ║
   ║                                                                    ║
   ╚══════════════════════════════════════════════════════════════════════╝
 ```

@@ -6,6 +6,22 @@ description: "Autonomous EPIC queue execution with permission sandwich, escalati
 
 # FIRST AID Mode
 
+:::danger Use at Your Own Risk
+
+FIRST AID mode grants Claude Code **elevated permissions** for the duration of the session. Claude will autonomously edit files, run shell commands, install packages, push code, create GitHub releases, and call MCP tools — **without asking for confirmation**.
+
+A hard-deny list blocks the most dangerous operations (`rm -rf /`, `git push --force`, `sudo`, `chmod 777`, etc.) and sensitive paths (`~/.ssh`, `~/.aws`, `/etc`). However, **autonomous AI agents can produce unexpected results**. Safety mechanisms (permission sandwich, 16 escalation triggers, crash recovery) reduce but do not eliminate risk.
+
+**Before starting FIRST AID:**
+- Review your EPIC queue carefully — Claude will execute everything in it
+- Run `/aid-first-aid --dry-run` to preview what will happen
+- Know that `/aid-stop` is available at any time to disengage
+- Check `permissions-auto.yaml` to understand exactly which commands are auto-allowed
+
+**You are responsible for all actions performed in your environment.**
+
+:::
+
 FIRST AID mode is the autonomous execution mode of AID Orchestrator. The PM approves the EPIC queue once, then the Controller runs all queued EPICs end-to-end without stopping at each decision point. Agent-driven quality checks replace manual approval gates, and a structured escalation protocol handles the 16 defined conditions that require human judgment.
 
 FIRST AID mode is started with `/aid-first-aid` and stopped with `/aid-stop`.
