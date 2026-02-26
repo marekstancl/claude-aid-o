@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v0.9.3
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v0.99.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,11 +116,10 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.0.0** — AID GUI backend (`packages/aid-gui`): TypeScript parsers, real-time file watchers, WebSocket streaming, 10 REST API routes, Ideas CRUD, queue scheduling engine, multi-project support, CLI (`npx aid-gui`). 314 tests. License changed to AGPL-3.0-only.
+- **v0.99.0** — AID Server backend (`packages/aid-server`), Docker deployment, Docusaurus docs site on GitHub Pages, GUI frontend polish
+- **v0.9.3** — GATES→CURATOR_RESOLVE fix, Qdrant config unification, FIRST AID animations, EPIC/plan archival
 - **v0.9.2** — FIRST AID autonomous mode (`/aid-first-aid`, `/aid-stop`), permission sandwich, auto-escalation, auto-release
-- **v0.9.1** — Brainstorming enhancement, release sub-phase, per-file version cleanup
 - **v0.9.0** — Core structure refactoring (SESSION→RUN rename, flat evidence)
-- **v0.8.2** — Housekeeping, untrusted-content framing, version alignment
 - **v0.8.0** — Workflow intelligence, Docker/MCP recommendations, process audit
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.

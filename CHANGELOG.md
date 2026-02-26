@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.99.0] — 2026-02-26
+
+### Added
+
+- **AID Server** (`packages/aid-server`) — Express + WebSocket backend serving the AID GUI dashboard; 18 REST API endpoints covering projects, pipeline state, EPIC queue, decisions, evidence, audit, ideas, usage metrics, and knowledge; real-time WebSocket pub/sub with chokidar file watching on `.aid-o/`; topic-based subscriptions with heartbeat and idle timeout
+- **Docker deployment** — multi-stage Dockerfile (gui-build → server-build → production) and docker-compose.yml; single `docker compose up --build` serves both GUI and API on port 9911; health check included
+- **Docusaurus documentation site** — full docs site with architecture, configuration, contributing, troubleshooting, reference docs, and Getting Started guides; deployed to GitHub Pages via GitHub Actions; EN + CS locales
+- **GUI frontend polish** — AI Companion panel, replay controls, error boundaries, production build optimization (FIRST AID EPIC session, 5 EPICs completed autonomously)
+
+### Fixed
+
+- **MDX expression errors** — escaped `{type: performance}` in `decision-policies.md` and `{message_type}`/`{action}` in `slack-integration.md` that broke Docusaurus MDX compilation
+- **GitHub Pages config** — replaced all placeholder values in `docusaurus.config.ts` (`your-org` → `marekstancl`, `your-project` → `claude-aid-o`)
+
+### Changed
+
+- **Default port** — server default port changed to 9911 (config.ts, Dockerfile, docker-compose.yml)
+- **Version bump** — all packages bumped to 0.99.0 (aid-server, aid-gui, docs)
+
 ## [0.9.3] — 2026-02-25
 
 ### Fixed
