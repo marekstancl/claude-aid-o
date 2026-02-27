@@ -1,7 +1,7 @@
 # Auto-Mode DONE State Protocol
 
 **Skill:** auto-done-state
-**Dependencies:** epic-orchestration, epic-queue, auto-escalation, permission-sandwich
+**Dependencies:** epic-orchestration, epic-queue, auto-escalation
 
 ---
 
@@ -74,7 +74,7 @@ These DONE actions are modified or replaced in auto-mode:
 | Release decision | PM asked for intermediate EPICs | Deterministic (Section 2) |
 | Completion summary | Presented to PM interactively | Logged silently, aggregated (Section 5) |
 | EPIC Queue check | Auto-pickup with status update | Auto-pickup with summary aggregation (Section 3) |
-| Session end | N/A (single EPIC) | Permission restore + final report (Section 4) |
+| Session end | N/A (single EPIC) | Final report + mode reset (Section 4) |
 
 ---
 
@@ -378,38 +378,33 @@ SESSION_COMPLETE():
      → Compile cross-EPIC statistics
      → Write to .aid-o/04-engine/evidence/auto-session-report-{session_id}.md
 
-  2. RESTORE permissions:
-     → Execute RESTORE_PERMISSIONS from skills/permission-sandwich.md (Section 4)
-     → This restores .claude/settings.json from the backup
-     → If restore fails: warn PM (non-blocking per permission-sandwich.md)
-
-  3. UPDATE auto-mode-state.yaml:
+  2. UPDATE auto-mode-state.yaml:
      session_status: "completed"
      completed_at: {ISO 8601 now}
      summary:
        ... (finalized summary data)
 
-  4. UPDATE epic-queue.yaml:
+  3. UPDATE epic-queue.yaml:
      → Verify all processed EPICs have correct final status
      → paused flag remains as-is (true if aborted, false if completed normally)
 
-  5. SEND final session notification:
+  4. SEND final session notification:
      → Via Slack (Type G - Status Update) or chat fallback
      → See Section 5.3 for notification format
 
-  6. PRESENT final session report to PM:
+  5. PRESENT final session report to PM:
      → Display the session report in conversation (or Slack)
      → This is the ONLY PM-facing summary for the entire auto-mode session
      → The PM sees this after all EPICs have been processed
 
-  7. LOG session completion:
+  6. LOG session completion:
      → stage_log.jsonl (in the last EPIC's evidence directory):
        {"state": "DONE", "action": "session_complete",
         "session_id": "{session_id}",
         "total_epics": {N}, "completed": {N}, "failed": {N},
         "duration_minutes": {N}}
 
-  8. TRANSITION to terminal IDLE:
+  7. TRANSITION to terminal IDLE:
      → Controller returns to IDLE state with no active EPIC
      → Auto-mode is fully complete
 ```
@@ -427,13 +422,11 @@ PARTIAL_SESSION_COMPLETE(reason):
      → Mark current EPIC status as "aborted" or "manual_takeover"
      → List remaining queued EPICs as "not_started"
 
-  2. RESTORE permissions (same as full completion)
-
-  3. IF reason == "abort":
+  2. IF reason == "abort":
      → Queue remains paused
      → PM must manually resume when ready
 
-  4. IF reason == "manual_takeover":
+  3. IF reason == "manual_takeover":
      → Current EPIC continues in manual mode
      → Queue paused until current EPIC finishes + PM resumes
      → Session report notes: "Session interrupted — continuing {epic_id} manually"
@@ -647,7 +640,7 @@ for session cost awareness.
 • Cost: ~${estimated_llm_cost_usd}
 
 :file_folder: Report: auto-session-report-{session_id}.md
-:white_check_mark: Permissions restored to pre-auto-mode state.
+:white_check_mark: Auto-mode ended — mode set to manual.
 ```
 
 #### Chat Fallback Notification
@@ -667,7 +660,7 @@ Summary:
   Cost: ~${estimated_llm_cost_usd}
 
 Report: .aid-o/04-engine/evidence/auto-session-report-{session_id}.md
-Permissions restored to pre-auto-mode state.
+Auto-mode ended — mode set to manual.
 ====================================
 
 What's next?
@@ -682,7 +675,7 @@ What's next?
 ## 6. auto-mode-state.yaml Structure
 
 The session state file tracks all auto-mode data. It is created during FIRST_AID_INIT
-(by `skills/permission-sandwich.md`) and updated throughout the session.
+(by `/aid-first-aid`) and updated throughout the session.
 
 ### 6.1 Full Schema
 
@@ -700,11 +693,10 @@ completed_at: null          # Set on session completion
 current_epic: "E-20260224-0001"
 current_epic_started_at: "2026-02-24T14:00:00Z"
 
-# Permissions tracking (managed by permission-sandwich.md)
+# Permissions tracking (managed by /aid-first-aid)
 permissions:
-  backup_path: ".aid-o/03-config/permissions-backup.json"
-  applied_permissions: [...]
-  learned_permissions: [...]
+  preset: "steroids"
+  verified_at: "{ISO 8601}"
 
 # Summary aggregation (updated after each EPIC completes)
 summary:
@@ -886,16 +878,14 @@ decision, completion summary delivery, and queue transition.
 | auto-mode-state.yaml write fails | Log warning, continue in memory | No |
 | Branch merge conflict | Escalate per standard DONE | Yes |
 | Auditor dispatch fails | Log warning, continue | No |
-| Permission restore fails | Warn PM, continue | No |
 | Qdrant unavailable | Skip metric writes, continue | No |
 
 ### 8.2 Session Recovery
 
 If the Controller crashes mid-session, the next startup detects the state:
 
-1. `permissions-backup.json` exists -> crash recovery per `skills/permission-sandwich.md`
-2. `auto-mode-state.yaml` with `session_status: "running"` -> stale session detected
-3. The Controller does NOT auto-resume. It restores permissions and reports:
+1. `auto-mode-state.yaml` with `session_status: "running"` -> stale session detected
+2. The Controller does NOT auto-resume. It reports:
    "Previous auto-mode session {session_id} did not complete cleanly.
     {completed_epics} EPICs completed before crash.
     Review auto-mode-state.yaml for details.
@@ -919,7 +909,6 @@ If the Controller crashes mid-session, the next startup detects the state:
 |--------|------|---------|
 | `skills/epic-queue.md` | Queue transition | `complete()`, `next()`, `start()` operations |
 | `skills/auto-escalation.md` | Guardrail check at EPIC boundary | E12 trigger if budget exceeded |
-| `skills/permission-sandwich.md` | Session complete | Restore permissions |
 | `skills/slack-mcp.md` | Session complete notification | Type G status update |
 | `release-policy.yaml` | Release sub-phase (Section 2) | Version file registry, tag/release config |
 
@@ -941,12 +930,11 @@ If the Controller crashes mid-session, the next startup detects the state:
 4. **ALWAYS perform mandatory bump for last/standalone EPICs** -- deferral is not an option
 5. **ALWAYS aggregate summary data after each EPIC** -- partial data is still valuable if the session stops early
 6. **ALWAYS check guardrails before loading the next EPIC** -- escalation budget is enforced at EPIC boundaries
-7. **ALWAYS restore permissions when the session ends** -- regardless of how it ends (complete, abort, crash)
-8. **ALWAYS generate a final session report** -- even for partial sessions (one EPIC completed is still reportable)
-9. **NEVER skip the queue paused check** -- if PM paused the queue during execution, honor it
-10. **NEVER auto-resume a crashed session** -- crash recovery restores permissions but does NOT continue execution
-11. **ALWAYS write to auto-mode-state.yaml** at each checkpoint -- it is the crash-recovery data source
-12. **ALWAYS include evidence paths** in the session report -- the PM must be able to find all artifacts
+7. **ALWAYS generate a final session report** -- even for partial sessions (one EPIC completed is still reportable)
+8. **NEVER skip the queue paused check** -- if PM paused the queue during execution, honor it
+9. **NEVER auto-resume a crashed session** -- report to PM and require explicit `/aid-first-aid --resume`
+10. **ALWAYS write to auto-mode-state.yaml** at each checkpoint -- it is the crash-recovery data source
+11. **ALWAYS include evidence paths** in the session report -- the PM must be able to find all artifacts
 
 ---
 

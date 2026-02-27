@@ -7,27 +7,11 @@
 # - .claude/settings.local.json tells Claude Code what to AUTO-ALLOW without prompting (enforcement-level)
 # - /aid-setup writes BOTH files simultaneously (dual-write)
 
-active_preset: "recommended"  # safe | recommended | advanced
+active_preset: "aspirin"  # aspirin | steroids
 
 presets:
-  safe:
-    description: "Read-only exploration, no file modifications"
-    # Claude Code auto-allow entries (written to .claude/settings.local.json)
-    claude_code_permissions:
-      - "Glob"
-      - "Grep"
-      - "Read"
-      - "Task"
-      - "TodoWrite"
-      - "WebSearch"
-      - "Bash(git status:*)"
-      - "Bash(git log:*)"
-      - "Bash(git diff:*)"
-      - "Bash(ls:*)"
-    notes: "VS Code will prompt for any file modifications"
-
-  recommended:
-    description: "Edit files, run local git, tests, and linters — no push, no install"
+  aspirin:
+    description: "Mirni bolest, ale na vsechno se zepta. Bezpecny default."
     claude_code_permissions:
       # Tools
       - "Glob"
@@ -76,10 +60,9 @@ presets:
       - "mcp__plugin_context7_context7__*"
     notes: "No git push, no package install, no rm, no network commands"
 
-  advanced:
-    description: "Full access — zero VS Code prompts, agents can do anything"
+  steroids:
+    description: "Plny vykon, zadne otazky. Required for First Aid. Destruktivni prikazy jsou zakazany."
     claude_code_permissions:
-      # Everything from recommended, plus:
       - "Glob"
       - "Grep"
       - "Read"
@@ -101,11 +84,9 @@ presets:
       - "mcp__plugin_context7_context7__*(*)"
     notes: |
       ⚠ USE AT YOUR OWN RISK — This preset grants unrestricted access. Agents can execute
-      arbitrary commands (rm -rf, git push --force), install packages, send messages via
-      Slack/MCP, and access all filesystem paths. Autonomous AI execution can produce
-      unexpected results. You are responsible for all actions performed in your environment.
-      Recommended only for trusted, isolated environments.
-      Consider using 'recommended' preset for production work.
+      arbitrary commands, install packages, send messages via Slack/MCP, and access all
+      filesystem paths. Destructive commands are ALWAYS denied (deny-list in settings.local.json).
+      Required for /aid-first-aid autonomous mode.
       PM should explicitly confirm this choice during /aid-setup.
 
 # Role-specific overrides (merged with active_preset)

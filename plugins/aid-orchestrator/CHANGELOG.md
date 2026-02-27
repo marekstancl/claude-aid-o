@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2.0] — 2026-02-27
+
+### Removed
+- **Permission Sandwich** — removed `skills/permission-sandwich.md` (750 lines) and `defaults/policies/permissions-auto.yaml` (164 lines); FIRST AID no longer backs up, elevates, or restores permissions — requires Steroids 💉 preset instead
+
+### Changed
+- **Permission presets** — Safe removed, Recommended renamed to Aspirin 💊, Advanced renamed to Steroids 💉; two-preset system with deny-list protection
+- **FIRST AID startup** — permission sandwich steps (backup, elevate) replaced by single Steroids preset verification check
+- **FIRST AID completion** — permission restore removed; /aid-stop simplified to 3 steps (mode flag, wait, save progress)
+
 ## [1.1.0] — 2026-02-27
 
 ### Added

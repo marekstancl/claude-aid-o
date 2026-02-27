@@ -13,9 +13,9 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 7. **PM approval** — via Slack MCP or chat fallback
 8. **Queue** — stack EPICs with `/aid-epic-queue`, AID processes them sequentially
 
-**FIRST AID mode** (`/aid-first-aid`) — autonomous queue execution. PM approvals replaced by agent-driven checks. Permissions elevated via permission sandwich (backup → elevate → restore). Only escalation requires PM interaction. Disengage anytime with `/aid-stop`.
+**FIRST AID mode** (`/aid-first-aid`) — autonomous queue execution. PM approvals replaced by agent-driven checks. Requires Steroids 💉 preset (set via /aid-setup). Destructive commands always denied. Only escalation requires PM interaction. Disengage anytime with `/aid-stop`.
 
-> **Disclaimer:** FIRST AID mode grants Claude Code elevated permissions to execute commands **without confirmation prompts**. This includes file edits, shell commands, package installs, git push, GitHub releases, and MCP tool calls. A hard-deny list prevents the most dangerous operations (`rm -rf /`, `git push --force`, `sudo`, etc.), but autonomous execution carries inherent risk. **Use at your own risk.** Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` available. See `permissions-auto.yaml` for the full permission list. You are responsible for all actions performed in your environment.
+> **Disclaimer:** FIRST AID mode grants Claude Code elevated permissions to execute commands **without confirmation prompts**. This includes file edits, shell commands, package installs, git push, GitHub releases, and MCP tool calls. A hard-deny list prevents the most dangerous operations (`rm -rf /`, `git push --force`, `sudo`, etc.), but autonomous execution carries inherent risk. **Use at your own risk.** Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` available. A hard-deny list is always enforced regardless of preset. You are responsible for all actions performed in your environment.
 
 ## Quick Start
 
@@ -104,7 +104,6 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | `cost-optimization` | Model selection, file scoping, dispatch trimming |
 | `analytics` | Performance metrics, bottleneck detection, trend reports |
 | `knowledge-acquisition` | Research pipeline, quality gates, aging protocol |
-| `permission-sandwich` | FIRST AID permission management — backup, elevate, restore, learning |
 | `auto-escalation` | FIRST AID escalation triggers, pause/resume, PM interaction format |
 | `auto-done-state` | FIRST AID DONE state — auto-release, queue transitions, summary |
 
@@ -192,7 +191,6 @@ Without Qdrant, the plugin works identically using file-based memory (active-wor
 | `policies/slack-config.yaml` | Slack channel, timeouts, reminders |
 | `policies/memory-config.yaml` | Qdrant vector memory settings |
 | `policies/release-policy.yaml` | Version files, SemVer rules, git tag/release settings |
-| `policies/permissions-auto.yaml` | FIRST AID permission template (allow/deny lists) |
 | `playbooks/*.md` | Role-specific agent instructions |
 
 ## Version

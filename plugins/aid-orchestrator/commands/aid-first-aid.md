@@ -4,12 +4,11 @@ description: Launch FIRST AID autonomous orchestration mode — process EPIC que
 user_invocable: true
 ---
 
-Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomous EPIC queue execution with elevated permissions, agent-driven decision-making, and escalation-only PM interaction.
+Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomous EPIC queue execution with Steroids 💉 preset, agent-driven decision-making, and escalation-only PM interaction.
 
 > **DISCLAIMER — Experimental Autonomous Mode**
 >
-> FIRST AID is an **experimental** feature. It grants Claude Code **elevated permissions**
-> for the duration of the session. The AI will execute commands, modify files, install
+> FIRST AID is an **experimental** feature. It requires the **Steroids 💉** preset (set via /aid-setup). The preset grants full access while a deny-list blocks destructive commands. The AI will execute commands, modify files, install
 > packages, push code, create GitHub releases, and call MCP tools — **without asking for
 > confirmation**. A hard-deny list blocks dangerous operations (`rm -rf /`,
 > `git push --force`, `sudo`, `chmod 777`, etc.), but no automated safeguard is
@@ -19,16 +18,16 @@ Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomo
 > preview execution. Use `/aid-stop` as the emergency stop to halt autonomous execution
 > at any point.
 
-The PM approves the EPIC queue before invocation. Once started, the Orchestrator processes every queued EPIC end-to-end: plan, execute, gate, merge, pick up next. PM is only contacted on escalation (16 defined triggers). Permissions are elevated for the duration and restored on completion.
+The PM approves the EPIC queue before invocation. Once started, the Orchestrator processes every queued EPIC end-to-end: plan, execute, gate, merge, pick up next. PM is only contacted on escalation (16 defined triggers). Requires Steroids 💉 preset.
 
-This is the **top-level autonomous command** — it wraps the entire lifecycle: permission sandwich, mode flag management, queue iteration, and cross-EPIC summary reporting.
+This is the **top-level autonomous command** — it wraps the entire lifecycle: mode flag management, queue iteration, and cross-EPIC summary reporting.
 
 ## Usage
 
 ```
 /aid-first-aid                  # Start auto-mode with current queue
 /aid-first-aid --resume         # Resume a paused/crashed session
-/aid-first-aid --dry-run        # Validate queue and permissions without executing
+/aid-first-aid --dry-run        # Validate queue and preset without executing
 ```
 
 **Examples:**
@@ -43,15 +42,14 @@ This is the **top-level autonomous command** — it wraps the entire lifecycle: 
 - `.aid-o/` workspace must exist (run `/aid-init` if not)
 - EPIC queue must have at least one entry with status `queued` (use `/aid-epic-queue add`)
 - `.claude/settings.json` must exist and be valid JSON (or will be auto-created)
-- `permissions-auto.yaml` must exist (project, plugin defaults, or will be generated)
+- Steroids 💉 preset must be active (run `/aid-setup` to configure)
 
 ## Core Instruction
 
 **Read the following skills BEFORE starting the loop:**
-1. `skills/permission-sandwich.md` — permission backup, elevation, restore, crash recovery
-2. `skills/auto-escalation.md` — 16 escalation triggers, pause/resume, PM notification
-3. `skills/epic-orchestration.md` — state machine (used by `/aid-run-epic` under the hood)
-4. `skills/epic-queue.md` — queue operations, auto-pickup, safety guards
+1. `skills/auto-escalation.md` — 16 escalation triggers, pause/resume, PM notification
+2. `skills/epic-orchestration.md` — state machine (used by `/aid-run-epic` under the hood)
+3. `skills/epic-queue.md` — queue operations, auto-pickup, safety guards
 
 **Read `skills/slack-mcp.md` for PM communication.** Escalation notifications and the
 final summary report use the Slack MCP protocol with chat fallback.
@@ -95,14 +93,13 @@ On each state transition, append to the session-level `stage_log.jsonl`.
 
 ```
 IF $ARGUMENTS contains "--dry-run":
-  1. Run all validation checks (steps 3-5) without side effects
+  1. Run all validation checks (steps 3-6) without side effects
   2. Display results:
      "DRY RUN — FIRST AID Validation
       ====================================
       Queue:       {N} EPICs queued ({epic_ids})
-      Permissions: {source} ({allow_count} allow, {deny_count} deny)
+      Preset:      Steroids 💉 (verified)
       Settings:    .claude/settings.json ({status: valid|missing|invalid})
-      Backup:      {none|orphaned — recovery needed}
       Mode state:  {none|active session exists}
 
       Ready to start: {YES|NO — {reason}}"
@@ -136,8 +133,7 @@ IF $ARGUMENTS contains "--resume":
         C) Cancel (do nothing)"
      → Wait for PM response.
      → OPTION A: execute resume protocol
-     → OPTION B: abort existing session (set mode: "aborted", restore
-       permissions if backup exists), then continue fresh init
+     → OPTION B: abort existing session (set mode: "aborted"), then continue fresh init
      → OPTION C: STOP
 ```
 
@@ -178,64 +174,28 @@ IF $ARGUMENTS contains "--resume":
    valid_epics = [list of valid queued epic_ids, sorted by priority then added_at]
 ```
 
-#### 6. Temp File Cleanup
-
-Per `skills/permission-sandwich.md` Section 5.3:
+#### 6. Verify Steroids Preset
 
 ```
-TEMP_FILE_CLEANUP:
-  IF .aid-o/03-config/permissions-backup.json.tmp exists:
-    → Delete it
-    → Log: "Cleaned up orphaned backup temp file"
-  IF .claude/settings.json.tmp exists:
-    → Delete it
-    → Log: "Cleaned up orphaned settings temp file"
+CHECK_PRESET:
+  1. Read .claude/settings.local.json → permissions.allow[]
+  2. Load Steroids preset definition from .aid-o/03-config/policies/permissions.yaml
+     (or defaults/policies/permissions.yaml if project-level missing)
+  3. Check: does current allow[] contain Bash(*:*)?
+     (Steroids key indicator — Aspirin does NOT have unrestricted Bash)
+  4. IF yes:
+     → Log: {"state": "FIRST_AID_INIT", "action": "preset_check",
+        "preset": "steroids", "result": "pass"}
+     → Continue
+  5. IF no:
+     → ABORT with message:
+       "First Aid vyzaduje preset Steroids 💉
+        Aktualni opravneni nejsou dostatecna.
+        Spust /aid-setup a zvol Steroids, nebo nastav rucne.
+        Destruktivni prikazy zustavaji zakazany (deny-list)."
 ```
 
-#### 7. Execute Permission Sandwich — Backup
-
-Per `skills/permission-sandwich.md` Section 1:
-
-```
-BACKUP_PERMISSIONS:
-  1. Read .claude/settings.json
-     - IF missing: create minimal default {"permissions": {"allow": []}}
-     - IF invalid JSON: ABORT
-  2. Check for orphaned backup (.aid-o/03-config/permissions-backup.json)
-     - IF exists: execute CRASH_RECOVERY per Section 5 of permission-sandwich.md
-  3. Atomic write backup:
-     a. Write to .aid-o/03-config/permissions-backup.json.tmp
-     b. Validate temp file
-     c. Rename to .aid-o/03-config/permissions-backup.json
-     d. Verify content matches original
-  4. Log: {"state": "FIRST_AID_INIT", "action": "permissions_backup",
-     "backup_path": ".aid-o/03-config/permissions-backup.json",
-     "original_allow_count": {N}}
-```
-
-**On backup failure:** ABORT. Do not proceed. Per permission-sandwich.md MUST Rule 1:
-"ALWAYS backup before elevating. No backup means no restore."
-
-#### 8. Execute Permission Sandwich — Elevate
-
-Per `skills/permission-sandwich.md` Section 2:
-
-```
-ELEVATE_PERMISSIONS:
-  1. Resolve permissions-auto.yaml (project → defaults → generate)
-  2. Parse allow[] + learned[] → effective_allow
-  3. Validate against hard-deny list (Section 3) → remove violations
-  4. Atomic write elevated .claude/settings.json:
-     a. Preserve existing settings structure
-     b. Replace permissions.allow[] with effective_allow
-     c. Write via temp file + rename
-  5. Log: {"state": "FIRST_AID_INIT", "action": "permissions_elevated",
-     "source": "{project|defaults|generated}",
-     "entries_before": {N}, "entries_after": {M},
-     "hard_deny_removed": {count}}
-```
-
-#### 9. Initialize Auto-Mode State
+#### 7. Initialize Auto-Mode State
 
 Create `.aid-o/04-engine/auto-mode-state.yaml`:
 
@@ -251,23 +211,8 @@ session:
     - "{epic_id_2}"
 
   permissions:
-    backup_path: ".aid-o/03-config/permissions-backup.json"
-    elevated_at: "{ISO 8601}"
-    source: "{project|defaults|generated}"
-    applied_permissions: [{list of effective_allow entries}]
-    applied_permissions_count: {N}
-    original_permissions_snapshot:
-      allow: [{original allow entries from settings.json BEFORE elevation}]
-      deny: [{original deny entries from settings.json BEFORE elevation, or empty list}]
-    learned_permissions: []
-    grant_log: []
-    # Each entry records a dynamic permission grant during the session:
-    # - permission: "Bash(npm test:*)"
-    #   source: "pm_escalation"       # pm_escalation | auto_learn | manual
-    #   actor: "pm"                    # pm | controller | agent
-    #   step_ref: "E-011_step_3"      # which step triggered the grant
-    #   timestamp: "2026-02-26T20:15:00Z"
-    #   reason: "PM approved npm test during E1 escalation"
+    preset: "steroids"
+    verified_at: "{ISO 8601}"
 
   escalation:
     budget: 3
@@ -300,7 +245,7 @@ session:
     per_epic: []
 ```
 
-#### 10. Display FIRST AID Startup Animation
+#### 8. Display FIRST AID Startup Animation
 
 Display the following 4-frame animation progressively. Output each frame with a
 brief pause between them (the Controller outputs them sequentially). Replace all
@@ -362,7 +307,7 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║  Session:      {session_id}                                        ║
   ║  Mode:         Autonomous                                          ║
   ║  EPICs queued: {count} ({total_estimated_steps} estimated steps)   ║
-  ║  Permissions:  Elevated ({source}, {allow_count} entries)          ║
+  ║  Preset:       Steroids 💉 (verified)                              ║
   ║  Escalation:   Budget {budget} | Used 0                            ║
   ║                                                                    ║
   ║  Queue:                                                            ║
@@ -374,7 +319,7 @@ exactly as shown (preserving alignment and box-drawing characters).
   ║  │ .. │            │                          │ ... and {N} more│  ║
   ║  └────┴────────────┴──────────────────────────┴─────────────────┘  ║
   ║                                                                    ║
-  ║  ⚠ USE AT YOUR OWN RISK — Elevated permissions active.              ║
+  ║  ⚠ USE AT YOUR OWN RISK — Steroids 💉 preset active.                ║
   ║  Claude will execute commands without confirmation prompts.         ║
   ║  Stop command:  /aid-stop to disengage at any time                 ║
   ║                                                                    ║
@@ -405,8 +350,6 @@ exactly as shown (preserving alignment and box-drawing characters).
 | `{session_id}` | `auto-mode-state.yaml` -> `session.session_id` |
 | `{count}` | Length of `valid_epics` list |
 | `{total_estimated_steps}` | Sum of estimated steps across queued EPICs (from EPIC files if available, otherwise `?`) |
-| `{source}` | Permission source: `project`, `defaults`, or `generated` |
-| `{allow_count}` | Number of effective_allow entries after elevation |
 | `{budget}` | `session.escalation.budget` |
 | `{priority}` | Queue entry priority (`critical`, `high`, `medium`, `low`) |
 | `{epic_id_N}` | EPIC ID from queue entry |
@@ -423,7 +366,7 @@ exactly as shown (preserving alignment and box-drawing characters).
 **Send Slack Status Update (Type G):**
 `:rocket: FIRST AID started — {count} EPICs queued. Session {session_id}.`
 
-#### 11. Create Session Evidence Directory
+#### 9. Create Session Evidence Directory
 
 ```
 mkdir -p .aid-o/04-engine/evidence/FIRST-AID-{session_id}/
@@ -678,7 +621,7 @@ PARALLEL_ESCALATION:
        - Fix (A): resume ALL agents after fix applied
        - Skip (B): mark triggering EPIC as failed, resume others
        - Abort (C): abort ALL parallel agents, transition to QUEUE_ADVANCE
-       - Continue Manual (D): abort parallel execution, restore permissions,
+       - Continue Manual (D): abort parallel execution,
          PM drives remaining EPICs
     4. ON resume:
        → Set session.mode = "auto"
@@ -798,9 +741,7 @@ EXECUTE_EPIC(epic_id):
      - Auto-mode decision behaviors are defined in step_1_architect output,
        Section 1 (Decision Point Mapping)
      - Escalation triggers follow skills/auto-escalation.md
-     - Permission learning runs at each PHASE_CHECK per skills/permission-sandwich.md
-       Each learned permission is appended to both session.permissions.learned_permissions[]
-       AND session.permissions.grant_log[] (with source: "auto_learn", actor: "controller")
+     - Steroids 💉 preset provides all needed permissions; deny-list enforced at all times
   3. On EPIC completion (DONE state reached):
      → The DONE state handles: release, merge, Curator, Auditor, memory indexing
      → auto-mode-specific DONE behaviors apply (auto-defer intermediate release,
@@ -859,7 +800,7 @@ Per `skills/auto-escalation.md`:
 4. On PM response:
    - Fix/Skip: resume auto-mode, continue from interrupted state
    - Abort: mark EPIC failed, transition to QUEUE_ADVANCE
-   - Continue Manual: restore permissions, exit auto-mode, PM drives completion
+   - Continue Manual: exit auto-mode, PM drives completion
 
 **Evidence:** Per-EPIC evidence in `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`
 
@@ -941,7 +882,7 @@ IF result_status == "failed":
   → Wait for PM:
     - "resume" → set paused: false, mode: auto, continue to next
     - "abort" → transition to FIRST_AID_COMPLETE
-    - "continue-manual" → restore permissions, exit auto
+    - "continue-manual" → exit auto
 ```
 
 #### 4. Check Queue
@@ -984,48 +925,7 @@ IF result_status == "failed":
    - IF unrecoverable error: status = "error"
 ```
 
-#### 2. Restore Permissions
-
-Per `skills/permission-sandwich.md` Section 4:
-
-```
-RESTORE_PERMISSIONS:
-  1. Read .aid-o/03-config/permissions-backup.json
-     - IF file exists and valid JSON: use as restore source → go to step 2
-     - IF missing or corrupted:
-       a. Log WARNING: "Backup file missing or corrupted. Attempting snapshot fallback."
-       b. Read .aid-o/04-engine/auto-mode-state.yaml →
-          session.permissions.original_permissions_snapshot
-       c. IF snapshot exists and contains allow[]:
-          → Reconstruct settings.json content from snapshot:
-            {
-              "permissions": {
-                "allow": [{snapshot allow entries}],
-                "deny": [{snapshot deny entries}]
-              }
-            }
-          → Use reconstructed content as restore source → go to step 2
-          → Log: {"state": "FIRST_AID_COMPLETE", "action": "permissions_snapshot_fallback",
-             "source": "auto-mode-state.yaml"}
-       d. IF snapshot also missing or empty:
-          → WARN PM: "Cannot restore permissions — backup file AND snapshot both
-            unavailable. Current .claude/settings.json retains elevated permissions.
-            Manually review .claude/settings.json."
-          → Log WARNING and continue (non-blocking)
-          → Skip steps 2-3, proceed to step 4
-  2. Atomic write restore:
-     a. Write restore source content to .claude/settings.json.tmp
-     b. Validate temp file is valid JSON
-     c. Rename to .claude/settings.json
-  3. Delete backup file (.aid-o/03-config/permissions-backup.json) if it exists
-  4. Log: {"state": "FIRST_AID_COMPLETE", "action": "permissions_restored",
-     "entries_restored": {N}, "restore_source": "{backup_file|snapshot_fallback}"}
-```
-
-**Per permission-sandwich.md MUST Rule 5:** Restore is non-blocking. If it fails,
-warn PM and continue with remaining completion actions.
-
-#### 3. Display Completion Banner and Generate Summary Report
+#### 2. Display Completion Banner and Generate Summary Report
 
 First, display the completion banner. Then generate the full summary report.
 
@@ -1162,10 +1062,7 @@ shown (preserving alignment and box-drawing characters).
   ║  PERMISSIONS                                                       ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║                                                                    ║
-  ║  Elevated at:   {elevated_timestamp}                               ║
-  ║  Restored at:   {restored_timestamp}                               ║
-  ║  Source:         {source}                                          ║
-  ║  Learned:       {learned_count} new permissions added              ║
+  ║  Preset: Steroids 💉 (verified at session start)                   ║
   ║                                                                    ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║  ARCHIVAL                                                          ║
@@ -1240,8 +1137,6 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
 | `{tag_status}` | `"created (v{version})"` or `"skipped"` |
 | `{release_status}` | `"created"` or `"skipped"` |
 | `{version_bump_list_or_none}` | Bulleted list from `session.aggregate.version_bumps[]` or `"  (none -- all releases deferred)"` |
-| `{source}` | `session.permissions.source` |
-| `{learned_count}` | Length of `session.permissions.learned_permissions` |
 | `{epics_archived_count}` | `session.aggregate.epics_archived` — count of EPICs moved to `02-epics/archive/` during this session. Incremented in DONE state archive logic. |
 | `{plans_archived_count}` | `session.aggregate.plans_archived` — count of plans moved to `01-plans/archive/` during this session. Incremented in QUEUE_ADVANCE plan archival check or DONE state archive logic. |
 
@@ -1257,7 +1152,7 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
   72-column frame. Per-EPIC duration is available in the per-EPIC evidence and
   `auto-mode-state.yaml` → `session.aggregate.per_epic[]`.
 
-#### 4. Save Summary Report
+#### 3. Save Summary Report
 
 ```
 1. Write report to:
@@ -1276,7 +1171,7 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
    })
 ```
 
-#### 5. Update Auto-Mode State
+#### 4. Update Auto-Mode State
 
 ```
 1. Update .aid-o/04-engine/auto-mode-state.yaml:
@@ -1289,7 +1184,7 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
    "epics_completed": N, "total_duration": "{duration}"}
 ```
 
-#### 6. Send Final Slack Notification
+#### 5. Send Final Slack Notification
 
 ```
 IF status == "completed":
@@ -1300,7 +1195,7 @@ IF status == "aborted" or "stopped":
    Session {session_id}. {remaining} EPICs remain in queue."
 ```
 
-#### 7. Present Report to PM
+#### 6. Present Report to PM
 
 Display the summary report in the conversation (or via Slack Type F).
 
@@ -1310,8 +1205,8 @@ Display the summary report in the conversation (or via Slack Type F).
 
 ## Resume After /aid-stop
 
-When `/aid-stop` is invoked during auto-mode, it sets `session.mode: "manual"` and
-triggers permission restore. The queue and EPIC progress are preserved.
+When `/aid-stop` is invoked during auto-mode, it sets `session.mode: "manual"`.
+The queue and EPIC progress are preserved.
 
 When `/aid-first-aid --resume` is invoked later:
 
@@ -1334,14 +1229,14 @@ RESUME_SESSION:
       Queue:       {remaining} EPICs remaining
 
       This will:
-      - Re-elevate permissions (permission sandwich)
+      - Verify Steroids 💉 preset is still active
       - Resume from the next queued EPIC (or retry the paused one)
       - Continue autonomous execution
 
       Proceed? (yes/no)"
 
   3. IF PM confirms:
-     a. Execute Permission Sandwich — Backup + Elevate (same as fresh init)
+     a. Verify Steroids 💉 preset (same as fresh init step 6)
      b. **Reset interrupted EPIC status** — scan `epic-queue.yaml` for entries with `status: "running"`:
         - If found: reset status to `"queued"`, log: `"Reset interrupted EPIC {epic_id} from running → queued for resume pickup"`
         - This ensures QUEUE_PROCESSING next() finds the interrupted EPIC
@@ -1371,7 +1266,7 @@ RESUME_SESSION:
           ║  Remaining:  {N} EPICs ({estimated_steps} estimated steps)         ║
           ║  Escalation: Budget {budget} | Used {used}                         ║
           ║                                                                    ║
-          ║  Permissions re-elevated. Syringe reloaded.                        ║
+          ║  Preset: Steroids 💉 (verified). Syringe reloaded.                 ║
           ║  Stop command:  /aid-stop to disengage                             ║
           ║                                                                    ║
           ╚══════════════════════════════════════════════════════════════════════╝
@@ -1425,25 +1320,16 @@ AID_STOP (during FIRST AID):
      - IF mid-gate: wait for current gate command to finish
      - This prevents partial state corruption
 
-  3. Restore permissions:
-     Execute RESTORE_PERMISSIONS per skills/permission-sandwich.md Section 4.
-     Use the same fallback chain as FIRST_AID_COMPLETE step 2:
-       primary:  .aid-o/03-config/permissions-backup.json
-       fallback: auto-mode-state.yaml → session.permissions.original_permissions_snapshot
-     Restore is non-blocking — if both sources are unavailable, warn PM and continue.
-
-  4. Save progress:
+  3. Save progress:
      → auto-mode-state.yaml already has latest progress
      → plan_progress.json has per-EPIC step progress
      → epic-queue.yaml has queue state
 
-  5. Inform PM:
+  4. Inform PM:
      "FIRST AID stopped.
       Session:  {session_id}
       Progress: {epics_completed}/{epics_total} EPICs
       Current:  {current_epic_id} at state {current_state}
-
-      Permissions restored to pre-auto-mode state.
 
       Options:
       - Resume later: /aid-first-aid --resume
@@ -1469,30 +1355,22 @@ ON_UNRECOVERABLE_ERROR(error):
      → Write current state to auto-mode-state.yaml
      → Stash uncommitted work if dirty working tree
 
-  3. Restore permissions:
-     Execute RESTORE_PERMISSIONS (non-blocking).
-     Use the same fallback chain as FIRST_AID_COMPLETE step 2:
-       primary:  .aid-o/03-config/permissions-backup.json
-       fallback: auto-mode-state.yaml → session.permissions.original_permissions_snapshot
-     If both sources are unavailable, warn PM and continue.
-
-  4. Update state:
+  3. Update state:
      → session.mode = "aborted"
      → session.progress.current_state = "ERROR"
 
-  5. Notify PM:
+  4. Notify PM:
      "FIRST AID encountered an unrecoverable error.
       Error: {error}
       EPIC: {current_epic_id}
       State: {current_state}
 
-      Permissions have been restored.
       Session progress is saved.
 
       To investigate: /aid-epic-status {current_epic_id}
       To resume: /aid-first-aid --resume"
 
-  6. STOP
+  5. STOP
 ```
 
 ### Per-State Error Table
@@ -1501,13 +1379,11 @@ ON_UNRECOVERABLE_ERROR(error):
 |-------|----------------|--------|
 | FIRST_AID_INIT | Workspace missing | ABORT (no cleanup needed) |
 | FIRST_AID_INIT | Queue empty | ABORT (no cleanup needed) |
-| FIRST_AID_INIT | Backup failure | ABORT (no elevation happened) |
-| FIRST_AID_INIT | Elevation failure | Restore backup, ABORT |
+| FIRST_AID_INIT | Steroids preset not active | ABORT with setup instructions |
 | QUEUE_PROCESSING | Mode changed externally | Transition to FIRST_AID_COMPLETE |
 | QUEUE_PROCESSING | EPIC file missing | Mark EPIC failed, advance queue |
 | QUEUE_PROCESSING | Escalation budget exceeded | E12 trigger, PM decides |
 | QUEUE_ADVANCE | Failed EPIC | Auto-pause queue, notify PM |
-| FIRST_AID_COMPLETE | Restore failure | Warn PM (non-blocking), continue |
 | FIRST_AID_COMPLETE | Summary generation failure | Log error, continue (non-blocking) |
 
 ---
@@ -1523,7 +1399,7 @@ Every state transition MUST append a line to the session-level stage log at
 
 **Examples:**
 ```json
-{"timestamp": "2026-02-24T16:00:00Z", "state": "FIRST_AID_INIT", "epic_id": null, "action": "session_start", "details": "3 EPICs queued, permissions elevated from defaults", "result": "pass"}
+{"timestamp": "2026-02-24T16:00:00Z", "state": "FIRST_AID_INIT", "epic_id": null, "action": "session_start", "details": "3 EPICs queued, Steroids preset verified", "result": "pass"}
 {"timestamp": "2026-02-24T16:00:05Z", "state": "QUEUE_PROCESSING", "epic_id": "E-20260224-a1b2", "action": "epic_start", "details": "Starting EPIC 1/3: E-20260224-a1b2 (high)", "result": "pending"}
 {"timestamp": "2026-02-24T17:30:00Z", "state": "QUEUE_ADVANCE", "epic_id": "E-20260224-a1b2", "action": "epic_completed", "details": "EPIC 1/3 completed. 5 steps, 0 escalations.", "result": "pass"}
 {"timestamp": "2026-02-24T17:30:05Z", "state": "QUEUE_PROCESSING", "epic_id": "E-20260224-c3d4", "action": "epic_start", "details": "Starting EPIC 2/3: E-20260224-c3d4 (medium)", "result": "pending"}
@@ -1538,23 +1414,20 @@ Per-EPIC execution also logs to the EPIC-specific stage log at
 
 ## Reference Files
 
-- **PERMISSION SANDWICH:** `skills/permission-sandwich.md` — backup, elevate, restore, crash recovery, permission learning
 - **ESCALATION:** `skills/auto-escalation.md` — 16 triggers, pause/resume, PM notification format, escalation budget
 - **ORCHESTRATION:** `skills/epic-orchestration.md` — 11-state machine (used inside each EPIC run)
 - **QUEUE:** `skills/epic-queue.md` — queue format, operations, auto-pickup, safety guards
 - **PM COMMS:** `skills/slack-mcp.md` — Slack MCP protocol, message types, fallback, timeouts
-- **PERMISSIONS:** `defaults/policies/permissions-auto.yaml` — default auto-mode permission template
 - **MODE FLAG:** `.aid-o/04-engine/auto-mode-state.yaml` — session state, mode, aggregate metrics
 
 ---
 
 ## Important
 
-- **Read the four skills listed in Core Instruction BEFORE starting.** They are the
+- **Read the three skills listed in Core Instruction BEFORE starting.** They are the
   authoritative sources. This command file is the execution protocol; the skills define
   the rules.
-- **Permission sandwich is a SAFETY mechanism.** Its primary job is ensuring elevated
-  permissions never persist beyond the auto-mode session. If in doubt, restore.
+- **Steroids 💉 preset is required.** Destructive commands are always denied via deny-list.
 - **The mode flag is read from disk at every decision point, never cached.** This is how
   `/aid-stop` takes immediate effect.
 - **Escalation is the ONLY mandatory PM touchpoint.** Everything else is automated.
@@ -1563,11 +1436,6 @@ Per-EPIC execution also logs to the EPIC-specific stage log at
   does not silently skip failures.
 - **Evidence is mandatory.** Every transition logs to `stage_log.jsonl`. Every EPIC
   produces a `final_report.md`. The session produces a `summary-report.md`.
-- **Permission learning is automatic.** If PM grants a permission during auto-mode,
-  it is persisted for future sessions (unless it is on the hard-deny list).
-  Every grant (from PM escalation, auto-learn, or manual) is recorded in
-  `session.permissions.grant_log[]` with permission, source, actor, step_ref,
-  timestamp, and reason.
 - **The hard-deny list is non-negotiable.** It cannot be overridden by configuration,
   by PM grants, or by any other mechanism.
 - If `$ARGUMENTS` is empty: start fresh auto-mode with current queue (equivalent to

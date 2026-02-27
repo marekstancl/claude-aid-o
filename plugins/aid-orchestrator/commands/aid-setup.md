@@ -307,11 +307,11 @@ Setup Options Available
    (Recommended: at minimum Qdrant local + GitHub for GitHub-hosted projects)
 
 7. Permission Preset
-   Controls what agents can do:
-   - Safe: read-only, no file changes
-   - Recommended: edit files, run tests/linters, local git (no push)
-   - Advanced: full access including git push and package install
-   (Recommended: Recommended preset)
+   Controls what Claude Code can do without asking:
+   - Aspirin 💊: edit files, run tests/linters, local git — VS Code asks for risky ops
+   - Steroids 💉: full access, zero prompts — required for /aid-first-aid
+   Both presets deny destructive commands (rm -rf /, git push --force, sudo, etc.)
+   (Default: Aspirin 💊)
 
 8. Document Language
    Language for generated plans, EPICs, and reports.
@@ -1020,39 +1020,36 @@ Permission Presets
 
 Choose a permission level for AID agents:
 
-  1. Safe       — Read-only. No file writes, no command execution.
-                  Tools: Read, Glob, Grep, Task, WebSearch
-                  Best for: auditing, code review, exploration
+  1. Aspirin 💊  — Edit, test, local git. VS Code asks for risky ops.  [DEFAULT]
+                   Tools: Read, Write, Edit, Glob, Grep, local git,
+                          test runners, Qdrant memory
+                   Blocked: git push, package install, unrestricted bash
+                   Best for: most development workflows
 
-  2. Recommended — Edit, test, local git. No push, no remote MCP.  [DEFAULT]
-                  Tools: Read, Write, Edit, Glob, Grep, local git,
-                         test runners, Qdrant memory
-                  Blocked: git push, rm -rf, curl, wget, Slack MCP
-                  Best for: most development workflows
-
-  3. Advanced   — Full access. Push, web, all MCP servers.
-                  Tools: everything enabled, nothing blocked
-                  MCP: GitHub, MinIO, Docker, Playwright, Context7,
-                       Qdrant memory
-                  Best for: trusted CI, experienced users
+  2. Steroids 💉 — Full access, zero prompts. Required for /aid-first-aid.
+                   Tools: everything enabled
+                   MCP: GitHub, MinIO, Docker, Playwright, Context7,
+                        Qdrant memory
+                   Best for: trusted CI, experienced users, first-aid
 
 Comparison:
-  +-------------------+------+-------------+----------+
-  | Capability        | Safe | Recommended | Advanced |
-  +-------------------+------+-------------+----------+
-  | Read files        |  Y   |      Y      |    Y     |
-  | Write/Edit files  |  N   |      Y      |    Y     |
-  | Run tests         |  N   |      Y      |    Y     |
-  | Local git ops     |  N   |      Y      |    Y     |
-  | git push          |  N   |      N      |    Y     |
-  | Web access        |  Y*  |      N      |    Y     |
-  | Qdrant memory     |  N   |      Y      |    Y     |
-  | All MCP servers   |  N   |      N      |    Y     |
-  | Destructive cmds  |  N   |      N      |    Y     |
-  +-------------------+------+-------------+----------+
-  * Safe allows WebSearch (read-only) but not WebFetch
+  +--------------------+-------------+-------------+
+  |                    | Aspirin 💊  | Steroids 💉 |
+  +--------------------+-------------+-------------+
+  | Read files         |      Y      |      Y      |
+  | Edit/Write files   |      Y      |      Y      |
+  | Git (local)        |      Y      |      Y      |
+  | Git push           |      N      |      Y      |
+  | Run tests/lint     |      Y      |      Y      |
+  | Package install    |      N      |      Y      |
+  | Bash (unrestricted)|      N      |      Y      |
+  | All MCP servers    |      N      |      Y      |
+  | Destructive cmds   |      N      |      N      |
+  +--------------------+-------------+-------------+
+  Note: Steroids 💉 is required for /aid-first-aid.
+  Destructive commands are ALWAYS denied (both presets).
 
-Select preset: (1/2/3) [2]
+Select preset: (1/2) [1]
 ```
 
 When PM selects a preset, perform **dual write** to BOTH files:
@@ -1071,22 +1068,23 @@ When PM selects a preset, perform **dual write** to BOTH files:
 
 3. Save the selected preset to `project-profile.yaml` under `permission_preset`:
    ```yaml
-   permission_preset: "recommended"   # safe | recommended | advanced
+   permission_preset: "aspirin"   # aspirin | steroids
    ```
 
 4. Confirm to PM:
    ```
    Permissions applied:
-     - Preset: {name}
+     - Preset: {Aspirin 💊 | Steroids 💉}
      - AID agents: .aid-o/03-config/policies/permissions.yaml
      - VS Code auto-allow: .claude/settings.local.json ({count} entries)
      - VS Code will NOT prompt for commands in the allow list
+     - Destructive commands are ALWAYS denied regardless of preset
    ```
 
 **Important:**
 - NEVER overwrite existing user entries in `.claude/settings.local.json`
 - Read -> merge -> write (additive, never destructive)
-- For "advanced": `Bash(*:*)` means VS Code never prompts for ANY bash command
+- For "steroids": `Bash(*:*)` means VS Code never prompts for ANY bash command
 - Target file is `.claude/settings.local.json` (NOT `.claude/settings.json`)
 
 **Option 8: Document Language**

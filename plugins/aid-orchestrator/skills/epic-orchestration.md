@@ -111,7 +111,6 @@ The Controller follows this high-level sequence when processing an EPIC:
 - **Epic queue:** `skills/epic-queue.md` — queue management, auto-pickup protocol
 - **FIRST AID mode start:** `commands/aid-first-aid.md` — PM confirms queue, permissions elevated, auto-mode activated
 - **FIRST AID mode stop:** `commands/aid-stop.md` — immediate mode switch to manual or paused
-- **Permission lifecycle:** `skills/permission-sandwich.md` — permission backup, elevation, restoration, crash recovery
 - **Auto-escalation protocol:** `skills/auto-escalation.md` — 16 trigger conditions, severity classification, escalation budget
 - **Auto-mode DONE state:** `skills/auto-done-state.md` — DONE state in auto-mode: release decisions, queue transitions, cross-EPIC summary
 - **Auto-mode state file:** `.aid-o/04-engine/auto-mode-state.yaml` — current mode, active EPIC, escalation count, progress snapshot

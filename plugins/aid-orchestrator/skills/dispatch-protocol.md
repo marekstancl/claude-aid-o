@@ -35,7 +35,7 @@ PERMISSIONS CONTEXT:
 ```
 
 If `permissions.yaml` does not exist or `active_preset` is not set,
-default to `recommended` preset behavior.
+default to `aspirin` preset behavior.
 
 ---
 

@@ -47,7 +47,7 @@ At every PM decision point (PLAN_REVIEW, PHASE_CHECK, PM_APPROVAL, DONE), the Co
 
 ## Starting and Stopping FIRST AID Mode
 
-- **Start:** `/aid-first-aid` — PM confirms the EPIC queue; Controller elevates permissions, sets `mode: auto`, and begins autonomous execution. See `commands/aid-first-aid.md` and `skills/permission-sandwich.md`.
+- **Start:** `/aid-first-aid` — PM confirms the EPIC queue; Controller verifies Steroids 💉 preset, sets `mode: auto`, and begins autonomous execution. See `commands/aid-first-aid.md`.
 - **Stop:** `/aid-stop` — immediately sets `mode: manual` (or `paused` if mid-EPIC); Controller finishes the current step cleanly and then waits for PM. See `commands/aid-stop.md`.
 
 ## Escalation in Auto-Mode
@@ -505,12 +505,11 @@ IF mode == auto:
        - DONE -> IDLE transition happens automatically (no PM confirmation needed)
     → IF queue is empty:
        - Set mode: manual in auto-mode-state.yaml (auto-mode ends with the queue)
-       - Restore permissions (permission sandwich teardown — see skills/permission-sandwich.md)
        - Send final summary to PM: "FIRST AID complete — queue exhausted. {N} EPICs completed."
        - Remain in terminal DONE state
 
   See `skills/auto-done-state.md` for the full auto-mode DONE state protocol
-  (including cross-EPIC summary aggregation and permission teardown sequence).
+  (including cross-EPIC summary aggregation).
 
 ELSE (mode == manual):
   {existing behavior: completion summary presented interactively, queue check proceeds,
