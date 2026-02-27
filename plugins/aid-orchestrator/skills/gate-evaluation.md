@@ -26,14 +26,40 @@ Before evaluating step outputs normally, validate agent output integrity:
    - Action: re-dispatch agent (max 1 retry), then ESCALATION
 
 2. **Credit exhaustion detection:**
-   Check agent output for Claude Code credit error strings:
-   - "You've exceeded your usage limit"
-   - "rate limit exceeded"
-   - "insufficient credits"
-   - "usage cap reached"
-   - "token limit exceeded for your plan"
 
-   IF any match found → status: CREDIT_EXHAUSTED
+   CREDIT EXHAUSTION DETECTION:
+
+   Match agent output against these patterns (case-insensitive regex).
+   IF any pattern matches → credit_exhaustion = true
+
+   Pattern 1: /exceed(ed)?\s+(your\s+)?(usage|token|rate)\s*(limit|cap|quota)/i
+     Matches: "exceeded your usage limit", "exceed token quota", "exceeded rate cap"
+
+   Pattern 2: /insufficient\s+(credits?|funds|balance|quota)/i
+     Matches: "insufficient credits", "insufficient quota", "insufficient balance"
+
+   Pattern 3: /(rate|usage|token)\s*(limit|cap|quota)\s*(reached|exceeded|hit)/i
+     Matches: "rate limit reached", "usage cap exceeded", "token quota hit"
+
+   Pattern 4: /too\s+many\s+(requests|tokens|api\s+calls)/i
+     Matches: "too many requests", "too many tokens", "too many API calls"
+
+   Pattern 5: /(billing|payment|subscription)\s*(issue|problem|error|required)/i
+     Matches: "billing issue", "payment required", "subscription error"
+
+   Pattern 6: /429|rate.?limit/i
+     Matches: HTTP 429 status codes in error messages, "rate-limit", "rate_limit"
+
+   NOTE: These patterns cover English error messages. Non-English API responses
+   may require additional patterns.
+
+   ON MATCH:
+   1. Set credit_exhaustion = true
+   2. Log: "Credit exhaustion detected: pattern {N} matched on text: '{matched_substring}'"
+   3. Trigger existing CREDIT_EXHAUSTION_HANDLER
+   4. Do NOT match the same output against remaining patterns (short-circuit after first match)
+
+   IF credit_exhaustion = true → status: CREDIT_EXHAUSTED
    Action:
    a. Save interrupted state immediately:
       - Write `interrupted_step_context.json` to evidence:
@@ -506,4 +532,4 @@ For PM_APPROVAL auto-mode behavior, **see:** `skills/first-aid-controller.md` Se
 
 ---
 
-**Last Updated:** 2026-02-26
+**Last Updated:** 2026-02-27
