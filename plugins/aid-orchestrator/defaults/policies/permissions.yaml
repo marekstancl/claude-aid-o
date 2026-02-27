@@ -11,7 +11,7 @@ active_preset: "aspirin"  # aspirin | steroids
 
 presets:
   aspirin:
-    description: "Mirni bolest, ale na vsechno se zepta. Bezpecny default."
+    description: "Eases the pain but asks before every action. Safe default."
     claude_code_permissions:
       # Tools
       - "Glob"
@@ -61,7 +61,7 @@ presets:
     notes: "No git push, no package install, no rm, no network commands"
 
   steroids:
-    description: "Plny vykon, zadne otazky. Required for First Aid. Destruktivni prikazy jsou zakazany."
+    description: "Full power, no questions. Required for FIRST AID. Destructive commands are always denied."
     claude_code_permissions:
       - "Glob"
       - "Grep"

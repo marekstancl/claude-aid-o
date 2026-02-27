@@ -205,7 +205,7 @@ AUTONOMOUS MODE COMMANDS:
     plan → execute → gate → merge → next for each EPIC. PM is contacted only
     on escalation (16 defined triggers). Permissions are restored on completion.
     WARNING: Requires Steroids 💉 preset. Set via /aid-setup. Destructive commands are always denied.
-    Skill: skills/first-aid-mode.md
+    Skill: skills/first-aid-controller.md
 
   /aid-stop
     Emergency stop — immediately disengage FIRST AID auto-mode.

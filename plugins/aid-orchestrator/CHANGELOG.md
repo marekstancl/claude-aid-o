@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.1] — 2026-02-27
+
+### Fixed
+- **Curator evidence path** — `step_output.json` replaced with `output.md` so Curator can actually read agent improvement notes
+- **FIRST AID skill reference** — `skills/first-aid-mode.md` corrected to `skills/first-aid-controller.md` in `/aid-help`
+- **Czech preset descriptions** — translated to English in `permissions.yaml` (aspirin and steroids descriptions)
+- **Stale epic-breakdown.md references** — 6 references across 5 files replaced with `epic.md` (the actual template)
+
 ## [1.3.0] — 2026-02-27
 
 ### Added

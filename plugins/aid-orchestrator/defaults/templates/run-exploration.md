@@ -9,7 +9,7 @@ completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
 epic_id: {epic-id} (if epic run)
 epic_run: {N} of {M} (if epic run)
-epic_file: .aid-o/02-epics/{active|completed}/{epic-id}/epic-breakdown.md (if epic run)
+epic_file: .aid-o/02-epics/{epic-id}.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---

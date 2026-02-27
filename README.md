@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.3.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.3.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -131,7 +131,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.3.0** (current) — 16 quality fixes: queue dependency ordering, INTERMEDIATE_GUARDRAIL, canonical ID format, OVERLAP_CHECK algorithm, setup re-run detection, adapt_example() simplification
+- **v1.3.1** (current) — Audit-driven fixes: Curator evidence path bug, broken cross-ref, Czech→English translations, stale template references
+- **v1.3.0** — 16 quality fixes: queue dependency ordering, INTERMEDIATE_GUARDRAIL, canonical ID format, OVERLAP_CHECK algorithm, setup re-run detection, adapt_example() simplification
 - **v1.2.0** — Permission sandwich removed (Aspirin/Steroids presets), 4 Controller bug fixes (plan archival, version bump, release sub-phase, queue removal)
 - **v1.1.0** — Plan-writing skill, brainstorming modular split (3 files), critical rules and self-checks, 11→8 step simplification
 

@@ -360,7 +360,7 @@ During long runs (roughly every 2-3 phases or every major transition):
 Run files for epic runs are stored in the standard `{project.paths.runs_active}/` location, linked to the epic via `epic_id` in frontmatter.
 
 ### Workflow
-1. Create epic file in `.aid-o/02-epics/` from `templates/epic-breakdown.md`
+1. Create epic file in `.aid-o/02-epics/` from `templates/epic.md`
 2. For each run: create run file in `{project.paths.runs_active}/`, set `epic_id` in frontmatter
 3. Run file must reference: epic file, run number, what previous runs accomplished
 4. On run completion: update epic file (run log, progress)
@@ -504,7 +504,7 @@ Located in: `{project.paths.templates}`
 | run-new-feature.md | Feature development |
 | run-refactoring.md | Code cleanup with before/after tracking |
 | run-exploration.md | Research and investigation |
-| epic-breakdown.md | Multi-phase projects (3+ runs) |
+| epic.md | Multi-phase projects (3+ runs) |
 | active-work-template.md | Initial active-work.md setup |
 
 **Note:** Templates serve as STARTING POINT. Run file must be filled with detailed, specific content — objectives, affected files, approach, risks. A run file with only template placeholders is incomplete.

@@ -40,10 +40,10 @@ reaches the PM.
 Read all step output files from the completed run run:
 
 ```
-evidence/{epic_id}/{run_id}/steps/*/step_output.json
+evidence/{epic_id}/{run_id}/steps/*/output.md
 ```
 
-From each file, extract the `improvement_notes` array. Merge all notes into a single
+From each file, extract the `improvement_notes` section. Merge all notes into a single
 flat list. Ensure every note has `source_agent` and `source_step` fields populated.
 Skip notes that are empty arrays.
 
@@ -185,7 +185,7 @@ These constraints are non-negotiable:
 
 ```
 1. RECEIVE trigger (CURATOR_RESOLVE state, after GATES pass)
-2. COLLECT improvement_notes from evidence/{epic_id}/{run_id}/steps/*/step_output.json
+2. COLLECT improvement_notes from evidence/{epic_id}/{run_id}/steps/*/output.md
    → Merge into flat list, tag each note with source agent + step
 3. LOAD context:
    → .aid-o/04-engine/backlog.md    (existing entries, current IMP-{NNN} counter)
