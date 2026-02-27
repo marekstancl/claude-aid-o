@@ -39,6 +39,7 @@ import type {
   AuditReportResponse,
   EvidenceEpicEntry,
   EvidenceFileResponse,
+  EvidenceSearchResponse,
   StoredIdea,
   IdeaCreateRequest,
   IdeaUpdateRequest,
@@ -54,6 +55,7 @@ import type {
   CompanionSession,
   CompanionStatus,
   EpicMetadata,
+  TheaterData,
 } from '../types/api';
 
 // ---------------------------------------------------------------------------
@@ -279,6 +281,14 @@ export interface ApiClient {
   /** GET /api/p/:projectId/evidence/:epicId/:runId/files/:filePath */
   getEvidenceFile(epicId: string, runId: string, filePath: string): Promise<ApiResult<EvidenceFileResponse>>;
 
+  /** GET /api/p/:projectId/evidence/search?q=:query&limit=:limit */
+  searchEvidence(query: string, limit?: number): Promise<ApiResult<EvidenceSearchResponse>>;
+
+  // ----- Pipeline Theater -----
+
+  /** GET /api/p/:projectId/pipeline/theater/:epicId/:runId */
+  getPipelineTheater(epicId: string, runId: string): Promise<ApiResult<TheaterData>>;
+
   // ----- Ideas -----
 
   /** GET /api/p/:projectId/ideas */
@@ -425,6 +435,23 @@ export function createApiClient(
     getEvidenceFile: (epicId: string, runId: string, filePath: string) =>
       typedFetch<EvidenceFileResponse>(
         `${base}/evidence/${encodeURIComponent(epicId)}/${encodeURIComponent(runId)}/files/${filePath}`,
+        timeoutMs,
+      ),
+
+    searchEvidence: (query: string, limit?: number) => {
+      const params = new URLSearchParams({ q: query });
+      if (limit !== undefined) params.set('limit', String(limit));
+      return typedFetch<EvidenceSearchResponse>(
+        `${base}/evidence/search?${params.toString()}`,
+        timeoutMs,
+      );
+    },
+
+    // ----- Pipeline Theater -----
+
+    getPipelineTheater: (epicId: string, runId: string) =>
+      typedFetch<TheaterData>(
+        `${base}/pipeline/theater/${encodeURIComponent(epicId)}/${encodeURIComponent(runId)}`,
         timeoutMs,
       ),
 

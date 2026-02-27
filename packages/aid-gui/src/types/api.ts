@@ -934,6 +934,93 @@ export interface LessonEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Evidence Search
+// ---------------------------------------------------------------------------
+
+/**
+ * A single search match result from the evidence search endpoint.
+ *
+ * Returned as array items within `EvidenceSearchResponse.results`.
+ */
+export interface EvidenceSearchResult {
+  /** EPIC identifier containing the matched file. */
+  epicId: string;
+  /** Run identifier containing the matched file. */
+  runId: string;
+  /** Relative file path within the run directory. */
+  filePath: string;
+  /** 1-based line number of the match. */
+  matchLine: number;
+  /** The matched line content, trimmed. */
+  context: string;
+}
+
+/**
+ * Response payload from GET /api/p/:projectId/evidence/search.
+ *
+ * Wrapped in `ApiResponse<EvidenceSearchResponse>` envelope.
+ */
+export interface EvidenceSearchResponse {
+  /** Array of matching results, up to the limit. */
+  results: EvidenceSearchResult[];
+  /** Total number of matches found (before limit). */
+  total: number;
+  /** Applied limit. */
+  limit: number;
+  /** The search query string. */
+  query: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline Theater
+// ---------------------------------------------------------------------------
+
+/**
+ * A single step in the pipeline theater view.
+ *
+ * Merges plan.json step data with plan_progress.json timing data.
+ */
+export interface TheaterStep {
+  /** Step identifier (e.g., "step_1_architect"). */
+  id: string;
+  /** Agent role that executes this step. */
+  role: string;
+  /** Execution status (e.g., "pending", "executing", "done", "failed"). */
+  status: string;
+  /** ISO 8601 timestamp when the step started, or null. */
+  startedAt: string | null;
+  /** ISO 8601 timestamp when the step completed, or null. */
+  completedAt: string | null;
+  /** Duration in milliseconds, or null if not yet completed. */
+  durationMs: number | null;
+  /** Step objective description. */
+  objective: string;
+}
+
+/**
+ * Combined theater data for a specific EPIC run.
+ *
+ * Returned from GET /api/p/:projectId/pipeline/theater/:epicId/:runId.
+ * Wrapped in `ApiResponse<TheaterData>` envelope.
+ */
+export interface TheaterData {
+  /** EPIC identifier. */
+  epicId: string;
+  /** Run identifier. */
+  runId: string;
+  /** Steps with merged progress data. */
+  steps: TheaterStep[];
+  /** Raw stage log entries. */
+  stageLog: StageLogEntryResponse[];
+  /** Total number of steps in the plan. */
+  totalSteps: number;
+  /** Number of completed steps. */
+  completedSteps: number;
+  /** Overall run status (e.g., "pending", "executing", "done", "failed"). */
+  overallStatus: string;
+}
+
+// ---------------------------------------------------------------------------
 // Knowledge
 // ---------------------------------------------------------------------------
 

@@ -39,7 +39,7 @@ import type {
   WsReplayMessage,
   EventTopic,
 } from '../types/ws';
-import type { StageLogEntryResponse, StoredIdea } from '../types/api';
+import type { StageLogEntryResponse, StoredIdea, PendingDecisionEntry } from '../types/api';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -201,11 +201,18 @@ function dispatchEvent(msg: WsEventMessage): void {
     case 'decisions': {
       if (data.type === 'file_change' && data.parsedData != null) {
         const parsed = data.parsedData as Record<string, unknown>;
-        // If the parsed data is an array, it is the decisions list
+        // If the parsed data is an array, it is the pending decisions list
         if (Array.isArray(parsed)) {
           store.setPendingDecisions(parsed.length);
+          // Also update the full pending decisions list so DecisionHub
+          // can detect new arrivals and trigger notifications
+          store.setPendingDecisionsList(parsed as PendingDecisionEntry[]);
         } else if ('total' in parsed && typeof parsed.total === 'number') {
           store.setPendingDecisions(parsed.total);
+          // If the response includes a decisions array, use it
+          if ('decisions' in parsed && Array.isArray(parsed.decisions)) {
+            store.setPendingDecisionsList(parsed.decisions as PendingDecisionEntry[]);
+          }
         }
       }
       break;

@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.4.0] — 2026-02-27
+
+### Added
+- **GUI Dashboard** — full-featured web dashboard (`aid-gui` package) with Express backend, WebSocket real-time updates, and React 19 + Zustand 5 frontend
+- **Ideas-to-Execution Kanban** — drag-and-drop board tracking ideas through exploration → planned → running → done lifecycle with auto-status from linked plans/EPICs
+- **AI Companion Chat** — SSE-streaming chat panel with markdown rendering, session management, voice input (Web Speech API), and contextual hint buttons
+- **EPIC Lifecycle Manager** — GUI-driven EPIC listing with frontmatter parsing, run/schedule actions, queue integration, and status-sorted display
+- **Evidence Vault** — full-text grep search across evidence files (200-result cap, binary detection), date-grouped collapsible sidebar, and markdown preview toggle with DOMPurify sanitization
+- **Pipeline Theater SVG Timeline** — Gantt-like horizontal timeline with color-coded role bars (architect/backend/frontend/qa/docs/security), replay controls (0.5x–4x speed), EPIC/run selector, and live auto-scroll mode
+- **Decision Hub Notifications** — Web Audio API sound alerts (440Hz sine, 3s debounce) and browser Notification API for background tabs, with Sidebar badge pulse animation
+- **Evidence Search API** — `GET /evidence/search?q=&limit=` endpoint with case-insensitive text matching, path traversal protection, and binary file skipping
+- **Pipeline Theater API** — `GET /pipeline/theater/:epicId/:runId` endpoint merging plan.json + plan_progress.json + stage_log.jsonl into combined theater data
+- **Companion Backend** — session-store with JSON persistence, auto-detect LLM adapter (Claude/OpenAI/Ollama/stub), SSE streaming endpoint, voice transcription proxy
+- **WebSocket Infrastructure** — topic-based pub/sub (pipeline, stage_log, decisions, queue) with heartbeat, auto-reconnect (exponential backoff), and replay on reconnect
+- **Test Suite** — 1014 Vitest tests across 31 files covering server routes, parsers, WebSocket, store slices, and API client
+
+### Changed
+- **Project structure** — added `packages/aid-gui/` (frontend) and `packages/aid-server/` (backend) as monorepo packages alongside the plugin
+
 ## [1.3.1] — 2026-02-27
 
 ### Fixed

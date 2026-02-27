@@ -11,6 +11,7 @@ import {
   FileText,
   Clock,
   ChevronRight,
+  ChevronDown,
   Play,
   Pause,
   RotateCcw,
@@ -19,8 +20,19 @@ import {
   WifiOff,
   AlertTriangle,
   Loader2,
+  Radio,
+  ArrowDown,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
-import type { PlanStep, StageLogEntryResponse, ApiError } from '../types/api';
+import type {
+  PlanStep,
+  StageLogEntryResponse,
+  ApiError,
+  TheaterStep,
+  TheaterData,
+  EvidenceEpicEntry,
+} from '../types/api';
 import type { StepStatus, ReplayState } from '../types/store';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +45,20 @@ interface Step {
   role: string;
   status: 'completed' | 'active' | 'pending' | 'failed' | 'skipped';
   duration?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  durationMs?: number | null;
+  objective?: string;
+}
+
+/** Tooltip data for SVG bar hover. */
+interface BarTooltip {
+  x: number;
+  y: number;
+  stepId: string;
+  role: string;
+  status: string;
+  duration: string;
 }
 
 const roleIcons: Record<string, React.ComponentType<{ size: number }>> = {
@@ -44,6 +70,25 @@ const roleIcons: Record<string, React.ComponentType<{ size: number }>> = {
 };
 
 // ---------------------------------------------------------------------------
+// Role color mapping
+// ---------------------------------------------------------------------------
+
+const ROLE_COLORS: Record<string, string> = {
+  architect: '#3b82f6',
+  backend: '#22c55e',
+  frontend: '#a855f7',
+  qa: '#f97316',
+  docs: '#6b7280',
+  security: '#ef4444',
+};
+
+const DEFAULT_ROLE_COLOR = '#6b7280';
+
+function getRoleColor(role: string): string {
+  return ROLE_COLORS[role.toLowerCase()] ?? DEFAULT_ROLE_COLOR;
+}
+
+// ---------------------------------------------------------------------------
 // API client (matches existing codebase pattern)
 // ---------------------------------------------------------------------------
 
@@ -53,7 +98,7 @@ const client = createApiClient('default');
 // Constants
 // ---------------------------------------------------------------------------
 
-const SPEED_OPTIONS = [1, 2, 4] as const;
+const SPEED_OPTIONS = [0.5, 1, 2, 4] as const;
 
 /**
  * Default delay between replay events when timestamps are identical or
@@ -67,6 +112,34 @@ const MIN_REPLAY_DELAY_MS = 300;
  * when there are large gaps between timestamps in the log.
  */
 const MAX_REPLAY_DELAY_MS = 3000;
+
+/** Maximum events rendered in the SVG timeline. */
+const SVG_MAX_EVENTS = 500;
+
+/** Height per step row in the timeline. */
+const ROW_HEIGHT = 36;
+
+/** Left margin for step labels. */
+const LABEL_WIDTH = 140;
+
+/** Timeline right padding. */
+const TIMELINE_PADDING = 24;
+
+/** Minimum bar width in pixels (so tiny durations are still visible). */
+const MIN_BAR_WIDTH = 6;
+
+// ---------------------------------------------------------------------------
+// Role legend entries
+// ---------------------------------------------------------------------------
+
+const ROLE_LEGEND: Array<{ role: string; color: string }> = [
+  { role: 'architect', color: '#3b82f6' },
+  { role: 'backend', color: '#22c55e' },
+  { role: 'frontend', color: '#a855f7' },
+  { role: 'qa', color: '#f97316' },
+  { role: 'docs', color: '#6b7280' },
+  { role: 'security', color: '#ef4444' },
+];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,6 +205,64 @@ function mapPlanStepToStep(
     role: planStep.role,
     status,
     duration,
+    startedAt: stepStatus?.startedAt ?? null,
+    completedAt: stepStatus?.completedAt ?? null,
+    durationMs:
+      stepStatus?.startedAt && stepStatus?.completedAt
+        ? new Date(stepStatus.completedAt).getTime() -
+          new Date(stepStatus.startedAt).getTime()
+        : null,
+    objective: planStep.objective,
+  };
+}
+
+/**
+ * Map TheaterStep data into the local Step interface.
+ */
+function mapTheaterStepToStep(ts: TheaterStep): Step {
+  let status: Step['status'] = 'pending';
+  switch (ts.status) {
+    case 'done':
+      status = 'completed';
+      break;
+    case 'executing':
+      status = 'active';
+      break;
+    case 'failed':
+      status = 'failed';
+      break;
+    case 'skipped':
+      status = 'skipped';
+      break;
+    default:
+      status = 'pending';
+  }
+
+  let duration: string | undefined;
+  if (ts.durationMs != null) {
+    const diffSec = Math.round(ts.durationMs / 1000);
+    if (diffSec < 60) {
+      duration = `${diffSec}s`;
+    } else {
+      const mins = Math.floor(diffSec / 60);
+      const secs = diffSec % 60;
+      duration = `${mins}m ${secs}s`;
+    }
+  }
+
+  return {
+    id: ts.id,
+    label:
+      ts.objective.length > 40
+        ? ts.objective.slice(0, 37) + '...'
+        : ts.objective,
+    role: ts.role,
+    status,
+    duration,
+    startedAt: ts.startedAt,
+    completedAt: ts.completedAt,
+    durationMs: ts.durationMs,
+    objective: ts.objective,
   };
 }
 
@@ -260,6 +391,468 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+/**
+ * Format milliseconds into a human-readable duration string.
+ */
+function formatDurationMs(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  if (mins < 60) return `${mins}m ${secs}s`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `${hours}h ${remMins}m`;
+}
+
+/**
+ * Compute the time range for the timeline axis from a set of steps.
+ */
+function computeTimeRange(steps: Step[]): { minTime: number; maxTime: number } {
+  const now = Date.now();
+  let minTime = Infinity;
+  let maxTime = -Infinity;
+
+  for (const step of steps) {
+    if (step.startedAt) {
+      const t = new Date(step.startedAt).getTime();
+      if (t < minTime) minTime = t;
+      if (t > maxTime) maxTime = t;
+    }
+    if (step.completedAt) {
+      const t = new Date(step.completedAt).getTime();
+      if (t > maxTime) maxTime = t;
+    }
+    if (step.status === 'active' && step.startedAt) {
+      // Active steps extend to "now"
+      if (now > maxTime) maxTime = now;
+    }
+  }
+
+  // If no steps have timing data, use a default 1-minute range centered on now
+  if (minTime === Infinity) {
+    minTime = now - 30_000;
+    maxTime = now + 30_000;
+  }
+
+  // Ensure at least 10 seconds of range for visibility
+  if (maxTime - minTime < 10_000) {
+    maxTime = minTime + 10_000;
+  }
+
+  // Add 5% padding on each side
+  const padding = (maxTime - minTime) * 0.05;
+  return { minTime: minTime - padding, maxTime: maxTime + padding };
+}
+
+/**
+ * Format a time axis tick label from epoch ms.
+ */
+function formatAxisTime(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+/**
+ * Compute a nice set of tick marks for the time axis.
+ */
+function computeTimeTicks(
+  minTime: number,
+  maxTime: number,
+  availableWidth: number,
+): number[] {
+  const range = maxTime - minTime;
+  const targetTicks = Math.max(3, Math.min(10, Math.floor(availableWidth / 120)));
+
+  // Find a nice interval
+  const rawInterval = range / targetTicks;
+  const niceIntervals = [1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
+  let interval = niceIntervals[0];
+  for (const ni of niceIntervals) {
+    if (ni >= rawInterval) {
+      interval = ni;
+      break;
+    }
+    interval = ni;
+  }
+
+  const ticks: number[] = [];
+  const start = Math.ceil(minTime / interval) * interval;
+  for (let t = start; t <= maxTime; t += interval) {
+    ticks.push(t);
+  }
+
+  return ticks;
+}
+
+// ---------------------------------------------------------------------------
+// SVG Timeline Component (inline)
+// ---------------------------------------------------------------------------
+
+interface TimelineProps {
+  steps: Step[];
+  playheadTime: number | null;
+  containerWidth: number;
+  onStepClick: (step: Step) => void;
+  autoFollow: boolean;
+  isLive: boolean;
+  replayProgress: number;
+  isReplaying: boolean;
+}
+
+function TimelineSVG({
+  steps,
+  playheadTime,
+  containerWidth,
+  onStepClick,
+  autoFollow,
+  isLive,
+}: TimelineProps) {
+  const [tooltip, setTooltip] = useState<BarTooltip | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // Limit to SVG_MAX_EVENTS steps
+  const visibleSteps = useMemo(() => steps.slice(0, SVG_MAX_EVENTS), [steps]);
+
+  const { minTime, maxTime } = useMemo(
+    () => computeTimeRange(visibleSteps),
+    [visibleSteps],
+  );
+
+  const timelineWidth = Math.max(400, containerWidth - LABEL_WIDTH - TIMELINE_PADDING * 2);
+  const svgHeight = Math.max(120, visibleSteps.length * ROW_HEIGHT + 48);
+  const totalWidth = LABEL_WIDTH + timelineWidth + TIMELINE_PADDING * 2;
+
+  const ticks = useMemo(
+    () => computeTimeTicks(minTime, maxTime, timelineWidth),
+    [minTime, maxTime, timelineWidth],
+  );
+
+  // Map time to x coordinate
+  const timeToX = useCallback(
+    (t: number) => {
+      const fraction = (t - minTime) / (maxTime - minTime);
+      return LABEL_WIDTH + TIMELINE_PADDING + fraction * timelineWidth;
+    },
+    [minTime, maxTime, timelineWidth],
+  );
+
+  // Playhead x position
+  const playheadX = useMemo(() => {
+    if (playheadTime == null) return null;
+    const x = timeToX(playheadTime);
+    // Clamp to timeline area
+    const minX = LABEL_WIDTH + TIMELINE_PADDING;
+    const maxX = LABEL_WIDTH + TIMELINE_PADDING + timelineWidth;
+    if (x < minX || x > maxX) return null;
+    return x;
+  }, [playheadTime, timeToX, timelineWidth]);
+
+  const handleBarMouseEnter = useCallback(
+    (e: React.MouseEvent, step: Step) => {
+      const svgEl = svgRef.current;
+      if (!svgEl) return;
+      const rect = svgEl.getBoundingClientRect();
+      setTooltip({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top - 10,
+        stepId: step.id,
+        role: step.role,
+        status: step.status,
+        duration: step.duration ?? (step.status === 'active' ? 'In progress...' : '--'),
+      });
+    },
+    [],
+  );
+
+  const handleBarMouseLeave = useCallback(() => {
+    setTooltip(null);
+  }, []);
+
+  return (
+    <svg
+      ref={svgRef}
+      width={totalWidth}
+      height={svgHeight}
+      className="block"
+      role="img"
+      aria-label="Pipeline timeline visualization"
+    >
+      <defs>
+        {/* Cross-hatch pattern for failed bars */}
+        <pattern
+          id="crosshatch"
+          width="8"
+          height="8"
+          patternUnits="userSpaceOnUse"
+          patternTransform="rotate(45)"
+        >
+          <line x1="0" y1="0" x2="0" y2="8" stroke="#ef4444" strokeWidth="2" strokeOpacity="0.6" />
+        </pattern>
+        {/* Pulse animation filter */}
+        <filter id="pulseGlow">
+          <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+          <feMerge>
+            <feMergeNode in="coloredBlur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {/* Time axis ticks and labels at top */}
+      {ticks.map((tick) => {
+        const x = timeToX(tick);
+        return (
+          <g key={tick}>
+            <line
+              x1={x}
+              y1={20}
+              x2={x}
+              y2={svgHeight}
+              stroke="rgba(255,255,255,0.06)"
+              strokeWidth="1"
+            />
+            <text
+              x={x}
+              y={14}
+              fill="rgba(255,255,255,0.35)"
+              fontSize="10"
+              fontFamily="monospace"
+              textAnchor="middle"
+            >
+              {formatAxisTime(tick)}
+            </text>
+          </g>
+        );
+      })}
+
+      {/* Step rows */}
+      {visibleSteps.map((step, index) => {
+        const y = 28 + index * ROW_HEIGHT;
+        const color = getRoleColor(step.role);
+        const now = Date.now();
+
+        // Compute bar position and width
+        let barX = LABEL_WIDTH + TIMELINE_PADDING;
+        let barWidth = 0;
+        const hasStart = step.startedAt != null;
+        const hasEnd = step.completedAt != null;
+
+        if (hasStart) {
+          const startT = new Date(step.startedAt!).getTime();
+          barX = timeToX(startT);
+
+          if (hasEnd) {
+            const endT = new Date(step.completedAt!).getTime();
+            barWidth = Math.max(MIN_BAR_WIDTH, timeToX(endT) - barX);
+          } else if (step.status === 'active') {
+            // Active: extend to current time
+            barWidth = Math.max(MIN_BAR_WIDTH, timeToX(now) - barX);
+          } else {
+            barWidth = MIN_BAR_WIDTH;
+          }
+        }
+
+        // Truncate label for narrow screens
+        const maxLabelLen = 18;
+        const truncatedLabel =
+          step.id.length > maxLabelLen
+            ? step.id.slice(0, maxLabelLen - 2) + '..'
+            : step.id;
+
+        return (
+          <g
+            key={step.id}
+            className="cursor-pointer"
+            onClick={() => onStepClick(step)}
+          >
+            {/* Row background on hover */}
+            <rect
+              x={0}
+              y={y - 2}
+              width={totalWidth}
+              height={ROW_HEIGHT - 4}
+              fill="transparent"
+              className="hover:fill-white/[0.03]"
+              rx="4"
+            />
+
+            {/* Step label */}
+            <text
+              x={LABEL_WIDTH - 8}
+              y={y + (ROW_HEIGHT - 4) / 2 + 1}
+              fill="rgba(255,255,255,0.5)"
+              fontSize="11"
+              fontFamily="monospace"
+              textAnchor="end"
+              dominantBaseline="middle"
+            >
+              {truncatedLabel}
+            </text>
+
+            {/* Step bar */}
+            {hasStart && barWidth > 0 ? (
+              <>
+                {/* Main bar */}
+                <rect
+                  x={barX}
+                  y={y + 4}
+                  width={barWidth}
+                  height={ROW_HEIGHT - 12}
+                  rx="4"
+                  fill={
+                    step.status === 'failed'
+                      ? 'url(#crosshatch)'
+                      : color
+                  }
+                  fillOpacity={
+                    step.status === 'completed'
+                      ? 0.7
+                      : step.status === 'active'
+                        ? 0.5
+                        : 0.3
+                  }
+                  stroke={
+                    step.status === 'failed' ? '#ef4444' : color
+                  }
+                  strokeWidth={step.status === 'active' ? 1.5 : 1}
+                  strokeOpacity={0.8}
+                  filter={step.status === 'active' ? 'url(#pulseGlow)' : undefined}
+                  onMouseEnter={(e) => handleBarMouseEnter(e, step)}
+                  onMouseLeave={handleBarMouseLeave}
+                >
+                  {step.status === 'active' && (
+                    <animate
+                      attributeName="fill-opacity"
+                      values="0.5;0.7;0.5"
+                      dur="2s"
+                      repeatCount="indefinite"
+                    />
+                  )}
+                </rect>
+
+                {/* Failed cross-hatch overlay */}
+                {step.status === 'failed' && (
+                  <rect
+                    x={barX}
+                    y={y + 4}
+                    width={barWidth}
+                    height={ROW_HEIGHT - 12}
+                    rx="4"
+                    fill="#ef4444"
+                    fillOpacity={0.2}
+                    pointerEvents="none"
+                  />
+                )}
+
+                {/* Duration label on bar (if wide enough) */}
+                {barWidth > 50 && step.duration && (
+                  <text
+                    x={barX + barWidth / 2}
+                    y={y + (ROW_HEIGHT - 4) / 2 + 1}
+                    fill="rgba(255,255,255,0.8)"
+                    fontSize="9"
+                    fontFamily="monospace"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    pointerEvents="none"
+                  >
+                    {step.duration}
+                  </text>
+                )}
+              </>
+            ) : (
+              // Pending: dashed outline placeholder
+              <rect
+                x={LABEL_WIDTH + TIMELINE_PADDING}
+                y={y + 4}
+                width={40}
+                height={ROW_HEIGHT - 12}
+                rx="4"
+                fill="none"
+                stroke={color}
+                strokeWidth="1"
+                strokeOpacity={0.2}
+                strokeDasharray="4 2"
+                onMouseEnter={(e) => handleBarMouseEnter(e, step)}
+                onMouseLeave={handleBarMouseLeave}
+              />
+            )}
+
+            {/* Role color dot */}
+            <circle
+              cx={LABEL_WIDTH + 4}
+              cy={y + (ROW_HEIGHT - 4) / 2}
+              r="3"
+              fill={color}
+              fillOpacity={0.7}
+            />
+          </g>
+        );
+      })}
+
+      {/* Playhead vertical line */}
+      {playheadX != null && (
+        <g>
+          <line
+            x1={playheadX}
+            y1={20}
+            x2={playheadX}
+            y2={svgHeight}
+            stroke="#f59e0b"
+            strokeWidth="1.5"
+            strokeOpacity="0.8"
+          />
+          <polygon
+            points={`${playheadX - 5},20 ${playheadX + 5},20 ${playheadX},26`}
+            fill="#f59e0b"
+            fillOpacity="0.9"
+          />
+        </g>
+      )}
+
+      {/* Tooltip */}
+      {tooltip && (
+        <g pointerEvents="none">
+          <rect
+            x={Math.min(tooltip.x, totalWidth - 200)}
+            y={Math.max(0, tooltip.y - 52)}
+            width="190"
+            height="48"
+            rx="6"
+            fill="rgba(15,15,20,0.95)"
+            stroke="rgba(255,255,255,0.1)"
+            strokeWidth="1"
+          />
+          <text
+            x={Math.min(tooltip.x, totalWidth - 200) + 8}
+            y={Math.max(0, tooltip.y - 52) + 16}
+            fill="rgba(255,255,255,0.9)"
+            fontSize="11"
+            fontFamily="monospace"
+            fontWeight="bold"
+          >
+            {tooltip.stepId}
+          </text>
+          <text
+            x={Math.min(tooltip.x, totalWidth - 200) + 8}
+            y={Math.max(0, tooltip.y - 52) + 30}
+            fill="rgba(255,255,255,0.5)"
+            fontSize="10"
+            fontFamily="monospace"
+          >
+            {tooltip.role} | {tooltip.status} | {tooltip.duration}
+          </text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -272,6 +865,8 @@ export const PipelineTheater: React.FC = () => {
   const { fsmState, progress } = useStore();
   const wsStatus = useStore((s) => s.wsStatus);
   const pipelineProgress = useStore((s) => s.pipelineProgress);
+  const currentEpicId = useStore((s) => s.currentEpicId);
+  const stageLogEntries = useStore((s) => s.stageLogEntries);
 
   // --- Replay state from store ---
   const replayState = useStore((s) => s.replayState);
@@ -289,27 +884,39 @@ export const PipelineTheater: React.FC = () => {
   const [loadingLog, setLoadingLog] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // EPIC/Run selector state
+  const [evidenceEpics, setEvidenceEpics] = useState<EvidenceEpicEntry[]>([]);
+  const [selectedEpicId, setSelectedEpicId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [theaterData, setTheaterData] = useState<TheaterData | null>(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [theaterLoading, setTheaterLoading] = useState(false);
+
+  // Auto-follow state
+  const [autoFollow, setAutoFollow] = useState(true);
+  const [hasNewEvents, setHasNewEvents] = useState(false);
+  const prevStageLogLenRef = useRef(0);
+
   // Ref for the playback timer so we can cancel it
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Ref for the SVG container to guard against zero-width rendering
-  const svgContainerRef = useRef<HTMLDivElement | null>(null);
-  const [svgWidth, setSvgWidth] = useState(0);
+  // Ref for the timeline scroll container
+  const timelineContainerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(800);
 
-  // Track SVG container width to avoid invalid path rendering
+  // Track container width
   useEffect(() => {
-    const el = svgContainerRef.current;
+    const el = timelineContainerRef.current;
     if (!el) return;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setSvgWidth(entry.contentRect.width);
+        setContainerWidth(entry.contentRect.width);
       }
     });
 
     observer.observe(el);
-    // Initialize with current width
-    setSvgWidth(el.clientWidth);
+    setContainerWidth(el.clientWidth);
 
     return () => observer.disconnect();
   }, []);
@@ -320,9 +927,42 @@ export const PipelineTheater: React.FC = () => {
   const hasSteps = planSteps.length > 0;
   const isReplaying = replayState !== 'idle';
   const hasReplayData = replayEvents.length > 0;
+  const isViewingTheater = theaterData != null;
 
   // ---------------------------------------------------------------------------
-  // Fetch stage log on mount
+  // Fetch evidence EPICs for selector on mount
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchEvidence() {
+      const result = await client.getEvidence();
+      if (cancelled) return;
+      if (result.ok) {
+        setEvidenceEpics(result.data);
+        // Default to current EPIC's most recent run
+        if (result.data.length > 0) {
+          const current = currentEpicId
+            ? result.data.find((e) => e.epicId === currentEpicId)
+            : null;
+          const defaultEpic = current ?? result.data[result.data.length - 1];
+          if (defaultEpic && defaultEpic.runs.length > 0) {
+            setSelectedEpicId(defaultEpic.epicId);
+            setSelectedRunId(defaultEpic.runs[defaultEpic.runs.length - 1].runId);
+          }
+        }
+      }
+    }
+
+    fetchEvidence();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentEpicId]);
+
+  // ---------------------------------------------------------------------------
+  // Fetch stage log on mount (for replay)
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
@@ -352,6 +992,82 @@ export const PipelineTheater: React.FC = () => {
       cancelled = true;
     };
   }, [setReplayEvents]);
+
+  // ---------------------------------------------------------------------------
+  // Load theater data when EPIC/run selection changes
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!selectedEpicId || !selectedRunId) return;
+    let cancelled = false;
+
+    async function loadTheater() {
+      setTheaterLoading(true);
+      const result = await client.getPipelineTheater(selectedEpicId!, selectedRunId!);
+      if (cancelled) return;
+      if (result.ok) {
+        setTheaterData(result.data);
+        // Load replay events from theater data
+        if (result.data.stageLog.length > 0) {
+          setReplayEvents(result.data.stageLog);
+        }
+      } else {
+        // Non-fatal: theater endpoint may not exist for all runs
+        setTheaterData(null);
+      }
+      setTheaterLoading(false);
+    }
+
+    loadTheater();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEpicId, selectedRunId, setReplayEvents]);
+
+  // ---------------------------------------------------------------------------
+  // Auto-scroll / auto-follow for live mode
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (isReplaying) return;
+
+    const newLen = stageLogEntries.length;
+    if (newLen > prevStageLogLenRef.current) {
+      if (autoFollow && timelineContainerRef.current) {
+        // Scroll to right edge
+        const el = timelineContainerRef.current;
+        el.scrollLeft = el.scrollWidth - el.clientWidth;
+      } else if (!autoFollow) {
+        setHasNewEvents(true);
+      }
+    }
+    prevStageLogLenRef.current = newLen;
+  }, [stageLogEntries.length, autoFollow, isReplaying]);
+
+  // Detect manual scrolling to disable auto-follow
+  useEffect(() => {
+    const el = timelineContainerRef.current;
+    if (!el) return;
+
+    let userScrolled = false;
+    const handleScroll = () => {
+      if (!userScrolled) {
+        userScrolled = true;
+        // Check if scrolled to the end
+        const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 20;
+        if (!atEnd && autoFollow) {
+          setAutoFollow(false);
+        }
+      }
+      // Reset flag after a short delay
+      setTimeout(() => {
+        userScrolled = false;
+      }, 100);
+    };
+
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [autoFollow]);
 
   // ---------------------------------------------------------------------------
   // Playback auto-advance timer
@@ -408,12 +1124,17 @@ export const PipelineTheater: React.FC = () => {
   const effectiveStepStatuses = isReplaying && replayStepStatuses ? replayStepStatuses : liveStepStatuses;
   const effectiveCurrentStepId = isReplaying ? replayCurrentStepId : liveCurrentStepId;
 
-  // Derive the renderable steps from store data
+  // Derive the renderable steps
   const steps: Step[] = useMemo(() => {
+    // If viewing a specific theater run, use theater data
+    if (isViewingTheater && theaterData) {
+      return theaterData.steps.map(mapTheaterStepToStep);
+    }
+    // Otherwise use live plan steps
     return planSteps.map((ps) =>
       mapPlanStepToStep(ps, effectiveStepStatuses[ps.id], effectiveCurrentStepId),
     );
-  }, [planSteps, effectiveStepStatuses, effectiveCurrentStepId]);
+  }, [planSteps, effectiveStepStatuses, effectiveCurrentStepId, isViewingTheater, theaterData]);
 
   // Current event for display
   const currentEvent = useMemo<StageLogEntryResponse | null>(() => {
@@ -432,6 +1153,19 @@ export const PipelineTheater: React.FC = () => {
       ? replayIndex / (replayEvents.length - 1)
       : 1
     : 0;
+
+  // Playhead time for the SVG timeline
+  const playheadTime = useMemo<number | null>(() => {
+    if (isReplaying && replayEvents.length > 0) {
+      const event = replayEvents[Math.min(replayIndex, replayEvents.length - 1)];
+      return new Date(event.timestamp).getTime();
+    }
+    // In live mode, show current time as playhead
+    if (!isReplaying && wsStatus === 'connected') {
+      return Date.now();
+    }
+    return null;
+  }, [isReplaying, replayEvents, replayIndex, wsStatus]);
 
   // ---------------------------------------------------------------------------
   // Replay control handlers
@@ -455,6 +1189,12 @@ export const PipelineTheater: React.FC = () => {
 
   const handleReset = useCallback(() => {
     resetReplay();
+  }, [resetReplay]);
+
+  const handleGoLive = useCallback(() => {
+    resetReplay();
+    setAutoFollow(true);
+    setHasNewEvents(false);
   }, [resetReplay]);
 
   const handleSkipBack = useCallback(() => {
@@ -500,6 +1240,86 @@ export const PipelineTheater: React.FC = () => {
     [setPlaybackSpeed],
   );
 
+  const handleToggleAutoFollow = useCallback(() => {
+    const newFollow = !autoFollow;
+    setAutoFollow(newFollow);
+    if (newFollow) {
+      setHasNewEvents(false);
+      // Scroll to latest
+      if (timelineContainerRef.current) {
+        const el = timelineContainerRef.current;
+        el.scrollLeft = el.scrollWidth - el.clientWidth;
+      }
+    }
+  }, [autoFollow]);
+
+  const handleJumpToLatest = useCallback(() => {
+    setHasNewEvents(false);
+    setAutoFollow(true);
+    if (timelineContainerRef.current) {
+      const el = timelineContainerRef.current;
+      el.scrollLeft = el.scrollWidth - el.clientWidth;
+    }
+  }, []);
+
+  const handleRunSelect = useCallback(
+    (epicId: string, runId: string) => {
+      setSelectedEpicId(epicId);
+      setSelectedRunId(runId);
+      setSelectorOpen(false);
+      // Exit replay when switching runs
+      resetReplay();
+    },
+    [resetReplay],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Miniature timeline for the scrub bar
+  // ---------------------------------------------------------------------------
+
+  const miniTimelineSteps = useMemo(() => {
+    if (!hasReplayData || steps.length === 0) return null;
+
+    const events = replayEvents;
+    const totalEvents = events.length;
+    if (totalEvents === 0) return null;
+
+    // Build a simplified representation: for each step, compute start/end as
+    // fraction of the total event range
+    const segments: Array<{
+      stepId: string;
+      role: string;
+      startFraction: number;
+      endFraction: number;
+    }> = [];
+
+    // Track first and last event index per step
+    const stepFirstIndex: Record<string, number> = {};
+    const stepLastIndex: Record<string, number> = {};
+
+    for (let i = 0; i < totalEvents; i++) {
+      const ev = events[i];
+      if (!ev.step) continue;
+      if (!(ev.step in stepFirstIndex)) stepFirstIndex[ev.step] = i;
+      stepLastIndex[ev.step] = i;
+    }
+
+    for (const step of steps) {
+      const first = stepFirstIndex[step.id];
+      const last = stepLastIndex[step.id];
+      if (first == null) continue;
+
+      segments.push({
+        stepId: step.id,
+        role: step.role,
+        startFraction: first / Math.max(1, totalEvents - 1),
+        endFraction: (last ?? first) / Math.max(1, totalEvents - 1),
+      });
+    }
+
+    return segments;
+  }, [hasReplayData, replayEvents, steps]);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -507,16 +1327,33 @@ export const PipelineTheater: React.FC = () => {
   return (
     <div className="h-full flex flex-col p-8 relative">
       {/* Header */}
-      <div className="flex items-center justify-between mb-12">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Pipeline Theater</h2>
           <p className="text-sm text-white/40">
             {isReplaying
               ? 'Replaying execution timeline'
-              : 'Visualizing the river of orchestration'}
+              : isViewingTheater
+                ? `Viewing ${theaterData?.epicId} / ${theaterData?.runId}`
+                : 'Live pipeline visualization'}
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Role color legend */}
+          <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/5 rounded-full">
+            {ROLE_LEGEND.map(({ role, color }) => (
+              <div key={role} className="flex items-center gap-1" title={role}>
+                <div
+                  className="w-2.5 h-2.5 rounded-sm"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="text-[9px] font-mono text-white/40 uppercase">
+                  {role.slice(0, 3)}
+                </span>
+              </div>
+            ))}
+          </div>
+
           {/* Replay mode badge */}
           {isReplaying && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full">
@@ -541,6 +1378,7 @@ export const PipelineTheater: React.FC = () => {
               </span>
             </div>
           )}
+
           <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5">
             <div className={cn(
               "w-2 h-2 rounded-full",
@@ -551,156 +1389,159 @@ export const PipelineTheater: React.FC = () => {
                   : "bg-white/20"
             )} />
             <span className="text-xs font-mono uppercase tracking-widest">
-              {isReplaying ? 'Replay Mode' : wsStatus === 'connected' ? 'Live Execution' : 'Offline'}
+              {isReplaying ? 'Replay' : wsStatus === 'connected' ? 'Live' : 'Offline'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* River Flow Visualization */}
-      <div ref={svgContainerRef} className="flex-1 flex items-center justify-center relative overflow-x-auto min-h-[400px]">
-        {/* Animated River SVG Background — only render when container has positive width and there's content to show */}
-        {svgWidth > 0 && (hasSteps || isReplaying) && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
-                <stop offset="50%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0.1" />
-                <stop offset="100%" stopColor={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'} stopOpacity="0" />
-              </linearGradient>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                <feMerge>
-                  <feMergeNode in="coloredBlur"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-            </defs>
-            <motion.path
-              d={`M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`}
-              fill="none"
-              stroke="url(#riverGrad)"
-              strokeWidth="40"
-              filter="url(#glow)"
-              animate={{
-                d: [
-                  `M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
-                  `M 0,200 Q ${svgWidth * 0.17},220 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
-                  `M 0,200 Q ${svgWidth * 0.17},180 ${svgWidth * 0.33},200 T ${svgWidth * 0.67},200 T ${svgWidth},200`,
-                ],
-              }}
-              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            />
-            {/* Particles */}
-            {[...Array(5)].map((_, i) => (
-              <motion.circle
-                key={i}
-                r="2"
-                fill={isReplaying ? 'var(--color-purple-400, #a78bfa)' : 'var(--color-state-executing)'}
-                initial={{ cx: 0, cy: 200, opacity: 0 }}
-                animate={{ cx: svgWidth, cy: 200, opacity: [0, 1, 0] }}
-                transition={{ duration: 3, repeat: Infinity, delay: i * 0.6, ease: "linear" }}
-              />
-            ))}
-          </svg>
+      {/* EPIC/Run selector */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative">
+          <button
+            onClick={() => setSelectorOpen(!selectorOpen)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors text-sm"
+            aria-label="Select EPIC and run"
+            aria-expanded={selectorOpen}
+          >
+            <span className="font-mono text-white/60">
+              {selectedEpicId && selectedRunId
+                ? `${selectedEpicId} / ${selectedRunId}`
+                : 'Select run...'}
+            </span>
+            <ChevronDown size={14} className={cn(
+              "text-white/40 transition-transform",
+              selectorOpen && "rotate-180"
+            )} />
+          </button>
+
+          <AnimatePresence>
+            {selectorOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className="absolute top-full left-0 mt-1 w-72 max-h-64 overflow-y-auto bg-surface-2 border border-white/10 rounded-xl shadow-2xl z-30"
+              >
+                {evidenceEpics.length === 0 ? (
+                  <div className="px-4 py-3 text-xs text-white/40">No runs available</div>
+                ) : (
+                  evidenceEpics.map((epic) => (
+                    <div key={epic.epicId}>
+                      <div className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/30 bg-white/[0.02] border-b border-white/5">
+                        {epic.epicId}
+                      </div>
+                      {epic.runs.map((run) => (
+                        <button
+                          key={run.runId}
+                          onClick={() => handleRunSelect(epic.epicId, run.runId)}
+                          className={cn(
+                            "w-full px-4 py-2 text-left hover:bg-white/5 transition-colors flex items-center justify-between",
+                            selectedEpicId === epic.epicId && selectedRunId === run.runId
+                              ? "bg-white/10 text-white"
+                              : "text-white/60"
+                          )}
+                        >
+                          <span className="text-xs font-mono">{run.runId}</span>
+                          <div className="flex items-center gap-2">
+                            {run.hasStageLog && (
+                              <span className="text-[9px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">LOG</span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Live mode / follow controls */}
+        {!isReplaying && wsStatus === 'connected' && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleToggleAutoFollow}
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors",
+                autoFollow
+                  ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400"
+                  : "bg-white/5 border border-white/10 text-white/40 hover:text-white/60"
+              )}
+              title={autoFollow ? 'Auto-follow enabled' : 'Auto-follow disabled'}
+              aria-label={autoFollow ? 'Disable auto-follow' : 'Enable auto-follow'}
+              aria-pressed={autoFollow}
+            >
+              {autoFollow ? <Eye size={12} /> : <EyeOff size={12} />}
+              <span className="font-mono uppercase tracking-wider text-[10px]">Follow</span>
+            </button>
+
+            {/* Jump to latest */}
+            {hasNewEvents && !autoFollow && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                onClick={handleJumpToLatest}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-xs hover:bg-amber-500/20 transition-colors"
+                aria-label="Jump to latest events"
+              >
+                <ArrowDown size={12} />
+                <span className="font-mono text-[10px]">New events</span>
+              </motion.button>
+            )}
+          </div>
         )}
 
-        {/* Loading Skeleton State */}
-        {isLoading && !hasSteps && (
-          <div className="flex items-center gap-16 px-20 relative z-10">
-            {[...Array(5)].map((_, i) => (
-              <React.Fragment key={i}>
-                <div className="relative">
-                  <div className="w-20 h-20 rounded-3xl bg-white/5 border-2 border-white/10 animate-pulse" />
-                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
-                    <div className="h-2.5 w-14 bg-white/5 rounded animate-pulse" />
-                    <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
-                  </div>
-                </div>
-                {i < 4 && (
-                  <div className="w-16 h-1 bg-white/5 rounded-full animate-pulse" />
-                )}
-              </React.Fragment>
-            ))}
+        {theaterLoading && (
+          <Loader2 size={16} className="text-white/40 animate-spin" />
+        )}
+      </div>
+
+      {/* SVG Timeline Visualization */}
+      <div
+        ref={timelineContainerRef}
+        className="flex-1 overflow-x-auto overflow-y-auto relative bg-white/[0.02] border border-white/5 rounded-xl min-h-[200px]"
+      >
+        {/* Loading skeleton */}
+        {isLoading && !hasSteps && !isViewingTheater && (
+          <div className="flex items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 size={32} className="text-white/20 animate-spin" />
+              <p className="text-sm text-white/30">Loading pipeline data...</p>
+            </div>
           </div>
         )}
 
         {/* Empty state when connected but no steps */}
-        {!isLoading && !hasSteps && (
-          <div className="flex flex-col items-center gap-4 relative z-10">
+        {!isLoading && !hasSteps && !isViewingTheater && (
+          <div className="flex flex-col items-center justify-center h-full gap-4">
             <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
               <AlertTriangle size={24} className="text-white/20" />
             </div>
             <div className="text-center">
               <p className="text-sm font-medium text-white/40">No pipeline data</p>
-              <p className="text-xs text-white/20 mt-1">No pipeline data — start an EPIC run to see execution flow</p>
+              <p className="text-xs text-white/20 mt-1">
+                Start an EPIC run or select a completed run from the dropdown above
+              </p>
             </div>
           </div>
         )}
 
-        {/* Real steps */}
-        {hasSteps && (
-          <div className="flex items-center gap-16 px-20 relative z-10">
-            {steps.map((step, index) => (
-              <React.Fragment key={step.id}>
-                {/* Step Island */}
-                <motion.div
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                  onClick={() => setSelectedStep(step)}
-                  className={cn(
-                    "relative group cursor-pointer",
-                    step.status === 'active' && "animate-pulse-subtle"
-                  )}
-                >
-                  <div className={cn(
-                    "w-20 h-20 rounded-3xl flex items-center justify-center transition-all duration-500 border-2",
-                    step.status === 'completed' ? "bg-state-done/20 border-state-done shadow-[0_0_15px_rgba(34,197,94,0.3)]" :
-                    step.status === 'active' ? "bg-state-executing/20 border-state-executing shadow-[0_0_20px_rgba(0,180,216,0.4)]" :
-                    step.status === 'failed' ? "bg-red-500/20 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.3)]" :
-                    step.status === 'skipped' ? "bg-yellow-500/10 border-yellow-500/40 opacity-50" :
-                    "bg-white/5 border-white/10 opacity-40"
-                  )}>
-                    {roleIcons[step.role] ? React.createElement(roleIcons[step.role], { size: 32 }) : <User size={32} />}
-                  </div>
-
-                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-center">
-                    <div className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-0.5">{step.role}</div>
-                    <div className="text-xs font-medium">{step.label}</div>
-                  </div>
-
-                  {step.duration && (
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-white/10 px-2 py-0.5 rounded text-[10px] font-mono text-white/60">
-                      {step.duration}
-                    </div>
-                  )}
-                </motion.div>
-
-                {/* Connector / Water Flow */}
-                {index < steps.length - 1 && (
-                  <div className="w-16 h-1 bg-white/5 relative overflow-hidden rounded-full">
-                    <motion.div
-                      className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                      animate={{ x: ['-100%', '100%'] }}
-                      transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                    />
-                    {step.status === 'completed' && (
-                      <div className="absolute inset-0 bg-state-done/40" />
-                    )}
-                  </div>
-                )}
-              </React.Fragment>
-            ))}
-
-            {/* Final Gate */}
-            <div className="ml-8 flex flex-col items-center gap-4 opacity-40">
-              <div className="w-16 h-32 border-2 border-dashed border-white/20 rounded-2xl flex flex-col items-center justify-center gap-4">
-                <div className="w-8 h-8 rounded-lg bg-white/5" />
-                <div className="w-8 h-8 rounded-lg bg-white/5" />
-              </div>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/20">Quality Gates</span>
-            </div>
+        {/* Timeline SVG */}
+        {(hasSteps || isViewingTheater) && steps.length > 0 && (
+          <div className="p-2">
+            <TimelineSVG
+              steps={steps}
+              playheadTime={playheadTime}
+              containerWidth={containerWidth}
+              onStepClick={setSelectedStep}
+              autoFollow={autoFollow}
+              isLive={!isReplaying && wsStatus === 'connected'}
+              replayProgress={replayProgress}
+              isReplaying={isReplaying}
+            />
           </div>
         )}
       </div>
@@ -712,7 +1553,7 @@ export const PipelineTheater: React.FC = () => {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="mb-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex items-center gap-4"
+            className="mt-3 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 flex items-center gap-4"
           >
             <div className="flex items-center gap-2 shrink-0">
               <div className={cn(
@@ -741,7 +1582,7 @@ export const PipelineTheater: React.FC = () => {
       </AnimatePresence>
 
       {/* Controls Bar */}
-      <div className="mt-auto bg-surface-1/50 backdrop-blur-xl border border-white/5 rounded-2xl p-4 flex items-center gap-6">
+      <div className="mt-3 bg-surface-1/50 backdrop-blur-xl border border-white/5 rounded-2xl p-4 flex items-center gap-6">
         {/* Transport Controls */}
         <div className="flex items-center gap-2">
           <button
@@ -818,7 +1659,7 @@ export const PipelineTheater: React.FC = () => {
                 onClick={() => handleSpeedChange(speed)}
                 disabled={!hasReplayData}
                 className={cn(
-                  "p-1 rounded text-[10px] font-mono transition-colors",
+                  "px-1.5 py-1 rounded text-[10px] font-mono transition-colors",
                   playbackSpeed === speed
                     ? "bg-white/20 text-white"
                     : hasReplayData
@@ -833,10 +1674,23 @@ export const PipelineTheater: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* LIVE button */}
+          {isReplaying && (
+            <button
+              onClick={handleGoLive}
+              className="flex items-center gap-1.5 ml-2 px-2.5 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors"
+              title="Exit replay and return to live view"
+              aria-label="Return to live view"
+            >
+              <Radio size={12} />
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider">Live</span>
+            </button>
+          )}
         </div>
 
         {/* Progress / Scrub Bar */}
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 space-y-1">
           {isReplaying || hasReplayData ? (
             <>
               <div className="flex justify-between text-[10px] font-mono text-white/40 uppercase tracking-widest">
@@ -849,6 +1703,34 @@ export const PipelineTheater: React.FC = () => {
                     : '--'}
                 </span>
               </div>
+
+              {/* Miniature timeline below slider */}
+              {miniTimelineSteps && miniTimelineSteps.length > 0 && (
+                <div className="relative h-2 w-full bg-white/[0.03] rounded-full overflow-hidden">
+                  {miniTimelineSteps.map((seg) => {
+                    const left = seg.startFraction * 100;
+                    const width = Math.max(0.5, (seg.endFraction - seg.startFraction) * 100);
+                    return (
+                      <div
+                        key={seg.stepId}
+                        className="absolute top-0 h-full rounded-sm"
+                        style={{
+                          left: `${left}%`,
+                          width: `${width}%`,
+                          backgroundColor: getRoleColor(seg.role),
+                          opacity: 0.5,
+                        }}
+                      />
+                    );
+                  })}
+                  {/* Playhead marker on mini timeline */}
+                  <div
+                    className="absolute top-0 h-full w-0.5 bg-amber-400"
+                    style={{ left: `${replayProgress * 100}%` }}
+                  />
+                </div>
+              )}
+
               <div className="relative">
                 <input
                   type="range"
@@ -917,6 +1799,13 @@ export const PipelineTheater: React.FC = () => {
               <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest">State</div>
               <div className="text-sm font-bold font-mono">{replayFsmState}</div>
             </>
+          ) : isViewingTheater && theaterData ? (
+            <>
+              <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Status</div>
+              <div className="text-sm font-bold">
+                {theaterData.completedSteps} / {theaterData.totalSteps} steps
+              </div>
+            </>
           ) : (
             <>
               <div className="text-[10px] font-mono text-white/40 uppercase tracking-widest">Remaining</div>
@@ -970,15 +1859,18 @@ export const PipelineTheater: React.FC = () => {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="absolute top-0 right-0 h-full w-96 bg-surface-2 border-l border-white/10 z-50 p-6 shadow-2xl"
+              className="absolute top-0 right-0 h-full w-96 bg-surface-2 border-l border-white/10 z-50 p-6 shadow-2xl overflow-y-auto"
             >
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-xl bg-white/5 border border-white/10">
+                  <div
+                    className="p-2 rounded-xl border border-white/10"
+                    style={{ backgroundColor: `${getRoleColor(selectedStep.role)}20` }}
+                  >
                     {roleIcons[selectedStep.role] ? React.createElement(roleIcons[selectedStep.role], { size: 20 }) : <User size={20} />}
                   </div>
                   <div>
-                    <h3 className="font-bold">{selectedStep.label}</h3>
+                    <h3 className="font-bold text-sm">{selectedStep.id}</h3>
                     <p className="text-[10px] uppercase tracking-widest text-white/40">{selectedStep.role}</p>
                   </div>
                 </div>
@@ -1004,6 +1896,18 @@ export const PipelineTheater: React.FC = () => {
                       "bg-white/20"
                     )} />
                     <span className="text-sm capitalize">{selectedStep.status}</span>
+                    <div
+                      className="w-3 h-3 rounded-sm ml-2"
+                      style={{ backgroundColor: getRoleColor(selectedStep.role) }}
+                      title={`Role: ${selectedStep.role}`}
+                    />
+                  </div>
+                </section>
+
+                <section>
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-3">Objective</h4>
+                  <div className="bg-white/5 rounded-xl p-4 text-xs leading-relaxed text-white/60">
+                    {selectedStep.objective ?? selectedStep.label}
                   </div>
                 </section>
 
@@ -1018,12 +1922,26 @@ export const PipelineTheater: React.FC = () => {
                   </div>
                 </section>
 
-                {selectedStep.duration && (
+                {(selectedStep.duration || selectedStep.startedAt) && (
                   <section>
                     <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-3">Timing</h4>
-                    <div className="flex items-center gap-2 text-sm">
-                      <Clock size={14} className="text-white/40" />
-                      <span>{selectedStep.duration} total duration</span>
+                    <div className="space-y-2">
+                      {selectedStep.duration && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Clock size={14} className="text-white/40" />
+                          <span>{selectedStep.duration} total duration</span>
+                        </div>
+                      )}
+                      {selectedStep.startedAt && (
+                        <div className="text-xs text-white/40 font-mono">
+                          Started: {formatTimestamp(selectedStep.startedAt)}
+                        </div>
+                      )}
+                      {selectedStep.completedAt && (
+                        <div className="text-xs text-white/40 font-mono">
+                          Completed: {formatTimestamp(selectedStep.completedAt)}
+                        </div>
+                      )}
                     </div>
                   </section>
                 )}

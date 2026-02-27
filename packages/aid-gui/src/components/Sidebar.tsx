@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink } from 'react-router';
 import {
   LayoutDashboard,
@@ -15,6 +15,7 @@ import {
   Menu
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { useStore } from '../store';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -35,6 +36,25 @@ const navItems = [
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle, isMobile }) => {
+  const pendingDecisions = useStore((s) => s.pendingDecisions);
+  const [isPulsing, setIsPulsing] = useState(false);
+  const prevCountRef = useRef(pendingDecisions);
+
+  // Trigger pulse animation when pending count increases
+  useEffect(() => {
+    if (pendingDecisions > prevCountRef.current && pendingDecisions > 0) {
+      setIsPulsing(true);
+      const timer = setTimeout(() => setIsPulsing(false), 2000);
+      return () => clearTimeout(timer);
+    }
+    prevCountRef.current = pendingDecisions;
+  }, [pendingDecisions]);
+
+  // Also update prevCountRef when count decreases (no pulse needed)
+  useEffect(() => {
+    prevCountRef.current = pendingDecisions;
+  }, [pendingDecisions]);
+
   const handleNavClick = () => {
     if (isMobile && !isCollapsed) {
       onToggle();
@@ -81,27 +101,61 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle, isMobil
         </div>
 
         <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              onClick={handleNavClick}
-              className={({ isActive }) => cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
-                isActive
-                  ? "bg-white/10 text-white"
-                  : "text-white/40 hover:text-white hover:bg-white/5"
-              )}
-            >
-              <item.icon size={20} className="shrink-0" />
-              {!isCollapsed && <span className="text-sm font-medium">{item.label}</span>}
-              {isCollapsed && (
-                <div className="absolute left-full ml-2 px-2 py-1 bg-surface-2 border border-white/10 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity">
-                  {item.label}
+          {navItems.map((item) => {
+            const isDecisionHub = item.path === '/decisions';
+            const showBadge = isDecisionHub && pendingDecisions > 0;
+
+            return (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                onClick={handleNavClick}
+                className={({ isActive }) => cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all group relative",
+                  isActive
+                    ? "bg-white/10 text-white"
+                    : "text-white/40 hover:text-white hover:bg-white/5"
+                )}
+              >
+                <div className="relative shrink-0">
+                  <item.icon size={20} />
+                  {showBadge && isCollapsed && (
+                    <span
+                      className={cn(
+                        "absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-state-error text-white text-[9px] font-bold px-1 leading-none",
+                        isPulsing && "animate-pulse"
+                      )}
+                    >
+                      {pendingDecisions > 99 ? '99+' : pendingDecisions}
+                    </span>
+                  )}
                 </div>
-              )}
-            </NavLink>
-          ))}
+                {!isCollapsed && (
+                  <span className="text-sm font-medium flex-1">{item.label}</span>
+                )}
+                {!isCollapsed && showBadge && (
+                  <span
+                    className={cn(
+                      "min-w-[20px] h-[20px] flex items-center justify-center rounded-full bg-state-error text-white text-[10px] font-bold px-1.5 leading-none",
+                      isPulsing && "animate-pulse"
+                    )}
+                  >
+                    {pendingDecisions > 99 ? '99+' : pendingDecisions}
+                  </span>
+                )}
+                {isCollapsed && (
+                  <div className="absolute left-full ml-2 px-2 py-1 bg-surface-2 border border-white/10 rounded text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity flex items-center gap-2">
+                    {item.label}
+                    {showBadge && (
+                      <span className="min-w-[16px] h-[16px] flex items-center justify-center rounded-full bg-state-error text-white text-[9px] font-bold px-1 leading-none">
+                        {pendingDecisions > 99 ? '99+' : pendingDecisions}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </NavLink>
+            );
+          })}
         </nav>
 
         <div className="p-4 border-t border-white/5">

@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore, stateColors } from '../store';
 import { createApiClient } from '../api/client';
 import { cn } from '../lib/utils';
-import { Gavel, Check, X, Info, ExternalLink, FileText, GitBranch, Archive, Clock, History } from 'lucide-react';
+import { Gavel, Check, X, Info, ExternalLink, FileText, GitBranch, Archive, Clock, History, Bell, BellOff } from 'lucide-react';
+import { useNotifications } from '../hooks/useNotifications';
 import type { ApiError, PendingDecisionEntry, DecisionEntry } from '../types/api';
 
 const client = createApiClient('default');
@@ -20,9 +21,39 @@ export const DecisionHub: React.FC = () => {
     addDecisionToHistory,
   } = useStore();
 
+  const {
+    playNotificationSound,
+    showBrowserNotification,
+    requestPermission,
+    permissionState,
+  } = useNotifications();
+
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [feedback, setFeedback] = useState('');
   const [actionInFlight, setActionInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Track the previous pending count to detect new arrivals
+  const prevPendingCountRef = useRef(pendingDecisionsList.length);
+
+  // Trigger notifications when new pending decisions arrive
+  useEffect(() => {
+    const prevCount = prevPendingCountRef.current;
+    const currentCount = pendingDecisionsList.length;
+    prevPendingCountRef.current = currentCount;
+
+    // Only notify when count increases (new decisions arrived)
+    if (currentCount > prevCount && prevCount >= 0 && notificationsEnabled) {
+      playNotificationSound();
+
+      // Show browser notification with the newest decision's state
+      if (pendingDecisionsList.length > 0) {
+        const newest = pendingDecisionsList[0];
+        const body = `${newest.state.replace(/_/g, ' ')} - EPIC ${newest.epicId}`;
+        showBrowserNotification(body);
+      }
+    }
+  }, [pendingDecisionsList, notificationsEnabled, playNotificationSound, showBrowserNotification]);
 
   // Fetch pending decisions and decision history on mount
   useEffect(() => {
@@ -186,8 +217,29 @@ export const DecisionHub: React.FC = () => {
           <h2 className="text-2xl font-bold tracking-tight">Decision Hub</h2>
           <p className="text-sm text-white/40">Critical points requiring human intervention</p>
         </div>
-        <div className="px-3 py-1 rounded-full bg-state-pm-approval/10 border border-state-pm-approval/20 text-[10px] font-bold uppercase tracking-widest text-state-pm-approval">
-          {pendingDecisionsList.length} Pending
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              const next = !notificationsEnabled;
+              setNotificationsEnabled(next);
+              if (next && permissionState !== 'granted' && permissionState !== 'unsupported') {
+                requestPermission();
+              }
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[10px] font-bold uppercase tracking-widest transition-all",
+              notificationsEnabled
+                ? "bg-state-done/10 border-state-done/20 text-state-done hover:bg-state-done/20"
+                : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/60"
+            )}
+            title={notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
+          >
+            {notificationsEnabled ? <Bell size={12} /> : <BellOff size={12} />}
+            {notificationsEnabled ? 'Notifications On' : 'Notifications Off'}
+          </button>
+          <div className="px-3 py-1 rounded-full bg-state-pm-approval/10 border border-state-pm-approval/20 text-[10px] font-bold uppercase tracking-widest text-state-pm-approval">
+            {pendingDecisionsList.length} Pending
+          </div>
         </div>
       </div>
 
