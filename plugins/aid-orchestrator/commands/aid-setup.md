@@ -18,6 +18,66 @@ No arguments — runs in the current project root.
 
 ## Flow
 
+### Step 0: Re-Run Detection
+
+**Execute this BEFORE any other setup step.**
+
+```
+RE-RUN DETECTION:
+
+1. Check if .aid-o/04-engine/memory/project-profile.yaml exists AND has initialized: true
+2. IF yes (re-run detected):
+   a. Read existing project-profile.yaml into memory
+   b. Present to PM:
+      "Existing AID configuration detected.
+       Initialized: {scanned_at date from profile}
+       Project: {project_name}
+
+       Select sections to update (comma-separated numbers, or 'all'):
+       (1) Tech Stack — re-detect languages, frameworks, tools
+       (2) MCP Servers — re-scan available MCP servers
+       (3) Directories — re-detect project directory structure
+       (4) Memory — reconfigure memory provider settings
+       (5) Knowledge — reconfigure knowledge/context7 settings
+       (6) Full re-scan — re-detect everything from scratch (keeps custom values as defaults)
+       (0) Cancel — keep current configuration, exit setup"
+   c. Read PM's selection
+   d. IF PM selects "0": exit setup without changes
+   e. IF PM selects "6" or "all": run full setup but pre-populate prompts with existing values
+      (PM sees current value as default, can press Enter to keep or type new value)
+   f. IF PM selects specific sections (e.g., "1,3"):
+      Run only those sections of the setup wizard
+      Merge results into existing project-profile.yaml:
+      - Update only the fields belonging to selected sections
+      - Preserve all fields from unselected sections unchanged
+      - Preserve any custom fields not in the standard schema
+   g. Update scanned_at timestamp after any changes
+3. IF no (fresh install): proceed with full setup as before
+
+SECTION-TO-FIELD MAPPING:
+  (1) Tech Stack  -> tech_stack.languages, tech_stack.frameworks, tech_stack.test,
+                     tech_stack.lint, tech_stack.build, tech_stack.type_check
+  (2) MCP Servers -> mcp_servers.*
+  (3) Directories -> directories.root, directories.plugin, directories.backend,
+                     directories.frontend, directories.source, directories.docs,
+                     directories.docker
+  (4) Memory      -> memory.*
+  (5) Knowledge   -> knowledge.*, context7.*
+
+Custom fields (anything NOT in the standard schema above) are always preserved
+during selective updates.
+
+ERROR HANDLING:
+- If project-profile.yaml exists but is corrupted (invalid YAML):
+  "Existing project-profile.yaml is corrupted (parse error: {error}).
+   Options: (A) Start fresh — overwrites corrupted file. (B) Abort — fix manually first."
+  Do not silently overwrite.
+- If PM selects a section that depends on another (e.g., Knowledge depends on MCP Servers
+  for context7 availability):
+  "Knowledge configuration depends on MCP Servers. Recommended to update MCP Servers (2)
+   as well. Proceed anyway? (Y/N)"
+```
+
 ### Step 1: Project Detection
 
 Scan the project root for indicator files. For each found, extract key information:
@@ -1487,6 +1547,9 @@ actionable next steps with command examples.
 
 - **NEVER delete existing project files** — only create/modify AID configuration
 - If `.aid-o/` already exists, do NOT re-run `/aid-init` unless user asks (skip and report)
-- If `project-profile.yaml` already has `initialized: true`, ask before overwriting
+- Re-run safety is handled by Step 0: Re-Run Detection at the beginning of this flow.
+  If we reach later steps, PM has already approved the scope of this run.
 - Detection is best-effort — if uncertain about a tool, ask the user
 - For monorepos: detect all workspaces and configure gates for each relevant one
+
+**Last Updated:** 2026-02-27
