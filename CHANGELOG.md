@@ -3,6 +3,31 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] — 2026-02-27
+
+### Added
+- **Queue dependency ordering** — `depends_on` field in queue schema with Kahn's algorithm cycle detection; `next()` computes READY/WAITING/BLOCKED eligibility per entry
+- **INTERMEDIATE_GUARDRAIL** — 3-check auto-approval gate (all_steps_done, no_gate_failures, evidence_complete) for intermediate EPICs in FIRST AID mode
+- **Queue write ownership** — CONFLICT_CHECK as Step 0 in add()/start()/complete() operations; single-writer constraint during FIRST AID via auto-mode flag file
+- **Canonical EPIC ID format** — formal `E-{plan_id}-{phase}_{total}` specification with validation regex and cross-referenced documentation
+- **Untrusted field list** — 10 untrusted and 6 trusted fields enumerated in dispatch-protocol with rationale for each classification
+- **OVERLAP_CHECK algorithm** — concrete pseudocode for 3 cases (exact-exact, glob-exact, glob-glob) replacing vague prose in planner
+- **R1 dependency classification** — DATA MODEL and API CONTRACT type definitions with 5-step determination algorithm replacing subjective criteria
+- **plan_ref keyword matching** — 4-step algorithm with extract/score/stopping-rule/confidence-check replacing vague Strategy 3 description
+- **Setup re-run detection** — `/aid-setup` detects existing workspace and offers 6-option section menu for selective reconfiguration
+- **Release count verification** — RELEASE_CHECK_COUNTS ensures CLAUDE.md command/skill counts stay in sync during releases
+- **DEFAULT_BASELINE** — threshold 50/100 applied when no prior audit report exists for PM_APPROVAL auditor trend check
+
+### Changed
+- **adapt_example()** — simplified from 7-step function (422 lines) to 3-step (83 lines): path substitution, tool reference update, validation
+- **Credit exhaustion detection** — 5 hardcoded strings replaced with 6 case-insensitive regex patterns and short-circuit evaluation
+
+### Fixed
+- **Escalation snapshot** — now correctly writes to `interrupted_step_context.json` instead of inconsistent field names
+
+### Removed
+- **`--dry-run` flag** — removed from `/aid-first-aid` command; deferred to backlog as standalone feature
+
 ## [1.2.0] — 2026-02-27
 
 ### Removed
