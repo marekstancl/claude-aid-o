@@ -32,6 +32,7 @@ queue:
     path: ".aid-o/02-epics/E-003-1_2.md"
     priority: high
     status: completed                      # queued | running | completed | failed | paused | removed
+    depends_on: []                         # list of epic_ids that must complete before this starts
     added_at: "2026-02-17T10:00:00Z"
     started_at: "2026-02-17T10:05:00Z"
     completed_at: "2026-02-17T14:30:00Z"
@@ -40,10 +41,14 @@ queue:
     path: ".aid-o/02-epics/E-003-2_2.md"
     priority: medium
     status: queued
+    depends_on: ["E-003-1_2"]              # waits for E-003-1_2 to complete first
     added_at: "2026-02-17T10:01:00Z"
     started_at: null
     completed_at: null
 ```
+
+**Backward compatibility:** Existing entries without `depends_on` are treated as having
+`depends_on: []` (no dependencies, always eligible for pickup).
 
 ### Status Values
 
@@ -60,7 +65,7 @@ queue:
 
 ## Queue Operations
 
-### `add(epic_path, priority)`
+### `add(epic_path, priority, depends_on)`
 
 Add an EPIC to the queue.
 
@@ -70,16 +75,68 @@ Add an EPIC to the queue.
 2. Extract epic_id from file
 3. Check for duplicates (same epic_id already in queue with status queued|running)
    - If duplicate → reject with error: "EPIC already in queue"
-4. Append to queue:
+4. DEPENDENCY VALIDATION (see below)
+5. Append to queue:
    epic_id: <extracted>
    path: <epic_path>
    priority: <priority — default: medium>
    status: queued
+   depends_on: <depends_on — default: []>
    added_at: <now ISO 8601>
    started_at: null
    completed_at: null
-5. Update last_modified to current timestamp
-6. Save epic-queue.yaml
+6. Update last_modified to current timestamp
+7. Save epic-queue.yaml
+```
+
+#### Step 4: DEPENDENCY VALIDATION
+
+```
+IF depends_on is empty → skip validation, proceed to step 5
+
+4a. REFERENCE CHECK — verify all referenced IDs exist:
+  For each dep_id in depends_on:
+    - IF dep_id == this epic's own epic_id → REJECT:
+      "Self-dependency rejected: {epic_id} cannot depend on itself."
+    - Search queue for entry with epic_id == dep_id
+    - Also check completed entries (dependency is pre-satisfied)
+    - IF dep_id not found anywhere:
+      → REJECT: "Dependency '{dep_id}' not found in queue. Add it first
+                 or remove the dependency."
+    - IF dep_id found with status == "failed":
+      → WARN: "Dependency '{dep_id}' has status 'failed'. EPIC will be
+               BLOCKED until resolved."
+      → Continue (allow add, but EPIC will not be eligible for pickup)
+
+4b. CYCLE DETECTION — Kahn's Algorithm:
+  Build the dependency graph from ALL queue entries + the new entry being added:
+    Nodes = all entries in queue (any status except "removed") + the new entry
+    Edges = for each entry, draw directed edge from dep_id → entry
+            for each dep_id in that entry's depends_on list
+            (edge means: dep_id must complete BEFORE entry can start)
+
+  Run Kahn's Algorithm:
+    1. Compute in_degree[node] for every node
+       (in_degree = count of incoming edges = number of dependencies)
+    2. Initialize processing_queue with all nodes where in_degree == 0
+       (these are EPICs with no dependencies)
+    3. sorted_count = 0
+    4. WHILE processing_queue is not empty:
+       a. Remove node from processing_queue
+       b. sorted_count += 1
+       c. For each dependent of node (entries whose depends_on contains node):
+          - Decrement in_degree[dependent] by 1
+          - IF in_degree[dependent] == 0: add dependent to processing_queue
+    5. IF sorted_count < total_node_count:
+       → CYCLE DETECTED
+       → Cycle members = all nodes where in_degree > 0 after algorithm completes
+       → Build cycle path: pick any cycle member, follow its dependencies through
+         other cycle members until returning to start node
+         Example: A → B → C → A
+       → REJECT: "Circular dependency detected: {cycle_path joined with ' -> '}"
+       → Do NOT add the entry to the queue
+
+  IF no cycle detected → proceed to step 5
 ```
 
 ### `remove(epic_id)`
@@ -99,14 +156,21 @@ Remove an EPIC from the queue (only if not running).
 
 ### `next()`
 
-Get the next EPIC to execute (highest priority, oldest within same priority).
+Get the next EPIC to execute (highest priority, oldest within same priority, all dependencies satisfied).
 
 ```
 1. Filter entries where status = "queued"
-2. Sort by:
+2. DEPENDENCY FILTER — for each candidate entry:
+   a. Resolve depends_on (treat missing field as [])
+   b. For each dep_id in depends_on:
+      - Find the queue entry with epic_id == dep_id
+      - IF entry not found OR entry.status != "completed":
+        → This candidate is BLOCKED — remove from eligible set
+   c. Only entries with ALL dependencies satisfied (completed) remain eligible
+3. Sort eligible entries by:
    a. Priority: critical > high > medium > low
    b. Within same priority: added_at ascending (FIFO)
-3. Return first entry, or null if empty
+4. Return first entry, or null if no eligible entry exists
 ```
 
 ### `start(epic_id)`
@@ -278,6 +342,8 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
 | **Failed EPIC → auto-pause** | If an EPIC fails (aborted/unrecoverable), the queue pauses automatically. PM must investigate and resume. |
 | **Manual pause** | `/epic-queue pause` stops auto-pickup immediately. Does not abort the running EPIC. |
 | **Duplicate prevention** | Cannot add the same EPIC twice (by epic_id) if it's already queued or running. |
+| **Dependency validation** | `add()` validates that all `depends_on` IDs exist in the queue, rejects self-dependencies, and runs Kahn's algorithm to detect circular dependency chains before accepting the entry. |
+| **Dependency-aware pickup** | `next()` only returns EPICs whose dependencies have ALL completed. Blocked EPICs remain queued but are skipped until their dependencies are satisfied. |
 | **Persistence** | Queue state lives in YAML file — survives run restarts and context window resets. |
 | **Running protection** | Cannot remove or reorder a running EPIC. |
 | **Conflict detection** | Mutation operations (`add`, `start`, `complete`) check `last_modified` timestamp before writing. Concurrent modification aborts the operation. |
@@ -384,6 +450,10 @@ Queue mutation operations reference the flag file in CONFLICT_CHECK Step 4:
   full queue YAML. Queue operations log warnings on concurrent access but do not
   block PM operations — the PM always retains manual override capability.
 - Parallelism is within EPICs (parallel_groups, analysis_groups), not between EPICs.
+- Dependencies are validated at `add()` time (existence check + cycle detection) and
+  enforced at `next()` time (only EPICs with all dependencies completed are eligible).
+  An EPIC with a failed dependency will remain queued indefinitely until the dependency
+  is resolved (re-run and completed) or the dependency is removed from `depends_on`.
 
 ---
 
