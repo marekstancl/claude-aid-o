@@ -134,4 +134,25 @@ The Controller follows this high-level sequence when processing an EPIC:
 
 ---
 
-**Last Updated:** 2026-02-26
+## Release Sub-Phase — CLAUDE.md Count Verification
+
+This check runs as part of the release checklist (BEFORE the version bump and CHANGELOG
+steps) to ensure CLAUDE.md stays in sync with the actual number of command and skill files.
+
+#### RELEASE CHECK — CLAUDE.md Counts
+
+```
+RELEASE_CHECK_COUNTS:
+  1. actual_commands = count of .md files in plugins/aid-orchestrator/commands/
+  2. actual_skills = count of .md files in plugins/aid-orchestrator/skills/
+  3. Read CLAUDE.md lines containing "slash commands" and "skills"
+  4. Extract the numbers from those lines
+  5. IF actual_commands != extracted command count OR actual_skills != extracted skill count:
+     → Update CLAUDE.md with correct counts before proceeding with release commit
+     → Log: "CLAUDE.md counts updated: commands {old}→{new}, skills {old}→{new}"
+  6. This check is part of the release checklist — release commit MUST NOT have stale counts
+```
+
+---
+
+**Last Updated:** 2026-02-27
