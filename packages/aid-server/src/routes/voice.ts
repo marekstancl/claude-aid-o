@@ -71,7 +71,7 @@ export function voiceRoutes(_registry: ProjectRegistry): Router {
       const formData = new FormData();
       formData.append(
         'file',
-        new Blob([file.buffer], { type: file.mimetype }),
+        new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }),
         file.originalname || 'audio.webm',
       );
       formData.append('model', WHISPER_MODEL);
