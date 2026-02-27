@@ -18,6 +18,8 @@ queue via `/epic-queue` command.
 
 The queue is stored in `.aid-o/04-engine/epic-queue.yaml`:
 
+EPIC IDs follow the canonical format defined in `skills/epic-state-machine.md` > ID Format: `E-{plan_id}-{phase}_{total}`
+
 ```yaml
 # Epic Queue — managed by Orchestrator + /epic-queue command
 # Do not edit manually while an EPIC is running.
@@ -26,16 +28,16 @@ paused: false                              # Global pause flag
 last_modified: "2026-02-17T14:30:00Z"      # Updated on every queue mutation (ISO 8601)
 
 queue:
-  - epic_id: "E-20260217-a1b2-user-auth"
-    path: ".aid-o/02-epics/E-20260217-a1b2-user-auth.md"
+  - epic_id: "E-003-1_2"
+    path: ".aid-o/02-epics/E-003-1_2.md"
     priority: high
     status: completed                      # queued | running | completed | failed | paused | removed
     added_at: "2026-02-17T10:00:00Z"
     started_at: "2026-02-17T10:05:00Z"
     completed_at: "2026-02-17T14:30:00Z"
 
-  - epic_id: "E-20260217-c3d4-api-v2"
-    path: ".aid-o/02-epics/E-20260217-c3d4-api-v2.md"
+  - epic_id: "E-003-2_2"
+    path: ".aid-o/02-epics/E-003-2_2.md"
     priority: medium
     status: queued
     added_at: "2026-02-17T10:01:00Z"
@@ -382,3 +384,7 @@ Queue mutation operations reference the flag file in CONFLICT_CHECK Step 4:
   full queue YAML. Queue operations log warnings on concurrent access but do not
   block PM operations — the PM always retains manual override capability.
 - Parallelism is within EPICs (parallel_groups, analysis_groups), not between EPICs.
+
+---
+
+**Last Updated:** 2026-02-27
