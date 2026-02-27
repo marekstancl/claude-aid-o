@@ -1,12 +1,30 @@
 ---
 name: aid-brainstorm
-description: 11-step interactive brainstorming flow
+description: 8-step interactive brainstorming flow
 user_invocable: true
 ---
 
-Interactive brainstorming run — collaborate with PM to explore an idea, design a solution, produce a validated plan, and generate an EPIC draft.
+Interactive brainstorming run — collaborate with PM to explore an idea, design a solution, and produce a validated plan.
 
-This command guides PM through a structured 11-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, writes the plan document, auto-generates an EPIC draft, and hands off to the next phase.
+This command guides PM through a structured 8-step brainstorming flow. It asks questions one at a time, explores alternatives with tradeoffs, validates the design incrementally, and delegates plan writing to the plan-writing skill. EPIC creation is a separate step offered after plan completion.
+
+## Critical Rules — Read BEFORE executing any step
+
+These rules govern your behavior throughout the ENTIRE brainstorming session. Violating any rule is a hard failure.
+
+1. **ONE question at a time** — never batch multiple questions into one message. Ask, wait for answer, then ask next.
+2. **Multiple choice preferred** — use A/B/C options instead of open-ended questions. Open-ended only when options cannot be predicted.
+3. **Present initial analysis BEFORE first question** — demonstrate understanding of the topic before asking anything (Step 2).
+4. **2-3 approaches with recommendation** — never present a single option. Always explain why alternatives are less suitable.
+5. **Section-by-section approval** — walk through design sections individually (Step 6). Never skip to final approval.
+6. **Detail by default** — provide specific file names, endpoint paths, data types, error handling. PM should never need to say "add more detail."
+7. **YAGNI** — propose the simplest solution meeting stated requirements. Do not add unrequested complexity.
+8. **Delegate plan writing** — Step 8 delegates to `skills/plan-writing.md`. Do not write the plan document yourself.
+9. **No files without approval** — never write plan or EPIC files until PM explicitly approves in Step 7.
+10. **Follow ALL steps in order** — do not skip, merge, or reorder steps. Each step has a specific purpose.
+11. **Progress output mandatory** — begin every step by outputting to PM: `=== Step N/8: {Name} ===`. This is not optional. If a step number is missing from the conversation, the step was skipped — which is a hard failure.
+
+**After reading these rules:** proceed to Step 1 and follow the flow sequentially.
 
 ## Usage
 
@@ -47,6 +65,8 @@ Read project state to ground the brainstorming in reality.
 
 **Present to PM:**
 ```
+=== Step 1/8: Context ===
+
 Brainstorming: {topic}
 ====================================
 Project: {name from project-profile.yaml or directory name}
@@ -57,7 +77,14 @@ I'll help you explore this idea step by step.
 Let's start with some questions to understand what you need.
 ```
 
+**Before moving to Step 2, verify:**
+- [ ] Read `skills/brainstorming.md` (not skipped)
+- [ ] PM's language detected — conversation language set
+- [ ] Context header presented to PM (topic, project, stack, recent)
+
 ### Step 2: Analysis
+
+**Output to PM first:** `=== Step 2/8: Analysis ===`
 
 Present a structured analysis of the PM's topic before asking any questions. Follow the Initial Analysis Phase protocol from `skills/brainstorming.md`.
 
@@ -72,7 +99,14 @@ Present a structured analysis of the PM's topic before asking any questions. Fol
 
 **Transition:** When PM confirms understanding, move to Step 3.
 
+**Before moving to Step 3, verify:**
+- [ ] Presented structured analysis (4 areas: understanding, dimensions, challenges, clarify)
+- [ ] Asked PM to confirm understanding
+- [ ] PM confirmed (or corrections incorporated and re-confirmed)
+
 ### Step 3: Questions
+
+**Output to PM first:** `=== Step 3/8: Questions ===`
 
 Ask PM clarifying questions to understand requirements, constraints, and goals. Follow the questioning protocol from `skills/brainstorming.md`.
 
@@ -98,7 +132,15 @@ Ask PM clarifying questions to understand requirements, constraints, and goals. 
 
 **Transition:** When enough context is gathered, summarize what you've learned and move to Step 4.
 
+**Before moving to Step 4, verify:**
+- [ ] Asked questions ONE at a time (not batched in a single message)
+- [ ] Used multiple choice format where possible
+- [ ] Covered at least 3 question categories from the table
+- [ ] Summarized findings to PM before transitioning
+
 ### Step 4: Approaches
+
+**Output to PM first:** `=== Step 4/8: Approaches ===`
 
 Propose 2-3 distinct approaches with tradeoffs and a recommendation.
 
@@ -142,7 +184,15 @@ Which approach? (A/B/C/modify)
 
 **If PM asks for modifications:** Incorporate feedback, present a revised option, and confirm.
 
+**Before moving to Step 5, verify:**
+- [ ] Presented 2-3 distinct approaches (not just one)
+- [ ] Each approach has: Name, Summary, Pros (3+), Cons (2+), Effort, Risk
+- [ ] Stated recommendation with reasoning why alternatives are less suitable
+- [ ] PM chose an approach (or modifications incorporated)
+
 ### Step 5: Design
+
+**Output to PM first:** `=== Step 5/8: Design ===`
 
 Present the chosen approach as a structured design with PM input.
 
@@ -159,7 +209,14 @@ Present the chosen approach as a structured design with PM input.
 
 **Detail by default:** Provide comprehensive detail without PM asking for it. Include specifics like field names, endpoint paths, error handling strategies. PM can always say "simplify" but should never need to say "add more detail."
 
+**Before moving to Step 6, verify:**
+- [ ] Design covers all 6 areas: architecture, data model, API, implementation, testing, risks
+- [ ] Includes specific details (field names, paths, protocols) — not vague descriptions
+- [ ] Asked PM for overall feedback before section-by-section review
+
 ### Step 6: Sections
+
+**Output to PM first:** `=== Step 6/8: Sections ===`
 
 Walk through the design section by section, getting approval for each.
 
@@ -182,7 +239,14 @@ Walk through the design section by section, getting approval for each.
    ```
 4. After all sections reviewed, move to Step 7
 
+**Before moving to Step 7, verify:**
+- [ ] Each section presented individually (not all at once)
+- [ ] Each section got explicit response: approve / modify / skip
+- [ ] Section Status tracker shown to PM with all statuses
+
 ### Step 7: Approval
+
+**Output to PM first:** `=== Step 7/8: Approval ===`
 
 Final design approval from PM.
 
@@ -204,180 +268,64 @@ Final design approval from PM.
 5. If PM says N: ask which section to revisit, return to Step 6 for that section
 6. If PM says X: end brainstorming, no files written
 
-### Step 8: Document
+**Before moving to Step 8, verify:**
+- [ ] Complete design summary shown with all section statuses
+- [ ] PM explicitly approved (said Y) — not assumed or implied
 
-Write the validated design to a plan file.
+### Step 8: Document (Plan-Writing Delegation)
 
-1. Generate plan ID per `skills/epic-orchestration.md` ID Generation section:
-   - Read `.aid-o/03-config/counter.yaml` → increment `plan` counter → `P{NNN}` (zero-padded 3 digits)
-2. Generate topic slug from the brainstorming topic (lowercase, hyphens, max 40 chars)
-3. Determine output language:
-   - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
-   - If `scope.plans: true`: write the plan document in the configured `document_language`
-   - If `scope.plans: false` or config missing: write in English
-   - **Note:** The conversation with PM stays in PM's language regardless of document language
-4. Write plan to `.aid-o/01-plans/{plan_id}-{topic}.md` using the plan template structure:
-   - Frontmatter: id, type (plan), status (draft), created, author (PM + AI)
-   - Context: why this plan exists (from Step 1-3)
-   - Goal: one-sentence desired outcome
-   - Scope: in-scope and out-of-scope items
-   - Approach: chosen option with pros/cons, rejected alternatives summarized
-   - Decision: which option and rationale
-   - High-Level Steps: numbered steps with descriptions and effort estimates
-   - Constraints: from PM answers
-   - Risks: from design discussion
-   - Success Criteria: from PM answers
-   - Next Steps: suggest creating EPIC
-5. Confirm to PM:
+**Output to PM first:** `=== Step 8/8: Document ===`
+
+Write the validated design to an exhaustive plan file by delegating to the plan-writing skill.
+
+1. Collect all approved sections from the brainstorming session:
+   - Step 3 (Questions): PM's answers to every clarification question
+   - Step 4 (Approaches): PM's chosen approach, rationale, and rejected alternatives
+   - Step 5 (Design): All design sections — architecture, data model, API, implementation, testing, risks
+   - Step 6 (Sections): PM's section-by-section approvals and all modifications
+   - Step 7 (Approval): PM's final approval
+   - Project context from Step 1 (project profile, tech stack, knowledge context)
+2. Invoke `skills/plan-writing.md` in **Mode A (Post-Brainstorming)**:
+   - Pass ALL collected sections as input
+   - The plan-writing skill handles:
+     - Plan ID generation (from counter.yaml)
+     - Topic slug generation
+     - Language configuration (from language.yaml)
+     - Exhaustive plan document structure with detailed per-step format
+     - Forbidden Phrase Detection (hard gate — no vague shortcuts)
+     - Traceability Verification (every brainstorming output → plan section)
+     - Completeness Gate (16-point verification, hard gate)
+     - Writing the plan file to `.aid-o/01-plans/{plan_id}-{topic}.md`
+3. The plan-writing skill confirms to PM:
    ```
    Plan written: .aid-o/01-plans/{plan_id}-{topic}.md
+
+   {step_count} implementation steps
+   Quality gates: passed (forbidden phrases: 0, completeness: 16/16)
    ```
 
-### Step 9: EPIC Subagent
+**Important:** The plan-writing skill writes detailed per-step sections (not the old high-level steps table). Each step includes file paths, implementation detail, error handling, edge cases, dependencies, and acceptance criteria. This ensures agents receive full implementation context during dispatch.
 
-Generate an EPIC draft from the approved plan using the EPIC subagent prompt template from `skills/brainstorming.md`.
-
-1. Read the plan file just created (Step 8)
-2. Read `skills/brainstorming.md` Section "EPIC Subagent Prompt Template"
-3. Read `.aid-o/04-engine/memory/project-profile.yaml` for tech stack context
-4. Read `.aid-o/03-config/templates/epic.md` for the EPIC template structure
-5. Determine output language:
-   - Same logic as Step 8: use `language.yaml` → `document_language` if `scope.plans: true`
-6. Generate EPIC draft:
-   - EPIC ID: per `skills/epic-orchestration.md` ID Generation (e.g., `E-{NNN}-1_1` for single-phase plan)
-   - Fill all EPIC template sections from the approved plan:
-     - **Context** — from plan Context + Approach Decision
-     - **Goal** — from plan Goal (1-3 sentences, specific, testable)
-     - **Scope** — Allowed files/paths and Forbidden zones derived from plan + project structure
-     - **Artifacts** — concrete deliverables from plan High-Level Steps
-     - **Constraints** — from plan Constraints + PM answers
-     - **DoD Gates** — default (tests_pass, lint_pass, security_scan_pass, docs_updated) + conditional gates based on stack
-     - **Acceptance Criteria** — from plan Success Criteria, expanded into testable checkboxes
-     - **Dependencies** — from plan Constraints + project context
-     - **Steps (Role Pipeline)** — map plan steps to AID roles (architect, backend, frontend, qa, etc.) with dependencies and parallel groups
-     - **Run Breakdown** — estimate single vs. multi-run based on step count and complexity
-   - Apply YAGNI: do not add steps or roles that the plan does not require
-7. Write EPIC draft to `.aid-o/02-epics/{epic_id}-{topic}.md`
-8. Confirm:
-   ```
-   EPIC draft written: .aid-o/02-epics/{epic_id}-{topic}.md
-   ```
-
-### Step 10: Execution Plan Option
-
-After the EPIC draft is written, offer PM the option to generate the execution plan immediately.
-
-1. Ask PM:
-   ```
-   EPIC draft written: .aid-o/02-epics/{epic_id}-{topic}.md
-
-   Would you like to generate the execution plan now?
-   (Y) Generate Plan JSON + Run file → ready for /aid-run-epic
-   (N) Stop here → review the EPIC draft, then run /aid-plan-epic manually
-
-   Generating now saves a step but skips manual EPIC review.
-   ```
-
-2. If PM says N (or skip, later, no):
-   → Proceed to Step 11 (handoff — present A-D options)
-
-3. If PM says Y (or yes, go, generate):
-   → Execute the plan-epic flow inline:
-   a. Use the EPIC file just written in Step 9 as input
-   b. Skip format detection (we know it's a valid EPIC — we just generated it)
-   c. Follow `commands/aid-plan-epic.md` Steps 3-9 exactly:
-      - Step 3: Load and Validate EPIC
-      - Step 4: Analyze Steps, Dependencies, and Parallel Groups
-      - Step 5: Generate Analysis Groups
-      - Step 6: Build Plan JSON
-      - Step 7: Save Plan JSON (plan.json + plan_progress.json + epic_input.md)
-      - Step 8: Generate Run File
-      - Step 9: Present Output
-   d. After plan-epic completes → proceed to Step 11 (handoff — present A-D options)
-
-### Step 11: Handoff
-
-Present interactive options based on the completed brainstorming run.
-
-1. Parse the plan's High-Level Steps and group them into logical phases (by dependency/domain)
-2. Display phases:
-   ```
-   Phases detected:
-     Phase 1: {steps 1-3} — {description}
-     Phase 2: {steps 4-6} — {description}
-     Phase 3: {steps 7-9} — {description}
-   ```
-3. Present options:
-   ```
-   Brainstorming Complete
-   ====================================
-   Plan:  .aid-o/01-plans/P-{id}-{topic}.md
-   EPIC:  .aid-o/02-epics/E-{id}-{topic}.md (draft)
-   Phases: {count} detected
-
-   What's next?
-   (A) Add more items to plan — re-open brainstorming
-   (B) Create EPIC for all phases — single EPIC covering everything
-   (C) Create EPIC for specific phase — pick a phase
-   (D) Stop here — review files, run /aid-plan-epic manually later
-   ```
-
-**Option A — Re-open brainstorming:**
-1. Load existing plan from Step 8
-2. Display already-approved sections
-3. Return to Step 3 with existing context
-4. New requirements ADD to the plan (never overwrite approved sections)
-5. Re-present modified sections for approval (Step 6)
-6. Re-write plan file (Step 8)
-7. Re-generate EPIC draft (Step 9)
-8. Return to Step 11
-
-**Option B — Create EPIC for all phases:**
-1. Use the EPIC draft from Step 9 as-is (covers all High-Level Steps)
-2. Proceed to Step 10 (Execution Plan Option) — ask if PM wants Plan JSON now
-3. If Y: generate Plan JSON inline, present full pipeline handoff
-4. If N: present plan + EPIC file paths
-
-**Option C — Create EPIC for specific phase:**
-1. Ask PM: "Which phase? (1/2/3/...)"
-2. Generate a new EPIC covering only the selected phase's steps:
-   - Restrict scope to phase-relevant files
-   - Set `plan_epics_total` in EPIC frontmatter to total phase count
-   - List external dependencies from other phases
-   - Add context note: "This EPIC covers Phase {N} of {total}"
-3. Save phase-specific EPIC to `.aid-o/02-epics/{epic_id}-{topic}.md` (ID encodes phase: `E-{NNN}-{N}_{total}`)
-4. Proceed to Step 10 (Execution Plan Option)
-
-**Option D — Stop here:**
-```
-Brainstorming complete. Files written:
-  Plan: .aid-o/01-plans/P-{id}-{topic}.md
-  EPIC: .aid-o/02-epics/E-{id}-{topic}.md (draft)
-
-Next steps:
-  1. Review the EPIC draft and refine if needed
-  2. Run /aid-plan-epic {epic-path} to generate execution plan
-  3. Run /aid-run-epic to start orchestration
-```
+**Step 8 is the FINAL step of brainstorming.** After plan-writing completes, it presents next steps (EPIC creation, review, re-open). Brainstorming does NOT create EPICs — that is `/aid-plan-epic`'s job.
 
 ## Reference Files
 
-- `skills/brainstorming.md` — process rules, key principles, EPIC subagent prompt template, language handling
-- `commands/aid-plan-epic.md` — plan-epic flow (Steps 3-9 used by Step 10 inline execution)
+- `skills/brainstorming.md` — process rules, key principles, language handling
+- `skills/plan-writing.md` — plan writing skill (Step 8 delegation — writes plan, presents next steps including EPIC creation)
+- `commands/aid-write-plan.md` — standalone plan writing command
+- `commands/aid-plan-epic.md` — create EPIC from plan (offered by plan-writing handoff)
 - `skills/planner.md` — plan generation logic (downstream from brainstorming)
-- `defaults/templates/plan.md` — plan document template
-- `defaults/templates/epic.md` — EPIC template
-- `defaults/templates/epic-example.md` — EPIC example for reference
+- `defaults/templates/plan.md` — base plan document template (extended by plan-writing skill)
 - `skills/run-management.md` — lifecycle protocols (End of Brainstorming Protocol)
 - `.aid-o/03-config/language.yaml` — document language configuration
 
 ## Important
 
-- **This command CREATES two files** — plan + EPIC draft. It never modifies existing files.
+- **This command CREATES one file** — the plan document. EPIC creation is a separate step via `/aid-plan-epic`.
 - **Detail by default** — brainstorming produces comprehensive output. PM should never need to ask for more detail.
 - **One question at a time** — never batch questions. PM attention is the bottleneck.
 - **Multiple choice preferred** — reduce PM cognitive load with options, not open-ended questions.
 - **Language split** — conversation follows PM's language; output documents follow `language.yaml` configuration.
 - **YAGNI** — do not propose over-engineered solutions. Start simple, PM can ask for complexity.
 - If PM aborts at any step (says "stop", "cancel", "abort"), end gracefully without writing files.
-- If `.aid-o/` does not exist, the command still works but writes plan/EPIC to current directory with a warning.
+- If `.aid-o/` does not exist, the command still works but writes plan to current directory with a warning.

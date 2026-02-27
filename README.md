@@ -131,7 +131,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.0.0** (current) — Plugin DX housekeeping: GitHub MCP in setup wizard, setup completion banner, version pre-check in plan-epic, help workflow examples, autonomous mode commands in help, stale path fixes
+- **v1.1.0** (current) — Plan-writing skill, brainstorming modular split (3 files), critical rules and self-checks, 11→8 step simplification
+- **v1.0.0** — Plugin DX housekeeping: GitHub MCP in setup wizard, setup completion banner, version pre-check in plan-epic, help workflow examples, autonomous mode commands in help, stale path fixes
 - **v0.99.0** — AID Server backend (`packages/aid-server`), Docker deployment, Docusaurus docs site on GitHub Pages, GUI frontend polish
 - **v0.9.3** — GATES→CURATOR_RESOLVE fix, Qdrant config unification, FIRST AID animations, EPIC/plan archival
 

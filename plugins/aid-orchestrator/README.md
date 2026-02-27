@@ -197,6 +197,6 @@ Without Qdrant, the plugin works identically using file-based memory (active-wor
 
 ## Version
 
-- **Plugin:** 1.0.0
+- **Plugin:** 1.1.0
 - **Requires:** Claude Code >= 1.0.0
 - **License:** AGPL-3.0-only

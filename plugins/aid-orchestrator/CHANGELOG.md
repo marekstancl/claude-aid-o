@@ -3,10 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.1.0] — 2026-02-27
 
 ### Added
 
+- **Plan-Writing Skill** — new `skills/plan-writing.md` with two modes: Mode A (post-brainstorming) and Mode B (standalone `/aid-write-plan`); includes Forbidden Phrase Detection hard gate, Traceability Verification, 16-point Completeness Gate, and Post-Write Handoff offering EPIC creation
+- **`/aid-write-plan` Command** — standalone plan writing command that delegates to the plan-writing skill; accepts topic argument or interactive input
+- **Brainstorming Critical Rules Block** — 11 critical rules at the top of `aid-brainstorm.md` with primacy effect positioning to prevent instruction drift
+- **Brainstorming Step Self-Checks** — each of the 8 brainstorming steps now has a mandatory self-check checklist (2-4 items) that must pass before transitioning to the next step
+- **Brainstorming Progress Tracker** — mandatory `=== Step N/8: {Name} ===` output at the start of every brainstorming step for checkpoint enforcement
 - **Brainstorming Approach Hard Gate** — RULE 9 enforces minimum 2 approaches before presenting to PM; RULE 10 prevents skipping approach exploration even for "obvious" topics
 - **Brainstorming Completeness Gate** — Step 8 now enumerates all PM answers from Steps 3-6 and verifies each appears in the plan document before finalizing
 - **adapt_example() Implementation** — 7-step function in knowledge-acquisition.md replaces path placeholders, updates framework versions, handles Docker sections, aligns platforms, merges constraints, adjusts step count, and writes adapted EPIC
@@ -24,6 +29,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- **Brainstorming modular split** — 1371-line `brainstorming.md` split into core (569 lines) + two sub-skills: `brainstorming-knowledge.md` (445 lines) for knowledge acquisition and file analysis, `brainstorming-workflow.md` (443 lines) for workflow detection and Docker/MCP rules
+- **Brainstorming flow simplified** — reduced from 11 steps to 8 steps; EPIC creation removed from brainstorming entirely (now handled by `/aid-plan-epic` via plan-writing handoff)
+- **Plan-writing delegation** — brainstorming Step 8 now delegates to `skills/plan-writing.md` instead of writing the plan inline; plan-writing skill handles quality gates, forbidden phrase detection, and completeness verification
 - **FIRST AID disclaimer** — reframed from alarmist "USE AT YOUR OWN RISK" to "Experimental Autonomous Mode"; added explicit `/aid-stop` emergency stop reference and `/aid-epic-queue` for queue review so users know how to intervene safely
 - **Setup MCP advanced permissions preset** — replaced the broad `mcp__*` wildcard with 7 explicit tool patterns (`mcp__shared-github__*(*)`, etc.) matching auto-mode format; updated setup wizard comparison matrix to reflect the change
 - **Epic orchestration skill split** — 2300-line `epic-orchestration.md` split into 5 modular files: slim orchestrator (138 lines), `epic-state-machine.md` (602), `dispatch-protocol.md` (498), `gate-evaluation.md` (509), and `first-aid-controller.md` (577); pure refactoring with no logic changes
