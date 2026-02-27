@@ -62,6 +62,12 @@ Read project state to ground the brainstorming in reality.
 6. Read language configuration:
    - If `.aid-o/03-config/language.yaml` exists: use `document_language` for output documents
    - If not: default to `EN` for output documents
+7. **Load sub-skills** (READ the files — do not skip):
+   - Check if PM's topic contains workflow keywords (agent, chatbot, RAG, workflow, pipeline, automation, LangChain, LangGraph, N8N, LangFlow, multi-agent, AI workflow, LLM agent, tool-calling, assistant):
+     - If yes: READ `skills/brainstorming-workflow.md` — follow its protocols throughout Steps 2-4
+   - Check `.aid-o/03-config/policies/memory-config.yaml` → `knowledge.enabled`:
+     - If true: READ `skills/brainstorming-knowledge.md` — follow its protocols in Steps 1 and 4
+   - Even if no workflow detected: READ `skills/brainstorming-workflow.md` → "Docker/MCP Preference Rules" section (needed for Step 4 Docker evaluation)
 
 **Present to PM:**
 ```
@@ -79,6 +85,7 @@ Let's start with some questions to understand what you need.
 
 **Before moving to Step 2, verify:**
 - [ ] Read `skills/brainstorming.md` (not skipped)
+- [ ] Sub-skills loaded: `brainstorming-workflow.md` READ if workflow keywords detected (or Docker/MCP section READ for all projects); `brainstorming-knowledge.md` READ if knowledge enabled
 - [ ] PM's language detected — conversation language set
 - [ ] Context header presented to PM (topic, project, stack, recent)
 

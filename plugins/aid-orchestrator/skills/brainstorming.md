@@ -152,13 +152,13 @@ Is this understanding correct, or should I adjust my focus before we continue?
 
 ## Knowledge-Augmented Brainstorming
 
-**Full protocol:** `skills/brainstorming-knowledge.md`
+**ACTION REQUIRED:** In Step 1, check if `memory-config.yaml` has `knowledge.enabled: true`. If yes, **READ `skills/brainstorming-knowledge.md`** and follow its protocols for knowledge search and file analysis. If knowledge is not configured, skip this section entirely.
 
-When knowledge acquisition is configured (`memory-config.yaml` → `knowledge.enabled: true`), brainstorming is augmented with relevant documentation, patterns, and lessons from past projects. Knowledge is strictly non-blocking — when unavailable, brainstorming works identically to a non-augmented run.
+When knowledge acquisition is configured, brainstorming is augmented with relevant documentation, patterns, and lessons from past projects. Knowledge is strictly non-blocking — when unavailable, brainstorming works identically to a non-augmented run.
 
 **Integration points:**
-- **Step 1** — Pre-brainstorming knowledge search + sample file analysis (`.aid-o/05-inputs/`)
-- **Step 3** — Approach-informed knowledge search + example EPIC lookup
+- **Step 1** — READ `skills/brainstorming-knowledge.md` → run Pre-brainstorming Knowledge Search + Sample File Analysis (`.aid-o/05-inputs/`)
+- **Step 3** — Follow `skills/brainstorming-knowledge.md` → Approach-Informed Knowledge Search + Example EPIC Lookup
 
 **Key guarantees:** 5-second timeout per knowledge call, max 3 calls per run, graceful degradation for all failure scenarios, PM-provided file paths analyzed on demand.
 
@@ -166,16 +166,14 @@ When knowledge acquisition is configured (`memory-config.yaml` → `knowledge.en
 
 ## Workflow Detection & Docker/MCP Integration
 
-**Full protocol:** `skills/brainstorming-workflow.md`
-
-When a workflow/agent project is detected, brainstorming is supplemented with workflow-specific questioning (WF1-WF6), platform recommendation (WF7), and workflow-aware approach structuring. Detection runs automatically before the first question. Non-workflow projects are completely unaffected.
+**ACTION REQUIRED:** In Step 1, run the Platform Detection Protocol (scan PM's topic for workflow keywords: agent, chatbot, RAG, workflow, pipeline, automation, LangChain, LangGraph, N8N, LangFlow, multi-agent, AI workflow, LLM agent, tool-calling, assistant). If `workflow_detected == true`, **READ `skills/brainstorming-workflow.md`** and follow its protocols for workflow questioning (WF1-WF6), platform recommendation (WF7), and Docker/MCP analysis. If no workflow detected, **STILL READ `skills/brainstorming-workflow.md` → Docker/MCP Preference Rules** section to evaluate Docker recommendation based on service count.
 
 Docker and MCP recommendations are cross-cutting (apply to ALL projects based on service count, external dependencies, and reproducibility needs). Workflow projects amplify these to "STRONGLY recommended."
 
 **Integration points:**
-- **Step 2** — Platform Detection Protocol, workflow question inserts (WF1-WF6)
-- **Step 2→3 transition** — WF7 Platform Recommendation
-- **Step 3** — Workflow-aware approaches (W1-W5), Docker/MCP analysis
+- **Step 2** — READ `skills/brainstorming-workflow.md` → Platform Detection, workflow question inserts (WF1-WF6)
+- **Step 2→3 transition** — Follow `skills/brainstorming-workflow.md` → WF7 Platform Recommendation
+- **Step 3** — Follow `skills/brainstorming-workflow.md` → Workflow-aware approaches (W1-W5), Docker/MCP analysis
 
 **Key guarantees:** PM's decline of Docker/MCP is final and respected immediately, constraints carry forward to plan document, non-workflow projects see zero difference.
 
