@@ -530,9 +530,45 @@ CPA still computes critical path and ratio, but relaxation rules don't apply
 #### Development Relaxation Rules
 
 ```
-RULE R1: "Frontend doesn't need Domain"
+RULE R1: "Frontend can parallelize with Domain when Domain produces only data models"
+
+DEFINITIONS:
+
+  DATA MODEL — a step that ONLY creates or modifies:
+    - Database schema files: *.prisma, *.sql, migrations/*, *.dbml
+    - Type/interface definition files: types.ts, interfaces.ts, models.py, types.py
+    - Entity/DTO class files that define data shape but NO callable methods
+    - Configuration files: *.yaml, *.json, *.toml, *.env
+    - Documentation files: *.md (no executable behavior)
+
+  API CONTRACT — a step that creates or modifies ANY of:
+    - Route/endpoint definitions: router.ts, urls.py, routes/, controllers/
+    - Request/response validation schemas used at HTTP boundaries
+      (e.g., zod schemas in route handlers, pydantic models in FastAPI endpoints)
+    - Middleware, interceptors, or request pipeline components
+    - OpenAPI/Swagger specification files: *.openapi.yaml, *.swagger.json
+    - Service interfaces with public methods that other components call
+      (e.g., AuthService with login(), register(), verify() methods)
+    - WebSocket event handlers or message schemas
+    - GraphQL schema definitions (*.graphql, schema.ts)
+
+DETERMINATION ALGORITHM:
+  1. List all files in the Domain step's "Files" section (Create + Modify entries only)
+  2. For each file, classify as DATA MODEL or API CONTRACT using the definitions above
+  3. IF all files classify as DATA MODEL → R1 applies, frontend step can run in parallel
+  4. IF any file classifies as API CONTRACT → R1 does NOT apply, frontend must wait
+  5. IF classification is ambiguous (file doesn't clearly match either category)
+     → treat as API CONTRACT (conservative, consistent with OVERLAP_CHECK philosophy)
+
+EXAMPLES:
+  - Domain creates "prisma/schema.prisma" → DATA MODEL → parallelize OK
+  - Domain creates "src/types/User.ts" (interface, no methods) → DATA MODEL → parallelize OK
+  - Domain creates "src/api/routers/auth.ts" → API CONTRACT → frontend must wait
+  - Domain creates "src/services/AuthService.ts" with public methods → API CONTRACT → must wait
+  - Domain creates only migration files → DATA MODEL → parallelize OK
+
   IF: step_{N}_frontend depends on step_{M}_domain
-  AND: step_{M}_domain produces only data models (no API contracts)
+  AND: DETERMINATION ALGORITHM classifies step_{M}_domain as DATA MODEL only
   AND: step_{1}_architect produced API contracts
   THEN: relax → frontend depends on architect instead of domain
   REASON: Frontend builds against API contracts, not domain internals
