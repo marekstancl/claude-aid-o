@@ -4,7 +4,8 @@ import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { Lightbulb, Plus, Rocket, Clock, CheckCircle2, MoreHorizontal, Filter, LayoutGrid, Network, X, Trash2, Link } from 'lucide-react';
 import { createApiClient } from '../api/client';
-import type { ApiError, StoredIdea, IdeaCreateRequest } from '../types/api';
+import type { ApiError, StoredIdea, IdeaCreateRequest, BacklogEntry } from '../types/api';
+import { InsightsPanel } from '../components/InsightsPanel';
 import {
   DndContext,
   DragOverlay,
@@ -21,15 +22,69 @@ import { CSS } from '@dnd-kit/utilities';
 
 const client = createApiClient('default');
 
-// Column definitions matching API statuses
+// Column definitions — 5-stage pipeline from Ideas to Done
 const COLUMNS = [
-  { id: 'idea', title: 'Ideas' },
-  { id: 'exploring', title: 'Exploring' },
-  { id: 'planned', title: 'Planned' },
-  { id: 'done', title: 'Done' },
+  { id: 'ideas', title: 'Ideas', icon: Lightbulb },
+  { id: 'plan', title: 'Plan', icon: Link },
+  { id: 'epic', title: 'EPIC', icon: Rocket },
+  { id: 'running', title: 'Running', icon: Clock },
+  { id: 'done', title: 'Done', icon: CheckCircle2 },
 ] as const;
 
 type ColumnId = typeof COLUMNS[number]['id'];
+
+/**
+ * Resolve effective column for an idea using `autoStatus ?? status`.
+ *
+ * Column mapping:
+ *   null + status 'idea'      → ideas
+ *   null + status 'exploring' → ideas   (backward compat)
+ *   'plan' or status 'planned'→ plan
+ *   'epic'                    → epic
+ *   'running'                 → running
+ *   'done' or status 'done'   → done
+ */
+function resolveColumn(idea: StoredIdea): ColumnId {
+  const effective = idea.autoStatus ?? idea.status;
+  switch (effective) {
+    case 'idea':
+    case 'exploring':
+      return 'ideas';
+    case 'plan':
+    case 'planned':
+      return 'plan';
+    case 'epic':
+      return 'epic';
+    case 'running':
+      return 'running';
+    case 'done':
+      return 'done';
+    default:
+      return 'ideas';
+  }
+}
+
+/**
+ * Map a column ID back to the API status value for `updateIdea()`.
+ * autoStatus is server-computed from linked artifacts, so we only set
+ * the manual `status` field here.
+ */
+function columnToApiStatus(columnId: ColumnId): StoredIdea['status'] {
+  switch (columnId) {
+    case 'ideas':
+      return 'idea';
+    case 'plan':
+      return 'planned';
+    case 'epic':
+      return 'planned'; // manual status stays planned; autoStatus is server-driven
+    case 'running':
+      return 'planned'; // manual status stays planned; autoStatus is server-driven
+    case 'done':
+      return 'done';
+    default:
+      return 'idea';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Sortable card component
@@ -39,9 +94,15 @@ interface SortableCardProps {
   idea: StoredIdea;
   onDelete: (id: string) => void;
   onLinkEpic: (id: string) => void;
+  /** When true, render a selection checkbox (Ideas column only). */
+  showCheckbox?: boolean;
+  /** Whether this card is currently selected. */
+  isSelected?: boolean;
+  /** Toggle selection for this card. */
+  onToggleSelect?: (id: string) => void;
 }
 
-const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic }) => {
+const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic, showCheckbox, isSelected, onToggleSelect }) => {
   const {
     attributes,
     listeners,
@@ -63,10 +124,28 @@ const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic 
       style={style}
       {...attributes}
       {...listeners}
-      className="glass p-4 rounded-xl border border-white/5 cursor-grab active:cursor-grabbing group hover:bg-white/[0.05] transition-colors"
+      className={cn(
+        "glass p-4 rounded-xl border cursor-grab active:cursor-grabbing group hover:bg-white/[0.05] transition-colors",
+        isSelected ? "border-state-executing/40 bg-state-executing/5" : "border-white/5",
+      )}
     >
       <div className="flex items-start justify-between mb-3">
-        <h4 className="text-sm font-medium leading-tight group-hover:text-state-executing transition-colors">{idea.title}</h4>
+        <div className="flex items-start gap-2">
+          {showCheckbox && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleSelect?.(idea.id); }}
+              className={cn(
+                "mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors",
+                isSelected
+                  ? "bg-state-executing border-state-executing text-bg-base"
+                  : "border-white/20 hover:border-white/40",
+              )}
+            >
+              {isSelected && <CheckCircle2 size={10} />}
+            </button>
+          )}
+          <h4 className="text-sm font-medium leading-tight group-hover:text-state-executing transition-colors">{idea.title}</h4>
+        </div>
         {idea.priority === 'high' && <div className="w-1.5 h-1.5 rounded-full bg-state-error shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
       </div>
 
@@ -245,6 +324,7 @@ export const IdeasToExecution: React.FC = () => {
   const [showCapture, setShowCapture] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
 
   const ideas = useStore((s) => s.ideas);
   const ideasLoading = useStore((s) => s.ideasLoading);
@@ -277,27 +357,78 @@ export const IdeasToExecution: React.FC = () => {
     return () => { cancelled = true; };
   }, [setIdeas, setIdeasLoading]);
 
-  // Group ideas by column status
+  // Toggle selection of an idea (Ideas column only)
+  const handleToggleSelect = useCallback((ideaId: string) => {
+    setSelectedIdeaIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(ideaId)) {
+        next.delete(ideaId);
+      } else {
+        next.add(ideaId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Create Plan action — stub for now
+  const handleCreatePlan = useCallback(() => {
+    const selected = Array.from(selectedIdeaIds);
+    const titles = ideas
+      .filter((i) => selected.includes(i.id))
+      .map((i) => i.title);
+    alert(`Create Plan from ${selected.length} idea(s):\n\n${titles.join('\n')}`);
+  }, [selectedIdeaIds, ideas]);
+
+  // Group ideas by column using autoStatus ?? status mapping
   const ideasByColumn: Record<ColumnId, StoredIdea[]> = {
-    idea: ideas.filter(i => i.status === 'idea'),
-    exploring: ideas.filter(i => i.status === 'exploring'),
-    planned: ideas.filter(i => i.status === 'planned'),
-    done: ideas.filter(i => i.status === 'done'),
+    ideas: [],
+    plan: [],
+    epic: [],
+    running: [],
+    done: [],
   };
+  for (const idea of ideas) {
+    const col = resolveColumn(idea);
+    ideasByColumn[col].push(idea);
+  }
+
+  // Clean up selections: remove IDs that are no longer in the Ideas column
+  useEffect(() => {
+    const ideasColumnIds = new Set(ideasByColumn.ideas.map((i) => i.id));
+    setSelectedIdeaIds((prev) => {
+      const cleaned = new Set<string>();
+      for (const id of prev) {
+        if (ideasColumnIds.has(id)) cleaned.add(id);
+      }
+      return cleaned.size !== prev.size ? cleaned : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ideas]);
 
   // Get the active idea for drag overlay
   const activeIdea = activeId ? ideas.find(i => i.id === activeId) : null;
 
+  // Track active backlog entry for overlay
+  const [activeBacklogEntry, setActiveBacklogEntry] = useState<BacklogEntry | null>(null);
+  const backlogEntries = useStore((s) => s.backlogEntries);
+
   // Find which column an idea belongs to
   const findColumnOfIdea = useCallback((ideaId: string): ColumnId | null => {
     const idea = ideas.find(i => i.id === ideaId);
-    return idea ? (idea.status as ColumnId) : null;
+    return idea ? resolveColumn(idea) : null;
   }, [ideas]);
 
   // ----- Drag handlers -----
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
+    const activeData = event.active.data.current;
+    if (activeData?.type === 'backlog-entry') {
+      setActiveBacklogEntry(activeData.entry as BacklogEntry);
+      setActiveId(null);
+    } else {
+      setActiveId(event.active.id as string);
+      setActiveBacklogEntry(null);
+    }
   }, []);
 
   const handleDragOver = useCallback((_event: DragOverEvent) => {
@@ -306,9 +437,40 @@ export const IdeasToExecution: React.FC = () => {
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {
     setActiveId(null);
+    setActiveBacklogEntry(null);
     const { active, over } = event;
     if (!over) return;
 
+    const activeData = active.data.current;
+
+    // --- Handle backlog entry dropped onto Ideas column ---
+    if (activeData?.type === 'backlog-entry') {
+      const entry = activeData.entry as BacklogEntry;
+      // Determine the target column
+      const overId = over.id as string;
+      let targetColumn: ColumnId | null = null;
+      if (COLUMNS.some(c => c.id === overId)) {
+        targetColumn = overId as ColumnId;
+      } else {
+        targetColumn = findColumnOfIdea(overId);
+      }
+
+      // Only create an idea if dropped on the Ideas column
+      if (targetColumn === 'ideas') {
+        const result = await client.createIdea({
+          title: entry.description,
+          tags: [entry.type, entry.area].filter(Boolean),
+        });
+        if (result.ok) {
+          addIdea(result.data);
+        } else {
+          setError((result as ApiError).error.message);
+        }
+      }
+      return;
+    }
+
+    // --- Handle idea drag between columns ---
     const ideaId = active.id as string;
     const overId = over.id as string;
 
@@ -328,17 +490,21 @@ export const IdeasToExecution: React.FC = () => {
     const currentColumn = findColumnOfIdea(ideaId);
     if (currentColumn === targetColumn) return;
 
+    // Map column IDs to API status values
+    const targetApiStatus = columnToApiStatus(targetColumn);
+    const currentApiStatus = currentColumn ? columnToApiStatus(currentColumn) : null;
+
     // Optimistic update
-    updateIdeaInStore(ideaId, { status: targetColumn });
+    updateIdeaInStore(ideaId, { status: targetApiStatus });
 
     // Persist to API
-    const result = await client.updateIdea(ideaId, { status: targetColumn });
+    const result = await client.updateIdea(ideaId, { status: targetApiStatus });
     if (!result.ok) {
       // Revert optimistic update
-      if (currentColumn) updateIdeaInStore(ideaId, { status: currentColumn });
+      if (currentApiStatus) updateIdeaInStore(ideaId, { status: currentApiStatus });
       setError((result as ApiError).error.message);
     }
-  }, [findColumnOfIdea, updateIdeaInStore]);
+  }, [findColumnOfIdea, updateIdeaInStore, addIdea]);
 
   // ----- Quick Capture -----
 
@@ -374,10 +540,10 @@ export const IdeasToExecution: React.FC = () => {
     const epicId = window.prompt('Enter EPIC ID to link (e.g., E-005):');
     if (!epicId) return;
 
-    updateIdeaInStore(ideaId, { linkedEpic: epicId });
-    const result = await client.updateIdea(ideaId, { linkedEpic: epicId });
-    if (!result.ok) {
-      updateIdeaInStore(ideaId, { linkedEpic: null });
+    const result = await client.linkIdea(ideaId, { linkedEpic: epicId });
+    if (result.ok) {
+      updateIdeaInStore(ideaId, result.data);
+    } else {
       setError((result as ApiError).error.message);
     }
   }, [updateIdeaInStore]);
@@ -459,16 +625,43 @@ export const IdeasToExecution: React.FC = () => {
         >
           <div className="flex-1 flex gap-6 overflow-x-auto pb-4 custom-scrollbar">
             {COLUMNS.map(col => {
+              const ColIcon = col.icon;
               const columnIdeas = ideasByColumn[col.id];
+              const isIdeasColumn = col.id === 'ideas';
+
+              // Placeholder text per column
+              const placeholderText: Record<ColumnId, string> = {
+                ideas: 'Capture your first idea',
+                plan: 'Ideas promoted to plans appear here',
+                epic: 'Plans converted to EPICs appear here',
+                running: 'EPICs currently executing appear here',
+                done: 'Completed work lands here',
+              };
+
               return (
-                <div key={col.id} className="w-80 shrink-0 flex flex-col">
+                <div key={col.id} className="w-72 shrink-0 flex flex-col">
+                  {/* Column header */}
                   <div className="flex items-center justify-between mb-4 px-2">
                     <div className="flex items-center gap-2">
+                      <ColIcon size={14} className="text-white/30" />
                       <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">{col.title}</span>
                       <span className="text-[10px] font-mono bg-white/5 px-1.5 py-0.5 rounded text-white/20">{columnIdeas.length}</span>
                     </div>
                     <button className="text-white/20 hover:text-white transition-colors"><MoreHorizontal size={14} /></button>
                   </div>
+
+                  {/* Create Plan action bar — only in Ideas column when ideas are selected */}
+                  {isIdeasColumn && selectedIdeaIds.size > 0 && (
+                    <div className="mb-2 px-2">
+                      <button
+                        onClick={handleCreatePlan}
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-state-executing text-bg-base font-bold rounded-xl shadow-lg shadow-state-executing/20 hover:scale-[1.02] transition-all text-xs"
+                      >
+                        <Plus size={14} />
+                        Create Plan ({selectedIdeaIds.size})
+                      </button>
+                    </div>
+                  )}
 
                   <SortableContext
                     items={columnIdeas.map(i => i.id)}
@@ -485,19 +678,27 @@ export const IdeasToExecution: React.FC = () => {
                           idea={idea}
                           onDelete={handleDelete}
                           onLinkEpic={handleLinkEpic}
+                          showCheckbox={isIdeasColumn}
+                          isSelected={selectedIdeaIds.has(idea.id)}
+                          onToggleSelect={handleToggleSelect}
                         />
                       ))}
                       {columnIdeas.length === 0 && (
-                        <div className="py-8 text-center text-[10px] font-mono text-white/15">
-                          Drop ideas here
+                        <div className="py-8 text-center">
+                          <ColIcon size={24} className="mx-auto mb-2 text-white/10" />
+                          <p className="text-[10px] font-mono text-white/15">
+                            {placeholderText[col.id]}
+                          </p>
                         </div>
                       )}
-                      <button
-                        onClick={() => setShowCapture(true)}
-                        className="w-full py-3 border border-dashed border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-white/20 hover:text-white/40 hover:border-white/20 transition-all"
-                      >
-                        + Add Item
-                      </button>
+                      {isIdeasColumn && (
+                        <button
+                          onClick={() => setShowCapture(true)}
+                          className="w-full py-3 border border-dashed border-white/10 rounded-xl text-[10px] font-bold uppercase tracking-widest text-white/20 hover:text-white/40 hover:border-white/20 transition-all"
+                        >
+                          + Add Idea
+                        </button>
+                      )}
                     </div>
                   </SortableContext>
                 </div>
@@ -505,8 +706,29 @@ export const IdeasToExecution: React.FC = () => {
             })}
           </div>
 
+          {/* Insights Panel — inside DndContext so backlog entries participate in drag-and-drop */}
+          <InsightsPanel />
+
           <DragOverlay>
             {activeIdea ? <DragOverlayCard idea={activeIdea} /> : null}
+            {activeBacklogEntry ? (
+              <div className="glass p-3 rounded-xl border border-state-executing/30 cursor-grabbing w-72 shadow-lg shadow-state-executing/10">
+                <p className="text-xs text-white/80 leading-snug line-clamp-2">{activeBacklogEntry.description}</p>
+                <div className="flex items-center gap-2 mt-1.5">
+                  <span className={cn(
+                    'text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded',
+                    activeBacklogEntry.priority.toLowerCase() === 'critical' || activeBacklogEntry.priority.toLowerCase() === 'high'
+                      ? 'bg-state-error/20 text-state-error'
+                      : activeBacklogEntry.priority.toLowerCase() === 'medium'
+                        ? 'bg-state-plan-review/20 text-state-plan-review'
+                        : 'bg-white/10 text-white/40',
+                  )}>
+                    {activeBacklogEntry.priority}
+                  </span>
+                  <span className="text-[9px] font-mono text-white/30">{activeBacklogEntry.type}</span>
+                </div>
+              </div>
+            ) : null}
           </DragOverlay>
         </DndContext>
       ) : (

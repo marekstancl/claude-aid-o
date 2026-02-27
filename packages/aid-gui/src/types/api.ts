@@ -722,6 +722,11 @@ export interface StoredIdea {
   priority: 'low' | 'medium' | 'high';
   /** Lifecycle status. */
   status: 'idea' | 'exploring' | 'planned' | 'done';
+  /**
+   * Auto-computed status derived from linked plan/epic lifecycle.
+   * Null when no linked artifact exists or status cannot be determined.
+   */
+  autoStatus: 'plan' | 'epic' | 'running' | 'done' | null;
   /** Linked plan reference, or null. */
   linkedPlan: string | null;
   /** Linked EPIC reference, or null. */
@@ -755,6 +760,72 @@ export interface IdeaUpdateRequest {
   status?: 'idea' | 'exploring' | 'planned' | 'done';
   linkedPlan?: string | null;
   linkedEpic?: string | null;
+}
+
+/**
+ * Request body for PUT /api/p/:projectId/ideas/:ideaId/link.
+ *
+ * Used to link an idea to a plan and/or EPIC without updating other fields.
+ */
+export interface IdeaLinkRequest {
+  /** Plan reference to link, or undefined to leave unchanged. */
+  linkedPlan?: string;
+  /** EPIC reference to link, or undefined to leave unchanged. */
+  linkedEpic?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Backlog & Lessons (Insights)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single backlog entry from the project's improvement backlog.
+ *
+ * Returned as array items from GET /api/p/:projectId/backlog.
+ */
+export interface BacklogEntry {
+  /** Unique backlog item identifier. */
+  id: string;
+  /** Improvement type (e.g., "refactoring", "performance", "security"). */
+  type: string;
+  /** Affected area or module path. */
+  area: string;
+  /** Human-readable description of the improvement. */
+  description: string;
+  /** Priority level (e.g., "low", "medium", "high"). */
+  priority: string;
+  /** Source agent or step that created this entry. */
+  source: string;
+  /** Current status (e.g., "open", "planned", "done"). */
+  status: string;
+}
+
+/**
+ * A lesson learned or gotcha entry from project execution history.
+ *
+ * This is a union shape: entries with `category: 'lesson'` use the
+ * `lesson`, `context`, and `impact` fields; entries with `category: 'gotcha'`
+ * use the `gotcha`, `when`, and `workaround` fields.
+ *
+ * Returned as array items from GET /api/p/:projectId/lessons.
+ */
+export interface LessonEntry {
+  /** Unique entry identifier. */
+  id: string;
+  /** Entry category discriminant. */
+  category: 'lesson' | 'gotcha';
+  /** Lesson description (present when category is 'lesson'). */
+  lesson?: string;
+  /** Context in which the lesson was learned (present when category is 'lesson'). */
+  context?: string;
+  /** Impact assessment (present when category is 'lesson'). */
+  impact?: string;
+  /** Gotcha description (present when category is 'gotcha'). */
+  gotcha?: string;
+  /** When the gotcha occurs (present when category is 'gotcha'). */
+  when?: string;
+  /** Known workaround (present when category is 'gotcha'). */
+  workaround?: string;
 }
 
 // ---------------------------------------------------------------------------

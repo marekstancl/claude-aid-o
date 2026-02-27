@@ -34,6 +34,8 @@ import type {
   UsageResponse,
   KnowledgeItem,
   Project,
+  BacklogEntry,
+  LessonEntry,
 } from './api';
 import type { WsConnectionStatus, EventTopic } from './ws';
 
@@ -657,6 +659,41 @@ export interface KnowledgeSlice {
 }
 
 // ---------------------------------------------------------------------------
+// InsightsSlice — Backlog & Lessons data
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages backlog entries and lesson/gotcha entries for the Insights panel.
+ *
+ * Data is fetched from the backlog and lessons REST endpoints and displayed
+ * in the Insights UI. The slice provides loading state for coordinated
+ * fetch indicators.
+ */
+export interface InsightsSlice {
+  // --- State ---
+
+  /** Improvement backlog entries. */
+  backlogEntries: BacklogEntry[];
+
+  /** Lessons learned and gotcha entries. */
+  lessonEntries: LessonEntry[];
+
+  /** Whether insights data is currently loading. */
+  insightsLoading: boolean;
+
+  // --- Actions ---
+
+  /** Replace the backlog entries list. */
+  setBacklogEntries: (entries: BacklogEntry[]) => void;
+
+  /** Replace the lesson entries list. */
+  setLessonEntries: (entries: LessonEntry[]) => void;
+
+  /** Set insights loading state. */
+  setInsightsLoading: (loading: boolean) => void;
+}
+
+// ---------------------------------------------------------------------------
 // DashboardStore — combined store type
 // ---------------------------------------------------------------------------
 
@@ -687,5 +724,6 @@ export type DashboardStore =
   & IdeasSlice
   & QueueDetailSlice
   & KnowledgeSlice
+  & InsightsSlice
   & ProjectsSlice
   & ReplaySlice;

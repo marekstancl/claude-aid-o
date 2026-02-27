@@ -102,6 +102,7 @@ function makeStoredIdea(overrides: Partial<StoredIdea> = {}): StoredIdea {
     tags: ['ui', 'accessibility'],
     priority: 'medium',
     status: 'idea',
+    autoStatus: null,
     linkedPlan: null,
     linkedEpic: null,
     createdAt: '2026-02-25T09:00:00.000Z',

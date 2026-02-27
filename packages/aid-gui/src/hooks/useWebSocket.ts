@@ -39,7 +39,7 @@ import type {
   WsReplayMessage,
   EventTopic,
 } from '../types/ws';
-import type { StageLogEntryResponse } from '../types/api';
+import type { StageLogEntryResponse, StoredIdea } from '../types/api';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -62,6 +62,7 @@ const DEFAULT_TOPICS: EventTopic[] = [
   'decisions',
   'usage',
   'audit',
+  'ideas',
 ];
 
 // ---------------------------------------------------------------------------
@@ -227,6 +228,17 @@ function dispatchEvent(msg: WsEventMessage): void {
       break;
     }
 
+    case 'ideas': {
+      if (data.type === 'file_change' && data.parsedData != null) {
+        const parsed = data.parsedData;
+        // parsedData from ideas.json is the full ideas array
+        if (Array.isArray(parsed)) {
+          store.setIdeas(parsed as StoredIdea[]);
+        }
+      }
+      break;
+    }
+
     default:
       // Unhandled topics are silently ignored -- no action needed
       break;
@@ -257,7 +269,7 @@ async function resyncFromRest(projectId: string): Promise<void> {
   const store = useStore.getState();
 
   // Fire all requests concurrently
-  const [pipelineRes, stepsRes, stageLogRes, queueRes, usageRes, auditRes] =
+  const [pipelineRes, stepsRes, stageLogRes, queueRes, usageRes, auditRes, ideasRes] =
     await Promise.allSettled([
       client.getPipelineState(),
       client.getPipelineSteps(),
@@ -265,6 +277,7 @@ async function resyncFromRest(projectId: string): Promise<void> {
       client.getQueue(),
       client.getUsage(),
       client.getAuditHealth(),
+      client.getIdeas(),
     ]);
 
   // Pipeline state
@@ -316,6 +329,11 @@ async function resyncFromRest(projectId: string): Promise<void> {
   if (auditRes.status === 'fulfilled' && auditRes.value.ok) {
     const d = auditRes.value.data;
     store.setHealthScore(d.scores.overall);
+  }
+
+  // Ideas
+  if (ideasRes.status === 'fulfilled' && ideasRes.value.ok) {
+    store.setIdeas(ideasRes.value.data);
   }
 }
 

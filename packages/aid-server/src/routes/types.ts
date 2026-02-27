@@ -18,3 +18,8 @@ export interface EvidenceFileParams extends ProjectParams {
   runId: string;
   '0': string; // wildcard path
 }
+
+export interface IdeaLinkBody {
+  linkedPlan?: string;
+  linkedEpic?: string;
+}

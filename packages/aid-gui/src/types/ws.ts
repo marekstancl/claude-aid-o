@@ -40,6 +40,7 @@ export type EventTopic =
   | 'audit'
   | 'usage'
   | 'queue.schedule'
+  | 'ideas'
   | 'system';
 
 /**
@@ -57,6 +58,7 @@ export const ALL_EVENT_TOPICS: readonly EventTopic[] = [
   'audit',
   'usage',
   'queue.schedule',
+  'ideas',
   'system',
 ] as const;
 

@@ -32,6 +32,7 @@ import type {
   IdeasSlice,
   QueueDetailSlice,
   KnowledgeSlice,
+  InsightsSlice,
   ProjectsSlice,
   ReplaySlice,
   ReplayState,
@@ -49,6 +50,8 @@ import type {
   ScheduleStatusResponse,
   UsageResponse,
   KnowledgeItem,
+  BacklogEntry,
+  LessonEntry,
   Project as ApiProject,
 } from './types/api';
 import type { WsConnectionStatus, EventTopic } from './types/ws';
@@ -462,6 +465,30 @@ const createKnowledgeSlice: StateCreator<
 });
 
 // ---------------------------------------------------------------------------
+// InsightsSlice
+// ---------------------------------------------------------------------------
+
+const createInsightsSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  InsightsSlice
+> = (set) => ({
+  backlogEntries: [] as BacklogEntry[],
+  lessonEntries: [] as LessonEntry[],
+  insightsLoading: false,
+
+  setBacklogEntries: (entries: BacklogEntry[]) =>
+    set({ backlogEntries: entries }),
+
+  setLessonEntries: (entries: LessonEntry[]) =>
+    set({ lessonEntries: entries }),
+
+  setInsightsLoading: (loading: boolean) =>
+    set({ insightsLoading: loading }),
+});
+
+// ---------------------------------------------------------------------------
 // Combined store
 // ---------------------------------------------------------------------------
 
@@ -541,6 +568,7 @@ export const useStore = create<DashboardStore>((...args) => ({
   ...createIdeasSlice(...args),
   ...createQueueDetailSlice(...args),
   ...createKnowledgeSlice(...args),
+  ...createInsightsSlice(...args),
   ...createProjectsSlice(...args),
   ...createReplaySlice(...args),
 }));

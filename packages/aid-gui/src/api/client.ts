@@ -42,6 +42,9 @@ import type {
   StoredIdea,
   IdeaCreateRequest,
   IdeaUpdateRequest,
+  IdeaLinkRequest,
+  BacklogEntry,
+  LessonEntry,
   ScheduleConfig,
   ScheduleStatusResponse,
   QueueScheduleEntry,
@@ -286,6 +289,17 @@ export interface ApiClient {
   /** DELETE /api/p/:projectId/ideas/:ideaId */
   deleteIdea(ideaId: string): Promise<ApiResult<{ deleted: boolean }>>;
 
+  /** PUT /api/p/:projectId/ideas/:ideaId/link */
+  linkIdea(ideaId: string, request: IdeaLinkRequest): Promise<ApiResult<StoredIdea>>;
+
+  // ----- Backlog & Lessons -----
+
+  /** GET /api/p/:projectId/backlog */
+  getBacklog(): Promise<ApiResult<BacklogEntry[]>>;
+
+  /** GET /api/p/:projectId/lessons */
+  getLessons(): Promise<ApiResult<LessonEntry[]>>;
+
   // ----- Queue Schedule -----
 
   /** GET /api/p/:projectId/queue/schedule */
@@ -404,6 +418,17 @@ export function createApiClient(
 
     deleteIdea: (ideaId: string) =>
       typedRequest<{ deleted: boolean }>(`${base}/ideas/${encodeURIComponent(ideaId)}`, timeoutMs, 'DELETE'),
+
+    linkIdea: (ideaId: string, request: IdeaLinkRequest) =>
+      typedRequest<StoredIdea>(`${base}/ideas/${encodeURIComponent(ideaId)}/link`, timeoutMs, 'PUT', request),
+
+    // ----- Backlog & Lessons -----
+
+    getBacklog: () =>
+      typedFetch<BacklogEntry[]>(`${base}/backlog`, timeoutMs),
+
+    getLessons: () =>
+      typedFetch<LessonEntry[]>(`${base}/lessons`, timeoutMs),
 
     // ----- Queue Schedule -----
 

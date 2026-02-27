@@ -14,6 +14,9 @@ import { auditRoutes } from './routes/audit.js';
 import { ideaRoutes } from './routes/ideas.js';
 import { usageRoutes } from './routes/usage.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
+import { backlogRoutes } from './routes/backlog.js';
+import { lessonsRoutes } from './routes/lessons.js';
+import { importFromIdeasMd, exportToIdeasMd } from './services/ideas-migration.js';
 
 const config = loadConfig();
 
@@ -30,6 +33,9 @@ app.get('/api/health', (_req, res) => {
 const registry = new ProjectRegistry(config.projectRoot);
 await registry.init();
 
+// --- Import ideas from IDEAS.md (deduplicates by title) ---
+await importFromIdeasMd(config.projectRoot);
+
 // --- API routes ---
 app.use('/api', projectRoutes(registry));
 app.use('/api/p/:projectId/pipeline', pipelineRoutes(registry));
@@ -40,6 +46,8 @@ app.use('/api/p/:projectId/audit', auditRoutes(registry));
 app.use('/api/p/:projectId/ideas', ideaRoutes(registry));
 app.use('/api/p/:projectId/usage', usageRoutes(registry));
 app.use('/api/p/:projectId/knowledge', knowledgeRoutes(registry));
+app.use('/api/p/:projectId/backlog', backlogRoutes(registry));
+app.use('/api/p/:projectId/lessons', lessonsRoutes(registry));
 
 // --- API catch-all 404 (must come before static fallback) ---
 app.all('/api/*', (_req, res) => {
@@ -83,8 +91,13 @@ server.listen(config.port, config.host, () => {
 
 // Graceful shutdown
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
     console.log(`\n  Shutting down (${sig})...`);
+    try {
+      await exportToIdeasMd(config.projectRoot);
+    } catch (err) {
+      console.error('  Failed to export IDEAS.md on shutdown:', err);
+    }
     wsHandler.close();
     server.close(() => process.exit(0));
   });
