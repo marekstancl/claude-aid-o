@@ -23,6 +23,7 @@ The queue is stored in `.aid-o/04-engine/epic-queue.yaml`:
 # Do not edit manually while an EPIC is running.
 
 paused: false                              # Global pause flag
+last_modified: "2026-02-17T14:30:00Z"      # Updated on every queue mutation (ISO 8601)
 
 queue:
   - epic_id: "E-20260217-a1b2-user-auth"
@@ -62,6 +63,7 @@ queue:
 Add an EPIC to the queue.
 
 ```
+0. CONFLICT_CHECK (see Conflict Detection Protocol below)
 1. Validate EPIC file exists at epic_path
 2. Extract epic_id from file
 3. Check for duplicates (same epic_id already in queue with status queued|running)
@@ -74,7 +76,8 @@ Add an EPIC to the queue.
    added_at: <now ISO 8601>
    started_at: null
    completed_at: null
-5. Save epic-queue.yaml
+5. Update last_modified to current timestamp
+6. Save epic-queue.yaml
 ```
 
 ### `remove(epic_id)`
@@ -87,8 +90,9 @@ Remove an EPIC from the queue (only if not running).
 3. Update entry (DO NOT delete — preserve audit trail):
    status: "removed"
    removed_at: "{ISO 8601}"
-4. Save epic-queue.yaml
-5. Log: "EPIC {epic_id} removed from queue (was: {previous_status})"
+4. Update last_modified to current timestamp
+5. Save epic-queue.yaml
+6. Log: "EPIC {epic_id} removed from queue (was: {previous_status})"
 ```
 
 ### `next()`
@@ -108,10 +112,12 @@ Get the next EPIC to execute (highest priority, oldest within same priority).
 Mark an EPIC as running.
 
 ```
+0. CONFLICT_CHECK (see Conflict Detection Protocol below)
 1. Find entry by epic_id
 2. Set status = "running"
 3. Set started_at = <now ISO 8601>
-4. Save epic-queue.yaml
+4. Update last_modified to current timestamp
+5. Save epic-queue.yaml
 ```
 
 ### `complete(epic_id, result_status)`
@@ -119,10 +125,12 @@ Mark an EPIC as running.
 Mark an EPIC as completed or failed.
 
 ```
+0. CONFLICT_CHECK (see Conflict Detection Protocol below)
 1. Find entry by epic_id
 2. Set status = result_status (completed | failed)
 3. Set completed_at = <now ISO 8601>
-4. Save epic-queue.yaml
+4. Update last_modified to current timestamp
+5. Save epic-queue.yaml
 ```
 
 ### `pause_queue()`
@@ -131,8 +139,9 @@ Pause auto-pickup globally.
 
 ```
 1. Set paused = true at top level
-2. Save epic-queue.yaml
-3. Send Status Update (Slack Type G): ":double_vertical_bar: Queue paused by PM"
+2. Update last_modified to current timestamp
+3. Save epic-queue.yaml
+4. Send Status Update (Slack Type G): ":double_vertical_bar: Queue paused by PM"
 ```
 
 ### `resume_queue()`
@@ -141,8 +150,9 @@ Resume auto-pickup.
 
 ```
 1. Set paused = false at top level
-2. Save epic-queue.yaml
-3. Send Status Update (Slack Type G): ":arrow_forward: Queue resumed"
+2. Update last_modified to current timestamp
+3. Save epic-queue.yaml
+4. Send Status Update (Slack Type G): ":arrow_forward: Queue resumed"
 ```
 
 ### `list()`
@@ -157,8 +167,61 @@ Change priority of a queued EPIC.
 1. Find entry by epic_id
 2. IF status != "queued" → reject: "Can only reorder queued EPICs"
 3. Set priority = new_priority
-4. Save epic-queue.yaml
+4. Update last_modified to current timestamp
+5. Save epic-queue.yaml
 ```
+
+---
+
+## Conflict Detection Protocol
+
+Every queue mutation that modifies entry state (`add()`, `start()`, `complete()`) executes
+CONFLICT_CHECK as Step 0 before any other logic. This prevents concurrent modification when
+multiple sessions (e.g., PM running `/epic-queue` while Controller is auto-picking) write to
+the same queue file.
+
+### CONFLICT_CHECK Algorithm
+
+```
+CONFLICT_CHECK(expected_last_modified):
+  1. Read epic-queue.yaml from disk (fresh read, NOT cached)
+  2. Parse last_modified timestamp from file
+  3. IF last_modified != expected_last_modified:
+       → Abort operation
+       → Log: "Conflict detected: queue modified since last read.
+               Expected: {expected_last_modified}, Found: {last_modified}.
+               Re-read queue and retry."
+       → Return error to caller
+  4. IF auto-mode flag file exists (see Auto-Mode Flag File section):
+       → Read flag file contents
+       → IF current operation is NOT from the Controller session identified in flag:
+            → Log warning: "Queue mutation attempted while auto-mode is active.
+                            Session {flag_session_id} is running. Concurrent modification risk."
+            → Proceed (do not block) — warning is informational for audit trail
+  5. PASSED — caller proceeds with mutation
+```
+
+### Caller Responsibility
+
+Every caller that invokes a mutation operation MUST:
+1. Read the queue file before calling the mutation
+2. Extract `last_modified` from the read
+3. Pass the extracted `last_modified` as `expected_last_modified` to the mutation
+4. On conflict error: re-read the queue, re-evaluate conditions, and retry if still valid
+
+### Which Operations Use CONFLICT_CHECK
+
+| Operation | CONFLICT_CHECK | Rationale |
+|-----------|---------------|-----------|
+| `add()` | Yes | Prevents duplicate adds from concurrent sessions |
+| `start()` | Yes | Prevents two sessions from starting different EPICs |
+| `complete()` | Yes | Prevents stale completion overwriting a re-queued EPIC |
+| `remove()` | No | PM-only operation; low concurrency risk |
+| `pause_queue()` | No | PM-only operation; idempotent |
+| `resume_queue()` | No | PM-only operation; idempotent |
+| `reorder()` | No | PM-only operation; low concurrency risk |
+| `next()` | No | Read-only; no mutation |
+| `list()` | No | Read-only; no mutation |
 
 ---
 
@@ -215,6 +278,83 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
 | **Duplicate prevention** | Cannot add the same EPIC twice (by epic_id) if it's already queued or running. |
 | **Persistence** | Queue state lives in YAML file — survives run restarts and context window resets. |
 | **Running protection** | Cannot remove or reorder a running EPIC. |
+| **Conflict detection** | Mutation operations (`add`, `start`, `complete`) check `last_modified` timestamp before writing. Concurrent modification aborts the operation. |
+| **Auto-mode flag** | `.aid-o/04-engine/auto-mode-active.flag` signals active Controller session. Queue operations warn on concurrent access from non-Controller callers. |
+
+---
+
+## Auto-Mode Flag File
+
+The file `.aid-o/04-engine/auto-mode-active.flag` provides fast external detection of an
+active auto-mode session without parsing the full queue YAML.
+
+### Format
+
+Plain text, single line:
+
+```
+FA-{session_id} {started_at}
+```
+
+Example:
+
+```
+FA-20260217-a1b2 2026-02-17T10:05:00Z
+```
+
+### Lifecycle
+
+| Event | Action | Responsible |
+|-------|--------|-------------|
+| FIRST_AID session starts | Create flag file | Controller (`first-aid-controller.md`) |
+| FIRST_AID session completes | Delete flag file | Controller (`first-aid-controller.md`) |
+| `/aid-stop` command issued | Delete flag file | Command (`aid-stop`) |
+| Session crash / ungraceful exit | Flag file remains (stale) | Detected by staleness check below |
+
+### Creation
+
+The Controller writes the flag file as the FIRST action after FIRST_AID_INIT, before any
+queue operations:
+
+```
+1. Generate session_id (format: FA-{YYYYMMDD}-{4-hex})
+2. Write to .aid-o/04-engine/auto-mode-active.flag:
+   "{session_id} {current ISO 8601 timestamp}"
+3. Proceed with queue operations
+```
+
+### Deletion
+
+The flag file is deleted in two paths:
+
+1. **Normal completion** (FIRST_AID_COMPLETE): Controller deletes the flag after the final
+   queue update (marking current EPIC complete and before auto-pickup of next EPIC, or
+   when entering idle state).
+2. **Manual stop** (`/aid-stop`): Command deletes the flag file as part of graceful shutdown.
+
+### Staleness Detection
+
+If the flag file exists but the Controller session is not active (e.g., after a crash):
+
+```
+1. Read flag file → extract started_at timestamp
+2. IF (now - started_at) > 4 hours:
+     → Log warning: "Stale auto-mode flag detected. Session {session_id} started
+                     {started_at} but no activity in 4+ hours."
+     → Flag is NOT auto-deleted (PM must investigate and delete manually or via /aid-stop)
+3. ELSE:
+     → Treat as active session (Controller may be in a long-running step)
+```
+
+### Queue Operation Integration
+
+Queue mutation operations reference the flag file in CONFLICT_CHECK Step 4:
+
+- If the flag file exists and the current operation is NOT from the Controller session
+  identified in the flag, a warning is logged about concurrent modification risk.
+- The warning is informational — it does not block the operation. This preserves PM
+  ability to manage the queue via `/epic-queue` while auto-mode is active, while
+  creating an audit trail of concurrent access.
 
 ---
 
@@ -234,6 +374,11 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
   POST-PROCESSING (Curator + Auditor) completes.
 - A failed EPIC always pauses the queue. This is a safety measure — the PM must
   investigate before more EPICs run. The queue does not silently skip failures.
-- Queue state is read from disk each time (not cached). This ensures consistency
-  even if the PM modifies the queue via `/epic-queue` while an EPIC is running.
+- Queue state is read from disk each time (not cached). Combined with the
+  `last_modified` conflict detection protocol, this ensures consistency even if
+  the PM modifies the queue via `/epic-queue` while an EPIC is running.
+- The auto-mode flag file (`.aid-o/04-engine/auto-mode-active.flag`) enables fast
+  detection of active auto-mode sessions. It is cheaper to check than parsing the
+  full queue YAML. Queue operations log warnings on concurrent access but do not
+  block PM operations — the PM always retains manual override capability.
 - Parallelism is within EPICs (parallel_groups, analysis_groups), not between EPICs.
