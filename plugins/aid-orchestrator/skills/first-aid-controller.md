@@ -197,14 +197,12 @@ ELSE (mode == manual):
 
 ```
 IF mode == auto:
-  1. Determine EPIC position from EPIC frontmatter:
-     a. Read plan_epics_total and runs_completed fields
-     b. IF plan_epics_total > 1 AND runs_completed + 1 < plan_epics_total:
-        → This is an INTERMEDIATE EPIC
-     c. ELSE:
-        → This is the LAST EPIC (or standalone)
+  1. Determine EPIC position:
+     → Call DETECT_EPIC_POSITION(epic_id) from skills/auto-done-state.md
+     → Returns: "standalone", "last", or "intermediate"
+     (Plan-based detection — see auto-done-state.md Section 2.4 for algorithm)
 
-  2. IF intermediate EPIC:
+  2. IF position == "intermediate":
      → Auto-approve immediately (no guardrails required for intermediate EPICs)
      → Save pm_decision.json:
         { "approver": "auto-mode", "decision": "approve",
@@ -214,7 +212,7 @@ IF mode == auto:
               "reason": "intermediate_epic", "position": "{N}/{total}"}
      → Transition to DONE
 
-  3. IF last EPIC (or standalone):
+  3. IF position == "last" OR position == "standalone":
      → Run auto-mode guardrails:
         a. Gates passed: gates_report.json overall == "pass"                     required
         b. No unresolved CRITICAL issues: check backlog.md for open CRITICAL items required
@@ -275,13 +273,41 @@ ELSE (mode == manual):
       The archived copy MUST reflect the completed status. Never archive a run
       that still shows `status: active`.
 
-   b. **Release Sub-Phase** (BEFORE branch merge — version bump if needed):
+   b. **RELEASE_SUB_PHASE** (MANDATORY — between gate completion and branch merge):
 
-      **See `skills/auto-done-state.md` Section 2** for the complete release sub-phase
-      protocol (version mismatch detection, version file updates, git tagging, GitHub
-      release creation, and mode-specific behavior for both manual and auto-mode).
+      Log: `{"state": "DONE", "action": "release_sub_phase_start", "epic_id": "{id}"}`
 
-      That section is the single source of truth for all release logic.
+      1. Read mode: manual or first_aid (from auto-mode-state.yaml if it exists, otherwise "manual")
+      2. Call `DETECT_EPIC_POSITION(epic_id)` from `skills/auto-done-state.md` → position
+      3. Branch on position:
+
+         IF position == "standalone" OR position == "last":
+           → Execute full release protocol (`auto-done-state.md` Sections 2.6-2.10):
+             a. Detect version mismatch (Section 2.2)
+             b. Determine bump type (patch/minor/major) from EPIC scope
+             c. Update all version files (`release-policy.yaml` `version_files[]`)
+             d. Finalize CHANGELOG (move `[Unreleased]` → `[vX.Y.Z]`)
+             e. Commit version bump
+             f. Create git tag
+             g. IF mode == "first_aid": create GitHub release (auto)
+                IF mode == "manual": ask PM whether to create GitHub release
+           → Log: `{"state": "DONE", "action": "release_sub_phase_complete",
+                   "epic_id": "{id}", "version": "vX.Y.Z", "result": "pass"}`
+
+         IF position == "intermediate":
+           → IF mode == "first_aid":
+               Auto-defer per `release-policy.yaml` → `first_aid.intermediate_action`
+               Log: `{"state": "DONE", "action": "release_sub_phase_deferred",
+                       "epic_id": "{id}", "reason": "intermediate_epic", "result": "deferred"}`
+             IF mode == "manual":
+               Ask PM: "This is an intermediate EPIC ({completed}/{total} for plan {plan_id}). Release now or defer to plan's last EPIC?"
+               Log PM's decision
+
+      4. IF any error in release sub-phase:
+         → Log: `{"state": "DONE", "action": "release_sub_phase_error",
+                 "epic_id": "{id}", "error": "{message}", "result": "failed"}`
+         → Set `release_status = "failed"` in final_report
+         → Do NOT block merge (release is important but not merge-blocking)
 
    c. **Run Branch Merge** (if git available):
       If a run branch was created (check plan_progress.json -> branch):
@@ -375,10 +401,12 @@ ELSE (mode == manual):
 
       NOTE: Evidence directory is NOT moved.
 
-   4. **Update Plan counter (conditional):**
+   4. **Update Plan counter (informative only):**
       - IF EPIC archived AND `plan_ref` exists:
         - Increment `epics_completed += 1` in plan frontmatter
-        - IF `epics_completed == epics_total`: archive plan
+        - Log: "Plan {plan_id}: {epics_completed}/{epics_total} EPICs done"
+        - NOTE: Plan archival is handled exclusively by QUEUE_ADVANCE -- do NOT archive here.
+          The frontmatter counter is informative (for human readers), not a decision input.
 
    5. **Stage log**
    6. **Final commit:** `git add -A && git commit -m "done({epic_id}): completed, archived [list]"`
@@ -518,4 +546,4 @@ ELSE (mode == manual):
 
 ---
 
-**Last Updated:** 2026-02-26
+**Last Updated:** 2026-02-27

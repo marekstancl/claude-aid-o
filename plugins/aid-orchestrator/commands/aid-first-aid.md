@@ -226,6 +226,11 @@ session:
     epics_completed: 0
     epics_total: {len(valid_epics)}
 
+  context:
+    epics_executed_this_context: []   # EPIC IDs the Controller actually dispatched in this execution context
+    context_started_at: "{ISO 8601}"  # When this context began (set at QUEUE_PROCESSING entry)
+    context_resume_count: 0           # How many times context was resumed (compaction/--resume)
+
   aggregate:
     epics_completed: 0
     epics_failed: 0
@@ -419,6 +424,7 @@ READ_MODE:
    → Update auto-mode-state.yaml:
      session.progress.current_epic_id = epic_id
      session.progress.current_state = "EXECUTING"
+   → Append epic_id to auto-mode-state.yaml → session.context.epics_executed_this_context[]
 ```
 
 #### 3. Multi-Agent Parallel Execution
@@ -836,33 +842,42 @@ Per `skills/auto-escalation.md`:
 #### 2. Plan Archival Check
 
 After each completed EPIC (before picking up next EPIC or transitioning to
-FIRST_AID_COMPLETE), check if the parent plan should be archived:
+FIRST_AID_COMPLETE), check if the parent plan should be archived.
+
+The QUEUE is the single source of truth for plan completion -- not filesystem
+scanning, not frontmatter counters.
 
 ```
-1. Read the completed EPIC's `plan_ref` from its frontmatter
+1. Read the completed EPIC's `plan_ref` from EPIC frontmatter
 2. IF no plan_ref: skip (standalone EPIC, no plan to archive)
 3. IF plan_ref exists:
-   a. Search for all EPICs that reference this plan:
-      - Scan .aid-o/02-epics/ for active EPICs with matching plan_ref
-      - Scan .aid-o/02-epics/archive/ for archived EPICs with matching plan_ref
-   b. Count: {total} total EPICs for this plan, {archived} in archive (completed)
-   c. IF all EPICs for this plan are archived (archived == total):
-      - Ensure archive directory: `mkdir -p .aid-o/01-plans/archive/`
-      - Move plan: `mv .aid-o/01-plans/{plan_file} .aid-o/01-plans/archive/{plan_file}`
-      - Log: {"state": "QUEUE_ADVANCE", "action": "archive_plan",
-              "details": "Archived plan {plan_id} -- all {total} EPICs completed"}
-      - Update auto-mode-state.yaml: session.aggregate.plans_archived += 1
-      - If move fails (file not found, already archived, permissions):
-        log WARNING, continue (non-blocking)
-   d. IF some EPICs still pending:
-      - Log: "Plan {plan_id}: {archived}/{total} EPICs done, archival deferred"
+   a. Read epic-queue.yaml (from disk)
+   b. Find ALL queue entries where plan_ref matches target plan
+   c. Count entries with status IN ["completed", "failed", "removed"] → done_count
+   d. Count ALL entries with matching plan_ref → total_count
+   e. IF done_count == total_count (all EPICs for this plan are done):
+      - Check if plan already archived: test -f .aid-o/01-plans/archive/{plan_file}
+      - IF already archived: skip (idempotent), log info
+      - IF not archived:
+        * mkdir -p .aid-o/01-plans/archive/
+        * mv .aid-o/01-plans/{plan_file} .aid-o/01-plans/archive/{plan_file}
+        * Log: {"state": "QUEUE_ADVANCE", "action": "plan_archival_check",
+                "details": "Archived plan {plan_id} — all {total_count} EPICs done",
+                "result": "archived"}
+        * Update auto-mode-state.yaml: session.aggregate.plans_archived += 1
+      - IF move fails: log WARNING, continue (non-blocking)
+   f. ELSE:
+      - Log: {"state": "QUEUE_ADVANCE", "action": "plan_archival_check",
+              "details": "Plan {plan_id}: {done_count}/{total_count} EPICs done",
+              "result": "deferred"}
+4. IF no plan_ref (step 2 skip):
+   - Log: {"state": "QUEUE_ADVANCE", "action": "plan_archival_check",
+           "result": "no_plan_ref"}
 ```
 
-NOTE: This check complements the plan archival in `skills/epic-orchestration.md`
-DONE state (section 6.4). The DONE state archives based on frontmatter counters;
-this check provides a safety net using actual file system state (scanning for
-archived EPICs). Both paths are idempotent -- if the plan was already archived
-in DONE, the move here will fail gracefully (file not found) and log a warning.
+NOTE: Plan archival is exclusively handled here in QUEUE_ADVANCE.
+DONE state only increments the plan's epics_completed counter (informative).
+The queue is the single source of truth for plan completion -- not filesystem scanning.
 
 #### 3. Handle Failed EPIC
 
@@ -1006,8 +1021,10 @@ shown (preserving alignment and box-drawing characters).
   ║  QUEUE RESULTS                                                     ║
   ╠══════════════════════════════════════════════════════════════════════╣
   ║                                                                    ║
-  ║  EPICs completed:  {completed} / {total}                           ║
+  ║  EPICs completed:  {completed} / {total}  (session total)           ║
+  ║  EPICs executed:   {executed_this_context}  (this context)         ║
   ║  EPICs failed:     {failed}                                        ║
+  ║  EPICs removed:    {removed_count}                                 ║
   ║  EPICs remaining:  {remaining}                                     ║
   ║                                                                    ║
   ║  ┌─────┬──────────────────────┬───────┬───────┬──────┬──────────┐  ║
@@ -1016,6 +1033,7 @@ shown (preserving alignment and box-drawing characters).
   ║  │ 1   │ E-xxx (Title)        │ 3/3   │ 4/4   │ 0    │ deferred │  ║
   ║  │ 2   │ E-yyy (Title)        │ 5/5   │ 4/4   │ 1    │ deferred │  ║
   ║  │ 3   │ E-zzz (Title)        │ 2/2   │ 3/3   │ 0    │ v0.9.0   │  ║
+  ║  │ !   │ E-aaa (Title)        │  --   │  --   │ --   │ removed  │  ║
   ║  ├─────┼──────────────────────┼───────┼───────┼──────┼──────────┤  ║
   ║  │ SUM │                      │ 10/10 │ 11/11 │ 1    │          │  ║
   ║  └─────┴──────────────────────┴───────┴───────┴──────┴──────────┘  ║
@@ -1115,7 +1133,9 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
 | `{completed}` | `session.aggregate.epics_completed` |
 | `{total}` | `session.progress.epics_total` |
 | `{failed}` | `session.aggregate.epics_failed` |
-| `{remaining}` | `total - completed - failed` |
+| `{remaining}` | `total - completed - failed - removed_count` |
+| `{executed_this_context}` | `session.context.epics_executed_this_context` length — count of EPICs actually dispatched in the current execution context |
+| `{removed_count}` | Count of entries in `epic-queue.yaml` with `status: "removed"` |
 | `{executed}` | `session.aggregate.total_steps_executed` |
 | `{skipped}` | `session.aggregate.total_steps_skipped` |
 | `{gate_runs}` | `session.aggregate.total_gate_runs` |
@@ -1148,6 +1168,7 @@ shorthand is only used in the terminal display to fit within the 70-char frame w
 - Release column: `deferred` or `v{X.Y.Z}` (the version bumped to)
 - SUM row: aggregates across all EPICs; Release cell left blank in SUM row
 - If an EPIC failed, prefix its row with a `!` indicator: `| !3  | E-zzz (Title) ...`
+- Removed EPICs show `!` in the `#` column, `--` in Steps/Gates/Esc columns, and `removed` in the Release column
 - Note: the Duration column is omitted from the terminal table to fit within the
   72-column frame. Per-EPIC duration is available in the per-EPIC evidence and
   `auto-mode-state.yaml` → `session.aggregate.per_epic[]`.
@@ -1241,10 +1262,14 @@ RESUME_SESSION:
         - If found: reset status to `"queued"`, log: `"Reset interrupted EPIC {epic_id} from running → queued for resume pickup"`
         - This ensures QUEUE_PROCESSING next() finds the interrupted EPIC
      c. Set session.mode = "auto"
-     d. Set session.progress.current_state = "QUEUE_PROCESSING"
-     e. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
-        "session_id": "{id}", "epics_remaining": N}
-     g. Display resume banner (re-injection theme):
+     d. Increment session.context.context_resume_count += 1
+     e. Reset session.context.epics_executed_this_context = []
+     f. Set session.context.context_started_at = "{ISO 8601}" (new context start)
+     g. Set session.progress.current_state = "QUEUE_PROCESSING"
+     h. Log: {"state": "FIRST_AID_RESUME", "action": "session_resumed",
+        "session_id": "{id}", "epics_remaining": N,
+        "context_resume_count": session.context.context_resume_count}
+     i. Display resume banner (re-injection theme):
 
         The syringe is partially refilled -- re-loading for continued treatment.
         The `~` symbol inside the syringe represents a fluid level that is being
@@ -1276,7 +1301,7 @@ RESUME_SESSION:
         - Startup:    `║ + ║`  -- full syringe, loaded and ready
         - Resume:     `║ ~ ║`  -- partially refilled, re-loading
         - Completion: `║   ║`  -- empty/depleted, treatment finished
-     h. Transition to QUEUE_PROCESSING
+     j. Transition to QUEUE_PROCESSING
 
   4. IF PM declines:
      → STOP (no changes)

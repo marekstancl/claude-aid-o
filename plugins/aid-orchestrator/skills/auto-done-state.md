@@ -35,7 +35,7 @@ EPICs bump mandatorily, and summaries accumulate silently until the session ends
 | **Queue transition** | Moving from one completed EPIC to the next queued EPIC |
 | **Summary aggregation** | Collecting per-EPIC metrics into a session-wide report |
 | **Final session report** | The comprehensive report generated when the queue is empty or stopped |
-| **EPIC position** | Whether an EPIC is standalone, intermediate, or last in the queue |
+| **EPIC position** | Whether an EPIC is standalone, intermediate, or last within its plan (determined by `DETECT_EPIC_POSITION`) |
 
 ---
 
@@ -88,6 +88,22 @@ The release sub-phase detects version mismatches between CHANGELOG headers and v
 files, and bumps versions when required. It runs inside the DONE state as a sub-phase —
 no new top-level FSM state is introduced.
 
+### Entry Point
+
+This section is called from DONE state action 1b (`RELEASE_SUB_PHASE`) in
+`skills/first-aid-controller.md`.
+
+**When:** After all gates pass, BEFORE branch merge.
+**Caller provides:** `epic_id`, `mode` (manual | first_aid)
+**This section MUST return with:** a `stage_log` entry — one of:
+  - `result: "pass"` — release completed successfully (version bump, tag, release)
+  - `result: "deferred"` — intermediate EPIC, bump deferred to plan's last EPIC
+  - `result: "failed"` — error during release (non-blocking, merge proceeds)
+
+The caller (DONE state) uses `DETECT_EPIC_POSITION(epic_id)` to determine
+whether to execute the full release protocol or defer. See Section 2.4 for
+the detection algorithm.
+
 ### 2.1 Configuration
 
 Read `release-policy.yaml` from `.aid-o/03-config/policies/`.
@@ -109,32 +125,44 @@ If no mismatch detected: skip, log, proceed to branch merge.
 
 ### 2.4 Step 3 — Multi-Phase Plan Status Check
 
-If bump is needed, determine EPIC position:
+If bump is needed, determine EPIC position by calling `DETECT_EPIC_POSITION(epic_id)`.
+This function is the single source of truth for both manual and auto-mode:
 
-1. Read EPIC frontmatter fields: `plan_ref`, `plan_epics_total`, `runs_completed`
-2. Determine EPIC position:
-   - **Standalone EPIC:** bump is **mandatory**
-   - **Last EPIC of multi-phase plan:** bump is **mandatory**
-   - **Intermediate EPIC:** proceed to Step 4 (deferral decision)
+- **"standalone":** bump is **mandatory**
+- **"last":** bump is **mandatory**
+- **"intermediate":** proceed to Step 4 (deferral decision)
 
-In auto-mode, position is detected from the queue instead of EPIC frontmatter:
+Position is detected from the EPIC's **plan**, not its queue position (a queue
+can contain EPICs from multiple plans, so queue position says nothing about
+per-plan completion):
 
 ```
 DETECT_EPIC_POSITION(epic_id):
+  """
+  Determines whether this EPIC triggers a version bump based on its PLAN,
+  not its queue position. Single source of truth for both release and PM_APPROVAL.
 
-  1. Read .aid-o/04-engine/epic-queue.yaml
-  2. Count EPICs with status "queued" (not including current "running" EPIC):
-     remaining_queued = count(queue.entries WHERE status = "queued")
-  3. Count total EPICs in the session:
-     total_session = count(queue.entries WHERE status IN ["running", "queued", "completed"])
-  4. Determine position:
-     IF total_session == 1:
-       → position = "standalone"
-     ELIF remaining_queued == 0:
-       → position = "last"
-     ELSE:
-       → position = "intermediate"
-  5. RETURN position
+  Returns: "standalone" | "last" | "intermediate"
+  - standalone: always triggers version bump (no plan, or solo plan)
+  - last: triggers version bump (last EPIC of a multi-EPIC plan)
+  - intermediate: defers version bump (more EPICs remain for this plan)
+  """
+
+  1. Read EPIC frontmatter → plan_ref, plan_epics_total
+  2. IF plan_ref is null (standalone EPIC, no plan):
+     → RETURN "standalone"  (always bumps)
+  3. IF plan_epics_total == 1 (solo plan):
+     → RETURN "standalone"  (always bumps)
+  4. IF plan_epics_total > 1 (multi-EPIC plan):
+     a. Read epic-queue.yaml
+     b. Find ALL queue entries with matching plan_ref
+     c. Count entries with status IN ["completed"] → completed_for_plan
+     d. The current EPIC (status: "running") counts as +1 → effective = completed_for_plan + 1
+     e. IF effective >= plan_epics_total:
+        → RETURN "last"  (triggers bump)
+     f. ELSE:
+        → RETURN "intermediate"  (defer bump)
+  5. FALLBACK: RETURN "standalone"  (bump by default — safer than skipping)
 ```
 
 ### 2.5 Step 4 — Intermediate EPIC Deferral Decision
@@ -151,7 +179,7 @@ Auto-mode logging for deferred bumps:
 {"state": "DONE", "action": "release", "bump_type": "deferred",
  "changelog_version": "{version}", "previous_version": "{previous}",
  "deferred": true, "reason": "Auto-mode: intermediate EPIC — version bump deferred",
- "epic_position": "intermediate", "remaining_queued": "{N}",
+ "epic_position": "intermediate", "plan_ref": "{plan_ref}", "plan_progress": "{completed_for_plan}/{plan_epics_total}",
  "mode": "first_aid"}
 ```
 
@@ -207,9 +235,9 @@ version_bump: {epic_id: "{epic_id}", version: "{version}",
 
 | EPIC Position | Release Action | Version Bump | Git Tag | GitHub Release | PM Asked? |
 |--------------|----------------|-------------|---------|----------------|-----------|
-| **Standalone** (1 EPIC in queue) | Mandatory bump | Yes | Per `release-policy.yaml` `auto_tag` | Per `release-policy.yaml` `auto_release` | No |
-| **Intermediate** (more EPICs queued) | Auto-DEFER | No | No | No | No |
-| **Last** (no more EPICs queued) | Mandatory bump | Yes | Per `release-policy.yaml` `auto_tag` | Per `release-policy.yaml` `auto_release` | No |
+| **Standalone** (no plan, or solo plan) | Mandatory bump | Yes | Per `release-policy.yaml` `auto_tag` | Per `release-policy.yaml` `auto_release` | No |
+| **Intermediate** (more EPICs remain for this plan) | Auto-DEFER | No | No | No | No |
+| **Last** (final EPIC of a multi-EPIC plan) | Mandatory bump | Yes | Per `release-policy.yaml` `auto_tag` | Per `release-policy.yaml` `auto_release` | No |
 
 ### 2.12 Error Handling
 
@@ -537,6 +565,8 @@ Where `{session_id}` matches the session ID from `auto-session.json`
 | Total EPICs | {total_epics} |
 | Completed | {completed_epics} |
 | Failed | {failed_epics} |
+| Removed | {removed_count} |
+| Executed (this context) | {executed_this_context} |
 | Total steps | {total_steps} |
 | Steps succeeded | {successful_steps} |
 | Steps failed | {failed_steps} |
@@ -585,6 +615,12 @@ Where `{session_id}` matches the session ID from `auto-session.json`
 {for each artifact in key_artifacts:}
   - {artifact}
 
+{for each removed_epic in removed_epics:}
+### ! {epic_id}
+- **Status:** removed
+- **Removed at:** {removed_at}
+- **Previous status:** {previous_status}
+
 ## Evidence Locations
 {for each epic_summary in epic_summaries:}
 - {epic_id}: {evidence_path}
@@ -629,8 +665,9 @@ for session cost awareness.
 ━━━━━━━━━━━━━━━━
 *Session:* {session_id}
 *Duration:* {total_duration_minutes} minutes
-*EPICs:* {completed_epics}/{total_epics} completed
+*EPICs:* {completed_epics}/{total_epics} completed (session), {executed_this_context} this context
   {failed_epics > 0 ? ":warning: {failed_epics} failed" : ""}
+  {removed_count > 0 ? ":wastebasket: {removed_count} removed" : ""}
 
 *Summary:*
 • Steps: {successful_steps}/{total_steps} succeeded
@@ -650,7 +687,9 @@ FIRST AID SESSION COMPLETE
 ====================================
 Session: {session_id}
 Duration: {total_duration_minutes} minutes
-EPICs: {completed_epics}/{total_epics} completed
+EPICs completed:  {completed_epics} / {total_epics}  (session total)
+EPICs executed:   {executed_this_context}  (this context)
+EPICs removed:    {removed_count}
 
 Summary:
   Steps: {successful_steps}/{total_steps} succeeded
@@ -697,6 +736,12 @@ current_epic_started_at: "2026-02-24T14:00:00Z"
 permissions:
   preset: "steroids"
   verified_at: "{ISO 8601}"
+
+# Context tracking (reset on --resume, used for accurate post-compaction counts)
+context:
+  epics_executed_this_context: []   # EPIC IDs the Controller actually dispatched in this execution context
+  context_started_at: "{ISO 8601}"  # When this context began
+  context_resume_count: 0           # Incremented at each --resume
 
 # Summary aggregation (updated after each EPIC completes)
 summary:
@@ -938,4 +983,4 @@ If the Controller crashes mid-session, the next startup detects the state:
 
 ---
 
-**Last Updated:** 2026-02-26
+**Last Updated:** 2026-02-27

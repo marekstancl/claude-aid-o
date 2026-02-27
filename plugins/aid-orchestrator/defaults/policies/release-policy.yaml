@@ -198,8 +198,10 @@ multi_phase:
 # FIRST AID mode uses these defaults instead.
 
 first_aid:
-  # Intermediate EPIC: auto-defer (skip version bump, wait for final EPIC).
-  intermediate_action: defer             # defer | release
+  # Intermediate EPIC: how to handle version bumps for non-final EPICs.
+  intermediate_action: defer             # defer | ask
+  # defer: intermediate EPICs auto-defer version bumps to plan's last EPIC
+  # ask: escalate to PM (auto-mode pauses)
 
   # Last/standalone EPIC: always bump + tag + release (no PM confirmation).
   last_epic_action: release              # release (always — not configurable, documented for clarity)

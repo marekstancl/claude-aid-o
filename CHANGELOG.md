@@ -13,6 +13,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **FIRST AID startup** — permission sandwich steps (backup, elevate) replaced by single Steroids preset verification check
 - **FIRST AID completion** — permission restore removed; /aid-stop simplified to 3 steps (mode flag, wait, save progress)
 
+### Fixed
+- **Plan archival** — QUEUE_ADVANCE now uses queue as ground truth for plan archival instead of filesystem scanning; DONE state no longer attempts archival (single source)
+- **Version bump detection** — uses plan-level completion (`plan_epics_total`) instead of queue position; solo plans always bump, multi-EPIC plans bump on last EPIC
+- **Release sub-phase** — DONE state now explicitly calls RELEASE_SUB_PHASE with mandatory stage_log entry; skipping is no longer possible without audit trail
+- **Queue removal** — `/epic-queue remove` sets status "removed" (not "completed"); context boundary tracking distinguishes session total from actually-executed EPICs
+
 ## [1.1.0] — 2026-02-27
 
 ### Added

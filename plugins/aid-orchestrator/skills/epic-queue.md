@@ -28,7 +28,7 @@ queue:
   - epic_id: "E-20260217-a1b2-user-auth"
     path: ".aid-o/02-epics/E-20260217-a1b2-user-auth.md"
     priority: high
-    status: completed                      # queued | running | completed | failed | paused
+    status: completed                      # queued | running | completed | failed | paused | removed
     added_at: "2026-02-17T10:00:00Z"
     started_at: "2026-02-17T10:05:00Z"
     completed_at: "2026-02-17T14:30:00Z"
@@ -51,6 +51,7 @@ queue:
 | `completed` | Finished successfully (DONE state, approved) |
 | `failed` | Finished with failure (aborted or unrecoverable) |
 | `paused` | Individually paused by PM (skipped in pickup) |
+| `removed` | Removed from queue by PM (/epic-queue remove) |
 
 ---
 
@@ -82,9 +83,12 @@ Remove an EPIC from the queue (only if not running).
 
 ```
 1. Find entry by epic_id
-2. IF status = "running" → reject: "Cannot remove running EPIC. Use /epic-queue pause."
-3. Remove entry from queue list
+2. IF status == "running" → reject: "Cannot remove running EPIC. Use /epic-queue pause first."
+3. Update entry (DO NOT delete — preserve audit trail):
+   status: "removed"
+   removed_at: "{ISO 8601}"
 4. Save epic-queue.yaml
+5. Log: "EPIC {epic_id} removed from queue (was: {previous_status})"
 ```
 
 ### `next()`
