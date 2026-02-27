@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.0.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.2.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -11,15 +11,15 @@ You describe what you want to build. AID brainstorms the design with you, genera
 > **USE AT YOUR OWN RISK.** FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** for the duration of the session. This means Claude can autonomously edit files, run shell commands, install packages, push code to remote repositories, create GitHub releases, and interact with configured MCP services — **all without asking for confirmation**.
 >
 > **What "elevated permissions" means in practice:**
-> - Claude executes commands defined in `permissions-auto.yaml` without VS Code/CLI prompts
+> - FIRST AID requires the **Steroids** preset (set via `/aid-setup`), which grants broad tool permissions
 > - This includes `git push`, `npm install`, `gh release create`, and many others
-> - The full list is in `.aid-o/03-config/permissions-auto.yaml` (or the plugin defaults)
+> - The full list is in `defaults/policies/permissions.yaml` → `steroids` preset
 >
 > **What Claude CANNOT do (hard-deny list, non-overridable):**
 > - `rm -rf /`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `chown`
 > - Access `~/.ssh`, `~/.aws`, `~/.gnupg`, `/etc`, or Claude's own config
 >
-> **Safety mechanisms exist** (permission sandwich, 16 escalation triggers, crash recovery), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind. You are responsible for the actions performed in your environment.
+> **Safety mechanisms exist** (deny-list, 16 escalation triggers, Steroids preset verification), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind. You are responsible for the actions performed in your environment.
 
 ## 30-Second Demo
 
@@ -131,10 +131,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.1.0** (current) — Plan-writing skill, brainstorming modular split (3 files), critical rules and self-checks, 11→8 step simplification
+- **v1.2.0** (current) — Permission sandwich removed (Aspirin/Steroids presets), 4 Controller bug fixes (plan archival, version bump, release sub-phase, queue removal)
+- **v1.1.0** — Plan-writing skill, brainstorming modular split (3 files), critical rules and self-checks, 11→8 step simplification
 - **v1.0.0** — Plugin DX housekeeping: GitHub MCP in setup wizard, setup completion banner, version pre-check in plan-epic, help workflow examples, autonomous mode commands in help, stale path fixes
-- **v0.99.0** — AID Server backend (`packages/aid-server`), Docker deployment, Docusaurus docs site on GitHub Pages, GUI frontend polish
-- **v0.9.3** — GATES→CURATOR_RESOLVE fix, Qdrant config unification, FIRST AID animations, EPIC/plan archival
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
