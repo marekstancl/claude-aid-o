@@ -15,6 +15,41 @@ For quality gates and evaluation, **see:** `skills/gate-evaluation.md`
 
 ---
 
+## ID Format
+
+**CANONICAL FORMAT:** `E-{plan_id}-{phase}_{total}`
+
+**Components:**
+- `E-` — literal prefix, all EPIC IDs start with this
+- `{plan_id}` — 3+ digit plan number without "P" prefix, zero-padded
+  (e.g., "015" from P015, "001" from P001)
+- `{phase}` — phase number within the plan, 1-indexed integer
+- `{total}` — total number of phases/EPICs created from this plan
+
+**Format examples:**
+- `E-015-1_2` — Plan P015, phase 1 of 2
+- `E-009-1_5` — Plan P009, phase 1 of 5
+- `E-001-1_1` — Plan P001, single phase (1 of 1)
+
+**VALIDATION REGEX:** `^E-\d{3,}-\d+_\d+$`
+
+**AD-HOC EPICs** (without a source plan):
+- Use ad-hoc counter from counter.yaml
+- Format: `E-{ad_hoc_counter}-1_1` (always single phase)
+- Example: `E-001-1_1` (first ad-hoc EPIC)
+
+**LEGACY FORMATS** — do NOT generate, read-only for historical evidence:
+- `E-YYYYMMDD-NNNN` (timestamp + sequential, pre-v1.0)
+- `E-YYYYMMDD-XXXX-slug` (timestamp + hash + description, pre-v1.0)
+These formats may appear in old evidence directories (`.aid-o/04-engine/evidence/`).
+Do not rename, migrate, or delete them. New EPICs MUST use the canonical format.
+
+**VALIDATION:** Before writing any new EPIC ID to a file (queue, run file, evidence path),
+validate against the regex. If validation fails, reject with error:
+`"Invalid EPIC ID format: {id}. Expected: E-{plan_id}-{phase}_{total} (e.g., E-015-1_2)"`
+
+---
+
 ## State Machine
 
 ```
@@ -627,4 +662,4 @@ Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of t
 
 ---
 
-**Last Updated:** 2026-02-26
+**Last Updated:** 2026-02-27

@@ -530,9 +530,45 @@ CPA still computes critical path and ratio, but relaxation rules don't apply
 #### Development Relaxation Rules
 
 ```
-RULE R1: "Frontend doesn't need Domain"
+RULE R1: "Frontend can parallelize with Domain when Domain produces only data models"
+
+DEFINITIONS:
+
+  DATA MODEL — a step that ONLY creates or modifies:
+    - Database schema files: *.prisma, *.sql, migrations/*, *.dbml
+    - Type/interface definition files: types.ts, interfaces.ts, models.py, types.py
+    - Entity/DTO class files that define data shape but NO callable methods
+    - Configuration files: *.yaml, *.json, *.toml, *.env
+    - Documentation files: *.md (no executable behavior)
+
+  API CONTRACT — a step that creates or modifies ANY of:
+    - Route/endpoint definitions: router.ts, urls.py, routes/, controllers/
+    - Request/response validation schemas used at HTTP boundaries
+      (e.g., zod schemas in route handlers, pydantic models in FastAPI endpoints)
+    - Middleware, interceptors, or request pipeline components
+    - OpenAPI/Swagger specification files: *.openapi.yaml, *.swagger.json
+    - Service interfaces with public methods that other components call
+      (e.g., AuthService with login(), register(), verify() methods)
+    - WebSocket event handlers or message schemas
+    - GraphQL schema definitions (*.graphql, schema.ts)
+
+DETERMINATION ALGORITHM:
+  1. List all files in the Domain step's "Files" section (Create + Modify entries only)
+  2. For each file, classify as DATA MODEL or API CONTRACT using the definitions above
+  3. IF all files classify as DATA MODEL → R1 applies, frontend step can run in parallel
+  4. IF any file classifies as API CONTRACT → R1 does NOT apply, frontend must wait
+  5. IF classification is ambiguous (file doesn't clearly match either category)
+     → treat as API CONTRACT (conservative, consistent with OVERLAP_CHECK philosophy)
+
+EXAMPLES:
+  - Domain creates "prisma/schema.prisma" → DATA MODEL → parallelize OK
+  - Domain creates "src/types/User.ts" (interface, no methods) → DATA MODEL → parallelize OK
+  - Domain creates "src/api/routers/auth.ts" → API CONTRACT → frontend must wait
+  - Domain creates "src/services/AuthService.ts" with public methods → API CONTRACT → must wait
+  - Domain creates only migration files → DATA MODEL → parallelize OK
+
   IF: step_{N}_frontend depends on step_{M}_domain
-  AND: step_{M}_domain produces only data models (no API contracts)
+  AND: DETERMINATION ALGORITHM classifies step_{M}_domain as DATA MODEL only
   AND: step_{1}_architect produced API contracts
   THEN: relax → frontend depends on architect instead of domain
   REASON: Frontend builds against API contracts, not domain internals
@@ -681,18 +717,65 @@ To evaluate PARALLEL RULE 2 condition (b), the Planner compares allowed_paths:
 
 ```
 OVERLAP_CHECK(step_A, step_B):
-  paths_A = normalize(step_A.allowed_paths)   # expand globs, resolve dirs
-  paths_B = normalize(step_B.allowed_paths)
-  overlap = paths_A ∩ paths_B
+  """Detect file scope conflicts between two parallel steps.
+  Returns: CONFLICT | SAFE
+  Principle: Conservative — when in doubt, return CONFLICT (prefer false positive over false negative)."""
 
-  IF overlap is empty → NO conflict → can parallelize
-  IF overlap contains only read-only/contract files (e.g., OpenAPI specs,
-     type definition files that both steps READ but neither MODIFIES):
-    → NO conflict → can parallelize
-    → Log: "Shared read-only paths ignored for parallelism: {overlap}"
-  IF overlap contains files that either step MODIFIES:
-    → CONFLICT → must be sequential or require wiring step (Section 2a)
-    → Log: "Parallel blocked by writable overlap: {overlap}"
+  INPUT: step_A.files[] and step_B.files[] — each entry is a file path (exact or glob pattern)
+         Only "Create" and "Modify" entries participate. "Read" and "Test" entries are excluded
+         (reading and testing are safe in parallel).
+
+  1. EXTRACT writable paths:
+     writable_A = [f.path for f in step_A.files if f.action in ("Create", "Modify")]
+     writable_B = [f.path for f in step_B.files if f.action in ("Create", "Modify")]
+     IF either list is empty → return SAFE (no write conflicts possible)
+
+  2. NORMALIZE all paths:
+     - Strip leading "./" or "/" (make relative to project root)
+     - Normalize path separators to "/"
+     - Case-insensitive comparison (accommodates macOS/Windows filesystems)
+
+  3. For each pair (path_A from writable_A, path_B from writable_B):
+
+     Case A — BOTH EXACT PATHS (no *, no **):
+       IF lowercase(path_A) == lowercase(path_B) → CONFLICT
+       ELSE → this pair is SAFE
+
+     Case B — ONE GLOB, ONE EXACT:
+       Test: does the exact path match the glob pattern?
+       Glob matching rules:
+         "*"  → matches any characters EXCEPT "/" (single directory level)
+         "**" → matches zero or more path segments including "/" (recursive)
+         "?"  → matches exactly one character except "/"
+       Examples:
+         "src/api/*.py" matches "src/api/auth.py" → CONFLICT
+         "src/api/*.py" does NOT match "src/api/routers/auth.py" (no recursive)
+         "src/api/**/*.py" matches "src/api/routers/auth.py" → CONFLICT
+         "src/**" matches "src/any/nested/file.ts" → CONFLICT
+       IF match → CONFLICT
+       ELSE → this pair is SAFE
+
+     Case C — BOTH GLOBS:
+       Conservative heuristic (exact glob intersection is computationally expensive):
+       1. Extract the fixed prefix of each glob (everything before the first * or **):
+          "src/api/**/*.py" → prefix = "src/api/"
+          "src/models/**/*.py" → prefix = "src/models/"
+       2. IF neither prefix starts with the other → SAFE
+          (different directory trees cannot overlap)
+          "src/api/" and "src/models/" → SAFE
+       3. IF one prefix starts with the other (or prefixes are identical):
+          Check file extension filters (if present):
+          "src/api/**/*.py" and "src/api/**/*.ts" → SAFE (different extensions)
+          "src/api/**/*.py" and "src/api/**/*.py" → CONFLICT (same extension)
+          "src/api/**/*" and "src/api/**/*.py" → CONFLICT (wildcard includes .py)
+       4. IF ambiguous after prefix and extension checks → CONFLICT (conservative)
+
+  4. IF any pair produces CONFLICT → return CONFLICT
+  5. IF all pairs are SAFE → return SAFE
+
+  NOTE: False positive (marking safe steps as conflicting) causes sequential execution —
+  slower but correct. False negative (marking conflicting steps as safe) causes file
+  corruption — fast but broken. Always prefer false positive.
 ```
 
 ### Example — Parallel Backend + Frontend
@@ -857,7 +940,7 @@ multiple rules, generating multiple analysis groups.
    restructure, rearchitect, decompose, consolidate
 
 3. Step touches 10+ files — determined by:
-   Count distinct file patterns in allowed_paths (expand globs):
+   Count distinct file patterns in allowed_paths (resolve glob patterns):
      "src/api/**/*.py" → count .py files matching the glob
      If glob count >= 10 OR 3+ distinct directory prefixes → trigger
 ```
@@ -1778,4 +1861,4 @@ And sets EPIC frontmatter: `runs_total: 2`
 
 ---
 
-**Last Updated:** 2026-02-26
+**Last Updated:** 2026-02-27

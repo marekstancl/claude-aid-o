@@ -14,8 +14,8 @@ Launch **FIRST AID** (Fully Integrated Autonomous Development) mode — autonomo
 > `git push --force`, `sudo`, `chmod 777`, etc.), but no automated safeguard is
 > exhaustive. **You are responsible for all actions performed in your environment.**
 >
-> Before starting: review your EPIC queue (`/aid-epic-queue`) and run `--dry-run` to
-> preview execution. Use `/aid-stop` as the emergency stop to halt autonomous execution
+> Before starting: review your EPIC queue (`/aid-epic-queue`).
+> Use `/aid-stop` as the emergency stop to halt autonomous execution
 > at any point.
 
 The PM approves the EPIC queue before invocation. Once started, the Orchestrator processes every queued EPIC end-to-end: plan, execute, gate, merge, pick up next. PM is only contacted on escalation (16 defined triggers). Requires Steroids 💉 preset.
@@ -27,14 +27,12 @@ This is the **top-level autonomous command** — it wraps the entire lifecycle: 
 ```
 /aid-first-aid                  # Start auto-mode with current queue
 /aid-first-aid --resume         # Resume a paused/crashed session
-/aid-first-aid --dry-run        # Validate queue and preset without executing
 ```
 
 **Examples:**
 ```
 /aid-first-aid                  # Process all queued EPICs autonomously
 /aid-first-aid --resume         # Resume from saved progress after crash or /aid-stop
-/aid-first-aid --dry-run        # Preview what would happen
 ```
 
 ## Prerequisites
@@ -93,17 +91,9 @@ On each state transition, append to the session-level `stage_log.jsonl`.
 
 ```
 IF $ARGUMENTS contains "--dry-run":
-  1. Run all validation checks (steps 3-6) without side effects
-  2. Display results:
-     "DRY RUN — FIRST AID Validation
-      ====================================
-      Queue:       {N} EPICs queued ({epic_ids})
-      Preset:      Steroids 💉 (verified)
-      Settings:    .claude/settings.json ({status: valid|missing|invalid})
-      Mode state:  {none|active session exists}
-
-      Ready to start: {YES|NO — {reason}}"
-  3. STOP (do not proceed to execution)
+  Output to PM: "--dry-run is not yet implemented."
+  Output to PM: "Feature spec: .aid-o/04-engine/backlog/dry-run-feature.md"
+  EXIT (do not proceed with any pipeline execution)
 ```
 
 #### 3. Handle --resume Flag
@@ -1465,3 +1455,5 @@ Per-EPIC execution also logs to the EPIC-specific stage log at
   by PM grants, or by any other mechanism.
 - If `$ARGUMENTS` is empty: start fresh auto-mode with current queue (equivalent to
   no flags).
+
+**Last Updated:** 2026-02-27

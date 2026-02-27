@@ -117,9 +117,18 @@ IF mode == auto:
      a. Set mode: paused in auto-mode-state.yaml
      b. Set paused_at: {ISO 8601 timestamp}
   2. Save progress snapshot:
-     a. Write snapshot file: .aid-o/04-engine/auto-mode-state-snapshot-{epic_id}.json
-        { "epic_id": "{epic_id}", "run_id": "{run_id}", "paused_at": "{state}",
-          "last_completed_step": "{step_id}", "escalation_trigger": "{reason}" }
+     a. Write snapshot file: .aid-o/04-engine/evidence/{epic_id}/{run_id}/interrupted_step_context.json
+        {
+          "epic_id": "{epic_id}",
+          "run_id": "{run_id}",
+          "interrupted_step": "{step_id}",
+          "interrupted_at": "{ISO 8601}",
+          "step_status_before": "running",
+          "agent_partial_output": "{first 500 chars}",
+          "git_stash_ref": "{stash ref}",
+          "plan_progress_snapshot": "{plan_progress.json state}",
+          "escalation_trigger": "{reason}"
+        }
      b. Set auto-mode-state.yaml → progress_snapshot: {snapshot_path}
   3. Increment escalation counter:
      → escalation_count += 1 in auto-mode-state.yaml
@@ -203,14 +212,31 @@ IF mode == auto:
      (Plan-based detection — see auto-done-state.md Section 2.4 for algorithm)
 
   2. IF position == "intermediate":
-     → Auto-approve immediately (no guardrails required for intermediate EPICs)
-     → Save pm_decision.json:
-        { "approver": "auto-mode", "decision": "approve",
-          "epic_position": "intermediate ({N}/{total})",
-          "mode": "auto", "timestamp": "{ISO 8601}" }
-     → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
-              "reason": "intermediate_epic", "position": "{N}/{total}"}
-     → Transition to DONE
+     → Apply INTERMEDIATE_GUARDRAIL:
+       INTERMEDIATE_GUARDRAIL — lightweight quality check for intermediate EPICs:
+         Check 1: All steps completed — no step has status "pending" or "blocked"
+                  (steps with status "completed" or "skipped" are acceptable)
+         Check 2: No gate failures in the run — gate retries are OK (the retry succeeded),
+                  but a final gate failure (retry exhausted, gate still failing) is not
+         Check 3: Evidence directory has at least 1 file per completed step
+                  (skipped steps are excluded from this check)
+     → IF all 3 checks pass:
+       → Auto-approve with log:
+         "Intermediate EPIC passed lightweight guardrail (3/3 checks)"
+       → Save pm_decision.json:
+          { "approver": "auto-mode", "decision": "approve",
+            "epic_position": "intermediate ({N}/{total})",
+            "guardrails": { "all_steps_done": "pass", "no_gate_failures": "pass",
+                            "evidence_complete": "pass" },
+            "mode": "auto", "timestamp": "{ISO 8601}" }
+       → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
+                "reason": "intermediate_guardrail_passed", "position": "{N}/{total}"}
+       → Transition to DONE
+     → IF any check fails:
+       → Escalate to PM with details:
+         "Intermediate EPIC failed guardrail: {list of failed checks}.
+          Downstream EPICs may be affected. PM approval required."
+       → Wait for PM response (standard escalation protocol)
 
   3. IF position == "last" OR position == "standalone":
      → Run auto-mode guardrails:
@@ -222,8 +248,18 @@ IF mode == auto:
            - Read from MOST RECENT PRIOR EPIC:
              evidence/{prev_epic_id}/{prev_run_id}/audit-report.md
            - Extract prior overall score
-           - IF no prior audit report exists: skip this guardrail check with log
-             "No prior audit report found — auditor_trend guardrail skipped"
+           - IF no prior audit report exists:
+             → Apply DEFAULT_BASELINE check instead of skipping:
+               DEFAULT_BASELINE:
+                 1. Read current EPIC's audit-report.md (from Auditor in POST-PROCESSING)
+                 2. Extract overall score
+                 3. IF overall_score >= 50: PASS (acceptable baseline for first EPIC)
+                    Log: "No prior audit — DEFAULT_BASELINE applied: score {score}/100 >= 50 threshold"
+                 4. IF overall_score < 50: FAIL — escalate E11
+                    "First EPIC audit score ({score}/100) below minimum baseline (50).
+                     No prior audit to compare against. Review quality before continuing."
+               Rationale: First EPIC has no history to compare. A score of 50+ indicates
+               fundamentally sound work. Below 50 suggests systemic issues requiring PM review.
            - IF prior exists: current_score >= prior_score - 5
      → IF all guardrails pass:
         → Auto-approve with guardrails
