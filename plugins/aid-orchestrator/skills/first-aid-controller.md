@@ -117,9 +117,18 @@ IF mode == auto:
      a. Set mode: paused in auto-mode-state.yaml
      b. Set paused_at: {ISO 8601 timestamp}
   2. Save progress snapshot:
-     a. Write snapshot file: .aid-o/04-engine/auto-mode-state-snapshot-{epic_id}.json
-        { "epic_id": "{epic_id}", "run_id": "{run_id}", "paused_at": "{state}",
-          "last_completed_step": "{step_id}", "escalation_trigger": "{reason}" }
+     a. Write snapshot file: .aid-o/04-engine/evidence/{epic_id}/{run_id}/interrupted_step_context.json
+        {
+          "epic_id": "{epic_id}",
+          "run_id": "{run_id}",
+          "interrupted_step": "{step_id}",
+          "interrupted_at": "{ISO 8601}",
+          "step_status_before": "running",
+          "agent_partial_output": "{first 500 chars}",
+          "git_stash_ref": "{stash ref}",
+          "plan_progress_snapshot": "{plan_progress.json state}",
+          "escalation_trigger": "{reason}"
+        }
      b. Set auto-mode-state.yaml → progress_snapshot: {snapshot_path}
   3. Increment escalation counter:
      → escalation_count += 1 in auto-mode-state.yaml
@@ -222,8 +231,18 @@ IF mode == auto:
            - Read from MOST RECENT PRIOR EPIC:
              evidence/{prev_epic_id}/{prev_run_id}/audit-report.md
            - Extract prior overall score
-           - IF no prior audit report exists: skip this guardrail check with log
-             "No prior audit report found — auditor_trend guardrail skipped"
+           - IF no prior audit report exists:
+             → Apply DEFAULT_BASELINE check instead of skipping:
+               DEFAULT_BASELINE:
+                 1. Read current EPIC's audit-report.md (from Auditor in POST-PROCESSING)
+                 2. Extract overall score
+                 3. IF overall_score >= 50: PASS (acceptable baseline for first EPIC)
+                    Log: "No prior audit — DEFAULT_BASELINE applied: score {score}/100 >= 50 threshold"
+                 4. IF overall_score < 50: FAIL — escalate E11
+                    "First EPIC audit score ({score}/100) below minimum baseline (50).
+                     No prior audit to compare against. Review quality before continuing."
+               Rationale: First EPIC has no history to compare. A score of 50+ indicates
+               fundamentally sound work. Below 50 suggests systemic issues requiring PM review.
            - IF prior exists: current_score >= prior_score - 5
      → IF all guardrails pass:
         → Auto-approve with guardrails
