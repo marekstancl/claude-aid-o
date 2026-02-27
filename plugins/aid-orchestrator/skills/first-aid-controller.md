@@ -212,14 +212,31 @@ IF mode == auto:
      (Plan-based detection — see auto-done-state.md Section 2.4 for algorithm)
 
   2. IF position == "intermediate":
-     → Auto-approve immediately (no guardrails required for intermediate EPICs)
-     → Save pm_decision.json:
-        { "approver": "auto-mode", "decision": "approve",
-          "epic_position": "intermediate ({N}/{total})",
-          "mode": "auto", "timestamp": "{ISO 8601}" }
-     → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
-              "reason": "intermediate_epic", "position": "{N}/{total}"}
-     → Transition to DONE
+     → Apply INTERMEDIATE_GUARDRAIL:
+       INTERMEDIATE_GUARDRAIL — lightweight quality check for intermediate EPICs:
+         Check 1: All steps completed — no step has status "pending" or "blocked"
+                  (steps with status "completed" or "skipped" are acceptable)
+         Check 2: No gate failures in the run — gate retries are OK (the retry succeeded),
+                  but a final gate failure (retry exhausted, gate still failing) is not
+         Check 3: Evidence directory has at least 1 file per completed step
+                  (skipped steps are excluded from this check)
+     → IF all 3 checks pass:
+       → Auto-approve with log:
+         "Intermediate EPIC passed lightweight guardrail (3/3 checks)"
+       → Save pm_decision.json:
+          { "approver": "auto-mode", "decision": "approve",
+            "epic_position": "intermediate ({N}/{total})",
+            "guardrails": { "all_steps_done": "pass", "no_gate_failures": "pass",
+                            "evidence_complete": "pass" },
+            "mode": "auto", "timestamp": "{ISO 8601}" }
+       → Log: {"state": "PM_APPROVAL", "action": "auto_approved",
+                "reason": "intermediate_guardrail_passed", "position": "{N}/{total}"}
+       → Transition to DONE
+     → IF any check fails:
+       → Escalate to PM with details:
+         "Intermediate EPIC failed guardrail: {list of failed checks}.
+          Downstream EPICs may be affected. PM approval required."
+       → Wait for PM response (standard escalation protocol)
 
   3. IF position == "last" OR position == "standalone":
      → Run auto-mode guardrails:
