@@ -158,19 +158,69 @@ Remove an EPIC from the queue (only if not running).
 
 Get the next EPIC to execute (highest priority, oldest within same priority, all dependencies satisfied).
 
+The function computes an **eligibility status** for each queued entry before selection.
+Only entries with eligibility = READY participate in priority/FIFO selection.
+
+#### Eligibility Statuses
+
+| Eligibility | Meaning |
+|-------------|---------|
+| `READY` | All dependencies satisfied (completed) or no dependencies — eligible for pickup |
+| `WAITING` | One or more dependencies still in progress (queued, running, paused) — not yet eligible |
+| `BLOCKED` | One or more dependencies failed or missing from queue — cannot proceed without intervention |
+
+#### Algorithm
+
 ```
-1. Filter entries where status = "queued"
-2. DEPENDENCY FILTER — for each candidate entry:
+1. Read epic-queue.yaml
+2. Filter: keep only entries where status == "queued" → candidate_list
+3. COMPUTE ELIGIBILITY — for each entry in candidate_list:
+
    a. Resolve depends_on (treat missing field as [])
-   b. For each dep_id in depends_on:
-      - Find the queue entry with epic_id == dep_id
-      - IF entry not found OR entry.status != "completed":
-        → This candidate is BLOCKED — remove from eligible set
-   c. Only entries with ALL dependencies satisfied (completed) remain eligible
-3. Sort eligible entries by:
-   a. Priority: critical > high > medium > low
-   b. Within same priority: added_at ascending (FIFO)
-4. Return first entry, or null if no eligible entry exists
+   b. IF depends_on is empty → eligibility = READY; continue to next entry
+
+   c. Initialize: all_satisfied = true, any_blocked = false, blocking_dep = null
+   d. FOR each dep_id in depends_on:
+      - Find dep_id in the FULL queue (any status, not just queued)
+      - IF dep_id.status == "completed":
+          → This dependency is satisfied (continue to next dep_id)
+      - IF dep_id.status == "failed" OR dep_id not found in queue:
+          → any_blocked = true
+          → blocking_dep = dep_id
+          → BREAK (no need to check remaining deps)
+      - IF dep_id.status in ["queued", "running", "paused"]:
+          → all_satisfied = false
+          (continue checking — a later dep might be failed/missing,
+           which takes precedence as BLOCKED over WAITING)
+
+   e. Assign eligibility:
+      - IF any_blocked → eligibility = BLOCKED
+        (record blocking_dep for diagnostic output)
+      - ELIF all_satisfied → eligibility = READY
+      - ELSE → eligibility = WAITING
+
+4. SELECT from READY entries only:
+   a. Filter candidate_list to entries where eligibility == READY
+   b. Sort by Priority: critical > high > medium > low
+   c. Within same priority: sort by added_at ascending (FIFO)
+   d. Return first entry
+
+5. IF no READY entries exist:
+   a. Count entries where eligibility == BLOCKED → blocked_count
+   b. Count entries where eligibility == WAITING → waiting_count
+   c. Log with distinction:
+      - IF blocked_count > 0 AND waiting_count > 0:
+        → "No eligible EPICs. {waiting_count} waiting on dependencies,
+           {blocked_count} blocked by failed/missing dependencies."
+      - IF blocked_count > 0 AND waiting_count == 0:
+        → "No eligible EPICs. {blocked_count} blocked by failed/missing
+           dependencies. Resolve failed EPICs or remove dependencies to unblock."
+      - IF waiting_count > 0 AND blocked_count == 0:
+        → "No eligible EPICs. {waiting_count} waiting on dependencies
+           currently in progress."
+      - IF both == 0:
+        → "Queue has no queued EPICs."
+   d. Return null
 ```
 
 ### `start(epic_id)`
@@ -223,7 +273,55 @@ Resume auto-pickup.
 
 ### `list()`
 
-Return full queue with status, priority, and timing info.
+Return full queue with status, priority, timing info, and **dependency eligibility**.
+
+```
+1. Read epic-queue.yaml
+2. For each entry in queue:
+   a. IF entry.status == "running"   → display_tag = [RUN]
+   b. IF entry.status == "completed" → display_tag = [DONE]
+   c. IF entry.status == "failed"    → display_tag = [FAIL]
+   d. IF entry.status == "removed"   → display_tag = [DEL]
+   e. IF entry.status == "paused"    → display_tag = [PAUSE]
+   f. IF entry.status == "queued":
+      → Compute eligibility using the same algorithm as next() step 3
+      → IF eligibility == READY   → display_tag = [READY]
+      → IF eligibility == WAITING → display_tag = [WAITING]
+      → IF eligibility == BLOCKED → display_tag = [BLOCKED]
+3. Display each entry with display_tag, epic_id, priority, and dependency context
+4. Display queue summary (paused state, counts by eligibility)
+```
+
+#### Queue Status Display Format
+
+When listing the queue, each entry shows its eligibility status along with
+dependency context for queued entries:
+
+```
+EPIC Queue
+━━━━━━━━━━━━━
+  [READY]    E-015-1_2  (high)   — no dependencies
+  [RUN]      E-014-1_2  (high)   — started 2h ago
+  [WAITING]  E-015-2_2  (medium) — waiting on: E-015-1_2 (running)
+  [BLOCKED]  E-013-1_1  (medium) — blocked by failed: E-012-1_1
+  [READY]    E-009-2_5  (low)    — dependencies satisfied
+  [DONE]     E-014-1_2  (high)   — completed 3h ago
+  [FAIL]     E-012-1_1  (high)   — failed 5h ago
+  [DEL]      E-010-1_1  (low)    — removed
+
+Auto-pickup: Active (2 READY, 1 WAITING, 1 BLOCKED)
+```
+
+**Dependency context** (shown after the dash) varies by eligibility:
+
+| Eligibility | Context shown |
+|-------------|---------------|
+| `READY` (no deps) | "no dependencies" |
+| `READY` (deps met) | "dependencies satisfied" |
+| `WAITING` | "waiting on: {dep_id} ({dep_status})" — lists the unsatisfied dependency IDs and their current status |
+| `BLOCKED` | "blocked by failed: {dep_id}" or "blocked by missing: {dep_id}" — identifies the specific dependency causing the block |
+
+For non-queued entries, context shows timing (started/completed/failed N ago).
 
 ### `reorder(epic_id, new_priority)`
 
@@ -343,7 +441,7 @@ Triggered from `skills/epic-orchestration.md` DONE state, after POST-PROCESSING 
 | **Manual pause** | `/epic-queue pause` stops auto-pickup immediately. Does not abort the running EPIC. |
 | **Duplicate prevention** | Cannot add the same EPIC twice (by epic_id) if it's already queued or running. |
 | **Dependency validation** | `add()` validates that all `depends_on` IDs exist in the queue, rejects self-dependencies, and runs Kahn's algorithm to detect circular dependency chains before accepting the entry. |
-| **Dependency-aware pickup** | `next()` only returns EPICs whose dependencies have ALL completed. Blocked EPICs remain queued but are skipped until their dependencies are satisfied. |
+| **Dependency-aware pickup** | `next()` computes eligibility (READY/WAITING/BLOCKED) for each queued EPIC. Only READY entries (all deps completed) participate in priority selection. WAITING entries have in-progress deps. BLOCKED entries have failed or missing deps and require PM intervention. |
 | **Persistence** | Queue state lives in YAML file — survives run restarts and context window resets. |
 | **Running protection** | Cannot remove or reorder a running EPIC. |
 | **Conflict detection** | Mutation operations (`add`, `start`, `complete`) check `last_modified` timestamp before writing. Concurrent modification aborts the operation. |
@@ -451,9 +549,12 @@ Queue mutation operations reference the flag file in CONFLICT_CHECK Step 4:
   block PM operations — the PM always retains manual override capability.
 - Parallelism is within EPICs (parallel_groups, analysis_groups), not between EPICs.
 - Dependencies are validated at `add()` time (existence check + cycle detection) and
-  enforced at `next()` time (only EPICs with all dependencies completed are eligible).
-  An EPIC with a failed dependency will remain queued indefinitely until the dependency
-  is resolved (re-run and completed) or the dependency is removed from `depends_on`.
+  enforced at `next()` time via eligibility computation. Each queued EPIC is classified
+  as READY (all deps completed), WAITING (deps in progress), or BLOCKED (deps failed
+  or missing). Only READY EPICs are eligible for pickup. BLOCKED EPICs require PM
+  intervention — either re-run and complete the failed dependency, or remove it from
+  `depends_on`. The `list()` operation shows eligibility status so PM can diagnose
+  queue stalls at a glance.
 
 ---
 

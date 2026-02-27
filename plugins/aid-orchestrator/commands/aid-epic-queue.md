@@ -39,28 +39,43 @@ The queue enables the Orchestrator to process multiple EPICs in sequence without
 
 ### `/aid-epic-queue` or `/aid-epic-queue list`
 
-Display the full queue with status, priority, and timing.
+Display the full queue with status, priority, timing, and **dependency eligibility**.
 
 **Actions:**
 1. Read `.aid-o/04-engine/epic-queue.yaml`
 2. If file doesn't exist → print "No queue configured. Use `/aid-epic-queue add` to start."
-3. Display queue:
+3. Compute eligibility for queued entries using `list()` from `skills/epic-queue.md`
+4. Display queue with eligibility tags and dependency context:
 
 ```
 EPIC Queue
 ━━━━━━━━━━━━━
- RUNNING: E-20260217-a1b2-user-auth (high) — started 2h ago
- QUEUED:  E-20260217-c3d4-api-v2 (medium) — added 1h ago
- QUEUED:  E-20260218-e5f6-dashboard (low) — added 30m ago
- DONE:    E-20260216-g7h8-scaffold (high) — completed 3h ago
- FAILED:  E-20260215-i9j0-legacy (medium) — failed 5h ago
+  [READY]    E-015-1_2  (high)   — no dependencies
+  [RUN]      E-014-1_2  (high)   — started 2h ago
+  [WAITING]  E-015-2_2  (medium) — waiting on: E-015-1_2 (running)
+  [BLOCKED]  E-013-1_1  (medium) — blocked by failed: E-012-1_1
+  [READY]    E-009-2_5  (low)    — dependencies satisfied
+  [DONE]     E-014-1_2  (high)   — completed 3h ago
+  [FAIL]     E-012-1_1  (high)   — failed 5h ago
 
-Auto-pickup: Active (2 EPICs queued)
+Auto-pickup: Active (2 READY, 1 WAITING, 1 BLOCKED)
 ```
+
+**Eligibility tags for queued entries:**
+- `[READY]` — eligible for pickup (no deps or all deps completed)
+- `[WAITING]` — deps in progress, shows which dep IDs and their status
+- `[BLOCKED]` — deps failed or missing, shows the blocking dep ID
+
+**Tags for non-queued entries:**
+- `[RUN]` — currently running
+- `[DONE]` — completed
+- `[FAIL]` — failed
+- `[DEL]` — removed
+- `[PAUSE]` — individually paused
 
 If queue is paused:
 ```
-Auto-pickup: PAUSED (2 EPICs queued, waiting for /aid-epic-queue resume)
+Auto-pickup: PAUSED (2 READY, 1 WAITING, 1 BLOCKED — waiting for /aid-epic-queue resume)
 ```
 
 ---
@@ -101,17 +116,23 @@ Remove an EPIC from the queue.
 
 ### `/aid-epic-queue next`
 
-Show the next EPIC that will be picked up.
+Show the next EPIC that will be picked up (highest-priority READY entry).
 
 **Actions:**
 1. Call `next()` from `skills/epic-queue.md`
-2. Display:
+2. If a READY entry is returned, display:
    ```
-   Next EPIC: E-20260217-c3d4-api-v2 (priority: medium)
-   Path: .aid-o/02-epics/E-20260217-c3d4-api-v2.md
+   Next EPIC: E-015-1_2 (priority: high) [READY]
+   Path: .aid-o/02-epics/E-015-1_2.md
    Added: 1h ago
    ```
-   Or: "Queue is empty. Add EPICs with `/aid-epic-queue add`."
+3. If no READY entry, display eligibility summary:
+   ```
+   No EPIC ready for pickup.
+   Queue: 1 WAITING (deps in progress), 2 BLOCKED (deps failed/missing)
+   Use /aid-epic-queue list for details.
+   ```
+   Or if queue is truly empty: "Queue is empty. Add EPICs with `/aid-epic-queue add`."
 
 ---
 
@@ -179,3 +200,7 @@ Change the priority of a queued EPIC.
 - `/aid-epic-queue pause` does NOT abort a running EPIC — it prevents the next one from starting
 - If the queue file doesn't exist when the Orchestrator checks (DONE state), it simply skips auto-pickup
 - If `$ARGUMENTS` is empty → default to `list` behavior
+
+---
+
+**Last Updated:** 2026-02-27
