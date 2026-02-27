@@ -50,6 +50,10 @@ import type {
   QueueScheduleEntry,
   KnowledgeItem,
   Project,
+  CompanionSessionSummary,
+  CompanionSession,
+  CompanionStatus,
+  EpicMetadata,
 } from '../types/api';
 
 // ---------------------------------------------------------------------------
@@ -323,6 +327,25 @@ export interface ApiClient {
 
   /** POST /api/p/:projectId/queue/launch */
   launchQueue(): Promise<ApiResult<{ launched: boolean; epicId?: string }>>;
+
+  // ----- Companion -----
+
+  /** GET /api/p/:projectId/companion/sessions */
+  getCompanionSessions(): Promise<ApiResult<CompanionSessionSummary[]>>;
+
+  /** GET /api/p/:projectId/companion/sessions/:sessionId */
+  getCompanionSession(sessionId: string): Promise<ApiResult<CompanionSession>>;
+
+  /** GET /api/p/:projectId/companion/status */
+  getCompanionStatus(): Promise<ApiResult<CompanionStatus>>;
+
+  // ----- Epics -----
+
+  /** GET /api/p/:projectId/epics */
+  getEpics(): Promise<ApiResult<EpicMetadata[]>>;
+
+  /** POST /api/p/:projectId/epics/:epicId/run */
+  runEpic(epicId: string, mode: 'now' | 'schedule'): Promise<ApiResult<{ queued: boolean }>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -453,5 +476,24 @@ export function createApiClient(
 
     launchQueue: () =>
       typedRequest<{ launched: boolean; epicId?: string }>(`${base}/queue/launch`, timeoutMs, 'POST'),
+
+    // ----- Companion -----
+
+    getCompanionSessions: () =>
+      typedFetch<CompanionSessionSummary[]>(`${base}/companion/sessions`, timeoutMs),
+
+    getCompanionSession: (sessionId: string) =>
+      typedFetch<CompanionSession>(`${base}/companion/sessions/${encodeURIComponent(sessionId)}`, timeoutMs),
+
+    getCompanionStatus: () =>
+      typedFetch<CompanionStatus>(`${base}/companion/status`, timeoutMs),
+
+    // ----- Epics -----
+
+    getEpics: () =>
+      typedFetch<EpicMetadata[]>(`${base}/epics`, timeoutMs),
+
+    runEpic: (epicId: string, mode: 'now' | 'schedule') =>
+      typedRequest<{ queued: boolean }>(`${base}/epics/${encodeURIComponent(epicId)}/run`, timeoutMs, 'POST', { mode }),
   };
 }

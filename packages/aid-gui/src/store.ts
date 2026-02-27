@@ -36,6 +36,7 @@ import type {
   ProjectsSlice,
   ReplaySlice,
   ReplayState,
+  CompanionSlice,
 } from './types/store';
 import type {
   StageLogEntryResponse,
@@ -53,6 +54,10 @@ import type {
   BacklogEntry,
   LessonEntry,
   Project as ApiProject,
+  CompanionMessage,
+  CompanionSessionSummary,
+  CompanionSession,
+  CompanionStatus,
 } from './types/api';
 import type { WsConnectionStatus, EventTopic } from './types/ws';
 
@@ -553,6 +558,78 @@ const createReplaySlice: StateCreator<
 });
 
 // ---------------------------------------------------------------------------
+// CompanionSlice
+// ---------------------------------------------------------------------------
+
+const createCompanionSlice: StateCreator<
+  DashboardStore,
+  [],
+  [],
+  CompanionSlice
+> = (set) => ({
+  companionOpen: false,
+  companionSessions: [] as CompanionSessionSummary[],
+  companionCurrentSession: null,
+  companionStreaming: false,
+  companionStreamingText: '',
+  companionStatus: null,
+  companionError: null,
+
+  setCompanionOpen: (open: boolean) =>
+    set({ companionOpen: open }),
+
+  toggleCompanion: () =>
+    set((state) => ({ companionOpen: !state.companionOpen })),
+
+  setCompanionSessions: (sessions: CompanionSessionSummary[]) =>
+    set({ companionSessions: sessions }),
+
+  setCompanionCurrentSession: (session: CompanionSession | null) =>
+    set({ companionCurrentSession: session }),
+
+  setCompanionStreaming: (streaming: boolean) =>
+    set({ companionStreaming: streaming }),
+
+  appendCompanionStreamText: (text: string) =>
+    set((state) => ({ companionStreamingText: state.companionStreamingText + text })),
+
+  resetCompanionStream: () =>
+    set({ companionStreamingText: '' }),
+
+  addCompanionMessage: (message: CompanionMessage) =>
+    set((state) => {
+      const session = state.companionCurrentSession;
+      if (!session) {
+        // Create a transient session shell to hold messages before server confirms
+        return {
+          companionCurrentSession: {
+            id: '',
+            projectId: '',
+            title: 'New conversation',
+            messages: [message],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            adapterUsed: state.companionStatus?.adapter ?? 'unknown',
+          },
+        };
+      }
+      return {
+        companionCurrentSession: {
+          ...session,
+          messages: [...session.messages, message],
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }),
+
+  setCompanionStatus: (status: CompanionStatus | null) =>
+    set({ companionStatus: status }),
+
+  setCompanionError: (error: string | null) =>
+    set({ companionError: error }),
+});
+
+// ---------------------------------------------------------------------------
 // Combined store
 // ---------------------------------------------------------------------------
 
@@ -571,6 +648,7 @@ export const useStore = create<DashboardStore>((...args) => ({
   ...createInsightsSlice(...args),
   ...createProjectsSlice(...args),
   ...createReplaySlice(...args),
+  ...createCompanionSlice(...args),
 }));
 
 // ---------------------------------------------------------------------------

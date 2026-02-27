@@ -608,6 +608,31 @@ export interface EpicListEntry {
   planRef: string;
 }
 
+/**
+ * EPIC metadata with run progress details.
+ *
+ * Returned as array items from GET /api/p/:projectId/epics.
+ * Extends the basic list entry with run counters and file location.
+ */
+export interface EpicMetadata {
+  /** EPIC identifier. */
+  id: string;
+  /** EPIC title. */
+  title: string;
+  /** Lifecycle status (e.g., "active", "completed", "paused", "failed", "running"). */
+  status: string;
+  /** Reference to the source plan, or null if not linked. */
+  planRef: string | null;
+  /** Total number of runs for this EPIC. */
+  runsTotal: number;
+  /** Number of completed runs. */
+  runsCompleted: number;
+  /** EPIC spec filename (e.g., "E-016.md"). */
+  fileName: string;
+  /** Absolute path to the EPIC spec file. */
+  path: string;
+}
+
 // ---------------------------------------------------------------------------
 // Plans
 // ---------------------------------------------------------------------------
@@ -760,6 +785,86 @@ export interface IdeaUpdateRequest {
   status?: 'idea' | 'exploring' | 'planned' | 'done';
   linkedPlan?: string | null;
   linkedEpic?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Companion (AI Chat)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single message in a companion chat session.
+ */
+export interface CompanionMessage {
+  /** Unique message identifier. */
+  id: string;
+  /** Who sent this message. */
+  role: 'user' | 'assistant' | 'system';
+  /** Message text content (may contain Markdown). */
+  content: string;
+  /** ISO 8601 timestamp. */
+  timestamp: string;
+  /** Model that generated the response (assistant messages only). */
+  model?: string;
+}
+
+/**
+ * Summary of a companion session (returned in session lists).
+ */
+export interface CompanionSessionSummary {
+  /** Session identifier. */
+  id: string;
+  /** Auto-generated title for the session. */
+  title: string;
+  /** ISO 8601 last update timestamp. */
+  updatedAt: string;
+  /** ISO 8601 creation timestamp. */
+  createdAt: string;
+  /** Number of messages in the session. */
+  messageCount: number;
+  /** Which LLM adapter was used. */
+  adapterUsed: string;
+}
+
+/**
+ * Full companion session including message history.
+ */
+export interface CompanionSession {
+  /** Session identifier. */
+  id: string;
+  /** Project this session belongs to. */
+  projectId: string;
+  /** Auto-generated title. */
+  title: string;
+  /** Ordered messages in this session. */
+  messages: CompanionMessage[];
+  /** ISO 8601 creation timestamp. */
+  createdAt: string;
+  /** ISO 8601 last update timestamp. */
+  updatedAt: string;
+  /** Which LLM adapter was used. */
+  adapterUsed: string;
+}
+
+/**
+ * Companion adapter availability status.
+ */
+export interface CompanionStatus {
+  /** Name of the active adapter (e.g., "claude", "stub"). */
+  adapter: string;
+  /** Whether the adapter is ready to serve requests. */
+  available: boolean;
+}
+
+/**
+ * Request body for POST /api/p/:projectId/companion/send.
+ */
+export interface CompanionSendRequest {
+  /** The user's message text. */
+  message: string;
+  /** Existing session ID to continue, or omit for a new session. */
+  sessionId?: string;
+  /** Optional system prompt override. */
+  systemPrompt?: string;
 }
 
 /**

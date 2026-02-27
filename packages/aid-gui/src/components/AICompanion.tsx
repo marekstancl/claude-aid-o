@@ -1,320 +1,320 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Mic, Sparkles, X, Command, ArrowRight, History, Zap, MessageSquare, Gavel, AlertCircle } from 'lucide-react';
+import { X, Send, Plus, ChevronDown, MessageSquare, Bot, AlertCircle, Loader2 } from 'lucide-react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { cn } from '../lib/utils';
 import { useStore } from '../store';
+import { createApiClient } from '../api/client';
+import { VoiceButton } from './companion/VoiceButton';
+import { HintButtons } from './companion/HintButtons';
+import type { CompanionMessage } from '../types/api';
 
-interface AICompanionProps {
-  isOpen: boolean;
-  onClose: () => void;
-}
+interface AICompanionProps { isOpen: boolean; onClose: () => void; }
 
-interface RecentQuery {
-  query: string;
-  timestamp: number;
-}
+marked.setOptions({ breaks: true, gfm: true });
 
-const STORAGE_KEY = 'aid-companion-recent';
-const MAX_RECENT = 10;
-
-function loadRecentQueries(): RecentQuery[] {
+function md(text: string): string {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.slice(0, MAX_RECENT);
-  } catch {
-    return [];
+    const raw = marked.parse(text) as string;
+    return DOMPurify.sanitize(raw);
+  } catch { return DOMPurify.sanitize(text); }
+}
+
+/** SSE streaming POST — reads chunks and dispatches to store. */
+async function sendMessageSSE(text: string): Promise<void> {
+  const store = useStore.getState();
+  const projectId = store.activeProject?.id;
+  if (!projectId) { store.setCompanionError('No active project selected'); return; }
+
+  store.addCompanionMessage({
+    id: `msg-${Date.now()}-u`, role: 'user', content: text, timestamp: new Date().toISOString(),
+  });
+  store.setCompanionStreaming(true);
+  store.resetCompanionStream();
+  store.setCompanionError(null);
+
+  try {
+    const res = await fetch(`/api/p/${encodeURIComponent(projectId)}/companion/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, sessionId: store.companionCurrentSession?.id || undefined }),
+    });
+    if (!res.ok || !res.body) {
+      store.setCompanionError(`Server returned ${res.status}`);
+      store.setCompanionStreaming(false);
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const json = JSON.parse(line.slice(6));
+          const s = useStore.getState();
+          if (json.type === 'text') {
+            s.appendCompanionStreamText(json.text);
+          } else if (json.type === 'done') {
+            s.addCompanionMessage({
+              id: `msg-${Date.now()}-a`, role: 'assistant',
+              content: s.companionStreamingText, timestamp: new Date().toISOString(), model: json.model,
+            });
+            s.setCompanionStreaming(false);
+            if (json.sessionId) {
+              const client = createApiClient(projectId);
+              const sr = await client.getCompanionSession(json.sessionId);
+              if (sr.ok) useStore.getState().setCompanionCurrentSession(sr.data);
+              const lr = await client.getCompanionSessions();
+              if (lr.ok) useStore.getState().setCompanionSessions(lr.data);
+            }
+          } else if (json.type === 'error') {
+            s.setCompanionError(json.error || 'Stream error');
+            s.setCompanionStreaming(false);
+          }
+        } catch { /* malformed SSE line */ }
+      }
+    }
+    const fs = useStore.getState();
+    if (fs.companionStreaming) {
+      if (fs.companionStreamingText) {
+        fs.addCompanionMessage({
+          id: `msg-${Date.now()}-a`, role: 'assistant',
+          content: fs.companionStreamingText, timestamp: new Date().toISOString(),
+        });
+      }
+      fs.setCompanionStreaming(false);
+    }
+  } catch (err) {
+    const s = useStore.getState();
+    s.setCompanionError(err instanceof Error ? err.message : 'Network error');
+    s.setCompanionStreaming(false);
   }
 }
 
-function saveRecentQueries(queries: RecentQuery[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(queries.slice(0, MAX_RECENT)));
-  } catch {
-    // localStorage may be full or unavailable
-  }
-}
-
-function addRecentQuery(query: string): RecentQuery[] {
-  const trimmed = query.trim();
-  if (!trimmed) return loadRecentQueries();
-  const existing = loadRecentQueries().filter((q) => q.query !== trimmed);
-  const updated = [{ query: trimmed, timestamp: Date.now() }, ...existing].slice(0, MAX_RECENT);
-  saveRecentQueries(updated);
-  return updated;
-}
-
+// ---------------------------------------------------------------------------
 export const AICompanion: React.FC<AICompanionProps> = ({ isOpen, onClose }) => {
-  const [query, setQuery] = useState('');
-  const [isListening, setIsListening] = useState(false);
-  const [recentQueries, setRecentQueries] = useState<RecentQuery[]>([]);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const [input, setInput] = useState('');
+  const [showSessions, setShowSessions] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const taRef = useRef<HTMLTextAreaElement>(null);
 
-  // Store selectors for context-aware presets
-  const currentEpicId = useStore((s) => s.currentEpicId);
-  const currentState = useStore((s) => s.currentState);
   const activeProject = useStore((s) => s.activeProject);
-  const healthScore = useStore((s) => s.healthScore);
-  const pendingDecisions = useStore((s) => s.pendingDecisions);
-  const queueCount = useStore((s) => s.queueCount);
+  const sessions = useStore((s) => s.companionSessions);
+  const session = useStore((s) => s.companionCurrentSession);
+  const streaming = useStore((s) => s.companionStreaming);
+  const streamText = useStore((s) => s.companionStreamingText);
+  const status = useStore((s) => s.companionStatus);
+  const error = useStore((s) => s.companionError);
+  const messages = session?.messages ?? [];
+  const available = status?.available ?? false;
 
-  // Build context-aware presets based on current pipeline state
-  const presets = React.useMemo(() => {
-    const items: { icon: typeof Zap; label: string; query: string }[] = [];
-
-    if (currentEpicId && currentState !== 'IDLE') {
-      items.push({
-        icon: Zap,
-        label: `Status of ${currentEpicId}`,
-        query: `pipeline status ${currentEpicId}`,
-      });
-    } else {
-      items.push({
-        icon: Zap,
-        label: "What's the status of my pipeline?",
-        query: 'pipeline status',
-      });
-    }
-
-    if (pendingDecisions > 0) {
-      items.push({
-        icon: Gavel,
-        label: `Review ${pendingDecisions} pending decision${pendingDecisions > 1 ? 's' : ''}`,
-        query: 'pending decisions',
-      });
-    }
-
-    if (healthScore !== null && healthScore < 70) {
-      items.push({
-        icon: AlertCircle,
-        label: `Health score is ${healthScore} — investigate`,
-        query: 'health check findings',
-      });
-    }
-
-    items.push(
-      { icon: History, label: 'Show me lessons from recent runs', query: 'lessons learned' },
-      { icon: Sparkles, label: 'What should I work on next?', query: 'next tasks' },
-      { icon: MessageSquare, label: 'Summarize recent decisions', query: 'recent decisions' },
-    );
-
-    if (!items.find((i) => i.query.includes('health'))) {
-      items.push({ icon: Gavel, label: 'Run a health check', query: 'health check' });
-    }
-
-    if (queueCount > 0) {
-      items.push({
-        icon: Zap,
-        label: `${queueCount} EPIC${queueCount > 1 ? 's' : ''} in queue — review`,
-        query: 'queue status',
-      });
-    }
-
-    return items.slice(0, 6);
-  }, [currentEpicId, currentState, pendingDecisions, healthScore, queueCount]);
-
-  // Load recent queries from localStorage on open
   useEffect(() => {
-    if (isOpen) {
-      setRecentQueries(loadRecentQueries());
-      inputRef.current?.focus();
-    }
-  }, [isOpen]);
+    if (!isOpen || !activeProject) return;
+    const c = createApiClient(activeProject.id);
+    c.getCompanionStatus().then((r) => { if (r.ok) useStore.getState().setCompanionStatus(r.data); });
+    c.getCompanionSessions().then((r) => { if (r.ok) useStore.getState().setCompanionSessions(r.data); });
+  }, [isOpen, activeProject]);
 
-  // Speech recognition setup
-  useEffect(() => {
-    if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = true;
+  useEffect(() => { if (isOpen) setTimeout(() => taRef.current?.focus(), 100); }, [isOpen]);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages.length, streamText]);
 
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0])
-          .map((result: any) => result.transcript)
-          .join('');
-        setQuery(transcript);
-      };
+  const handleSend = useCallback(() => {
+    const t = input.trim();
+    if (!t || streaming) return;
+    setInput('');
+    sendMessageSSE(t);
+  }, [input, streaming]);
 
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
-      };
+  const onKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  }, [handleSend]);
 
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
-    }
+  const newSession = useCallback(() => {
+    const s = useStore.getState();
+    s.setCompanionCurrentSession(null); s.resetCompanionStream(); s.setCompanionError(null);
+    setShowSessions(false); setInput('');
   }, []);
 
-  const toggleListening = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      setQuery('');
-      recognitionRef.current?.start();
-      setIsListening(true);
-    }
-  };
+  const selectSession = useCallback(async (id: string) => {
+    if (!activeProject) return;
+    setShowSessions(false);
+    const r = await createApiClient(activeProject.id).getCompanionSession(id);
+    if (r.ok) { useStore.getState().setCompanionCurrentSession(r.data); useStore.getState().setCompanionError(null); }
+  }, [activeProject]);
 
-  const handleSubmit = useCallback(() => {
-    if (!query.trim()) return;
-    const updated = addRecentQuery(query);
-    setRecentQueries(updated);
-    // Search is coming soon — for now, just save the query
-    setQuery('');
-  }, [query]);
+  const onInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+  }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'Enter' && query.trim()) handleSubmit();
-    };
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }
-  }, [onClose, isOpen, query, handleSubmit]);
+  const handleTranscript = useCallback((text: string) => {
+    setInput((prev) => (prev ? `${prev} ${text}` : text));
+    taRef.current?.focus();
+  }, []);
 
-  // Format relative time for recent queries
-  const timeAgo = (ts: number): string => {
-    const diff = Date.now() - ts;
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  };
+  const handleHint = useCallback((prompt: string) => {
+    if (streaming) return;
+    setInput('');
+    sendMessageSSE(prompt);
+  }, [streaming]);
+
+  const handleFocusInput = useCallback(() => {
+    taRef.current?.focus();
+  }, []);
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-bg-base/80 backdrop-blur-xl z-[100]"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="fixed left-1/2 top-1/4 -translate-x-1/2 w-full max-w-2xl bg-surface-2 border border-white/10 rounded-[2rem] shadow-2xl z-[101] overflow-hidden"
-          >
-            <div className="p-6 border-b border-white/5 relative">
-              <div className="absolute left-8 top-1/2 -translate-y-1/2 text-state-executing">
-                <Sparkles size={20} />
-              </div>
-              <input
-                ref={inputRef}
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={
-                  activeProject
-                    ? `Ask about ${activeProject.name}...`
-                    : 'Ask anything about your orchestration...'
-                }
-                className="w-full bg-transparent pl-12 pr-12 py-2 text-lg focus:outline-none placeholder:text-white/20"
-              />
-              <div className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center gap-3">
-                <button
-                  onClick={toggleListening}
-                  className={cn(
-                    "p-2 rounded-xl transition-all relative",
-                    isListening ? "bg-state-error/20 text-state-error" : "hover:bg-white/5 text-white/40 hover:text-white"
-                  )}
-                >
-                  {isListening && (
-                    <span className="absolute inset-0 rounded-xl bg-state-error/20 animate-ping" />
-                  )}
-                  <Mic size={18} />
-                </button>
-                <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-xl text-white/40 hover:text-white transition-colors">
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar">
-              {!query ? (
-                <div className="space-y-6 p-2">
-                  <section>
-                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-3 px-2">Presets</h4>
-                    <div className="grid grid-cols-1 gap-1">
-                      {presets.map((preset) => (
-                        <button
-                          key={preset.label}
-                          onClick={() => setQuery(preset.query)}
-                          className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-white/5 text-left transition-all group"
-                        >
-                          <div className="p-2 rounded-lg bg-white/5 text-white/40 group-hover:text-state-executing transition-colors">
-                            <preset.icon size={16} />
-                          </div>
-                          <span className="text-sm font-medium text-white/60 group-hover:text-white">{preset.label}</span>
-                          <ArrowRight size={14} className="ml-auto opacity-0 group-hover:opacity-100 transition-all -translate-x-2 group-hover:translate-x-0" />
+        <motion.div
+          initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }}
+          exit={{ x: '100%', opacity: 0 }}
+          transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+          className={cn(
+            'fixed top-12 right-0 z-50 flex flex-col',
+            'bg-surface-2 border-l border-white/10 shadow-2xl',
+            'w-full md:w-[33vw] md:min-w-[360px] h-[calc(100vh-48px)]',
+          )}
+        >
+          {/* Header */}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/5 shrink-0">
+            <Bot size={18} className="text-state-executing" />
+            <span className="text-sm font-semibold flex-1">AI Companion</span>
+            <span
+              className={cn('w-2 h-2 rounded-full', available ? 'bg-emerald-400' : 'bg-red-400')}
+              title={status ? `${status.adapter} - ${available ? 'available' : 'unavailable'}` : 'Checking...'}
+            />
+            <div className="relative">
+              <button onClick={() => setShowSessions(!showSessions)}
+                className="flex items-center gap-1 text-xs text-white/50 hover:text-white/80 px-2 py-1 rounded-lg hover:bg-white/5 transition-colors">
+                <MessageSquare size={14} />
+                <span className="max-w-[100px] truncate">{session?.title ?? 'New chat'}</span>
+                <ChevronDown size={12} />
+              </button>
+              {showSessions && (
+                <div className="absolute right-0 top-full mt-1 w-64 bg-surface-2 border border-white/10 rounded-xl shadow-xl z-10 overflow-hidden">
+                  <button onClick={newSession}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-white/5 text-state-executing transition-colors">
+                    <Plus size={14} /> New conversation
+                  </button>
+                  {sessions.length > 0 && (
+                    <div className="border-t border-white/5 max-h-48 overflow-y-auto custom-scrollbar">
+                      {sessions.map((s) => (
+                        <button key={s.id} onClick={() => selectSession(s.id)}
+                          className={cn('w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-white/5 text-left transition-colors',
+                            session?.id === s.id && 'bg-white/5 text-white')}>
+                          <MessageSquare size={12} className="shrink-0 text-white/30" />
+                          <span className="flex-1 truncate">{s.title}</span>
+                          <span className="text-[10px] text-white/20 shrink-0">{s.messageCount}</span>
                         </button>
                       ))}
                     </div>
-                  </section>
-
-                  {recentQueries.length > 0 && (
-                    <section>
-                      <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-3 px-2">Recent Queries</h4>
-                      <div className="space-y-1">
-                        {recentQueries.slice(0, 5).map((recent) => (
-                          <button
-                            key={recent.timestamp}
-                            onClick={() => setQuery(recent.query)}
-                            className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 text-left text-xs text-white/40 hover:text-white/60 transition-all"
-                          >
-                            <History size={14} />
-                            <span className="flex-1 truncate">"{recent.query}"</span>
-                            <span className="text-[10px] text-white/20 shrink-0">{timeAgo(recent.timestamp)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </section>
                   )}
-                </div>
-              ) : (
-                <div className="p-4 text-center space-y-4">
-                  <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center mx-auto">
-                    <Search size={20} className="text-white/30" />
-                  </div>
-                  <p className="text-sm text-white/40">AI search coming soon — press Enter to save this query.</p>
-                  <p className="text-xs text-white/20">Your queries are stored locally for quick access.</p>
                 </div>
               )}
             </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-white/5 rounded-lg text-white/40 hover:text-white transition-colors" aria-label="Close companion">
+              <X size={16} />
+            </button>
+          </div>
 
-            <div className="p-4 bg-white/[0.02] border-t border-white/5 flex items-center justify-between px-6">
-              <div className="flex items-center gap-4 text-[10px] text-white/20 font-bold uppercase tracking-widest">
-                <div className="flex items-center gap-1.5">
-                  <span className="bg-white/10 px-1.5 py-0.5 rounded text-white/40">ENTER</span>
-                  <span>to search</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="bg-white/10 px-1.5 py-0.5 rounded text-white/40">ESC</span>
-                  <span>to close</span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-[10px] text-white/20 font-bold uppercase tracking-widest">
-                <Command size={12} />
-                <span>Powered by AID Intelligence</span>
-              </div>
+          {/* Error banner */}
+          {error && (
+            <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2 text-xs text-red-400 shrink-0">
+              <AlertCircle size={14} /><span className="flex-1">{error}</span>
+              <button onClick={() => useStore.getState().setCompanionError(null)} className="hover:text-red-300"><X size={12} /></button>
             </div>
-          </motion.div>
-        </>
+          )}
+
+          {/* Messages */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-4">
+            {messages.length === 0 && !streaming && (
+              <div className="flex flex-col items-center justify-center h-full text-center space-y-4">
+                <Bot size={32} className="text-white/20 opacity-50" />
+                <p className="text-sm text-white/30">Start a conversation with your AID project companion.</p>
+                <HintButtons onHint={handleHint} onFocus={handleFocusInput} variant="full" />
+                <p className="text-[11px] text-white/15">Or type a message below</p>
+              </div>
+            )}
+            {messages.map((m) => <MsgBubble key={m.id} msg={m} />)}
+            {streaming && streamText && (
+              <div className="flex gap-2 items-start">
+                <div className="w-6 h-6 rounded-full bg-state-executing/20 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot size={14} className="text-state-executing" />
+                </div>
+                <div className="prose prose-invert prose-sm max-w-none bg-white/5 rounded-2xl rounded-tl-sm px-3 py-2 text-sm text-white/80"
+                  dangerouslySetInnerHTML={{ __html: md(streamText) + '<span class="streaming-cursor">&#9610;</span>' }} />
+              </div>
+            )}
+            {streaming && !streamText && (
+              <div className="flex gap-2 items-center">
+                <div className="w-6 h-6 rounded-full bg-state-executing/20 flex items-center justify-center shrink-0">
+                  <Loader2 size={14} className="text-state-executing animate-spin" />
+                </div>
+                <span className="text-xs text-white/30">Thinking...</span>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Input */}
+          <div className="px-4 py-3 border-t border-white/5 shrink-0">
+            {messages.length > 0 && !streaming && (
+              <HintButtons onHint={handleHint} onFocus={handleFocusInput} variant="compact" />
+            )}
+            <div className="flex items-end gap-2 bg-white/5 rounded-2xl px-3 py-2">
+              <textarea ref={taRef} value={input} onChange={onInput} onKeyDown={onKeyDown}
+                placeholder={activeProject ? `Message about ${activeProject.name}...` : 'Select a project first...'}
+                disabled={!activeProject || !available} rows={1}
+                className="flex-1 bg-transparent text-sm resize-none focus:outline-none placeholder:text-white/20 max-h-[120px] py-1" />
+              <VoiceButton onTranscript={handleTranscript} disabled={!available || streaming} />
+              <button onClick={handleSend} disabled={!input.trim() || streaming || !activeProject || !available}
+                className={cn('p-2 rounded-xl transition-all shrink-0',
+                  input.trim() && !streaming ? 'bg-state-executing text-white hover:brightness-110' : 'text-white/20 cursor-not-allowed')}
+                aria-label="Send message">
+                <Send size={16} />
+              </button>
+            </div>
+            <div className="flex items-center justify-between mt-2 px-1">
+              <span className="text-[10px] text-white/15">{status?.adapter ? `Adapter: ${status.adapter}` : ''}</span>
+              <span className="text-[10px] text-white/15">Shift+Enter for new line</span>
+            </div>
+          </div>
+        </motion.div>
       )}
     </AnimatePresence>
   );
 };
+
+// ---------------------------------------------------------------------------
+const MsgBubble: React.FC<{ msg: CompanionMessage }> = React.memo(({ msg }) => {
+  if (msg.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] bg-state-executing/20 text-white/90 rounded-2xl rounded-br-sm px-3 py-2 text-sm whitespace-pre-wrap">
+          {msg.content}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex gap-2 items-start">
+      <div className="w-6 h-6 rounded-full bg-state-executing/20 flex items-center justify-center shrink-0 mt-0.5">
+        <Bot size={14} className="text-state-executing" />
+      </div>
+      <div className="max-w-[85%] space-y-1">
+        <div className="prose prose-invert prose-sm max-w-none bg-white/5 rounded-2xl rounded-tl-sm px-3 py-2 text-sm text-white/80"
+          dangerouslySetInnerHTML={{ __html: md(msg.content) }} />
+        {msg.model && <span className="text-[10px] text-white/15 pl-1">{msg.model}</span>}
+      </div>
+    </div>
+  );
+});
+MsgBubble.displayName = 'MsgBubble';

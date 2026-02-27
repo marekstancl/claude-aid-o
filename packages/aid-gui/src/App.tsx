@@ -25,9 +25,11 @@ const MOBILE_BREAKPOINT = 768;
 
 export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isCompanionOpen, setIsCompanionOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < MOBILE_BREAKPOINT);
   const { setProject, fsmState, currentProject } = useStore();
+  const isCompanionOpen = useStore((s) => s.companionOpen);
+  const toggleCompanion = useStore((s) => s.toggleCompanion);
+  const setCompanionOpen = useStore((s) => s.setCompanionOpen);
   const navigate = useNavigate();
 
   // Connect WebSocket — the hook manages connection lifecycle, reconnection,
@@ -38,7 +40,7 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setIsCompanionOpen(prev => !prev);
+        toggleCompanion();
       }
       
       if (!isCompanionOpen && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
@@ -64,7 +66,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isCompanionOpen, navigate]);
+  }, [isCompanionOpen, navigate, toggleCompanion]);
 
   // Detect mobile viewport and auto-collapse sidebar
   useEffect(() => {
@@ -130,7 +132,7 @@ export default function App() {
         />
 
         <div className={`flex-1 flex flex-col transition-all duration-300 ${isMobile ? 'ml-0' : isSidebarCollapsed ? 'ml-16' : 'ml-60'}`}>
-          <Topbar onSearchClick={() => setIsCompanionOpen(true)} />
+          <Topbar onSearchClick={() => setCompanionOpen(true)} />
 
           <main className="flex-1 mt-14 relative overflow-hidden">
             <AnimatePresence mode="wait">
@@ -149,7 +151,7 @@ export default function App() {
           </main>
         </div>
 
-        <AICompanion isOpen={isCompanionOpen} onClose={() => setIsCompanionOpen(false)} />
+        <AICompanion isOpen={isCompanionOpen} onClose={() => setCompanionOpen(false)} />
       </div>
     </ToastProvider>
   );

@@ -36,6 +36,10 @@ import type {
   Project,
   BacklogEntry,
   LessonEntry,
+  CompanionMessage,
+  CompanionSessionSummary,
+  CompanionSession,
+  CompanionStatus,
 } from './api';
 import type { WsConnectionStatus, EventTopic } from './ws';
 
@@ -694,6 +698,71 @@ export interface InsightsSlice {
 }
 
 // ---------------------------------------------------------------------------
+// CompanionSlice — AI Companion chat state
+// ---------------------------------------------------------------------------
+
+/**
+ * Manages the AI Companion chat panel state: sessions, messages, streaming,
+ * and adapter status.
+ */
+export interface CompanionSlice {
+  // --- State ---
+
+  /** Whether the companion panel is open. */
+  companionOpen: boolean;
+
+  /** List of session summaries for the session selector. */
+  companionSessions: CompanionSessionSummary[];
+
+  /** The currently active session with full message history, or null. */
+  companionCurrentSession: CompanionSession | null;
+
+  /** Whether an SSE stream is currently in progress. */
+  companionStreaming: boolean;
+
+  /** Accumulated text from the current SSE stream (displayed as typing). */
+  companionStreamingText: string;
+
+  /** Adapter availability status, or null if not yet fetched. */
+  companionStatus: CompanionStatus | null;
+
+  /** Current error message, or null. */
+  companionError: string | null;
+
+  // --- Actions ---
+
+  /** Set whether the companion panel is open. */
+  setCompanionOpen: (open: boolean) => void;
+
+  /** Toggle the companion panel open/closed. */
+  toggleCompanion: () => void;
+
+  /** Replace the session summaries list. */
+  setCompanionSessions: (sessions: CompanionSessionSummary[]) => void;
+
+  /** Set the current session (with messages). */
+  setCompanionCurrentSession: (session: CompanionSession | null) => void;
+
+  /** Set the streaming flag. */
+  setCompanionStreaming: (streaming: boolean) => void;
+
+  /** Append text to the streaming buffer. */
+  appendCompanionStreamText: (text: string) => void;
+
+  /** Reset the streaming buffer to empty. */
+  resetCompanionStream: () => void;
+
+  /** Add a message to the current session's message list. */
+  addCompanionMessage: (message: CompanionMessage) => void;
+
+  /** Set the adapter status. */
+  setCompanionStatus: (status: CompanionStatus | null) => void;
+
+  /** Set or clear the error message. */
+  setCompanionError: (error: string | null) => void;
+}
+
+// ---------------------------------------------------------------------------
 // DashboardStore — combined store type
 // ---------------------------------------------------------------------------
 
@@ -726,4 +795,5 @@ export type DashboardStore =
   & KnowledgeSlice
   & InsightsSlice
   & ProjectsSlice
-  & ReplaySlice;
+  & ReplaySlice
+  & CompanionSlice;

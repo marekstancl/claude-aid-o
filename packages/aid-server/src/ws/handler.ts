@@ -11,7 +11,8 @@ import { FsReader } from '../services/fs-reader.js';
 
 const EVENT_TOPICS = [
   'pipeline', 'pipeline.stage_log', 'evidence', 'decisions',
-  'config', 'queue', 'audit', 'usage', 'queue.schedule', 'system', 'ideas',
+  'config', 'queue', 'audit', 'usage', 'queue.schedule', 'system', 'ideas', 'epics',
+  'companion.stream', 'companion.session',
 ] as const;
 
 type EventTopic = (typeof EVENT_TOPICS)[number] | '*';
@@ -188,6 +189,8 @@ export class WsHandler {
   }
 
   private classifyFileChange(relPath: string): string {
+    if (relPath.includes('04-engine/companion-sessions/')) return 'companion.session';
+    if (relPath.includes('02-epics/') || relPath.startsWith('02-epics')) return 'epics';
     if (relPath.includes('ideas.json')) return 'ideas';
     if (relPath.includes('epic-queue')) return 'queue';
     if (relPath.includes('schedule')) return 'queue.schedule';

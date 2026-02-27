@@ -41,6 +41,9 @@ export type EventTopic =
   | 'usage'
   | 'queue.schedule'
   | 'ideas'
+  | 'epics'
+  | 'companion.stream'
+  | 'companion.session'
   | 'system';
 
 /**
@@ -59,6 +62,9 @@ export const ALL_EVENT_TOPICS: readonly EventTopic[] = [
   'usage',
   'queue.schedule',
   'ideas',
+  'epics',
+  'companion.stream',
+  'companion.session',
   'system',
 ] as const;
 

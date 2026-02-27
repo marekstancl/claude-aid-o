@@ -16,6 +16,9 @@ import { usageRoutes } from './routes/usage.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { backlogRoutes } from './routes/backlog.js';
 import { lessonsRoutes } from './routes/lessons.js';
+import { epicRoutes } from './routes/epics.js';
+import { companionRoutes } from './routes/companion.js';
+import { voiceRoutes } from './routes/voice.js';
 import { importFromIdeasMd, exportToIdeasMd } from './services/ideas-migration.js';
 
 const config = loadConfig();
@@ -48,6 +51,9 @@ app.use('/api/p/:projectId/usage', usageRoutes(registry));
 app.use('/api/p/:projectId/knowledge', knowledgeRoutes(registry));
 app.use('/api/p/:projectId/backlog', backlogRoutes(registry));
 app.use('/api/p/:projectId/lessons', lessonsRoutes(registry));
+app.use('/api/p/:projectId/epics', epicRoutes(registry));
+app.use('/api/p/:projectId/companion', voiceRoutes(registry));
+app.use('/api/p/:projectId/companion', companionRoutes(registry));
 
 // --- API catch-all 404 (must come before static fallback) ---
 app.all('/api/*', (_req, res) => {

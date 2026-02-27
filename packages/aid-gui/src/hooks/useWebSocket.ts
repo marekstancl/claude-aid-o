@@ -63,6 +63,7 @@ const DEFAULT_TOPICS: EventTopic[] = [
   'usage',
   'audit',
   'ideas',
+  'epics',
 ];
 
 // ---------------------------------------------------------------------------
@@ -149,6 +150,18 @@ function dispatchEvent(msg: WsEventMessage): void {
               activeStep: (parsed.currentStepId ?? parsed.currentStep) as string | null,
             });
           }
+
+          // Pipeline state changes affect idea autoStatus (running/done).
+          // Re-fetch ideas so cards auto-transition in the kanban board.
+          const projectId = store.activeProject?.id ?? store.currentProject?.id ?? 'default';
+          const client = createApiClient(projectId);
+          client.getIdeas().then((result) => {
+            if (result.ok) {
+              useStore.getState().setIdeas(result.data);
+            }
+          }).catch(() => {
+            // Non-fatal
+          });
         }
 
         // Check if this looks like plan progress data (has `steps` map)
@@ -235,6 +248,23 @@ function dispatchEvent(msg: WsEventMessage): void {
         if (Array.isArray(parsed)) {
           store.setIdeas(parsed as StoredIdea[]);
         }
+      }
+      break;
+    }
+
+    case 'epics': {
+      // EPIC file changed — re-fetch ideas to reflect autoStatus changes
+      // (autoStatus is server-computed from linked plan/epic lifecycle)
+      if (data.type === 'file_change') {
+        const projectId = store.activeProject?.id ?? store.currentProject?.id ?? 'default';
+        const client = createApiClient(projectId);
+        client.getIdeas().then((result) => {
+          if (result.ok) {
+            useStore.getState().setIdeas(result.data);
+          }
+        }).catch(() => {
+          // Non-fatal — ideas will refresh on next poll or navigation
+        });
       }
       break;
     }

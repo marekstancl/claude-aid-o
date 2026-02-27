@@ -55,3 +55,15 @@
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
+
+/* AI Companion streaming cursor blink */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.streaming-cursor {
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--color-state-executing);
+  margin-left: 1px;
+}

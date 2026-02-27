@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
@@ -100,9 +100,11 @@ interface SortableCardProps {
   isSelected?: boolean;
   /** Toggle selection for this card. */
   onToggleSelect?: (id: string) => void;
+  /** When true, the card shows a building animation (EPIC column drop). */
+  isBuilding?: boolean;
 }
 
-const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic, showCheckbox, isSelected, onToggleSelect }) => {
+const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic, showCheckbox, isSelected, onToggleSelect, isBuilding }) => {
   const {
     attributes,
     listeners,
@@ -127,6 +129,7 @@ const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic,
       className={cn(
         "glass p-4 rounded-xl border cursor-grab active:cursor-grabbing group hover:bg-white/[0.05] transition-colors",
         isSelected ? "border-state-executing/40 bg-state-executing/5" : "border-white/5",
+        isBuilding && "animate-pulse border-state-executing/50 bg-state-executing/10 shadow-[0_0_20px_rgba(0,180,216,0.15)]",
       )}
     >
       <div className="flex items-start justify-between mb-3">
@@ -146,7 +149,14 @@ const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic,
           )}
           <h4 className="text-sm font-medium leading-tight group-hover:text-state-executing transition-colors">{idea.title}</h4>
         </div>
-        {idea.priority === 'high' && <div className="w-1.5 h-1.5 rounded-full bg-state-error shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
+        <div className="flex items-center gap-1.5">
+          {isBuilding && (
+            <span className="text-[9px] font-bold uppercase tracking-widest text-state-executing bg-state-executing/20 px-1.5 py-0.5 rounded">
+              Building
+            </span>
+          )}
+          {idea.priority === 'high' && <div className="w-1.5 h-1.5 rounded-full bg-state-error shadow-[0_0_8px_rgba(239,68,68,0.5)]" />}
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-4">
@@ -325,6 +335,8 @@ export const IdeasToExecution: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
+  const [buildingIds, setBuildingIds] = useState<Set<string>>(new Set());
+  const buildingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const ideas = useStore((s) => s.ideas);
   const ideasLoading = useStore((s) => s.ideasLoading);
@@ -356,6 +368,34 @@ export const IdeasToExecution: React.FC = () => {
     fetchIdeas();
     return () => { cancelled = true; };
   }, [setIdeas, setIdeasLoading]);
+
+  // Cleanup building animation timers on unmount
+  useEffect(() => {
+    return () => {
+      buildingTimersRef.current.forEach((timer) => clearTimeout(timer));
+      buildingTimersRef.current.clear();
+    };
+  }, []);
+
+  // Trigger building animation on a card for 2 seconds
+  const triggerBuildingAnimation = useCallback((ideaId: string) => {
+    // Clear existing timer for this ID if any
+    const existing = buildingTimersRef.current.get(ideaId);
+    if (existing) clearTimeout(existing);
+
+    setBuildingIds((prev) => new Set(prev).add(ideaId));
+
+    const timer = setTimeout(() => {
+      setBuildingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(ideaId);
+        return next;
+      });
+      buildingTimersRef.current.delete(ideaId);
+    }, 2000);
+
+    buildingTimersRef.current.set(ideaId, timer);
+  }, []);
 
   // Toggle selection of an idea (Ideas column only)
   const handleToggleSelect = useCallback((ideaId: string) => {
@@ -494,6 +534,11 @@ export const IdeasToExecution: React.FC = () => {
     const targetApiStatus = columnToApiStatus(targetColumn);
     const currentApiStatus = currentColumn ? columnToApiStatus(currentColumn) : null;
 
+    // Trigger building animation when dropping into the EPIC column
+    if (targetColumn === 'epic') {
+      triggerBuildingAnimation(ideaId);
+    }
+
     // Optimistic update
     updateIdeaInStore(ideaId, { status: targetApiStatus });
 
@@ -504,7 +549,7 @@ export const IdeasToExecution: React.FC = () => {
       if (currentApiStatus) updateIdeaInStore(ideaId, { status: currentApiStatus });
       setError((result as ApiError).error.message);
     }
-  }, [findColumnOfIdea, updateIdeaInStore, addIdea]);
+  }, [findColumnOfIdea, updateIdeaInStore, addIdea, triggerBuildingAnimation]);
 
   // ----- Quick Capture -----
 
@@ -681,6 +726,7 @@ export const IdeasToExecution: React.FC = () => {
                           showCheckbox={isIdeasColumn}
                           isSelected={selectedIdeaIds.has(idea.id)}
                           onToggleSelect={handleToggleSelect}
+                          isBuilding={buildingIds.has(idea.id)}
                         />
                       ))}
                       {columnIdeas.length === 0 && (

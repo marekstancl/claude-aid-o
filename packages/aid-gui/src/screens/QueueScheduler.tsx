@@ -77,9 +77,13 @@ interface SortableQueueItemProps {
   entry: QueueScheduleEntry;
   index: number;
   isFirst: boolean;
+  onRunNow: (epicId: string) => void;
+  onSchedule: (epicId: string) => void;
+  /** Set of EPIC IDs currently processing a run/schedule action. */
+  loadingActions: Set<string>;
 }
 
-const SortableQueueItem: React.FC<SortableQueueItemProps> = ({ entry, index, isFirst }) => {
+const SortableQueueItem: React.FC<SortableQueueItemProps> = ({ entry, index, isFirst, onRunNow, onSchedule, loadingActions }) => {
   const {
     attributes,
     listeners,
@@ -159,6 +163,46 @@ const SortableQueueItem: React.FC<SortableQueueItemProps> = ({ entry, index, isF
           )}>
             {statusLabel(entry.status)}
           </div>
+          {entry.status === 'queued' && (
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => { e.stopPropagation(); onRunNow(entry.epicId); }}
+                disabled={loadingActions.has(entry.epicId)}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all border",
+                  loadingActions.has(entry.epicId)
+                    ? "bg-white/5 border-white/5 text-white/20 cursor-wait"
+                    : "bg-state-error/10 border-state-error/20 text-state-error hover:bg-state-error/20"
+                )}
+                title="Run immediately with critical priority"
+              >
+                {loadingActions.has(entry.epicId) ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Zap size={12} />
+                )}
+                Run Now
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); onSchedule(entry.epicId); }}
+                disabled={loadingActions.has(entry.epicId)}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all border",
+                  loadingActions.has(entry.epicId)
+                    ? "bg-white/5 border-white/5 text-white/20 cursor-wait"
+                    : "bg-state-plan-review/10 border-state-plan-review/20 text-state-plan-review hover:bg-state-plan-review/20"
+                )}
+                title="Schedule with medium priority"
+              >
+                {loadingActions.has(entry.epicId) ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Clock size={12} />
+                )}
+                Schedule
+              </button>
+            </div>
+          )}
           <button className="opacity-0 group-hover:opacity-100 p-2 hover:bg-white/10 rounded-lg transition-all text-white/40 hover:text-white">
             Edit
           </button>
@@ -327,6 +371,13 @@ export const QueueScheduler: React.FC = () => {
     message: string;
   } | null>(null);
 
+  // Run Now / Schedule action state
+  const [runActionLoading, setRunActionLoading] = useState<Set<string>>(new Set());
+  const [runActionFeedback, setRunActionFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
   const isQueueEmpty = queueEntries.filter((e) => e.status === 'queued').length === 0;
   const hasRunningEntry = queueEntries.some((e) => e.status === 'running');
   const isLaunchDisabled = isQueueEmpty || hasRunningEntry || launchLoading;
@@ -375,6 +426,51 @@ export const QueueScheduler: React.FC = () => {
   const handleLaunchCancel = useCallback(() => {
     setShowLaunchConfirm(false);
   }, []);
+
+  // ----- Run Now / Schedule handlers -----
+
+  const handleRunEpic = useCallback(async (epicId: string, mode: 'now' | 'schedule') => {
+    setRunActionLoading((prev) => new Set(prev).add(epicId));
+    setRunActionFeedback(null);
+
+    const result = await client.runEpic(epicId, mode);
+
+    setRunActionLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(epicId);
+      return next;
+    });
+
+    if (result.ok) {
+      const modeLabel = mode === 'now' ? 'Run Now (critical)' : 'Scheduled (medium)';
+      setRunActionFeedback({
+        type: 'success',
+        message: `${epicId} queued: ${modeLabel}`,
+      });
+
+      // Refresh queue data after action
+      const refreshResult = await client.getQueue();
+      if (refreshResult.ok) {
+        setQueueEntries(refreshResult.data.queue);
+      }
+
+      // Auto-dismiss feedback after 4 seconds
+      setTimeout(() => setRunActionFeedback(null), 4000);
+    } else {
+      setRunActionFeedback({
+        type: 'error',
+        message: (result as ApiError).error.message ?? `Failed to ${mode === 'now' ? 'run' : 'schedule'} ${epicId}`,
+      });
+    }
+  }, [setQueueEntries]);
+
+  const handleRunNow = useCallback((epicId: string) => {
+    handleRunEpic(epicId, 'now');
+  }, [handleRunEpic]);
+
+  const handleSchedule = useCallback((epicId: string) => {
+    handleRunEpic(epicId, 'schedule');
+  }, [handleRunEpic]);
 
   // ---------------------------------------------------------------------------
   // Computed values
@@ -629,6 +725,9 @@ export const QueueScheduler: React.FC = () => {
                       entry={entry}
                       index={index}
                       isFirst={index === 0}
+                      onRunNow={handleRunNow}
+                      onSchedule={handleSchedule}
+                      loadingActions={runActionLoading}
                     />
                   ))}
                 </div>
@@ -736,6 +835,35 @@ export const QueueScheduler: React.FC = () => {
                       {launchFeedback.message}
                       <button
                         onClick={() => setLaunchFeedback(null)}
+                        className="ml-auto p-0.5 hover:bg-white/10 rounded transition-colors"
+                      >
+                        <X size={12} />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Run Now / Schedule feedback toast */}
+                <AnimatePresence>
+                  {runActionFeedback && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className={cn(
+                        "mt-3 px-4 py-2.5 rounded-xl text-xs font-medium flex items-center gap-2 border",
+                        runActionFeedback.type === 'success'
+                          ? "bg-state-done/10 border-state-done/20 text-state-done"
+                          : "bg-state-error/10 border-state-error/20 text-state-error"
+                      )}
+                    >
+                      {runActionFeedback.type === 'success'
+                        ? <CheckCircle size={14} />
+                        : <AlertCircle size={14} />
+                      }
+                      {runActionFeedback.message}
+                      <button
+                        onClick={() => setRunActionFeedback(null)}
                         className="ml-auto p-0.5 hover:bg-white/10 rounded transition-colors"
                       >
                         <X size={12} />

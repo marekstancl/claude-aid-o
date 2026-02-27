@@ -10,16 +10,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "ai": "^6.0.103",
+    "ai-sdk-provider-claude-code": "^3.4.2",
     "chokidar": "^4.0.3",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "js-yaml": "^4.1.0",
+    "multer": "^2.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/js-yaml": "^4.0.9",
+    "@types/multer": "^2.0.0",
     "@types/node": "^22.13.4",
     "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
