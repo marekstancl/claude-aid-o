@@ -259,10 +259,37 @@ Try these matching strategies in order (first match wins):
      `## Step 2`, `### 2.`, `**2.`, `## Task 2`, `## Phase 2`
    - Also try: `## High-Level Steps` → find numbered item `2.` within that section
 
-3. **Keyword matching (fallback):**
-   - Extract key terms from step objective (role name, action verbs, domain terms)
-   - Scan plan section headers for best keyword overlap
-   - Require at least 2 keyword matches to accept
+3. **Keyword matching (fallback for legacy plans without `### Step {N}` headers):**
+
+   1. EXTRACT keywords from the current step's objective:
+      - Split objective into words
+      - Remove stop words (the, a, an, is, are, to, for, with, from, in, on, at, by)
+      - Remove common verbs (create, add, update, implement, fix, modify, change)
+      - Remaining words are the keyword set
+
+   2. SCORE each plan section:
+      For each section in the plan (identified by `##` or `###` headers), in document order:
+        a. Combine section header text + first paragraph (first 3 sentences) into search text
+        b. Count how many keywords from step 1 appear in the search text (case-insensitive)
+        c. Record: `{section_index, section_header, match_count}`
+
+   3. STOPPING RULE — select the best section:
+      a. IF exactly 1 section has the highest `match_count` → select that section
+      b. IF multiple sections tie for highest `match_count`:
+         → Select the section with the lowest `section_index` (earliest in document order)
+         → Rationale: primary/canonical sections tend to appear before secondary references
+      c. IF all sections have `match_count == 0` → fall through to Strategy 4 (no match)
+
+   4. CONFIDENCE CHECK:
+      - IF selected section's `match_count < 2`:
+        → Include warning in dispatch log: `"Low-confidence plan_ref match
+          (only {match_count} keyword). Injecting section '{section_header}'
+          but agent should verify against full plan context."`
+      - IF `match_count >= 2` → proceed without warning (sufficient confidence)
+
+   NOTE: Strategy 3 is a last-resort for legacy plans. Plans written with the
+   plan-writing skill use `### Step {N}: {Name}` headers that enable Strategy 2
+   (step number mapping) directly — Strategy 3 should rarely be needed.
 
 4. **No match found:**
    - If no section matches after all strategies: skip injection for this step
