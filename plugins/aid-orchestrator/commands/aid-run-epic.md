@@ -870,3 +870,5 @@ If Slack is not configured or send fails → silently skip (status updates are n
 - If resuming an interrupted run: read `plan_progress.json` to find where to continue
   - If `plan_progress.json` is corrupted or unreadable: rebuild from `stage_log.jsonl` entries (scan for completed steps), or ask PM to confirm which steps are done
 - If `$ARGUMENTS` is empty and multiple EPICs exist → list them and ask which to run
+
+**Last Updated:** 2026-02-27
