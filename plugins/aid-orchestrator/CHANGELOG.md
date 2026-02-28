@@ -10,6 +10,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Shared Script Library** — `scripts/lib/common.sh` with 7 portable bash functions (YAML parsing, section extraction, slugify, prerequisites check, error formatting, timestamps)
 - **Script Documentation** — `scripts/README.md` with full interface contracts, argument tables, exit codes, data flow diagram, and JSON manifest schema for all 5 pipeline scripts
 - **EPIC Template Dependencies Section** — structured Dependencies section with Internal/External/Queue subsections replacing flat placeholder
+- **Deterministic Work Detection Audit** — new audit category I) scanning commands, skills, and agents for LLM-performed template filling, structured parsing, and file manipulation that could be replaced by scripts, with false positive filters and -10 cap scoring
+
+### Changed
+- **aid-plan-epic Command** — rewritten from 544-line LLM-driven flow to 235-line script-orchestrated 6-step flow delegating deterministic work to `aid-auto-pipeline.sh`
+- **aid-run-epic Command** — inline plan generation removed; `plan.json` must pre-exist (created via `/aid-plan-epic`) with clear error message and actionable suggestion when missing
 
 ## [1.5.0] — 2026-02-28
 
