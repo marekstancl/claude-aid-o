@@ -4,9 +4,9 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 
 ## How It Works
 
-1. **Brainstorm** — `/aid-brainstorm` runs a 9-step dialog: context, questions, approaches, trade-offs, architecture, plan
+1. **Brainstorm** — `/aid-brainstorm` runs an 8-step dialog: context, questions, approaches, trade-offs, architecture, plan
 2. **EPIC** — structured task specification (scope, constraints, acceptance criteria, steps)
-3. **Plan** — `/aid-plan-epic` generates execution plan with dependency graph and parallel groups
+3. **Plan** — `/aid-plan-epic` generates EPICs, plan.json, run files, and queue entries using bash/jq pipeline scripts (`scripts/aid-auto-pipeline.sh`) — deterministic transformations without LLM variance
 4. **Dispatch** — Controller sends work to role-based agents on separate git worktrees
 5. **Gates** — tests, lint, security scan — with auto-fix retry (gate-fixer agent, max 3 attempts)
 6. **Curator** — post-EPIC improvement proposals, auto-evaluated and applied
@@ -35,8 +35,8 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 |---------|-------------|
 | `/aid-init` | Initialize `.aid-o/` workspace |
 | `/aid-setup` | Interactive project onboarding — detect tech stack, configure AID |
-| `/aid-brainstorm [topic]` | 9-step interactive brainstorming → plan + optional EPIC |
-| `/aid-plan-epic <path>` | Parse EPIC or Plan → Plan JSON + run file |
+| `/aid-brainstorm [topic]` | 8-step interactive brainstorming → plan + optional EPIC |
+| `/aid-plan-epic <path>` | Parse Plan → EPICs, Plan JSON, run files, queue entries (via pipeline scripts) |
 | `/aid-run-epic [id]` | Run Controller state machine for full EPIC orchestration |
 | `/aid-first-aid` | Start FIRST AID autonomous mode (EPIC queue with guardrails) |
 | `/aid-stop` | Emergency stop — restore permissions, save progress |
@@ -87,7 +87,7 @@ A Claude Code plugin implementing **Controller + Workers** architecture for mult
 | Skill | Purpose |
 |-------|---------|
 | `epic-orchestration` | 12-state Controller FSM (includes FIRST AID auto-mode conditionals) |
-| `brainstorming` | 9-step brainstorming process |
+| `brainstorming` | 8-step brainstorming process |
 | `workflow-intelligence` | Workflow/agent project detection, domain questioning (WF1-WF7), platform recommendations, UI derivation |
 | `agent-core` | Core agent behavior, roles, workflow routing |
 | `planner` | Plan generation — dependency graph, parallel groups, analysis groups |

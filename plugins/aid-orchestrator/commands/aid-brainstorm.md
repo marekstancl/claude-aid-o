@@ -313,7 +313,7 @@ Write the validated design to an exhaustive plan file by delegating to the plan-
 
 **Important:** The plan-writing skill writes detailed per-step sections (not the old high-level steps table). Each step includes file paths, implementation detail, error handling, edge cases, dependencies, and acceptance criteria. This ensures agents receive full implementation context during dispatch.
 
-**Step 8 is the FINAL step of brainstorming.** After plan-writing completes, it presents next steps (EPIC creation, review, re-open). Brainstorming does NOT create EPICs — that is `/aid-plan-epic`'s job.
+**Step 8 is the FINAL step of brainstorming.** After plan-writing completes, it presents next steps (EPIC creation, review, re-open). Brainstorming does NOT create EPICs — that is `/aid-plan-epic`'s job. `/aid-plan-epic` delegates all deterministic operations (EPIC generation, plan.json construction, run file creation, queue entry) to bash/jq pipeline scripts, ensuring reproducible output without LLM variance.
 
 ## Reference Files
 
@@ -336,3 +336,5 @@ Write the validated design to an exhaustive plan file by delegating to the plan-
 - **YAGNI** — do not propose over-engineered solutions. Start simple, PM can ask for complexity.
 - If PM aborts at any step (says "stop", "cancel", "abort"), end gracefully without writing files.
 - If `.aid-o/` does not exist, the command still works but writes plan to current directory with a warning.
+
+**Last Updated:** 2026-02-28

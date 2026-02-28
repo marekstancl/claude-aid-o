@@ -136,6 +136,8 @@ Run all quality gates from `skills/plan-writing.md` before writing:
 
 The plan-writing skill handles the post-write handoff (see `skills/plan-writing.md` → Post-Write Handoff). It presents PM with options: create EPIC, review plan, brainstorm, or stop.
 
+If PM chooses to create EPICs, the handoff runs `/aid-plan-epic`, which uses bash/jq pipeline scripts to deterministically generate EPIC files, plan.json, run files, and queue entries from the plan. The LLM handles only validation and reporting — all file transformations are script-based.
+
 ## Reference Files
 
 - `skills/plan-writing.md` — process rules, quality gates, detailed step format, anti-circumvention rules
@@ -152,3 +154,5 @@ The plan-writing skill handles the post-write handoff (see `skills/plan-writing.
 - **Language split** — conversation follows PM's language; plan document follows `language.yaml` configuration.
 - **Quality gates are mandatory** — the plan is not written until Forbidden Phrase Detection and Completeness Gate both pass.
 - If PM aborts at any step (says "stop", "cancel", "abort"), end gracefully without writing files.
+
+**Last Updated:** 2026-02-28
