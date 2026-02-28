@@ -105,6 +105,91 @@ The plan MUST contain these sections in this order:
 
 ---
 
+## Phase Markers
+
+When a plan spans multiple EPICs (phases), each phase must be delimited by a phase marker so the pipeline scripts can slice steps correctly. The marker format is:
+
+```
+**EPIC N: Steps M-P — Title**
+```
+
+Where:
+- `N` is the phase number (1, 2, 3, ...)
+- `M` is the first step number in this phase
+- `P` is the last step number in this phase
+- `Title` is a short human-readable label (optional but recommended)
+
+**Extended form (with step range — preferred for multi-phase plans):**
+
+```markdown
+**EPIC 1: Steps 1-4 — Foundation**
+
+### Step 1: ...
+### Step 2: ...
+### Step 3: ...
+### Step 4: ...
+
+**EPIC 2: Steps 5-8 — Feature Build**
+
+### Step 5: ...
+...
+```
+
+**Short form (without step range — for sequential simple plans):**
+
+```markdown
+**EPIC 1**
+
+### Step 1: ...
+### Step 2: ...
+
+**EPIC 2**
+
+### Step 3: ...
+```
+
+When the short form is used, the script assigns steps to phases by document order: every `### Step N:` header encountered after a `**EPIC N**` marker belongs to that phase, until the next marker.
+
+**Rules:**
+
+| Scenario | Rule |
+|----------|------|
+| Multi-phase plan (total phases > 1) | MUST include phase markers |
+| Single-phase plan (total phases = 1) | Phase markers are NOT required — all steps belong to the single phase automatically |
+| Marker placement | Place each marker on its own line, immediately before the first step of that phase |
+| Step numbering | Step numbers in the marker range MUST match actual `### Step N:` headers; ranges with gaps are invalid |
+
+**Do NOT use these formats — they will not be parsed:**
+
+```markdown
+# WRONG — uses heading syntax instead of bold text
+## Phase 1: Foundation
+### Phase 2: Build
+
+# WRONG — uses dash list and wrong keyword
+- Phase 1: Steps 1-4
+
+# WRONG — missing asterisks, not bold
+EPIC 1: Steps 1-4
+*EPIC 1: Steps 1-4*
+
+# WRONG — uses "Phase" keyword instead of "EPIC"
+**Phase 1: Steps 1-4 — Foundation**
+
+# WRONG — missing colon between EPIC N and Steps
+**EPIC 1 Steps 1-4**
+```
+
+**Why format matters:** The `aid-plan-to-epic.sh` script uses a bash regex to identify phase boundaries:
+
+```
+^\*\*EPIC[[:space:]]+([0-9]+)(:[[:space:]]+Steps[[:space:]]+([0-9]+)-([0-9]+))?
+```
+
+Only lines that match this regex are recognised as phase markers. Any other format is silently ignored, causing the script to fall back to even step distribution across phases — which produces incorrect EPIC splits when steps are not evenly distributed.
+
+---
+
 ## Detailed Step Format
 
 The `## Implementation Steps` section replaces the old `## High-Level Steps` table. Each step gets its own subsection with mandatory fields.

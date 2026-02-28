@@ -48,6 +48,7 @@ This is the **top-level autonomous command** — it wraps the entire lifecycle: 
 1. `skills/auto-escalation.md` — 16 escalation triggers, pause/resume, PM notification
 2. `skills/epic-orchestration.md` — state machine (used by `/aid-run-epic` under the hood)
 3. `skills/epic-queue.md` — queue operations, auto-pickup, safety guards
+4. `skills/first-aid-controller.md` — auto-mode behavior at each state, QUEUE_PROCESSING parallel dispatch
 
 **Read `skills/slack-mcp.md` for PM communication.** Escalation notifications and the
 final summary report use the Slack MCP protocol with chat fallback.
@@ -474,6 +475,16 @@ DETECT_INDEPENDENT_EPICS(selected_epic, queue):
             → Log: "Skipping {epic_id}: scope overlap with {member.epic_id}
                      (overlap: {overlap}, forbidden cross: {cross_a}, {cross_b})"
             → Continue to next candidate
+
+        NOTE — Scope granularity matters for parallel detection accuracy:
+          File-level paths (e.g. `src/api/auth.ts`) produce far fewer false
+          overlaps than broad directory paths (e.g. `src/api/`). Two EPICs that
+          each touch different files under the same directory will be incorrectly
+          flagged as conflicting if both declare the directory as their scope.
+          When authoring or generating EPICs, prefer per-file allowed_paths and
+          narrow forbidden_zones. The EPIC template and aid-plan-to-epic.sh
+          pipeline emit file-level paths by default when source plan steps
+          include **Files:** sections with Create:/Modify: entries.
 
      e. IF all checks pass:
         → Add candidate_epic to candidates list
@@ -1456,4 +1467,4 @@ Per-EPIC execution also logs to the EPIC-specific stage log at
 - If `$ARGUMENTS` is empty: start fresh auto-mode with current queue (equivalent to
   no flags).
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

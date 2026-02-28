@@ -3,6 +3,41 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Master Test Runner** — `run-all-tests.sh` discovers and executes all test suites with unified pass/fail reporting (88 tests across 6 suites)
+- **Curator Dispatch Regression Tests** — Suite F (5 tests) verifying unconditional Curator dispatch and state-entry logging in gate-evaluation.md and first-aid-controller.md
+- **Phase Marker Documentation** — `plan-writing.md` Phase Markers subsection with exact format, rules, regex, and "do NOT use" examples for LLM-generated plans
+- **PARALLEL_EXECUTING Sub-State** — `epic-state-machine.md` documents the FIRST AID parallel execution sub-state with activation criteria and safety limits
+- **AI Companion Project Context** — system prompt auto-built from CLAUDE.md, package.json, pipeline state, EPIC queue, plans, decisions, ideas backlog, and project structure on every message
+- **AI Companion Tool Use** — 7 tools (readFile, listDirectory, searchContent, readYaml, readEpic, readPlan, getPipelineState) giving the companion full codebase access with sandboxed paths and 8-step tool call limit
+- **Voice Dictation Recording Bar** — waveform visualization via AudioContext AnalyserNode, elapsed timer, live interim text display (Web Speech API), and one-click stop-and-send flow
+- **Whisper Auto-Detection** — background probe on mount detects Whisper availability; uses Web Speech API as primary (Czech `cs-CZ` support) with Whisper upgrade when OPENAI_API_KEY is set
+- **FIRST AID Wrapper State Mapping** — FIRST_AID_INIT, QUEUE_PROCESSING, QUEUE_ADVANCE, FIRST_AID_COMPLETE mapped to medical labels (Triage, Operating, Next Patient, All Clear) with FSM colors and active state detection
+- **Satellite Card Alternation** — Ward, Lab, Escalations, Vitals cards alternate between current and total values every 4 seconds with AnimatePresence transitions
+
+### Changed
+- **EPIC ID Regex Hardened** — `aid-auto-pipeline.sh` now accepts alphanumeric plan IDs with internal hyphens (e.g., `E-TEST-001-1_2`)
+- **Dependency Parser Enhanced** — `aid-plan-to-epic.sh` supports range expansion (`Steps 3-7`), trailing text stripping, cross-phase dependency filtering, and deduplication
+- **Scope Generation Granularity** — `aid-plan-to-epic.sh` generates file-level paths in EPIC scope when plan steps have `**Files:**` sections, improving FIRST AID parallel detection accuracy
+- **EPIC Template Scope Guidance** — template includes guidance comments encouraging file-level path declarations over broad directories
+- **Curator Dispatch Made Unconditional** — `gate-evaluation.md` and `first-aid-controller.md` now mandate Curator dispatch at CURATOR_RESOLVE regardless of discovered_issues
+- **QUEUE_PROCESSING Auto-Mode** — `first-aid-controller.md` includes parallel dispatch checklist cross-referencing `aid-first-aid.md` sections 3.1-3.5
+- **Command Center State Labels** — all FSM states renamed to medical/hospital theme (On Call, Diagnosis, Prescription, Infusing, Vital Signs, Second Opinion, Lab Results, Doctor's Orders, Recovery, Discharged, Code Red)
+- **Satellite Cards Data Sources** — Ward shows queue running+waiting / completed+failed; Lab shows gate runs+retries / audit score; Escalations shows budget usage / total escalations; Vitals shows steps executed / total events
+- **EPIC Runs Display** — shows last 5 completed (most recent first) instead of first 5
+- **Voice Flow Simplified** — removed confirm step; recording stops and sends directly (one action instead of three)
+- **CommandPalette Voice** — transcript sends as message directly instead of inserting into filter input
+- **Companion Open Speed** — status and sessions pre-fetched on project select; palette/panel opens instantly without network delay
+- **Pipeline API Extended** — `/pipeline` endpoint returns full autoModeSession with escalation budget/count and aggregate counters (epicsCompleted, epicsFailed, totalStepsExecuted, totalGateRuns, totalGateRetries, totalEscalations)
+
+### Fixed
+- **Curator Input File References** — corrected from `step_output.json` to `output.md` + `diff.patch` matching actual agent output format
+- **Queue Field Name** — `scripts/README.md` corrected `queued_at` to `added_at` matching actual queue schema
+- **Queue Field Name Mismatch** — server returned `data.entries` but GUI expected `data.queue`, causing queue entries, elapsed time, and EPIC runs to never display
+- **Topbar Voice Integration** — replaced inline mic recording logic (~90 lines) with shared VoiceButton component using `compact` prop
+
 ## [1.6.0] — 2026-02-28
 
 ### Added

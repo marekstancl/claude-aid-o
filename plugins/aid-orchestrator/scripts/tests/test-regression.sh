@@ -761,6 +761,123 @@ else
   fail "E4: run_id directory check" "manifest is not parseable JSON"
 fi
 
+# ===========================================================================
+# STRUCTURAL SUITE F: CURATOR_RESOLVE dispatch integrity
+#
+# Verify that the skill files contain correct CURATOR_RESOLVE dispatch
+# instructions — unconditional dispatch, state entry log, and no conditionals
+# that skip Curator based on discovered_issues.
+#
+# These tests guard against regression of the Curator activation bug
+# (FA-20260228T080115Z: Curator produced 0 proposals because dispatch
+# was ambiguous and lacked observability).
+# ===========================================================================
+
+echo ""
+echo "--- Suite F: CURATOR_RESOLVE dispatch integrity ---"
+
+GATE_EVAL_MD="$PLUGIN_DIR/skills/gate-evaluation.md"
+FIRST_AID_MD="$PLUGIN_DIR/skills/first-aid-controller.md"
+
+# ===========================================================================
+# TEST F1: gate-evaluation.md contains CURATOR_RESOLVE state entry log
+# ===========================================================================
+run_test "F1: gate-evaluation.md has CURATOR_RESOLVE state_entered log instruction"
+
+if [[ -f "$GATE_EVAL_MD" ]]; then
+  if grep -q '"action": "state_entered"' "$GATE_EVAL_MD" 2>/dev/null &&
+     grep -q 'CURATOR_RESOLVE entered' "$GATE_EVAL_MD" 2>/dev/null; then
+    pass "F1: gate-evaluation.md contains CURATOR_RESOLVE state_entered log"
+  else
+    fail "F1: CURATOR_RESOLVE state_entered log" \
+      "gate-evaluation.md missing state_entered action or entry message"
+  fi
+else
+  fail "F1: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+fi
+
+# ===========================================================================
+# TEST F2: gate-evaluation.md does NOT contain a conditional that skips
+#          Curator dispatch when discovered_issues is empty
+# ===========================================================================
+run_test "F2: gate-evaluation.md has no conditional skipping Curator on empty discovered_issues"
+
+if [[ -f "$GATE_EVAL_MD" ]]; then
+  # Look for problematic patterns: "if no discovered_issues", "skip curator",
+  # "if discovered_issues is empty", etc. within the CURATOR_RESOLVE section.
+  # Extract the CURATOR_RESOLVE section (from ## CURATOR_RESOLVE to the next ##)
+  curator_section="$(awk '
+    /^## CURATOR_RESOLVE/{found=1; next}
+    /^## [A-Z]/{if(found) exit}
+    found{print}
+  ' "$GATE_EVAL_MD" 2>/dev/null)"
+
+  skip_patterns="$(echo "$curator_section" \
+    | grep -iE '(if.*no.*(discovered_issues|issues).*skip|skip.*curator.*no.*issues|discovered_issues.*empty.*skip)' \
+    || true)"
+
+  if [[ -z "$skip_patterns" ]]; then
+    pass "F2: no conditional skipping Curator dispatch on empty discovered_issues"
+  else
+    fail "F2: Curator skip conditional found" \
+      "problematic lines: $skip_patterns"
+  fi
+else
+  fail "F2: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+fi
+
+# ===========================================================================
+# TEST F3: gate-evaluation.md contains "Unconditional Dispatch" instruction
+# ===========================================================================
+run_test "F3: gate-evaluation.md CURATOR_RESOLVE contains unconditional dispatch instruction"
+
+if [[ -f "$GATE_EVAL_MD" ]]; then
+  if grep -q 'Unconditional Dispatch' "$GATE_EVAL_MD" 2>/dev/null &&
+     grep -q 'MUST ALWAYS be dispatched' "$GATE_EVAL_MD" 2>/dev/null; then
+    pass "F3: gate-evaluation.md has unconditional dispatch instruction"
+  else
+    fail "F3: unconditional dispatch instruction" \
+      "gate-evaluation.md missing 'Unconditional Dispatch' or 'MUST ALWAYS be dispatched'"
+  fi
+else
+  fail "F3: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+fi
+
+# ===========================================================================
+# TEST F4: first-aid-controller.md contains CURATOR_RESOLVE state entry log
+#          for auto-mode
+# ===========================================================================
+run_test "F4: first-aid-controller.md has CURATOR_RESOLVE state_entered log for auto-mode"
+
+if [[ -f "$FIRST_AID_MD" ]]; then
+  if grep -q '"action": "state_entered"' "$FIRST_AID_MD" 2>/dev/null &&
+     grep -q 'CURATOR_RESOLVE entered (auto-mode)' "$FIRST_AID_MD" 2>/dev/null; then
+    pass "F4: first-aid-controller.md contains auto-mode CURATOR_RESOLVE state_entered log"
+  else
+    fail "F4: auto-mode CURATOR_RESOLVE state_entered log" \
+      "first-aid-controller.md missing state_entered action for auto-mode"
+  fi
+else
+  fail "F4: first-aid-controller.md exists" "not found: $FIRST_AID_MD"
+fi
+
+# ===========================================================================
+# TEST F5: first-aid-controller.md contains unconditional dispatch instruction
+# ===========================================================================
+run_test "F5: first-aid-controller.md CURATOR_RESOLVE contains unconditional dispatch instruction"
+
+if [[ -f "$FIRST_AID_MD" ]]; then
+  if grep -q 'Unconditional Dispatch' "$FIRST_AID_MD" 2>/dev/null &&
+     grep -q 'MUST ALWAYS' "$FIRST_AID_MD" 2>/dev/null; then
+    pass "F5: first-aid-controller.md has unconditional dispatch instruction"
+  else
+    fail "F5: unconditional dispatch instruction" \
+      "first-aid-controller.md missing 'Unconditional Dispatch' or 'MUST ALWAYS'"
+  fi
+else
+  fail "F5: first-aid-controller.md exists" "not found: $FIRST_AID_MD"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

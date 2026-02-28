@@ -146,6 +146,31 @@ phase defined in the plan.
   --counter-yaml .aid-o/04-engine/epic-counter.yaml
 ```
 
+#### Phase Marker Format
+
+`aid-plan-to-epic.sh` uses a bash regex to identify phase boundaries in the plan file:
+
+```
+^\*\*EPIC[[:space:]]+([0-9]+)(:[[:space:]]+Steps[[:space:]]+([0-9]+)-([0-9]+))?
+```
+
+This matches two forms:
+
+| Form | Example | Behaviour |
+|------|---------|-----------|
+| With step range | `**EPIC 1: Steps 1-6 — Title**` | Phase gets steps M through P explicitly |
+| Without step range | `**EPIC 1**` | Steps are assigned by document order (everything after the marker until the next marker) |
+
+If **no markers are present at all**, the script divides steps evenly across the total number of phases (remainder steps are distributed to earlier phases).
+
+Only lines that match the regex are treated as markers. Common mistakes that cause silent parse failure:
+
+- Using `## Phase N` (heading syntax) instead of `**EPIC N**`
+- Using `**Phase 1: Steps 1-4**` (keyword `Phase` instead of `EPIC`)
+- Omitting the colon: `**EPIC 1 Steps 1-4**` instead of `**EPIC 1: Steps 1-4**`
+
+The authoritative format reference is `skills/plan-writing.md` → **Phase Markers** section.
+
 #### Portability Notes
 
 - Uses `sed` for text replacement — avoids GNU-only flags (`-i` differs between

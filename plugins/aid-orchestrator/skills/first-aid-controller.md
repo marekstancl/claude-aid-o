@@ -168,9 +168,18 @@ ELSE (mode == manual):
 
 ## CURATOR_RESOLVE — Auto-Mode Behavior
 
+**IMPORTANT — Unconditional Dispatch:** In auto-mode, the Curator agent MUST ALWAYS
+be dispatched when CURATOR_RESOLVE is entered. The Curator performs its own independent
+code review — it does NOT depend on pre-existing `discovered_issues`. Never skip
+Curator dispatch based on the absence of discovered issues or improvement notes.
+
 ```
 IF mode == auto:
-  1. Dispatch Curator + LE in parallel (same as manual — see skills/gate-evaluation.md sub-steps 1-2)
+  0. State entry log (MANDATORY — before any dispatch):
+     {"state": "CURATOR_RESOLVE", "action": "state_entered", "mode": "auto",
+      "timestamp": "{ISO 8601}", "epic_id": "{epic_id}", "run_id": "{run_id}",
+      "details": "CURATOR_RESOLVE entered (auto-mode) — dispatching Curator + LE unconditionally"}
+  1. Dispatch Curator + LE in parallel (same as manual — see skills/gate-evaluation.md sub-steps 0-1)
   2. Auto-evaluate proposals via 3-tier algorithm (same as manual — see skills/gate-evaluation.md sub-step 3)
   3. For each APPROVED proposal:
      - IF effort == S: dispatch fix agent inline (same as manual — see skills/gate-evaluation.md sub-step 5)
@@ -356,9 +365,8 @@ ELSE (mode == manual):
 
       If no run branch (git not available): skip this step.
 
-   d. Update EPIC file status to "Completed"
-   e. Archive run file to `.aid-o/04-engine/runs/archive/`
-   f. Update `.aid-o/04-engine/memory/active-work.md`
+   d. Archive EPIC, run file, and update memory — see step 6 (Archive Logic) below
+   e. Update `.aid-o/04-engine/memory/active-work.md`
 2. Generate final report
 3. **POST-PROCESSING (Auditor):**
 
@@ -429,11 +437,19 @@ ELSE (mode == manual):
    2. **Update EPIC counter:**
       - Increment `runs_completed += 1` in EPIC frontmatter
 
-   3. **Archive EPIC (conditional):**
+   3. **Archive EPIC (conditional — update-then-move):**
       - IF `runs_completed == runs_total`:
-        - Set `status: completed`, `completed: {timestamp}`
-        - Move to `.aid-o/02-epics/archive/{filename}`
+        - FIRST: Update frontmatter IN PLACE (before move):
+          - Set `status: completed`
+          - Set `completed: {timestamp}`
+          - Verify: re-read file, confirm `status` == `completed`
+        - THEN: `mkdir -p .aid-o/02-epics/archive/` and move file
+        - VERIFY: confirm file exists at archive path
       - ELSE: EPIC stays active
+
+      IMPORTANT: Always update-then-move, never move-then-update.
+      If move happens first and context is lost (compaction, crash),
+      the file ends up in archive with stale frontmatter.
 
       NOTE: Evidence directory is NOT moved.
 
@@ -579,6 +595,85 @@ ELSE (mode == manual):
   {existing behavior: completion summary presented interactively, queue check proceeds,
    PM chooses next action from the "What's next?" options}
 ```
+
+---
+
+## QUEUE_PROCESSING — Auto-Mode Behavior
+
+The QUEUE_PROCESSING state is part of the FIRST AID outer state machine (not the per-EPIC 11-state FSM). It selects the next EPIC from the queue and decides whether to execute it sequentially or in parallel with other independent EPICs. The Controller MUST evaluate parallelism BEFORE falling through to sequential execution.
+
+For the full protocol, **see:** `commands/aid-first-aid.md` Sections 3.1-3.5.
+
+### Independence Detection Checklist
+
+Before executing the next EPIC, the Controller runs independence detection against the remaining queue. An EPIC is eligible for parallel execution only if ALL of the following checks pass against every other candidate:
+
+```
+INDEPENDENCE CHECKLIST (condensed from aid-first-aid.md Section 3.1):
+
+  1. EPIC file exists and is readable at its queue entry path
+  2. EPIC has a non-empty "### Allowed files/paths" section
+     (missing or empty scope = uncertain = exclude from parallel)
+  3. No declared dependency on any other candidate EPIC
+     (check both directions: A depends on B, or B depends on A)
+  4. No file scope overlap with any other candidate:
+     a. allowed_paths sets do not intersect
+     b. candidate's allowed_paths does not intersect any member's forbidden_zones
+     c. member's allowed_paths does not intersect candidate's forbidden_zones
+  5. Scope is not exclusively broad wildcards without directory prefix
+     (e.g., "**/*.md" alone is too broad to prove independence)
+```
+
+**Path intersection rules:** Paths are compared as directory prefixes. A specific file path overlaps with a directory path if the file is under that directory. When in doubt, treat as overlapping (conservative — prefer sequential over incorrect parallel).
+
+### Parallel Dispatch Protocol (Condensed)
+
+```
+IF DETECT_INDEPENDENT_EPICS returns >= 2 candidates:
+  1. Cap at MAX_PARALLEL_AGENTS (3) — process excess in next iteration
+  2. Verify disk space for N worktrees (each is a full working copy)
+  3. Mark all candidates as "running" in epic-queue.yaml
+  4. Set session.progress.current_state = "PARALLEL_EXECUTING"
+  5. Spawn isolated Task agents — each gets its own git worktree,
+     runs the full 11-state /aid-run-epic loop independently
+  6. Controller waits for ALL agents to complete
+  7. SEQUENTIAL MERGE — merge completed agents to main one at a time
+     (merge conflicts mark the EPIC as "failed", others continue)
+  8. Collect results, update aggregate metrics
+  9. WORKTREE_CLEANUP — remove all worktrees and branches (mandatory)
+  10. Transition to QUEUE_ADVANCE
+
+IF DETECT_INDEPENDENT_EPICS returns 1 candidate:
+  → No parallelism — continue sequential execution (step 4 onward)
+```
+
+**Escalation during parallel execution:** If any agent triggers an escalation, ALL agents pause via the shared `session.mode` flag. The escalation budget is shared across parallel agents. See `commands/aid-first-aid.md` Section 3.3 (PARALLEL_ESCALATION) for the full coordination protocol.
+
+**Failure handling:** A failed agent does not block other agents. Only the failed EPIC is excluded from merge. After all agents complete, if any failed, the queue auto-pauses and PM is notified. See `commands/aid-first-aid.md` Section 3.3 (PARALLEL_FAILURE).
+
+### Evaluation Order
+
+The Controller MUST follow this order in QUEUE_PROCESSING:
+
+1. Read mode flag (verify still `auto`)
+2. Select next EPIC from queue
+3. **Evaluate parallelism** — call `DETECT_INDEPENDENT_EPICS` (Section 3.1)
+4. IF parallel candidates >= 2: dispatch parallel (Section 3.2), coordinate (Section 3.3), clean up (Section 3.4)
+5. IF no parallelism: check escalation budget guardrail, then execute EPIC sequentially
+
+The parallelism check (step 3) MUST happen before the escalation budget check (step 4/5) and before sequential execution. This ensures the Controller does not miss opportunities to process independent EPICs concurrently.
+
+### Cross-References
+
+| Topic | Location |
+|-------|----------|
+| Full independence detection algorithm | `commands/aid-first-aid.md` Section 3.1 |
+| Full parallel dispatch protocol | `commands/aid-first-aid.md` Section 3.2 |
+| Coordination and merge protocol | `commands/aid-first-aid.md` Section 3.3 |
+| Safety guards and limits | `commands/aid-first-aid.md` Section 3.4 |
+| Integration with QUEUE_PROCESSING flow | `commands/aid-first-aid.md` Section 3.5 |
+| PARALLEL_EXECUTING sub-state | `skills/epic-state-machine.md` (QUEUE_PROCESSING sub-states) |
+| Escalation triggers during parallel | `skills/auto-escalation.md` (all 16 triggers apply) |
 
 ---
 

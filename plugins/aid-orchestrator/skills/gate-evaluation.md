@@ -311,14 +311,31 @@ For ESCALATION auto-mode behavior, **see:** `skills/first-aid-controller.md` Sec
 
 **Purpose:** Dispatch Curator + Lessons-Extractor in parallel, auto-evaluate proposals, implement approved fixes, process lessons, and prepare a summary for PM_APPROVAL.
 
+**IMPORTANT — Unconditional Dispatch:** The Curator agent MUST ALWAYS be dispatched
+when CURATOR_RESOLVE is entered. The Curator performs its own code review and analysis
+to generate proposals -- it does NOT depend on pre-existing `discovered_issues` from
+earlier steps. Even if no issues were discovered during PHASE_CHECK, the Curator will
+independently analyze code quality, patterns, and improvement opportunities. Never skip
+Curator dispatch based on the absence of discovered issues or improvement notes.
+
 **Sub-Steps:**
 
-1. **Parallel Dispatch:**
+0. **State Entry (observability — MANDATORY):**
+
+   Log the following entry to `stage_log.jsonl` immediately upon entering CURATOR_RESOLVE:
+   ```json
+   {"state": "CURATOR_RESOLVE", "action": "state_entered", "timestamp": "{ISO 8601}", "epic_id": "{epic_id}", "run_id": "{run_id}", "details": "CURATOR_RESOLVE entered — dispatching Curator + LE unconditionally"}
+   ```
+   This entry MUST appear before any agent dispatch. It confirms the state was reached
+   and is the primary observability signal for diagnosing Curator activation issues.
+
+1. **Parallel Dispatch (unconditional — no preconditions):**
 
    a. Dispatch **Curator agent** (`agents/curator.md`, model: sonnet) with:
-      - All step outputs: `evidence/{epic_id}/{run_id}/steps/*/step_output.json`
+      - All step outputs: `evidence/{epic_id}/{run_id}/steps/*/output.md`
+      - All step diffs: `evidence/{epic_id}/{run_id}/steps/*/diff.patch`
       - Gate results: `evidence/{epic_id}/{run_id}/gates_report.json`
-      - Final report: `evidence/{epic_id}/{run_id}/final_report.md`
+      - Discovered issues (if any): `evidence/{epic_id}/{run_id}/steps/*/discovered_issues.md`
    b. Dispatch **Lessons-Extractor agent** (`agents/lessons-extractor.md`, model: haiku) with:
       - Active run file
       - Git log and diff
@@ -532,4 +549,4 @@ For PM_APPROVAL auto-mode behavior, **see:** `skills/first-aid-controller.md` Se
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

@@ -123,6 +123,29 @@ validate against the regex. If validation fails, reject with error:
 | **PM_APPROVAL** | Send final results to PM via Slack (or chat fallback) | PM approves merge | `pm_decision.json` |
 | **DONE** | Merge branch, archive evidence, run Auditor, extract example pattern (if eligible), send summaries via Slack, check Epic Queue for auto-pickup | — | `final_report.md`, `audit-report.md`, `slack_log.jsonl` |
 
+### PARALLEL_EXECUTING Sub-State (FIRST AID Only)
+
+`PARALLEL_EXECUTING` is a sub-state of the FIRST AID outer state machine's `QUEUE_PROCESSING` state. It is NOT part of the per-EPIC 11-state FSM above. It activates when the Controller detects two or more independent EPICs in the queue that can execute concurrently in isolated git worktrees.
+
+```
+QUEUE_PROCESSING
+  ├── (sequential) → execute single EPIC via 11-state FSM → QUEUE_ADVANCE
+  └── (parallel)   → PARALLEL_EXECUTING
+                        ├── Agent 1: EPIC A (own worktree, full 11-state FSM)
+                        ├── Agent 2: EPIC B (own worktree, full 11-state FSM)
+                        └── Agent 3: EPIC C (own worktree, full 11-state FSM)
+                      → sequential merge to main
+                      → QUEUE_ADVANCE
+```
+
+**When active:** `auto-mode-state.yaml` shows `session.progress.current_state = "PARALLEL_EXECUTING"` and `session.parallel_execution.active = true`.
+
+**Independence requirement:** EPICs must have non-overlapping file scopes and no declared dependencies. The full independence detection algorithm is defined in `commands/aid-first-aid.md` Section 3.1. The condensed checklist is in `skills/first-aid-controller.md` Section "QUEUE_PROCESSING -- Auto-Mode Behavior".
+
+**Safety limits:** Maximum 3 parallel agents (`MAX_PARALLEL_AGENTS`). Disk space is verified before spawning. Worktrees are cleaned up after completion (mandatory). See `commands/aid-first-aid.md` Section 3.4 for all safety guards.
+
+**Escalation:** Shared escalation budget across all parallel agents. Any escalation pauses ALL agents. See `commands/aid-first-aid.md` Section 3.3.
+
 ---
 
 ## Detailed Flow
@@ -662,4 +685,4 @@ Old IDs (format: `X-YYYYMMDD-XXXX`) will be mapped to new IDs during step 8 of t
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

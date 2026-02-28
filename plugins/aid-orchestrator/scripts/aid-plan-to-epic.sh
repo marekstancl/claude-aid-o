@@ -566,14 +566,47 @@ Phase ${phase}/${total} deliverables:
 ${step_objectives}"
 fi
 
-# Scope Allowed — aggregate from phase steps' files, deduplicate directories
+# Scope Allowed — aggregate from phase steps' files.
+# Prefer per-file paths over directory paths for better FIRST AID parallel
+# detection: file-level granularity avoids false scope overlaps between EPICs.
+# When plan steps have **Files:** sections with Create:/Modify: entries, each
+# file is listed individually. Directory paths are only emitted as a fallback
+# when no specific file paths are available for a given directory.
 scope_allowed=""
 if [[ -n "$all_allowed_paths" ]]; then
-  # Extract unique directory paths and file paths
+  # Separate file paths (have extension or no trailing slash) from directory
+  # paths (end with /). List file paths individually; only include a directory
+  # path if no file-level paths already cover that directory.
   scope_allowed="$(echo "$all_allowed_paths" | sort -u | awk '
     {
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-      if ($0 != "") printf "- `%s`\n", $0
+      if ($0 == "") next
+      # Classify: directory path ends with / or has no extension in basename
+      n = split($0, parts, "/")
+      basename = parts[n]
+      if ($0 ~ /\/$/ || basename !~ /\./) {
+        dirs[++nd] = $0
+      } else {
+        files[++nf] = $0
+      }
+    }
+    END {
+      # Emit per-file paths first (preferred for parallel detection)
+      for (i = 1; i <= nf; i++) {
+        printf "- `%s`\n", files[i]
+      }
+      # Emit directory paths only if no file within that directory is listed
+      for (i = 1; i <= nd; i++) {
+        dir = dirs[i]
+        # Normalize: ensure trailing slash for prefix matching
+        dslash = dir
+        if (dslash !~ /\/$/) dslash = dslash "/"
+        covered = 0
+        for (j = 1; j <= nf; j++) {
+          if (index(files[j], dslash) == 1) { covered = 1; break }
+        }
+        if (!covered) printf "- `%s`\n", dir
+      }
     }
   ')"
 fi

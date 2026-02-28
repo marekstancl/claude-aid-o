@@ -29,15 +29,36 @@ runs_completed: 0      # incremented at each run DONE
 ## Scope
 
 ### Allowed files/paths
-- <!-- Directories: backend/app/tasks/ -->
-- <!-- Specific files (helps planner scope agents): -->
+<!-- SCOPE GRANULARITY GUIDANCE:
+     Prefer file-level paths (e.g. `src/api/auth.ts`) over broad directory paths
+     (e.g. `src/api/`). FIRST AID parallel detection checks scope overlap between
+     EPICs to determine if they can run concurrently. Broad directory paths cause
+     false overlaps — two EPICs touching different files under `src/api/` will be
+     treated as conflicting if both declare the directory. File-level paths enable
+     accurate independence detection and better cross-EPIC parallelism.
+
+     Good:  `backend/app/tasks/models.py`, `backend/app/tasks/routes.py`
+     Avoid: `backend/app/tasks/` (unless the EPIC truly owns the entire directory)
+-->
+- <!-- Specific files (preferred for parallel detection): -->
   - <!-- backend/app/tasks/models.py -->
   - <!-- backend/app/tasks/routes.py -->
   - <!-- backend/app/tasks/schemas.py -->
+- <!-- Directories (only when the EPIC owns the entire directory): -->
+  - <!-- backend/app/tasks/ -->
 
 ### Forbidden zones
-- <!-- e.g. backend/app/core/ (shared infrastructure) -->
-- <!-- e.g. other module directories -->
+<!-- SPECIFICITY GUIDANCE:
+     Be specific with forbidden zones too. Declaring a broad directory as forbidden
+     (e.g. `src/`) blocks any EPIC whose allowed paths fall within it from running
+     in parallel, even if the actual conflict is limited to a single file.
+     Narrow forbidden zones reduce false positives in parallel detection.
+
+     Good:  `backend/app/core/auth.py`, `backend/app/core/config.py`
+     Avoid: `backend/app/core/` (unless the entire directory is truly off-limits)
+-->
+- <!-- e.g. backend/app/core/auth.py (specific shared file) -->
+- <!-- e.g. backend/app/core/ (entire shared directory — use only when needed) -->
 
 ## Artifacts
 
