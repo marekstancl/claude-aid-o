@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.6.0] — 2026-02-28
 
 ### Added
 - **Pipeline Scripts** — 5 bash scripts (`aid-plan-to-epic.sh`, `aid-epic-to-json.sh`, `aid-json-to-run.sh`, `aid-queue-add.sh`, `aid-auto-pipeline.sh`) for deterministic Plan→EPIC→json→run→queue conversion replacing LLM-driven operations
@@ -11,10 +11,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Script Documentation** — `scripts/README.md` with full interface contracts, argument tables, exit codes, data flow diagram, and JSON manifest schema for all 5 pipeline scripts
 - **EPIC Template Dependencies Section** — structured Dependencies section with Internal/External/Queue subsections replacing flat placeholder
 - **Deterministic Work Detection Audit** — new audit category I) scanning commands, skills, and agents for LLM-performed template filling, structured parsing, and file manipulation that could be replaced by scripts, with false positive filters and -10 cap scoring
+- **Pipeline Test Suite** — 76 tests across 6 test scripts (40 unit, 16 integration, 20 regression) with 3 fixture plan files covering single-phase, multi-phase, and cross-plan dependency scenarios
 
 ### Changed
 - **aid-plan-epic Command** — rewritten from 544-line LLM-driven flow to 235-line script-orchestrated 6-step flow delegating deterministic work to `aid-auto-pipeline.sh`
 - **aid-run-epic Command** — inline plan generation removed; `plan.json` must pre-exist (created via `/aid-plan-epic`) with clear error message and actionable suggestion when missing
+- **Documentation Consistency Pass** — 10+ skill/command files updated to reference script-based pipeline, removing references to inline plan generation
 
 ## [1.5.0] — 2026-02-28
 
