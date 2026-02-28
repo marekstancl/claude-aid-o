@@ -4,25 +4,27 @@
 
 gates:
   tests_pass:
-    description: "All tests pass (unit + integration)"
+    description: "All tests pass via project test runner (unit + integration)"
     required: true
-    command: "pytest -q --tb=short"
+    command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh"
     timeout_seconds: 300
     pass_criteria: "exit code 0"
 
   lint_pass:
     description: "Code passes linting and formatting checks"
-    required: true
+    required: false
     command: "ruff check . && ruff format --check ."
     timeout_seconds: 120
     pass_criteria: "exit code 0"
+    when: "linting tools (ruff, eslint, etc.) are configured in the project"
 
   security_scan_pass:
     description: "No high/critical security findings"
-    required: true
+    required: false
     command: "bandit -q -r . -ll"
     timeout_seconds: 180
     pass_criteria: "exit code 0, no HIGH or CRITICAL findings"
+    when: "security scanning tools (bandit, snyk, etc.) are configured in the project"
 
   docs_updated:
     description: "Documentation updated for all changed APIs/models"

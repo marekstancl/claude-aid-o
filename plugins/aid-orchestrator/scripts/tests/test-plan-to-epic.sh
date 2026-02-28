@@ -363,6 +363,251 @@ else
   fail "error output is JSON with 'error' and 'code' keys" "got: $stderr_output"
 fi
 
+# ===========================================================================
+# TEST 11: Trailing text after step reference is stripped
+# ===========================================================================
+run_test "Dependency parser strips trailing text: 'Step 1 — provides the base configuration' -> '1'"
+
+env_dir="$(make_test_env "t11")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+
+actual_exit=0
+epic_path_t11="$("$SCRIPT_UNDER_TEST" \
+  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --phase 1 \
+  --total 3 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "complex-deps plan phase 1 exits with code 0" "got exit code $actual_exit"
+else
+  # Step 2 has "Depends on: Step 1 — provides the base configuration"
+  # The table row for step 2 should show "1" in the Depends On column
+  step2_row="$(grep "^| 2 |" "$epic_path_t11" 2>/dev/null || true)"
+  if echo "$step2_row" | grep -qE '\| 1 \|'; then
+    pass "trailing text stripped: Step 2 depends on '1'"
+  else
+    fail "trailing text stripped: Step 2 depends on '1'" "row: $step2_row"
+  fi
+fi
+
+# ===========================================================================
+# TEST 12: Multiple deps with trailing text: "Step 1, Step 2 — both needed"
+# ===========================================================================
+run_test "Dependency parser: 'Step 1, Step 2 — both needed' -> '1, 2'"
+
+# Reuse EPIC from TEST 11 (phase 1)
+if [[ -n "${epic_path_t11:-}" && -f "${epic_path_t11:-}" ]]; then
+  # Step 3 has "Depends on: Step 1, Step 2 — both needed for integration"
+  step3_row="$(grep "^| 3 |" "$epic_path_t11" 2>/dev/null || true)"
+  if echo "$step3_row" | grep -qE '\| 1, 2 \|'; then
+    pass "multiple deps with trailing text: Step 3 depends on '1, 2'"
+  else
+    fail "multiple deps with trailing text: Step 3 depends on '1, 2'" "row: $step3_row"
+  fi
+else
+  fail "multiple deps with trailing text" "skipped — EPIC file not available from TEST 11"
+fi
+
+# ===========================================================================
+# TEST 13: Range expansion: "Steps 1-3" -> "1, 2, 3"
+# ===========================================================================
+run_test "Dependency parser: range 'Steps 1-3' expands to individual step numbers"
+
+env_dir="$(make_test_env "t13")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+
+actual_exit=0
+epic_path_t13="$("$SCRIPT_UNDER_TEST" \
+  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --phase 2 \
+  --total 3 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "complex-deps plan phase 2 exits with code 0" "got exit code $actual_exit"
+else
+  # Step 4 has "Depends on: Steps 1-3" but only steps 4-6 are in this phase.
+  # After cross-phase stripping, steps 1, 2, 3 are removed (they're in phase 1).
+  # So Step 4's depends_on should be "---" in the EPIC.
+  # We verify range expansion worked by checking step 5 which has "Step 1, Steps 3-5"
+  # After cross-phase stripping (valid: 4,5,6): 1 removed, 3 removed, 4 kept, 5 kept
+  step2_row="$(grep "^| 2 |" "$epic_path_t13" 2>/dev/null || true)"
+  if echo "$step2_row" | grep -qE '\| 4, 5 \|'; then
+    pass "range expansion + cross-phase strip: Step 5 depends on '4, 5'"
+  else
+    fail "range expansion + cross-phase strip: Step 5 depends on '4, 5'" "row: $step2_row"
+  fi
+fi
+
+# ===========================================================================
+# TEST 14: Cross-phase stripping: deps outside this EPIC's steps become empty
+# ===========================================================================
+run_test "Cross-phase stripping: deps from another phase produce '---'"
+
+# Reuse EPIC from TEST 13 (phase 2, steps 4-6)
+if [[ -n "${epic_path_t13:-}" && -f "${epic_path_t13:-}" ]]; then
+  # Step 4 has "Depends on: Steps 1-3" — after cross-phase stripping (valid: 4,5,6), all are removed
+  step1_row="$(grep "^| 1 |" "$epic_path_t13" 2>/dev/null || true)"
+  if echo "$step1_row" | grep -qE '\| --- \|'; then
+    pass "cross-phase stripping: Step 4 (depends on Steps 1-3) shows '---'"
+  else
+    fail "cross-phase stripping: Step 4 (depends on Steps 1-3) shows '---'" "row: $step1_row"
+  fi
+else
+  fail "cross-phase stripping" "skipped — EPIC file not available from TEST 13"
+fi
+
+# ===========================================================================
+# TEST 15: Reversed range produces warning and empty expansion
+# ===========================================================================
+run_test "Reversed range 'Steps 14-1' produces warning and empty depends"
+
+# Reuse EPIC from TEST 13 (phase 2, steps 4-6)
+# Step 6 has "Depends on: Steps 14-1" — reversed range
+if [[ -n "${epic_path_t13:-}" && -f "${epic_path_t13:-}" ]]; then
+  step3_row="$(grep "^| 3 |" "$epic_path_t13" 2>/dev/null || true)"
+  if echo "$step3_row" | grep -qE '\| --- \|'; then
+    pass "reversed range: Step 6 (Steps 14-1) shows '---'"
+  else
+    fail "reversed range: Step 6 (Steps 14-1) shows '---'" "row: $step3_row"
+  fi
+else
+  fail "reversed range check" "skipped — EPIC file not available from TEST 13"
+fi
+
+# ===========================================================================
+# TEST 16: Reversed range emits warning to stderr
+# ===========================================================================
+run_test "Reversed range 'Steps 14-1' emits WARNING to stderr"
+
+env_dir="$(make_test_env "t16")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+
+stderr_t16="$("$SCRIPT_UNDER_TEST" \
+  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --phase 2 \
+  --total 3 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>&1 >/dev/null)" || true
+
+if echo "$stderr_t16" | grep -q "WARNING.*Reversed range"; then
+  pass "reversed range emits WARNING to stderr"
+else
+  fail "reversed range emits WARNING to stderr" "stderr: $stderr_t16"
+fi
+
+# ===========================================================================
+# TEST 17: Full cross-phase stripping for phase 3 (Steps 7-8, deps on 1-6)
+# ===========================================================================
+run_test "Cross-phase: phase 3 step depending on Steps 1-6 gets all deps stripped"
+
+env_dir="$(make_test_env "t17")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+
+actual_exit=0
+epic_path_t17="$("$SCRIPT_UNDER_TEST" \
+  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --phase 3 \
+  --total 3 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "complex-deps plan phase 3 exits with code 0" "got exit code $actual_exit"
+else
+  # Step 7 has "Depends on: Steps 1-6" — all outside phase 3 (steps 7-8)
+  step1_row="$(grep "^| 1 |" "$epic_path_t17" 2>/dev/null || true)"
+  if echo "$step1_row" | grep -qE '\| --- \|'; then
+    pass "phase 3: Step 7 (depends on Steps 1-6) fully stripped to '---'"
+  else
+    fail "phase 3: Step 7 (depends on Steps 1-6) fully stripped to '---'" "row: $step1_row"
+  fi
+fi
+
+# ===========================================================================
+# TEST 18: Mixed format: "Step 1, Steps 3-5" in same-phase EPIC
+# ===========================================================================
+run_test "Mixed format 'Step 1, Steps 3-5' produces '1, 3, 4, 5' (before cross-phase strip)"
+
+# We test the parse_step_deps function directly by sourcing the script's helpers
+# Since parse_step_deps is defined in the main script, we extract and test it
+# through a generated EPIC. For phase 1 (steps 1-3), Step 3 has
+# "Depends on: Step 1, Step 2 — both needed" which gives "1, 2".
+#
+# For a pure mixed-format test, we use phase 2 step 5 which has
+# "Step 1, Steps 3-5" -> should parse to "1, 3, 4, 5", then after
+# cross-phase strip (valid: 4,5,6) -> "4, 5". Already verified in TEST 13.
+#
+# Instead, let's verify parse_step_deps directly with a subprocess.
+mixed_result="$(bash -c '
+  set -euo pipefail
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
+
+  # Source parse_step_deps from the main script by extracting it
+  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+
+  parse_step_deps "Step 1, Steps 3-5"
+' 2>/dev/null)"
+
+if [[ "$mixed_result" == "1, 3, 4, 5" ]]; then
+  pass "mixed format 'Step 1, Steps 3-5' -> '1, 3, 4, 5'"
+else
+  fail "mixed format 'Step 1, Steps 3-5' -> '1, 3, 4, 5'" "got: '$mixed_result'"
+fi
+
+# ===========================================================================
+# TEST 19: Large range expansion: "Steps 1-14"
+# ===========================================================================
+run_test "Range 'Steps 1-14' expands to '1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14'"
+
+range_result="$(bash -c '
+  set -euo pipefail
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
+  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  parse_step_deps "Steps 1-14"
+' 2>/dev/null)"
+
+expected="1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14"
+if [[ "$range_result" == "$expected" ]]; then
+  pass "range 'Steps 1-14' expands to all 14 step numbers"
+else
+  fail "range 'Steps 1-14' expands to all 14 step numbers" "got: '$range_result'"
+fi
+
+# ===========================================================================
+# TEST 20: strip_cross_phase_deps: deps "1, 2, ..., 14" for EPIC with step 15
+# ===========================================================================
+run_test "Cross-phase strip: deps '1, 2, 3, 14' with valid step 15 -> empty"
+
+strip_result="$(bash -c '
+  set -euo pipefail
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
+  eval "$(sed -n "/^strip_cross_phase_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  strip_cross_phase_deps "1, 2, 3, 14" "15"
+' 2>/dev/null)"
+
+if [[ -z "$strip_result" ]]; then
+  pass "cross-phase strip: all deps outside valid steps -> empty string"
+else
+  fail "cross-phase strip: all deps outside valid steps -> empty string" "got: '$strip_result'"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

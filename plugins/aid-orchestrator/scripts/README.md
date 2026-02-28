@@ -357,7 +357,7 @@ queue:
     priority: medium
     status: queued          # queued | running | completed | failed
     depends_on: []
-    queued_at: 2026-02-28T14:30:00Z
+    added_at: 2026-02-28T14:30:00Z
 ```
 
 #### Exit Codes
@@ -639,3 +639,91 @@ After running the full pipeline, the workspace looks like:
       R-E018-3/
         ...
 ```
+
+---
+
+## Testing
+
+All pipeline scripts have comprehensive test suites located in `tests/`. A
+master test runner executes all suites and reports unified results.
+
+### Running All Tests
+
+```bash
+# From the scripts directory
+./tests/run-all-tests.sh
+
+# From the repository root
+bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+
+# With full output from each suite
+./tests/run-all-tests.sh --verbose
+```
+
+### Test Runner Options
+
+| Flag | Description |
+|------|-------------|
+| `--verbose`, `-v` | Show full output from each test suite (individual PASS/FAIL lines) |
+| `--help`, `-h` | Show usage information |
+
+### Test Runner Output
+
+**Compact mode** (default) shows one summary line per suite:
+
+```
+========================================================================
+  AID Pipeline Tests
+========================================================================
+
+Discovered 6 test suite(s)
+
+----------------------------------------------------------------------
+Suite 1/6: test-epic-to-json
+----------------------------------------------------------------------
+  [PASS] 10/10 passed, 0 failed
+
+----------------------------------------------------------------------
+Suite 2/6: test-full-pipeline
+----------------------------------------------------------------------
+  [PASS] 16/16 passed, 0 failed
+
+...
+
+========================================================================
+  Summary
+========================================================================
+
+  Suites:  6/6 passed, 0 failed
+  Tests:   76/76 passed, 0 failed
+  Total:   76 tests across 6 suites
+
+RESULT: PASS
+```
+
+**Verbose mode** (`--verbose`) additionally prints every individual test line
+(PASS/FAIL) from each suite.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | All suites passed |
+| 1 | One or more suites failed |
+
+### Test Suites
+
+| Suite | Script Under Test | Tests | Focus |
+|-------|-------------------|-------|-------|
+| `test-plan-to-epic.sh` | `aid-plan-to-epic.sh` | 20 | Phase extraction, section content, error handling |
+| `test-epic-to-json.sh` | `aid-epic-to-json.sh` | 10 | JSON generation, step parsing, cycle detection |
+| `test-json-to-run.sh` | `aid-json-to-run.sh` | 10 | Run file generation, phase sections, error handling |
+| `test-queue-add.sh` | `aid-queue-add.sh` | 10 | Queue operations, duplicate detection, dependencies |
+| `test-full-pipeline.sh` | `aid-auto-pipeline.sh` | 16 | End-to-end pipeline integration |
+| `test-regression.sh` | `aid-auto-pipeline.sh` | 10 | Structural equivalence of pipeline output |
+
+### Test Fixtures
+
+Test fixtures are stored in `tests/fixtures/` and include sample Plan.md and
+EPIC.md files used by all test suites. Fixtures are read-only during testing
+(each test creates its own temp directory for output).

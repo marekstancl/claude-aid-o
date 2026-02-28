@@ -251,7 +251,7 @@ for phase in $(seq 1 "$total_phases"); do
 
   # Extract epic_id from the generated filename
   epic_basename="$(basename "$epic_path")"
-  if [[ "$epic_basename" =~ (E-[0-9]+-[0-9]+_[0-9]+) ]]; then
+  if [[ "$epic_basename" =~ (E-[A-Za-z0-9][A-Za-z0-9-]*[0-9]+_[0-9]+) ]]; then
     epic_id="${BASH_REMATCH[1]}"
   else
     error_exit "Cannot extract EPIC ID from generated file: $epic_basename" 1

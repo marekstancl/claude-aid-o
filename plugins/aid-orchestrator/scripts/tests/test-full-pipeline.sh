@@ -472,6 +472,50 @@ else
   fail "duration_ms check" "skipped — manifest not parseable from TEST 1"
 fi
 
+# ===========================================================================
+# TEST 17: EPIC ID regex extracts correctly from non-numeric plan ID filenames
+# ===========================================================================
+run_test "EPIC ID regex extracts E-TEST-001-1_1 from non-numeric plan ID fixture filename"
+
+# This test validates the regex used in aid-auto-pipeline.sh line ~254 to
+# extract EPIC IDs from generated filenames. Filenames may contain alphanumeric
+# plan ID prefixes (e.g., E-TEST-001-1_1) rather than purely numeric ones
+# (e.g., E-003-1_2). We test the regex in isolation rather than running the
+# full pipeline, because the fixture filename already exists and the regex is
+# the specific unit under test.
+test_filename="E-TEST-001-1_1-minimal-test-plan.md"
+expected_epic_id="E-TEST-001-1_1"
+
+if [[ "$test_filename" =~ (E-[A-Za-z0-9][A-Za-z0-9-]*[0-9]+_[0-9]+) ]]; then
+  extracted="${BASH_REMATCH[1]}"
+  if [[ "$extracted" == "$expected_epic_id" ]]; then
+    pass "extracted '$extracted' from '$test_filename'"
+  else
+    fail "extracted EPIC ID matches expected" \
+      "expected '$expected_epic_id', got '$extracted'"
+  fi
+else
+  fail "regex matches non-numeric plan ID filename" \
+    "regex did not match '$test_filename'"
+fi
+
+# Also verify the regex still works for numeric-only plan IDs
+numeric_filename="E-019-1_2-some-feature.md"
+expected_numeric_id="E-019-1_2"
+
+if [[ "$numeric_filename" =~ (E-[A-Za-z0-9][A-Za-z0-9-]*[0-9]+_[0-9]+) ]]; then
+  extracted_num="${BASH_REMATCH[1]}"
+  if [[ "$extracted_num" == "$expected_numeric_id" ]]; then
+    pass "extracted '$extracted_num' from numeric filename '$numeric_filename'"
+  else
+    fail "extracted numeric EPIC ID matches expected" \
+      "expected '$expected_numeric_id', got '$extracted_num'"
+  fi
+else
+  fail "regex matches numeric plan ID filename" \
+    "regex did not match '$numeric_filename'"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

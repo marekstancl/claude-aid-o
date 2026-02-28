@@ -596,49 +596,37 @@ else
 fi
 
 # ===========================================================================
-# TEST D4: Queue entries have an ISO 8601 timestamp field (added_at or queued_at)
+# TEST D4: Queue entries have an ISO 8601 timestamp in the 'added_at' field
 #
-# The README documents 'queued_at' but the implementation uses 'added_at'.
-# This test accepts either field name to remain structurally correct.
-# See improvement_notes for the documentation discrepancy.
+# The implementation and README both use 'added_at' as the canonical field name.
 # ===========================================================================
-run_test "D4: Each queue entry has an ISO 8601 timestamp field (added_at or queued_at)"
+run_test "D4: Each queue entry has an ISO 8601 timestamp in the added_at field"
 
 if [[ -f "$QUEUE_FILE" ]]; then
   entry_count="$(grep -c "epic_id:" "$QUEUE_FILE" 2>/dev/null || echo 0)"
   entry_count="${entry_count//[[:space:]]/}"
 
-  # Check for either 'added_at' (actual implementation) or 'queued_at' (documented name)
-  timestamp_count=0
-  if grep -q "added_at:" "$QUEUE_FILE" 2>/dev/null; then
-    timestamp_count="$(grep -c "added_at:" "$QUEUE_FILE" 2>/dev/null || echo 0)"
-    timestamp_field="added_at"
-  elif grep -q "queued_at:" "$QUEUE_FILE" 2>/dev/null; then
-    timestamp_count="$(grep -c "queued_at:" "$QUEUE_FILE" 2>/dev/null || echo 0)"
-    timestamp_field="queued_at"
-  else
-    timestamp_field="(none)"
-  fi
+  timestamp_count="$(grep -c "added_at:" "$QUEUE_FILE" 2>/dev/null || echo 0)"
   timestamp_count="${timestamp_count//[[:space:]]/}"
 
   if [[ "$timestamp_count" -ne "$entry_count" ]]; then
-    fail "D4: timestamp field count" \
-      "found $timestamp_count '$timestamp_field' entries, expected $entry_count"
+    fail "D4: added_at field count" \
+      "found $timestamp_count 'added_at' entries, expected $entry_count"
   else
     # Verify timestamps look like ISO 8601 (YYYY-MM-DDTHH:MM:SS or with Z/offset)
-    bad_timestamps="$(grep "${timestamp_field}:" "$QUEUE_FILE" 2>/dev/null \
-      | sed "s/.*${timestamp_field}:[[:space:]]*//" \
+    bad_timestamps="$(grep "added_at:" "$QUEUE_FILE" 2>/dev/null \
+      | sed 's/.*added_at:[[:space:]]*//' \
       | tr -d '"' \
       | grep -Ev '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' || true)"
 
     if [[ -z "$bad_timestamps" ]]; then
-      pass "D4: all queue entries have valid ISO 8601 timestamps in '$timestamp_field' field"
+      pass "D4: all queue entries have valid ISO 8601 timestamps in 'added_at' field"
     else
       fail "D4: ISO 8601 timestamp format" "invalid timestamps: $bad_timestamps"
     fi
   fi
 else
-  fail "D4: timestamp field check" "queue file not found"
+  fail "D4: added_at field check" "queue file not found"
 fi
 
 # ===========================================================================

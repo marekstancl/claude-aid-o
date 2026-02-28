@@ -88,10 +88,24 @@ plan_num="$(echo "$plan_id" | sed 's/^P//')"
 epic_id="E-${plan_num}-${phase}_${total}"
 
 # Extract plan title from H1 header
+# Supports two formats:
+#   "# Plan: Some Title"         → extracts "Some Title"
+#   "# P019 — Some Title"        → extracts "Some Title" (strips "PNNN — " prefix)
+#   "# P019 - Some Title"        → extracts "Some Title" (strips "PNNN - " prefix)
 title="$(awk '
   { gsub(/\r$/, "") }
   /^# Plan:/ {
     sub(/^# Plan:[[:space:]]*/, "")
+    print
+    exit
+  }
+  /^# P[0-9]/ {
+    sub(/^# P[0-9A-Za-z-]+[[:space:]]*[—–-][[:space:]]*/, "")
+    print
+    exit
+  }
+  /^# / {
+    sub(/^# /, "")
     print
     exit
   }
@@ -270,6 +284,96 @@ extract_bold_field() {
   '
 }
 
+# Helper: parse step dependency references from a raw dependency string.
+# Handles singular ("Step 1"), plural ranges ("Steps 3-5"), mixed formats,
+# trailing descriptive text after step references, and reversed ranges.
+#
+# Args:
+#   $1 — raw dependency string, e.g. "Step 1, Steps 3-5 — all needed"
+#
+# Output (stdout): comma-separated step numbers, e.g. "1, 3, 4, 5"
+# Stderr: warning on reversed ranges
+parse_step_deps() {
+  local raw="$1"
+  local result=()
+
+  # Tokenize by splitting on commas first, then process each token.
+  # We use a while-read loop with newlines as separators after replacing commas.
+  local tokens
+  tokens="$(echo "$raw" | sed 's/,/\n/g')"
+
+  while IFS= read -r token; do
+    # Trim leading/trailing whitespace
+    token="$(echo "$token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -z "$token" ]] && continue
+
+    # Match range pattern: "Steps M-N" or "steps M-N" (with optional trailing text)
+    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+      local range_start="${BASH_REMATCH[1]}"
+      local range_end="${BASH_REMATCH[2]}"
+
+      if [[ "$range_start" -gt "$range_end" ]]; then
+        echo "WARNING: Reversed range Steps ${range_start}-${range_end} — skipping" >&2
+        continue
+      fi
+
+      for (( i=range_start; i<=range_end; i++ )); do
+        result+=("$i")
+      done
+
+    # Match singular pattern: "Step N" (with optional trailing text)
+    elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
+      result+=("${BASH_REMATCH[1]}")
+
+    # Match bare number (possibly left after earlier processing)
+    elif [[ "$token" =~ ^([0-9]+) ]]; then
+      result+=("${BASH_REMATCH[1]}")
+    fi
+    # Anything else (pure text without step reference) is silently ignored
+  done <<< "$tokens"
+
+  # Deduplicate and sort numerically, then join with ", "
+  if [[ "${#result[@]}" -gt 0 ]]; then
+    printf '%s\n' "${result[@]}" | sort -n -u | paste -sd ',' - | sed 's/,/, /g'
+  fi
+}
+
+# Helper: strip cross-phase dependencies.
+# Removes step numbers that are NOT in the current EPIC's step list.
+#
+# Args:
+#   $1 — comma-separated step numbers (e.g. "1, 2, 3, 14")
+#   $2 — space-separated list of valid step numbers for this EPIC (e.g. "15 16 17")
+#
+# Output (stdout): filtered comma-separated step numbers (may be empty)
+strip_cross_phase_deps() {
+  local deps_str="$1"
+  local valid_steps_str="$2"
+
+  # Build associative array of valid steps
+  declare -A valid_map
+  for vs in $valid_steps_str; do
+    valid_map["$vs"]=1
+  done
+
+  # Filter deps
+  local filtered=()
+  local dep_num
+  while IFS=',' read -ra dep_nums; do
+    for dep_num in "${dep_nums[@]}"; do
+      dep_num="$(echo "$dep_num" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -z "$dep_num" ]] && continue
+      if [[ -n "${valid_map[$dep_num]+_}" ]]; then
+        filtered+=("$dep_num")
+      fi
+    done
+  done <<< "$deps_str"
+
+  if [[ "${#filtered[@]}" -gt 0 ]]; then
+    printf '%s\n' "${filtered[@]}" | paste -sd ',' - | sed 's/,/, /g'
+  fi
+}
+
 # Collect per-step data
 steps_table_rows=""
 all_ac=""
@@ -384,8 +488,8 @@ for sn in "${phase_steps[@]}"; do
   # Build step objectives list for Goal section
   step_objectives="${step_objectives}- Step ${sn}: ${objective}"$'\n'
 
-  # Extract dependencies from step content
-  step_deps="$(echo "$step_content" | awk '
+  # Extract raw dependency line from step content
+  raw_dep_line="$(echo "$step_content" | awk '
     BEGIN { in_deps = 0 }
     {
       gsub(/\r$/, "")
@@ -393,13 +497,28 @@ for sn in "${phase_steps[@]}"; do
       if (in_deps && $0 ~ /^\*\*/) { in_deps = 0 }
       if (in_deps && $0 ~ /Depends on:/) {
         sub(/.*Depends on:[[:space:]]*/, "", $0)
-        # Extract step references: "Step 1" → "1"
-        gsub(/Step /, "", $0)
-        gsub(/[()]/, "", $0)
         print
       }
     }
   ')"
+
+  # Parse step references from the raw dependency line.
+  # Handles:
+  #   - "Step 1" -> 1
+  #   - "Steps 3-5" -> 3, 4, 5
+  #   - "Step 1, Steps 3-5" -> 1, 3, 4, 5
+  #   - Trailing descriptive text: "Step 1 — provides base config" -> 1
+  #   - Reversed ranges: "Steps 14-1" -> warning + empty
+  step_deps=""
+  if [[ -n "$raw_dep_line" ]]; then
+    step_deps="$(parse_step_deps "$raw_dep_line")"
+  fi
+
+  # Strip cross-phase dependencies: remove any step numbers that fall
+  # outside the current EPIC's step range
+  if [[ -n "$step_deps" ]]; then
+    step_deps="$(strip_cross_phase_deps "$step_deps" "${phase_steps[*]}")"
+  fi
 
   # Build Steps table row
   # Collapse multi-line objective to single line for table
@@ -414,8 +533,8 @@ for sn in "${phase_steps[@]}"; do
   # Determine depends_on for this step within the phase
   depends_on_str="---"
   if [[ -n "$step_deps" ]]; then
-    # Convert step references to the format expected in EPIC table
-    depends_on_str="$(echo "$step_deps" | sed 's/,/, /g' | head -1)"
+    # parse_step_deps already returns "N, M, ..." format — use as-is
+    depends_on_str="$(echo "$step_deps" | head -1)"
     [[ -z "$depends_on_str" ]] && depends_on_str="---"
   fi
 
