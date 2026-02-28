@@ -7,7 +7,7 @@
 
 ## Overview
 
-This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, selective context injection, branch management, orchestration logging, and token usage tracking.
+This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, selective context injection, trimmed EPIC context protocol, branch management, orchestration logging, and token usage tracking.
 
 For the FSM states that trigger dispatch, **see:** `skills/epic-state-machine.md`
 For quality gate evaluation after dispatch, **see:** `skills/gate-evaluation.md`
@@ -47,11 +47,12 @@ default to `aspirin` preset behavior.
 1. Load playbook: .aid-o/03-config/playbooks/{role}.md
 2. Build prompt:
    - System: playbook content
-   - Context: EPIC goal + scope + constraints
+   - Context: EPIC goal (first sentence only) + step-level constraints
    - Task: plan step objective + inputs + outputs
    - Previous outputs: evidence from dependency steps (per context scope)
    - Knowledge + memory context (per context scope)
-   - Constraints: allowed_paths, forbidden_paths
+   - Scope: step.allowed_paths, step.forbidden_paths (from plan.json)
+   - Acceptance: step.acceptance_criteria only (not all EPIC ACs)
 3. Resolve model tier (see Model Tier Resolution below)
 4. Resolve context scope (see Context Scope Resolution below)
 5. Dispatch via Task tool with model parameter (subagent_type matching role or general-purpose)
@@ -132,6 +133,72 @@ plan.json files), all three sub-fields default to their permissive values
 identical behavior to the pre-context-scope pipeline where all context was
 injected unconditionally.
 
+### Trimmed EPIC Context Protocol
+
+When assembling the dispatch prompt, do NOT inject the full EPIC markdown content.
+Instead, extract only the fields the agent needs for its specific step. This reduces
+prompt size and prevents agents from being distracted by unrelated EPIC sections
+(e.g., steps belonging to other agents, full artifact lists, EPIC-level scope that
+differs from step-level scope).
+
+```
+ASSEMBLE trimmed EPIC context for step:
+
+1. Read the EPIC file (already loaded during IDLE state)
+
+2. Extract EPIC goal — FIRST SENTENCE ONLY:
+   → Find the ## Goal section in the EPIC markdown
+   → Take the first sentence (up to and including the first period)
+   → This becomes epic_goal_summary (one line, not the full section)
+
+3. Extract step-level paths from plan.json (NOT from EPIC ## Scope):
+   → allowed_paths = step.allowed_paths from plan.json
+   → forbidden_paths = step.forbidden_paths from plan.json
+   → These are step-specific and may differ from EPIC-level scope
+
+4. Extract relevant constraints:
+   → Read ## Constraints section from EPIC (if present)
+   → Include constraints that apply to ALL agents (e.g., language, framework,
+     coding standards, security requirements)
+   → Exclude constraints that are step-specific to OTHER steps
+
+5. Extract step acceptance criteria from plan.json:
+   → acceptance_criteria = step.acceptance_criteria from plan.json
+   → Do NOT include acceptance criteria from other steps or EPIC-level ACs
+
+6. Build the trimmed context block:
+
+   EPIC CONTEXT:
+   Goal: {epic_goal_summary}
+   Allowed paths: {step.allowed_paths}
+   Forbidden paths: {step.forbidden_paths}
+   Constraints: {relevant constraints from EPIC}
+   Your acceptance criteria: {step.acceptance_criteria}
+```
+
+**What is excluded from the trimmed context:**
+- Full EPIC ## Goal section (only first sentence is kept)
+- EPIC ## Scope section (step-level paths from plan.json are used instead)
+- EPIC ## Artifacts section (agents learn their outputs from plan step definition)
+- EPIC ## Steps section (agents only need their own step, not the full step list)
+- EPIC ## Acceptance Criteria section (step-level ACs from plan.json are used instead)
+- EPIC frontmatter fields (epic_id, plan_ref, etc. are injected separately where needed)
+
+**What is NOT affected by this trimming:**
+- Source Plan Integration (plan_ref injection) — handled separately by the
+  Source Plan Integration protocol below. plan_ref resolution continues to read
+  the EPIC frontmatter directly; it is NOT part of the EPIC context block.
+- Previous step outputs — handled by Context Scope Resolution above
+- Memory and knowledge context — handled by Context Scope Resolution above
+- The `## EPIC Goal` block in the dispatch prompt template (in `commands/aid-run-epic.md`)
+  now receives `epic_goal_summary` (first sentence) instead of the full goal section
+
+**Backward compatibility:** This is a prompt optimization, not a behavioral change.
+Agents receive the same constraints and acceptance criteria they always did — the
+difference is that irrelevant EPIC sections are no longer included. Old plan.json
+files without `acceptance_criteria` on steps will produce an empty AC field in the
+trimmed context; the agent still receives its task definition from the plan step.
+
 **Detailed EXECUTING Actions (sequential step):**
 
 1. Determine next step(s) to execute (respect dependency graph)
@@ -156,7 +223,7 @@ injected unconditionally.
       4. Store extracted section for inclusion in agent prompt (step 2e)
    e. Dispatch agent via Task tool with `model` parameter set to resolved tier:
       - **model:** resolved model tier from step 2c (one of: `sonnet`, `opus`, `haiku`)
-      - EPIC specification (relevant sections)
+      - **Trimmed EPIC context** (per Trimmed EPIC Context Protocol above — NOT the full EPIC)
       - Plan step (objective, inputs, outputs, constraints)
       - **Source plan implementation detail** (if resolved in step 2d — injected as
         `## Source Plan — Implementation Detail` section in the prompt, placed after
@@ -168,7 +235,7 @@ injected unconditionally.
           `dependencies[].before` where `after == current step ID` — i.e., only
           the direct upstream dependencies for this step
         - `"none"`: include NO previous step outputs in the dispatch prompt
-      - Allowed/forbidden paths
+      - Allowed/forbidden paths (from the step in plan.json, NOT EPIC-level scope)
    f. Include cross-project knowledge context — controlled by `resolved_context.knowledge`
       (from Context Scope Resolution above):
       - IF `resolved_context.knowledge == false`:
