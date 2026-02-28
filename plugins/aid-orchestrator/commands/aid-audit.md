@@ -14,10 +14,11 @@ Available audit types:
 - `code` — Logic, hardcoded values, error handling, duplications
 - `database` — Schema validation, indexes, transactions, orphaned data
 - `documentation` — Code vs docs sync, outdated info, API accuracy
+- `efficiency` — Token usage per role vs baseline thresholds (advisory, never blocks)
 - `frontend` — Components, performance, accessibility, error handling
 - `security` — PII logging, input validation, auth, secrets
 - `architecture` — Layer separation, coupling, scalability
-- `full` — All of the above
+- `full` — All of the above (including Token Efficiency)
 
 If no type specified, ask the user which audit to run.
 
