@@ -1,37 +1,30 @@
 ---
 name: aid-plan-epic
-description: Generate Plan JSON from EPIC or Plan specification
+description: Generate EPICs, Plan JSON, and Run files from a Plan specification
 user_invocable: true
 ---
 
-Parse an EPIC **or Plan** file and generate a Plan JSON + Run file for the Controller state machine.
-
-This command is the unified entry point to orchestration. It handles two input paths seamlessly:
-
-- **EPIC input (standard path):** Reads the EPIC, analyzes its steps and dependencies, and produces a validated execution plan that `/aid-run-epic` will follow.
-- **Plan input (unified Plan→EPIC→Plan path):** Auto-detects that a Plan file was given, generates a full EPIC from it using the EPIC Subagent Template, asks PM to review the generated EPIC, then proceeds with plan generation from that EPIC — all in one command invocation.
-
-After plan generation completes, the command asks the PM whether to run the EPIC immediately, review the plan first, or execute a single step.
+Parse a **Plan** file, generate EPICs (one per phase), plan.json, run.md, and queue entries — all in one command. Deterministic operations are delegated to bash pipeline scripts; the LLM handles only PM dialog, script invocation, output validation, and reporting.
 
 ## Usage
 
 ```
-/aid-plan-epic <path-to-epic-or-plan-file>
+/aid-plan-epic <path-to-plan-file>
 ```
 
 **Examples:**
 ```
-/aid-plan-epic .aid-o/02-epics/E-001-1_1-user-auth.md                # EPIC input (standard)
-/aid-plan-epic .aid-o/01-plans/P005-C-aid-gui-backend.md              # Plan input → auto-generates EPIC, then Plan JSON
-/aid-plan-epic .aid-o/02-epics/E-002-task-management.md               # Ad-hoc EPIC (no plan)
+/aid-plan-epic .aid-o/01-plans/P005-C-aid-gui-backend.md
+/aid-plan-epic .aid-o/01-plans/2026-02-28-pipeline-scripts.md
 ```
 
-Both input formats produce the same output: a plan.json, plan_progress.json, and run file ready for `/aid-run-epic`. When given a Plan file, the command adds an intermediate EPIC generation step and shows it to the PM for review before continuing.
+Only Plan files are accepted. Solo EPIC input is not supported — use `/aid-run-epic` directly for existing EPICs.
 
 ## Prerequisites
 
 - `.aid-o/` workspace must exist (run `/aid-init` first)
-- Input file must be an EPIC (preferred) or a Plan (auto-converted to EPIC)
+- Input file must be a Plan (frontmatter `type: plan` or H1 starts with `# Plan:`)
+- `jq` must be installed (`brew install jq` on macOS, `apt install jq` on Linux)
 
 ## Flow
 
@@ -85,449 +78,146 @@ continues to Step 1 regardless of the result.
 
 After displaying the version check result, proceed to Step 1.
 
-### Step 1: Input Format Detection
+### Step 1: Validate Input
 
-Before validating EPIC sections, detect whether the input file is a Plan or an EPIC.
+1. If `$ARGUMENTS` is empty (no path provided):
+   - List files from `.aid-o/01-plans/` for selection
+   - Present the list to PM and ask them to choose a Plan file
+2. Read the file at the given path
+3. Validate it is a Plan file:
+   - **Frontmatter check:** YAML frontmatter contains `type: plan` — valid Plan
+   - **Header check:** First H1 header starts with `# Plan:` — valid Plan
+   - If neither matches: **STOP** and display:
+     ```
+     ERROR: Expected Plan file.
+     ================================
+     File: {path}
 
-1. Read the input file at the given path
-2. Detect format using this heuristic (first match wins):
-   a. **Frontmatter check:** If YAML frontmatter contains `type: plan` → Plan format
-   b. **Header check:** If first H1 header starts with `# Plan:` → Plan format.
-      If first H1 header starts with `# EPIC:` → EPIC format
-   c. **Section fingerprinting:** Scan for section headers:
-      - If file contains BOTH `## DoD Gates` AND (`## Steps (Role Pipeline)` OR `## Steps`) → EPIC format
-      - If file contains ANY of (`## High-Level Steps`, `## Approach`, `## Success Criteria`,
-        `## Task Order`) AND lacks `## DoD Gates` → Plan format
-   d. **Ambiguous:** Ask PM: "This file doesn't match the standard Plan or EPIC format.
-      Is this a (P)lan or an (E)PIC?"
+     This file does not appear to be a Plan. Only Plan files are accepted.
+     Run /aid-brainstorm to create a plan first.
+     ```
 
-3. If EPIC format detected → proceed to Step 3 (no change to existing flow)
-4. If Plan format detected → proceed to Step 2 (Plan-to-EPIC conversion)
+### Step 2: Plan Analysis
 
-### Step 2: Plan-to-EPIC Conversion
-
-When a Plan file is provided instead of an EPIC, auto-generate an EPIC using the
-EPIC Subagent Prompt Template from `skills/brainstorming.md`.
-
-1. Read the plan file content (already loaded)
-2. Read `skills/brainstorming.md` Section "EPIC Subagent Prompt Template"
-3. Read `.aid-o/04-engine/memory/project-profile.yaml` for tech stack context
-4. Read `.aid-o/03-config/templates/epic.md` for the EPIC template structure
-5. Determine output language:
-   - Read `.aid-o/03-config/language.yaml` → `document_language` (default: `EN`)
-6. Extract plan_id:
-   - From frontmatter `id` field if present (e.g., `P006`)
-   - From filename if contains `P{NNN}` pattern (e.g., `P005-C-aid-gui.md` → `P005`)
-   - Fallback: Read `.aid-o/03-config/counter.yaml` → increment `plan` counter → `P{NNN}` (zero-padded 3 digits)
-7. Generate EPIC using the EPIC Subagent Prompt Template:
-   - Substitute `{plan_content}` with the plan file content
-   - Substitute `{project_profile_yaml}` with the project profile
-   - Substitute `{epic_template}` with the EPIC template
-   - Substitute `{document_language}` with the resolved language
-   - Substitute `{plan_id}` with the extracted plan ID
-8. Generate EPIC ID per `skills/epic-orchestration.md` ID Generation section:
-   - Extract plan number (NNN) from plan_id (e.g., `P005` → `005`)
-   - If plan has multiple phases: `E-{NNN}-{phase}_{total}` (e.g., `E-005-1_4`)
-   - If plan has single phase: `E-{NNN}-1_1` (e.g., `E-005-1_1`)
-   - If ad-hoc EPIC (no plan): Read `counter.yaml` → increment `epic` counter → `E-{NNN}`
-9. Generate topic slug from plan title (lowercase, hyphens, max 40 chars)
-10. Save EPIC to `.aid-o/02-epics/{epic_id}-{topic}.md`
-11. Present to PM:
-    ```
-    Input detected as a Plan (not an EPIC).
-    ====================================
-    Plan: {plan_file_path}
-    Generated EPIC: .aid-o/02-epics/{epic_id}-{topic}.md
-
-    The EPIC was auto-generated from your plan using the standard template.
-    Review it below, then I'll proceed with plan generation.
-
-    [Show EPIC summary: Goal, Scope, Steps count, DoD Gates]
-
-    Proceed with plan generation? (Y/N/Edit)
-    ```
-12. If PM says Y → proceed to Step 3 with the newly generated EPIC file path
-13. If PM says N → stop, tell PM to edit EPIC manually and re-run
-14. If PM says Edit → PM modifies sections inline, then proceed to Step 3
-
-IMPORTANT: The generated EPIC is a DRAFT. PM reviews it before plan generation
-proceeds. This ensures the Plan-to-EPIC conversion quality is validated.
-
-**Phase Selection (from brainstorming):**
-
-When this step is invoked from brainstorming with phase selection context:
-
-1. **All phases (Option B):** Process ALL High-Level Steps from the plan into a single EPIC. This is the default behavior — no changes to the conversion logic.
-
-2. **Specific phase (Option C):**
-   - Only include steps from the selected phase in the generated EPIC
-   - Set `plan_epics_total` in EPIC frontmatter to the total number of phases
-   - Add external dependencies: list steps from OTHER phases that this phase's steps depend on
-   - Scope the EPIC's Allowed files/paths to only files relevant to the selected phase
-   - Add a note in EPIC Context: "This EPIC covers Phase {N} of {total} from plan {plan_id}"
-
-If no phase context is provided (standard /aid-plan-epic invocation), process all steps as usual.
-
-### Step 3: Load and Validate EPIC
-
-1. Read the EPIC file at the given path
-2. Validate required sections exist:
-   - **Goal** — what must be true when complete
-   - **Scope** — allowed files/paths, forbidden zones
-   - **Constraints** — budget, patterns, requirements
-   - **DoD Gates** — which quality gates apply
-   - **Acceptance Criteria** — specific, testable criteria
-3. If any section is missing, **STOP** and report:
+1. Parse frontmatter to extract `id` (plan_id) and `title`
+   - If `id` is missing: extract from filename `P{NNN}` pattern
+   - If title is missing: extract from H1 header
+2. Count phases by scanning the `## High-Level Steps` table rows (or equivalent phase markers in `## Implementation Steps`)
+3. Display summary to PM:
    ```
-   ERROR: EPIC validation failed
-   ================================
-   File: {path}
-   Missing sections:
-   - Goal (required)
-   - Acceptance Criteria (required)
-
-   Fix the EPIC file and re-run /aid-plan-epic.
-   Template: .aid-o/03-config/templates/epic.md
-   ```
-4. Extract `epic_id` from filename:
-   - `E-005-1_4-gui-foundation.md` → `E-005-1_4`
-   - `E-002-task-management.md` → `E-002`
-   - `E-001-1_1-user-auth.md` → `E-001-1_1`
-   - Legacy format `E-20260216-c2d1-user-auth.md` → `E-20260216-c2d1` (backwards-compatible)
-   - Fallback: use full filename without `.md`
-
-### Step 4: Analyze Steps, Dependencies, and Parallel Groups
-
-> **Reference:** Read `skills/planner.md` for the complete algorithm (dependency graph, parallel groups, ordering rules).
-
-1. Find the **Steps** section in the EPIC (may be called "Steps", "Steps (Role Pipeline)", or "Runs")
-2. For each step, extract:
-   - **Role** — must be one of: `architect`, `domain`, `backend`, `frontend`, `qa`, `security`, `observability`, `docs`, `release`
-   - **Objective** — what the step must accomplish
-   - **Dependencies** — which steps must complete first (from "Depends On" column)
-   - **Parallel Group** — which steps can run concurrently (from "Parallel Group" column)
-3. If EPIC has explicit steps table → use it directly
-4. If EPIC has only Runs section → extract roles from run descriptions, apply default ordering
-
-**Dependency Graph Construction** (per `skills/planner.md` Section 1):
-1. Parse steps into (step_id, role, objective, depends_on[])
-2. Build adjacency list (before → after)
-3. Validate: no cycles (topological sort must succeed), all refs exist, no self-deps
-
-**Parallel Group Detection** (per `skills/planner.md` Section 2):
-1. Topological sort → level assignment (Level 0 = no deps, Level N = all deps at lower levels)
-2. Steps at same level with no inter-dependencies → parallel group
-3. Single-step levels → sequential (no parallel_groups entry)
-
-**Default Ordering Rules** (per `skills/planner.md` Section 3):
-- Architect ALWAYS first (contracts before implementation)
-- Domain after Architect (needs contracts)
-- Backend + Frontend in parallel (both depend on contracts)
-- QA + Security + Observability in parallel (all depend on implementation)
-- Docs after implementation steps
-- Release last (needs all gates to pass)
-
-If the EPIC explicitly defines a different order → respect it (EPIC overrides defaults).
-
-### Step 5: Generate Analysis Groups
-
-> **Reference:** Read `skills/planner.md` Section 4 for auto-trigger rules.
-
-After building steps + dependencies + parallel_groups, generate analysis groups:
-
-1. **Apply auto-trigger rules** to each step:
-   - **Security-relevant:** step objective mentions auth/token/encryption/SQL/injection/etc → add `security` review (union)
-   - **High complexity:** step has 5+ outputs or mentions refactor/migrate/redesign → add `architect` review (weighted)
-   - **Database changes:** step mentions migration/schema/database/model → add `backend` + `security` validation (consensus)
-   - **API contract changes:** step role is architect, outputs include OpenAPI/contract/ADR → add `backend` + `frontend` validation (union)
-
-2. **Check EPIC for manual analysis_groups** — the EPIC may explicitly define analysis groups
-3. **Merge auto + manual:** manual groups take precedence on conflict (same target + same agents → keep manual)
-4. **Assign IDs:** `analysis_{N}_{purpose}` (e.g., `analysis_1_security_review`)
-5. **Validate:** all targets reference existing steps, all agents are valid roles, agents != target step's own role
-6. Add `analysis_groups` array to Plan JSON (empty array `[]` if no triggers matched)
-
-### Step 6: Build Plan JSON
-
-Read `.aid-o/03-config/templates/plan.schema.json` for the schema definition.
-
-**Source Plan Resolution (Variant B):**
-
-Before building plan.json, check if the EPIC has a source plan:
-
-1. Read EPIC frontmatter → extract `plan_ref` field
-2. If `plan_ref` is set and not null:
-   a. Resolve plan file path:
-      - If relative: resolve against `.aid-o/01-plans/`
-      - If absolute: use as-is
-   b. Verify file exists and is readable
-   c. Set `source_plan` in plan.json to the resolved path
-   d. Read plan file content for step enrichment (see below)
-3. If `plan_ref` is null or missing:
-   a. Set `source_plan: null` in plan.json
-   b. Skip enrichment (standard flow)
-
-Generate a Plan JSON object with these fields:
-
-```json
-{
-  "epic_id": "{extracted from step 3}",
-  "source_plan": "{path to source .md plan file, or null if no plan_ref}",
-  "version": 1,
-  "created_at": "{ISO 8601 timestamp}",
-  "steps": [
-    {
-      "id": "step_{N}_{role}",
-      "role": "{role}",
-      "objective": "{from EPIC step}",
-      "inputs": ["{EPIC spec}", "{outputs from dependency steps}"],
-      "outputs": ["{expected artifacts}"],
-      "constraints": ["{from EPIC Constraints + Scope}"],
-      "allowed_paths": ["{from EPIC Scope → Allowed files/paths}"],
-      "forbidden_paths": ["{from EPIC Scope → Forbidden zones}"],
-      "acceptance_criteria": ["{verifiable criteria derived from EPIC + step objective}"]
-    }
-  ],
-  "dependencies": [
-    {
-      "before": "step_{N}_{role}",
-      "after": "step_{M}_{role}",
-      "reason": "{why this ordering}"
-    }
-  ],
-  "parallel_groups": [
-    ["step_3_backend", "step_4_frontend"]
-  ],
-  "analysis_groups": [
-    {
-      "id": "analysis_1_security_review",
-      "target": "step_3_backend",
-      "agents": ["security"],
-      "mode": "review",
-      "merge_strategy": "union",
-      "trigger": "auto"
-    }
-  ],
-  "gates": ["{from EPIC DoD Gates}"],
-  "budget": {
-    "max_llm_cost_usd": "{from EPIC Constraints, default 50}",
-    "max_retries_per_gate": 3
-  }
-}
-```
-
-**Note:** `analysis_groups` may be an empty array `[]` if no auto-trigger rules matched and EPIC didn't specify any. This is valid — plans without analysis groups work normally.
-
-**Step ID format:** `step_{N}_{role}` where N is sequential (1, 2, 3...).
-
-**Inputs/Outputs derivation:**
-- Step 1 (architect): inputs = ["EPIC specification"], outputs = contracts/ADRs
-- Steps depending on architect: inputs include architect's outputs
-- QA/Security: inputs include implementation outputs
-- Docs: inputs include all previous outputs
-
-**Acceptance criteria derivation:**
-- From EPIC acceptance criteria (mapped to relevant steps)
-- From step objective (decomposed into verifiable checks)
-- From step outputs (each output = one criterion: "artifact exists and is complete")
-- Keep criteria specific and testable — "API docs cover all new endpoints" not "docs are good"
-
-**Self-validation** (per `skills/planner.md` Section 6): After generating, verify:
-- All `step.id` values are unique
-- All `step.role` values are valid enum values
-- All dependency `before`/`after` reference existing step IDs
-- All parallel_groups reference existing step IDs
-- No circular dependencies (DAG validation)
-- Gates values are valid enum values from schema
-- All `analysis_groups[].target` reference existing step IDs
-- All `analysis_groups[].agents` are valid role enum values
-- All `analysis_groups[].merge_strategy` are: union|consensus|weighted
-- All `analysis_groups[].mode` are: review|audit|validation
-- No duplicate analysis_group IDs
-- Analysis group agents != target step's agent role (no self-review)
-
-If validation fails → fix and regenerate (do not present invalid plan).
-
-**Source Plan Step Enrichment (Variant B):**
-
-When building each step in plan.json AND `source_plan` is available:
-
-For each step S:
-  1. Find matching plan task section (by objective keywords or Plan Task ID in objective)
-  2. If matched:
-     a. Enrich `inputs`: add specific files mentioned in plan task
-     b. Enrich `outputs`: add specific files/artifacts from plan task
-     c. Enrich `constraints`: add per-task constraints from plan
-     d. Enrich `acceptance_criteria`: add verifiable criteria from plan task
-  3. If not matched: use EPIC-derived data only (no error)
-
-IMPORTANT: Enrichment is ADDITIVE — EPIC-derived data is the base,
-plan task detail supplements it. Never override EPIC constraints with plan data.
-
-### Step 7: Save Plan JSON
-
-1. Generate `run_id` per `skills/epic-orchestration.md` ID Generation section:
-   - Format: `R-{EPIC_ID}-{run_number}` (e.g., `R-005-1_4-1` for first run of `E-005-1_4`)
-   - Run number is sequential within the EPIC (1, 2, 3...)
-   - For evidence directory: use `run_{epic_id}_{run_number}` (e.g., `run_E-005-1_4_1`)
-2. Create evidence directory: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/`
-3. Save plan to: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json`
-4. Initialize progress tracker: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/plan_progress.json`:
-   ```json
-   {
-     "epic_id": "{epic_id}",
-     "run_id": "{run_id}",
-     "state": "PLANNING",
-     "started_at": "{ISO 8601}",
-     "steps": {
-       "step_1_architect": {
-         "status": "pending",
-         "review_cycles": 0,
-         "last_review": null
-       },
-       "step_2_domain": {
-         "status": "pending",
-         "review_cycles": 0,
-         "last_review": null
-       }
-     },
-     "current_step": null,
-     "gates": {},
-     "escalations": []
-   }
-   ```
-5. Copy EPIC to evidence: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md`
-
-### Step 8: Generate Run File (Run Creation Protocol)
-
-The run file is the human-readable operational document for this EPIC run.
-It must be **detailed enough** that any agent reading it understands the full scope,
-their role, inputs/outputs, and acceptance criteria — without needing to parse plan.json.
-
-#### 8a. Gather Sources
-
-Before creating the run file, read ALL of the following:
-
-1. **EPIC file** (already loaded from Step 3) — goal, scope, constraints, affected areas
-2. **Plan JSON** (generated in Step 6) — steps, dependencies, parallel_groups, analysis_groups, gates, budget
-3. **Plan file** (`.aid-o/01-plans/`) — broader project context
-4. **Previous run** (if `epic_run > 1`) — what was delivered, lessons learned
-5. **Relevant source code** — scan inputs/outputs from plan steps, read key files to understand current state
-6. **Decision policies** (`.aid-o/03-config/policies/decision-policies.yaml`) — auto_decisions, escalation_triggers
-
-#### 8b. Create Run File
-
-1. Use the run_id already generated in Step 7 (`R-{EPIC_ID}-{run_number}`)
-2. Use template from `.aid-o/03-config/templates/run-new-feature.md` (or type-appropriate template)
-3. Fill in frontmatter:
-   ```yaml
-   id: {run_id}
-   type: new-feature
-   status: active
-   priority: {from EPIC}
-   started: {YYYY-MM-DD}
-   epic_id: {epic_id}
-   epic_run: {N}
-   plan_ref: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
-   source_plan: {from plan.json source_plan field, or null}
-   orchestrated: true
+   Plan {plan_id}: {title}, {N} phases
    ```
 
-#### 8c. Map Plan JSON to Run Phases
+### Step 3: Queue Mode Selection
 
-For EACH step in plan.json, create a Phase in the run file:
-
-1. `step.objective` → **Phase Goal** — expand the objective into a full paragraph explaining what the phase accomplishes and why
-2. `step.role` → **Agent / Role** — the agent role that will execute this phase
-3. `step.inputs` → **Inputs** — translate file paths to readable descriptions with paths
-4. `step.outputs` → **Outputs** — describe expected deliverables with file paths
-5. `step.constraints` → **Constraints** — list as bullet points
-6. `step.allowed_paths` + `step.forbidden_paths` → add to Constraints as scope boundaries
-7. Check `analysis_groups` — if this step is the target of an analysis group, add to the phase: "Post-phase review: {agent roles} will perform {mode} analysis (merge strategy: {merge_strategy})"
-8. Create **Acceptance** checklist from outputs (each output = one checkbox) + constraints that can be verified
-
-**Source Plan Phase Enrichment (Variant B):**
-
-When creating each Phase AND `source_plan` is available in plan.json:
-
-1. Read the matching plan task section
-2. Use plan task's detailed description to expand Phase Goal:
-   - Instead of just restating the step objective, include WHY this phase
-     matters, WHAT specific changes are expected, and KEY decisions from the plan
-3. Add to Phase Inputs: "Source plan: {source_plan} (Task {X})"
-4. Add to Phase Constraints: any specific implementation constraints from the plan task
-   that aren't captured in plan.json (e.g., "never overwrite existing rules — append only")
-
-#### 8d. Fill Remaining Sections
-
-- **Objective:** 3-5 sentences from EPIC goal + scope. Include success criteria.
-- **Context:** Reference previous runs (if epic_run > 1), current code state, what was delivered before.
-- **Scope:** IN list from EPIC scope (min 3 items), OUT list from EPIC constraints/exclusions (min 2 items).
-- **Dependencies:** Table from plan.json `dependencies` array — "Phase X depends on Phase Y because Z".
-- **Quality Gates:** List from plan.json `gates` array + relevant entries from decision-policies.yaml.
-- **Run Log:** Initialize with `| {date} | Run created from EPIC {epic_id}, {step_count} phases planned |`
-
-#### 8e. Quality Check
-
-Before saving, verify the run file contains:
-- [ ] Objective: 3+ sentences (not just a one-liner)
-- [ ] Context: references to previous work or "greenfield" statement
-- [ ] Scope: IN list (3+ items) and OUT list (2+ items)
-- [ ] Phases: each phase has all 6 subsections (Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance)
-- [ ] Dependencies: table with at least one entry (or "No inter-phase dependencies" for single-step plans)
-- [ ] Quality Gates: at least one gate listed
-- [ ] Run Log: initialized
-
-If any check fails, fix before proceeding.
-
-#### 8f. Save
-
-Save to: `.aid-o/04-engine/runs/{run_id}-{topic}.md`
-
-### Step 9: Present Output
+Present PM with queue dependency options:
 
 ```
-Plan Generated for EPIC: {epic_id}
+How should these {N} EPICs be queued?
+
+  (A) Single queue, chain: E-{id}-1 -> 2 -> ... -> N  (Recommended)
+  (B) Separate queue per EPIC (all independent, can run in parallel)
+  (C) Custom (I'll ask for dependency specifics)
+```
+
+- If PM selects **(A)**: set `queue_mode=chain`
+- If PM selects **(B)**: set `queue_mode=separate`
+- If PM selects **(C)**: ask PM for custom `depends_on` configuration (comma-separated EPIC IDs), then set `queue_mode=custom` with the provided dependencies
+
+### Step 4: Execute Pipeline Script
+
+1. **Locate scripts:**
+   - Check that `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` exists
+   - If not found: **STOP** and display:
+     ```
+     Pipeline scripts not found. Plugin may need update:
+     claude plugin update aid-orchestrator@claude-aid-o
+     ```
+
+2. **Run the pipeline:**
+   ```bash
+   bash plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh \
+     --plan <path> \
+     --queue-mode <mode> \
+     --plugin-dir plugins/aid-orchestrator
+   ```
+   - If `queue_mode=custom`, also pass `--depends-on <comma-separated-ids>`
+
+3. **Capture output:**
+   - stdout contains the JSON manifest
+   - stderr contains progress messages (`[INFO]`) and errors
+
+4. **Handle exit codes:**
+
+   | Exit Code | Action |
+   |-----------|--------|
+   | 0 | Success — proceed to Step 5 |
+   | 1 | Validation error — display stderr error to PM |
+   | 2 | Missing dependency — display: `"Required dependency 'jq' not found. Install: brew install jq (macOS) or apt install jq (Linux)"` |
+   | 3 | File I/O error — display stderr error to PM |
+
+5. **On non-zero exit:** offer PM recovery options:
+   ```
+   Pipeline failed (exit code {N}): {error message}
+
+     (R) Retry
+     (M) Manual review of error
+     (A) Abort
+   ```
+
+### Step 5: Validate Output
+
+1. Parse the JSON manifest from stdout
+   - If JSON parse fails: **STOP** and display:
+     ```
+     Script produced invalid output. Raw output (first 500 chars):
+     {first 500 chars of stdout}
+
+     Report this as a bug.
+     ```
+2. Check the `epics` array is non-empty
+   - If empty (0 epics): **STOP** and display:
+     ```
+     Script produced no EPICs — check plan has Implementation Steps with phase markers.
+     ```
+3. For each EPIC entry in the manifest:
+   - Verify the file at `epic_path` exists
+   - Verify the file at `plan_json` exists
+   - Verify the file at `run_path` exists
+4. For each `plan_json` path: validate the JSON against `plan.schema.json` using `jq`
+   - If validation fails: report the specific error and path, offer retry
+
+### Step 6: Report to PM
+
+Display the pipeline results:
+
+```
+{N} EPICs created and queued ({duration}s):
 ====================================
-Steps: {count}
-Parallel groups: {count}
-Analysis groups: {count}
-Dependencies: {count}
-Roles: {comma-separated list}
-Gates: {comma-separated list}
-Budget: ${max_cost}
 
-Step sequence:
-  1. [architect] {objective}
-  2. [domain] {objective} (depends on: step 1)
-  3. [backend] {objective} (depends on: step 2) ← parallel group 1
-  4. [frontend] {objective} (depends on: step 1) ← parallel group 1
-  5. [qa] {objective} (depends on: step 3) ← parallel group 2
-  6. [security] {objective} (depends on: step 3) ← parallel group 2
-  7. [docs] {objective} (depends on: step 3)
-
-Analysis groups:
-  - analysis_1_security_review: [security] → step_3_backend (auto, union)
-  - analysis_2_db_validation: [backend, security] → step_3_backend (auto, consensus)
+| # | EPIC ID      | Queue Status | Depends On          |
+|---|--------------|-------------|---------------------|
+| 1 | E-{id}-1_{N} | queued      | (none)              |
+| 2 | E-{id}-2_{N} | queued      | E-{id}-1_{N}        |
+| 3 | E-{id}-3_{N} | queued      | E-{id}-2_{N}        |
 
 Files created:
-  - Plan: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
-  - Progress: .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan_progress.json
-  - EPIC copy: .aid-o/04-engine/evidence/{epic_id}/{run_id}/epic_input.md
-  - Run: .aid-o/04-engine/runs/{run_file}
+  EPICs:      {list of epic_path values}
+  Plans:      {list of plan_json values}
+  Runs:       {list of run_path values}
 
-Ready to execute?
-  Want to run this EPIC now?  → /aid-run-epic {epic_id}
-  Review plan first?          → open .aid-o/04-engine/evidence/{epic_id}/{run_id}/plan.json
-  Run a single step?          → /aid-run-epic {epic_id} step_1_architect
+What's next?
+  (A) Start FIRST AID           -> /aid-first-aid
+  (B) Review EPICs              -> {epic_path list}
+  (C) Review plan.json          -> {plan_json list}
+  (D) Done (EPICs queued, start later)
 ```
-
-If no analysis groups were generated, omit the "Analysis groups" section from output.
 
 ## Reference Files
 
+- **`plugins/aid-orchestrator/scripts/README.md`** — Pipeline script contracts, arguments, and JSON manifest format
 - **`skills/planner.md`** — Planner skill: dependency graph, parallel groups, auto-triggers, analysis groups generation
-- **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used for Plan-to-EPIC conversion in Step 2)
+- **`skills/brainstorming.md`** — EPIC Subagent Prompt Template (used by aid-plan-to-epic.sh)
 - `skills/epic-orchestration.md` — Section "2. PLANNING" (plan generation rules, evidence structure)
 - `.aid-o/03-config/templates/plan.schema.json` — Plan JSON schema (includes `analysis_groups`)
 - `.aid-o/03-config/templates/run-new-feature.md` — Run file template
@@ -536,8 +226,10 @@ If no analysis groups were generated, omit the "Analysis groups" section from ou
 
 ## Important
 
-- **NEVER modify the original EPIC file** — it is the source of truth, only copy it to evidence
-- If `$ARGUMENTS` is empty, list files from BOTH `.aid-o/02-epics/` (marked as `(EPIC)`) AND `.aid-o/01-plans/` (marked as `(Plan)`) for selection
-- If a Plan JSON already exists for this EPIC, ask: "Plan already exists (version {N}). Create new version? (Y/N)"
-- The plan is a **proposal** — PM reviews it in `/aid-run-epic` (PLAN_REVIEW state) before execution begins
+- **NEVER modify the original Plan file** — it is the source of truth
+- **Solo EPIC input is not supported** — only Plan files are accepted; use `/aid-run-epic` directly for existing EPICs
+- If `$ARGUMENTS` is empty, list files from `.aid-o/01-plans/` (marked as `(Plan)`) for selection
+- If a queue entry already exists for any generated EPIC, the pipeline script handles deduplication (exit code 1 with descriptive error)
+- The pipeline scripts handle all deterministic work: Plan-to-EPIC conversion, plan.json generation, run.md generation, and queue entry creation
+- The LLM's role is: PM dialog (Steps 1-3), script invocation (Step 4), output validation (Step 5), and reporting (Step 6)
 - Budget defaults: `max_llm_cost_usd: 50`, `max_retries_per_gate: 3` (unless EPIC specifies otherwise)
