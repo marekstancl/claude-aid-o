@@ -26,7 +26,7 @@ This is the **main orchestration command** — it implements the entire 11-state
 
 - `.aid-o/` workspace must exist
 - EPIC file must exist in `.aid-o/02-epics/` or at the given path
-- Plan JSON should exist (from `/aid-plan-epic`). If not, `/aid-plan-epic` is called automatically.
+- Plan JSON **must** exist (created by `/aid-plan-epic`). The command will not generate a plan inline.
 
 ## Core Instruction
 
@@ -67,10 +67,23 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 3. Read `.aid-o/03-config/policies/decision-policies.yaml`
 4. Read `.aid-o/03-config/policies/gates.yaml`
 5. **Create evidence directory:** `mkdir -p .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/`
-6. Find existing Plan JSON (in evidence directory) or generate one:
-   - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id` (most recent by directory name — run IDs use ISO timestamp prefix)
+6. **Locate Plan JSON** (REQUIRED — will not generate inline):
+   - Search `.aid-o/04-engine/evidence/{epic_id}/` for latest `run_id` with a `plan.json`
    - If plan.json exists → load it
-   - If not → run `/aid-plan-epic` logic inline
+   - If plan.json is NOT found → **STOP with error:**
+     ```
+     ERROR: No plan.json found for EPIC {epic_id}.
+
+     A plan must be generated before running the EPIC.
+     Run the following command first:
+
+       /aid-plan-epic {epic_id_or_path}
+     ```
+     If the EPIC frontmatter contains a `plan_ref` field, enhance the suggestion:
+     ```
+       /aid-plan-epic {plan_ref}
+     ```
+     Then **terminate** — do NOT proceed to PLANNING or any other state.
 7. Initialize or load `plan_progress.json`
 8. Copy EPIC to evidence (if not already there)
 9. **Source Plan Loading (Variant B):**
@@ -84,18 +97,32 @@ Implement the following loop. On each state transition, append to `stage_log.jso
 
 **Evidence:** `epic_input.md` saved to evidence directory.
 
-**Transition:** → PLANNING (if new plan needed) or → PLAN_REVIEW (if plan already exists)
+**Transition:** → PLANNING (plan.json must already exist — loaded in action 6; PLANNING validates and generates run file)
 
 ---
 
 ### State: PLANNING
 
+**Pre-condition:** `plan.json` must already exist in the evidence directory (loaded during IDLE action 6). If it does not exist, the IDLE state will have terminated with an error before reaching this state.
+
 **Actions:**
-1. If Plan JSON doesn't exist, generate it (same logic as `/aid-plan-epic` Steps 4-7)
+1. Load `plan.json` from the evidence directory (already located in IDLE action 6)
 2. Validate plan against `.aid-o/03-config/templates/plan.schema.json`
-3. Save plan to evidence
-4. **Generate run file** following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8)
-5. **Validate run file** completeness (per `skills/epic-orchestration.md` Run File Quality Check):
+   - If validation fails → **STOP with error:**
+     ```
+     ERROR: plan.json for EPIC {epic_id} failed schema validation.
+
+     Validation errors:
+       {list of validation errors}
+
+     Re-generate the plan by running:
+
+       /aid-plan-epic {epic_id_or_path}
+     ```
+     If the EPIC frontmatter contains a `plan_ref` field, use `/aid-plan-epic {plan_ref}` in the suggestion.
+     Then **terminate**.
+3. **Generate run file** following Run Creation Protocol (`commands/aid-plan-epic.md` Step 8)
+4. **Validate run file** completeness (per `skills/epic-orchestration.md` Run File Quality Check):
    - Objective: 3+ sentences with success criteria
    - Scope: explicit IN (3+) and OUT (2+) lists
    - Phases: each has Goal, Agent/Role, Inputs, Outputs, Constraints, Acceptance (3+)
@@ -103,11 +130,11 @@ Implement the following loop. On each state transition, append to `stage_log.jso
    - Quality Gates listed
    - If any check fails → fix before proceeding
 
-**Evidence:** `plan.json` + run file saved.
+**Evidence:** Run file saved (plan.json was already saved by `/aid-plan-epic`).
 
 **Transition:** → PLAN_REVIEW
 
-**On failure:** → ESCALATION ("Plan generation failed: {reason}")
+**On failure:** → ESCALATION ("Plan validation or run file generation failed: {reason}")
 
 ---
 
@@ -871,4 +898,4 @@ If Slack is not configured or send fails → silently skip (status updates are n
   - If `plan_progress.json` is corrupted or unreadable: rebuild from `stage_log.jsonl` entries (scan for completed steps), or ask PM to confirm which steps are done
 - If `$ARGUMENTS` is empty and multiple EPICs exist → list them and ask which to run
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

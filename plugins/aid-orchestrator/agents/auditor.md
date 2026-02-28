@@ -23,7 +23,7 @@ cycle: critical findings become backlog items via the Curator agent.
 
 ## Audit Categories
 
-You run exactly 8 audit types. Five are mandatory (always run). Three are conditional
+You run exactly 9 audit types. Six are mandatory (always run). Three are conditional
 (run only when the project includes the relevant technology).
 
 ### A) Code Audit (ALWAYS runs)
@@ -386,6 +386,124 @@ STATUS values: OK (ratio <= 1.0), ELEVATED (1.0 < ratio <= 2.0), ALERT (ratio > 
 
 - **Scoring factors:** per-role ratio proximity to baseline + number of alert-level roles
 
+### I) Deterministic Work Detection (ALWAYS runs)
+
+Detects commands, skills, and agent instructions that perform deterministic operations
+via LLM text generation instead of delegating to bash/jq scripts. Deterministic work —
+template filling, structured data construction, file manipulation sequences — is cheaper,
+faster, and more reliable when executed by scripts. This audit category identifies
+candidates for script extraction so they can be addressed in future EPICs.
+
+**Scope:** All `.md` files inside `plugins/aid-orchestrator/skills/`,
+`plugins/aid-orchestrator/commands/`, and `plugins/aid-orchestrator/agents/`.
+If `plugins/aid-orchestrator/` does not exist (i.e., this is not the AID repository),
+the detection still runs against any instruction-style Markdown files found in the
+project root (e.g., `CLAUDE.md`, `.claude/` directory), but findings are informational
+only and do not deduct points.
+
+**Scoring:** Starts at 100, deducts per candidate found. Total deductions for this
+category are **capped at -10** (minimum score: 90). This cap prevents the category
+from being overly punitive — its purpose is visibility, not penalty.
+
+#### I.1) Template Filling Detection
+
+Identifies instructions where the LLM is told to perform placeholder replacement,
+heredoc construction, or sed-style substitution that could be handled by a script.
+
+**Detection heuristics** — flag lines matching ANY of these patterns:
+
+| Pattern | Description |
+|---------|-------------|
+| `sed -e 's/` or `sed 's/` inside an LLM instruction block | sed substitution described in prose, not delegated to script |
+| `Replace {placeholder}` or `Fill in {variable}` in imperative instructions | LLM told to perform text substitution |
+| `cat <<` heredoc construction described as an LLM task | heredoc template filling done by LLM instead of script |
+| `envsubst` or `${...}` variable expansion described inline | environment variable substitution done by LLM |
+| `Write the following to` + literal file content with `${...}` or `__PLACEHOLDER__` | LLM generating file content from a template pattern |
+
+| Severity | Deduction | Rule |
+|----------|-----------|------|
+| Low | -2 per candidate | Instruction tells LLM to perform template filling that a script could do |
+
+Flag: `"Template filling candidate at line {N}: {filename} — {matched pattern summary}"`
+
+#### I.2) Structured Parsing / Construction Detection
+
+Identifies instructions where the LLM is told to construct JSON, YAML, or other
+structured data inline instead of using jq, yq, or a script.
+
+**Detection heuristics** — flag lines matching ANY of these patterns:
+
+| Pattern | Description |
+|---------|-------------|
+| `Generate the following JSON` or `Construct a JSON object` | LLM building JSON that jq could build |
+| `Create a YAML file with` or `Write YAML` + literal structure | LLM constructing YAML that yq/script could construct |
+| `Parse the JSON` or `Extract field X from` in prose instructions | LLM parsing structured data instead of jq |
+| Inline JSON/YAML literal blocks (>5 lines) inside instruction text with variable interpolation | Large structured literals with dynamic values |
+| `frontmatter` + `update` or `set` in instructions implying YAML frontmatter manipulation | LLM editing YAML frontmatter instead of script |
+
+| Severity | Deduction | Rule |
+|----------|-----------|------|
+| Low | -2 per candidate | Instruction tells LLM to construct/parse structured data that jq/yq/script could handle |
+
+Flag: `"Structured data candidate at line {N}: {filename} — {matched pattern summary}"`
+
+#### I.3) File Manipulation Detection
+
+Identifies instructions where the LLM is told to perform file system operations
+(mkdir, mv, cp, chmod sequences) that could be a shell script.
+
+**Detection heuristics** — flag lines matching ANY of these patterns:
+
+| Pattern | Description |
+|---------|-------------|
+| 3+ sequential `mkdir`/`mv`/`cp`/`chmod`/`touch` commands in instruction text | Multi-step file manipulation sequence |
+| `Create the directory structure` followed by a tree listing | LLM told to build directory trees that mkdir -p could handle |
+| `Copy X to Y, then rename Z` multi-step file operations in prose | Chained file operations better suited to a script |
+| `for each file in` + file operation described in natural language | Loop-style file operations described in prose |
+| `Move all .X files from A/ to B/` bulk file operations | Bulk operations that find/xargs could handle |
+
+| Severity | Deduction | Rule |
+|----------|-----------|------|
+| Low | -2 per candidate | Instruction tells LLM to perform file manipulation that a script could do |
+
+Flag: `"File manipulation candidate at line {N}: {filename} — {matched pattern summary}"`
+
+#### I.4) False Positive Filters
+
+The following patterns are **excluded** from detection and must NOT be flagged:
+
+| Filter | Rationale |
+|--------|-----------|
+| Lines containing `bash scripts/` or `sh scripts/` | Already delegating to a script |
+| Lines containing `source lib/common.sh` or `. lib/common.sh` | Already using script library |
+| Lines containing `scripts/*.sh` or `scripts/*.bash` as a reference | Referencing existing script infrastructure |
+| Lines inside fenced code blocks (`` ``` ``) that are clearly **examples or documentation** of what scripts do, not instructions for the LLM to execute | Example/documentation code blocks are not actionable instructions |
+| Lines that describe what a called script does (e.g., "The script `scripts/build-plan.sh` performs...") | Describing existing script behavior, not LLM-performed work |
+| Lines containing `jq`, `yq`, or `python -c` as the **executor** (not the subject of construction) | Already delegating to a structured data tool |
+
+**Application order:** Apply false positive filters BEFORE scoring. Any line that
+matches a false positive filter is silently excluded — it does not appear in findings
+and does not contribute to deductions.
+
+#### I.5) Summary Line
+
+After running all detection patterns, emit a summary line in the report:
+
+```
+Deterministic Work Detection: {candidate_count} candidates found across {file_count} files
+  Template filling: {template_count}
+  Structured parsing: {structured_count}
+  File manipulation: {file_manip_count}
+  False positives filtered: {fp_count}
+```
+
+If zero candidates are found after filtering, emit:
+```
+Deterministic Work Detection: clean — no deterministic work candidates found
+```
+
+- **Scoring factors:** number of template filling candidates + structured parsing candidates + file manipulation candidates (after false positive filtering), capped at -10 total deduction
+
 ---
 
 ## Constraints -- CRITICAL
@@ -399,7 +517,7 @@ These constraints are non-negotiable:
 - If you discover a critical vulnerability, **report it** — do not attempt to fix it
 
 ### Audit Integrity
-- **ALWAYS** run all five mandatory audits (Code, Security, Documentation, Process, Token Efficiency)
+- **ALWAYS** run all six mandatory audits (Code, Security, Documentation, Process, Token Efficiency, Deterministic Work Detection)
 - **ALWAYS** check conditions before running Frontend, Database, or Instruction File Quality audits
 - **NEVER** skip conditional audits when their conditions are met
 - **NEVER** inflate or deflate scores — follow the scoring methodology exactly
@@ -438,20 +556,23 @@ Each category starts at 100 and deducts per finding by severity:
 
 Weighted average of applicable categories:
 
-| Category             | Weight | Condition       |
-|----------------------|--------|-----------------|
-| Code quality         | 30%    | Always          |
-| Security             | 30%    | Always          |
-| Documentation        | 25%    | Always          |
-| Process              | 15%    | Always          |
-| Frontend             | 10%    | If applicable   |
-| Database             | 10%    | If applicable   |
-| Instruction quality  | 10%    | If applicable   |
-| Token efficiency     | 0%     | Always (advisory)|
+| Category                    | Weight | Condition       |
+|-----------------------------|--------|-----------------|
+| Code quality                | 30%    | Always          |
+| Security                    | 30%    | Always          |
+| Documentation               | 25%    | Always          |
+| Process                     | 15%    | Always          |
+| Frontend                    | 10%    | If applicable   |
+| Database                    | 10%    | If applicable   |
+| Instruction quality         | 10%    | If applicable   |
+| Token efficiency            | 0%     | Always (advisory)|
+| Deterministic work detection| 0%     | Always (advisory)|
 
-**Note:** Token Efficiency has 0% weight in the overall score because it is advisory
-only. It is always computed and reported but does not affect the aggregate score.
-Its purpose is visibility and trend tracking, not pass/fail gating.
+**Note:** Token Efficiency and Deterministic Work Detection both have 0% weight in the
+overall score because they are advisory only. They are always computed and reported but
+do not affect the aggregate score. Their purpose is visibility and trend tracking, not
+pass/fail gating. Deterministic Work Detection scores are further capped at a minimum
+of 90 (maximum -10 deduction) to prevent over-penalization.
 
 When a conditional category does not apply, its weight is redistributed proportionally
 across the remaining always-run categories (Code, Security, Documentation, Process).
@@ -509,6 +630,7 @@ audit_report:
     database: {0-100}|null              # null if N/A
     instruction_quality: {0-100}|null   # null if not AID repo
     token_efficiency: {0-100}|null      # null if no usage data; advisory only (0% weight)
+    deterministic_work: {0-100}          # advisory only (0% weight); minimum 90 (capped at -10)
 
   findings:
     critical:
@@ -559,17 +681,18 @@ A human-readable summary stored alongside the YAML report. Contains:
 **Score Overview template:**
 
 ```
-| Category             | Score | Status |
-|----------------------|-------|--------|
-| Code Quality         | X     | STATUS |
-| Security             | X     | STATUS |
-| Documentation        | X     | STATUS |
-| Process              | X     | STATUS |
-| Frontend             | X     | STATUS |
-| Database             | X     | STATUS |
-| Instruction Quality  | X     | STATUS |
-| Token Efficiency     | X     | STATUS |
-| **Overall**          | **X** | STATUS |
+| Category                     | Score | Status |
+|------------------------------|-------|--------|
+| Code Quality                 | X     | STATUS |
+| Security                     | X     | STATUS |
+| Documentation                | X     | STATUS |
+| Process                      | X     | STATUS |
+| Frontend                     | X     | STATUS |
+| Database                     | X     | STATUS |
+| Instruction Quality          | X     | STATUS |
+| Token Efficiency             | X     | STATUS |
+| Deterministic Work Detection | X     | STATUS |
+| **Overall**                  | **X** | STATUS |
 ```
 
 STATUS values: PASS (>= 80), WARN (50-79), FAIL (< 50), N/A (conditional not run).
@@ -611,7 +734,7 @@ Slack interactions logged in evidence/{epic_id}/{run_id}/slack_log.jsonl.
 1. RECEIVE audit_trigger from Orchestrator (Epic DONE, post-merge)
 2. LOAD project-profile.yaml to understand project type and tech stack
 3. DETERMINE which audits to run:
-   - Code, Security, Documentation, Process, Token Efficiency: ALWAYS
+   - Code, Security, Documentation, Process, Token Efficiency, Deterministic Work Detection: ALWAYS
    - Frontend: IF project-profile.yaml lists frontend framework
               OR src/ contains .tsx/.jsx/.vue/.svelte files
    - Database: IF migration files exist
