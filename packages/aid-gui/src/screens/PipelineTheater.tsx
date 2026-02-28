@@ -1325,9 +1325,9 @@ export const PipelineTheater: React.FC = () => {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="h-full flex flex-col p-8 relative">
+    <div className="h-full flex flex-col p-4 md:p-6 relative overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 shrink-0 flex-wrap gap-2">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Pipeline Theater</h2>
           <p className="text-sm text-white/40">
@@ -1396,7 +1396,7 @@ export const PipelineTheater: React.FC = () => {
       </div>
 
       {/* EPIC/Run selector */}
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex items-center gap-3 mb-3 shrink-0 flex-wrap">
         <div className="relative">
           <button
             onClick={() => setSelectorOpen(!selectorOpen)}
@@ -1502,7 +1502,7 @@ export const PipelineTheater: React.FC = () => {
       {/* SVG Timeline Visualization */}
       <div
         ref={timelineContainerRef}
-        className="flex-1 overflow-x-auto overflow-y-auto relative bg-white/[0.02] border border-white/5 rounded-xl min-h-[200px]"
+        className="flex-1 overflow-x-auto overflow-y-auto relative bg-white/[0.02] border border-white/5 rounded-xl min-h-[120px] max-h-[50vh]"
       >
         {/* Loading skeleton */}
         {isLoading && !hasSteps && !isViewingTheater && (
@@ -1582,7 +1582,7 @@ export const PipelineTheater: React.FC = () => {
       </AnimatePresence>
 
       {/* Controls Bar */}
-      <div className="mt-3 bg-surface-1/50 backdrop-blur-xl border border-white/5 rounded-2xl p-4 flex items-center gap-6">
+      <div className="mt-3 shrink-0 bg-surface-1/50 backdrop-blur-xl border border-white/5 rounded-2xl p-3 md:p-4 flex items-center gap-4 md:gap-6 overflow-x-auto">
         {/* Transport Controls */}
         <div className="flex items-center gap-2">
           <button

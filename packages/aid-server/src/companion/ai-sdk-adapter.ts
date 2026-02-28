@@ -21,7 +21,7 @@ import type {
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_MODEL = 'sonnet';
 
 // ---------------------------------------------------------------------------
 // AiSdkAdapter
@@ -137,8 +137,30 @@ export class AiSdkAdapter implements CompanionService {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await this.importAi();
+      const { generateText } = await this.importAi();
       await this.importProvider();
+      const model = await this.createModel();
+
+      // Do a lightweight probe to verify auth works end-to-end.
+      // The ai-sdk-provider-claude-code returns "Not logged in · Please run
+      // /login" as regular text (not an error) when credentials are missing.
+      // Wrap in a 5-second timeout to prevent hanging when the provider
+      // cannot reach Claude (e.g. Docker without authentication).
+      const probe = await Promise.race([
+        (generateText as Function)({
+          model,
+          prompt: 'ping',
+          maxTokens: 10,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('probe timeout')), 5_000),
+        ),
+      ]);
+      const text: string = (probe as AiGenerateResult)?.text ?? '';
+      if (text.includes('Not logged in') || text.includes('/login')) {
+        return false;
+      }
+
       return true;
     } catch {
       return false;

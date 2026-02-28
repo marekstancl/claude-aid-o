@@ -18,7 +18,7 @@ export function loadConfig(): ServerConfig {
     port: parseInt(process.env.AID_PORT ?? '9911', 10),
     host: process.env.AID_HOST ?? '0.0.0.0',
     projectRoot: process.env.AID_PROJECT_ROOT ?? process.cwd(),
-    corsOrigins: (process.env.AID_CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3000').split(','),
+    corsOrigins: (process.env.AID_CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:3000,http://localhost:9911').split(','),
     wsHeartbeatInterval: 30_000,
     wsIdleTimeout: 90_000,
   };

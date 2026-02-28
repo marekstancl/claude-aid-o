@@ -22,6 +22,9 @@ services:
       - .:/project:ro
       # Mount .aid-o/ read-write for ideas, decisions, schedule writes
       - ./.aid-o:/project/.aid-o
+      # Mount Claude credentials for AI Companion (AI SDK + CLI fallback)
+      # Read-write needed: Agent SDK writes debug logs to ~/.claude/debug/
+      - ${HOME}/.claude:/root/.claude
     environment:
       - AID_PORT=9911
       - AID_HOST=0.0.0.0
@@ -29,7 +32,7 @@ services:
       - AID_CORS_ORIGINS=*
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9911/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9911/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3

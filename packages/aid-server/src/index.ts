@@ -70,8 +70,10 @@ const guiCandidates = [
   join(import.meta.dirname, '..', '..', 'aid-gui', 'dist'), // Local dev (from src/)
 ];
 const guiDistPath = guiCandidates.find((p) => existsSync(p)) ?? guiCandidates[1];
-app.use(express.static(guiDistPath));
+// Hashed assets are long-cached; index.html must always be revalidated.
+app.use(express.static(guiDistPath, { maxAge: '7d', immutable: true, index: false }));
 app.get('*', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(join(guiDistPath, 'index.html'), (err) => {
     if (err) res.status(404).json({ error: 'GUI not built. Run: cd packages/aid-gui && npm run build' });
   });

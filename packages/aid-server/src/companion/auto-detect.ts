@@ -156,11 +156,12 @@ export async function detectAdapter(
     new StubAdapter(),
   ];
 
+  const t0 = Date.now();
   for (const candidate of candidates) {
     try {
       const ok = await candidate.isAvailable();
       if (ok) {
-        console.log(`[companion] Auto-detected adapter: ${candidate.name}`);
+        console.log(`[companion] Auto-detected adapter: ${candidate.name} (${Date.now() - t0}ms)`);
         return candidate;
       }
     } catch {

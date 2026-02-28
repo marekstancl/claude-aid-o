@@ -12,7 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ListOrdered,
-  Menu
+  Menu,
+  Layers,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore } from '../store';
@@ -28,6 +29,7 @@ const navItems = [
   { icon: GitBranch, label: 'Pipeline Theater', path: '/pipeline' },
   { icon: Activity, label: 'Activity Stream', path: '/activity' },
   { icon: Gavel, label: 'Decision Hub', path: '/decisions' },
+  { icon: Layers, label: 'EPIC Lifecycle', path: '/epics' },
   { icon: Archive, label: 'Evidence Vault', path: '/evidence' },
   { icon: HeartPulse, label: 'Health Observatory', path: '/health' },
   { icon: Lightbulb, label: 'Ideas to Execution', path: '/ideas' },
@@ -164,7 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggle, isMobil
             {!isCollapsed && (
               <div className="flex flex-col min-w-0">
                 <span className="text-xs font-medium truncate">Admin User</span>
-                <span className="text-[10px] text-white/40 truncate">v1.0.0-beta</span>
+                <span className="text-[10px] text-white/40 truncate">v1.4.0</span>
               </div>
             )}
           </div>

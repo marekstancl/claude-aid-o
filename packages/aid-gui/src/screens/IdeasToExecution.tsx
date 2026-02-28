@@ -13,6 +13,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
@@ -87,6 +88,30 @@ function columnToApiStatus(columnId: ColumnId): StoredIdea['status'] {
 }
 
 // ---------------------------------------------------------------------------
+// Droppable column wrapper — enables drops on empty columns
+// ---------------------------------------------------------------------------
+
+interface DroppableColumnProps {
+  id: string;
+  children: React.ReactNode;
+}
+
+const DroppableColumn: React.FC<DroppableColumnProps> = ({ id, children }) => {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "flex-1 space-y-3 p-2 bg-white/[0.02] rounded-2xl border overflow-y-auto custom-scrollbar min-h-[100px] transition-colors",
+        isOver ? "border-state-executing/30 bg-state-executing/5" : "border-white/5",
+      )}
+    >
+      {children}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Sortable card component
 // ---------------------------------------------------------------------------
 
@@ -94,6 +119,7 @@ interface SortableCardProps {
   idea: StoredIdea;
   onDelete: (id: string) => void;
   onLinkEpic: (id: string) => void;
+  onCardClick: (idea: StoredIdea) => void;
   /** When true, render a selection checkbox (Ideas column only). */
   showCheckbox?: boolean;
   /** Whether this card is currently selected. */
@@ -104,7 +130,7 @@ interface SortableCardProps {
   isBuilding?: boolean;
 }
 
-const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic, showCheckbox, isSelected, onToggleSelect, isBuilding }) => {
+const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic, onCardClick, showCheckbox, isSelected, onToggleSelect, isBuilding }) => {
   const {
     attributes,
     listeners,
@@ -113,6 +139,8 @@ const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic,
     transition,
     isDragging,
   } = useSortable({ id: idea.id, data: { type: 'idea', idea } });
+
+  const dragStartPos = useRef<{ x: number; y: number } | null>(null);
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -126,6 +154,20 @@ const SortableCard: React.FC<SortableCardProps> = ({ idea, onDelete, onLinkEpic,
       style={style}
       {...attributes}
       {...listeners}
+      onPointerDown={(e) => {
+        dragStartPos.current = { x: e.clientX, y: e.clientY };
+        listeners?.onPointerDown?.(e as any);
+      }}
+      onClick={(e) => {
+        // Only open detail if this wasn't a drag (distance < activation threshold)
+        if (dragStartPos.current) {
+          const dx = Math.abs(e.clientX - dragStartPos.current.x);
+          const dy = Math.abs(e.clientY - dragStartPos.current.y);
+          if (dx < 5 && dy < 5) {
+            onCardClick(idea);
+          }
+        }
+      }}
       className={cn(
         "glass p-4 rounded-xl border cursor-grab active:cursor-grabbing group hover:bg-white/[0.05] transition-colors",
         isSelected ? "border-state-executing/40 bg-state-executing/5" : "border-white/5",
@@ -335,6 +377,7 @@ export const IdeasToExecution: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedIdeaIds, setSelectedIdeaIds] = useState<Set<string>>(new Set());
+  const [detailIdea, setDetailIdea] = useState<StoredIdea | null>(null);
   const [buildingIds, setBuildingIds] = useState<Set<string>>(new Set());
   const buildingTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -713,16 +756,14 @@ export const IdeasToExecution: React.FC = () => {
                     strategy={verticalListSortingStrategy}
                     id={col.id}
                   >
-                    <div
-                      className="flex-1 space-y-3 p-2 bg-white/[0.02] rounded-2xl border border-white/5 overflow-y-auto custom-scrollbar min-h-[100px]"
-                      data-column-id={col.id}
-                    >
+                    <DroppableColumn id={col.id}>
                       {columnIdeas.map(idea => (
                         <SortableCard
                           key={idea.id}
                           idea={idea}
                           onDelete={handleDelete}
                           onLinkEpic={handleLinkEpic}
+                          onCardClick={setDetailIdea}
                           showCheckbox={isIdeasColumn}
                           isSelected={selectedIdeaIds.has(idea.id)}
                           onToggleSelect={handleToggleSelect}
@@ -745,7 +786,7 @@ export const IdeasToExecution: React.FC = () => {
                           + Add Idea
                         </button>
                       )}
-                    </div>
+                    </DroppableColumn>
                   </SortableContext>
                 </div>
               );
@@ -800,6 +841,141 @@ export const IdeasToExecution: React.FC = () => {
             onSubmit={handleQuickCapture}
             onClose={() => setShowCapture(false)}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Idea Detail Panel — slide-over overlay */}
+      <AnimatePresence>
+        {detailIdea && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm"
+            onClick={() => setDetailIdea(null)}
+          >
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md h-full bg-surface-1 border-l border-white/10 shadow-2xl overflow-y-auto"
+            >
+              <div className="p-6 space-y-6">
+                {/* Header */}
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 mr-4">
+                    <h3 className="text-lg font-bold leading-tight">{detailIdea.title}</h3>
+                    <p className="text-xs text-white/40 mt-1 font-mono">{detailIdea.id}</p>
+                  </div>
+                  <button
+                    onClick={() => setDetailIdea(null)}
+                    className="p-1.5 hover:bg-white/10 rounded-lg text-white/40 hover:text-white transition-colors shrink-0"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Status & Priority */}
+                <div className="flex items-center gap-3">
+                  <span className={cn(
+                    "text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg",
+                    resolveColumn(detailIdea) === 'ideas' ? "bg-white/10 text-white/60"
+                      : resolveColumn(detailIdea) === 'plan' ? "bg-state-plan-review/20 text-state-plan-review"
+                      : resolveColumn(detailIdea) === 'epic' ? "bg-state-executing/20 text-state-executing"
+                      : resolveColumn(detailIdea) === 'running' ? "bg-yellow-500/20 text-yellow-400"
+                      : "bg-green-500/20 text-green-400",
+                  )}>
+                    {resolveColumn(detailIdea)}
+                  </span>
+                  <span className={cn(
+                    "text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg",
+                    detailIdea.priority === 'high' ? "bg-state-error/20 text-state-error"
+                      : detailIdea.priority === 'medium' ? "bg-state-plan-review/20 text-state-plan-review"
+                      : "bg-white/10 text-white/40",
+                  )}>
+                    {detailIdea.priority}
+                  </span>
+                </div>
+
+                {/* Description */}
+                {detailIdea.description && (
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 block mb-2">Description</label>
+                    <p className="text-sm text-white/70 leading-relaxed">{detailIdea.description}</p>
+                  </div>
+                )}
+
+                {/* Tags */}
+                {detailIdea.tags.length > 0 && (
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 block mb-2">Tags</label>
+                    <div className="flex flex-wrap gap-2">
+                      {detailIdea.tags.map(tag => (
+                        <span key={tag} className="text-xs font-mono bg-white/5 border border-white/10 px-2.5 py-1 rounded-lg text-white/50">
+                          {tag.startsWith('#') ? tag : `#${tag}`}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Linked Artifacts */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 block mb-2">Linked Artifacts</label>
+                  <div className="space-y-2">
+                    {detailIdea.linkedPlan && (
+                      <div className="flex items-center gap-2 text-sm text-state-plan-review bg-state-plan-review/10 px-3 py-2 rounded-lg">
+                        <Link size={14} />
+                        <span className="font-mono text-xs">{detailIdea.linkedPlan}</span>
+                      </div>
+                    )}
+                    {detailIdea.linkedEpic && (
+                      <div className="flex items-center gap-2 text-sm text-state-executing bg-state-executing/10 px-3 py-2 rounded-lg">
+                        <Rocket size={14} />
+                        <span className="font-mono text-xs">{detailIdea.linkedEpic}</span>
+                      </div>
+                    )}
+                    {!detailIdea.linkedPlan && !detailIdea.linkedEpic && (
+                      <p className="text-xs text-white/20 italic">No linked artifacts</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Timestamps */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-white/40 block mb-2">Timeline</label>
+                  <div className="space-y-1.5 text-xs text-white/40 font-mono">
+                    <div className="flex justify-between">
+                      <span>Created</span>
+                      <span>{new Date(detailIdea.createdAt).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Updated</span>
+                      <span>{new Date(detailIdea.updatedAt).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-4 border-t border-white/5">
+                  <button
+                    onClick={() => { handleLinkEpic(detailIdea.id); }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-state-executing/10 text-state-executing border border-state-executing/20 rounded-xl text-xs font-bold hover:bg-state-executing/20 transition-colors"
+                  >
+                    <Rocket size={14} /> Link EPIC
+                  </button>
+                  <button
+                    onClick={() => { handleDelete(detailIdea.id); setDetailIdea(null); }}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-state-error/10 text-state-error border border-state-error/20 rounded-xl text-xs font-bold hover:bg-state-error/20 transition-colors"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

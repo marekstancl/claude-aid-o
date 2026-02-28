@@ -14,6 +14,7 @@ import { HealthObservatory } from './screens/HealthObservatory';
 import { IdeasToExecution } from './screens/IdeasToExecution';
 import { QueueScheduler } from './screens/QueueScheduler';
 import { KnowledgeBase } from './screens/KnowledgeBase';
+import { EpicLifecycle } from './screens/EpicLifecycle';
 
 import { useNavigate } from 'react-router';
 import { AICompanion } from './components/AICompanion';
@@ -141,6 +142,7 @@ export default function App() {
                 <Route path="/pipeline" element={<ErrorBoundary><PageWrapper><PipelineTheater /></PageWrapper></ErrorBoundary>} />
                 <Route path="/activity" element={<ErrorBoundary><PageWrapper><ActivityStream /></PageWrapper></ErrorBoundary>} />
                 <Route path="/decisions" element={<ErrorBoundary><PageWrapper><DecisionHub /></PageWrapper></ErrorBoundary>} />
+                <Route path="/epics" element={<ErrorBoundary><PageWrapper><EpicLifecycle /></PageWrapper></ErrorBoundary>} />
                 <Route path="/evidence" element={<ErrorBoundary><PageWrapper><EvidenceVault /></PageWrapper></ErrorBoundary>} />
                 <Route path="/health" element={<ErrorBoundary><PageWrapper><HealthObservatory /></PageWrapper></ErrorBoundary>} />
                 <Route path="/ideas" element={<ErrorBoundary><PageWrapper><IdeasToExecution /></PageWrapper></ErrorBoundary>} />
@@ -151,7 +153,9 @@ export default function App() {
           </main>
         </div>
 
-        <AICompanion isOpen={isCompanionOpen} onClose={() => setCompanionOpen(false)} />
+        <ErrorBoundary>
+          <AICompanion isOpen={isCompanionOpen} onClose={() => setCompanionOpen(false)} />
+        </ErrorBoundary>
       </div>
     </ToastProvider>
   );
