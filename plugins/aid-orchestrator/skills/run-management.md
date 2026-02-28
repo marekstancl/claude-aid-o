@@ -148,6 +148,9 @@ Testing/QA only? → Verification run
       - Location: `{project.paths.runs_active}/`
       - Naming: `{id}-{topic}.md` (e.g., `R-005-1_4-1-gui-foundation.md`)
       - Template: `{project.paths.templates}/run-{type}.md`
+      - **EPIC runs:** When an EPIC is being executed, the run file is pre-created by
+        `plugins/aid-orchestrator/scripts/aid-json-to-run.sh` during the `/aid-plan-epic`
+        pipeline. The Controller reads this pre-existing run file rather than creating one.
    e. Fill run file with DETAILED plan — objectives, approach, affected files, risks
    f. If epic run: reference epic file, note which run # this is, review what previous runs accomplished
    g. Ask PM for approval to proceed
@@ -579,7 +582,8 @@ Standard `.aid-o/` paths (created by `/aid-init`):
 | documentation-protocol | Doc updates in work loop, same-commit principle |
 | debugging | Bug triage and fix workflows (3 modes) |
 | project-context-detection | Auto-detects project architecture at first run |
+| aid-json-to-run.sh | Script that generates run files from plan.json for EPIC runs (invoked by `/aid-plan-epic` pipeline) |
 
 ---
 
-**Last Updated:** 2026-02-23
+**Last Updated:** 2026-02-28

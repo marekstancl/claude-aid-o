@@ -537,7 +537,10 @@ What's next?
 ```
 
 **Option A — Create EPIC:**
-Suggest running `/aid-plan-epic .aid-o/01-plans/{plan_id}-{topic}.md`. This command creates a proper EPIC and generates the execution plan (Plan JSON + Run file).
+Suggest running `/aid-plan-epic .aid-o/01-plans/{plan_id}-{topic}.md`. This command
+runs the `aid-auto-pipeline.sh` script which creates all artifacts deterministically:
+EPIC files (one per phase), plan.json, run.md, and queue entries. The LLM's role is
+PM dialog and validation — the script handles all file creation.
 
 **Option B — Review plan:**
 PM reviews the plan file, makes edits if needed, then runs `/aid-plan-epic` when ready.
@@ -551,7 +554,9 @@ If invoked standalone (Mode B), suggest `/aid-brainstorm` to explore alternative
 ```
 Plan written. When ready:
   1. Run /aid-plan-epic {plan_path} to create EPIC and execution plan
+     (pipeline scripts generate all artifacts: EPIC files, plan.json, run.md, queue)
   2. Run /aid-run-epic to start orchestration
+     (requires plan.json to already exist — created in step 1)
 ```
 
 ---
@@ -562,11 +567,12 @@ Plan written. When ready:
 - `commands/aid-brainstorm.md` — brainstorming command that delegates Step 8 to this skill
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
 - `skills/dispatch-protocol.md` — agent dispatch (downstream — injects plan sections into agent prompts)
-- `commands/aid-plan-epic.md` — plan-to-EPIC conversion (downstream — reads plan to generate EPIC)
+- `commands/aid-plan-epic.md` — plan-to-EPIC conversion (downstream — reads plan and delegates to `aid-auto-pipeline.sh` for all artifact generation)
+- `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)
 - `.aid-o/03-config/language.yaml` — document language configuration
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

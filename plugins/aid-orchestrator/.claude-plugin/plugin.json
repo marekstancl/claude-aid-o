@@ -1,6 +1,6 @@
 {
   "name": "aid-orchestrator",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "AID — AI Development Orchestrator. Controller + Workers architecture for multi-agent software development. Takes an EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
   "author": {
     "name": "Marek Stancl"

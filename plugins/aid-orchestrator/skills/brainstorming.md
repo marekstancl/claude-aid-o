@@ -291,6 +291,9 @@ RULE 6: PLAN-WRITING DELEGATION (Step 8) — When brainstorming reaches Step 8:
         discussions and the written plan document.
 RULE 7: Brainstorming does NOT create EPICs. EPIC creation is handled by
         /aid-plan-epic, offered as an option in plan-writing's Post-Write Handoff.
+        As of Plan P018, /aid-plan-epic delegates EPIC file creation to the
+        `aid-plan-to-epic.sh` script — the LLM does not generate EPIC content
+        inline. The script reads the plan document and writes EPIC files deterministically.
 ```
 
 ---
@@ -417,6 +420,9 @@ After brainstorming completes, the plan-writing skill presents next steps:
 ```
 
 `/aid-plan-epic` accepts Plan files directly — no separate EPIC authoring needed.
+The command runs the `aid-auto-pipeline.sh` script which creates all artifacts:
+EPIC files, plan.json, run.md, and queue entries — all deterministically from
+the plan document without requiring LLM involvement in the file creation steps.
 
 ---
 
@@ -554,7 +560,9 @@ Reference: skills/brainstorming-workflow.md + skills/workflow-intelligence.md fo
 - `commands/aid-brainstorm.md` — command that invokes this skill (8-step flow)
 - `skills/plan-writing.md` — plan writing skill (Step 8 delegation — writes exhaustive plan document, presents next steps)
 - `commands/aid-write-plan.md` — standalone plan writing command
-- `commands/aid-plan-epic.md` — next step: create EPIC from plan (offered by plan-writing handoff)
+- `commands/aid-plan-epic.md` — next step: create EPIC from plan (offered by plan-writing handoff); delegates to `aid-auto-pipeline.sh` for all file creation
+- `plugins/aid-orchestrator/scripts/aid-plan-to-epic.sh` — script that converts plan documents into EPIC files (invoked by `/aid-plan-epic`)
+- `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — orchestrates the full pipeline: Plan.md → EPIC.md → plan.json → run.md → queue
 - `defaults/templates/plan.md` — base plan document template (extended by plan-writing skill)
 - `skills/planner.md` — how plans become Plan JSON (downstream from brainstorming)
 - `skills/run-management.md` — End of Brainstorming Protocol (lifecycle integration)
@@ -564,4 +572,4 @@ Reference: skills/brainstorming-workflow.md + skills/workflow-intelligence.md fo
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

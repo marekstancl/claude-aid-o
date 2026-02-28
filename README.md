@@ -131,9 +131,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.5.0** (current) — Token efficiency: model tiering, selective context injection, dispatch prompt trimming, usage tracking, efficiency audit
+- **v1.6.0** (current) — Script-based pipeline: 5 bash scripts replacing LLM-driven deterministic operations, command rewrites, Deterministic Work Detection audit, 76-test suite
+- **v1.5.0** — Token efficiency: model tiering, selective context injection, dispatch prompt trimming, usage tracking, efficiency audit
 - **v1.4.0** — GUI Dashboard: Ideas-to-Execution Kanban, AI Companion Chat, Evidence Vault full-text search, Pipeline Theater SVG timeline, Decision Hub notifications, 1014 tests
-- **v1.3.1** — Audit-driven fixes: Curator evidence path bug, broken cross-ref, Czech→English translations, stale template references
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

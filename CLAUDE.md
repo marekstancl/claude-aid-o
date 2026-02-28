@@ -15,6 +15,13 @@ ai-orchestrator/
     agents/                     # 18 specialized agents
     commands/                   # 14 slash commands (verify: ls commands/*.md | wc -l)
     skills/                     # 27 skills (verify: ls skills/*.md | wc -l)
+    scripts/                    # Pipeline scripts for deterministic plan-to-EPIC transformations
+      aid-auto-pipeline.sh      # Master orchestration script (Plan → EPICs → plan.json → run → queue)
+      aid-plan-to-epic.sh       # Plan.md → EPIC.md
+      aid-epic-to-json.sh       # EPIC.md → plan.json + plan_progress.json
+      aid-json-to-run.sh        # plan.json → run.md
+      aid-queue-add.sh          # EPIC → epic-queue.yaml entry
+      lib/common.sh             # Shared bash functions
     defaults/                   # Files copied by /aid-init into target projects
       policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
       templates/                # plan.md, epic.md, plan.schema.json, run-*.md
@@ -55,7 +62,7 @@ When users run `/aid-init`, it creates:
 | `/aid-init` | Initialize or upgrade .aid-o/ workspace |
 | `/aid-setup` | Interactive project onboarding |
 | `/aid-help` | Show AID documentation |
-| `/aid-plan-epic` | Parse EPIC or Plan → generate Plan JSON |
+| `/aid-plan-epic` | Parse Plan → EPICs, Plan JSON, run files, queue entries (script-based pipeline) |
 | `/aid-run-epic` | Run full EPIC orchestration pipeline |
 | `/aid-epic-status` | Show pipeline status |
 | `/aid-epic-queue` | Manage EPIC execution queue |
