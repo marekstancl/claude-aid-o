@@ -40,10 +40,9 @@ The Controller follows this high-level sequence when processing an EPIC:
    → Probe memory system
    → See: skills/epic-state-machine.md Section "1. IDLE → PLANNING"
 
-2. GENERATE PLAN
-   → Analyze EPIC → roles, dependency graph, parallel groups
-   → Generate Plan JSON + run file
-   → Validate against schema and quality checks
+2. LOAD PLAN (formerly: GENERATE PLAN)
+   → plan.json and run.md are pre-created by `/aid-plan-epic` (via pipeline scripts)
+   → PLANNING state validates and loads these artifacts, not generates them inline
    → See: skills/epic-state-machine.md Section "2. PLANNING"
 
 3. REVIEW PLAN
@@ -107,7 +106,8 @@ The Controller follows this high-level sequence when processing an EPIC:
 
 ## Configuration References
 
-- **Planner:** `skills/planner.md` — dependency graph, parallel groups, analysis groups generation
+- **Planner:** `skills/planner.md` — dependency graph, parallel groups, analysis groups generation (implemented by `plugins/aid-orchestrator/scripts/aid-epic-to-json.sh`)
+- **Pipeline scripts:** `plugins/aid-orchestrator/scripts/` — `aid-auto-pipeline.sh` orchestrates Plan→EPIC→plan.json→run.md→queue; plan.json and run.md are expected to pre-exist when `/aid-run-epic` is invoked
 - **Parallel dispatch:** `skills/parallel-dispatch.md` — branch strategy, dispatch protocol, conflict detection
 - **Analysis merge:** `skills/analysis-merge.md` — merge strategies (union, consensus, weighted)
 - **PM communication:** `skills/slack-mcp.md` — Slack MCP protocol, message types, fallback
