@@ -7,7 +7,7 @@
 
 ## Overview
 
-This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, branch management, orchestration logging, and token usage tracking.
+This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, selective context injection, trimmed EPIC context protocol, branch management, orchestration logging, and token usage tracking.
 
 For the FSM states that trigger dispatch, **see:** `skills/epic-state-machine.md`
 For quality gate evaluation after dispatch, **see:** `skills/gate-evaluation.md`
@@ -47,14 +47,157 @@ default to `aspirin` preset behavior.
 1. Load playbook: .aid-o/03-config/playbooks/{role}.md
 2. Build prompt:
    - System: playbook content
-   - Context: EPIC goal + scope + constraints
+   - Context: EPIC goal (first sentence only) + step-level constraints
    - Task: plan step objective + inputs + outputs
-   - Previous outputs: evidence from dependency steps
-   - Constraints: allowed_paths, forbidden_paths
-3. Dispatch via Task tool (subagent_type matching role or general-purpose)
-4. Collect output
-5. Save to .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/
+   - Previous outputs: evidence from dependency steps (per context scope)
+   - Knowledge + memory context (per context scope)
+   - Scope: step.allowed_paths, step.forbidden_paths (from plan.json)
+   - Acceptance: step.acceptance_criteria only (not all EPIC ACs)
+3. Resolve model tier (see Model Tier Resolution below)
+4. Resolve context scope (see Context Scope Resolution below)
+5. Dispatch via Task tool with model parameter (subagent_type matching role or general-purpose)
+6. Collect output
+7. Save to .aid-o/04-engine/evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/
 ```
+
+### Model Tier Resolution — Fallback Chain
+
+Before dispatching any agent, resolve the model tier to pass as the `model` parameter
+on the Task tool call. The Task tool accepts `model` values: `sonnet`, `opus`, `haiku`.
+
+```
+RESOLVE model tier for step:
+
+1. Check step.model in plan.json:
+   → If step.model is present and non-null (e.g., "sonnet"):
+     model = step.model
+     DONE
+
+2. If step.model is missing or null:
+   → Read dispatch-config.yaml → role_assignments[step.role]
+   → If role found (e.g., role_assignments.backend = "opus"):
+     model = role_assignments[step.role]
+     DONE
+
+3. If dispatch-config.yaml is missing/unreadable OR step.role not in role_assignments:
+   → model = "opus"   (default — matches pre-tiering behavior)
+   DONE
+```
+
+**Backward compatibility:** Old plan.json files without a `model` field on steps
+fall through to level 2 (dispatch-config.yaml) or level 3 (default "opus"). This
+produces identical behavior to the pre-tiering pipeline where all agents used opus.
+
+### Context Scope Resolution
+
+Before assembling the dispatch prompt, resolve which context sources to include.
+The `context_scope` field on plan.json steps controls selective context injection.
+When the field is absent (old plan.json files), all context is injected — preserving
+full backward compatibility.
+
+```
+RESOLVE context scope for step:
+
+1. Read step.context_scope from plan.json:
+
+   IF step.context_scope is missing or null:
+     → Use defaults: knowledge = true, memory = true, previous_outputs = "all"
+     → DONE (backward compatible — identical to pre-context-scope behavior)
+
+2. Resolve knowledge injection:
+   IF step.context_scope.knowledge === false:
+     → resolved_context.knowledge = false   (SKIP knowledge base injection)
+   ELSE (field is true, missing, or null):
+     → resolved_context.knowledge = true    (inject knowledge as before)
+
+3. Resolve memory/Qdrant injection:
+   IF step.context_scope.memory === false:
+     → resolved_context.memory = false      (SKIP Qdrant memory search)
+   ELSE (field is true, missing, or null):
+     → resolved_context.memory = true       (search Qdrant as before)
+
+4. Resolve previous step outputs injection:
+   IF step.context_scope.previous_outputs is present:
+     → "all":    include ALL prior step outputs (current behavior)
+     → "direct": include ONLY outputs from steps listed in
+                 dependencies[].before where after == current step ID
+     → "none":   include NO previous step outputs
+     → resolved_context.previous_outputs = "{value used}"
+   ELSE (field is missing or null):
+     → resolved_context.previous_outputs = "all"  (backward compatible)
+```
+
+**Backward compatibility:** When `step.context_scope` is entirely absent (old
+plan.json files), all three sub-fields default to their permissive values
+(`knowledge: true`, `memory: true`, `previous_outputs: "all"`). This produces
+identical behavior to the pre-context-scope pipeline where all context was
+injected unconditionally.
+
+### Trimmed EPIC Context Protocol
+
+When assembling the dispatch prompt, do NOT inject the full EPIC markdown content.
+Instead, extract only the fields the agent needs for its specific step. This reduces
+prompt size and prevents agents from being distracted by unrelated EPIC sections
+(e.g., steps belonging to other agents, full artifact lists, EPIC-level scope that
+differs from step-level scope).
+
+```
+ASSEMBLE trimmed EPIC context for step:
+
+1. Read the EPIC file (already loaded during IDLE state)
+
+2. Extract EPIC goal — FIRST SENTENCE ONLY:
+   → Find the ## Goal section in the EPIC markdown
+   → Take the first sentence (up to and including the first period)
+   → This becomes epic_goal_summary (one line, not the full section)
+
+3. Extract step-level paths from plan.json (NOT from EPIC ## Scope):
+   → allowed_paths = step.allowed_paths from plan.json
+   → forbidden_paths = step.forbidden_paths from plan.json
+   → These are step-specific and may differ from EPIC-level scope
+
+4. Extract relevant constraints:
+   → Read ## Constraints section from EPIC (if present)
+   → Include constraints that apply to ALL agents (e.g., language, framework,
+     coding standards, security requirements)
+   → Exclude constraints that are step-specific to OTHER steps
+
+5. Extract step acceptance criteria from plan.json:
+   → acceptance_criteria = step.acceptance_criteria from plan.json
+   → Do NOT include acceptance criteria from other steps or EPIC-level ACs
+
+6. Build the trimmed context block:
+
+   EPIC CONTEXT:
+   Goal: {epic_goal_summary}
+   Allowed paths: {step.allowed_paths}
+   Forbidden paths: {step.forbidden_paths}
+   Constraints: {relevant constraints from EPIC}
+   Your acceptance criteria: {step.acceptance_criteria}
+```
+
+**What is excluded from the trimmed context:**
+- Full EPIC ## Goal section (only first sentence is kept)
+- EPIC ## Scope section (step-level paths from plan.json are used instead)
+- EPIC ## Artifacts section (agents learn their outputs from plan step definition)
+- EPIC ## Steps section (agents only need their own step, not the full step list)
+- EPIC ## Acceptance Criteria section (step-level ACs from plan.json are used instead)
+- EPIC frontmatter fields (epic_id, plan_ref, etc. are injected separately where needed)
+
+**What is NOT affected by this trimming:**
+- Source Plan Integration (plan_ref injection) — handled separately by the
+  Source Plan Integration protocol below. plan_ref resolution continues to read
+  the EPIC frontmatter directly; it is NOT part of the EPIC context block.
+- Previous step outputs — handled by Context Scope Resolution above
+- Memory and knowledge context — handled by Context Scope Resolution above
+- The `## EPIC Goal` block in the dispatch prompt template (in `commands/aid-run-epic.md`)
+  now receives `epic_goal_summary` (first sentence) instead of the full goal section
+
+**Backward compatibility:** This is a prompt optimization, not a behavioral change.
+Agents receive the same constraints and acceptance criteria they always did — the
+difference is that irrelevant EPIC sections are no longer included. Old plan.json
+files without `acceptance_criteria` on steps will produce an empty AC field in the
+trimmed context; the agent still receives its task definition from the plan step.
 
 **Detailed EXECUTING Actions (sequential step):**
 
@@ -62,7 +205,12 @@ default to `aspirin` preset behavior.
 2. For sequential step:
    a. Create branch: `epic/{epic_id}/step_{N}_{role}` from `epic/{epic_id}/main`
    b. Load role playbook from `.aid-o/03-config/playbooks/{role}.md`
-   c. **Resolve plan_ref and load source plan detail** (see **Source Plan Integration** below):
+   c. **Resolve model tier** (per Model Tier Resolution above):
+      1. If `step.model` is present and non-null in plan.json → use it
+      2. Else read `dispatch-config.yaml` → `role_assignments[step.role]` → use it
+      3. Else default to `"opus"`
+      Store resolved model for use in Task tool call (step 2e)
+   d. **Resolve plan_ref and load source plan detail** (see **Source Plan Integration** below):
       1. Read EPIC frontmatter → extract `plan_ref` field
       2. If `plan_ref` is set and not null:
          - Resolve plan file path (relative paths resolve against `.aid-o/01-plans/`)
@@ -72,28 +220,46 @@ default to `aspirin` preset behavior.
       3. If `plan_ref` is null or missing:
          - Check `plan.json` → `source_plan` field as fallback
          - If `source_plan` is also null or file unreadable → skip (no error)
-      4. Store extracted section for inclusion in agent prompt (step 2d)
-   d. Dispatch agent with context:
-      - EPIC specification (relevant sections)
+      4. Store extracted section for inclusion in agent prompt (step 2e)
+   e. Dispatch agent via Task tool with `model` parameter set to resolved tier:
+      - **model:** resolved model tier from step 2c (one of: `sonnet`, `opus`, `haiku`)
+      - **Trimmed EPIC context** (per Trimmed EPIC Context Protocol above — NOT the full EPIC)
       - Plan step (objective, inputs, outputs, constraints)
-      - **Source plan implementation detail** (if resolved in step 2c — injected as
+      - **Source plan implementation detail** (if resolved in step 2d — injected as
         `## Source Plan — Implementation Detail` section in the prompt, placed after
         `## Your Task` and before `## Scope`)
-      - Previous step outputs (if dependency)
-      - Allowed/forbidden paths
-   e. Include cross-project knowledge context (per `skills/memory-mcp.md` Cross-Project Knowledge Protocol):
-      - If `memory.cross_project.read_at_executing: true` AND Qdrant available:
-        `qdrant-find` query = step objective + role + tech_stack
-      - Include top `cross_project.max_results` entries in dispatch prompt
-      - If Qdrant unavailable: skip silently (agent works normally)
-   f. **Estimate dispatch prompt tokens** (per `skills/token-estimator.md`):
+      - **Previous step outputs** — controlled by `resolved_context.previous_outputs`
+        (from Context Scope Resolution above):
+        - `"all"`: include ALL prior step outputs that are available (current behavior)
+        - `"direct"`: include ONLY outputs from steps listed in
+          `dependencies[].before` where `after == current step ID` — i.e., only
+          the direct upstream dependencies for this step
+        - `"none"`: include NO previous step outputs in the dispatch prompt
+      - Allowed/forbidden paths (from the step in plan.json, NOT EPIC-level scope)
+   f. Include cross-project knowledge context — controlled by `resolved_context.knowledge`
+      (from Context Scope Resolution above):
+      - IF `resolved_context.knowledge == false`:
+        → SKIP knowledge base injection entirely
+      - ELSE (knowledge == true — the default):
+        → Inject knowledge context as before (per `skills/memory-mcp.md`
+          Cross-Project Knowledge Protocol)
+   g. Include memory/Qdrant context — controlled by `resolved_context.memory`
+      (from Context Scope Resolution above):
+      - IF `resolved_context.memory == false`:
+        → SKIP Qdrant memory search entirely
+      - ELSE (memory == true — the default):
+        → If `memory.cross_project.read_at_executing: true` AND Qdrant available:
+          `qdrant-find` query = step objective + role + tech_stack
+        → Include top `cross_project.max_results` entries in dispatch prompt
+        → If Qdrant unavailable: skip silently (agent works normally)
+   h. **Estimate dispatch prompt tokens** (per `skills/token-estimator.md`):
       - Call `estimate_dispatch_tokens(prompt_components)` on the fully assembled prompt
       - Use content-type classification from `dispatch-config.yaml` → `token_estimation.chars_per_token`
       - Record `estimated_prompt_tokens` for inclusion in the post-dispatch usage entry
       - This step is NON-BLOCKING: if estimation fails, log error to stage_log.jsonl
         and set `estimated_prompt_tokens = null` — dispatch proceeds regardless
       - Record start timestamp for duration tracking
-   g. Agent executes and produces outputs
+   i. Agent executes and produces outputs
 
 ### Mandatory Evidence Write Checklist
 
@@ -144,21 +310,31 @@ estimated_total_tokens = estimated_prompt_tokens + estimated_execution_tokens
 **Step 2 — Resolve model tier:**
 
 ```
-# Look up the model tier assigned to this step's role
-model = dispatch_config.role_assignments[step.role]   # "opus" | "sonnet" | "haiku"
-# If role not found, use fallback.model from dispatch-config.yaml (default: "opus")
+# Use the model tier already resolved during dispatch (step 2c of Detailed EXECUTING Actions).
+# The resolution follows the same 3-level fallback chain:
+#   1. step.model from plan.json (if present and non-null)
+#   2. dispatch_config.role_assignments[step.role] (if dispatch-config.yaml readable and role found)
+#   3. "opus" (default)
+model = resolved_model_tier   # "opus" | "sonnet" | "haiku" — already determined at dispatch time
 ```
 
 **Step 3 — Resolve context sources used in dispatch:**
 
 ```
+# Values come from the Context Scope Resolution performed before dispatch (step 2,
+# see "Context Scope Resolution" section above). These reflect what was ACTUALLY
+# injected into the agent prompt — not static config defaults.
+
 context_sources = {
-  "knowledge": true|false,     # Was knowledge context included in prompt?
-  "memory": true|false,        # Was memory context included in prompt?
-  "previous_outputs": "all"|"direct"|"none",  # What prior outputs mode was used?
-  "plan_ref": true|false       # Was source plan detail injected?
+  "knowledge": resolved_context.knowledge,          # true if knowledge was injected, false if skipped
+  "memory": resolved_context.memory,                # true if Qdrant was searched, false if skipped
+  "previous_outputs": resolved_context.previous_outputs,  # "all", "direct", or "none"
+  "plan_ref": true|false                            # Was source plan detail injected? (unchanged — from step 2d resolution)
 }
-# Values come from dispatch-config.yaml context_defaults for the model tier
+
+# NOTE: For backward compatibility, when step.context_scope is absent in plan.json,
+# resolved_context defaults to: knowledge=true, memory=true, previous_outputs="all"
+# — which matches pre-context-scope behavior exactly.
 ```
 
 **Step 4 — Check budget alert thresholds:**
@@ -206,8 +382,8 @@ IF dispatch_config.budget_alerts.enabled:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `usage.model` | string | Model tier from `dispatch-config.yaml` role_assignments |
-| `usage.estimated_prompt_tokens` | int or null | From pre-dispatch estimation (step 2f). Null if estimation failed |
+| `usage.model` | string | Resolved model tier (from step.model, dispatch-config.yaml role_assignments, or default "opus") |
+| `usage.estimated_prompt_tokens` | int or null | From pre-dispatch estimation (step 2h). Null if estimation failed |
 | `usage.estimated_execution_tokens` | int or null | From duration/ops calculation above. Null if estimation failed |
 | `usage.estimated_total_tokens` | int or null | Sum of prompt + execution. Null if either component is null |
 | `usage.duration_seconds` | int | Wall-clock seconds from dispatch to agent completion |
