@@ -156,7 +156,13 @@ For steps listed in `plan.parallel_groups`:
       git checkout epic/{epic_id}/main
       git checkout -b epic/{epic_id}/step_{N}_{role}
 
-   b. Prepare agent prompt using OPTIMIZED dispatch template (see below):
+   b. Resolve model tier for this step using the 3-level fallback chain:
+      1. step.model from plan.json → if present and non-null, use it
+      2. dispatch-config.yaml → role_assignments[step.role] → if found, use it
+      3. Default: "opus"
+      Store resolved model for use in Task tool call (step 4)
+
+   c. Prepare agent prompt using OPTIMIZED dispatch template (see below):
       - Role SUMMARY (3-5 lines, NOT full playbook)
       - EPIC summary (goal + constraints + step AC only, NOT full EPIC)
       - Plan step spec (objective, inputs, outputs, allowed_paths, forbidden_paths)
@@ -164,16 +170,26 @@ For steps listed in `plan.parallel_groups`:
       - File scope: relevant_files list from plan.json
       - Playbook reference: "Read defaults/playbooks/{role}.md for details"
 
-   c. ADD "PARALLEL CONTEXT" block to prompt (see below)
+   d. ADD "PARALLEL CONTEXT" block to prompt (see below)
 
 4. Dispatch ALL agents in a SINGLE message with multiple Task tool calls
-   - One Task call per agent
+   - One Task call per agent, with `model` parameter set to the resolved tier from step 3b
+   - Each agent may have a DIFFERENT model tier (e.g., backend=opus, qa=sonnet)
    - All dispatched in the same message = true concurrency
 
 5. Wait for ALL to complete (Task tool handles collection)
 
 6. Proceed to PHASE_CHECK for the entire group (Section 4)
 ```
+
+**Model tier fallback chain** (same as `skills/dispatch-protocol.md`):
+
+```
+step.model (plan.json) → role_assignments (dispatch-config.yaml) → "opus" (default)
+```
+
+**Backward compatibility:** Old plan.json files without `model` fields on steps
+produce "opus" for all agents via the fallback chain, matching pre-tiering behavior.
 
 **Parallel Context block** (appended to each agent's prompt):
 
@@ -670,12 +686,23 @@ to minimize token consumption while maintaining all necessary context.
 
 ### Model Selection in Dispatch
 
-When dispatching an agent, read the agent's `model:` field from frontmatter:
-- `model: opus` -- dispatch with opus (default/inherit behavior)
-- `model: sonnet` -- dispatch with sonnet
-- `model: haiku` -- dispatch with haiku
+When dispatching an agent, resolve the model tier using the 3-level fallback chain:
 
+```
+1. step.model (from plan.json) → if present and non-null, use it
+2. dispatch-config.yaml → role_assignments[step.role] → if found, use it
+3. Default: "opus"
+```
+
+Pass the resolved tier as the `model` parameter on the Task tool call.
+Valid values: `sonnet`, `opus`, `haiku`.
+
+**Backward compatibility:** Plans without `step.model` fields fall through to
+dispatch-config.yaml or default "opus", preserving pre-tiering behavior.
+
+See `skills/dispatch-protocol.md` for the canonical fallback chain definition.
 See `skills/cost-optimization.md` for the full agent-to-model mapping.
+See `defaults/policies/dispatch-config.yaml` for role_assignments configuration.
 
 ---
 
@@ -687,8 +714,10 @@ See `skills/cost-optimization.md` for the full agent-to-model mapping.
 | `skills/planner.md` | Parallel groups and analysis groups generation in plan JSON |
 | `skills/analysis-merge.md` | Merge strategies for combining analysis agent outputs |
 | `skills/cost-optimization.md` | Model selection, file scoping, dispatch optimization |
+| `skills/dispatch-protocol.md` | Sequential dispatch, model tier fallback chain definition |
+| `defaults/policies/dispatch-config.yaml` | Role-to-model assignments, context defaults, budget alerts |
 | `commands/aid-run-epic.md` | Main orchestration loop that calls this dispatch protocol |
 
 ---
 
-**Last Updated:** 2026-02-20
+**Last Updated:** 2026-02-28
