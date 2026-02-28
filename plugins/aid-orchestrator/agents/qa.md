@@ -1,4 +1,5 @@
 ---
+name: qa
 model: sonnet
 ---
 

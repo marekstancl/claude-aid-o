@@ -1,4 +1,5 @@
 ---
+name: observability
 model: sonnet
 ---
 

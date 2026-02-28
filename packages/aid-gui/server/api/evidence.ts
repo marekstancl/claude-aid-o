@@ -11,7 +11,7 @@
 import { Router, type Request, type Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { sendOk, send404, sendError } from './middleware.ts';
+import { sendOk, send404, sendError, validateEvidencePath } from './middleware.ts';
 import {
   parseYaml,
   parseJson,
@@ -181,7 +181,19 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 router.get('/:epicId', async (req: Request, res: Response): Promise<void> => {
   const aidoPath = req.aidoPath;
   const { epicId } = req.params;
-  const epicDirPath = path.join(evidenceBase(aidoPath), epicId);
+
+  // Defense-in-depth path traversal prevention (CWE-22).
+  // Layer 1 (regex): rejects ".", "/", "\" in epicId.
+  // Layer 2 (resolve+startsWith): verifies the constructed path stays within
+  //   the evidence directory after OS canonicalization.
+  const base = evidenceBase(aidoPath);
+  const validation = validateEvidencePath(base, epicId);
+  if (!validation.ok) {
+    sendError(res, 400, 'INVALID_PATH', validation.reason);
+    return;
+  }
+
+  const epicDirPath = validation.resolvedPath;
 
   try {
     if (!(await isDirectory(epicDirPath))) {
@@ -242,7 +254,19 @@ router.get('/:epicId', async (req: Request, res: Response): Promise<void> => {
 router.get('/:epicId/:runId', async (req: Request, res: Response): Promise<void> => {
   const aidoPath = req.aidoPath;
   const { epicId, runId } = req.params;
-  const runDirPath = path.join(evidenceBase(aidoPath), epicId, runId);
+
+  // Defense-in-depth path traversal prevention (CWE-22).
+  // Layer 1 (regex): rejects ".", "/", "\" in epicId and runId.
+  // Layer 2 (resolve+startsWith): verifies the joined path stays within the
+  //   evidence directory after OS canonicalization.
+  const base = evidenceBase(aidoPath);
+  const validation = validateEvidencePath(base, epicId, runId);
+  if (!validation.ok) {
+    sendError(res, 400, 'INVALID_PATH', validation.reason);
+    return;
+  }
+
+  const runDirPath = validation.resolvedPath;
 
   try {
     if (!(await isDirectory(runDirPath))) {

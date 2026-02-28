@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,9 +113,22 @@ async function findActiveStageLog(aidoPath: string): Promise<string | null> {
   }
 }
 
+/** Parse AID_GUI_CORS_ORIGINS env var into a cors origin option. */
+function parseGuiCorsOrigins(): string | string[] {
+  const DEFAULT_ORIGINS = "http://localhost:5173,http://localhost:3000";
+  const raw = (process.env.AID_GUI_CORS_ORIGINS ?? DEFAULT_ORIGINS).trim();
+
+  if (raw === "*") {
+    return "*";
+  }
+
+  return raw.split(",").map((o) => o.trim()).filter(Boolean);
+}
+
 export function createApp() {
   const app = express();
 
+  app.use(cors({ origin: parseGuiCorsOrigins() }));
   app.use(express.json());
 
   // Mount REST API routes behind project resolution middleware.
@@ -215,8 +229,9 @@ export async function startServer(config?: ServerConfig): Promise<void> {
   // ---------------------------------------------------------------------------
   // Start everything
   // ---------------------------------------------------------------------------
-  server.listen(PORT, "0.0.0.0", () => {
-    console.log(`AID Dashboard server running on http://localhost:${PORT}`);
+  const GUI_HOST = process.env.AID_GUI_HOST ?? "127.0.0.1";
+  server.listen(PORT, GUI_HOST, () => {
+    console.log(`AID Dashboard server running on http://${GUI_HOST}:${PORT}`);
     console.log(`WebSocket server available at ws://localhost:${PORT}/ws`);
     console.log(`Watching .aid-o/ at: ${aidoPath}`);
   });

@@ -72,7 +72,7 @@ Use `/aid-brainstorm` to explore an idea interactively and produce a plan docume
 /aid-brainstorm "add pagination to the users API"
 ```
 
-AID opens an 11-step structured brainstorming dialog. It asks you one question at a time — multiple choice where possible — to understand your requirements, propose approaches, and validate a design with you.
+AID opens an 8-step structured brainstorming dialog. It asks you one question at a time — multiple choice where possible — to understand your requirements, propose approaches, and validate a design with you.
 
 A typical session looks like this:
 

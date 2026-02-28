@@ -25,7 +25,7 @@ Run the Controller state machine to orchestrate an EPIC through its full lifecyc
 
 - `.aid-o/` workspace must exist
 - EPIC file must exist in `.aid-o/02-epics/` or at the given path
-- Plan JSON should exist (from [`/aid-plan-epic`](./aid-plan-epic)). If not, plan generation runs automatically.
+- `plan.json` must exist before running this command. Run [`/aid-plan-epic`](./aid-plan-epic) first to generate it from your EPIC or plan file.
 
 ## Examples
 

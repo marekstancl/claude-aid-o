@@ -177,3 +177,94 @@ export async function findActiveRun(aidoPath: string): Promise<ActiveRun | null>
 export function invalidateActiveRunCache(): void {
   cachedActiveRun = null;
 }
+
+// ---------------------------------------------------------------------------
+// Path traversal prevention utilities
+// ---------------------------------------------------------------------------
+//
+// Defense-in-depth implementation for CWE-22 (Path Traversal).
+//
+// Two independent layers are applied in sequence:
+//
+//   Layer 1 — Regex: rejects any component containing ".", "/", or "\" before
+//     any path construction occurs. Eliminates `../`, absolute paths, and
+//     Windows separators from epicId / runId parameters.
+//
+//   Layer 2 — Resolve + startsWith: after joining with path.join(), the result
+//     is canonicalized with path.resolve() and verified to still begin with the
+//     expected base directory. Catches encoding tricks or OS-specific edge cases
+//     the regex alone would not handle.
+//
+// Threat: an attacker supplying epicId = "../../etc/passwd" could read
+// arbitrary server files. Both layers together prevent this even if one is
+// bypassed.
+
+/** Characters that must not appear in a path-component parameter. */
+const UNSAFE_PATH_CHARS_RE = /[./\\]/;
+
+/**
+ * Validate a single path component (e.g. epicId or runId) does not contain
+ * path separator or traversal characters.
+ *
+ * @returns `true` when the value is safe; `false` otherwise.
+ */
+export function isValidPathComponent(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  return !UNSAFE_PATH_CHARS_RE.test(value);
+}
+
+/**
+ * Verify that a resolved path is strictly contained within the expected parent
+ * directory. The trailing `path.sep` suffix prevents a prefix-match false
+ * positive (e.g. `/evidence/epi` wrongly matching parent `/evidence/epic`).
+ */
+export function isWithinDirectory(resolvedPath: string, parentDir: string): boolean {
+  const normalizedParent = path.resolve(parentDir);
+  const normalizedPath = path.resolve(resolvedPath);
+  return (
+    normalizedPath === normalizedParent ||
+    normalizedPath.startsWith(normalizedParent + path.sep)
+  );
+}
+
+export type PathValidationResult =
+  | { ok: true; resolvedPath: string }
+  | { ok: false; reason: string };
+
+/**
+ * Full two-layer validation for a filesystem path built from user-supplied
+ * components rooted at a known base directory.
+ *
+ * @param baseDir    - Trusted root directory. Resolved internally.
+ * @param components - One or more path components to append after `baseDir`.
+ * @returns Discriminated union: `{ ok: true, resolvedPath }` on success, or
+ *          `{ ok: false, reason }` on any validation failure.
+ *
+ * @example
+ * const v = validateEvidencePath(evidenceBase(aidoPath), epicId, runId);
+ * if (!v.ok) return sendError(res, 400, 'INVALID_PATH', v.reason);
+ * // v.resolvedPath is safe to use
+ */
+export function validateEvidencePath(
+  baseDir: string,
+  ...components: string[]
+): PathValidationResult {
+  for (const component of components) {
+    if (!isValidPathComponent(component)) {
+      return {
+        ok: false,
+        reason: `Invalid path component "${component}": must not contain ".", "/", or "\\"`,
+      };
+    }
+  }
+
+  const joined = path.join(baseDir, ...components);
+  const resolved = path.resolve(joined);
+  const resolvedBase = path.resolve(baseDir);
+
+  if (!isWithinDirectory(resolved, resolvedBase)) {
+    return { ok: false, reason: 'Path escapes allowed directory' };
+  }
+
+  return { ok: true, resolvedPath: resolved };
+}

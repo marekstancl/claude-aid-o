@@ -1,4 +1,5 @@
 ---
+name: security
 model: sonnet
 ---
 

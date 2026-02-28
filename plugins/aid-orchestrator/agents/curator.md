@@ -1,4 +1,5 @@
 ---
+name: curator
 model: sonnet
 ---
 

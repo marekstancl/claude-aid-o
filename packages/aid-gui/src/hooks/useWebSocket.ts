@@ -126,33 +126,90 @@ function dispatchEvent(msg: WsEventMessage): void {
   switch (topic) {
     case 'pipeline': {
       if (data.type === 'file_change' && data.parsedData != null) {
-        // The parsedData from a pipeline file_change event contains
-        // pipeline state fields. Apply what is available.
         const parsed = data.parsedData as Record<string, unknown>;
 
-        // Check if this looks like pipeline state data
-        if ('currentState' in parsed || 'state' in parsed) {
+        // auto-mode-state.yaml has nested { session: { progress: { current_state, ... } } }
+        // Flatten it into the expected shape so downstream code works uniformly.
+        const session = parsed.session as Record<string, any> | undefined;
+        const prog = session?.progress as Record<string, any> | undefined;
+        const agg = session?.aggregate as Record<string, any> | undefined;
+        const perEpic: any[] = agg?.per_epic ?? [];
+        const aggStepsTotal = perEpic.reduce(
+          (sum: number, e: any) => sum + (e.steps_total ?? e.steps_executed ?? 0), 0,
+        );
+
+        // Determine if we have pipeline state data (flat or nested)
+        const hasFlatState = 'currentState' in parsed || 'state' in parsed;
+        const hasNestedState = prog?.current_state != null;
+
+        if (hasFlatState || hasNestedState) {
+          const fsm = (
+            hasFlatState
+              ? (parsed.currentState ?? parsed.state)
+              : prog!.current_state
+          ) as string;
+
+          const epicId = (
+            hasFlatState
+              ? (parsed.currentEpicId ?? parsed.epicId)
+              : prog?.current_epic_id
+          ) as string | null ?? store.currentEpicId;
+
+          const stepId = (
+            hasFlatState
+              ? (parsed.currentStepId ?? parsed.currentStep)
+              : prog?.current_step_id
+          ) as string | null ?? store.currentStepId;
+
+          // Build progress from nested aggregate or flat progress object
+          const progress: typeof store.pipelineProgress = hasNestedState
+            ? {
+                epicsCompleted: agg?.epics_completed ?? prog?.epics_completed ?? 0,
+                epicsTotal: prog?.epics_total ?? 0,
+                stepsCompleted: agg?.total_steps_executed ?? 0,
+                stepsTotal: aggStepsTotal || (agg?.total_steps_executed ?? 0),
+              }
+            : (parsed.progress as typeof store.pipelineProgress) ?? store.pipelineProgress;
+
+          // Build autoModeSession from nested session data
+          const autoModeSession = hasNestedState && session
+            ? {
+                sessionId: session.session_id,
+                mode: session.mode,
+                startedAt: session.started_at,
+                startedBy: session.started_by ?? 'pm',
+                queueSnapshot: session.queue_snapshot ?? [],
+                escalation: {
+                  budget: session.escalation?.budget ?? 0,
+                  count: session.escalation?.count ?? 0,
+                },
+                aggregate: {
+                  epicsCompleted: agg?.epics_completed ?? 0,
+                  epicsFailed: agg?.epics_failed ?? 0,
+                  totalStepsExecuted: agg?.total_steps_executed ?? 0,
+                  totalGateRuns: agg?.total_gate_runs ?? 0,
+                  totalGateRetries: agg?.total_gate_retries ?? 0,
+                  totalEscalations: agg?.total_escalations ?? 0,
+                },
+              }
+            : (parsed.autoModeSession as any) ?? store.autoModeSession;
+
           store.setPipelineState({
-            currentState: (parsed.currentState ?? parsed.state ?? store.currentState) as string,
-            currentEpicId: (parsed.currentEpicId ?? parsed.epicId ?? store.currentEpicId) as string | null,
-            currentStepId: (parsed.currentStepId ?? parsed.currentStep ?? store.currentStepId) as string | null,
-            progress: (parsed.progress as typeof store.pipelineProgress) ?? store.pipelineProgress,
+            currentState: fsm,
+            currentEpicId: epicId,
+            currentStepId: stepId,
+            progress,
+            autoModeSession,
           });
 
-          // Sync legacy slice fields for backward compatibility
-          const fsm = (parsed.currentState ?? parsed.state) as string | undefined;
-          if (fsm) {
-            store.setFSMState(fsm as Parameters<typeof store.setFSMState>[0]);
-          }
-          if (parsed.currentEpicId != null || parsed.epicId != null) {
-            store.updatePipeline({
-              epic: (parsed.currentEpicId ?? parsed.epicId) as string | null,
-              activeStep: (parsed.currentStepId ?? parsed.currentStep) as string | null,
-            });
-          }
+          // Sync legacy slice fields
+          store.setFSMState(fsm as Parameters<typeof store.setFSMState>[0]);
+          store.updatePipeline({
+            epic: epicId,
+            activeStep: stepId,
+          });
 
           // Pipeline state changes affect idea autoStatus (running/done).
-          // Re-fetch ideas so cards auto-transition in the kanban board.
           const projectId = store.activeProject?.id ?? store.currentProject?.id ?? 'default';
           const client = createApiClient(projectId);
           client.getIdeas().then((result) => {
@@ -287,10 +344,9 @@ function dispatchEvent(msg: WsEventMessage): void {
  */
 function dispatchReplay(msg: WsReplayMessage): void {
   const store = useStore.getState();
-  const entries = msg.data.map((item) => toStageLogEntry(item.entry));
-  if (entries.length > 0) {
-    store.addStageLogEntries(entries);
-  }
+  if (!Array.isArray(msg.data) || msg.data.length === 0) return;
+  const entries = msg.data.map((item) => toStageLogEntry(item));
+  store.addStageLogEntries(entries);
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +381,7 @@ async function resyncFromRest(projectId: string): Promise<void> {
       currentEpicId: d.currentEpicId,
       currentStepId: d.currentStepId,
       progress: d.progress,
+      autoModeSession: (d as any).autoModeSession ?? null,
     });
     // Sync legacy fields
     store.setFSMState(d.currentState as Parameters<typeof store.setFSMState>[0]);

@@ -2,6 +2,7 @@ import { Router, type Request } from 'express';
 import { join } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
 import type { ProjectParams } from './types.js';
+import { validateEvidencePath } from './path-validation.js';
 
 export function pipelineRoutes(registry: ProjectRegistry): Router {
   const router = Router({ mergeParams: true });
@@ -30,6 +31,20 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
           sessionId: autoState.session.session_id,
           mode: autoState.session.mode,
           startedAt: autoState.session.started_at,
+          startedBy: autoState.session.started_by ?? 'pm',
+          queueSnapshot: autoState.session.queue_snapshot ?? [],
+          escalation: {
+            budget: autoState.session.escalation?.budget ?? 0,
+            count: autoState.session.escalation?.count ?? 0,
+          },
+          aggregate: {
+            epicsCompleted: autoState.session.aggregate?.epics_completed ?? 0,
+            epicsFailed: autoState.session.aggregate?.epics_failed ?? 0,
+            totalStepsExecuted: autoState.session.aggregate?.total_steps_executed ?? 0,
+            totalGateRuns: autoState.session.aggregate?.total_gate_runs ?? 0,
+            totalGateRetries: autoState.session.aggregate?.total_gate_retries ?? 0,
+            totalEscalations: autoState.session.aggregate?.total_escalations ?? 0,
+          },
         } : null,
         progress: {
           epicsCompleted: autoState?.session?.aggregate?.epics_completed ?? 0,
@@ -76,7 +91,22 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
     const { epicId, runId } = req.params;
-    const runDir = join(fs.aidoPath, '04-engine', 'evidence', epicId, runId);
+
+    // Defense-in-depth: validate path components before constructing any path.
+    // Layer 1 (regex): rejects ".", "/", "\" to block traversal sequences.
+    // Layer 2 (resolve+startsWith): confirms the joined path stays within the
+    //   evidence base after OS-level canonicalization.
+    // CWE-22: Path Traversal — prevents reading files outside evidence/.
+    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const validation = validateEvidencePath(evidenceBase, epicId, runId);
+    if (!validation.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: { code: 'INVALID_PATH', message: validation.reason },
+      });
+    }
+
+    const runDir = validation.resolvedPath;
 
     // Verify the run directory exists
     const runDirExists = await fs.exists(runDir);

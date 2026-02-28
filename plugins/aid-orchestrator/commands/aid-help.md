@@ -70,7 +70,7 @@ What is AID?
 Commands (13):
   /aid-init          Initialize or upgrade .aid-o/ workspace
   /aid-setup         Interactive project onboarding
-  /aid-brainstorm    9-step interactive brainstorming flow
+  /aid-brainstorm    8-step interactive brainstorming flow
   /aid-help          This help
   /aid-plan-epic     EPIC or Plan → Plan JSON + run file
   /aid-research      On-demand documentation research (topic, URL, --deep)
@@ -131,11 +131,11 @@ SETUP COMMANDS:
     Calls /aid-init internally if needed.
 
   /aid-brainstorm [topic]
-    9-step interactive brainstorming flow.
+    8-step interactive brainstorming flow.
     Usage: /aid-brainstorm "Build a REST API with auth and CRUD"
-    Flow: context → questions → approaches → design → sections → approval
-          → document → EPIC draft → handoff
-    Output: Plan document in .aid-o/01-plans/ + optional EPIC draft
+    Flow: context → analysis → questions → approaches → design → sections
+          → approval → document
+    Output: Plan document in .aid-o/01-plans/ (EPIC creation via /aid-plan-epic)
 
   /aid-help [topic]
     This help. Shows commands, workflow, FAQ.
@@ -1056,15 +1056,15 @@ WORKFLOW 1: Greenfield Feature (most common path)
     /aid-brainstorm "Build user authentication with JWT — login,
     register, refresh tokens, and role-based access control"
 
-    AID runs a 9-step interactive dialog:
-      Steps 1-2: Context + clarifying questions (stack? DB? social login?)
-      Steps 3-4: Compare approaches, produce design with API contracts
-      Steps 5-6: Present plan outline → PM reviews and approves
-      Steps 7-8: Write plan to .aid-o/01-plans/ → generate EPIC draft
-      Step 9:    Handoff with decisions summary and next steps
+    AID runs an 8-step interactive dialog:
+      Steps 1-2: Context + initial topic analysis
+      Step 3:    Clarifying questions one at a time (stack? DB? social login?)
+      Step 4:    Compare 2-3 approaches with pros, cons, and recommendation
+      Steps 5-6: Detailed design → section-by-section PM approval
+      Step 7:    Final approval before any files are written
+      Step 8:    Write plan to .aid-o/01-plans/ via plan-writing skill
 
     Output: .aid-o/01-plans/P-NNN-jwt-auth.md
-            .aid-o/02-epics/E-NNN-1_1-jwt-auth.md  (if you accepted the draft)
 
   Step 2 — Review and edit the EPIC
     Open .aid-o/02-epics/E-NNN-1_1-jwt-auth.md and verify:

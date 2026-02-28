@@ -1,4 +1,5 @@
 ---
+name: docs-writer
 model: sonnet
 ---
 

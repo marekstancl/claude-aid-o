@@ -110,6 +110,7 @@ export type {
   // Event payloads
   WsFileChangeEventPayload,
   WsStageLogEventPayload,
+  WsReplayStageLogEntry,
   WsHeartbeatEventPayload,
   WsConnectionEventPayload,
   WsScheduleStatusEventPayload,

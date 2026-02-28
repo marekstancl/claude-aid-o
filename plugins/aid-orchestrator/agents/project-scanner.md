@@ -1,4 +1,5 @@
 ---
+name: project-scanner
 model: sonnet
 ---
 

@@ -1,4 +1,5 @@
 ---
+name: architect
 model: opus
 ---
 

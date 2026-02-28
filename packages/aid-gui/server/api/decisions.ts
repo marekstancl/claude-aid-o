@@ -11,7 +11,7 @@
 import { Router, type Request, type Response } from 'express';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { sendOk, send404, send400, sendError, invalidateActiveRunCache } from './middleware.ts';
+import { sendOk, send404, send400, sendError, invalidateActiveRunCache, validateEvidencePath } from './middleware.ts';
 import { parseJson } from '../parsers/index.ts';
 import type { Decision, PendingDecision, DecisionWriteRequest, PlanProgress } from '../types.ts';
 
@@ -238,8 +238,25 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       ? String(body.feedback)
       : null;
 
+    // Defense-in-depth path traversal prevention (CWE-22).
+    // This write endpoint is particularly sensitive: a traversal here would
+    // allow an attacker to write pm_decision.json outside the evidence directory,
+    // potentially overwriting arbitrary files on the server filesystem.
+    //
+    // Layer 1 (regex): rejects ".", "/", "\" in epicId and runId before any
+    //   path is constructed.
+    // Layer 2 (resolve+startsWith): verifies the joined path stays within the
+    //   evidence directory after OS canonicalization.
+    const evidenceDir = path.join(req.aidoPath, '04-engine', 'evidence');
+    const validation = validateEvidencePath(evidenceDir, epicId, runId);
+    if (!validation.ok) {
+      send400(res, validation.reason);
+      return;
+    }
+
+    const runDir = validation.resolvedPath;
+
     // Verify the evidence directory exists.
-    const runDir = path.join(req.aidoPath, '04-engine', 'evidence', epicId, runId);
     try {
       const stat = await fs.stat(runDir);
       if (!stat.isDirectory()) {

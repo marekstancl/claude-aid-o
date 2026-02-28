@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.5.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.6.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -25,7 +25,7 @@ You describe what you want to build. AID brainstorms the design with you, genera
 
 ```bash
 /aid-brainstorm "Build a REST API with auth and CRUD"
-# → 9-step interactive dialog: context, approaches, trade-offs, architecture, plan
+# → 8-step interactive dialog: context, approaches, trade-offs, architecture, plan
 
 /aid-run-epic
 # → AID takes over: architect → backend + frontend (parallel) → QA → gates → merge
@@ -64,7 +64,7 @@ Or go fully autonomous:
 
 | Command | What it does |
 |---------|-------------|
-| `/aid-brainstorm [topic]` | 9-step interactive brainstorming → plan + optional EPIC |
+| `/aid-brainstorm [topic]` | 8-step interactive brainstorming → plan + optional EPIC |
 | `/aid-plan-epic <path>` | Generate execution plan from EPIC or Plan |
 | `/aid-run-epic [id]` | Run the full orchestration pipeline |
 | `/aid-first-aid` | Start autonomous mode (EPIC queue execution with guardrails) |

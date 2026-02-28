@@ -1,4 +1,5 @@
 ---
+name: gate-fixer
 model: haiku
 ---
 

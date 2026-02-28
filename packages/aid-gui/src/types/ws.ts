@@ -271,7 +271,7 @@ export interface WsEventMessage {
  * {
  *   "type": "replay",
  *   "topic": "pipeline.stage_log",
- *   "data": [{ "type": "stage_log", ... }, ...],
+ *   "data": [{ "timestamp": "...", "state": "...", "step": null, "action": "...", "details": "...", "result": "pass" }, ...],
  *   "timestamp": "2026-02-25T14:00:01.100Z"
  * }
  * ```
@@ -281,10 +281,32 @@ export interface WsReplayMessage {
   type: 'replay';
   /** Always "pipeline.stage_log" for replay messages. */
   topic: 'pipeline.stage_log';
-  /** Buffered stage log events, ordered oldest-first. */
-  data: WsStageLogEventPayload[];
+  /** Raw stage log entries, ordered oldest-first (no `.entry` wrapper). */
+  data: WsReplayStageLogEntry[];
   /** ISO 8601 timestamp when the replay was sent. */
   timestamp: string;
+}
+
+/**
+ * A raw stage log entry as sent in replay messages.
+ *
+ * Unlike `WsStageLogEventPayload` (used in live events), replay entries are
+ * sent without the `type`/`topic`/`entry` wrapper — they are the inner entry
+ * directly.
+ */
+export interface WsReplayStageLogEntry {
+  /** ISO 8601 timestamp of the event. */
+  timestamp: string;
+  /** FSM state at the time of the event. */
+  state: string;
+  /** Step ID this event relates to, or null. */
+  step: string | null;
+  /** Action identifier. */
+  action: string;
+  /** Human-readable description. */
+  details: string;
+  /** Outcome of the event. */
+  result: 'pass' | 'fail' | 'pending' | 'skip' | 'success';
 }
 
 /**

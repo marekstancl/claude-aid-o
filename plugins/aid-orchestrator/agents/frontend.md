@@ -1,4 +1,5 @@
 ---
+name: frontend
 model: opus
 ---
 

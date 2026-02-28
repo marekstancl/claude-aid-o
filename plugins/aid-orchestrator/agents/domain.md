@@ -1,4 +1,5 @@
 ---
+name: domain
 model: sonnet
 ---
 
