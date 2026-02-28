@@ -6,6 +6,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Path Traversal Guards** — defense-in-depth (regex + resolve+startsWith) path validation on pipeline theater, evidence, and decision routes preventing CWE-22 filesystem traversal via `epicId`/`runId` parameters
+- **GUI CORS Middleware** — `cors()` middleware on the aid-gui Express server with `AID_GUI_CORS_ORIGINS` env var support, defaulting to localhost:5173 and localhost:3000
+- **Agent Name Frontmatter** — all 18 agent files now have `name:` field in YAML frontmatter matching the filename stem, enabling plugin validation
 - **Master Test Runner** — `run-all-tests.sh` discovers and executes all test suites with unified pass/fail reporting (88 tests across 6 suites)
 - **Curator Dispatch Regression Tests** — Suite F (5 tests) verifying unconditional Curator dispatch and state-entry logging in gate-evaluation.md and first-aid-controller.md
 - **Phase Marker Documentation** — `plan-writing.md` Phase Markers subsection with exact format, rules, regex, and "do NOT use" examples for LLM-generated plans
@@ -18,6 +21,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Satellite Card Alternation** — Ward, Lab, Escalations, Vitals cards alternate between current and total values every 4 seconds with AnimatePresence transitions
 
 ### Changed
+- **CORS Wildcard Handling** — `AID_CORS_ORIGINS=*` now correctly enables wildcard CORS instead of creating a single-element array `['*']`
+- **Default Server Binding** — both aid-server and aid-gui default to `127.0.0.1` (loopback only) instead of `0.0.0.0`, preventing unintentional network exposure; Docker containers retain `0.0.0.0` via explicit env var
+- **GUI README Replaced** — removed Gemini/AI Studio boilerplate, replaced with accurate AID Dashboard GUI documentation including local setup and aid-server dependency
+- **Root README Version** — updated from v1.5.0 to v1.6.0
+- **Brainstorming Step Count Standardized** — all documentation (README, Docusaurus, aid-help) now references 8-step brainstorming matching the actual skill lifecycle
+- **aid-run-epic Prerequisites** — removed false auto-generation claim; `plan.json` must pre-exist via `/aid-plan-epic`
+- **Zombie Backlog Cleanup** — moved 7 already-fixed entries (IMP-010/035/049/050/057/059/067) from Active to Implemented, correcting count from 62 to 55
 - **EPIC ID Regex Hardened** — `aid-auto-pipeline.sh` now accepts alphanumeric plan IDs with internal hyphens (e.g., `E-TEST-001-1_2`)
 - **Dependency Parser Enhanced** — `aid-plan-to-epic.sh` supports range expansion (`Steps 3-7`), trailing text stripping, cross-phase dependency filtering, and deduplication
 - **Scope Generation Granularity** — `aid-plan-to-epic.sh` generates file-level paths in EPIC scope when plan steps have `**Files:**` sections, improving FIRST AID parallel detection accuracy
@@ -33,6 +43,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Pipeline API Extended** — `/pipeline` endpoint returns full autoModeSession with escalation budget/count and aggregate counters (epicsCompleted, epicsFailed, totalStepsExecuted, totalGateRuns, totalGateRetries, totalEscalations)
 
 ### Fixed
+- **WebSocket Replay Parsing** — `dispatchReplay()` now reads raw stage log entries directly instead of expecting non-existent `.entry` wrapper, fixing Pipeline Theater replay after reconnection
+- **CSS Custom Property Generation** — `.replaceAll('_', '-')` replaces all underscores in FSM state names for correct CSS variable references (was `.replace` which only fixed the first)
 - **Curator Input File References** — corrected from `step_output.json` to `output.md` + `diff.patch` matching actual agent output format
 - **Queue Field Name** — `scripts/README.md` corrected `queued_at` to `added_at` matching actual queue schema
 - **Queue Field Name Mismatch** — server returned `data.entries` but GUI expected `data.queue`, causing queue entries, elapsed time, and EPIC runs to never display
