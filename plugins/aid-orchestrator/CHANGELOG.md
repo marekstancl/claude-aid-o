@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Token Estimation Protocol** — new `skills/token-estimator.md` defining character-based heuristic for dispatch token counting with cl100k_base approximation and calibration process
+- **Dispatch Configuration** — new `defaults/policies/dispatch-config.yaml` with 18 role-to-model tier mappings (3 opus, 11 sonnet, 4 haiku), per-tier context defaults, and advisory budget alerts
+- **Plan Schema Extension** — `model` (enum: haiku/sonnet/opus) and `context_scope` (knowledge, memory, previous_outputs) optional fields per step in `plan.schema.json`
+- **Planner Model Assignment** — planner reads `dispatch-config.yaml` and populates `model` + `context_scope` per step with fallback to opus/all-context when config is absent
+- **Dispatch Usage Logging** — pre-dispatch token estimation and post-dispatch `usage` object in stage_log.jsonl with model, tokens, duration, context sources, and budget alerts
+- **Usage Aggregation** — DONE state aggregates all dispatch_complete entries into `usage_summary` in plan_progress.json with breakdowns by model, role, and step
+
 ## [1.4.0] — 2026-02-27
 
 ### Added

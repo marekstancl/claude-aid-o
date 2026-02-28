@@ -1,0 +1,252 @@
+# AID Dispatch Configuration — Model Tiers, Role Assignments, and Token Estimation
+#
+# This file centralizes model selection, context defaults, budget alerts, and
+# token estimation configuration for the AID Orchestrator dispatch pipeline.
+#
+# Source of truth for:
+#   - Which model tier each agent role uses
+#   - What context (knowledge, memory, previous outputs) each tier receives
+#   - Advisory budget alert thresholds
+#   - Token estimation heuristic parameters and calibration data
+#
+# See: skills/cost-optimization.md for rationale behind assignments
+# See: skills/token-estimator.md for estimation protocol details
+# See: skills/dispatch-protocol.md for how these values are consumed at dispatch
+#
+# Fallback behavior:
+#   If this file is missing or unreadable, the Controller falls back to:
+#     - All agents dispatched with opus (inherit from Controller model)
+#     - All context enabled (knowledge=true, memory=true, previous_outputs=all)
+#     - No budget alerts (thresholds disabled)
+#     - Default token estimation ratios (3.5 chars/token mixed)
+#   This preserves backward compatibility with pre-dispatch-config installations.
+
+# ---------------------------------------------------------------------------
+# Model Tiers
+# ---------------------------------------------------------------------------
+# Three tiers mapping to Claude model variants. On MAX plan (flat rate), cost
+# per token is irrelevant — tier selection optimizes for SPEED (Sonnet ~2-3x
+# faster output than Opus) and CAPABILITY (Opus for complex reasoning).
+
+model_tiers:
+  opus:
+    description: "Complex reasoning, code generation, architecture decisions"
+    use_for: "Tasks requiring creative problem-solving, multi-file scaffolding, or nuanced design trade-offs"
+    speed_note: "Slowest output rate — reserve for tasks that genuinely need deep reasoning"
+
+  sonnet:
+    description: "Analysis, review, documentation, structured writing"
+    use_for: "Tasks that follow known patterns, require reading comprehension, or produce structured output"
+    speed_note: "~2-3x faster output than Opus — preferred default for most agent work"
+
+  haiku:
+    description: "Utility tasks — extraction, validation, formatting, gate checks"
+    use_for: "Mechanical tasks with clear rules, minimal ambiguity, and short outputs"
+    speed_note: "Fastest output — ideal for high-volume, low-complexity operations"
+
+# ---------------------------------------------------------------------------
+# Role Assignments
+# ---------------------------------------------------------------------------
+# Maps each of the 18 agent roles to a model tier. Assignments are based on
+# task complexity analysis from BMK-001 (see skills/cost-optimization.md).
+#
+# To override for a specific project, copy this file to
+# .aid-o/03-config/policies/dispatch-config.yaml and edit role_assignments.
+
+role_assignments:
+  # Opus tier — complex code generation, architecture, creative reasoning
+  architect:          opus       # Complex scaffolding, ADR decisions, API contracts
+  backend:            opus       # Full API implementation, complex business logic
+  frontend:           opus       # Component architecture, state management, UI logic
+
+  # Sonnet tier — analysis, review, structured writing, pattern-following
+  domain:             sonnet     # Schema/model writing is structured, not creative
+  qa:                 sonnet     # Test writing follows patterns, reads existing code
+  security:           sonnet     # Security review is analysis, not generation
+  docs-writer:        sonnet     # Documentation from existing code, structured output
+  code-reviewer:      sonnet     # Code analysis and feedback
+  docs-reviewer:      sonnet     # Documentation validation and compliance checking
+  curator:            sonnet     # Backlog analysis, improvement proposal evaluation
+  auditor:            sonnet     # Project health analysis, metric aggregation
+  project-scanner:    sonnet     # Codebase structure analysis, tech stack detection
+  observability:      sonnet     # Monitoring setup, instrumentation code
+  release:            sonnet     # Release process execution (mostly scripted steps)
+
+  # Haiku tier — utility tasks with clear rules and short outputs
+  gate-fixer:         haiku      # Simple lint/format fixes, mechanical corrections
+  lessons-extractor:  haiku      # Extract and format text from run artifacts
+  run-validator:      haiku      # Schema validation, file existence checks
+  quality-gates-runner: haiku    # Run commands, check exit codes, report pass/fail
+
+# ---------------------------------------------------------------------------
+# Context Defaults
+# ---------------------------------------------------------------------------
+# Per-tier defaults for what context is included in the dispatch prompt.
+# These reduce prompt size (and thus latency) for lower tiers that don't
+# need the full context window.
+#
+# Fields:
+#   knowledge    — Include knowledge context from Qdrant (skills/knowledge-acquisition.md)
+#   memory       — Include memory context from Qdrant (skills/memory-mcp.md)
+#   previous_outputs — How much prior step output to include:
+#     all     — All prior step outputs (full context)
+#     direct  — Only direct dependency outputs (per cost-optimization.md Rule 2)
+#     none    — No prior outputs (utility agents that don't need them)
+
+context_defaults:
+  opus:
+    knowledge: true              # Full knowledge context for complex reasoning
+    memory: true                 # Past decisions and lessons inform architecture
+    previous_outputs: all        # Opus agents may need broader context for design
+
+  sonnet:
+    knowledge: true              # Framework docs help analysis agents
+    memory: false                # Skip memory search — saves latency, sonnet tasks are self-contained
+    previous_outputs: direct     # Only direct dependencies (Rule 2 from cost-optimization)
+
+  haiku:
+    knowledge: false             # Utility tasks don't need framework documentation
+    memory: false                # No memory search — mechanical tasks have no use for history
+    previous_outputs: none       # Haiku agents operate on immediate inputs only
+
+# Per-role overrides (optional). Uncomment to override tier defaults for specific roles.
+# context_overrides:
+#   security:
+#     memory: true               # Security agent benefits from past vulnerability patterns
+#   qa:
+#     previous_outputs: all      # QA may need all outputs to validate integration
+
+# ---------------------------------------------------------------------------
+# Budget Alerts
+# ---------------------------------------------------------------------------
+# Advisory thresholds for token consumption during EPIC execution.
+# These are WARNINGS ONLY — they never block dispatch or reject agent output.
+# Alerts are logged to stage_log.jsonl and surfaced in /aid-analytics reports.
+#
+# Thresholds are based on BMK-001 baseline (~3.5M tokens for a 6-step EPIC).
+# Adjust for your project's typical EPIC size.
+
+budget_alerts:
+  enabled: true                  # Set to false to disable all budget alerts
+
+  # Per-EPIC token thresholds
+  warn_at_tokens: 2500000        # Log WARNING when cumulative estimate exceeds this
+  critical_at_tokens: 5000000    # Log CRITICAL WARNING + PM notification above this
+
+  # Per-step token thresholds (catches runaway agents early)
+  step_warn_at_tokens: 500000    # Log WARNING if a single step exceeds this
+  step_critical_at_tokens: 1000000  # Log CRITICAL for a single step above this
+
+  # What happens when thresholds are breached
+  on_warn:
+    log_to_stage_log: true       # Always log the warning
+    notify_pm: false             # Don't interrupt PM for warnings
+    continue_dispatch: true      # Never block dispatch
+
+  on_critical:
+    log_to_stage_log: true       # Always log the critical alert
+    notify_pm: true              # Notify PM via configured channel (Slack or chat)
+    continue_dispatch: true      # Still don't block — PM decides manually if needed
+
+  # Cost estimation (informational only, based on published API pricing)
+  # These rates are approximate and may not reflect actual billing (MAX plan, etc.)
+  cost_per_1k_tokens:
+    opus_input: 0.015
+    opus_output: 0.075
+    sonnet_input: 0.003
+    sonnet_output: 0.015
+    haiku_input: 0.00025
+    haiku_output: 0.00125
+
+# ---------------------------------------------------------------------------
+# Token Estimation
+# ---------------------------------------------------------------------------
+# Configuration for the character-based token estimation heuristic.
+# See: skills/token-estimator.md for the full protocol and accuracy notes.
+#
+# These ratios approximate cl100k_base tokenizer behavior without invoking
+# an actual tokenizer. Expected accuracy: +/-10-15% for mixed content.
+
+token_estimation:
+  # Base character-to-token ratios by content type
+  chars_per_token:
+    english: 4.0                 # Natural language prose
+    code: 3.0                    # Python, JS, TS — short identifiers, operators
+    code_verbose: 3.5            # Java, Go — longer identifiers, more boilerplate
+    mixed: 3.5                   # Default for dispatch prompts (prose + code)
+    yaml_json: 3.2               # Structured config with repeated keys
+    markdown: 3.8                # Headers, lists, formatting tokens
+
+  # Default content type when classification is unavailable
+  default_content_type: mixed
+
+  # Execution estimation parameters (from BMK-001 baseline)
+  execution:
+    ops_per_minute: 3            # Average tool operations per minute of agent runtime
+    tokens_per_op: 2600          # Average tokens consumed per tool operation
+    # These values are used when tool_operations_count is unavailable
+    # from the agent's Execution Summary block
+
+  # Calibration data — refined from actual EPIC runs
+  # Initial values match BMK-001 baseline. Updated by calibration process
+  # (see skills/token-estimator.md Calibration section).
+  calibration:
+    last_calibration_date: null  # ISO 8601 — set when calibration runs
+    samples_used: 0              # Number of step profiles used in last calibration
+    min_samples_for_calibration: 3  # Minimum completed EPICs before adjusting
+
+    # Adjusted ratios (take precedence over base chars_per_token when non-null)
+    # Set by calibration process or manually by PM
+    chars_per_token_adjusted:
+      english: null
+      code: null
+      mixed: null
+
+    # Adjusted execution parameters
+    tokens_per_op_adjusted: null
+    ops_per_minute_adjusted: null
+
+    # BMK-001 reference data (read-only — used as calibration anchor)
+    bmk_001:
+      total_tokens_estimated: 3500000
+      active_compute_minutes: 140
+      step_count: 6
+      agent_execution_pct: 89
+      dispatch_pct: 3.3
+      controller_pct: 7.7
+      ops_per_minute: 3
+      tokens_per_op: 2600
+
+# ---------------------------------------------------------------------------
+# Fallback Behavior
+# ---------------------------------------------------------------------------
+# Documents what happens when dispatch-config.yaml is missing or unreadable.
+# This section is informational — the fallback logic is implemented in the
+# Controller (skills/dispatch-protocol.md), not parsed from this file.
+#
+# The Controller checks for dispatch-config.yaml at IDLE state. If the file
+# is absent, malformed, or unreadable:
+#
+#   model_tiers:        All agents use opus (inherit from Controller model)
+#   context_defaults:   All context enabled (knowledge=true, memory=true,
+#                       previous_outputs=all)
+#   budget_alerts:      Disabled (no thresholds, no warnings)
+#   token_estimation:   Default ratios (mixed=3.5 chars/token), BMK-001
+#                       execution parameters (3 ops/min, 2600 tokens/op)
+#
+# This ensures backward compatibility: projects without dispatch-config.yaml
+# behave identically to pre-dispatch-config AID versions (all-opus, full
+# context). The only difference is the absence of token tracking and budget
+# alerts — which are additive features.
+#
+# To restore defaults after customization, delete or rename the project's
+# .aid-o/03-config/policies/dispatch-config.yaml. The Controller will fall
+# back to the behavior above until /aid-init copies a fresh default.
+
+fallback:
+  model: opus                    # Default model when role_assignments lookup fails
+  knowledge: true                # Default knowledge context when context_defaults missing
+  memory: true                   # Default memory context when context_defaults missing
+  previous_outputs: all          # Default previous outputs when context_defaults missing
+  budget_alerts_enabled: false   # No alerts when config is missing
+  log_fallback_event: true       # Log to stage_log.jsonl when fallback triggers

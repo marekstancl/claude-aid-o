@@ -1,17 +1,19 @@
 # Agent Dispatch Protocol
 
 **Skill:** dispatch-protocol
-**Dependencies:** epic-state-machine, epic-orchestration (parent module)
+**Dependencies:** epic-state-machine, epic-orchestration (parent module), token-estimator (token tracking)
 
 ---
 
 ## Overview
 
-This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, branch management, and orchestration logging.
+This module defines how the Controller dispatches agents during the EXECUTING state. It covers prompt assembly, role selection, sequential dispatch, parallel group dispatch, wiring step dispatch, analysis group dispatch, source plan integration, branch management, orchestration logging, and token usage tracking.
 
 For the FSM states that trigger dispatch, **see:** `skills/epic-state-machine.md`
 For quality gate evaluation after dispatch, **see:** `skills/gate-evaluation.md`
 For auto-mode behavior during dispatch, **see:** `skills/first-aid-controller.md`
+For token estimation protocol and accuracy notes, **see:** `skills/token-estimator.md`
+For model tiers, budget alert thresholds, and estimation config, **see:** `defaults/policies/dispatch-config.yaml`
 
 ---
 
@@ -84,7 +86,14 @@ default to `aspirin` preset behavior.
         `qdrant-find` query = step objective + role + tech_stack
       - Include top `cross_project.max_results` entries in dispatch prompt
       - If Qdrant unavailable: skip silently (agent works normally)
-   f. Agent executes and produces outputs
+   f. **Estimate dispatch prompt tokens** (per `skills/token-estimator.md`):
+      - Call `estimate_dispatch_tokens(prompt_components)` on the fully assembled prompt
+      - Use content-type classification from `dispatch-config.yaml` → `token_estimation.chars_per_token`
+      - Record `estimated_prompt_tokens` for inclusion in the post-dispatch usage entry
+      - This step is NON-BLOCKING: if estimation fails, log error to stage_log.jsonl
+        and set `estimated_prompt_tokens = null` — dispatch proceeds regardless
+      - Record start timestamp for duration tracking
+   g. Agent executes and produces outputs
 
 ### Mandatory Evidence Write Checklist
 
@@ -103,6 +112,124 @@ POST-DISPATCH EVIDENCE CHECKLIST:
 
 If `output.md` cannot be written (agent produced no output or error), the Controller
 MUST NOT transition to PHASE_CHECK — instead transition directly to ESCALATION.
+
+### Post-Dispatch Token Usage Logging
+
+After every agent execution completes (success or failure) and before transitioning
+to PHASE_CHECK, the Controller logs token usage to stage_log.jsonl. This protocol
+references `skills/token-estimator.md` for estimation functions and
+`defaults/policies/dispatch-config.yaml` for budget alert thresholds.
+
+**Step 1 — Calculate estimated execution tokens:**
+
+```
+record_end_timestamp = now()
+duration_seconds = record_end_timestamp - dispatch_start_timestamp
+
+# Per skills/token-estimator.md execution estimation:
+# Baseline from BMK-001: ~3 ops/min, ~2600 tokens/op
+# Read dispatch-config.yaml → token_estimation.execution for values
+ops_per_minute = dispatch_config.token_estimation.execution.ops_per_minute   # default: 3
+tokens_per_op = dispatch_config.token_estimation.execution.tokens_per_op     # default: 2600
+
+# Prefer tool_operations_count from Execution Summary when available
+IF agent_output contains tool_operations_count:
+  estimated_execution_tokens = tool_operations_count * tokens_per_op
+ELSE:
+  estimated_execution_tokens = (duration_seconds / 60) * ops_per_minute * tokens_per_op
+
+estimated_total_tokens = estimated_prompt_tokens + estimated_execution_tokens
+```
+
+**Step 2 — Resolve model tier:**
+
+```
+# Look up the model tier assigned to this step's role
+model = dispatch_config.role_assignments[step.role]   # "opus" | "sonnet" | "haiku"
+# If role not found, use fallback.model from dispatch-config.yaml (default: "opus")
+```
+
+**Step 3 — Resolve context sources used in dispatch:**
+
+```
+context_sources = {
+  "knowledge": true|false,     # Was knowledge context included in prompt?
+  "memory": true|false,        # Was memory context included in prompt?
+  "previous_outputs": "all"|"direct"|"none",  # What prior outputs mode was used?
+  "plan_ref": true|false       # Was source plan detail injected?
+}
+# Values come from dispatch-config.yaml context_defaults for the model tier
+```
+
+**Step 4 — Check budget alert thresholds:**
+
+```
+budget_alert = null
+
+IF dispatch_config.budget_alerts.enabled:
+  # Per-step thresholds
+  IF estimated_total_tokens > dispatch_config.budget_alerts.step_critical_at_tokens:
+    budget_alert = "critical"
+  ELIF estimated_total_tokens > dispatch_config.budget_alerts.step_warn_at_tokens:
+    budget_alert = "warn"
+```
+
+**Step 5 — Write dispatch_complete entry to stage_log.jsonl:**
+
+```json
+{
+  "timestamp": "{ISO 8601}",
+  "state": "EXECUTING",
+  "epic_id": "{epic_id}",
+  "step_id": "{step_id}",
+  "action": "dispatch_complete",
+  "details": "{role} agent completed step — {brief outcome}",
+  "result": "pass|fail",
+  "usage": {
+    "model": "opus|sonnet|haiku",
+    "estimated_prompt_tokens": 1234,
+    "estimated_execution_tokens": 5678,
+    "estimated_total_tokens": 6912,
+    "duration_seconds": 120,
+    "context_sources": {
+      "knowledge": true,
+      "memory": false,
+      "previous_outputs": "direct",
+      "plan_ref": true
+    },
+    "budget_alert": null
+  }
+}
+```
+
+**Field descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `usage.model` | string | Model tier from `dispatch-config.yaml` role_assignments |
+| `usage.estimated_prompt_tokens` | int or null | From pre-dispatch estimation (step 2f). Null if estimation failed |
+| `usage.estimated_execution_tokens` | int or null | From duration/ops calculation above. Null if estimation failed |
+| `usage.estimated_total_tokens` | int or null | Sum of prompt + execution. Null if either component is null |
+| `usage.duration_seconds` | int | Wall-clock seconds from dispatch to agent completion |
+| `usage.context_sources` | object | What context was included in the dispatch prompt |
+| `usage.budget_alert` | string or null | "warn", "critical", or null — per dispatch-config.yaml thresholds |
+
+**Non-blocking guarantee:**
+
+The entire usage logging sequence is wrapped in error handling. If any step fails
+(missing config, calculation error, write failure), the Controller:
+
+1. Logs the error to stage_log.jsonl: `{"action": "usage_logging_error", "error": "{message}"}`
+2. Sets affected fields to `null`
+3. Continues to PHASE_CHECK — usage logging NEVER blocks the pipeline
+
+This is consistent with the non-blocking behavior defined in `skills/token-estimator.md`.
+
+**Compatibility note:**
+
+The `usage` field is ADDITIVE to the existing stage_log.jsonl entry format. Existing
+consumers that do not expect the `usage` field will ignore it (standard JSON behavior).
+No existing fields are modified or removed.
 
 ### SECURITY — Untrusted Content Framing
 
@@ -545,4 +672,4 @@ ON STARTUP (IDLE → PLANNING transition):
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28
