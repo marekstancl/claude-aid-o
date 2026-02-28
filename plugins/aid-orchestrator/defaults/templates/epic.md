@@ -76,8 +76,14 @@ runs_completed: 0      # incremented at each run DONE
 
 ## Dependencies
 
-<!-- External dependencies: other EPICs, services, libraries -->
--
+### Internal (same plan)
+<!-- Auto-generated: previous phases from this plan -->
+
+### External (other plans/EPICs)
+<!-- From plan Dependencies section — cross-plan deps -->
+
+### Queue Implications
+depends_on: []
 
 ## Steps (Role Pipeline)
 
