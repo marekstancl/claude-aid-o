@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.4.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.5.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -131,9 +131,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v1.4.0** (current) — GUI Dashboard: Ideas-to-Execution Kanban, AI Companion Chat, Evidence Vault full-text search, Pipeline Theater SVG timeline, Decision Hub notifications, 1014 tests
+- **v1.5.0** (current) — Token efficiency: model tiering, selective context injection, dispatch prompt trimming, usage tracking, efficiency audit
+- **v1.4.0** — GUI Dashboard: Ideas-to-Execution Kanban, AI Companion Chat, Evidence Vault full-text search, Pipeline Theater SVG timeline, Decision Hub notifications, 1014 tests
 - **v1.3.1** — Audit-driven fixes: Curator evidence path bug, broken cross-ref, Czech→English translations, stale template references
-- **v1.3.0** — 16 quality fixes: queue dependency ordering, INTERMEDIATE_GUARDRAIL, canonical ID format, OVERLAP_CHECK algorithm, setup re-run detection
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

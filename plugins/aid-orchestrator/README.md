@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-A Claude Code plugin implementing **Controller + Workers** architecture for multi-agent software development. v1.3.1
+A Claude Code plugin implementing **Controller + Workers** architecture for multi-agent software development. v1.5.0
 
 ## How It Works
 
@@ -195,6 +195,6 @@ Without Qdrant, the plugin works identically using file-based memory (active-wor
 
 ## Version
 
-- **Plugin:** 1.4.0
+- **Plugin:** 1.5.0
 - **Requires:** Claude Code >= 1.0.0
 - **License:** AGPL-3.0-only

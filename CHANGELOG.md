@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.5.0] — 2026-02-28
 
 ### Added
 - **Token Estimation Protocol** — new `skills/token-estimator.md` defining character-based heuristic for dispatch token counting with cl100k_base approximation and calibration process
@@ -12,6 +12,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Planner Model Assignment** — planner reads `dispatch-config.yaml` and populates `model` + `context_scope` per step with fallback to opus/all-context when config is absent
 - **Dispatch Usage Logging** — pre-dispatch token estimation and post-dispatch `usage` object in stage_log.jsonl with model, tokens, duration, context sources, and budget alerts
 - **Usage Aggregation** — DONE state aggregates all dispatch_complete entries into `usage_summary` in plan_progress.json with breakdowns by model, role, and step
+- **Model Tiering in Dispatch** — `step.model` passed to Task tool with 3-level fallback chain (step.model → dispatch-config.yaml → opus default)
+- **Selective Context Injection** — knowledge, memory, and previous outputs conditionally injected based on `step.context_scope` with full backward compatibility
+- **Dispatch Prompt Trimming** — EPIC context reduced to one-line goal + step-level paths instead of full EPIC specification
+- **Token Efficiency Audit** — new `/aid-audit efficiency` type with per-role baseline comparison and 2x alert threshold (advisory, 0% weight)
+
+### Changed
+- **Dispatch Protocol** — model parameter wired into Task tool calls, context injection is conditional, prompt uses trimmed EPIC context
+- **Parallel Dispatch** — model tiering support with per-agent model resolution
 
 ## [1.4.0] — 2026-02-27
 
