@@ -1,0 +1,641 @@
+# AID Pipeline Scripts
+
+Bash scripts that implement the AID Plan-to-Execution pipeline. Each script
+handles one transformation step, and `aid-auto-pipeline.sh` orchestrates them
+all in sequence.
+
+```
+Plan.md --> EPIC.md --> plan.json --> run.md --> epic-queue.yaml
+          (1)         (2)          (3)         (4)
+                  aid-auto-pipeline.sh (5) = 1+2+3+4
+```
+
+## Prerequisites
+
+| Dependency | Minimum Version | Check Command |
+|------------|----------------|---------------|
+| bash | 4.0+ | `bash --version` |
+| jq | 1.6+ | `jq --version` |
+| sed | any (BSD or GNU) | `sed --version 2>/dev/null \|\| echo BSD` |
+| awk | any (POSIX) | `awk --version 2>/dev/null \|\| echo BSD` |
+| date | any (BSD or GNU) | `date --version 2>/dev/null \|\| echo BSD` |
+
+Install `jq` if missing:
+
+```bash
+# macOS
+brew install jq
+
+# Debian / Ubuntu
+sudo apt install jq
+
+# Fedora / RHEL
+sudo dnf install jq
+```
+
+All scripts source `lib/common.sh`, which runs `check_prerequisites()` at the
+top of each script. If bash < 4.0 or jq is absent, the script exits
+immediately with code 2 and printed install guidance.
+
+## Exit Codes
+
+| Code | Meaning | Example |
+|------|---------|---------|
+| 0 | Success | Script completed normally |
+| 1 | Validation error | Malformed EPIC, missing required section, schema mismatch |
+| 2 | Missing dependency | bash < 4.0, jq not installed |
+| 3 | File I/O error | Input file not found, output directory not writable |
+
+All non-zero exits print a JSON object to stderr:
+
+```json
+{"error": "descriptive message", "code": 1}
+```
+
+## Data Flow Diagram
+
+```
+                       aid-auto-pipeline.sh
+          +-------------------------------------------------+
+          |                                                 |
+          v                                                 |
+   +------------+     +----------------+     +-------------+|    +---------------+
+   | Plan.md    |---->| EPIC.md        |---->| plan.json   ||--->| run.md        |
+   | (.aid-o/   |  1  | (.aid-o/       |  2  | plan_       ||  3 | (.aid-o/      |
+   |  01-plans/)|     |  02-epics/)    |     | progress.json||   |  04-engine/   |
+   +------------+     +----------------+     +-------------+|    |  runs/)       |
+                                                            |    +---------------+
+                                                            |
+                                                            |    +---------------+
+                                                            +--->| epic-queue    |
+                                                              4  | .yaml         |
+                                                                 | (.aid-o/      |
+                                                                 |  04-engine/)  |
+                                                                 +---------------+
+```
+
+Where the numbered arrows correspond to:
+
+1. `aid-plan-to-epic.sh` — Plan.md to EPIC.md
+2. `aid-epic-to-json.sh` — EPIC.md to plan.json + plan_progress.json
+3. `aid-json-to-run.sh` — plan.json to run.md
+4. `aid-queue-add.sh` — EPIC to epic-queue.yaml entry
+
+---
+
+## Scripts
+
+### 1. aid-plan-to-epic.sh
+
+**Purpose:** Convert a Plan.md file into one or more EPIC.md files, one per
+phase defined in the plan.
+
+#### Arguments
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--plan <path>` | Yes | Path to the source Plan.md file |
+| `--phase <N>` | Yes | Phase number to extract (1-based index) |
+| `--total <T>` | Yes | Total number of phases in the plan |
+| `--epic-template <path>` | Yes | Path to the EPIC template file (.aid-o/03-config/templates/epic.md) |
+| `--output-dir <path>` | Yes | Directory where the generated EPIC file is written |
+| `--counter-yaml <path>` | Yes | Path to the EPIC counter YAML file for auto-incrementing EPIC IDs |
+
+#### stdin / stdout Contract
+
+- **stdin:** Not used.
+- **stdout:** Absolute path to the generated EPIC file.
+
+  ```
+  /project/.aid-o/02-epics/E-018-1_3.md
+  ```
+
+- **stderr:** JSON error on failure (see Exit Codes).
+
+#### Behavior
+
+1. Reads `--plan` and extracts frontmatter (plan ID, title, metadata).
+2. Extracts the phase-specific section from the plan's `## High-Level Steps`
+   table (row matching `--phase`).
+3. Reads the EPIC template and fills placeholders:
+   - `plan_ref` set to the plan filename
+   - `plan_epics_total` set to `--total`
+   - EPIC ID auto-incremented from `--counter-yaml`
+   - Context, Goal, Scope, and Steps sections populated from plan content
+4. Writes the completed EPIC to `--output-dir`.
+5. Prints the output path to stdout.
+
+#### Exit Codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | EPIC generated successfully |
+| 1 | Plan is malformed (missing frontmatter, no steps table, phase out of range) |
+| 2 | Missing dependency (bash/jq) |
+| 3 | Plan file not found, template not found, output dir not writable |
+
+#### Usage Example
+
+```bash
+./aid-plan-to-epic.sh \
+  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --phase 1 \
+  --total 3 \
+  --epic-template .aid-o/03-config/templates/epic.md \
+  --output-dir .aid-o/02-epics \
+  --counter-yaml .aid-o/04-engine/epic-counter.yaml
+```
+
+#### Portability Notes
+
+- Uses `sed` for text replacement — avoids GNU-only flags (`-i` differs between
+  BSD and GNU; uses temp file + mv instead).
+- All awk usage is POSIX-compliant (no gawk extensions).
+
+---
+
+### 2. aid-epic-to-json.sh
+
+**Purpose:** Parse an EPIC.md file and produce a `plan.json` (execution plan)
+and `plan_progress.json` (progress tracker), plus initialize an evidence
+directory for the run.
+
+#### Arguments
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--epic <path>` | Yes | Path to the EPIC.md file |
+| `--schema <path>` | Yes | Path to plan.schema.json for validation |
+| `--output-dir <path>` | Yes | Directory where plan.json, plan_progress.json, and evidence/ are written |
+| `--plan-source <path>` | No | Path to the source Plan.md (populates `source_plan` in plan.json) |
+
+#### stdin / stdout Contract
+
+- **stdin:** Not used.
+- **stdout:** JSON manifest describing generated artifacts:
+
+  ```json
+  {
+    "plan_json": ".aid-o/04-engine/runs/R-E018-1/plan.json",
+    "progress": ".aid-o/04-engine/runs/R-E018-1/plan_progress.json",
+    "run_id": "R-E018-1",
+    "evidence_dir": ".aid-o/04-engine/runs/R-E018-1/evidence"
+  }
+  ```
+
+- **stderr:** JSON error on failure.
+
+#### Behavior
+
+1. Reads the EPIC frontmatter to extract `status`, `plan_ref`, `runs_total`.
+2. Parses the `## Steps (Role Pipeline)` table into structured step objects.
+3. Builds a dependency graph from the "Depends On" column.
+4. Detects parallel groups from the "Parallel Group" column.
+5. Auto-generates analysis groups for steps matching policy rules (e.g.,
+   security review after backend steps).
+6. Reads `## DoD Gates` to populate the `gates` array.
+7. Constructs the plan.json object conforming to `plan.schema.json`.
+8. Validates the generated JSON against the schema using `jq`.
+9. Initializes `plan_progress.json` with all steps set to `pending`.
+10. Creates the evidence directory.
+11. Prints the JSON manifest to stdout.
+
+#### Exit Codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | plan.json and plan_progress.json generated and validated |
+| 1 | EPIC is malformed (missing Steps table, invalid dependencies, cycle detected) |
+| 2 | Missing dependency (bash/jq) |
+| 3 | EPIC file not found, schema file not found, output dir not writable |
+
+#### Usage Example
+
+```bash
+./aid-epic-to-json.sh \
+  --epic .aid-o/02-epics/E-018-1_3.md \
+  --schema .aid-o/03-config/templates/plan.schema.json \
+  --output-dir .aid-o/04-engine/runs/R-E018-1 \
+  --plan-source .aid-o/01-plans/2026-02-28-pipeline-scripts.md
+```
+
+#### Portability Notes
+
+- JSON construction uses `jq` exclusively (no hand-assembled JSON strings).
+- Schema validation uses `jq` to verify required fields and types — not a full
+  JSON Schema validator, but sufficient for structural correctness.
+- Dependency cycle detection implements Kahn's algorithm in bash/awk.
+
+---
+
+### 3. aid-json-to-run.sh
+
+**Purpose:** Generate a run.md file from a plan.json, filling a run template
+with frontmatter, phase sections, and dependency information.
+
+#### Arguments
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--plan-json <path>` | Yes | Path to the plan.json file |
+| `--run-template <path>` | Yes | Path to the run template (e.g., run-new-feature.md) |
+| `--epic <path>` | Yes | Path to the source EPIC.md (for context and metadata) |
+| `--output-dir <path>` | Yes | Directory where the run.md file is written |
+| `--run-id <R-xxx>` | Yes | Run identifier (e.g., R-E018-1) |
+
+#### stdin / stdout Contract
+
+- **stdin:** Not used.
+- **stdout:** Absolute path to the generated run file.
+
+  ```
+  /project/.aid-o/04-engine/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md
+  ```
+
+- **stderr:** JSON error on failure.
+
+#### Behavior
+
+1. Reads `--plan-json` to extract steps, dependencies, and parallel groups.
+2. Reads `--epic` to extract Goal, Context, Scope, and Acceptance Criteria.
+3. Reads `--run-template` as the structural skeleton.
+4. Fills run frontmatter:
+   - `id` from `--run-id`
+   - `run_id` as date-slugified identifier
+   - `epic_id` from plan.json `epic_id`
+   - `epic_file` from `--epic` path
+   - `plan_ref` from plan.json
+   - `orchestrated: true`
+5. Generates one Phase section per plan.json step, populating:
+   - Goal (from step objective)
+   - Agent / Role
+   - Inputs (from step inputs + dependency outputs)
+   - Outputs (from step outputs)
+   - Constraints (from step constraints + allowed/forbidden paths)
+   - Acceptance criteria (from step acceptance_criteria)
+6. Generates the Dependencies table from plan.json dependencies.
+7. Writes the completed run file.
+8. Prints the output path to stdout.
+
+#### Exit Codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | Run file generated successfully |
+| 1 | plan.json is invalid (missing steps, malformed structure) |
+| 2 | Missing dependency (bash/jq) |
+| 3 | Input file not found, output dir not writable |
+
+#### Usage Example
+
+```bash
+./aid-json-to-run.sh \
+  --plan-json .aid-o/04-engine/runs/R-E018-1/plan.json \
+  --run-template .aid-o/03-config/templates/run-new-feature.md \
+  --epic .aid-o/02-epics/E-018-1_3.md \
+  --output-dir .aid-o/04-engine/runs/R-E018-1 \
+  --run-id R-E018-1
+```
+
+#### Portability Notes
+
+- Template placeholder replacement uses `sed` with `|` as delimiter to avoid
+  conflicts with `/` in file paths.
+- Generates valid markdown tables using `printf` formatting.
+
+---
+
+### 4. aid-queue-add.sh
+
+**Purpose:** Add an EPIC entry to the `epic-queue.yaml` file for queued
+execution. Validates against duplicates and runs cycle detection on the
+dependency graph.
+
+#### Arguments
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--epic-id <E-xxx>` | Yes | EPIC identifier to enqueue |
+| `--epic-path <path>` | Yes | Path to the EPIC.md file |
+| `--priority <level>` | No | Priority level: `critical`, `high`, `medium` (default), `low` |
+| `--depends-on <list>` | No | Comma-separated list of EPIC IDs this EPIC depends on |
+| `--queue-yaml <path>` | Yes | Path to the epic-queue.yaml file |
+
+#### stdin / stdout Contract
+
+- **stdin:** Not used.
+- **stdout:** Confirmation string:
+
+  ```
+  queued:E-018-1_3
+  ```
+
+- **stderr:** JSON error on failure.
+
+#### Behavior
+
+1. Validates `--epic-id` format (must match `E-` prefix pattern).
+2. Reads existing `--queue-yaml` (creates if absent).
+3. Checks for duplicate entries — exits with code 1 if EPIC already queued.
+4. If `--depends-on` is specified, validates that all dependency EPIC IDs exist
+   in the queue or are already completed.
+5. Runs Kahn's algorithm for topological cycle detection on the full queue
+   dependency graph (including the new entry). Exits with code 1 if a cycle
+   is detected.
+6. Appends the new entry to the queue YAML with atomic write (write to temp
+   file, then `mv` to target — prevents partial writes on failure).
+7. Prints confirmation to stdout.
+
+#### Queue Entry Format
+
+Each entry in `epic-queue.yaml`:
+
+```yaml
+queue:
+  - epic_id: E-018-1_3
+    epic_path: .aid-o/02-epics/E-018-1_3.md
+    priority: medium
+    status: queued          # queued | running | completed | failed
+    depends_on: []
+    queued_at: 2026-02-28T14:30:00Z
+```
+
+#### Exit Codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | EPIC queued successfully |
+| 1 | Duplicate EPIC, dependency cycle detected, invalid EPIC ID format |
+| 2 | Missing dependency (bash/jq) |
+| 3 | Queue file not writable, EPIC file not found |
+
+#### Usage Example
+
+```bash
+./aid-queue-add.sh \
+  --epic-id E-018-1_3 \
+  --epic-path .aid-o/02-epics/E-018-1_3.md \
+  --priority medium \
+  --depends-on E-017-1_1,E-017-2_1 \
+  --queue-yaml .aid-o/04-engine/epic-queue.yaml
+```
+
+#### Portability Notes
+
+- YAML generation uses `printf` and string concatenation — no external YAML
+  library required.
+- Atomic write via temp file + `mv` is POSIX-portable and prevents corruption.
+- Kahn's algorithm is implemented in awk for performance (no subshell loops).
+
+---
+
+### 5. aid-auto-pipeline.sh
+
+**Purpose:** Master orchestration script that runs the full Plan-to-Queue
+pipeline. Takes a Plan.md, generates EPICs for all phases, converts each to
+plan.json and run.md, then enqueues them all.
+
+#### Arguments
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--plan <path>` | Yes | Path to the source Plan.md file |
+| `--queue-mode <mode>` | No | How to set up queue dependencies between generated EPICs. One of: `chain` (default), `separate`, `custom` |
+| `--plugin-dir <path>` | No | Path to the AID plugin directory (auto-detected if not set) |
+| `--depends-on <list>` | No | Comma-separated EPIC IDs for custom dependencies (only with `--queue-mode custom`) |
+
+**Queue Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `chain` | Each EPIC depends on the previous one: E1 -> E2 -> E3. Default. |
+| `separate` | All EPICs are independent — no inter-EPIC dependencies. |
+| `custom` | Uses `--depends-on` to set the same dependencies on all generated EPICs. |
+
+#### stdin / stdout Contract
+
+- **stdin:** Not used.
+- **stdout:** JSON manifest summarizing all generated artifacts:
+
+  ```json
+  {
+    "plan_id": "P018",
+    "plan_path": ".aid-o/01-plans/2026-02-28-pipeline-scripts.md",
+    "epics": [
+      {
+        "epic_id": "E-018-1_3",
+        "epic_path": ".aid-o/02-epics/E-018-1_3.md",
+        "plan_json": ".aid-o/04-engine/runs/R-E018-1/plan.json",
+        "run_path": ".aid-o/04-engine/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md",
+        "run_id": "R-E018-1",
+        "queue_status": "queued"
+      },
+      {
+        "epic_id": "E-018-2_3",
+        "epic_path": ".aid-o/02-epics/E-018-2_3.md",
+        "plan_json": ".aid-o/04-engine/runs/R-E018-2/plan.json",
+        "run_path": ".aid-o/04-engine/runs/R-E018-2/2026-02-28-new-feature-pipeline-scripts.md",
+        "run_id": "R-E018-2",
+        "queue_status": "queued"
+      }
+    ],
+    "queue_mode": "chain",
+    "duration_ms": 4200
+  }
+  ```
+
+- **stderr:** JSON error on failure; progress messages prefixed with `[INFO]`.
+
+#### Behavior
+
+1. Validates the plan file exists and has valid frontmatter.
+2. Counts total phases from the `## High-Level Steps` table.
+3. Locates the AID plugin directory (templates, schemas) from `--plugin-dir`
+   or by walking up from the script location.
+4. For each phase (1..N):
+   a. Calls `aid-plan-to-epic.sh` to generate the EPIC.
+   b. Calls `aid-epic-to-json.sh` to generate plan.json + progress.
+   c. Calls `aid-json-to-run.sh` to generate the run file.
+   d. Calls `aid-queue-add.sh` to enqueue the EPIC.
+5. Constructs dependency chains according to `--queue-mode`.
+6. Measures total wall-clock time.
+7. Prints the JSON manifest to stdout.
+
+#### Exit Codes
+
+| Code | Condition |
+|------|-----------|
+| 0 | All phases processed and queued successfully |
+| 1 | Plan is malformed, or a sub-script returned validation error |
+| 2 | Missing dependency (bash/jq) |
+| 3 | Plan file not found, plugin directory not found |
+
+#### Usage Example
+
+```bash
+# Default chain mode — each EPIC depends on the previous
+./aid-auto-pipeline.sh \
+  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md
+
+# All EPICs independent (can run in parallel)
+./aid-auto-pipeline.sh \
+  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --queue-mode separate
+
+# Custom dependencies
+./aid-auto-pipeline.sh \
+  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --queue-mode custom \
+  --depends-on E-017-1_1
+
+# Explicit plugin directory
+./aid-auto-pipeline.sh \
+  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --plugin-dir plugins/aid-orchestrator
+```
+
+#### Portability Notes
+
+- Measures duration using bash `SECONDS` variable (available since bash 2.0)
+  and converts to milliseconds via `$(( SECONDS * 1000 ))`.
+- Sub-script invocation uses `"$(dirname "$0")/aid-plan-to-epic.sh"` for
+  reliable relative path resolution.
+- Progress messages go to stderr (`[INFO]` prefix) to keep stdout clean for
+  the JSON manifest.
+
+---
+
+## Shared Library: lib/common.sh
+
+All 5 scripts source `lib/common.sh` at startup. This file provides 7 shared
+functions and must never be executed directly (it contains a guard that exits
+with an error if run as a standalone script).
+
+### Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `parse_frontmatter` | `parse_frontmatter <file>` | Extract YAML frontmatter as key=value pairs |
+| `extract_section` | `extract_section <file> <header>` | Extract H2 section body by header name |
+| `extract_subsection` | `extract_subsection <file> <h2> <h3>` | Extract H3 subsection within an H2 |
+| `slugify` | `slugify <text>` | Convert text to lowercase hyphenated slug (max 40 chars) |
+| `check_prerequisites` | `check_prerequisites` | Verify bash >= 4.0 and jq availability |
+| `error_exit` | `error_exit <msg> <code>` | Print JSON error to stderr and exit |
+| `iso_timestamp` | `iso_timestamp` | Return current UTC ISO 8601 timestamp |
+
+### Sourcing Pattern
+
+Every pipeline script begins with:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+check_prerequisites
+```
+
+---
+
+## JSON Manifest Schema
+
+The `aid-auto-pipeline.sh` stdout produces a JSON manifest. Its schema:
+
+```json
+{
+  "type": "object",
+  "required": ["plan_id", "plan_path", "epics", "queue_mode", "duration_ms"],
+  "properties": {
+    "plan_id": {
+      "type": "string",
+      "description": "Plan identifier extracted from the plan frontmatter",
+      "examples": ["P018"]
+    },
+    "plan_path": {
+      "type": "string",
+      "description": "Path to the source Plan.md file"
+    },
+    "epics": {
+      "type": "array",
+      "description": "One entry per generated EPIC (one per plan phase)",
+      "items": {
+        "type": "object",
+        "required": ["epic_id", "epic_path", "plan_json", "run_path", "run_id", "queue_status"],
+        "properties": {
+          "epic_id": {
+            "type": "string",
+            "description": "Generated EPIC identifier",
+            "examples": ["E-018-1_3"]
+          },
+          "epic_path": {
+            "type": "string",
+            "description": "Path to the generated EPIC.md file"
+          },
+          "plan_json": {
+            "type": "string",
+            "description": "Path to the generated plan.json"
+          },
+          "run_path": {
+            "type": "string",
+            "description": "Path to the generated run.md file"
+          },
+          "run_id": {
+            "type": "string",
+            "description": "Run identifier",
+            "examples": ["R-E018-1"]
+          },
+          "queue_status": {
+            "type": "string",
+            "enum": ["queued", "failed"],
+            "description": "Whether the EPIC was successfully queued"
+          }
+        }
+      }
+    },
+    "queue_mode": {
+      "type": "string",
+      "enum": ["chain", "separate", "custom"],
+      "description": "Queue dependency mode used"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "description": "Total wall-clock time in milliseconds"
+    }
+  }
+}
+```
+
+---
+
+## Directory Structure
+
+After running the full pipeline, the workspace looks like:
+
+```
+.aid-o/
+  01-plans/
+    2026-02-28-pipeline-scripts.md          # Source plan (input)
+  02-epics/
+    E-018-1_3.md                            # Generated EPIC (phase 1)
+    E-018-2_3.md                            # Generated EPIC (phase 2)
+    E-018-3_3.md                            # Generated EPIC (phase 3)
+  03-config/
+    templates/
+      epic.md                               # EPIC template (input)
+      plan.schema.json                      # JSON schema (input)
+      run-new-feature.md                    # Run template (input)
+  04-engine/
+    epic-counter.yaml                       # Auto-increment counter
+    epic-queue.yaml                         # Execution queue
+    runs/
+      R-E018-1/
+        plan.json                           # Execution plan
+        plan_progress.json                  # Progress tracker
+        2026-02-28-new-feature-*.md         # Run file
+        evidence/                           # Evidence directory
+      R-E018-2/
+        ...
+      R-E018-3/
+        ...
+```
