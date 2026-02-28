@@ -80,9 +80,12 @@ The Controller follows this high-level sequence when processing an EPIC:
    → Auto-mode: skills/first-aid-controller.md Section "PM_APPROVAL — Auto-Mode Behavior"
 
 8. DONE
+   → Token usage aggregation (dispatch_complete entries → usage_summary)
+   → Write usage_summary to plan_progress.json + Qdrant
    → Release sub-phase (version bump if needed)
    → Branch merge, archive, auditor, metrics
    → EPIC queue check (auto-pickup next EPIC)
+   → See: "DONE State — Token Usage Aggregation" section below
    → See: skills/first-aid-controller.md Section "DONE State"
 ```
 
@@ -130,7 +133,141 @@ The Controller follows this high-level sequence when processing an EPIC:
 - **Orchestration log (fallback):** `.aid-o/logs/orchestration-events.jsonl`
 - **Lessons learned (file):** `.aid-o/04-engine/lessons-learned.md`
 - **Cost optimization:** `skills/cost-optimization.md` (model selection, file scoping, dispatch optimization)
+- **Token estimation:** `skills/token-estimator.md` (character-based heuristic, accuracy notes, calibration)
+- **Dispatch config:** `.aid-o/03-config/policies/dispatch-config.yaml` (model tiers, budget alerts, token estimation params)
 - **Release policy:** `.aid-o/03-config/policies/release-policy.yaml`
+
+---
+
+## DONE State — Token Usage Aggregation
+
+At the DONE state, after all steps have completed and before the release sub-phase,
+the Controller aggregates token usage from the run's stage_log.jsonl into a
+`usage_summary` object. This provides a single consolidated view of estimated token
+consumption for the entire EPIC run.
+
+**References:**
+- `skills/token-estimator.md` — estimation protocol and accuracy notes
+- `skills/dispatch-protocol.md` — dispatch_complete entries with `usage` field
+- `defaults/policies/dispatch-config.yaml` — budget alert thresholds
+
+### Aggregation Protocol
+
+```
+DONE_USAGE_AGGREGATION:
+  1. Read stage_log.jsonl from .aid-o/04-engine/evidence/{epic_id}/{run_id}/
+  2. Filter entries where action == "dispatch_complete" AND usage field is present
+  3. For each matching entry:
+     a. Accumulate estimated_total_tokens into running total
+        (skip entries where estimated_total_tokens is null)
+     b. Accumulate by model tier (usage.model → opus|sonnet|haiku)
+     c. Accumulate by role (extract role from step_id pattern: step_{N}_{role})
+     d. Accumulate by step (use step_id as key)
+     e. Accumulate duration_seconds into total_duration
+     f. Count entries where usage.budget_alert is not null
+  4. Produce usage_summary object
+  5. Write usage_summary to plan_progress.json
+  6. Store usage_summary to Qdrant (if available)
+```
+
+### usage_summary Schema
+
+The `usage_summary` is added to `plan_progress.json` as a top-level field. It is
+ADDITIVE — existing fields in plan_progress.json are not modified.
+
+```json
+{
+  "usage_summary": {
+    "total_estimated_tokens": 123456,
+    "by_model": {
+      "opus": 50000,
+      "sonnet": 60000,
+      "haiku": 13456
+    },
+    "by_role": {
+      "architect": 30000,
+      "backend": 40000,
+      "qa": 25000,
+      "code-reviewer": 15000,
+      "gate-fixer": 13456
+    },
+    "by_step": {
+      "step_1_architect": 30000,
+      "step_2_backend": 40000,
+      "step_3_qa": 25000,
+      "step_4_code-reviewer": 15000,
+      "step_5_gate-fixer": 13456
+    },
+    "total_duration_seconds": 600,
+    "budget_alerts_triggered": 0
+  }
+}
+```
+
+**Field descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_estimated_tokens` | int | Sum of all `estimated_total_tokens` from dispatch_complete entries (null entries excluded) |
+| `by_model` | object | Tokens grouped by model tier key (opus, sonnet, haiku). Missing tiers omitted |
+| `by_role` | object | Tokens grouped by agent role (extracted from step_id). Roles with 0 tokens omitted |
+| `by_step` | object | Tokens grouped by step_id. Steps with null estimates omitted |
+| `total_duration_seconds` | int | Sum of all `duration_seconds` from dispatch_complete entries |
+| `budget_alerts_triggered` | int | Count of entries where `usage.budget_alert` was "warn" or "critical" |
+
+### Writing to plan_progress.json
+
+```
+WRITE_USAGE_SUMMARY:
+  1. Read plan_progress.json from .aid-o/04-engine/runs/{run_id}/
+  2. Parse as JSON object
+  3. Add "usage_summary" key with the aggregated object
+  4. Write back to plan_progress.json
+  5. If plan_progress.json does not exist or is unreadable:
+     → Log warning to stage_log.jsonl
+     → Skip writing (do not create new file)
+     → Continue to next DONE sub-phase
+```
+
+### Qdrant Storage
+
+If Qdrant MCP is available, store the usage summary as a metric for cross-EPIC
+analytics and cost trend analysis.
+
+```
+STORE_USAGE_TO_QDRANT:
+  1. Check Qdrant MCP availability (same probe as orchestration logging)
+  2. IF available:
+     a. Build metric payload:
+        {
+          "metric_kind": "token_profile",
+          "epic_id": "{epic_id}",
+          "run_id": "{run_id}",
+          "timestamp": "{ISO 8601}",
+          "total_estimated_tokens": usage_summary.total_estimated_tokens,
+          "by_model": usage_summary.by_model,
+          "by_role": usage_summary.by_role,
+          "total_duration_seconds": usage_summary.total_duration_seconds,
+          "budget_alerts_triggered": usage_summary.budget_alerts_triggered,
+          "step_count": count of entries in by_step
+        }
+     b. Store via qdrant-store to collection "aid-orchestration-log"
+     c. Metadata: { "metric_kind": "token_profile", "epic_id": "{epic_id}" }
+  3. IF Qdrant unavailable:
+     → Append metric to .aid-o/logs/orchestration-events.jsonl (same fallback as
+       dispatch event logging — see skills/dispatch-protocol.md)
+     → Continue — never block DONE state for Qdrant failures
+```
+
+### Non-Blocking Guarantee
+
+The entire usage aggregation sequence is non-blocking. If any step fails (missing
+stage_log.jsonl, parse error, Qdrant unavailable, plan_progress.json write failure),
+the Controller:
+
+1. Logs the error to stage_log.jsonl: `{"state": "DONE", "action": "usage_aggregation_error", "error": "{message}"}`
+2. Continues to the next DONE sub-phase (release, branch merge, archive)
+3. Usage aggregation failure NEVER prevents EPIC completion
 
 ---
 
@@ -155,4 +292,4 @@ RELEASE_CHECK_COUNTS:
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28

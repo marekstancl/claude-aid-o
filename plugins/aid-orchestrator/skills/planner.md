@@ -11,11 +11,12 @@ This skill defines how the Planner converts an EPIC specification into a validat
 The Planner builds a dependency graph from EPIC steps, detects parallel groups via topological
 sort, applies default ordering rules when the EPIC is underspecified, applies granularity
 heuristics (G1: layer splitting, G2: module splitting) to decompose coarse-grained steps,
-and auto-generates `analysis_groups` for multi-perspective review of security-sensitive,
-high-complexity, or contract-changing steps.
+auto-generates `analysis_groups` for multi-perspective review of security-sensitive,
+high-complexity, or contract-changing steps, and enriches each step with `model` tier and
+`context_scope` from `dispatch-config.yaml` for downstream dispatch optimization.
 
 **Input:** EPIC file (role + objective + depends_on per step)
-**Output:** Plan JSON conforming to `plan.schema.json` (steps, dependencies, parallel_groups, analysis_groups, gates, budget)
+**Output:** Plan JSON conforming to `plan.schema.json` (steps with model + context_scope, dependencies, parallel_groups, analysis_groups, gates, budget)
 
 ---
 
@@ -1193,6 +1194,12 @@ This is the master procedure the Planner follows when `/aid-plan-epic` is invoke
  9. ASSEMBLE Plan JSON:
       { epic_id, version: 1, created_at, steps, dependencies,
         parallel_groups, analysis_groups, gates, budget }
+ 9.1. DISPATCH CONFIG ENRICHMENT (Section 7.5):
+      a. Load dispatch-config.yaml (project-level → plugin defaults → hardcoded fallback)
+      b. For each step: set step.model from role_assignments[step.role]
+      c. For each step: set step.context_scope from context_defaults[step.model]
+      d. Apply context_overrides if present
+      e. Log: config source used, any fallback triggers, any unknown roles
 10. COST ESTIMATES — conditional on billing_mode (see Section 8 below)
 11. RUN BOUNDARIES:
       a. Apply wave-based run boundary algorithm (Section 11)
@@ -1511,6 +1518,138 @@ Auto-Scaffold Detection. The sequence is:
 The Docker step is injected BEFORE step decomposition so that decomposition rules
 can evaluate it normally (though Docker steps rarely meet decomposition criteria
 since they produce only 2-3 files).
+
+---
+
+## 7.5 Dispatch Config Enrichment (Model + Context Scope per Step)
+
+After assembling plan steps, the Planner enriches each step with `model` and `context_scope`
+fields from `dispatch-config.yaml`. This enables downstream consumers (Controller, dispatch
+protocol, token estimator) to know which model tier and context configuration each step should
+use — without those consumers needing to read dispatch-config.yaml themselves.
+
+### Config Loading
+
+```
+1. ATTEMPT to read project-level config:
+   path: .aid-o/03-config/policies/dispatch-config.yaml
+
+2. IF project-level file exists and is valid YAML:
+   → Parse role_assignments and context_defaults sections
+   → Log: "Dispatch config loaded from project-level config"
+
+3. ELSE IF project-level is missing or unreadable:
+   ATTEMPT to read default config:
+   path: defaults/policies/dispatch-config.yaml (relative to plugin root)
+
+4. IF default config exists and is valid YAML:
+   → Parse role_assignments and context_defaults sections
+   → Log: "Dispatch config loaded from plugin defaults"
+
+5. ELSE (both files missing or unreadable):
+   → Use hardcoded fallbacks (see Fallback Behavior below)
+   → Log: "Dispatch config not found — using built-in fallback defaults"
+   → Include note in plan generation output:
+     "NOTE: dispatch-config.yaml not found. All steps assigned model=opus
+      with full context (knowledge=true, memory=true, previous_outputs=all)."
+```
+
+### Step Enrichment Algorithm
+
+```
+For each step S in plan.steps:
+
+  1. LOOKUP model tier:
+     role = S.role
+     IF role_assignments[role] exists:
+       S.model = role_assignments[role]    # e.g., "sonnet", "opus", "haiku"
+     ELSE:
+       S.model = "opus"                    # fallback for unknown roles
+       Log: "Role '{role}' not found in dispatch-config.yaml — defaulting to opus"
+
+  2. LOOKUP context scope:
+     tier = S.model                        # e.g., "sonnet"
+     IF context_defaults[tier] exists:
+       S.context_scope = {
+         "knowledge": context_defaults[tier].knowledge,
+         "memory":    context_defaults[tier].memory,
+         "previous_outputs": context_defaults[tier].previous_outputs
+       }
+     ELSE:
+       S.context_scope = {
+         "knowledge": true,
+         "memory": true,
+         "previous_outputs": "all"
+       }
+       Log: "Tier '{tier}' not found in context_defaults — using full context"
+
+  3. CHECK for per-role context overrides (optional section in dispatch-config.yaml):
+     IF context_overrides[role] exists:
+       Merge overrides into S.context_scope (override wins per field)
+       Log: "Context override applied for role '{role}'"
+```
+
+### Fallback Behavior
+
+When `dispatch-config.yaml` is missing or unreadable, ALL steps receive:
+
+```yaml
+model: opus
+context_scope:
+  knowledge: true
+  memory: true
+  previous_outputs: all
+```
+
+This matches the pre-dispatch-config behavior where the Controller dispatched all
+agents with the same model and full context. Plans generated with fallback defaults
+are fully valid and backward compatible.
+
+### Example — Enriched Steps
+
+Given dispatch-config.yaml with:
+```yaml
+role_assignments:
+  architect: opus
+  backend: opus
+  qa: sonnet
+  gate-fixer: haiku
+
+context_defaults:
+  opus:    { knowledge: true,  memory: true,  previous_outputs: all }
+  sonnet:  { knowledge: true,  memory: false, previous_outputs: direct }
+  haiku:   { knowledge: false, memory: false, previous_outputs: none }
+```
+
+Plan steps after enrichment:
+```json
+[
+  {
+    "id": "step_1_architect",
+    "role": "architect",
+    "model": "opus",
+    "context_scope": { "knowledge": true, "memory": true, "previous_outputs": "all" }
+  },
+  {
+    "id": "step_3_backend",
+    "role": "backend",
+    "model": "opus",
+    "context_scope": { "knowledge": true, "memory": true, "previous_outputs": "all" }
+  },
+  {
+    "id": "step_5_qa",
+    "role": "qa",
+    "model": "sonnet",
+    "context_scope": { "knowledge": true, "memory": false, "previous_outputs": "direct" }
+  }
+]
+```
+
+### Integration with Plan Generation Flow
+
+Dispatch config enrichment runs at step 9.1 of the master procedure (Section 7), immediately
+after ASSEMBLE Plan JSON (step 9) and before COST ESTIMATES (step 10). This ensures all steps
+have their `model` and `context_scope` fields populated before validation and output.
 
 ---
 
@@ -1847,6 +1986,9 @@ And sets EPIC frontmatter: `runs_total: 2`
 15. **ALWAYS respect "PM decided: no Docker"** constraint — overrides docker_recommended flag
 16. **ALWAYS check file scope overlap** before parallelizing backend + frontend — use OVERLAP_CHECK (Section 3) and respect EPIC explicit ordering (Application Rule 6)
 17. **ALWAYS evaluate granularity heuristics G1 and G2** during Step Decomposition (Section 2b) — log applied heuristics or override reasons in plan metadata
+18. **ALWAYS enrich every step with `model` and `context_scope`** from dispatch-config.yaml during step 9.1 of the master procedure (Section 7.5)
+19. **ALWAYS fall back gracefully** when dispatch-config.yaml is missing — default to model=opus and full context (knowledge=true, memory=true, previous_outputs=all) for all steps
+20. **ALWAYS log the dispatch config source** — whether loaded from project-level, plugin defaults, or hardcoded fallback
 
 ---
 
@@ -1856,9 +1998,10 @@ And sets EPIC frontmatter: `runs_total: 2`
 - `skills/epic-orchestration.md` -- PLANNING state references this skill (Section 2)
 - `skills/brainstorming.md` -- produces docker_recommended flag consumed by Section 7.4
 - `skills/workflow-intelligence.md` -- platform-specific Docker Compose templates for workflow projects (Section 7.4)
-- `defaults/templates/plan.schema.json` -- Plan JSON schema (includes analysis_groups)
+- `defaults/templates/plan.schema.json` -- Plan JSON schema (includes analysis_groups, model, context_scope)
+- `defaults/policies/dispatch-config.yaml` -- model tier assignments, context defaults, and token estimation config (Section 7.5)
 - `.aid-o/01-plans/P-20260216-b3a1-aid-v2-workspace-agents-memory.md` -- Plan D-011 (analysis_groups design decision)
 
 ---
 
-**Last Updated:** 2026-02-27
+**Last Updated:** 2026-02-28
