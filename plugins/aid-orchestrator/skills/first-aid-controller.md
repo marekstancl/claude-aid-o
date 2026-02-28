@@ -182,18 +182,18 @@ IF mode == auto:
   1. Dispatch Curator + LE in parallel (same as manual — see skills/gate-evaluation.md sub-steps 0-1)
   2. Auto-evaluate proposals via 3-tier algorithm (same as manual — see skills/gate-evaluation.md sub-step 3)
   3. For each APPROVED proposal:
-     - IF effort == S: dispatch fix agent inline (same as manual — see skills/gate-evaluation.md sub-step 5)
+     - IF effort == S or M: dispatch fix agent inline (same as manual — see skills/gate-evaluation.md sub-step 5)
        - If fix fails: auto-defer the proposal
          (status: deferred, reason: "fix attempt failed in auto-mode")
          Continue with remaining proposals (non-blocking).
-     - IF effort == M or L: auto-defer to backlog (do NOT dispatch fix agent)
-       - Set urgency: HIGH for effort:M, MEDIUM for effort:L
+     - IF effort == L: auto-defer to backlog (do NOT dispatch fix agent)
+       - Set urgency: HIGH for effort:L
        - Update backlog.md: status → "deferred", urgency → "{urgency}",
-         reason → "auto-mode guardrail: effort:{effort} deferred to backlog"
+         reason → "auto-mode guardrail: effort:L deferred to backlog"
        - Log:
          {"state": "CURATOR_RESOLVE", "action": "auto_defer",
-          "proposal": "IMP-{NNN}", "effort": "{effort}", "urgency": "{urgency}",
-          "reason": "auto-mode guardrail: effort:{effort} deferred to backlog"}
+          "proposal": "IMP-{NNN}", "effort": "L", "urgency": "{urgency}",
+          "reason": "auto-mode guardrail: effort:L deferred to backlog"}
   4. Process LE output (same as manual — see skills/gate-evaluation.md sub-step 4)
   5. Compile curator_resolve_report.json (same format as manual — see skills/gate-evaluation.md sub-step 6)
      - Deferred entries include auto-mode reason when applicable
@@ -203,11 +203,12 @@ ELSE (mode == manual):
   {existing behavior: all approved proposals get fix agents regardless of effort size}
 ```
 
-> **Rationale:** In auto-mode, only effort:S proposals are safe for inline fixes
-> because they are small, low-risk, and fast. Effort:M/L proposals require human
-> judgment on scope and timing, so they are deferred to the backlog with urgency
-> tags for the PM to triage later. If even an effort:S fix fails, the proposal is
-> silently deferred rather than escalating — this keeps auto-mode flowing.
+> **Rationale:** In auto-mode, effort:S and effort:M proposals are safe for inline
+> fixes — they are bounded in scope and risk. Only effort:L proposals (large
+> refactors, architectural changes) require human judgment on scope and timing,
+> so they are deferred to the backlog with urgency tags for the PM to triage later.
+> If even an effort:S/M fix fails, the proposal is silently deferred rather than
+> escalating — this keeps auto-mode flowing.
 
 ---
 

@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [1.7.0] — 2026-02-28
 
 ### Added
 - **Path Traversal Guards** — defense-in-depth (regex + resolve+startsWith) path validation on pipeline theater, evidence, and decision routes preventing CWE-22 filesystem traversal via `epicId`/`runId` parameters
@@ -34,6 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **EPIC Template Scope Guidance** — template includes guidance comments encouraging file-level path declarations over broad directories
 - **Curator Dispatch Made Unconditional** — `gate-evaluation.md` and `first-aid-controller.md` now mandate Curator dispatch at CURATOR_RESOLVE regardless of discovered_issues
 - **QUEUE_PROCESSING Auto-Mode** — `first-aid-controller.md` includes parallel dispatch checklist cross-referencing `aid-first-aid.md` sections 3.1-3.5
+- **Curator Auto-Defer Threshold Raised** — auto-mode now defers only effort:L proposals to backlog; effort:S and effort:M are fixed inline, increasing autonomous fix rate
 - **Command Center State Labels** — all FSM states renamed to medical/hospital theme (On Call, Diagnosis, Prescription, Infusing, Vital Signs, Second Opinion, Lab Results, Doctor's Orders, Recovery, Discharged, Code Red)
 - **Satellite Cards Data Sources** — Ward shows queue running+waiting / completed+failed; Lab shows gate runs+retries / audit score; Escalations shows budget usage / total escalations; Vitals shows steps executed / total events
 - **EPIC Runs Display** — shows last 5 completed (most recent first) instead of first 5
