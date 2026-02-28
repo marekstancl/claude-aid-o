@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Pipeline Scripts** — 5 bash scripts (`aid-plan-to-epic.sh`, `aid-epic-to-json.sh`, `aid-json-to-run.sh`, `aid-queue-add.sh`, `aid-auto-pipeline.sh`) for deterministic Plan→EPIC→json→run→queue conversion replacing LLM-driven operations
+- **Shared Script Library** — `scripts/lib/common.sh` with 7 portable bash functions (YAML parsing, section extraction, slugify, prerequisites check, error formatting, timestamps)
+- **Script Documentation** — `scripts/README.md` with full interface contracts, argument tables, exit codes, data flow diagram, and JSON manifest schema for all 5 pipeline scripts
+- **EPIC Template Dependencies Section** — structured Dependencies section with Internal/External/Queue subsections replacing flat placeholder
+
 ## [1.5.0] — 2026-02-28
 
 ### Added
