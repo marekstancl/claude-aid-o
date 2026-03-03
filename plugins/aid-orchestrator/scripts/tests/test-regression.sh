@@ -762,120 +762,124 @@ else
 fi
 
 # ===========================================================================
-# STRUCTURAL SUITE F: CURATOR_RESOLVE dispatch integrity
+# STRUCTURAL SUITE F: Curator dispatch integrity (v2)
 #
-# Verify that the skill files contain correct CURATOR_RESOLVE dispatch
-# instructions — unconditional dispatch, state entry log, and no conditionals
-# that skip Curator based on discovered_issues.
-#
-# These tests guard against regression of the Curator activation bug
+# Guards against regression of the Curator activation bug
 # (FA-20260228T080115Z: Curator produced 0 proposals because dispatch
 # was ambiguous and lacked observability).
+#
+# v2 change: CURATOR_RESOLVE state was eliminated. Curator is now an
+# unconditional hook in GATES state, documented in skills/pipeline.md §5.
 # ===========================================================================
 
 echo ""
-echo "--- Suite F: CURATOR_RESOLVE dispatch integrity ---"
+echo "--- Suite F: Curator dispatch integrity ---"
 
-GATE_EVAL_MD="$PLUGIN_DIR/skills/gate-evaluation.md"
-FIRST_AID_MD="$PLUGIN_DIR/skills/first-aid-controller.md"
+PIPELINE_MD="$PLUGIN_DIR/skills/pipeline.md"
 
 # ===========================================================================
-# TEST F1: gate-evaluation.md contains CURATOR_RESOLVE state entry log
+# TEST F1: pipeline.md §5 GATES contains a Curator hook section
 # ===========================================================================
-run_test "F1: gate-evaluation.md has CURATOR_RESOLVE state_entered log instruction"
+run_test "F1: pipeline.md §5 GATES has Curator hook section"
 
-if [[ -f "$GATE_EVAL_MD" ]]; then
-  if grep -q '"action": "state_entered"' "$GATE_EVAL_MD" 2>/dev/null &&
-     grep -q 'CURATOR_RESOLVE entered' "$GATE_EVAL_MD" 2>/dev/null; then
-    pass "F1: gate-evaluation.md contains CURATOR_RESOLVE state_entered log"
+if [[ -f "$PIPELINE_MD" ]]; then
+  if grep -q 'Curator hook' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F1: pipeline.md contains Curator hook in GATES state"
   else
-    fail "F1: CURATOR_RESOLVE state_entered log" \
-      "gate-evaluation.md missing state_entered action or entry message"
+    fail "F1: Curator hook in pipeline.md" \
+      "pipeline.md missing 'Curator hook' section in §5 GATES"
   fi
 else
-  fail "F1: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+  fail "F1: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ===========================================================================
-# TEST F2: gate-evaluation.md does NOT contain a conditional that skips
-#          Curator dispatch when discovered_issues is empty
+# TEST F2: pipeline.md Curator hook has no conditional skipping on
+#          empty discovered_issues
 # ===========================================================================
-run_test "F2: gate-evaluation.md has no conditional skipping Curator on empty discovered_issues"
+run_test "F2: pipeline.md Curator hook has no skip conditional on discovered_issues"
 
-if [[ -f "$GATE_EVAL_MD" ]]; then
-  # Look for problematic patterns: "if no discovered_issues", "skip curator",
-  # "if discovered_issues is empty", etc. within the CURATOR_RESOLVE section.
-  # Extract the CURATOR_RESOLVE section (from ## CURATOR_RESOLVE to the next ##)
-  curator_section="$(awk '
-    /^## CURATOR_RESOLVE/{found=1; next}
-    /^## [A-Z]/{if(found) exit}
+if [[ -f "$PIPELINE_MD" ]]; then
+  gates_section="$(awk '
+    /^## §5 GATES/{found=1; next}
+    /^## §[0-9]/{if(found) exit}
     found{print}
-  ' "$GATE_EVAL_MD" 2>/dev/null)"
+  ' "$PIPELINE_MD" 2>/dev/null)"
 
-  skip_patterns="$(echo "$curator_section" \
+  skip_patterns="$(echo "$gates_section" \
     | grep -iE '(if.*no.*(discovered_issues|issues).*skip|skip.*curator.*no.*issues|discovered_issues.*empty.*skip)' \
     || true)"
 
   if [[ -z "$skip_patterns" ]]; then
-    pass "F2: no conditional skipping Curator dispatch on empty discovered_issues"
+    pass "F2: no conditional skipping Curator on empty discovered_issues"
   else
     fail "F2: Curator skip conditional found" \
       "problematic lines: $skip_patterns"
   fi
 else
-  fail "F2: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+  fail "F2: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ===========================================================================
-# TEST F3: gate-evaluation.md contains "Unconditional Dispatch" instruction
+# TEST F3: pipeline.md Curator hook is unconditional (dispatched after
+#          all gates pass — no "if" guard around the dispatch)
 # ===========================================================================
-run_test "F3: gate-evaluation.md CURATOR_RESOLVE contains unconditional dispatch instruction"
+run_test "F3: pipeline.md Curator hook is dispatched unconditionally after gates pass"
 
-if [[ -f "$GATE_EVAL_MD" ]]; then
-  if grep -q 'Unconditional Dispatch' "$GATE_EVAL_MD" 2>/dev/null &&
-     grep -q 'MUST ALWAYS be dispatched' "$GATE_EVAL_MD" 2>/dev/null; then
-    pass "F3: gate-evaluation.md has unconditional dispatch instruction"
+if [[ -f "$PIPELINE_MD" ]]; then
+  if grep -q 'After all gates pass' "$PIPELINE_MD" 2>/dev/null &&
+     grep -q 'dispatch Curator agent' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F3: pipeline.md Curator dispatch is unconditional (after all gates pass)"
   else
-    fail "F3: unconditional dispatch instruction" \
-      "gate-evaluation.md missing 'Unconditional Dispatch' or 'MUST ALWAYS be dispatched'"
+    fail "F3: unconditional Curator dispatch" \
+      "pipeline.md missing 'After all gates pass' + 'dispatch Curator agent'"
   fi
 else
-  fail "F3: gate-evaluation.md exists" "not found: $GATE_EVAL_MD"
+  fail "F3: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ===========================================================================
-# TEST F4: first-aid-controller.md contains CURATOR_RESOLVE state entry log
-#          for auto-mode
+# TEST F4: pipeline.md §9 auto-mode does NOT suppress Curator hook
 # ===========================================================================
-run_test "F4: first-aid-controller.md has CURATOR_RESOLVE state_entered log for auto-mode"
+run_test "F4: pipeline.md §9 auto-mode does not suppress Curator hook"
 
-if [[ -f "$FIRST_AID_MD" ]]; then
-  if grep -q '"action": "state_entered"' "$FIRST_AID_MD" 2>/dev/null &&
-     grep -q 'CURATOR_RESOLVE entered (auto-mode)' "$FIRST_AID_MD" 2>/dev/null; then
-    pass "F4: first-aid-controller.md contains auto-mode CURATOR_RESOLVE state_entered log"
+if [[ -f "$PIPELINE_MD" ]]; then
+  auto_section="$(awk '
+    /^## §9 /{found=1; next}
+    /^## §[0-9]/{if(found) exit}
+    found{print}
+  ' "$PIPELINE_MD" 2>/dev/null)"
+
+  suppress_patterns="$(echo "$auto_section" \
+    | grep -iE '(skip.*curator|no.*curator|curator.*disabled|suppress.*curator)' \
+    || true)"
+
+  if [[ -z "$suppress_patterns" ]]; then
+    pass "F4: pipeline.md §9 auto-mode does not suppress Curator"
   else
-    fail "F4: auto-mode CURATOR_RESOLVE state_entered log" \
-      "first-aid-controller.md missing state_entered action for auto-mode"
+    fail "F4: auto-mode Curator suppression found" \
+      "problematic lines: $suppress_patterns"
   fi
 else
-  fail "F4: first-aid-controller.md exists" "not found: $FIRST_AID_MD"
+  fail "F4: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ===========================================================================
-# TEST F5: first-aid-controller.md contains unconditional dispatch instruction
+# TEST F5: pipeline.md Curator hook dispatches both Curator and
+#          Lessons-Extractor agents (defense-in-depth: two observers)
 # ===========================================================================
-run_test "F5: first-aid-controller.md CURATOR_RESOLVE contains unconditional dispatch instruction"
+run_test "F5: pipeline.md Curator hook dispatches Curator + Lessons-Extractor"
 
-if [[ -f "$FIRST_AID_MD" ]]; then
-  if grep -q 'Unconditional Dispatch' "$FIRST_AID_MD" 2>/dev/null &&
-     grep -q 'MUST ALWAYS' "$FIRST_AID_MD" 2>/dev/null; then
-    pass "F5: first-aid-controller.md has unconditional dispatch instruction"
+if [[ -f "$PIPELINE_MD" ]]; then
+  if grep -q 'curator.md' "$PIPELINE_MD" 2>/dev/null &&
+     grep -q 'lessons-extractor.md' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F5: pipeline.md Curator hook dispatches both agents"
   else
-    fail "F5: unconditional dispatch instruction" \
-      "first-aid-controller.md missing 'Unconditional Dispatch' or 'MUST ALWAYS'"
+    fail "F5: Curator + Lessons-Extractor dispatch" \
+      "pipeline.md missing curator.md or lessons-extractor.md in Curator hook"
   fi
 else
-  fail "F5: first-aid-controller.md exists" "not found: $FIRST_AID_MD"
+  fail "F5: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ---------------------------------------------------------------------------
