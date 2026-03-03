@@ -9,51 +9,52 @@ export interface HintButtonsProps {
   variant?: 'full' | 'compact';
 }
 
-interface HintDef {
+export interface HintDef {
   id: string;
   label: string;
+  description: string;
   icon: React.ElementType;
   template: (ctx: HintContext) => string | null;
 }
 
-interface HintContext {
+export interface HintContext {
   projectName: string | null;
   epicId: string | null;
   focusedIdeaTitle: string | null;
 }
 
-const HINTS: HintDef[] = [
+export const HINTS: HintDef[] = [
   {
-    id: 'brainstorm', label: 'Brainstorm', icon: Lightbulb,
+    id: 'brainstorm', label: 'Brainstorm', description: 'Generate ideas for your project', icon: Lightbulb,
     template: (ctx) =>
       `Brainstorm ideas for ${ctx.projectName ?? 'this project'}.${ctx.focusedIdeaTitle ? ` Context: "${ctx.focusedIdeaTitle}".` : ''}`,
   },
   {
-    id: 'plan', label: 'Plan EPIC', icon: FileText,
+    id: 'plan', label: 'Plan EPIC', description: 'Create a structured implementation plan', icon: FileText,
     template: (ctx) => `Create an EPIC plan for: ${ctx.focusedIdeaTitle ?? 'a new feature'}.`,
   },
   {
-    id: 'run', label: 'Run', icon: Play,
+    id: 'run', label: 'Run', description: 'Check current pipeline execution status', icon: Play,
     template: (ctx) =>
       ctx.epicId
         ? `What is the status of the current pipeline run for ${ctx.epicId}?`
         : 'What is the status of the current pipeline run?',
   },
   {
-    id: 'audit', label: 'Audit', icon: ShieldCheck,
+    id: 'audit', label: 'Audit', description: 'Run health audit and summarize findings', icon: ShieldCheck,
     template: () => 'Run a health audit on the project and summarize the findings.',
   },
   {
-    id: 'explain', label: 'Explain', icon: HelpCircle,
+    id: 'explain', label: 'Explain', description: 'Explain architecture or a specific topic', icon: HelpCircle,
     template: (ctx) =>
       `Explain ${ctx.focusedIdeaTitle ? `"${ctx.focusedIdeaTitle}"` : 'the current project architecture'}.`,
   },
   {
-    id: 'fix', label: 'Fix', icon: Wrench,
+    id: 'fix', label: 'Fix', description: 'Help diagnose and resolve an issue', icon: Wrench,
     template: (ctx) => `Help me fix: ${ctx.focusedIdeaTitle ?? 'an issue I am experiencing'}.`,
   },
   {
-    id: 'free', label: 'Free chat', icon: MessageCircle,
+    id: 'free', label: 'Free chat', description: 'Open conversation about anything', icon: MessageCircle,
     template: () => null,
   },
 ];

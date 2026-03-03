@@ -164,11 +164,11 @@ function parseIdeasMd(content: string): ParsedIdea[] {
 // ---------------------------------------------------------------------------
 
 function ideasJsonPath(projectRoot: string): string {
-  return join(projectRoot, '.aid-o', '04-engine', 'ideas.json');
+  return join(projectRoot, '.aid-o', 'work', 'ideas.json');
 }
 
 function ideasMdPath(projectRoot: string): string {
-  return join(projectRoot, '.aid-o', '01-plans', 'IDEAS.md');
+  return join(projectRoot, '.aid-o', 'plans', 'IDEAS.md');
 }
 
 async function readIdeasJson(projectRoot: string): Promise<StoredIdea[]> {
@@ -181,7 +181,7 @@ async function readIdeasJson(projectRoot: string): Promise<StoredIdea[]> {
 }
 
 async function saveIdeasJson(projectRoot: string, ideas: StoredIdea[]): Promise<void> {
-  const dir = join(projectRoot, '.aid-o', '04-engine');
+  const dir = join(projectRoot, '.aid-o', 'work');
   await mkdir(dir, { recursive: true });
   await writeFile(ideasJsonPath(projectRoot), JSON.stringify(ideas, null, 2), 'utf-8');
 }

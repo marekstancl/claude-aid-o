@@ -82,7 +82,11 @@ export type FSMState =
   | 'PM_APPROVAL'
   | 'CURATOR_RESOLVE'
   | 'DONE'
-  | 'ERROR';
+  | 'ERROR'
+  | 'FIRST_AID_INIT'
+  | 'QUEUE_PROCESSING'
+  | 'QUEUE_ADVANCE'
+  | 'FIRST_AID_COMPLETE';
 
 /**
  * @deprecated Use the `Project` type from `./types/api` for full server
@@ -153,14 +157,27 @@ const createPipelineSlice: StateCreator<
   } as PipelineProgress,
   steps: [],
   stepStatuses: {} as Record<string, StepStatus>,
+  autoModeSession: null,
 
   // Actions
   setPipelineState: (pipelineState) =>
-    set({
-      currentState: pipelineState.currentState,
-      currentEpicId: pipelineState.currentEpicId,
-      currentStepId: pipelineState.currentStepId,
-      pipelineProgress: pipelineState.progress,
+    set((state) => {
+      // When the current EPIC changes, reset per-EPIC step data so stale
+      // progress from the previous EPIC doesn't leak into the new one.
+      const epicChanged =
+        pipelineState.currentEpicId != null &&
+        state.currentEpicId != null &&
+        pipelineState.currentEpicId !== state.currentEpicId;
+
+      return {
+        currentState: pipelineState.currentState,
+        currentEpicId: pipelineState.currentEpicId,
+        currentStepId: pipelineState.currentStepId,
+        pipelineProgress: pipelineState.progress,
+        autoModeSession: pipelineState.autoModeSession ?? null,
+        // Clear stale per-EPIC data on EPIC switch
+        ...(epicChanged ? { stepStatuses: {}, steps: [] } : {}),
+      };
     }),
 
   setSteps: (steps) =>
@@ -514,8 +531,21 @@ const createProjectsSlice: StateCreator<
   setProjects: (projects: ApiProject[]) =>
     set({ projects }),
 
-  setActiveProject: (project: ApiProject | null) =>
-    set({ activeProject: project }),
+  setActiveProject: (project: ApiProject | null) => {
+    set({ activeProject: project });
+    // Pre-fetch companion data so palette/panel opens instantly
+    if (project) {
+      import('./api/client').then(({ createApiClient }) => {
+        const c = createApiClient(project.id);
+        c.getCompanionStatus().then((r) => {
+          if (r.ok) useStore.getState().setCompanionStatus(r.data);
+        });
+        c.getCompanionSessions().then((r) => {
+          if (r.ok) useStore.getState().setCompanionSessions(r.data);
+        });
+      });
+    }
+  },
 
   setProjectsLoading: (loading: boolean) =>
     set({ projectsLoading: loading }),
@@ -568,6 +598,8 @@ const createCompanionSlice: StateCreator<
   CompanionSlice
 > = (set) => ({
   companionOpen: false,
+  companionMode: 'palette' as const,
+  commandPaletteOpen: false,
   companionSessions: [] as CompanionSessionSummary[],
   companionCurrentSession: null,
   companionStreaming: false,
@@ -627,6 +659,12 @@ const createCompanionSlice: StateCreator<
 
   setCompanionError: (error: string | null) =>
     set({ companionError: error }),
+
+  setCompanionMode: (mode: 'palette' | 'panel') =>
+    set({ companionMode: mode }),
+
+  setCommandPaletteOpen: (open: boolean) =>
+    set({ commandPaletteOpen: open }),
 });
 
 // ---------------------------------------------------------------------------
@@ -668,4 +706,9 @@ export const stateColors: Record<FSMState, string> = {
   CURATOR_RESOLVE: 'var(--color-state-curator-resolve)',
   DONE: 'var(--color-state-done)',
   ERROR: 'var(--color-state-error)',
+  // FIRST AID wrapper states
+  FIRST_AID_INIT: 'var(--color-state-plan-review)',
+  QUEUE_PROCESSING: 'var(--color-state-executing)',
+  QUEUE_ADVANCE: 'var(--color-state-phase-check)',
+  FIRST_AID_COMPLETE: 'var(--color-state-done)',
 };

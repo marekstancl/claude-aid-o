@@ -138,6 +138,9 @@ export interface PipelineSlice {
   /** Per-step status keyed by step ID. */
   stepStatuses: Record<string, StepStatus>;
 
+  /** Auto-mode session data (escalation, aggregates). Null when not in auto-mode. */
+  autoModeSession: import('../types/api').AutoModeSession | null;
+
   // --- Actions ---
 
   /** Replace the full pipeline state (from REST or WS event). */
@@ -146,6 +149,7 @@ export interface PipelineSlice {
     currentEpicId: string | null;
     currentStepId: string | null;
     progress: PipelineProgress;
+    autoModeSession?: import('../types/api').AutoModeSession | null;
   }) => void;
 
   /** Replace the steps list (from GET /pipeline/steps). */
@@ -297,7 +301,11 @@ export type LegacyFSMState =
   | 'PM_APPROVAL'
   | 'CURATOR_RESOLVE'
   | 'DONE'
-  | 'ERROR';
+  | 'ERROR'
+  | 'FIRST_AID_INIT'
+  | 'QUEUE_PROCESSING'
+  | 'QUEUE_ADVANCE'
+  | 'FIRST_AID_COMPLETE';
 
 /**
  * Lightweight project reference used in the existing store.
@@ -711,6 +719,12 @@ export interface CompanionSlice {
   /** Whether the companion panel is open. */
   companionOpen: boolean;
 
+  /** Display mode: 'palette' renders inline dropdown, 'panel' renders right-side panel. */
+  companionMode: 'palette' | 'panel';
+
+  /** Whether the command palette dropdown is open. */
+  commandPaletteOpen: boolean;
+
   /** List of session summaries for the session selector. */
   companionSessions: CompanionSessionSummary[];
 
@@ -760,6 +774,12 @@ export interface CompanionSlice {
 
   /** Set or clear the error message. */
   setCompanionError: (error: string | null) => void;
+
+  /** Switch between palette (dropdown) and panel (right-side) modes. */
+  setCompanionMode: (mode: 'palette' | 'panel') => void;
+
+  /** Open/close the command palette dropdown. */
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------

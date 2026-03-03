@@ -41,7 +41,7 @@ export class ProjectRegistry {
     this.projects.set(project.id, project);
 
     // Also try to read a registry file if it exists
-    const registryPath = join(this.defaultProjectRoot, '.aid-o', '03-config', 'projects.yaml');
+    const registryPath = join(this.defaultProjectRoot, '.aid-o', 'config', 'projects.yaml');
     const registry = await fs.readYaml<{ projects?: Array<{ id: string; name: string; path: string }> }>(registryPath);
     if (registry?.projects) {
       for (const p of registry.projects) {

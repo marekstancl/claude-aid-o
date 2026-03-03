@@ -1,0 +1,85 @@
+# AID Integrations Configuration (v2)
+# Consolidated from: slack-config.yaml, memory-config.yaml
+#
+# Controls: Slack MCP integration, Qdrant memory, knowledge acquisition.
+# Both integrations are optional — disabled by default.
+
+# ─── Slack ───────────────────────────────────────────────────────────────
+# See: skills/slack-mcp.md for protocol details.
+# Requires: slack-mcp-server by @korotovsky in .mcp.json
+slack:
+  enabled: false
+  channel: "#aid-orchestrator"
+  pm_user_id: ""
+
+  timeouts:
+    plan_approval_minutes: 1440
+    escalation_minutes: 480
+    merge_approval_minutes: 1440
+    proposal_minutes: 4320
+
+  reminders:
+    enabled: true
+    interval_minutes: 60
+    max_reminders: 3
+
+  timeout_actions:
+    plan_approval: wait
+    escalation: wait
+    merge_approval: wait
+    proposal: defer
+
+# ─── Memory (Qdrant) ────────────────────────────────────────────────────
+# See: skills/memory-mcp.md for protocol details.
+# Requires: Qdrant MCP server configured in .mcp.json
+memory:
+  enabled: false
+  collection_name: "aid-memory"
+
+  cross_project:
+    enabled: true
+    max_results: 3
+
+  auto_index:
+    run_end: true
+    epic_done: true
+    gate_results: false
+
+  search:
+    top_k: 3
+    timeout_seconds: 5
+    min_score: 0.4
+    pre_step_search: true
+
+# ─── Knowledge Acquisition ──────────────────────────────────────────────
+# See: skills/knowledge-acquisition.md for protocol details.
+# Primary source: Context7 MCP; fallback: WebSearch
+knowledge:
+  enabled: false
+  primary_source: context7
+  fallback_source: websearch
+
+  context7:
+    available: false
+    scope: user
+
+  research:
+    default_depth: quick
+    deep_on_demand_only: true
+    max_frameworks_per_scan: 5
+    max_urls_per_framework: 3
+    max_chunks_per_source: 15
+
+  quality:
+    min_chunk_words: 50
+    max_chunk_tokens: 2000
+    dedup_threshold: 0.85
+    merge_threshold: 0.70
+
+  aging:
+    documentation_ttl_days: 90
+    pattern_ttl_days: 180
+    lesson_ttl_days: 365
+    stale_weight: 0.7
+    expired_weight: 0.3
+    exclude_after_days: 180

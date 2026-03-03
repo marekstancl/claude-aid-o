@@ -1,0 +1,103 @@
+# AID Orchestration Configuration (v2)
+# Consolidated from: language.yaml, dispatch-config.yaml, dispatch-strategy.yaml,
+#                    release-policy.yaml, skill-conflicts.yaml
+#
+# Controls: language, model tiers, dispatch strategy, escalation, FSM,
+#           release policy, and skill conflict resolution.
+
+# ─── Language ────────────────────────────────────────────────────────────
+language:
+  document_language: EN
+  conversation_language: auto  # detected from PM input
+
+# ─── Models ──────────────────────────────────────────────────────────────
+# Simplified role→tier mapping. See dispatch-protocol skill for consumption.
+models:
+  opus: [architect, backend, frontend]
+  sonnet: [qa, security, docs-writer, curator, auditor, implementer, verifier]
+  haiku: [gate-fixer, run-validator]
+
+# ─── Dispatch ────────────────────────────────────────────────────────────
+dispatch:
+  strategy: worktrees
+  max_parallel: 4
+  worktree_base: .claude/worktrees
+
+# ─── Escalation ─────────────────────────────────────────────────────────
+escalation:
+  max_per_session: 3
+  triggers:
+    - gate_retry_exhausted
+    - security_required_fail
+    - scope_violation
+
+# ─── FSM ─────────────────────────────────────────────────────────────────
+fsm:
+  states: [READY, EXECUTE, GATES, ESCALATION, DONE]
+  state_file: .aid-o/work/evidence/{epic_id}/{run_id}/state.yaml
+  timeline_file: .aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl
+
+# ─── Release Policy ─────────────────────────────────────────────────────
+# Versioning, SemVer rules, and release automation settings.
+release:
+  versioning:
+    mode: single
+    changelog: CHANGELOG.md
+
+  version_files:
+    - path: ".claude-plugin/marketplace.json"
+      field: "metadata.version"
+      update_method: json_field
+    - path: ".claude-plugin/marketplace.json"
+      field: "plugins[0].version"
+      update_method: json_field
+    - path: "plugins/aid-orchestrator/.claude-plugin/plugin.json"
+      field: "version"
+      update_method: json_field
+    - path: "plugins/aid-orchestrator/README.md"
+      field: "plugin_version"
+      update_method: regex
+      pattern: '^\- \*\*Plugin:\*\* [\d.]+'
+      replacement: '- **Plugin:** ${version}'
+    - path: "README.md"
+      field: "roadmap_current"
+      update_method: regex
+      pattern: '^\- \*\*v[\d.]+\*\* \(current\)'
+      replacement: '- **v${version}** (current)'
+
+  semver:
+    pre_release: true
+    changelog_header_pattern: '## \[(\d+\.\d+\.\d+)\]'
+
+  multi_phase:
+    last_epic: mandatory
+    intermediate_epic: pm_choice
+    standalone_epic: mandatory
+
+  first_aid:
+    intermediate_action: defer
+    last_epic_action: release
+    on_error: escalate
+
+  settings:
+    git_tag: true
+    github_release: true
+    draft_release: false
+    auto_tag: true
+    auto_release: true
+
+  commit:
+    message_template: "release: v${version} — ${summary}"
+
+  skip_when:
+    no_changelog_version: true
+    versions_current: true
+
+# ─── Skill Conflicts ────────────────────────────────────────────────────
+# Known conflicts between plugins/skills. Used by /aid-setup.
+skill_conflicts:
+  - id: "brainstorming-duplicate"
+    prefer: "aid-orchestrator:aid-brainstorm"
+    deny: "superpowers:brainstorming"
+    reason: "Both provide brainstorming workflow. AID version is integrated with orchestration pipeline."
+    severity: high

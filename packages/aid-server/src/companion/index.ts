@@ -19,6 +19,7 @@ export type {
   CompanionResponse,
   CompanionService,
   CompanionSession,
+  CompanionTools,
   SessionMetadata,
   TokenUsage,
 } from './types.js';

@@ -221,15 +221,35 @@ function dispatchEvent(msg: WsEventMessage): void {
           });
         }
 
-        // Check if this looks like plan progress data (has `steps` map)
+        // Check if this looks like plan progress data.
+        // Format 1: object with `steps` map — { steps: { stepId: { status, ... } } }
+        // Format 2: array of step objects — [{ id, status, started_at, ... }]
         if ('steps' in parsed && typeof parsed.steps === 'object' && parsed.steps !== null) {
-          const stepsMap = parsed.steps as Record<string, {
+          store.setStepStatuses(parsed.steps as Record<string, {
             status: 'pending' | 'executing' | 'done' | 'failed' | 'skipped';
             startedAt?: string;
             completedAt?: string;
             reviewCycles?: number;
+          }>);
+        } else if (Array.isArray(data.parsedData)) {
+          // plan_progress.json is an array: [{id, status, started_at, ...}]
+          const arr = data.parsedData as Array<{
+            id: string;
+            status: string;
+            started_at?: string | null;
+            completed_at?: string | null;
           }>;
-          store.setStepStatuses(stepsMap);
+          if (arr.length > 0 && arr[0].id && arr[0].status) {
+            const stepsMap: Record<string, any> = {};
+            for (const s of arr) {
+              stepsMap[s.id] = {
+                status: s.status,
+                startedAt: s.started_at ?? undefined,
+                completedAt: s.completed_at ?? undefined,
+              };
+            }
+            store.setStepStatuses(stepsMap);
+          }
         }
       }
       break;
@@ -362,10 +382,11 @@ async function resyncFromRest(projectId: string): Promise<void> {
   const store = useStore.getState();
 
   // Fire all requests concurrently
-  const [pipelineRes, stepsRes, stageLogRes, queueRes, usageRes, auditRes, ideasRes] =
+  const [pipelineRes, stepsRes, stepStatusesRes, stageLogRes, queueRes, usageRes, auditRes, ideasRes] =
     await Promise.allSettled([
       client.getPipelineState(),
       client.getPipelineSteps(),
+      client.getStepStatuses(),
       client.getStageLog(),
       client.getQueue(),
       client.getUsage(),
@@ -394,6 +415,14 @@ async function resyncFromRest(projectId: string): Promise<void> {
   // Steps
   if (stepsRes.status === 'fulfilled' && stepsRes.value.ok) {
     store.setSteps(stepsRes.value.data);
+  }
+
+  // Step statuses (per-EPIC progress from plan_progress.json)
+  if (stepStatusesRes.status === 'fulfilled' && stepStatusesRes.value.ok) {
+    const data = stepStatusesRes.value.data;
+    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+      store.setStepStatuses(data as any);
+    }
   }
 
   // Stage log

@@ -1,0 +1,50 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+jobs:
+  bash-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      - name: Run bash test suite
+        run: |
+          chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
+          plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
+        timeout-minutes: 5
+
+  vitest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm test
+        timeout-minutes: 10
+
+  build-check:
+    needs: [vitest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: npm run build
+        working-directory: packages/aid-gui
+        timeout-minutes: 10
+
+  security-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: node scripts/check-path-validation.js
+        timeout-minutes: 2

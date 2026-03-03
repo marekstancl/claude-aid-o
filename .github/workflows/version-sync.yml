@@ -1,0 +1,21 @@
+name: Version Sync
+on:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: All version locations must match
+        run: |
+          VERSION=$(jq -r .version package.json)
+          echo "Expected version: $VERSION"
+          check_version() { local file=$1 pattern=$2
+            actual=$(grep -oP "$pattern" "$file" | head -1)
+            [ "$actual" = "$VERSION" ] || (echo "MISMATCH in $file: $actual != $VERSION" && exit 1)
+          }
+          check_version "packages/aid-gui/package.json" '(?<="version": ")[^"]+'
+          check_version "packages/aid-server/package.json" '(?<="version": ")[^"]+'
+          check_version "plugins/aid-orchestrator/.claude-plugin/plugin.json" '(?<="version": ")[^"]+'
+          # Add remaining version locations as they are identified

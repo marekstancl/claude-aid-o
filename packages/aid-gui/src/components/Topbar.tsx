@@ -1,12 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bell, Settings, Sparkles, Mic, Zap, ChevronDown, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Bell, Settings, Sparkles, ChevronDown, Check, Play } from 'lucide-react';
 import { useStore } from '../store';
 import { getProjects } from '../api/client';
 import { cn } from '../lib/utils';
+import { CommandPalette } from './CommandPalette';
+import { VoiceButton } from './companion/VoiceButton';
+import { sendMessageSSE } from '../lib/companion';
 import type { Project } from '../types/api';
 
 interface TopbarProps {
-  onSearchClick: () => void;
+  isSidebarCollapsed: boolean;
+  isMobile: boolean;
 }
 
 /**
@@ -19,17 +23,31 @@ const connectionIndicator: Record<string, { color: string; label: string }> = {
   disconnected: { color: 'bg-red-400',    label: 'Disconnected' },
 };
 
-export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
+export const Topbar: React.FC<TopbarProps> = ({ isSidebarCollapsed, isMobile }) => {
   const wsStatus = useStore((s) => s.wsStatus);
-  const ccUsage = useStore((s) => s.ccUsage);
   const projects = useStore((s) => s.projects);
   const activeProject = useStore((s) => s.activeProject);
   const setProjects = useStore((s) => s.setProjects);
   const setActiveProject = useStore((s) => s.setActiveProject);
   const setProjectsLoading = useStore((s) => s.setProjectsLoading);
+  const commandPaletteOpen = useStore((s) => s.commandPaletteOpen);
+  const fsmState = useStore((s) => s.fsmState);
+  const stepStatuses = useStore((s) => s.stepStatuses);
+  const currentEpicId = useStore((s) => s.currentEpicId);
 
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    // Open the palette and send the transcript as a message
+    const s = useStore.getState();
+    s.setCompanionCurrentSession(null);
+    s.resetCompanionStream();
+    s.setCompanionError(null);
+    s.setCommandPaletteOpen(true);
+    s.setCompanionMode('palette');
+    sendMessageSSE(text);
+  }, []);
 
   const indicator = connectionIndicator[wsStatus] ?? connectionIndicator.disconnected;
 
@@ -42,7 +60,6 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
       if (cancelled) return;
       if (result.ok) {
         setProjects(result.data);
-        // Auto-select first project if none active
         if (!activeProject && result.data.length > 0) {
           setActiveProject(result.data[0]);
         }
@@ -66,26 +83,28 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
     }
   }, [dropdownOpen]);
 
-  // Derive a usage display from the CC usage metrics.
-  const totalEvents = ccUsage.totalEvents;
-  const usageCap = 100_000;
-  const usagePercent = Math.min(100, Math.round((totalEvents / usageCap) * 100));
-
-  const formatCount = (n: number): string => {
-    if (n >= 1000) {
-      const k = n / 1000;
-      return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`;
-    }
-    return String(n);
-  };
+  // CC Usage — commented out for now (data is unreliable)
+  // const totalEvents = ccUsage.totalEvents;
+  // const usageCap = 100_000;
+  // const usagePercent = Math.min(100, Math.round((totalEvents / usageCap) * 100));
+  // const formatCount = (n: number): string => {
+  //   if (n >= 1000) { const k = n / 1000; return k % 1 === 0 ? `${k}k` : `${k.toFixed(1)}k`; }
+  //   return String(n);
+  // };
 
   const handleSelectProject = (project: Project) => {
     setActiveProject(project);
     setDropdownOpen(false);
   };
 
+  // Compute left offset to match sidebar width
+  const headerLeft = isMobile ? 0 : isSidebarCollapsed ? 64 : 240; // 16*4=64 (ml-16), 60*4=240 (ml-60)
+
   return (
-    <header className="fixed top-0 right-0 left-0 h-14 bg-bg-base/80 backdrop-blur-md border-b border-white/5 z-30 flex items-center justify-between px-6 ml-16 md:ml-0 pl-[inherit]">
+    <header
+      className="fixed top-0 right-0 h-14 bg-bg-base/80 backdrop-blur-md border-b border-white/5 z-30 flex items-center justify-between px-6 transition-all duration-300"
+      style={{ left: headerLeft }}
+    >
       <div className="flex items-center gap-4">
         {/* Project selector with connection status indicator */}
         <div className="relative z-50" ref={dropdownRef}>
@@ -150,37 +169,7 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
           )}
         </div>
 
-        {/* CC Usage Gauge */}
-        <div className="flex items-center gap-3 px-3 py-1.5 rounded-full bg-white/5 border border-white/5">
-          <Zap size={14} className="text-state-executing" />
-          <div className="flex flex-col">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">CC Usage</span>
-              {wsStatus === 'connecting' ? (
-                <div className="h-3 w-20 bg-white/5 rounded animate-pulse" />
-              ) : (
-                <span className="text-[10px] font-mono text-white/60">
-                  {formatCount(totalEvents)} / {formatCount(usageCap)}
-                </span>
-              )}
-            </div>
-            <div className="w-24 h-1 bg-white/10 rounded-full overflow-hidden mt-0.5">
-              {wsStatus === 'connecting' ? (
-                <div className="h-full w-0" />
-              ) : (
-                <div
-                  className={cn(
-                    "h-full transition-all duration-500",
-                    usagePercent > 80 ? "bg-red-400" : usagePercent > 60 ? "bg-yellow-400" : "bg-state-executing"
-                  )}
-                  style={{ width: `${usagePercent}%` }}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Connection status text for small screens or when disconnected */}
+        {/* Connection status text when disconnected */}
         {(wsStatus === 'disconnected' || wsStatus === 'reconnecting') && (
           <div className="flex items-center gap-1.5">
             <span className={cn(
@@ -194,28 +183,90 @@ export const Topbar: React.FC<TopbarProps> = ({ onSearchClick }) => {
         )}
       </div>
 
-      <div className="flex-1 max-w-xl mx-8 transition-all duration-300 relative max-w-md">
-        <div className="relative group">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-state-executing transition-colors">
+      {/* Search bar — triggers CommandPalette */}
+      <div className="flex-1 max-w-md mx-8 transition-all duration-300 relative">
+        <div
+          className="relative group"
+          data-palette-trigger
+          onClick={() => {
+            const s = useStore.getState();
+            if (s.commandPaletteOpen) {
+              s.setCommandPaletteOpen(false);
+            } else {
+              s.setCompanionCurrentSession(null);
+              s.resetCompanionStream();
+              s.setCompanionError(null);
+              s.setCommandPaletteOpen(true);
+              s.setCompanionMode('palette');
+            }
+          }}
+        >
+          <div className={cn(
+            "absolute left-3 top-1/2 -translate-y-1/2 transition-colors",
+            commandPaletteOpen ? "text-state-executing" : "text-white/20 group-focus-within:text-state-executing",
+          )}>
             <Sparkles size={16} />
           </div>
           <input
             type="text"
-            placeholder="Ask AI Companion (Cmd+K)..."
-            onClick={onSearchClick}
+            placeholder={commandPaletteOpen ? "AI Companion open..." : "Ask AI Companion (Cmd+K)..."}
             readOnly
-            className="w-full bg-white/5 border border-white/10 rounded-full py-2 pl-10 pr-10 text-sm focus:outline-none focus:border-state-executing/50 focus:bg-white/10 transition-all cursor-pointer placeholder:text-white/20"
+            className={cn(
+              "w-full rounded-full py-2 pl-10 pr-10 text-sm focus:outline-none transition-all cursor-pointer",
+              commandPaletteOpen
+                ? "bg-white/10 border border-state-executing/30 placeholder:text-white/40"
+                : "bg-white/5 border border-white/10 focus:border-state-executing/50 focus:bg-white/10 placeholder:text-white/20",
+            )}
           />
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-            <button className="p-1 hover:bg-white/10 rounded text-white/40 hover:text-white transition-colors">
-              <Mic size={14} />
-            </button>
-            <div className="text-[10px] font-mono bg-white/10 px-1.5 py-0.5 rounded text-white/40">⌘K</div>
-          </div>
+          {!commandPaletteOpen && (
+            <div
+              className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <VoiceButton compact onTranscript={handleVoiceTranscript} />
+              <div className="text-[10px] font-mono bg-white/10 px-1.5 py-0.5 rounded text-white/40">⌘K</div>
+            </div>
+          )}
         </div>
+
+        {/* Command Palette dropdown */}
+        <CommandPalette />
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Pipeline Progress — visible during active runs with step data */}
+        {(() => {
+          const isActive = !['IDLE', 'DONE', 'FIRST_AID_COMPLETE', 'ERROR'].includes(fsmState);
+          const entries = Object.values(stepStatuses);
+          const total = entries.length;
+          const done = entries.filter((s) => s.status === 'done' || s.status === 'skipped').length;
+          if (!isActive || total === 0) return null;
+          const pct = Math.round((done / total) * 100);
+          return (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-state-executing/10 border border-state-executing/20">
+              <Play size={12} className="text-state-executing animate-pulse" />
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-state-executing">
+                    Step {done}/{total}
+                  </span>
+                  {currentEpicId && (
+                    <span className="text-[10px] font-mono text-white/30 max-w-[100px] truncate">
+                      {currentEpicId}
+                    </span>
+                  )}
+                </div>
+                <div className="w-20 h-1 bg-white/10 rounded-full overflow-hidden mt-0.5">
+                  <div
+                    className="h-full bg-state-executing rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         <button
           title="Coming soon"
           onClick={() => {}}

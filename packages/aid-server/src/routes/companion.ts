@@ -2,10 +2,13 @@
  * Companion routes — SSE streaming chat, session management, adapter status.
  *
  * Endpoints:
- *   POST /api/p/:projectId/companion/send     — SSE-streamed chat response
- *   GET  /api/p/:projectId/companion/sessions  — list sessions (summary)
- *   GET  /api/p/:projectId/companion/sessions/:sessionId — session detail
- *   GET  /api/p/:projectId/companion/status    — adapter availability
+ *   POST   /api/p/:projectId/companion/send     — SSE-streamed chat response
+ *   GET    /api/p/:projectId/companion/sessions  — list sessions (summary)
+ *   GET    /api/p/:projectId/companion/sessions/:sessionId — session detail
+ *   DELETE /api/p/:projectId/companion/sessions/:sessionId — delete session
+ *   PATCH  /api/p/:projectId/companion/sessions/:sessionId — rename session
+ *   POST   /api/p/:projectId/companion/sessions/:sessionId/archive — archive
+ *   GET    /api/p/:projectId/companion/status    — adapter availability
  */
 
 import { randomUUID } from 'node:crypto';
@@ -17,6 +20,8 @@ import {
   type CompanionBundle,
   type CompanionMessage,
 } from '../companion/index.js';
+import { buildProjectContext } from '../companion/build-context.js';
+import { buildCompanionTools } from '../companion/build-tools.js';
 
 // ---------------------------------------------------------------------------
 // Route param types
@@ -133,11 +138,28 @@ export function companionRoutes(registry: ProjectRegistry): Router {
     res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
     res.flushHeaders();
 
+    // Build project context as system prompt (unless caller provided custom one)
+    let systemPrompt = body.systemPrompt;
+    const project = registry.get(req.params.projectId);
+    if (!systemPrompt && project) {
+      systemPrompt = await buildProjectContext(project, fs);
+    }
+
+    // Build tools for file access (only for adapters that support it)
+    let tools;
+    if (project) {
+      try {
+        tools = await buildCompanionTools(project.path, fs);
+      } catch {
+        // Tools require `ai` + `zod` — not available in all adapters, skip
+      }
+    }
+
     // Stream response
     try {
       let fullText = '';
 
-      for await (const chunk of service.stream(body.message, sessionId, body.systemPrompt)) {
+      for await (const chunk of service.stream(body.message, sessionId, systemPrompt, tools)) {
         if (chunk.type === 'text') {
           fullText += chunk.text;
           res.write(`data: ${JSON.stringify({ type: 'text', text: chunk.text })}\n\n`);
@@ -249,6 +271,127 @@ export function companionRoutes(registry: ProjectRegistry): Router {
       }
 
       res.json({ ok: true, data: session });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // DELETE /sessions/:sessionId — delete a session permanently
+  // -------------------------------------------------------------------------
+  router.delete(
+    '/sessions/:sessionId',
+    async (req: Request<SessionParams>, res: Response) => {
+      const fs = registry.getFsReader(req.params.projectId);
+      if (!fs) {
+        return res
+          .status(404)
+          .json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+      }
+
+      let companion: CompanionBundle;
+      try {
+        companion = await getCompanion(fs.aidoPath, req.params.projectId);
+      } catch (err) {
+        return res.status(503).json({
+          ok: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: `Failed to initialize companion: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        });
+      }
+
+      const deleted = await companion.sessionStore.deleteSession(req.params.sessionId);
+      if (!deleted) {
+        return res.status(404).json({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: `Session ${req.params.sessionId} not found` },
+        });
+      }
+
+      res.json({ ok: true, data: { deleted: true } });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // POST /sessions/:sessionId/archive — archive a session
+  // -------------------------------------------------------------------------
+  router.post(
+    '/sessions/:sessionId/archive',
+    async (req: Request<SessionParams>, res: Response) => {
+      const fs = registry.getFsReader(req.params.projectId);
+      if (!fs) {
+        return res
+          .status(404)
+          .json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+      }
+
+      let companion: CompanionBundle;
+      try {
+        companion = await getCompanion(fs.aidoPath, req.params.projectId);
+      } catch (err) {
+        return res.status(503).json({
+          ok: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: `Failed to initialize companion: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        });
+      }
+
+      const archived = await companion.sessionStore.archiveSession(req.params.sessionId);
+      if (!archived) {
+        return res.status(404).json({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: `Session ${req.params.sessionId} not found` },
+        });
+      }
+
+      res.json({ ok: true, data: { archived: true } });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // PATCH /sessions/:sessionId — rename a session
+  // -------------------------------------------------------------------------
+  router.patch(
+    '/sessions/:sessionId',
+    async (req: Request<SessionParams>, res: Response) => {
+      const fs = registry.getFsReader(req.params.projectId);
+      if (!fs) {
+        return res
+          .status(404)
+          .json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+      }
+
+      const { title } = req.body as { title?: string };
+      if (!title || typeof title !== 'string' || title.trim().length === 0) {
+        return res
+          .status(400)
+          .json({ ok: false, error: { code: 'BAD_REQUEST', message: 'title is required' } });
+      }
+
+      let companion: CompanionBundle;
+      try {
+        companion = await getCompanion(fs.aidoPath, req.params.projectId);
+      } catch (err) {
+        return res.status(503).json({
+          ok: false,
+          error: {
+            code: 'SERVICE_UNAVAILABLE',
+            message: `Failed to initialize companion: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        });
+      }
+
+      const newTitle = await companion.sessionStore.renameSession(req.params.sessionId, title);
+      if (newTitle === null) {
+        return res.status(404).json({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: `Session ${req.params.sessionId} not found` },
+        });
+      }
+
+      res.json({ ok: true, data: { title: newTitle } });
     },
   );
 

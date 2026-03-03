@@ -122,14 +122,14 @@ export class WsHandler {
   }
 
   private async sendStageLogReplay(ws: WebSocket): Promise<void> {
-    const evidenceBase = join(this.fsReader.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(this.fsReader.aidoPath, 'work', 'evidence');
     const epicDirs = await this.fsReader.listDir(evidenceBase);
     const allEntries: any[] = [];
 
     for (const epicDir of epicDirs.slice(-3)) {
       const runs = await this.fsReader.listDir(join(evidenceBase, epicDir));
       for (const run of runs) {
-        const entries = await this.fsReader.readJsonl(join(evidenceBase, epicDir, run, 'stage_log.jsonl'));
+        const entries = await this.fsReader.readJsonl(join(evidenceBase, epicDir, run, 'timeline.jsonl'));
         allEntries.push(...entries);
       }
     }
@@ -174,7 +174,7 @@ export class WsHandler {
         type: 'event',
         topic,
         data: {
-          type: relPath.includes('stage_log') ? 'stage_log' : 'file_change',
+          type: relPath.includes('timeline') ? 'timeline' : 'file_change',
           topic,
           filePath: relPath,
           changeType,
@@ -189,17 +189,17 @@ export class WsHandler {
   }
 
   private classifyFileChange(relPath: string): string {
-    if (relPath.includes('04-engine/companion-sessions/')) return 'companion.session';
-    if (relPath.includes('02-epics/') || relPath.startsWith('02-epics')) return 'epics';
+    if (relPath.includes('work/companion-sessions/')) return 'companion.session';
+    if (relPath.includes('tasks/') || relPath.startsWith('tasks')) return 'epics';
     if (relPath.includes('ideas.json')) return 'ideas';
-    if (relPath.includes('epic-queue')) return 'queue';
+    if (relPath.includes('queue.yaml')) return 'queue';
     if (relPath.includes('schedule')) return 'queue.schedule';
-    if (relPath.includes('auto-mode-state') || relPath.includes('plan_progress')) return 'pipeline';
-    if (relPath.includes('stage_log')) return 'pipeline.stage_log';
+    if (relPath.includes('auto-mode-state') || relPath.includes('state.yaml')) return 'pipeline';
+    if (relPath.includes('timeline.jsonl')) return 'pipeline.timeline';
     if (relPath.includes('evidence')) return 'evidence';
     if (relPath.includes('decisions') || relPath.includes('pending-decision')) return 'decisions';
     if (relPath.includes('audit')) return 'audit';
-    if (relPath.startsWith('03-config')) return 'config';
+    if (relPath.startsWith('config')) return 'config';
     return 'system';
   }
 

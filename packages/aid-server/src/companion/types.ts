@@ -18,6 +18,13 @@
  * suitable for SSE. `isAvailable()` is a cheap probe used by auto-detection
  * to decide which adapter to activate.
  */
+/**
+ * Tool definitions that can be passed to adapters supporting tool use.
+ * Keys are tool names; values follow the Vercel AI SDK tool shape.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type CompanionTools = Record<string, any>;
+
 export interface CompanionService {
   /** Human-readable adapter name, e.g. 'ai-sdk' | 'cli-proxy' | 'stub'. */
   readonly name: string;
@@ -34,6 +41,7 @@ export interface CompanionService {
     message: string,
     sessionId: string,
     systemPrompt?: string,
+    tools?: CompanionTools,
   ): AsyncGenerator<CompanionChunk>;
 
   /** Quick check whether this adapter can serve requests right now. */

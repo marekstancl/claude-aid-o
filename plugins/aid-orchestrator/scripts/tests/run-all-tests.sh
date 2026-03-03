@@ -88,10 +88,26 @@ for suite in "${SUITES[@]}"; do
   echo "Suite $SUITES_RUN/${#SUITES[@]}: $suite_name"
   echo "$SEP"
 
+  # Detect if suite is a bats test (shebang line)
+  is_bats=0
+  if head -1 "$suite" 2>/dev/null | grep -q 'bats'; then
+    is_bats=1
+  fi
+
   # Run the suite, capturing output and exit code
   suite_output=""
   suite_exit=0
-  if [[ "$VERBOSE" -eq 1 ]]; then
+  if [[ "$is_bats" -eq 1 ]]; then
+    # bats test: requires bats binary
+    BATS_BIN="$(command -v bats 2>/dev/null || echo "")"
+    if [[ -z "$BATS_BIN" ]]; then
+      suite_output="SKIP: bats not installed"
+      suite_exit=0
+    else
+      suite_output="$("$BATS_BIN" "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
+    fi
+    [[ "$VERBOSE" -eq 1 ]] && echo "$suite_output"
+  elif [[ "$VERBOSE" -eq 1 ]]; then
     # In verbose mode, tee output to both terminal and capture variable
     suite_output="$(bash "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
     echo "$suite_output"
@@ -99,30 +115,50 @@ for suite in "${SUITES[@]}"; do
     suite_output="$(bash "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
   fi
 
-  # Parse the Results line from the suite output
-  # Expected formats:
-  #   "Results: X/Y passed, Z failed"
-  #   "Results: X/Y passed, Z failed, W skipped"
-  results_line="$(echo "$suite_output" | grep -E '^Results:' | tail -1)"
-
   suite_passed=0
   suite_run=0
   suite_failed=0
   suite_skipped=0
 
-  if [[ -n "$results_line" ]]; then
-    # Extract passed/total
-    if [[ "$results_line" =~ ([0-9]+)/([0-9]+)\ passed ]]; then
-      suite_passed="${BASH_REMATCH[1]}"
-      suite_run="${BASH_REMATCH[2]}"
+  if [[ "$is_bats" -eq 1 ]]; then
+    # Parse bats TAP output: "ok N description" / "not ok N description" / "1..N"
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^1\.\.([0-9]+) ]]; then
+        suite_run="${BASH_REMATCH[1]}"
+      elif [[ "$line" =~ ^ok\ [0-9] ]]; then
+        suite_passed=$(( suite_passed + 1 ))
+      elif [[ "$line" =~ ^not\ ok\ [0-9] ]]; then
+        suite_failed=$(( suite_failed + 1 ))
+      elif [[ "$line" =~ ^ok.*\#\ skip ]]; then
+        suite_skipped=$(( suite_skipped + 1 ))
+        suite_passed=$(( suite_passed - 1 ))  # correct overcounting
+      fi
+    done <<< "$suite_output"
+    # If run count wasn't in TAP plan line, infer from pass+fail
+    if [[ "$suite_run" -eq 0 ]]; then
+      suite_run=$(( suite_passed + suite_failed + suite_skipped ))
     fi
-    # Extract failed count
-    if [[ "$results_line" =~ ([0-9]+)\ failed ]]; then
-      suite_failed="${BASH_REMATCH[1]}"
-    fi
-    # Extract skipped count (if present)
-    if [[ "$results_line" =~ ([0-9]+)\ skipped ]]; then
-      suite_skipped="${BASH_REMATCH[1]}"
+  else
+    # Parse the Results line from the bash suite output
+    # Expected formats:
+    #   "Results: X/Y passed, Z failed"
+    #   "Results: X/Y passed, Z failed, W skipped"
+    results_line="$(echo "$suite_output" | grep -E '^Results:' | tail -1)"
+
+    if [[ -n "$results_line" ]]; then
+      # Extract passed/total
+      if [[ "$results_line" =~ ([0-9]+)/([0-9]+)\ passed ]]; then
+        suite_passed="${BASH_REMATCH[1]}"
+        suite_run="${BASH_REMATCH[2]}"
+      fi
+      # Extract failed count
+      if [[ "$results_line" =~ ([0-9]+)\ failed ]]; then
+        suite_failed="${BASH_REMATCH[1]}"
+      fi
+      # Extract skipped count (if present)
+      if [[ "$results_line" =~ ([0-9]+)\ skipped ]]; then
+        suite_skipped="${BASH_REMATCH[1]}"
+      fi
     fi
   fi
 

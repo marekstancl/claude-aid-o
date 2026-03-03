@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express';
 import { join } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
-import type { ProjectParams, EvidenceFileParams } from './types.js';
+import { isValidPathComponent, type ProjectParams, type EvidenceFileParams } from './types.js';
 
 export function evidenceRoutes(registry: ProjectRegistry): Router {
   const router = Router({ mergeParams: true });
@@ -11,7 +11,7 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
     const result: any[] = [];
 
@@ -25,7 +25,7 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
         runEntries.push({
           runId: run,
           files,
-          hasStageLog: files.includes('stage_log.jsonl'),
+          hasTimeline: files.includes('timeline.jsonl'),
           hasPlan: files.includes('plan.json'),
           hasGatesReport: files.some((f) => f.includes('gates')),
         });
@@ -48,10 +48,14 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
     const filePath = req.params['0'] ?? '';
     if (!filePath) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'File path required' } });
 
-    const fullPath = join(fs.aidoPath, '04-engine', 'evidence', req.params.epicId, req.params.runId, filePath);
+    if (!isValidPathComponent(req.params.epicId) || !isValidPathComponent(req.params.runId)) {
+      return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId or runId' } });
+    }
+
+    const fullPath = join(fs.aidoPath, 'work', 'evidence', req.params.epicId, req.params.runId, filePath);
 
     // Security: ensure path doesn't escape evidence dir
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     if (!fullPath.startsWith(evidenceBase)) {
       return res.status(403).json({ ok: false, error: { code: 'FORBIDDEN', message: 'Path traversal not allowed' } });
     }
