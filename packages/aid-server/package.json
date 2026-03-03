@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aid/contract": "*",
     "ai": "^6.0.103",
     "ai-sdk-provider-claude-code": "^3.4.2",
     "chokidar": "^4.0.3",
