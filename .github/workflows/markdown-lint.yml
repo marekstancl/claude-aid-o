@@ -1,0 +1,24 @@
+name: Markdown Lint
+on:
+  pull_request:
+    paths:
+      - 'plugins/aid-orchestrator/skills/**'
+      - 'plugins/aid-orchestrator/commands/**'
+      - 'plugins/aid-orchestrator/agents/**'
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Last Updated footer
+        run: |
+          missing=$(grep -rL "Last Updated:" \
+            plugins/aid-orchestrator/skills/ \
+            plugins/aid-orchestrator/commands/ \
+            plugins/aid-orchestrator/agents/ 2>/dev/null || true)
+          [ -z "$missing" ] || (echo "Missing 'Last Updated:' in: $missing" && exit 1)
+      - name: Warn on files over 800 lines
+        run: |
+          find plugins/aid-orchestrator/skills/ plugins/aid-orchestrator/commands/ \
+            plugins/aid-orchestrator/agents/ -name "*.md" | \
+            xargs awk 'END{if(NR>800)print "WARNING: " FILENAME " has " NR " lines (limit 800)"}'
