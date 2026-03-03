@@ -88,7 +88,7 @@ export type PathValidationResult =
  *          `{ ok: false, reason }` on failure.
  *
  * @example
- * const result = validateEvidencePath('/project/.aid-o/04-engine/evidence', epicId, runId);
+ * const result = validateEvidencePath('/project/.aid-o/work/evidence', epicId, runId);
  * if (!result.ok) {
  *   return res.status(400).json({ ok: false, error: { code: 'INVALID_PATH', message: result.reason } });
  * }

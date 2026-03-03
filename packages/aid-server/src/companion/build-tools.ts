@@ -135,7 +135,7 @@ export async function buildCompanionTools(
       parameters: z.object({
         path: z
           .string()
-          .describe('Relative path to YAML file, e.g. ".aid-o/04-engine/epic-queue.yaml"'),
+          .describe('Relative path to YAML file, e.g. ".aid-o/config/queue.yaml"'),
       }),
       execute: async ({ path }: { path: string }) => {
         const abs = safePath(path);
@@ -195,8 +195,8 @@ export async function buildCompanionTools(
         'Get the current pipeline state including FSM state, current EPIC, steps, aggregate stats, and escalation info.',
       parameters: z.object({}),
       execute: async () => {
-        const autoState = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'auto-mode-state.yaml'));
-        const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+        const autoState = await fs.readYaml<any>(join(fs.aidoPath, 'work', 'auto-mode-state.yaml'));
+        const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
 
         if (!autoState?.session) return 'No active pipeline session.';
 

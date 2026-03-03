@@ -13,7 +13,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+    const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
 
     const entries = (queue?.queue ?? []).map((e: any) => ({
       epicId: e.epic_id,
@@ -36,7 +36,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const config = await fs.readYaml<any>(join(fs.aidoPath, '03-config', 'schedule.yaml'));
+    const config = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'schedule.yaml'));
 
     res.json({
       ok: true,
@@ -57,7 +57,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const schedulePath = join(fs.aidoPath, '03-config', 'schedule.yaml');
+    const schedulePath = join(fs.aidoPath, 'config', 'schedule.yaml');
     const existing = (await fs.readYaml<any>(schedulePath)) ?? {};
     const body = req.body;
 
@@ -91,7 +91,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const config = await fs.readYaml<any>(join(fs.aidoPath, '03-config', 'schedule.yaml'));
+    const config = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'schedule.yaml'));
 
     res.json({
       ok: true,
@@ -118,7 +118,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
     if (!isValidPathComponent(req.params.epicId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId' } });
 
-    const queuePath = join(fs.aidoPath, '04-engine', 'epic-queue.yaml');
+    const queuePath = join(fs.aidoPath, 'config', 'queue.yaml');
     const queue = await fs.readYaml<any>(queuePath);
     if (!queue?.queue) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Queue not found' } });
 

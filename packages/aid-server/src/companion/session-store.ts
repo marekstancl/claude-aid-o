@@ -2,7 +2,7 @@
  * Session store — JSONL-based persistence for companion sessions.
  *
  * Each session is stored as a single `.jsonl` file under
- * `<aidoPath>/04-engine/companion-sessions/<sessionId>.jsonl`.
+ * `<aidoPath>/work/companion-sessions/<sessionId>.jsonl`.
  *
  * File format:
  *   Line 1  — system message whose `content` is JSON-encoded SessionMetadata
@@ -35,8 +35,8 @@ import type {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SESSIONS_DIR = '04-engine/companion-sessions';
-const ARCHIVE_DIR = '04-engine/companion-sessions/archive';
+const SESSIONS_DIR = 'work/companion-sessions';
+const ARCHIVE_DIR = 'work/companion-sessions/archive';
 const MAX_TITLE_LENGTH = 80;
 
 // ---------------------------------------------------------------------------

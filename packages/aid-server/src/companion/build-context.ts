@@ -38,7 +38,7 @@ You have full knowledge of this project. Answer questions about its structure, E
   }
 
   // -- Current pipeline state
-  const autoState = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'auto-mode-state.yaml'));
+  const autoState = await fs.readYaml<any>(join(fs.aidoPath, 'work', 'auto-mode-state.yaml'));
   if (autoState?.session) {
     const s = autoState.session;
     const agg = s.aggregate ?? {};
@@ -55,7 +55,7 @@ You have full knowledge of this project. Answer questions about its structure, E
   }
 
   // -- EPIC queue
-  const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+  const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
   if (queue?.queue?.length) {
     const items = queue.queue.slice(0, 10).map((e: any) =>
       `  - ${e.epic_id}: ${e.status} (priority: ${e.priority ?? 'N/A'})`,
@@ -63,13 +63,13 @@ You have full knowledge of this project. Answer questions about its structure, E
     sections.push(`## EPIC Queue (${queue.queue.length} items)\n${items}`);
   }
 
-  // -- Active EPICs (from 02-epics/)
-  const epicFiles = await fs.listDir(join(fs.aidoPath, '02-epics'));
+  // -- Active EPICs (from tasks/)
+  const epicFiles = await fs.listDir(join(fs.aidoPath, 'tasks'));
   const activeEpics = epicFiles.filter((f) => f.endsWith('.md') && !f.startsWith('archive'));
   if (activeEpics.length > 0) {
     const epicSummaries: string[] = [];
     for (const file of activeEpics.slice(0, 5)) {
-      const content = await fs.readText(join(fs.aidoPath, '02-epics', file));
+      const content = await fs.readText(join(fs.aidoPath, 'tasks', file));
       if (content) {
         // Extract first 500 chars as summary
         const summary = content.slice(0, 500).replace(/\n/g, ' ').trim();
@@ -81,15 +81,15 @@ You have full knowledge of this project. Answer questions about its structure, E
     }
   }
 
-  // -- Plans (from 01-plans/)
-  const planFiles = await fs.listDir(join(fs.aidoPath, '01-plans'));
+  // -- Plans (from plans/)
+  const planFiles = await fs.listDir(join(fs.aidoPath, 'plans'));
   const activePlans = planFiles.filter((f) => f.endsWith('.md'));
   if (activePlans.length > 0) {
     sections.push(`## Plans\n${activePlans.map((f) => `  - ${f}`).join('\n')}`);
   }
 
   // -- Recent decisions
-  const decisionsDir = join(fs.aidoPath, '04-engine', 'decisions');
+  const decisionsDir = join(fs.aidoPath, 'work', 'decisions');
   const decisionFiles = await fs.listDir(decisionsDir);
   if (decisionFiles.length > 0) {
     const recentDecisions = decisionFiles.slice(-5);
@@ -106,7 +106,7 @@ You have full knowledge of this project. Answer questions about its structure, E
   }
 
   // -- Ideas backlog
-  const ideas = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'ideas.yaml'));
+  const ideas = await fs.readYaml<any>(join(fs.aidoPath, 'work', 'ideas.yaml'));
   if (ideas?.ideas?.length) {
     const ideaList = ideas.ideas.slice(0, 8).map((i: any) =>
       `  - [${i.status ?? '?'}] ${i.title ?? 'Untitled'}`,
@@ -124,7 +124,7 @@ You have full knowledge of this project. Answer questions about its structure, E
   }
 
   // -- Config summary
-  const gatesConfig = await fs.readYaml<any>(join(fs.aidoPath, '03-config', 'policies', 'gates.yaml'));
+  const gatesConfig = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'gates.yaml'));
   if (gatesConfig) {
     const gateNames = Object.keys(gatesConfig.gates ?? gatesConfig).slice(0, 10);
     sections.push(`## Quality Gates\nConfigured: ${gateNames.join(', ')}`);

@@ -6,7 +6,7 @@ import { isValidPathComponent, type ProjectParams, type IdeaParams, type IdeaLin
 import type { FsReader } from '../services/fs-reader.js';
 
 function ideasPath(aidoPath: string): string {
-  return join(aidoPath, '04-engine', 'ideas.json');
+  return join(aidoPath, 'work', 'ideas.json');
 }
 
 async function readIdeas(fs: FsReader): Promise<any[]> {
@@ -14,7 +14,7 @@ async function readIdeas(fs: FsReader): Promise<any[]> {
 }
 
 async function saveIdeas(ideas: any[], aidoPath: string): Promise<void> {
-  await mkdir(join(aidoPath, '04-engine'), { recursive: true });
+  await mkdir(join(aidoPath, 'work'), { recursive: true });
   await writeFile(ideasPath(aidoPath), JSON.stringify(ideas, null, 2), 'utf-8');
 }
 

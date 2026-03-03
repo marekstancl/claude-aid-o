@@ -56,7 +56,7 @@ export function backlogRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const filePath = join(fs.aidoPath, '04-engine', 'backlog.md');
+    const filePath = join(fs.aidoPath, 'work', 'backlog.md');
     const text = await fs.readText(filePath);
 
     if (!text) {

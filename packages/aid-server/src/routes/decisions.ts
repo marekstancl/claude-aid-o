@@ -12,7 +12,7 @@ export function decisionRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const logPath = join(fs.aidoPath, '04-engine', 'decisions.jsonl');
+    const logPath = join(fs.aidoPath, 'work', 'decisions.jsonl');
     const entries = await fs.readJsonl(logPath);
     res.json({ ok: true, data: entries, meta: { total: entries.length } });
   });
@@ -22,7 +22,7 @@ export function decisionRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const pendingPath = join(fs.aidoPath, '04-engine', 'pending-decisions.jsonl');
+    const pendingPath = join(fs.aidoPath, 'work', 'pending-decisions.jsonl');
     const entries = await fs.readJsonl(pendingPath);
     res.json({ ok: true, data: entries });
   });
@@ -49,8 +49,8 @@ export function decisionRoutes(registry: ProjectRegistry): Router {
       mode: 'manual',
     };
 
-    const logPath = join(fs.aidoPath, '04-engine', 'decisions.jsonl');
-    await mkdir(join(fs.aidoPath, '04-engine'), { recursive: true });
+    const logPath = join(fs.aidoPath, 'work', 'decisions.jsonl');
+    await mkdir(join(fs.aidoPath, 'work'), { recursive: true });
     await appendFile(logPath, JSON.stringify(entry) + '\n', 'utf-8');
 
     res.json({ ok: true, data: entry });

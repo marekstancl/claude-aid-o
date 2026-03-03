@@ -11,7 +11,7 @@ export function auditRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const dirs = await fs.listDir(evidenceBase);
     const auditDirs = dirs.filter((d) => d.startsWith('audit-')).sort().reverse();
 

@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
 import type { ProjectParams } from './types.js';
 import { validateEvidencePath } from './path-validation.js';
+import type { AidStateYaml, AidTimelineEntry } from '@aid/contract';
 
 export function pipelineRoutes(registry: ProjectRegistry): Router {
   const router = Router({ mergeParams: true });
@@ -12,8 +13,8 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const autoState = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'auto-mode-state.yaml'));
-    const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+    const autoState = await fs.readYaml<any>(join(fs.aidoPath, 'work', 'auto-mode-state.yaml'));
+    const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
 
     const runningEpic = queue?.queue?.find((e: any) => e.status === 'running');
 
@@ -62,7 +63,7 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
     // Find current running epic and its plan
-    const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+    const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
     const runningEpic = queue?.queue?.find((e: any) => e.status === 'running');
 
     if (!runningEpic) {
@@ -70,7 +71,7 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     }
 
     // Find evidence dir for the epic
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
     const epicDir = epicDirs.find((d) => d.startsWith(runningEpic.epic_id));
 
@@ -86,16 +87,16 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
   });
 
   // GET /api/p/:projectId/pipeline/step-statuses
-  // Returns plan_progress.json for the current running EPIC — per-step status data.
+  // Returns state.yaml for the current running EPIC — per-step status data.
   router.get('/step-statuses', async (req: Request<ProjectParams>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+    const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
     const runningEpic = queue?.queue?.find((e: any) => e.status === 'running');
     if (!runningEpic) return res.json({ ok: true, data: {} });
 
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
     const epicDir = epicDirs.find((d) => d.startsWith(runningEpic.epic_id));
     if (!epicDir) return res.json({ ok: true, data: {} });
@@ -104,16 +105,8 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     const latestRun = runs.sort().pop();
     if (!latestRun) return res.json({ ok: true, data: {} });
 
-    const progress = await fs.readJson<any>(join(evidenceBase, epicDir, latestRun, 'plan_progress.json'));
-    // Convert array format [{id, status, ...}] to map {id: {status, ...}}
-    if (Array.isArray(progress)) {
-      const map: Record<string, any> = {};
-      for (const s of progress) {
-        if (s.id) map[s.id] = { status: s.status, startedAt: s.started_at, completedAt: s.completed_at };
-      }
-      return res.json({ ok: true, data: map });
-    }
-    res.json({ ok: true, data: progress?.steps ?? progress ?? {} });
+    const state = await fs.readYaml<AidStateYaml>(join(evidenceBase, epicDir, latestRun, 'state.yaml'));
+    res.json({ ok: true, data: state ?? {} });
   });
 
   // GET /api/p/:projectId/pipeline/theater/:epicId/:runId
@@ -124,11 +117,8 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     const { epicId, runId } = req.params;
 
     // Defense-in-depth: validate path components before constructing any path.
-    // Layer 1 (regex): rejects ".", "/", "\" to block traversal sequences.
-    // Layer 2 (resolve+startsWith): confirms the joined path stays within the
-    //   evidence base after OS-level canonicalization.
     // CWE-22: Path Traversal — prevents reading files outside evidence/.
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const validation = validateEvidencePath(evidenceBase, epicId, runId);
     if (!validation.ok) {
       return res.status(400).json({
@@ -152,52 +142,32 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
       return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: `plan.json not found in ${epicId}/${runId}` } });
     }
 
-    // Read plan_progress.json (optional -- may not exist yet)
-    const progress = await fs.readJson<any>(join(runDir, 'plan_progress.json'));
+    // Read state.yaml (optional -- may not exist yet)
+    const state = await fs.readYaml<AidStateYaml>(join(runDir, 'state.yaml'));
 
-    // Read stage_log.jsonl (optional)
-    const stageLog = await fs.readJsonl<any>(join(runDir, 'stage_log.jsonl'));
+    // Read timeline.jsonl (optional)
+    const timeline = await fs.readJsonl<AidTimelineEntry>(join(runDir, 'timeline.jsonl'));
 
-    // Build step progress map from plan_progress.json
-    const progressSteps: Record<string, any> = progress?.steps ?? {};
-
-    // Merge plan steps with progress data
+    // Build step progress from state
     const planSteps: any[] = plan.steps ?? [];
-    const steps = planSteps.map((step: any) => {
-      const stepProgress = progressSteps[step.id] ?? {};
-      const startedAt = stepProgress.startedAt ?? stepProgress.started_at ?? null;
-      const completedAt = stepProgress.completedAt ?? stepProgress.completed_at ?? null;
-
-      let durationMs: number | null = null;
-      if (startedAt && completedAt) {
-        const startMs = new Date(startedAt).getTime();
-        const endMs = new Date(completedAt).getTime();
-        if (Number.isFinite(startMs) && Number.isFinite(endMs)) {
-          durationMs = endMs - startMs;
-        }
-      }
-
+    const currentStep = state?.current_step ?? 0;
+    const steps = planSteps.map((step: any, idx: number) => {
+      const isDone = idx < currentStep;
+      const isActive = idx === currentStep && state?.state === 'EXECUTE';
       return {
         id: step.id,
         role: step.role ?? 'unknown',
-        status: stepProgress.status ?? 'pending',
-        startedAt,
-        completedAt,
-        durationMs,
+        status: isDone ? 'done' : isActive ? 'executing' : 'pending',
         objective: step.objective ?? '',
       };
     });
 
-    const completedSteps = steps.filter((s: any) => s.status === 'done' || s.status === 'completed').length;
+    const completedSteps = steps.filter((s) => s.status === 'done').length;
 
-    // Determine overall status from progress state or derive from steps
-    let overallStatus = progress?.state ?? 'pending';
+    // Determine overall status from state
+    let overallStatus: string = state?.state ?? 'pending';
     if (completedSteps === steps.length && steps.length > 0) {
       overallStatus = 'done';
-    } else if (steps.some((s: any) => s.status === 'executing' || s.status === 'in_progress')) {
-      overallStatus = 'executing';
-    } else if (steps.some((s: any) => s.status === 'failed')) {
-      overallStatus = 'failed';
     }
 
     res.json({
@@ -206,7 +176,7 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
         epicId,
         runId,
         steps,
-        stageLog,
+        timeline,
         totalSteps: steps.length,
         completedSteps,
         overallStatus,
@@ -214,28 +184,50 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     });
   });
 
-  // GET /api/p/:projectId/pipeline/stage-log
-  router.get('/stage-log', async (req: Request<ProjectParams>, res) => {
+  // GET /api/p/:projectId/pipeline/timeline
+  router.get('/timeline', async (req: Request<ProjectParams>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    // Collect stage logs from all evidence dirs
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    // Collect timeline entries from all evidence dirs
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
-    const allEntries: any[] = [];
+    const allEntries: AidTimelineEntry[] = [];
 
     for (const epicDir of epicDirs.slice(-5)) { // last 5 epics
       const runs = await fs.listDir(join(evidenceBase, epicDir));
       for (const run of runs) {
-        const logPath = join(evidenceBase, epicDir, run, 'stage_log.jsonl');
-        const entries = await fs.readJsonl(logPath);
+        const logPath = join(evidenceBase, epicDir, run, 'timeline.jsonl');
+        const entries = await fs.readJsonl<AidTimelineEntry>(logPath);
         allEntries.push(...entries);
       }
     }
 
     // Sort by timestamp
-    allEntries.sort((a: any, b: any) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''));
+    allEntries.sort((a, b) => (a.ts ?? '').localeCompare(b.ts ?? ''));
 
+    res.json({ ok: true, data: allEntries });
+  });
+
+  // GET /api/p/:projectId/pipeline/stage-log (backward compat alias)
+  router.get('/stage-log', async (req: Request<ProjectParams>, res) => {
+    const fs = registry.getFsReader(req.params.projectId);
+    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
+    const epicDirs = await fs.listDir(evidenceBase);
+    const allEntries: AidTimelineEntry[] = [];
+
+    for (const epicDir of epicDirs.slice(-5)) {
+      const runs = await fs.listDir(join(evidenceBase, epicDir));
+      for (const run of runs) {
+        const logPath = join(evidenceBase, epicDir, run, 'timeline.jsonl');
+        const entries = await fs.readJsonl<AidTimelineEntry>(logPath);
+        allEntries.push(...entries);
+      }
+    }
+
+    allEntries.sort((a, b) => (a.ts ?? '').localeCompare(b.ts ?? ''));
     res.json({ ok: true, data: allEntries });
   });
 

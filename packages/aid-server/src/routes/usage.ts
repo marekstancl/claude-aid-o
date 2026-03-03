@@ -11,18 +11,18 @@ export function usageRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const autoState = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'auto-mode-state.yaml'));
+    const autoState = await fs.readYaml<any>(join(fs.aidoPath, 'work', 'auto-mode-state.yaml'));
     const agg = autoState?.session?.aggregate;
 
     // Aggregate from evidence directories
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
     const perEpic: any[] = [];
 
     for (const epicDir of epicDirs.filter((d) => d.startsWith('E-'))) {
       const runs = await fs.listDir(join(evidenceBase, epicDir));
       for (const run of runs) {
-        const logEntries = await fs.readJsonl(join(evidenceBase, epicDir, run, 'stage_log.jsonl'));
+        const logEntries = await fs.readJsonl(join(evidenceBase, epicDir, run, 'timeline.jsonl'));
         perEpic.push({
           epicId: epicDir,
           runId: run,

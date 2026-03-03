@@ -173,7 +173,7 @@ export function epicRoutes(registry: ProjectRegistry): Router {
     }
 
     // Read or initialize the queue
-    const queuePath = join(fs.aidoPath, '04-engine', 'epic-queue.yaml');
+    const queuePath = join(fs.aidoPath, 'config', 'queue.yaml');
     const queueData = (await fs.readYaml<{ queue?: QueueEntry[]; paused?: boolean }>(queuePath)) ?? { queue: [] };
     const queue: QueueEntry[] = queueData.queue ?? [];
 

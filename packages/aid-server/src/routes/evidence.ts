@@ -11,7 +11,7 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
 
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const epicDirs = await fs.listDir(evidenceBase);
     const result: any[] = [];
 
@@ -25,7 +25,7 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
         runEntries.push({
           runId: run,
           files,
-          hasStageLog: files.includes('stage_log.jsonl'),
+          hasTimeline: files.includes('timeline.jsonl'),
           hasPlan: files.includes('plan.json'),
           hasGatesReport: files.some((f) => f.includes('gates')),
         });
@@ -52,10 +52,10 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
       return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId or runId' } });
     }
 
-    const fullPath = join(fs.aidoPath, '04-engine', 'evidence', req.params.epicId, req.params.runId, filePath);
+    const fullPath = join(fs.aidoPath, 'work', 'evidence', req.params.epicId, req.params.runId, filePath);
 
     // Security: ensure path doesn't escape evidence dir
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     if (!fullPath.startsWith(evidenceBase)) {
       return res.status(403).json({ ok: false, error: { code: 'FORBIDDEN', message: 'Path traversal not allowed' } });
     }

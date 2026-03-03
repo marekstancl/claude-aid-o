@@ -2,7 +2,7 @@
  * Evidence search route.
  *
  * Provides grep-like text search across all evidence files stored in
- * .aid-o/04-engine/evidence/. Walks epicId/runId directories recursively,
+ * .aid-o/work/evidence/. Walks epicId/runId directories recursively,
  * searches for case-insensitive substring matches, and returns results
  * sorted by epicId (asc), runId (desc = newest first), then filePath (asc).
  */
@@ -70,7 +70,7 @@ export function evidenceSearchRoutes(registry: ProjectRegistry): Router {
       ? Math.min(rawLimit, MAX_LIMIT)
       : DEFAULT_LIMIT;
 
-    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
     const resolvedBase = resolve(evidenceBase);
 
     // Walk epic directories
