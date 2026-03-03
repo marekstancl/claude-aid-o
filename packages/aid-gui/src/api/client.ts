@@ -250,6 +250,9 @@ export interface ApiClient {
   /** GET /api/p/:projectId/pipeline/steps */
   getPipelineSteps(): Promise<ApiResult<PipelineStepsResponse>>;
 
+  /** GET /api/p/:projectId/pipeline/step-statuses */
+  getStepStatuses(): Promise<ApiResult<Record<string, { status: string; startedAt?: string; completedAt?: string }>>>;
+
   /** GET /api/p/:projectId/pipeline/stage-log */
   getStageLog(): Promise<ApiResult<StageLogEntryResponse[]>>;
 
@@ -346,6 +349,15 @@ export interface ApiClient {
   /** GET /api/p/:projectId/companion/sessions/:sessionId */
   getCompanionSession(sessionId: string): Promise<ApiResult<CompanionSession>>;
 
+  /** DELETE /api/p/:projectId/companion/sessions/:sessionId */
+  deleteCompanionSession(sessionId: string): Promise<ApiResult<{ deleted: boolean }>>;
+
+  /** POST /api/p/:projectId/companion/sessions/:sessionId/archive */
+  archiveCompanionSession(sessionId: string): Promise<ApiResult<{ archived: boolean }>>;
+
+  /** PATCH /api/p/:projectId/companion/sessions/:sessionId */
+  renameCompanionSession(sessionId: string, title: string): Promise<ApiResult<{ title: string }>>;
+
   /** GET /api/p/:projectId/companion/status */
   getCompanionStatus(): Promise<ApiResult<CompanionStatus>>;
 
@@ -403,6 +415,9 @@ export function createApiClient(
 
     getPipelineSteps: () =>
       typedFetch<PipelineStepsResponse>(`${base}/pipeline/steps`, timeoutMs),
+
+    getStepStatuses: () =>
+      typedFetch<Record<string, { status: string; startedAt?: string; completedAt?: string }>>(`${base}/pipeline/step-statuses`, timeoutMs),
 
     getStageLog: () =>
       typedFetch<StageLogEntryResponse[]>(`${base}/pipeline/stage-log`, timeoutMs),
@@ -511,6 +526,15 @@ export function createApiClient(
 
     getCompanionSession: (sessionId: string) =>
       typedFetch<CompanionSession>(`${base}/companion/sessions/${encodeURIComponent(sessionId)}`, timeoutMs),
+
+    deleteCompanionSession: (sessionId: string) =>
+      typedRequest<{ deleted: boolean }>(`${base}/companion/sessions/${encodeURIComponent(sessionId)}`, timeoutMs, 'DELETE'),
+
+    archiveCompanionSession: (sessionId: string) =>
+      typedRequest<{ archived: boolean }>(`${base}/companion/sessions/${encodeURIComponent(sessionId)}/archive`, timeoutMs, 'POST'),
+
+    renameCompanionSession: (sessionId: string, title: string) =>
+      typedRequest<{ title: string }>(`${base}/companion/sessions/${encodeURIComponent(sessionId)}`, timeoutMs, 'PATCH', { title }),
 
     getCompanionStatus: () =>
       typedFetch<CompanionStatus>(`${base}/companion/status`, timeoutMs),

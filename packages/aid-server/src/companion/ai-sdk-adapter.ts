@@ -15,6 +15,7 @@ import type {
   CompanionChunk,
   CompanionResponse,
   CompanionService,
+  CompanionTools,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,7 @@ export class AiSdkAdapter implements CompanionService {
     message: string,
     sessionId: string,
     systemPrompt?: string,
+    tools?: CompanionTools,
   ): AsyncGenerator<CompanionChunk> {
     const { streamText } = await this.importAi();
     const model = await this.createModel();
@@ -98,6 +100,7 @@ export class AiSdkAdapter implements CompanionService {
         model,
         ...(systemPrompt ? { system: systemPrompt } : {}),
         prompt: message,
+        ...(tools ? { tools, maxSteps: 8 } : {}),
       });
 
       // Iterate over the text stream, yielding incremental text chunks.

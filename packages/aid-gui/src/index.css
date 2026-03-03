@@ -67,3 +67,17 @@
   color: var(--color-state-executing);
   margin-left: 1px;
 }
+
+/* Command Center heartbeat animation */
+@keyframes heartbeat {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  14% { opacity: 1; transform: scale(1.04); }
+  28% { opacity: 0.5; transform: scale(1); }
+  42% { opacity: 0.95; transform: scale(1.02); }
+  56% { opacity: 0.4; transform: scale(1); }
+}
+
+.animate-heartbeat {
+  animation: heartbeat 2.4s ease-in-out infinite;
+}
+

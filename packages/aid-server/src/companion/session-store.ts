@@ -19,6 +19,8 @@ import {
   mkdir,
   readFile,
   readdir,
+  rename,
+  unlink,
   writeFile,
 } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -34,6 +36,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const SESSIONS_DIR = '04-engine/companion-sessions';
+const ARCHIVE_DIR = '04-engine/companion-sessions/archive';
 const MAX_TITLE_LENGTH = 80;
 
 // ---------------------------------------------------------------------------
@@ -42,9 +45,11 @@ const MAX_TITLE_LENGTH = 80;
 
 export class SessionStore {
   private readonly sessionsDir: string;
+  private readonly archiveDir: string;
 
   constructor(aidoPath: string) {
     this.sessionsDir = join(aidoPath, SESSIONS_DIR);
+    this.archiveDir = join(aidoPath, ARCHIVE_DIR);
   }
 
   // -----------------------------------------------------------------------
@@ -182,6 +187,85 @@ export class SessionStore {
     const raw = firstUser.content.trim().replace(/\s+/g, ' ');
     if (raw.length <= MAX_TITLE_LENGTH) return raw;
     return raw.slice(0, MAX_TITLE_LENGTH - 1) + '\u2026';
+  }
+
+  /**
+   * Delete a session file permanently.
+   *
+   * @returns `true` if the session was deleted, `false` if not found.
+   */
+  async deleteSession(sessionId: string): Promise<boolean> {
+    if (!this.isValidSessionId(sessionId)) return false;
+    const filePath = this.sessionFile(sessionId);
+    try {
+      await unlink(filePath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Archive a session by moving its file to the archive sub-directory.
+   *
+   * @returns `true` if the session was archived, `false` if not found.
+   */
+  async archiveSession(sessionId: string): Promise<boolean> {
+    if (!this.isValidSessionId(sessionId)) return false;
+    const src = this.sessionFile(sessionId);
+    await mkdir(this.archiveDir, { recursive: true });
+    const dst = join(this.archiveDir, `${sessionId}.jsonl`);
+    try {
+      await rename(src, dst);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Rename a session by updating its metadata title.
+   *
+   * @returns The updated session title, or `null` if the session was not found.
+   */
+  async renameSession(sessionId: string, newTitle: string): Promise<string | null> {
+    if (!this.isValidSessionId(sessionId)) return null;
+    const filePath = this.sessionFile(sessionId);
+    let raw: string;
+    try {
+      raw = await readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+
+    const allLines = raw.split('\n').filter((line) => line.trim().length > 0);
+    if (allLines.length === 0) return null;
+
+    let metaMsg: CompanionMessage;
+    try {
+      metaMsg = JSON.parse(allLines[0]) as CompanionMessage;
+    } catch {
+      return null;
+    }
+
+    let metadata: SessionMetadata;
+    try {
+      metadata = JSON.parse(metaMsg.content) as SessionMetadata;
+    } catch {
+      return null;
+    }
+
+    const trimmed = newTitle.trim().replace(/\s+/g, ' ');
+    metadata.title = trimmed.length <= MAX_TITLE_LENGTH
+      ? trimmed
+      : trimmed.slice(0, MAX_TITLE_LENGTH - 1) + '\u2026';
+    metadata.updatedAt = new Date().toISOString();
+
+    metaMsg.content = JSON.stringify(metadata);
+    allLines[0] = JSON.stringify(metaMsg);
+
+    await writeFile(filePath, allLines.join('\n') + '\n', 'utf-8');
+    return metadata.title;
   }
 
   // -----------------------------------------------------------------------

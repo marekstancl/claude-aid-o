@@ -85,6 +85,37 @@ export function pipelineRoutes(registry: ProjectRegistry): Router {
     res.json({ ok: true, data: plan?.steps ?? [] });
   });
 
+  // GET /api/p/:projectId/pipeline/step-statuses
+  // Returns plan_progress.json for the current running EPIC — per-step status data.
+  router.get('/step-statuses', async (req: Request<ProjectParams>, res) => {
+    const fs = registry.getFsReader(req.params.projectId);
+    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+
+    const queue = await fs.readYaml<any>(join(fs.aidoPath, '04-engine', 'epic-queue.yaml'));
+    const runningEpic = queue?.queue?.find((e: any) => e.status === 'running');
+    if (!runningEpic) return res.json({ ok: true, data: {} });
+
+    const evidenceBase = join(fs.aidoPath, '04-engine', 'evidence');
+    const epicDirs = await fs.listDir(evidenceBase);
+    const epicDir = epicDirs.find((d) => d.startsWith(runningEpic.epic_id));
+    if (!epicDir) return res.json({ ok: true, data: {} });
+
+    const runs = await fs.listDir(join(evidenceBase, epicDir));
+    const latestRun = runs.sort().pop();
+    if (!latestRun) return res.json({ ok: true, data: {} });
+
+    const progress = await fs.readJson<any>(join(evidenceBase, epicDir, latestRun, 'plan_progress.json'));
+    // Convert array format [{id, status, ...}] to map {id: {status, ...}}
+    if (Array.isArray(progress)) {
+      const map: Record<string, any> = {};
+      for (const s of progress) {
+        if (s.id) map[s.id] = { status: s.status, startedAt: s.started_at, completedAt: s.completed_at };
+      }
+      return res.json({ ok: true, data: map });
+    }
+    res.json({ ok: true, data: progress?.steps ?? progress ?? {} });
+  });
+
   // GET /api/p/:projectId/pipeline/theater/:epicId/:runId
   router.get('/theater/:epicId/:runId', async (req: Request<ProjectParams & { epicId: string; runId: string }>, res) => {
     const fs = registry.getFsReader(req.params.projectId);

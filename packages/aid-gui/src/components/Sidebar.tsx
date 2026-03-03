@@ -3,7 +3,7 @@ import { NavLink } from 'react-router';
 import {
   LayoutDashboard,
   Activity,
-  GitBranch,
+
   Gavel,
   Archive,
   HeartPulse,
@@ -24,16 +24,15 @@ interface SidebarProps {
   isMobile: boolean;
 }
 
-const navItems = [
+export const navItems = [
   { icon: LayoutDashboard, label: 'Command Center', path: '/' },
-  { icon: GitBranch, label: 'Pipeline Theater', path: '/pipeline' },
+  { icon: Layers, label: 'EPIC Lifecycle', path: '/epics' },
+  { icon: ListOrdered, label: 'Queue Scheduler', path: '/queue' },
   { icon: Activity, label: 'Activity Stream', path: '/activity' },
   { icon: Gavel, label: 'Decision Hub', path: '/decisions' },
-  { icon: Layers, label: 'EPIC Lifecycle', path: '/epics' },
   { icon: Archive, label: 'Evidence Vault', path: '/evidence' },
   { icon: HeartPulse, label: 'Health Observatory', path: '/health' },
   { icon: Lightbulb, label: 'Ideas to Execution', path: '/ideas' },
-  { icon: ListOrdered, label: 'Queue Scheduler', path: '/queue' },
   { icon: BookOpen, label: 'Knowledge Base', path: '/knowledge' },
 ];
 
