@@ -20,11 +20,12 @@ gates:
 
   security_scan_pass:
     description: "No high/critical security findings"
-    required: false
+    required: true
     command: "bandit -q -r . -ll"
     timeout_seconds: 180
     pass_criteria: "exit code 0, no HIGH or CRITICAL findings"
     when: "security scanning tools (bandit, snyk, etc.) are configured in the project"
+    # Making this required: any future EPIC must pass security scan before DONE state
 
   docs_updated:
     description: "Documentation updated for all changed APIs/models"
