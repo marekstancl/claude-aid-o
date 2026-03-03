@@ -49,6 +49,13 @@ gates:
     pass_criteria: "exit code 0"
     when: "frontend files changed"
 
+  scope_check:
+    description: "Verify changes are within EPIC scope"
+    command: "plugins/aid-orchestrator/scripts/gates/scope-check.sh .aid-o/work/evidence/{epic_id}/allowed_paths.txt {base_commit}"
+    required: true
+    type: deterministic
+    max_retries: 0
+
 # Retry configuration
 retry:
   max_attempts: 3
