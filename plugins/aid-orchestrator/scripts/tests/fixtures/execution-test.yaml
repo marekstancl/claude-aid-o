@@ -1,0 +1,12 @@
+epic_id: E-TEST
+run_id: R-001
+mode: manual
+gates:
+  tests_pass:
+    command: "exit 0"
+    required: true
+    max_retries: 1
+  lint_pass:
+    command: "exit 0"
+    required: false
+    max_retries: 0
