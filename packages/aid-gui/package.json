@@ -1,7 +1,7 @@
 {
   "name": "aid-gui",
   "private": true,
-  "version": "0.99.0",
+  "version": "2.0.0",
   "type": "module",
   "bin": {
     "aid-gui": "./bin/aid-gui.ts"

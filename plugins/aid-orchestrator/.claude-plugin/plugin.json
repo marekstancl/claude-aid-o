@@ -1,10 +1,39 @@
 {
   "name": "aid-orchestrator",
-  "version": "1.7.0",
-  "description": "AID — AI Development Orchestrator. Controller + Workers architecture for multi-agent software development. Takes an EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
+  "version": "2.0.0",
+  "description": "AID — AI Development Orchestrator. 6-state bash FSM, Fast Mode (<2 min overhead), 87% token reduction. Takes a task or EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
   "author": {
     "name": "Marek Stancl"
   },
   "license": "AGPL-3.0-only",
-  "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management"]
+  "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management", "fast-mode", "fsm"],
+  "agents": [
+    "implementer",
+    "verifier",
+    "gate-fixer",
+    "curator",
+    "auditor",
+    "project-scanner",
+    "run-validator"
+  ],
+  "skills": [
+    "agent-protocol",
+    "pipeline",
+    "planner",
+    "brainstorming",
+    "quality-gates",
+    "run-management",
+    "memory",
+    "role-cards"
+  ],
+  "commands": [
+    "aid-do",
+    "aid-plan",
+    "aid-run",
+    "aid-status",
+    "aid-help",
+    "aid-init",
+    "aid-audit",
+    "aid-stop"
+  ]
 }

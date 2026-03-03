@@ -1,42 +1,41 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v1.6.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.0.0
 
-You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches specialized agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
+You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
 ---
 
-## Disclaimer — FIRST AID & Elevated Permissions
+## Disclaimer — Autonomous Mode & Elevated Permissions
 
-> **USE AT YOUR OWN RISK.** FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** for the duration of the session. This means Claude can autonomously edit files, run shell commands, install packages, push code to remote repositories, create GitHub releases, and interact with configured MCP services — **all without asking for confirmation**.
->
-> **What "elevated permissions" means in practice:**
-> - FIRST AID requires the **Steroids** preset (set via `/aid-setup`), which grants broad tool permissions
-> - This includes `git push`, `npm install`, `gh release create`, and many others
-> - The full list is in `defaults/policies/permissions.yaml` → `steroids` preset
+> **USE AT YOUR OWN RISK.** AID's autonomous mode (`/aid-run --auto`) grants Claude Code **elevated permissions** for the duration of the session. This means Claude can autonomously edit files, run shell commands, install packages, push code to remote repositories, and interact with configured MCP services — **all without asking for confirmation**.
 >
 > **What Claude CANNOT do (hard-deny list, non-overridable):**
 > - `rm -rf /`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `chown`
 > - Access `~/.ssh`, `~/.aws`, `~/.gnupg`, `/etc`, or Claude's own config
 >
-> **Safety mechanisms exist** (deny-list, 16 escalation triggers, Steroids preset verification), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your EPIC queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind. You are responsible for the actions performed in your environment.
+> **Safety mechanisms exist** (deny-list, escalation triggers, scope checking), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your task queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind.
 
-## 30-Second Demo
+## Quick Start
 
 ```bash
-/aid-brainstorm "Build a REST API with auth and CRUD"
-# → 8-step interactive dialog: context, approaches, trade-offs, architecture, plan
+# Fast Mode — small task, < 2 min overhead
+/aid-do "Add input validation to the login form"
+# → implements, logs to Q-001.md, done
 
-/aid-run-epic
-# → AID takes over: architect → backend + frontend (parallel) → QA → gates → merge
+# Full Pipeline — plan + execute + gates
+/aid-plan "Build a REST API with auth and CRUD"
+# → brainstorm → architecture → plan.json
+
+/aid-run
+# → READY → EXECUTE (agents) → GATES (tests, lint, security) → DONE
 ```
 
 Or go fully autonomous:
 
 ```bash
-/aid-epic-queue add epic1.md epic2.md epic3.md
-/aid-first-aid
-# → AID processes the entire queue unattended, pausing only on genuine issues
+/aid-run --auto
+# → processes EPIC queue unattended, pausing only on genuine escalations
 ```
 
 ## Installation
@@ -45,95 +44,82 @@ Or go fully autonomous:
 # In Claude Code CLI:
 /plugin marketplace add marekstancl/claude-aid-o
 /plugin install aid-orchestrator@claude-aid-o
-/aid-setup    # detects your stack, configures gates and permissions
+/aid-init    # creates .aid-o/ workspace, detects your stack
 ```
 
 ## What You Get
 
-**9 role agents** — Architect, Domain, Backend, Frontend, QA, Security, Observability, Docs, Release — dispatched automatically based on your plan's dependency graph. Backend and Frontend run in parallel on separate git worktrees.
+**6-state bash FSM** — READY → EXECUTE → GATES → DONE (happy path), with ESCALATION and ERROR branches. State transitions enforced by bash scripts, not LLM instructions. Deterministic, auditable, crash-recoverable.
 
-**Quality gates with auto-fix** — tests, lint, security scan run after implementation. Gate failures trigger a fixer agent that patches and re-runs (up to 3 attempts) before escalating to you.
+**Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the full EPIC pipeline.
 
-**FIRST AID mode** — `/aid-first-aid` starts autonomous queue execution. PM approvals are replaced by agent-driven checks. Permissions are elevated for the session and restored on completion or `/aid-stop`. The only mandatory human touchpoint is escalation on genuine failures.
+**7 controller agents** — Implementer, Verifier, Gate-fixer, Curator, Auditor, Project-scanner, Run-validator — dispatched automatically based on your plan's dependency graph.
 
-**Evidence trail** — every prompt, output, gate result, and PM decision is recorded in `.aid-o/04-engine/evidence/`. Full auditability.
+**Quality gates with auto-fix** — Tests, lint, build, security scan run via `aid-run-gates.sh`. Gate failures trigger the gate-fixer agent (up to 3 attempts) before escalating to you.
 
-**Qdrant memory** (optional) — agents learn from past runs. Decisions, patterns, and lessons are indexed and injected into future agent prompts. Works without Qdrant using file-based fallback.
+**Evidence trail** — Every event, gate result, and decision is recorded in `.aid-o/work/evidence/` as `timeline.jsonl`. Full auditability.
+
+**~50K prompt tokens** — 87% reduction from v1's ~400K. Deterministic logic moved to bash scripts, skills consolidated, cross-references eliminated.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
-| `/aid-brainstorm [topic]` | 8-step interactive brainstorming → plan + optional EPIC |
-| `/aid-plan-epic <path>` | Generate execution plan from EPIC or Plan |
-| `/aid-run-epic [id]` | Run the full orchestration pipeline |
-| `/aid-first-aid` | Start autonomous mode (EPIC queue execution with guardrails) |
-| `/aid-stop` | Emergency stop — restore permissions, save progress |
-| `/aid-setup` | Project onboarding — detect stack, configure AID |
-| `/aid-init` | Initialize `.aid-o/` workspace |
-| `/aid-epic-queue [sub]` | Queue management (add, remove, pause, resume) |
-| `/aid-epic-status [id]` | Pipeline status — steps, gates, budget |
-| `/aid-analytics [scope]` | Performance metrics and optimization recommendations |
-| `/aid-audit` | Project health audit (0-100 score) |
-| `/aid-research [topic]` | On-demand documentation research |
-| `/aid-help [topic]` | AID documentation and help |
+| `/aid-do [task]` | Fast Mode — implement small task with < 2 min overhead |
+| `/aid-plan [topic]` | Brainstorm → architecture → plan.json (merges old brainstorm + write-plan + plan-epic) |
+| `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
+| `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
+| `/aid-init` | Initialize `.aid-o/` workspace — 10-file structure, stack auto-detection, idempotent |
+| `/aid-audit` | Project health audit — code, docs, tests, dependencies |
+| `/aid-stop` | Emergency stop — save progress, restore permissions |
+| `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
 
 ## How the Pipeline Works
 
 ```
-/aid-brainstorm → Plan → EPIC → /aid-run-epic       OR  /aid-first-aid (autonomous queue)
-                                      │                         │
-                                      ├─────────────────────────┘
-                                      ↓
-                      IDLE → PLANNING → PLAN_REVIEW ──────────────────┐
-                                          │                           │
-                                  Manual: PM approves        Auto: validated by AI
-                                          │                           │
-                                          ├───────────────────────────┘
-                                          ↓
-                      EXECUTING ←──── NEXT_PHASE ←── PHASE_CHECK
-                         │                                │
-                    dispatch agents              check outputs + scope
-                    (parallel where possible)
-                         │
-                   all steps done
-                         ↓
-                      GATES → GATE_RETRY (auto-fix, max 3) → ESCALATION (PM always)
-                         │
-                     all pass
-                         ↓
-                  CURATOR_RESOLVE (improvement proposals, lessons learned)
-                         ↓
-                   PM_APPROVAL ───────────────────────────┐
-                         │                                │
-                 Manual: PM approves merge       Auto: 4 guardrails check
-                         │                                │
-                         ├────────────────────────────────┘
-                         ↓
-                       DONE (auditor, release, archive, next EPIC from queue)
+/aid-plan → plan.json → /aid-run
+                            │
+                      ┌─────┴─────┐
+                      ▼           ▼
+                   READY    (aid-fsm.sh validates)
+                      │
+                      ▼
+                   EXECUTE ◄──── dispatch agents (parallel where DAG allows)
+                      │
+                  all steps done
+                      ▼
+                    GATES ───► aid-run-gates.sh (tests, lint, build, security, scope)
+                      │
+               ┌──────┴──────┐
+               ▼              ▼
+           all pass      gate fails
+               │              │
+               ▼              ▼
+             DONE      ESCALATION → gate-fixer (auto) or PM (manual)
+               │              │
+               ▼              └──► retry → GATES
+          curator + archive
 ```
 
-**Manual mode** — 3 PM touchpoints: PLAN_REVIEW, ESCALATION, PM_APPROVAL (via Slack or chat).
-**FIRST AID mode** — only ESCALATION requires PM; plan review and merge are agent-validated.
+**Manual mode** — PM approves at READY and reviews at ESCALATION.
+**Autonomous mode (`--auto`)** — Only genuine escalations require PM; all other checkpoints are agent-validated.
 
 ## Configuration
 
-`/aid-setup` auto-configures everything. Fine-tune in `.aid-o/03-config/`:
+`/aid-init` auto-configures everything. Fine-tune in `.aid-o/config/`:
 
 | File | Controls |
 |------|----------|
-| `gates.yaml` | Gate commands, retry limits, budget |
-| `decision-policies.yaml` | What the Controller decides vs. escalates |
-| `dispatch-strategy.yaml` | Parallel isolation — worktrees / branches / sequential |
-| `slack-config.yaml` | Slack channel, timeouts, reminders |
-| `memory-config.yaml` | Qdrant vector memory settings |
-| `playbooks/*.md` | Role-specific agent instructions |
+| `execution.yaml` | Gate commands, retry limits, dispatch strategy |
+| `project.yaml` | Stack detection, project preferences |
+| `permissions.yaml` | Agent permission presets |
 
 ## Changelog
 
-- **v1.7.0** (current) — Security hardening, AI Companion context+tools, voice dictation, FIRST AID autonomous orchestration improvements, Curator unconditional dispatch
-- **v1.6.0** — Script-based pipeline: 5 bash scripts replacing LLM-driven deterministic operations, command rewrites, Deterministic Work Detection audit, 76-test suite
-- **v1.5.0** — Token efficiency: model tiering, selective context injection, dispatch prompt trimming, usage tracking, efficiency audit
+- **v2.0.0** (current) — Complete redesign: 6-state bash FSM, Fast Mode, 87% token reduction (400K→50K), 8 consolidated commands, 173 tests
+- **v1.7.0** — Security hardening, AI Companion, voice dictation, FIRST AID improvements
+- **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
+- **v1.5.0** — Token efficiency, model tiering, usage tracking
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
