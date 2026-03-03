@@ -1,0 +1,207 @@
+# AID Execution Configuration (v2)
+# Consolidated from: gates.yaml, decision-policies.yaml
+#
+# Controls: quality gates, retry/escalation, decision policies, budget,
+#           content quality, discovered issues triage, and acceptable debt.
+
+# ─── Quality Gates ───────────────────────────────────────────────────────
+gates:
+  tests_pass:
+    description: "All tests pass via project test runner"
+    required: true
+    command: "./plugins/aid-orchestrator/scripts/tests/run-all-tests.sh"
+    timeout_seconds: 300
+    pass_criteria: "exit code 0"
+
+  security_scan_pass:
+    description: "No high/critical security findings"
+    required: true
+    command: "bandit -q -r . -ll"
+    timeout_seconds: 180
+    pass_criteria: "exit code 0"
+
+  docs_updated:
+    description: "Documentation updated for changed APIs/models"
+    required: true
+    rule: "docs or CHANGELOG updated if code changes affect public API"
+    pass_criteria: "manual or automated check"
+
+  scope_check:
+    description: "Verify changes are within EPIC scope"
+    command: "plugins/aid-orchestrator/scripts/gates/scope-check.sh .aid-o/work/evidence/{epic_id}/allowed_paths.txt {base_commit}"
+    required: true
+    type: deterministic
+    max_retries: 0
+
+  lint_pass:
+    description: "Code passes linting and formatting checks"
+    required: false
+    command: "ruff check . && ruff format --check ."
+    timeout_seconds: 120
+    when: "linting tools configured"
+
+  type_check:
+    description: "TypeScript type checking passes"
+    required: false
+    command: "npx tsc --noEmit"
+    timeout_seconds: 120
+    when: "frontend files changed"
+
+  build_pass:
+    description: "Project builds without errors"
+    required: false
+    command: "npm run build"
+    timeout_seconds: 180
+    when: "frontend files changed"
+
+# Python project gates (language-specific override example)
+# Uncomment and customize for Python-heavy projects:
+# gates_python:
+#   tests_pass:
+#     command: "pytest -q --tb=short tests/"
+#     required: true
+#     max_retries: 2
+#     language: python
+#   lint_pass:
+#     command: "ruff check . --fix && black ."
+#     required: true
+#     max_retries: 0
+#     language: python
+#   type_check:
+#     command: "mypy src/ --ignore-missing-imports"
+#     required: true
+#     max_retries: 1
+#     language: python
+#   security_scan:
+#     command: "bandit -r src/ -ll"
+#     required: true
+#     max_retries: 2
+#     language: python
+
+# ─── Retry & Escalation ─────────────────────────────────────────────────
+retry:
+  max_attempts: 3
+  backoff:
+    strategy: fixed
+    delay_seconds: 5
+  on_failure: escalate
+
+escalation:
+  method: inline
+  message_template: |
+    GATE FAILURE — Escalation to PM
+    Gate: {gate_name}
+    EPIC: {epic_id}
+    Attempts: {attempt_count}/{max_attempts}
+    Last error: {last_error}
+    Action needed: Review and decide (fix / skip / abort)
+
+# ─── Budget ──────────────────────────────────────────────────────────────
+budget:
+  max_llm_cost_per_epic_usd: 50
+  warn_at_percentage: 80
+
+# ─── Evidence ────────────────────────────────────────────────────────────
+evidence:
+  store_gate_results: true
+  store_command_output: true
+  store_retry_history: true
+  output_dir: "evidence/{epic_id}/{run_id}/gates/"
+
+# ─── Quality Thresholds ─────────────────────────────────────────────────
+quality_thresholds:
+  min_test_coverage_percent: 80
+  min_review_score: 7
+  max_todo_count: 0
+  max_security_findings_high: 0
+  max_security_findings_medium: 3
+
+# ─── Auto-Decisions (Controller decides without PM) ──────────────────────
+auto_decisions:
+  - condition: "all gate results = pass"
+    action: "proceed to next state"
+  - condition: "gate fails AND retry_count < max_attempts"
+    action: "generate fix instructions, dispatch retry"
+  - condition: "step produces expected outputs"
+    action: "proceed to next step"
+  - condition: "agent modifies only allowed_paths"
+    action: "accept changes"
+  - condition: "agent modifies forbidden_paths"
+    action: "reject changes, re-dispatch with warning"
+  - condition: "LLM cost < budget.warn_at_percentage"
+    action: "continue execution"
+
+# ─── Escalation Triggers ────────────────────────────────────────────────
+escalation_triggers:
+  - trigger: "gate fails after max_attempts retries"
+    action: "HARD STOP"
+    options: ["fix manually", "skip gate", "abort EPIC"]
+  - trigger: "LLM cost exceeds budget"
+    action: "HARD STOP"
+    options: ["increase budget", "abort EPIC"]
+  - trigger: "agent produces no output or errors out"
+    action: "HARD STOP"
+    options: ["retry with different prompt", "skip step", "abort EPIC"]
+  - trigger: "conflicting outputs from parallel agents"
+    action: "HARD STOP"
+    options: ["choose A", "choose B", "merge manually"]
+  - trigger: "security finding classified as CRITICAL"
+    action: "HARD STOP"
+    options: ["fix before proceeding", "abort EPIC"]
+
+# ─── Content Quality ────────────────────────────────────────────────────
+content_quality:
+  auto_accept_when:
+    - "step role is: docs, config, release"
+    - "step has <= 3 acceptance criteria"
+  review_required_when:
+    - "step role is: architect, backend, frontend, security"
+    - "step has 5+ acceptance criteria"
+  review_agent: code-reviewer
+  max_review_fix_cycles: 2
+
+# ─── Discovered Issues Triage ───────────────────────────────────────────
+discovered_issues:
+  critical:
+    auto_fix_patterns:
+      - { pattern: "migration.*fail", dispatch: backend }
+      - { pattern: "dependency.*conflict", dispatch: backend }
+      - { pattern: "security.*critical", dispatch: security }
+    default_action: escalate_to_pm
+    blocks_current_step: true
+  high:
+    forward_to_later_step: true
+    create_backlog_entry: true
+    blocks_current_step: false
+  medium:
+    log_to_improvement_notes: true
+    blocks_current_step: false
+
+# ─── Acceptable / Not-Acceptable Debt ────────────────────────────────────
+acceptable_debt:
+  - "TODO with issue reference (tracked in backlog)"
+  - "missing edge case tests (core path tested)"
+  - "placeholder error messages (replaced before release)"
+
+not_acceptable:
+  - "TODO/FIXME without issue reference"
+  - "hardcoded credentials or API keys"
+  - "disabled security checks"
+  - "skipped tests without documented reason"
+  - "changes to forbidden paths"
+  - "console.log / print() in production code"
+  - "empty catch blocks"
+
+# ─── Curator Auto-Resolution ────────────────────────────────────────────
+curator_auto_rules:
+  always_approve:
+    - { type: dx }
+    - { type: security, priority: high }
+    - { area: "docs/*" }
+  always_defer:
+    - { type: architecture }
+  default_action: approve
+  learning:
+    enabled: true
+    similarity_threshold: 0.80
+    min_decisions: 3
