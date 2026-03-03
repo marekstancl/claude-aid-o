@@ -1,229 +1,173 @@
 ---
 sidebar_position: 2
 title: "Quick Start"
-description: "Run your first AID Orchestrator workflow in four commands — from initialization to EPIC execution."
+description: "Two paths to your first AID workflow — Fast Mode for quick tasks, Epic Mode for full pipeline execution."
 ---
 
 # Quick Start
 
-This guide walks you through your first AID workflow from start to finish. You will initialize a workspace, brainstorm a feature idea, generate an EPIC, and execute it — all within Claude Code.
+AID has two execution paths. Choose based on task complexity:
 
-## Before You Begin
+| Path | Commands | When to use | Overhead |
+|------|----------|-------------|----------|
+| **Fast** | `/aid-init` then `/aid-do "task"` | Small, well-defined tasks | < 2 min |
+| **Full** | `/aid-init` then `/aid-plan "topic"` then `/aid-run` | Complex features, multi-step work | 5-15 min |
 
-Make sure you have:
+## Prerequisites
 
-- The AID plugin installed (see [Installation](./installation))
+- AID plugin installed (see [Installation](./installation))
 - Claude Code open in a project with a git repository
-- A rough idea of something you want to build or change in the project
-
-The whole workflow takes about 15 minutes the first time. After that, you can go from idea to running EPIC in under five minutes.
 
 ---
 
-## Step 1 — Initialize the Workspace
+## Path 1: Fast Mode
 
-Run `/aid-init` in your project root to create the `.aid-o/` workspace:
+For tasks that are clear enough to implement directly without a planning phase.
+
+### Step 1 — Initialize
 
 ```text
 /aid-init
 ```
 
-AID creates the workspace directory structure and copies default configuration files:
+Creates the `.aid-o/` workspace with config files and directory structure:
 
 ```text
-AID Workspace Initialized (.aid-o/)
-====================================
-
-Directories:
-  [CREATED] .aid-o/01-plans/
-  [CREATED] .aid-o/02-epics/
-  [CREATED] .aid-o/03-config/
-  [CREATED] .aid-o/04-engine/
-
-Config files (.aid-o/03-config/):
-  [CREATED] policies/gates.yaml
-  [CREATED] policies/decision-policies.yaml
-  [CREATED] playbooks/architect.md
-  ... (18 files from plugin defaults)
-
-Next steps:
-  1. Run /aid-setup for interactive project onboarding
-  2. Customize .aid-o/03-config/policies/ for your project
-  3. Create your first Plan in .aid-o/01-plans/
+.aid-o/
+  01-plans/           # Plan documents
+  tasks/              # Task tracking
+  config/             # execution.yaml, orchestration.yaml, integrations.yaml
+  work/               # evidence, state, timeline
 ```
 
-After initialization, run `/aid-setup` to let AID scan your project's tech stack and configure the gates and tooling for your language and framework:
+### Step 2 — Execute
 
 ```text
-/aid-setup
+/aid-do "add rate limiting to /api/users — max 100 req/min per API key"
 ```
 
-`/aid-setup` detects your package manager, test runner, linter, and build tool, then writes that information to `.aid-o/04-engine/memory/project-profile.yaml`. It also updates `gates.yaml` with the correct commands for your stack (e.g., `pytest` for Python, `npm test` for Node.js).
+AID dispatches the implementer agent, runs quality gates, and delivers the result.
 
-See [Configuration](./configuration) for details on what gets set up and how to customize it.
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant AID as AID Plugin
+    participant FSM as aid-fsm.sh
+    participant Agent as Implementer
+    participant Gates as aid-run-gates.sh
+
+    U->>AID: /aid-do "task description"
+    AID->>FSM: init → READY
+    FSM->>FSM: transition READY → EXECUTE
+    AID->>Agent: dispatch implementer with task
+    Agent->>Agent: write code, run tests
+    Agent-->>AID: implementation complete
+    FSM->>FSM: transition EXECUTE → GATES
+    AID->>Gates: run-all (execution.yaml)
+    Gates->>Gates: tests, lint, scope check
+    Gates-->>AID: all pass
+    FSM->>FSM: transition GATES → DONE
+    AID-->>U: task complete
+```
 
 ---
 
-## Step 2 — Brainstorm and Create a Plan
+## Path 2: Epic Mode (Full Pipeline)
 
-Use `/aid-brainstorm` to explore an idea interactively and produce a plan document and EPIC draft:
+For complex features that benefit from structured planning, multiple agent roles, and detailed evidence trails.
+
+### Step 1 — Initialize
 
 ```text
-/aid-brainstorm "add pagination to the users API"
+/aid-init
 ```
 
-AID opens an 8-step structured brainstorming dialog. It asks you one question at a time — multiple choice where possible — to understand your requirements, propose approaches, and validate a design with you.
+Same as Fast Mode. Only needs to run once per project.
 
-A typical session looks like this:
+### Step 2 — Plan
+
+```text
+/aid-plan "add pagination to the users API"
+```
+
+AID runs a structured brainstorming session, explores approaches with you, then generates a plan document and `plan.json` execution spec.
 
 ```text
 Brainstorming: add pagination to the users API
 ====================================
-Project: my-api
 Stack: Python, FastAPI, PostgreSQL
-Recent: no prior context
 
-I'll help you explore this idea step by step.
-Let's start with some questions to understand what you need.
-
-──────────────────────────────────────
-Question 1: What pagination style should we use?
-  (A) Offset-based — page=1&per_page=20 (simple, familiar to clients)
-  (B) Cursor-based — cursor=<token> (better for large datasets, no page drift)
-  (C) No preference — let you recommend
+Question 1: What pagination style?
+  (A) Offset-based — page=1&per_page=20
+  (B) Cursor-based — cursor=<token>
+  (C) No preference
 ```
 
-After you answer 3–7 questions, AID proposes approaches, walks you through the design section by section for your approval, then writes two files:
+After brainstorming, AID produces:
 
-- `Plan: .aid-o/01-plans/P001-add-pagination-to-users-api.md`
-- `EPIC: .aid-o/02-epics/E-001-1_1-add-pagination-to-users-api.md (draft)`
+- `Plan: .aid-o/01-plans/P001-add-pagination.md`
+- `Execution spec: .aid-o/tasks/plan.json`
 
-At the end of brainstorming, AID offers to generate the execution plan immediately or let you review the EPIC draft first. For your first run, choose to review the draft — it is a good way to understand what AID produces.
-
-See [`/aid-brainstorm` command reference](../commands/aid-brainstorm) for the full step-by-step flow.
-
----
-
-## Step 3 — Generate the Execution Plan
-
-Once you are happy with your EPIC draft, generate the execution plan:
+### Step 3 — Execute
 
 ```text
-/aid-plan-epic .aid-o/02-epics/E-001-1_1-add-pagination-to-users-api.md
+/aid-run
 ```
 
-AID reads the EPIC, analyzes the steps and their dependencies, identifies which steps can run in parallel, and produces a Plan JSON:
+The 6-state bash FSM takes over. It dispatches agents step by step, runs quality gates, and only pauses for escalations.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant AID as AID Plugin
+    participant FSM as aid-fsm.sh
+    participant Agents as Agents
+    participant Gates as aid-run-gates.sh
+    participant TL as timeline.jsonl
+
+    U->>AID: /aid-run
+    AID->>FSM: init → READY
+    FSM->>TL: log READY
+
+    FSM->>FSM: transition READY → EXECUTE
+    FSM->>TL: log EXECUTE
+
+    loop For each step in plan.json
+        AID->>Agents: dispatch (implementer / verifier)
+        Agents-->>AID: step output
+        FSM->>FSM: increment-step
+        FSM->>TL: log step complete
+    end
+
+    FSM->>FSM: transition EXECUTE → GATES
+    AID->>Gates: run-all (execution.yaml)
+    Gates->>TL: log gate results
+
+    alt All gates pass
+        FSM->>FSM: transition GATES → DONE
+        FSM->>TL: log DONE
+        AID-->>U: pipeline complete
+    else Gate fails
+        FSM->>FSM: transition GATES → ESCALATION
+        AID-->>U: escalation — review needed
+    end
+```
+
+### Step 4 — Check Status (optional)
+
+At any point during execution:
 
 ```text
-Plan Generated for EPIC: E-001-1_1
-====================================
-Steps: 5
-Parallel groups: 1
-Analysis groups: 1
-Dependencies: 4
-Roles: architect, backend, qa, security, docs
-Gates: tests_pass, lint_pass, security_scan_pass, docs_updated
-Budget: $50
-
-Step sequence:
-  1. [architect] Define API contract and pagination schema
-  2. [backend]   Implement paginated query and response model (depends on: step 1)
-  3. [qa]        Write unit and integration tests for pagination (depends on: step 2) ← parallel group 1
-  4. [security]  Review input validation and injection risk (depends on: step 2) ← parallel group 1
-  5. [docs]      Update API reference with pagination parameters (depends on: step 2)
-
-Files created:
-  - Plan:     .aid-o/04-engine/evidence/E-001-1_1/R-001-1_1-1/plan.json
-  - Progress: .aid-o/04-engine/evidence/E-001-1_1/R-001-1_1-1/plan_progress.json
-  - Run:      .aid-o/04-engine/runs/R-001-1_1-1-add-pagination.md
-
-Ready to execute?
-  Want to run this EPIC now?  → /aid-run-epic E-001-1_1
-  Review plan first?          → open .aid-o/04-engine/evidence/E-001-1_1/R-001-1_1-1/plan.json
+/aid-status
 ```
 
-The plan respects the default role ordering: architect always runs first (contracts before implementation), then implementation agents, then QA and security in parallel, then docs. If your EPIC specifies a different order, that takes precedence.
-
-See [`/aid-plan-epic` command reference](../commands/aid-plan-epic) for details on parallel groups, analysis groups, and Plan JSON structure.
-
----
-
-## Step 4 — Execute the EPIC
-
-Run the EPIC to start the orchestration pipeline:
-
-```text
-/aid-run-epic E-001-1_1
-```
-
-The Controller state machine takes over. It works through the steps in order, dispatching specialized agents, running quality gates between phases, and only pausing to ask you for input at the three PM touchpoints:
-
-1. **Plan Review** — you approve the execution plan before any agents run
-2. **Escalation** (if needed) — only if a gate fails after 3 auto-fix attempts, or a critical issue is found
-3. **PM Approval** — you approve the final result before changes are merged
-
-A typical run looks like this:
-
-```text
-EPIC E-001-1_1 — add pagination to the users API
-====================================
-State: PLAN_REVIEW
-
-Step sequence:
-  1. [architect]  Define API contract and pagination schema
-  2. [backend]    Implement paginated query and response model
-  3. [qa]         Write unit and integration tests
-  4. [security]   Review input validation
-  5. [docs]       Update API reference
-
-Approve plan and begin execution? (Y/N)
-> Y
-
-State: EXECUTING — Step 1: architect
-  Dispatching architect agent...
-  [architect] Wrote: docs/api-contracts/pagination.yaml
-  [architect] Wrote: docs/adr/ADR-001-pagination-cursor-vs-offset.md
-  Step 1 complete. ✓
-
-State: EXECUTING — Step 2: backend
-  Dispatching backend agent...
-  [backend] Modified: app/api/users.py
-  [backend] Modified: app/models/pagination.py
-  Step 2 complete. ✓
-
-State: EXECUTING — Steps 3 + 4 (parallel group)
-  Dispatching qa + security agents in parallel...
-  [qa]       Written: tests/test_users_pagination.py (14 tests)
-  [security] Review passed — no injection risks found
-  Steps 3 + 4 complete. ✓
-
-State: EXECUTING — Step 5: docs
-  Dispatching docs agent...
-  [docs] Updated: docs/api/users.md
-  Step 5 complete. ✓
-
-State: GATES
-  Running: tests_pass     → PASS (14/14)
-  Running: lint_pass      → PASS
-  Running: security_scan  → PASS
-  Running: docs_updated   → PASS
-
-State: PM_APPROVAL
-  All gates passed. Review the changes and approve merge.
-  [View diff] [Approve] [Request changes]
-```
-
-When you approve at the PM_APPROVAL step, AID runs the Curator (collects improvement notes, runs post-EPIC analysis), archives the run, and transitions to DONE.
-
-See [`/aid-run-epic` command reference](../commands/aid-run-epic) for the full state machine, escalation behavior, and FIRST AID autonomous mode.
+Shows the current FSM state, step progress, and gate results.
 
 ---
 
 ## What's Next
 
-Now that you have completed your first workflow:
-
-- **[Configuration](./configuration)** — customize gates, coding standards, and project settings
-- **[`/aid-first-aid`](../commands/aid-first-aid)** — autonomous queue mode for unattended execution
-- **[`/aid-epic-queue`](../commands/aid-epic-queue)** — queue multiple EPICs and process them sequentially
-- **[Agents](../agents)** — understand what each of the 18 agents does and when they are dispatched
+- **[Configuration](./configuration)** — customize gates, dispatch strategy, and integrations
+- **[Architecture Overview](../architecture/overview)** — understand the dual-layer design
+- **[Autonomous Mode](../architecture/first-aid-mode)** — run pipelines without manual approval
+- **[Quality Gates](../architecture/quality-gates)** — how gates are defined and executed

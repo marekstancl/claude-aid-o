@@ -1,100 +1,163 @@
 ---
 sidebar_position: 1
 title: "Architecture Overview"
-description: "High-level architecture of AID Orchestrator — components, pipeline, and design principles."
+description: "Dual-layer architecture — bash controller for deterministic operations, LLM agents for creative work."
 ---
 
 # Architecture Overview
 
-AID Orchestrator is a Claude Code plugin that implements a **Controller + Workers** architecture for AI-driven software development. It takes an EPIC specification written by the PM, generates a structured execution plan, dispatches specialized role-based agents for each step, enforces quality gates after all steps complete, and maintains a complete evidence trail throughout.
+AID v2 uses a **dual-layer architecture** that separates deterministic operations from creative work. Bash scripts handle state transitions, gate execution, and scope checking. The LLM handles planning, code generation, reviews, and decision-making.
 
 ## What AID Is
 
-AID is not a standalone application. It runs entirely inside Claude Code as a plugin — a set of slash commands, skill files (Markdown instructions for the Claude model), and configuration templates. When you run `/aid-run-epic`, Claude Code itself becomes the Controller, reading the EPIC specification and orchestrating agents step by step according to the protocol defined in `skills/epic-orchestration.md`.
+AID is a Claude Code plugin — a set of slash commands, skill files (Markdown instructions), agent definitions, and bash scripts. It does not run outside Claude Code. When you invoke `/aid-run`, Claude Code reads the pipeline skill, which tells it how to orchestrate the FSM and dispatch agents. The bash scripts handle the parts that do not need an LLM.
 
-Agents are also Claude Code instances. Each agent receives a role-specific playbook, the step specification from the EPIC plan, and memory context from previous runs. Agents write files, run commands, and produce structured output. The Controller reads that output, checks it against acceptance criteria, and decides what to do next.
+## Dual-Layer Design
 
-## Component Map
+```mermaid
+flowchart TB
+    subgraph Layer1["Layer 1: Bash Controller (deterministic, no LLM)"]
+        FSM["aid-fsm.sh<br/>6-state FSM"]
+        GATES["aid-run-gates.sh<br/>gate runner"]
+        LOG["aid-stage-log.sh<br/>JSONL timeline"]
+        RELEASE["aid-release.sh<br/>version bump + tag"]
+        PIPE["aid-auto-pipeline.sh<br/>plan → EPIC → run"]
+        SCOPE["scope-check.sh<br/>path validation"]
+    end
 
-```
-Plugin (Claude Code)
-  |
-  |-- Commands (/aid-run-epic, /aid-plan-epic, /aid-init, ...)
-  |
-  |-- Controller (epic-orchestration skill)
-  |     |
-  |     |-- Planner            Reads EPIC → generates Plan JSON
-  |     |-- Agent Dispatcher   Dispatches role agents per step
-  |     |-- Phase Checker      Validates step outputs, merges analysis
-  |     |-- Gates Engine       Runs quality gates after all steps
-  |     |-- Curator            Resolves improvement proposals
-  |     `-- PM Gateway         Slack or chat for approvals/escalations
-  |
-  |-- Agents (18 specialized roles)
-  |     architect, backend, frontend, domain, QA, security,
-  |     docs-writer, release, curator, auditor, gate-fixer, ...
-  |
-  |-- Quality Gates
-  |     6 pre-commit gates (quality-gates skill)
-  |     N configurable post-EPIC gates (gates-engine skill, gates.yaml)
-  |
-  |-- Memory System
-  |     File-based (lessons-learned.md, command-history.md, decisions.yaml)
-  |     Qdrant vector store via MCP (optional, semantic search)
-  |
-  `-- Evidence Store
-        .aid-o/04-engine/evidence/{epic_id}/{run_id}/
-        stage_log.jsonl, plan.json, gates_report.json, step outputs
+    subgraph Layer2["Layer 2: LLM Skills + Agents (creative work)"]
+        SKILLS["Skills<br/>pipeline, planner, quality-gates,<br/>brainstorming, run-management,<br/>agent-protocol, memory, role-cards"]
+        AGENTS["Agents<br/>implementer, verifier, gate-fixer,<br/>curator, auditor, project-scanner,<br/>run-validator"]
+    end
+
+    subgraph Data["Data (.aid-o/)"]
+        CONFIG["config/<br/>execution.yaml<br/>orchestration.yaml<br/>integrations.yaml"]
+        WORK["work/<br/>evidence/, state.yaml,<br/>timeline.jsonl"]
+        PLANS["01-plans/"]
+        TASKS["tasks/"]
+    end
+
+    Layer2 -->|"calls"| Layer1
+    Layer1 -->|"reads"| CONFIG
+    Layer1 -->|"writes"| WORK
+    Layer2 -->|"reads"| CONFIG
+    Layer2 -->|"reads/writes"| PLANS
+    Layer2 -->|"reads/writes"| TASKS
 ```
 
-## Pipeline Diagram
+### Layer 1: Bash Controller
 
-The following diagram shows the full EPIC pipeline from start to finish:
+Handles operations that are deterministic and should never involve LLM reasoning:
+
+| Script | Purpose |
+|--------|---------|
+| `aid-fsm.sh` | 6-state FSM — init, transition, get-state, increment-step |
+| `aid-run-gates.sh` | Execute gate commands, capture exit codes, log results |
+| `aid-stage-log.sh` | Append structured JSONL events to timeline |
+| `aid-release.sh` | Version bump across registered files, git tag |
+| `aid-auto-pipeline.sh` | Orchestrate the full pipeline: plan.md to EPIC to plan.json to run |
+| `scope-check.sh` | Validate that changes stay within allowed paths |
+
+These scripts have no LLM dependency. They read YAML config, execute shell commands, and write structured output. They can be tested independently (173 tests across 13 suites).
+
+### Layer 2: LLM Skills + Agents
+
+Handles operations that require reasoning, code generation, or natural language understanding:
+
+**8 Skills** (instruction sets the model reads):
+
+| Skill | Purpose |
+|-------|---------|
+| `agent-protocol` | How to dispatch and communicate with agents |
+| `pipeline` | The full orchestration protocol (FSM + agents + gates) |
+| `planner` | How to generate plan.json from requirements |
+| `brainstorming` | Structured exploration dialog with the user |
+| `quality-gates` | Pre-commit gate protocol (6 checks before every commit) |
+| `run-management` | Run lifecycle, status tracking, stop/resume |
+| `memory` | Qdrant integration protocol |
+| `role-cards` | Agent role definitions and dispatch rules |
+
+**7 Agents** (role-specific behavior definitions):
+
+| Agent | Role |
+|-------|------|
+| `implementer` | Write code, create files, implement features |
+| `verifier` | Review code, check acceptance criteria |
+| `gate-fixer` | Analyze gate failures, apply targeted fixes |
+| `curator` | Evaluate improvement proposals, extract lessons |
+| `auditor` | Post-run project health audit |
+| `project-scanner` | Detect tech stack, generate project.yaml |
+| `run-validator` | Validate plan.json structure and run files |
+
+## Pipeline Flow
 
 ```mermaid
 flowchart TD
-    A([PM writes EPIC]) --> B[/aid-run-epic/]
-    B --> C[IDLE\nLoad EPIC, probe memory,\ncreate git branch]
-    C --> D[PLANNING\nGenerate Plan JSON,\nidentify waves + roles]
-    D --> E{PLAN_REVIEW\nPM or auto-mode\napproves plan}
-    E -->|GO| F[EXECUTING\nDispatch agents\nwave by wave]
-    E -->|REVISE| D
-    E -->|ABORT| K
-    F --> G[PHASE_CHECK\nValidate output,\nmerge analysis]
-    G -->|More steps| F
-    G -->|All steps done| H[GATES\nRun gates.yaml\nquality checks]
-    H -->|All pass| I[CURATOR_RESOLVE\nEvaluate proposals,\nextract lessons]
-    H -->|Fail + retries remain| H2[GATE_RETRY\nAuto-fix attempt]
-    H2 --> H
-    H -->|Fail + retries exhausted| J[ESCALATION\nNotify PM]
-    J -->|Fix| H
-    J -->|Skip| I
-    J -->|Abort| K
-    I --> L{PM_APPROVAL\nFinal review}
-    L -->|Approved| K[DONE\nMerge branch,\narchive evidence,\nrun auditor]
-    L -->|Rejected| J
+    A([User invokes command]) --> B{Which mode?}
+    B -->|"/aid-do task"| C[Fast Mode]
+    B -->|"/aid-plan + /aid-run"| D[Epic Mode]
+
+    C --> E[FSM: READY]
+    D --> F[Planner generates plan.json]
+    F --> E
+
+    E --> G[FSM: EXECUTE]
+    G --> H[Dispatch agents per plan steps]
+    H --> I[Agents write code + produce evidence]
+    I --> J{More steps?}
+    J -->|Yes| G
+    J -->|No| K[FSM: GATES]
+
+    K --> L["aid-run-gates.sh executes gates"]
+    L --> M{All pass?}
+    M -->|Yes| N[FSM: DONE]
+    M -->|No, retries remain| O[gate-fixer agent]
+    O --> K
+    M -->|No, retries exhausted| P[FSM: ESCALATION]
+    P -->|PM fixes| G
+    P -->|PM skips gate| K
+
+    N --> Q[Curator + Auditor]
+    Q --> R([Pipeline complete])
 ```
 
 ## Key Design Principles
 
+### Bash for Determinism, LLM for Creativity
+
+State transitions, gate execution, and scope validation run in bash. They produce the same result every time given the same input. The LLM handles code generation, reviews, and planning — tasks where reasoning is required.
+
 ### Evidence-Driven
 
-Every action the Controller takes produces a file. Plans become `plan.json`. Gate results become `gates_report.json`. PM decisions become `pm_decision.json`. Agent outputs go into `steps/step_N_role/`. Nothing is kept only in memory or conversation context. You can always audit what happened and why by reading the evidence directory.
+Every action produces a file. Plans become `plan.json`. Gate results are written to `timeline.jsonl`. State lives in `state.yaml`. Nothing is kept only in conversation context. The `.aid-o/work/evidence/` directory is the audit trail.
 
 ### PM-in-the-Loop
 
-AID is not a black-box autonomous system. The PM approves the plan before execution begins and approves the final result before the branch merges. Failures escalate to the PM with structured options and a recommendation — they never silently disappear. In manual mode (the default), the PM can inspect and intervene at every state boundary.
+The PM approves plans and reviews escalations. In normal mode, the PM can inspect at every state boundary. In autonomous mode (`/aid-run --auto`), plan approval is automated but escalations still reach the PM.
 
-FIRST AID mode (`/aid-first-aid`) enables autonomous queue execution where the PM approves the queue once and the Controller runs all EPICs end-to-end. Even in this mode, 16 defined escalation triggers pause execution and notify the PM when human judgment is required.
+### Optional GUI Dashboard
 
-### Fail-Safe
+AID includes an optional web dashboard (`packages/aid-gui` + `packages/aid-server`) that watches `.aid-o/` files and provides real-time pipeline visualization, decision approval UI, and evidence browsing. The GUI is read-only — all orchestration runs through Claude Code. See [GUI Integration](./gui-integration.md) for the full architecture.
 
-AID prefers caution over convenience. If `settings.json` is missing when entering auto-mode, a minimal default is created rather than proceeding blindly. If Qdrant is unavailable, memory operations degrade gracefully to file-based storage without blocking execution. If a gate fails, it retries up to the configured maximum before escalating — it never silently skips. If a permission backup cannot be found on auto-mode exit, the PM is warned rather than leaving the system in an elevated state silently.
+### ~50K Token Budget
 
-### Role-Based Agents with Strict Scope
+v2 reduced prompt overhead from ~400K tokens (v1) to ~50K by moving deterministic logic to bash scripts. Skills and agents are loaded on-demand rather than all at once.
 
-Each agent has a defined role, a playbook, and an `allowed_paths`/`forbidden_paths` scope for each step. Agents cannot modify files outside their scope. This prevents cross-domain contamination where, for example, a backend agent rewrites frontend components.
+## Directory Structure
 
-### Separation of Config and Engine
-
-User-editable configuration lives in `.aid-o/03-config/` (policies, templates, playbooks). The engine's runtime state lives in `.aid-o/04-engine/` (memory, evidence, run history). Users customize behavior by editing config files; the engine reads those files at runtime. This means PM can change gate definitions, decision policies, or playbooks between EPIC runs without modifying the plugin itself.
+```text
+.aid-o/
+  01-plans/              Plan documents (archive/ for completed)
+  tasks/                 Task tracking, plan.json, EPIC specs
+  config/                PM-customizable configuration
+    execution.yaml       Gates, retry, budget, quality thresholds
+    orchestration.yaml   Language, dispatch, FSM, release
+    integrations.yaml    Slack, memory, knowledge
+    project.yaml         Auto-detected stack
+  work/                  Runtime state (AI-managed)
+    evidence/            Per-run evidence directories
+      {epic_id}/{run_id}/
+        state.yaml       FSM state
+        timeline.jsonl   Event log
+        gates/           Gate output files
+```

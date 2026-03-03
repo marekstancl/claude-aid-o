@@ -1,295 +1,222 @@
 ---
 sidebar_position: 3
 title: "Quality Gates"
-description: "The two-layer gate system: 6 pre-commit gates and the configurable post-EPIC gates engine."
+description: "Bash-executed quality gates defined in execution.yaml — how they run, retry, and escalate."
 ---
 
 # Quality Gates
 
-AID has two distinct gate layers that operate at different points in the development cycle. Understanding both is important — they serve different purposes and are enforced by different mechanisms.
+Quality gates in AID v2 are executed by `aid-run-gates.sh`, a bash script that reads gate definitions from `execution.yaml`, runs each command, and logs results to `timeline.jsonl`. The LLM is not involved in gate execution — only in fixing failures (via the gate-fixer agent).
 
-## Two Gate Layers
+## Gate Execution Flow
 
-| Layer | When | Config | Skill |
-|-------|------|--------|-------|
-| **Pre-commit gates** | Before every commit | Built into `quality-gates.md` playbook | `skills/quality-gates.md` |
-| **Post-EPIC gates** | After all EPIC steps complete (GATES state) | `gates.yaml` in `.aid-o/03-config/policies/` | `skills/gates-engine.md` |
+```mermaid
+sequenceDiagram
+    participant FSM as aid-fsm.sh
+    participant GR as aid-run-gates.sh
+    participant CMD as Shell Commands
+    participant TL as timeline.jsonl
+    participant GF as gate-fixer agent
 
-The pre-commit gates are enforced by every agent before committing work. The post-EPIC gates are enforced by the Controller in the GATES state of the orchestration pipeline.
+    FSM->>FSM: transition EXECUTE → GATES
+    FSM->>GR: run-all (execution.yaml, epic_id, run_id)
 
----
+    loop For each gate in execution.yaml
+        GR->>CMD: execute gate command with timeout
+        CMD-->>GR: exit code + output
+        GR->>TL: log gate result (JSON)
+    end
 
-## Pre-Commit Gates (6 Gates)
-
-Every agent runs all 6 gates before every commit. There are no exceptions. A failed gate means fix first, then re-run from Gate 1. All 6 must pass before a commit is allowed.
-
-**Time investment:** 3-5 minutes per commit.
-
-### Gate 1: Log Analysis + UI Smoke Test
-
-**Purpose:** Verify changes do not break runtime and the UI renders correctly.
-
-**Process:**
-1. Start the frontend server (or backend, depending on what changed) and watch logs for 30 seconds.
-2. Check for any ERROR in logs, server crashes, or build failures. Pre-existing warnings are documented as known, not treated as failures.
-3. If UI files changed: run a Playwright browser smoke test — navigate to affected pages, check console for JS errors, take a screenshot as visual evidence.
-
-**Playwright fallback:** If the Playwright MCP server is unavailable, a manual QA proposal is generated for the PM to confirm.
-
-### Gate 2: Documentation Impact Analysis
-
-**Purpose:** Keep documentation synchronized with code changes.
-
-**Process:**
-1. Run `git diff --name-only` to list changed files.
-2. For each changed file, determine documentation impact using the impact table:
-   - Database models affect ERD and schema docs.
-   - API endpoints affect API docs and integration guides.
-   - Core business logic affects system overview and architecture docs.
-   - Any `feat:` or `fix:` commit requires a CHANGELOG.md update.
-   - Breaking changes require a migration guide.
-3. Update all affected documentation.
-4. Stage documentation changes: `git add {docs path}`.
-
-If it is unclear which docs need updating, the agent escalates to the PM with a list of changed files and potentially affected docs. Guessing is not permitted.
-
-### Gate 3: Code Cleanup
-
-**Purpose:** Remove temporary artifacts, debug code, and sensitive data before committing.
-
-**Checks:**
-- Temporary files: `*.tmp`, `*.bak`, `*.swp`
-- Debug statements: `console.log`, `print()`, `debugger`, `pdb.set_trace()`
-- Large commented code blocks (version control handles history)
-- TODO/FIXME comments in production code (move to `bugs.md` or the run file)
-- Hardcoded credentials: literals for `password`, `api_key`, `secret`
-- Test data in production code (move to `tests/fixtures/`)
-
-### Gate 4: Git Status Check
-
-**Purpose:** Verify the correct files are staged and no secrets are accidentally included.
-
-**Checks:**
-- All code and documentation changes are staged.
-- Files that must never be committed are not staged: `.env`, `node_modules/`, `__pycache__/`, `dist/`, `*.log`.
-- Review staged diff: `git diff --cached`.
-
-### Gate 5: Commit Message Format
-
-**Purpose:** Maintain a clean, searchable git history.
-
-**Required format:**
-```
-type(scope): description (YYYY-MM-DD HH:MM timezone)
+    alt All required gates pass
+        GR-->>FSM: overall: pass
+        FSM->>FSM: transition GATES → DONE
+    else Required gate fails, retries remain
+        GR-->>FSM: overall: fail
+        Note over FSM,GF: LLM dispatches gate-fixer
+        FSM->>GF: analyze failure, apply fix
+        GF-->>FSM: fix applied
+        FSM->>GR: re-run failed gates
+    else Required gate fails, retries exhausted
+        GR-->>FSM: overall: fail
+        FSM->>FSM: transition GATES → ESCALATION
+    end
 ```
 
-Valid types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `style`, `perf`, `ci`.
+## Default Gates
 
-Rules: imperative mood, lowercase start, no trailing period, max 72 characters for the first line, timestamp with timezone is mandatory.
+AID ships with 6 default gates in `execution.yaml`. The project-scanner agent customizes the commands during `/aid-init` to match your stack.
 
-### Gate 6: Testing
+| Gate | Required | Type | Purpose |
+|------|----------|------|---------|
+| `tests_pass` | Yes | command | Run project test suite |
+| `security_scan_pass` | Yes | command | Check for high/critical security findings |
+| `docs_updated` | Yes | rule | Verify docs are current with code changes |
+| `scope_check` | Yes | deterministic | Verify changes stay within allowed paths |
+| `lint_pass` | No | conditional | Run linter (when configured) |
+| `build_pass` | No | conditional | Run build (when frontend files changed) |
 
-**Purpose:** Prevent regressions and verify new functionality.
+## Gate Types
 
-**When to run:** Code changes, features, bug fixes, refactoring, schema changes.
+### Command Gates
 
-**Requirements:**
-- All existing tests must pass (100% pass rate).
-- New features require unit and integration tests with more than 80% coverage for new code.
-- Bug fixes require a regression test that reproduces the bug and passes after the fix.
-- Flaky tests (fail sometimes but pass on re-run) are re-run 3 times. If still flaky, they are documented and a bug ticket is created.
-
-**Skip conditions (PM approval required):** Docs-only changes, styling-only changes, config-only changes.
-
----
-
-## Post-EPIC Gates Engine
-
-After all EPIC steps complete, the Controller enters the GATES state and runs the gate definitions from `.aid-o/03-config/policies/gates.yaml`. These gates validate the EPIC output as a whole — integration tests, security scans, build verification, and documentation checks.
-
-### Gate Types
-
-**Command gates** execute a shell command and evaluate the exit code:
+Execute a shell command and evaluate the exit code:
 
 ```yaml
 tests_pass:
-  description: "All tests must pass"
+  description: "All tests pass via project test runner"
   required: true
-  command: "pytest -q --tb=short"
+  command: "npm test"
   timeout_seconds: 300
   pass_criteria: "exit code 0"
 ```
 
-**Rule gates** evaluate a logical condition by inspecting files and git history rather than running a command:
+`aid-run-gates.sh` runs the command with `timeout`, captures stdout+stderr (truncated to 2000 chars), and records the result as JSON.
+
+### Rule Gates
+
+Evaluated by the LLM rather than a shell command:
 
 ```yaml
 docs_updated:
-  description: "Documentation must be updated if public API changed"
+  description: "Documentation updated for changed APIs/models"
   required: true
-  rule: "{project.docs.path} or CHANGELOG.md must be updated if code changes affect public API"
-  pass_criteria: "manual or automated check that relevant docs are current"
+  rule: "docs or CHANGELOG updated if code changes affect public API"
+  pass_criteria: "manual or automated check"
 ```
 
-**Conditional gates** only execute when a `when` condition is met. If the condition is false, the gate is marked `skip` — not a failure:
+The pipeline skill reads the rule text and evaluates whether it holds based on the git diff. This is the only gate type that involves the LLM.
+
+### Deterministic Gates
+
+Executed by a dedicated bash script with `max_retries: 0` — no auto-fix allowed:
 
 ```yaml
-type_check:
-  description: "TypeScript type check"
+scope_check:
+  description: "Verify changes are within EPIC scope"
+  command: "plugins/aid-orchestrator/scripts/gates/scope-check.sh ..."
+  required: true
+  type: deterministic
+  max_retries: 0
+```
+
+If a deterministic gate fails, it escalates immediately. The gate-fixer agent is not dispatched.
+
+### Conditional Gates
+
+Only execute when a `when` condition is met. If the condition is false, the gate is skipped (not failed):
+
+```yaml
+build_pass:
+  description: "Project builds without errors"
   required: false
-  command: "npx tsc --noEmit"
+  command: "npm run build"
+  timeout_seconds: 180
   when: "frontend files changed"
-  pass_criteria: "exit code 0"
 ```
 
-### Gate Classification
+Conditional gates have `required: false`. A failure produces a warning but does not block the pipeline.
 
-All gates are classified into three categories before execution:
+## Gate Result Format
 
-```
-REQUIRED gates     required: true, no `when` clause
-                   Must execute and must pass.
-
-CONDITIONAL gates  required: false, has `when` clause
-                   Condition evaluated first.
-                   If condition false → status: SKIP
-                   If condition true but fails → WARNING (non-blocking)
-
-SKIPPED gates      Conditional gate where `when` condition is false.
-                   Status: SKIP. Not executed.
-```
-
-Only required gates affect the overall pass/fail result. Conditional gate failures are warnings.
-
-### Gate Execution Order
-
-Gates execute in the order they appear in `gates.yaml`. For each gate:
-
-1. Log start to `stage_log.jsonl`.
-2. For command gates: execute via Bash with the configured timeout. Capture exit code, stdout, and stderr.
-3. Evaluate against `pass_criteria`.
-4. Write raw output to `evidence/{epic_id}/{run_id}/gates/{gate_name}.txt`.
-5. Record result in `gates_report.json`.
-6. Log completion to `stage_log.jsonl`.
-
-### Retry Logic
-
-When a required gate fails and the retry budget is not exhausted:
-
-1. The Controller transitions to GATE_RETRY.
-2. A gate-fixer agent is dispatched with the failure output as context.
-3. The fixer applies a code or configuration change.
-4. The gate is re-executed.
-5. The retry attempt is appended to the `attempts` array in `gates_report.json`.
-
-The maximum number of retries is configured per gate in `gates.yaml`. When the retry budget is exhausted, the Controller escalates to the PM.
-
-### Gates Report
-
-After all gates execute, `gates_report.json` is generated:
+Each gate produces a JSON result logged to `timeline.jsonl`:
 
 ```json
 {
-  "epic_id": "E-20260224-fa01",
-  "run_id": "20260224T140000Z",
-  "gates": [
-    {
-      "name": "tests_pass",
-      "type": "command",
-      "required": true,
-      "status": "pass",
-      "command": "pytest -q --tb=short",
-      "exit_code": 0,
-      "output_summary": "45 passed in 3.2s",
-      "duration_seconds": 3.2,
-      "attempts": [
-        {
-          "attempt": 1,
-          "status": "pass",
-          "output_summary": "45 passed in 3.2s",
-          "fix_applied": null
-        }
-      ]
-    },
-    {
-      "name": "type_check",
-      "type": "command",
-      "required": false,
-      "status": "skip",
-      "justification": "Condition not met: frontend files changed",
-      "attempts": []
-    }
-  ],
-  "summary": {
-    "total": 6,
-    "passed": 4,
-    "failed": 0,
-    "skipped": 2,
-    "errors": 0,
-    "warnings": 0
-  },
-  "overall": "pass",
-  "next_action": "proceed_to_pm_approval"
+  "gate": "tests_pass",
+  "result": "pass",
+  "exit_code": 0,
+  "duration_ms": 3200,
+  "output": "45 passed in 3.2s"
 }
 ```
 
-### Gate Status Values
+### Result Values
 
-| Status | Meaning |
+| Result | Meaning |
 |--------|---------|
-| `pass` | Gate passed on this attempt |
-| `fail` | Gate failed (required gate — blocking) |
-| `skip` | Conditional gate, condition was not met |
-| `error` | Gate execution error (timeout, command not found) |
-| `skipped_by_pm` | PM explicitly skipped this gate during escalation |
+| `pass` | Gate command exited 0 (or rule evaluated true) |
+| `fail` | Gate command exited non-zero (required gate — blocks pipeline) |
+| `skip` | Conditional gate where `when` condition was false |
+| `error` | Execution error (timeout, command not found, permission denied) |
 
-### Overall Result Calculation
+### Overall Result
 
 ```
-IF any required gate has status "fail" or "error":
-  → overall: "fail"
+IF any required gate has result "fail" or "error":
+  overall = "fail"
 ELSE:
-  → overall: "pass"
+  overall = "pass"
 
-Conditional gates (required: false) and PM-skipped gates
-do NOT affect the overall result.
+Conditional gates (required: false) do NOT affect the overall result.
 ```
 
-### Auto-Fix Behavior
+## Retry Logic
 
-The gate-fixer agent handles common failures automatically without PM intervention:
+When a required gate fails and the retry budget (from `execution.yaml` `retry.max_attempts`) is not exhausted:
 
-| Gate failure | Auto-fix approach |
-|--------------|-------------------|
-| Lint failures (style) | Run `ruff check --fix` or equivalent auto-formatter |
+1. The pipeline skill dispatches the `gate-fixer` agent with the failure output as context.
+2. The gate-fixer analyzes the failure and applies a targeted fix.
+3. `aid-run-gates.sh` re-runs the failed gate.
+4. The retry attempt is logged to `timeline.jsonl`.
+
+Common auto-fix patterns:
+
+| Failure | Auto-fix |
+|---------|----------|
+| Lint/formatting violations | Run auto-formatter (`ruff check --fix`, `prettier --write`) |
 | Minor type errors | Fix type annotations in affected files |
-| Formatting violations | Apply auto-formatter |
+| Missing test imports | Add missing imports |
 
-Failures that require logic changes or security remediation are not auto-fixed — they escalate to the PM.
+Failures that require logic changes or security remediation are not auto-fixed. They escalate to the PM.
 
-### Evidence Files
+## Customizing Gates
 
+Edit `.aid-o/config/execution.yaml` to customize gates:
+
+```yaml
+gates:
+  # Replace with your test runner
+  tests_pass:
+    command: "pytest -q --tb=short"
+    required: true
+    timeout_seconds: 300
+
+  # Add a custom gate
+  e2e_tests:
+    description: "End-to-end tests pass"
+    command: "npx playwright test"
+    required: true
+    timeout_seconds: 600
+
+  # Disable a gate
+  security_scan_pass:
+    required: false
 ```
-.aid-o/04-engine/evidence/{epic_id}/{run_id}/
-  gates_report.json         # Structured results for all gates
+
+Any entry with a `command` field is executed by `aid-run-gates.sh`. You can add as many custom gates as needed.
+
+## Evidence
+
+Gate results are stored in the run's evidence directory:
+
+```text
+.aid-o/work/evidence/{epic_id}/{run_id}/
+  timeline.jsonl          Gate results as JSONL events
   gates/
-    tests_pass.txt          # Raw command output
+    tests_pass.txt        Raw command output
     lint_pass.txt
-    security_scan_pass.txt
-    docs_updated.txt        # Rule evaluation log
-    type_check.txt          # Conditional gate output (only if executed)
-    retry_lint_pass_1.md    # Gate-fixer output for attempt 1
-    retry_lint_pass_2.md    # Gate-fixer output for attempt 2
+    scope_check.txt
 ```
 
-Retry evidence is never deleted — every attempt is preserved. Gate output files are overwritten on re-run (only the latest output matters).
+Every retry attempt is preserved in the timeline. Gate output files are overwritten on re-run (only the latest output is kept as a file; the history lives in `timeline.jsonl`).
 
-### Error Handling
+## Error Handling
 
 | Error | Response |
 |-------|----------|
-| `gates.yaml` not found | FAIL: "Gates config not found. Run `/aid-init` first." |
-| Command not found (e.g., pytest not installed) | Status: `error`. Message includes the missing tool and a suggestion to install it or update `gates.yaml`. |
-| Timeout exceeded | Status: `error`. Message includes the configured timeout duration. |
-| Permission denied | Status: `error`. Message notes the permission issue. |
+| `execution.yaml` not found | Pipeline fails: "Config not found. Run `/aid-init` first." |
+| Command not found (e.g., pytest not installed) | Result: `error`. Output includes the missing tool name. |
+| Timeout exceeded | Result: `error`. Output includes the configured timeout. |
+| Permission denied | Result: `error`. Output notes the permission issue. |
 
-The gates engine never modifies `gates.yaml` during execution. That file is PM-owned configuration.
+`aid-run-gates.sh` never modifies `execution.yaml`. That file is PM-owned configuration.

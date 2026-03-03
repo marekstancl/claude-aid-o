@@ -1,31 +1,74 @@
 ---
 sidebar_position: 1
-title: AID Orchestrator
-description: "Multi-Agent Development Orchestration for Claude Code — Controller + Workers architecture for AI-driven software development."
+title: AID Orchestrator v2
+description: "AI Development Orchestrator — a Claude Code plugin with 8 commands, 7 agents, 8 skills, and a 6-state bash FSM for structured multi-agent development."
 slug: /
 ---
 
-# AID Orchestrator
+# AID Orchestrator v2.0.0
 
-**Multi-Agent Development Orchestration for Claude Code.**
+**Structured multi-agent development orchestration for Claude Code.**
 
-AID is a Claude Code plugin that implements a **Controller + Workers architecture** for AI-driven software development. It takes an EPIC specification, generates structured execution plans, dispatches specialized role-based agents, enforces quality gates, and maintains complete evidence trails.
+AID is a Claude Code plugin that gives the AI model structured workflows for software development. It provides commands, skills, agents, and bash scripts that turn Claude Code into a disciplined engineering pipeline — from planning through implementation to quality-gated delivery.
 
-:::info Disclaimer — FIRST AID & Elevated Permissions
+| Metric | Value |
+|--------|-------|
+| Commands | 8 slash commands |
+| Agents | 7 specialized roles |
+| Skills | 8 core instruction sets |
+| FSM | 6-state bash state machine |
+| Prompt budget | ~50K tokens (down from ~400K in v1) |
+| Tests | 173 across 13 suites |
+| Config files | 3 YAMLs |
 
-FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** to execute commands autonomously — including file edits, shell commands, `git push`, package installs, GitHub releases, and MCP tool calls — **without asking for confirmation**. A hard-deny list blocks the most dangerous operations, but autonomous AI execution carries inherent risk. **Use at your own risk.** See the [FIRST AID Mode](/architecture/first-aid-mode) page for full safety details.
+## How It Works
 
-:::
+```mermaid
+flowchart LR
+    U([User]) -->|"/aid-do task"| FAST[Fast Mode]
+    U -->|"/aid-plan topic"| PLAN[Planner]
+    PLAN -->|plan.json| RUN["/aid-run"]
+    FAST --> EX[EXECUTE]
+    RUN --> EX
+    EX -->|agents write code| GATES[GATES]
+    GATES -->|all pass| DONE([DONE])
+    GATES -->|fail| ESC[ESCALATION]
+    ESC -->|fix| GATES
+```
 
-## Features
+## Two Execution Modes
 
-- **13 slash commands** for planning, executing, auditing, and managing your development pipeline
-- **18 specialized agents** (architect, backend, frontend, QA, security, and more) dispatched based on step requirements
-- **21 reusable skills** encoding orchestration patterns, quality gates, retry logic, and memory management
-- **Quality gates** enforced between phases — type checks, linting, tests, builds, security scans
-- **FIRST AID mode** for fully autonomous EPIC queue execution with escalation-only PM interaction
-- **Evidence trails** capturing every decision, artifact, and outcome for auditability
-- **Qdrant vector memory** for cross-project knowledge persistence and retrieval
+### Fast Mode — `/aid-do "task"`
+
+For small, well-defined tasks. Under 2 minutes of orchestration overhead. Skips planning, goes straight to implementation + gates.
+
+```bash
+/aid-do "add rate limiting to the /api/users endpoint"
+```
+
+### Epic Mode — `/aid-plan` + `/aid-run`
+
+For complex features requiring planning, multiple agents, and full quality gates.
+
+```bash
+/aid-plan "add pagination to the users API"
+# Review the generated plan, then:
+/aid-run
+```
+
+## What AID Is (and Is Not)
+
+AID is a **plugin** that runs inside Claude Code. It does not replace Claude — it structures what Claude does.
+
+| Component | What it is | Who/what executes it |
+|-----------|-----------|---------------------|
+| **Claude Code** | The AI model running in CLI | Anthropic's Claude model |
+| **Commands** | Slash commands the user types (`/aid-do`, `/aid-run`) | Claude Code reads the command definition |
+| **Skills** | Markdown instructions for HOW to orchestrate | Claude reads these to know the protocol |
+| **Agents** | Role definitions for WHAT to do (implementer, verifier, etc.) | Claude reads these to adopt a role |
+| **Scripts** | Bash programs for deterministic operations | Bash executes these — no LLM involved |
+
+In v2, all deterministic operations — state transitions, gate execution, scope checking, token counting — run in **bash scripts**, not LLM instructions. The LLM handles creative work: code generation, reviews, planning.
 
 ## Quick Start
 
@@ -34,37 +77,24 @@ FIRST AID mode (`/aid-first-aid`) grants Claude Code **elevated permissions** to
 /plugin marketplace add marekstancl/claude-aid-o
 /plugin install aid-orchestrator@claude-aid-o
 
-# Initialize and configure your project
+# Initialize workspace in your project
 /aid-init
-/aid-setup
 
-# Plan and execute an EPIC
-/aid-brainstorm
-/aid-plan-epic
-/aid-run-epic
+# Fast mode (small tasks)
+/aid-do "add input validation to signup form"
+
+# Full pipeline (complex features)
+/aid-plan "implement OAuth2 with refresh tokens"
+/aid-run
 ```
 
-See the [Installation Guide](getting-started/installation) for prerequisites and detailed setup.
+## Documentation
 
-## How It Works
-
-AID follows a **Controller + Workers** pattern:
-
-1. **Planning** — The Controller reads your EPIC spec and generates a dependency-aware execution plan with parallel wave grouping.
-2. **Dispatch** — Specialized agents (architect, backend, frontend, QA, etc.) are dispatched to execute individual steps within scoped boundaries.
-3. **Quality Gates** — After each phase, 6 quality gates are enforced: type checks, linting, tests, builds, security scans, and documentation checks.
-4. **Review** — The PM reviews completed work at key checkpoints. Failed steps trigger retry with automated analysis.
-5. **Evidence** — Every step produces evidence artifacts (plans, reports, logs) stored in `.aid-o/04-engine/evidence/`.
-
-## Documentation Sections
-
-| Section | What You'll Find |
-|---------|-----------------|
-| [Getting Started](getting-started/installation) | Installation, first EPIC walkthrough, configuration |
-| [Architecture](architecture/overview) | Pipeline design, state machine, quality gates, memory system, FIRST AID |
-| [Commands](commands/aid-init) | Reference for all 13 slash commands |
-| [Agents](agents/overview) | Reference for all 18 specialized agents |
-| [Skills](skills/overview) | Reference for all 21 orchestration skills |
-| [Configuration](configuration/gates-yaml) | Field-by-field reference for policy files |
-| [Contributing](contributing/how-to-contribute) | How to add commands, agents, and contribute |
+| Section | Content |
+|---------|---------|
+| [Getting Started](getting-started/quick-start) | Quick start, installation, configuration |
+| [Architecture](architecture/overview) | Dual-layer design, FSM, quality gates, memory |
+| [Commands](commands/aid-init) | Reference for all 8 slash commands |
+| [Agents](agents/overview) | Reference for all 7 agents |
+| [Skills](skills/overview) | Reference for all 8 core skills |
 | [Troubleshooting](troubleshooting/common-issues) | Common issues and FAQ |

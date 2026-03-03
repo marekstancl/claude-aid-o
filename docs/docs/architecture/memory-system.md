@@ -1,268 +1,186 @@
 ---
 sidebar_position: 4
 title: "Memory System"
-description: "How AID stores and retrieves knowledge across runs using file-based memory and optional Qdrant vector search."
+description: "File-based memory in .aid-o/work/ and optional Qdrant vector search for cross-project knowledge."
 ---
 
 # Memory System
 
-AID has a two-layer memory system. File-based memory is the primary, authoritative store — it works in every project, with no configuration. Qdrant vector memory is an optional supplementary layer that adds semantic search and cross-project knowledge sharing.
+AID has a two-layer memory system. File-based memory is the primary store and works without any configuration. Qdrant vector memory is an optional supplementary layer that adds semantic search and cross-project knowledge sharing.
 
-**Core principle:** File-based memory is authoritative. Qdrant is supplementary. The plugin works identically without Qdrant — every memory operation has a graceful no-op fallback.
+**Core principle:** File-based memory is authoritative. Qdrant is supplementary. AID works identically without Qdrant.
 
-## Storage Architecture
+## Architecture
 
+```mermaid
+flowchart TB
+    subgraph FileMemory["File-Based Memory (.aid-o/work/)"]
+        TL["timeline.jsonl<br/>event log"]
+        ST["state.yaml<br/>FSM state"]
+        EV["evidence/<br/>gate results, step outputs"]
+    end
+
+    subgraph QdrantMemory["Qdrant Vector Memory (optional)"]
+        COL["Collection: aid-memory"]
+        SEARCH["Semantic search"]
+        CROSS["Cross-project queries"]
+    end
+
+    subgraph Pipeline["Pipeline"]
+        EXEC["EXECUTE state"]
+        GATES["GATES state"]
+        DONE["DONE state"]
+    end
+
+    EXEC -->|"logs events"| TL
+    EXEC -->|"updates"| ST
+    GATES -->|"logs gate results"| TL
+    GATES -->|"writes output"| EV
+    DONE -->|"indexes decisions, lessons"| COL
+    EXEC -->|"queries before dispatch"| SEARCH
+    SEARCH -->|"returns relevant context"| EXEC
 ```
-Per-project file memory (.aid-o/)
-  04-engine/memory/
-    active-work.md           Current run state and goals
-    lessons-learned.md       Accumulated lessons from all runs
-    command-history.md       Working commands discovered during runs
-    decisions.yaml           Architectural and process decisions
-    project-profile.yaml     Tech stack, paths, preferences
-
-Global vector memory (~/.local/share/aid-orchestrator/qdrant-data)
-  Collection: "aid-memory"
-  Scope: user (available in all projects)
-  Tagged with project_name for filtering
-  Semantic search across all projects and document types
-```
-
-The Qdrant data directory is shared across all projects. Every entry is tagged with `project_name` so knowledge from Project A can inform Project B. Deleting a project's `.aid-o/` directory does not delete its Qdrant entries.
 
 ## File-Based Memory
 
+All runtime state lives in `.aid-o/work/`:
+
+```text
+.aid-o/work/
+  evidence/{epic_id}/{run_id}/
+    state.yaml                FSM state (current state, step counter, mode)
+    timeline.jsonl            Append-only event log (transitions, gates, steps)
+    gates/                    Raw gate command output
+  lessons-learned.md          Accumulated lessons from all runs
+  decisions.yaml              Architectural and process decisions
+```
+
+### state.yaml
+
+The FSM state file. Written by `aid-fsm.sh`, read by all pipeline components.
+
+```yaml
+epic_id: E-20260303-a1b2
+run_id: R-20260303-001
+state: EXECUTE
+current_step: 3
+total_steps: 5
+mode: epic
+branch: epic/E-20260303-a1b2
+base_commit: abc123
+gate_retries: 0
+escalation_count: 0
+started_at: "2026-03-03T10:00:00Z"
+```
+
+### timeline.jsonl
+
+Append-only structured event log. Written by `aid-stage-log.sh`. Every state transition, gate result, and step completion is recorded.
+
+```jsonl
+{"ts":"2026-03-03T10:00:00Z","event":"fsm_init","state":"READY","epic_id":"E-20260303-a1b2"}
+{"ts":"2026-03-03T10:00:05Z","event":"fsm_transition","from":"READY","to":"EXECUTE"}
+{"ts":"2026-03-03T10:01:30Z","event":"step_complete","step":1,"agent":"implementer","duration_ms":85000}
+{"ts":"2026-03-03T10:03:05Z","event":"gate_result","gate":"tests_pass","result":"pass","exit_code":0,"duration_ms":3200}
+```
+
 ### lessons-learned.md
 
-Written by the Lessons-Extractor agent at the end of each EPIC run. Contains lessons derived from debugging sessions, implementation challenges, and process improvements. Format is free-form Markdown, organized by category (debugging, performance, testing, process, architecture).
-
-### command-history.md
-
-Written by the Lessons-Extractor agent. Contains working commands discovered during runs — build commands, test commands, deploy commands, lint commands — annotated with context about when to use them. This prevents agents from guessing the correct command for a project.
+Written by the curator agent at run end. Contains lessons from debugging sessions, implementation challenges, and process improvements. Accumulates across runs.
 
 ### decisions.yaml
 
-Architectural, technical, and process decisions recorded during EPIC runs and agent outputs. Structured YAML with decision text, context, and alternatives considered.
-
-### project-profile.yaml
-
-Generated by `/aid-setup`. Contains the project's tech stack, file paths, quality gate thresholds, and preferences. Referenced by agents to adapt behavior to the specific project's language, framework, and tooling.
+Architectural, technical, and process decisions recorded during runs. Structured YAML with decision text, context, and alternatives considered.
 
 ## Qdrant Vector Memory
 
-### Setup and Configuration
-
-Memory is configured in `.aid-o/03-config/policies/memory-config.yaml`:
+Optional. Enabled in `.aid-o/config/integrations.yaml`:
 
 ```yaml
 memory:
-  enabled: false                    # true = use Qdrant MCP, false = file-based only
+  enabled: true
   collection_name: "aid-memory"
-
-  auto_index:
-    run_end: true                   # Index decisions and lessons at run end
-    epic_done: true                 # Index EPIC summary at completion
-    gate_results: false             # Index gate results (verbose, opt-in)
-
   search:
-    top_k: 5                        # Max results per query
+    top_k: 3
     timeout_seconds: 5
-    min_score: 0.4                  # Minimum similarity score
-    pre_step_search: true           # Search before each agent dispatch
+    min_score: 0.4
+    pre_step_search: true
 ```
 
-AID connects to Qdrant through the official `mcp-server-qdrant` MCP server. Embedding is handled server-side using FastEmbed (`sentence-transformers/all-MiniLM-L6-v2`). No external API calls and no API keys are needed for embeddings.
-
-### MCP Interface
-
-The memory system uses two MCP tools:
-
-**`qdrant-store`** — Store knowledge with metadata:
-```
-Input:
-  information: string      # The text to store (target: 50-500 words per chunk)
-  metadata: object         # Structured metadata (type, date, tags, etc.)
-  collection_name: string  # Override default collection (optional)
-```
-
-**`qdrant-find`** — Retrieve relevant knowledge by semantic search:
-```
-Input:
-  query: string            # Natural language query
-  collection_name: string  # Override default collection (optional)
-
-Output:
-  results: array           # Matching documents ranked by similarity score (0-1)
-```
-
-### Document Types
-
-AID indexes 8 types of knowledge into Qdrant. Each type has a defined metadata schema and indexing trigger.
-
-#### Type 1: Decision
-
-Architectural, technical, or process decisions made during runs or EPICs.
-
-**Indexed:** At run end and EPIC completion.
-
-**Metadata:**
-```json
-{
-  "type": "decision",
-  "run_id": "R-20260217-2eec",
-  "epic_id": "E-20260215-a3f2",
-  "date": "2026-02-17",
-  "area": "authentication",
-  "decision": "Use JWT with refresh tokens",
-  "context": "Brief context of why this decision was made",
-  "alternatives_considered": ["session cookies", "OAuth2 only"]
-}
-```
-
-#### Type 2: Lesson
-
-Lessons learned from debugging, implementation challenges, or process improvements.
-
-**Source:** `lessons-learned.md`, run completion notes, agent `improvement_notes`.
-**Indexed:** At run end.
-
-**Metadata:** `type`, `run_id`, `date`, `category` (debugging/performance/testing/process/architecture), `severity` (gotcha/tip/warning), `tags`.
-
-#### Type 3: Pattern
-
-Code patterns, architectural patterns, or workflow patterns observed across EPICs.
-
-**Source:** Agent outputs (from `improvement_notes` sections), code-reviewer findings, architect design documents.
-**Indexed:** At EPIC completion.
-
-**Metadata:** `type`, `epic_id`, `agent_role`, `date`, `pattern_type` (code/architecture/workflow/testing), `language`, `tags`.
-
-#### Type 4: Command
-
-Working commands discovered during runs — build, test, deploy, lint.
-
-**Source:** `command-history.md`, Lessons-Extractor output.
-**Indexed:** At run end.
-
-**Metadata:** `type`, `run_id`, `date`, `tool` (pytest/npm/docker/git/custom), `category` (build/test/deploy/lint/database), `project_specific`.
-
-#### Type 5: Audit Finding
-
-Findings from post-EPIC audits (code quality, security, documentation issues).
-
-**Source:** `audit-report.md`, Auditor agent output.
-**Indexed:** At EPIC completion.
-
-**Metadata:** `type`, `epic_id`, `date`, `audit_category` (code_quality/security/documentation/frontend/database), `severity` (critical/warning/suggestion), `score`.
-
-#### Type 6: Documentation
-
-Framework and library documentation chunks acquired through the knowledge-acquisition research pipeline. Uses Context7 MCP as the primary source, with WebSearch as a fallback.
-
-**Indexed:** During `/aid-setup` onboarding, `/aid-brainstorm` framework detection, and `/aid-research` runs.
-
-**Quality gates:** Documentation chunks must pass a 4-gate quality protocol before storage. Other document types bypass quality gates and store directly.
-
-**TTL:** Expires after 90 days by default. Freshness is tracked and applied during search result ranking.
-
-**Metadata:**
-```json
-{
-  "type": "documentation",
-  "framework": "FastAPI",
-  "framework_version": "0.115.x",
-  "section": "dependency-injection",
-  "source": "context7",
-  "source_url": "https://fastapi.tiangolo.com/tutorial/dependencies/",
-  "indexed_at": "2026-02-20T10:00:00Z",
-  "valid_until": "2026-05-20T10:00:00Z",
-  "project_name": "global",
-  "confidence": "high"
-}
-```
-
-Documentation chunks use `project_name: "global"` because framework documentation is universal and shared across all projects.
-
-#### Type 7: Proposal
-
-Structured proposals generated by agents for PM review — architectural approaches, technology selections, or process changes.
-
-**Indexed:** At explicit proposal generation, not auto-indexed at run end.
-
-**Metadata:** `type`, `epic_id`, `run_id`, `date`, `proposal_type` (architecture/technology/process/design), `status` (pending/approved/rejected), `area`, `tags`.
-
-#### Type 8: Example EPIC
-
-Complete EPIC templates extracted from successfully completed EPICs. Represents a full project archetype — step sequence, role assignments, architectural decisions — abstracted from a real implementation.
-
-**Indexed:** At EPIC DONE state, after Curator, with PM approval.
-
-**Never expires** (`valid_until: null`).
-
-**Metadata:**
-```json
-{
-  "type": "example_epic",
-  "frameworks": ["langchain", "chromadb", "fastapi"],
-  "archetype": "rag-chatbot",
-  "source_epic_id": "E-20260215-a3f2",
-  "source_project": "customer-support-bot",
-  "step_count": 6,
-  "roles": ["architect", "backend", "qa"],
-  "complexity": "medium",
-  "confidence": "high",
-  "project_name": "global"
-}
-```
+Requires the Qdrant MCP server configured in `.mcp.json`. Embedding is handled server-side using FastEmbed — no external API calls needed.
 
 ### When Memory Is Searched
 
-Memory is searched at two points in the pipeline:
+```mermaid
+sequenceDiagram
+    participant P as Pipeline
+    participant Q as Qdrant MCP
+    participant A as Agent
 
-**At IDLE (before planning):** Qdrant is searched with the EPIC goal and tech stack as the query. Cross-project results (from other projects) are filtered in and included in the Planner's context. This seeds the plan with relevant past patterns.
+    Note over P: READY state
+    P->>Q: search(EPIC goal + tech stack)
+    Q-->>P: cross-project patterns
+    Note over P: context passed to planner
 
-**At EXECUTING (before each agent dispatch):** If `pre_step_search` is enabled, Qdrant is searched with the step objective and agent role as the query. The top results are injected into the agent's prompt as a `## MEMORY CONTEXT (from past runs)` block, clearly labeled so agents know it is historical reference rather than current-run state.
+    Note over P: EXECUTE state (each step)
+    P->>Q: search(step objective + agent role)
+    Q-->>P: relevant past decisions/lessons
+    P->>A: dispatch with memory context block
+    A-->>P: step output
 
-### Fallback Protocol
+    Note over P: DONE state
+    P->>Q: store(decisions, lessons, patterns)
+    Q-->>P: indexed
+```
 
-**When Qdrant MCP is not configured** (memory disabled or `memory.enabled: false`):
-- All `memory_*` functions return immediately (no-op or empty results).
-- File-based memory continues to work normally.
-- No MCP tool calls are made.
-- No log messages — completely transparent.
+**At READY:** Qdrant is searched with the EPIC goal and tech stack. Cross-project results are included in the planner's context.
 
-**When Qdrant MCP server is unavailable** (connection failure or timeout):
-- `memory_store` silently skips the write and logs a warning to `memory_log.jsonl`.
-- `memory_find` returns empty results and logs a warning.
-- Execution continues normally with file-based memory only.
-- Memory operations are never retried (unlike Slack, which retries 3 times). Memory is supplementary, not critical-path.
-- One log message per run: `"Qdrant MCP unavailable — proceeding with file-based memory only"`.
+**At EXECUTE (before each dispatch):** If `pre_step_search: true`, Qdrant is searched with the step objective and agent role. Top results are injected as a `## MEMORY CONTEXT (from past runs)` block in the agent's prompt.
 
-**When search returns no results or all scores are below the minimum threshold:**
-- The agent is dispatched without memory context. This is normal behavior for new projects.
+**At DONE:** Decisions, lessons, and patterns from the run are indexed for future retrieval.
+
+### Document Types
+
+AID indexes these types of knowledge:
+
+| Type | Source | When Indexed |
+|------|--------|-------------|
+| `decision` | Architectural/technical choices | Run end, EPIC completion |
+| `lesson` | Debugging/implementation insights | Run end |
+| `pattern` | Code/architecture patterns | EPIC completion |
+| `command` | Working build/test/deploy commands | Run end |
+| `audit_finding` | Code quality/security findings | EPIC completion |
+| `documentation` | Framework/library docs (via Context7) | On-demand |
+| `proposal` | Agent-generated proposals | Explicit generation |
+| `example_epic` | Complete EPIC templates from successes | EPIC DONE with PM approval |
 
 ### Cross-Project Knowledge
 
-Qdrant serves as the single cross-project knowledge store. Every entry is tagged with `project_name` so lessons from one project inform another.
+Every Qdrant entry is tagged with `project_name`. When a new EPIC starts, the search includes results from other projects. Entries from the current project are excluded (those are already in local files).
 
-When a new EPIC starts, the Controller queries Qdrant for knowledge from other projects that is relevant to the EPIC goal and tech stack. Cross-project results are filtered to exclude entries from the current project (those are already in local `.md` files) and the top results are passed to the Planner.
+Documentation entries use `project_name: "global"` because framework docs are universal.
 
-If Qdrant is not configured or unavailable, cross-project search returns empty results silently. Local file-based memory continues to work per-project.
+### Fallback Protocol
+
+**Qdrant not configured (`memory.enabled: false`):**
+- All memory operations are no-ops. No MCP calls.
+- File-based memory works normally.
+
+**Qdrant unavailable (connection failure):**
+- `store` silently skips, logs warning to `timeline.jsonl`.
+- `search` returns empty results, logs warning.
+- Execution continues with file-based memory only.
+- One warning per run: `"Qdrant MCP unavailable — file-based memory only"`.
+
+**Search returns no results:**
+- Agent is dispatched without memory context. Normal for new projects.
 
 ### Evidence Logging
 
-Memory operations are logged to:
+Memory operations are logged to `timeline.jsonl` alongside all other events:
 
-```
-.aid-o/04-engine/evidence/{epic_id}/{run_id}/memory_log.jsonl   (EPIC runs)
-.aid-o/04-engine/memory/memory_log.jsonl                         (non-EPIC runs)
-```
-
-Each log entry is a JSON object:
-
-```json
-{"ts": "2026-02-17T10:00:00Z", "action": "store", "type": "decision", "status": "success", "collection": "aid-memory"}
-{"ts": "2026-02-17T10:00:02Z", "action": "find", "query": "authentication patterns", "status": "success", "results": 3}
-{"ts": "2026-02-17T10:00:05Z", "action": "store", "type": "pattern", "status": "failed", "error": "Qdrant MCP unavailable"}
-{"ts": "2026-02-17T11:00:00Z", "action": "index_epic", "epic_id": "E-20260215-a3f2", "status": "success"}
+```jsonl
+{"ts":"2026-03-03T10:00:00Z","event":"memory_search","query":"pagination patterns","results":3,"status":"success"}
+{"ts":"2026-03-03T10:05:00Z","event":"memory_store","type":"decision","status":"success"}
+{"ts":"2026-03-03T10:05:01Z","event":"memory_store","type":"lesson","status":"failed","error":"Qdrant MCP unavailable"}
 ```

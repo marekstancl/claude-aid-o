@@ -1,66 +1,71 @@
 ---
-sidebar_position: 18
+sidebar_position: 8
 title: "Run Validator Agent"
-description: "Validate run file completeness at phase-end and run-end checkpoints."
+description: "Validate run files, state.yaml, evidence completeness, and quick log format."
 ---
 
 # Run Validator Agent
 
-The Run Validator agent checks that run files are complete and correct at phase-end and run-end checkpoints. It reads the run file and validates it against the AID run file requirements, producing a structured PASS/FAIL report.
+The Run Validator checks that task evidence files are complete and correct. It validates FSM state files, timeline logs, quick logs (FAST MODE), and task files (EPIC MODE), producing a structured PASS/FAIL report.
 
 ## Role
 
-The Run Validator is a **utility agent**. It does not modify any files — it reads and validates only. It is used at phase-end checkpoints and before run completion to verify the run file meets all AID requirements.
+The Run Validator is a **utility agent**. It does not modify any files — it reads and validates only. Used after completing a phase or before run end.
 
 ## When Dispatched
 
-- After completing a phase, to verify the phase is correctly documented in the run file
-- Before run end, to confirm the run file is complete and ready for finalization
-- When the Controller needs to validate run file completeness at a checkpoint
+- After completing a phase, to verify evidence is correctly recorded
+- Before run end, to confirm evidence completeness
+- When the pipeline needs to validate run state at a checkpoint
 
-## Capabilities
+## What It Validates
 
-### Frontmatter Validation
+### 1. state.yaml (FSM State File)
+- `epic_id` present and format-correct (`E-NNN` or `E-NNN-phase_total`)
+- `state` is valid FSM state: READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
+- `current_step` within bounds (0 to `total_steps`)
+- `mode` is "manual" or "auto"
+- `started_at` is valid ISO 8601
 
-- `id` present and matches format `S-YYYYMMDD-{4char}`
-- `type` is one of: new-feature, bug-fix, refactoring, exploration, verification
-- `status` is one of: active, blocked, completed
-- `priority` present, `started` has a date, `ai_agent` present
-- For EPIC runs: `epic_id`, `epic_run`, `epic_file` all present
+### 2. timeline.jsonl (Event Log)
+- File exists and is non-empty
+- Each line is valid JSON with `timestamp`, `eventType`, `state`
+- At least one `fsm_transition` or `step_dispatch` event
+- Timestamps are non-decreasing (minute granularity)
 
-### Completed Phases Validation
+### 3. Quick Log Q-NNN.md (FAST MODE only)
+- Frontmatter has: `id`, `task`, `started_at`, `duration_s`, `files_changed`, `commit`
+- `commit` is a valid git short SHA (7+ hex chars)
 
-- Each completed phase has status "done" or equivalent marker
-- Each completed phase has at least one commit hash referenced
-- Changes table populated for completed phases (File, Description, Status columns)
+### 4. Task File (EPIC MODE only)
+- File exists in `.aid-o/tasks/`
+- Frontmatter `id` matches `epic_id` from state.yaml
 
-### Content Completeness Validation
+## Output Format
 
-- Objective section is filled (not a template placeholder)
-- At least one deliverable or requirement listed
-- AI Run Log has at least one entry with a timestamp
+```
+RUN VALIDATION REPORT
+=========================
+Run: {epic_id}
+Evidence: {evidence_dir}
 
-### Testing Validation (mandatory for last phase)
+RESULTS:
+  [PASS|FAIL] state.yaml -- FSM state valid
+  [PASS|FAIL] timeline.jsonl -- event log valid
+  [PASS|FAIL] Quick log format (FAST MODE only)
+  [PASS|FAIL] Task file present (EPIC MODE)
 
-- If this is the last phase of a run or EPIC, a testing proposal must exist
-- Testing section has concrete steps, not just template placeholders
-
-### No Empty Required Sections
-
-- Objective, Requirements/Deliverables, and Implementation sections have content
-- Template placeholders like `{Title}` or `{description}` are replaced
-
-## Tools Available
-
-Read access to the run file and `skills/run-management.md` for full run file requirements.
+OVERALL: PASS | FAIL
+```
 
 ## Key Behaviors
 
-- **Read-only.** Does not modify any files.
-- **Produces a structured report** with PASS/FAIL per check, an overall verdict, and a list of specific issues with descriptions.
-- **References `skills/run-management.md`** for full run file requirements if needed.
+- **Read-only.** Validate evidence structure, never modify it.
+- **Missing state.yaml = immediate FAIL.** Cannot validate without FSM state.
+- **Empty timeline.jsonl = FAIL.** Every run must produce at least one event.
+- **Model:** haiku (fast, lightweight validation)
 
 ## Related
 
 - [Run Management Skill](../skills/run-management)
-- [Epic Orchestration Skill](../skills/epic-orchestration)
+- [Pipeline Skill](../skills/pipeline)

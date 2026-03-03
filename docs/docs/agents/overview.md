@@ -1,71 +1,82 @@
 ---
 sidebar_position: 1
 title: "Agent System Overview"
-description: "Overview of AID's 18 specialized agents and the multi-agent architecture."
+description: "Overview of AID's 7 agents in v2 — parametric dispatch, role cards, and the Controller + Workers architecture."
 ---
 
 # Agent System Overview
 
-AID operates through a **Controller + Workers** architecture. When an EPIC runs, the Controller (implemented in the `epic-orchestration` skill) reads the execution plan and dispatches steps to specialized agents. Each agent has a defined role, a bounded scope of work, and a structured output format. Agents do not communicate with each other directly — they work through the Controller, reading prior step outputs from the evidence trail.
+AID v2 operates through a **Controller + Workers** architecture with **7 agents** (down from 18 in v1). The key innovation is **parametric dispatch**: instead of one agent per role, AID uses two parametric agents — **implementer** and **verifier** — that adopt any role via role cards loaded at dispatch time.
 
-## Two Types of Agents
+## Parametric Dispatch
 
-### Role Agents
+In v1, each role (architect, backend, frontend, QA, security, etc.) was a separate agent with its own instruction file. In v2, all implementation roles are handled by a single **implementer** agent that reads a role card from `role-cards.md` at dispatch time. Similarly, all verification roles (code review, docs review, QA, security review) are handled by a single **verifier** agent with focus cards.
 
-Role agents are dispatched by the Controller during EPIC step execution. Each step in the plan specifies an `agent_role`, and the Controller dispatches the matching agent with a `step_spec` that includes the step description, allowed file paths, acceptance criteria, and context from prior steps.
+This means adding a new role requires only a new card in `role-cards.md` — no new agent file, no manifest update, no documentation page.
 
-Role agents produce a `step_output` YAML block that the Controller stores in the evidence trail. Other agents can reference these outputs as prior context.
+## Agent Dispatch Flow
+
+```mermaid
+graph LR
+    Pipeline["Pipeline (FSM)"] -->|dispatch step| Implementer
+    Implementer -->|reads| RoleCard["Role Card<br/>(architect/backend/frontend/...)"]
+    RoleCard --> Work["Execute Step"]
+    Work --> Output["step output.md"]
+    Output --> Pipeline2["Pipeline (FSM)"]
+    Pipeline2 -->|dispatch review| Verifier
+    Verifier -->|reads| FocusCard["Focus Card<br/>(qa/security/code-review/docs-review)"]
+    FocusCard --> Review["Verify Output"]
+    Review --> Verdict["PASS / FAIL / PASS_WITH_NOTES"]
+```
+
+## The 7 Agents
+
+### Parametric Agents
+
+| Agent | Type | Purpose | Cards |
+|-------|------|---------|-------|
+| [Implementer](./implementer) | Parametric | Execute plan steps — code, design, docs, instrumentation | 8 role cards (architect, backend, frontend, domain, observability, docs-writer, release, security) |
+| [Verifier](./verifier) | Parametric | Verify step outputs — tests, reviews, security checks | 4 focus cards (qa, security-review, code-review, docs-review) |
 
 ### Specialist Agents
 
-Specialist agents run outside the normal per-step flow. They are triggered by specific pipeline states or events — for example, the Auditor runs once after a completed EPIC is merged, and the Curator runs after all steps complete and quality gates pass. Specialist agents read evidence from the run but do not execute plan steps.
+| Agent | Type | Purpose | When Dispatched |
+|-------|------|---------|-----------------|
+| [Auditor](./auditor) | Specialist | Post-Epic health audit — 8 categories, scoring, trends | After Epic DONE + merge |
+| [Curator](./curator) | Specialist | Evaluate improvements, extract lessons, manage backlog | After gates pass, before PM approval |
+| [Project Scanner](./project-scanner) | Specialist | Analyze codebase structure, tech stack, conventions | During `/aid-init` or on-demand |
 
-## Agent Table
+### Utility Agents
 
-| Agent | Type | Role | When Dispatched |
-|-------|------|------|-----------------|
-| [Architect](./architect) | Role | Design API contracts, event schemas, ADRs, module boundaries | When a step requires interface design or architectural decisions |
-| [Auditor](./auditor) | Specialist | Post-Epic health audit — scoring across 6 categories | After Epic DONE + successful merge |
-| [Backend](./backend) | Role | Implement server-side logic — APIs, services, data access | When a step requires backend implementation |
-| [Code Reviewer](./code-reviewer) | Specialist | Review implementation against plan and coding standards | During PHASE_CHECK for step acceptance validation |
-| [Curator](./curator) | Specialist | Collect improvement notes, deduplicate, propose improvements | During CURATOR_RESOLVE state, after gates pass |
-| [Docs Reviewer](./docs-reviewer) | Specialist | Review documentation changes for compliance and completeness | During gate checks for documentation files |
-| [Docs Writer](./docs-writer) | Role | Write and maintain documentation — API docs, guides, changelogs | When a step requires documentation authoring |
-| [Domain](./domain) | Role | Model business domain — entities, aggregates, business rules | When a step requires domain modeling or business rule codification |
-| [Frontend](./frontend) | Role | Implement UI — components, pages, client-side state | When a step requires frontend implementation |
-| [Gate Fixer](./gate-fixer) | Utility | Fix failing quality gates with minimal targeted changes | During GATE_RETRY state when a gate fails |
-| [Lessons Extractor](./lessons-extractor) | Specialist | Extract reusable knowledge and working commands from completed runs | During CURATOR_RESOLVE state, in parallel with Curator |
-| [Observability](./observability) | Role | Add logging, metrics, tracing, health checks, alerting | When a step requires instrumentation |
-| [Project Scanner](./project-scanner) | Specialist | Analyze project tech stack, architecture, and conventions | During `/aid-setup` (quick scan) or post-milestone (deep scan) |
-| [QA](./qa) | Role | Write tests, validate quality, ensure coverage targets | When a step requires test authoring or coverage improvement |
-| [Quality Gates Runner](./quality-gates-runner) | Utility | Run the 6-gate pre-commit quality protocol | Before any git commit |
-| [Release](./release) | Role | Prepare releases — versioning, changelogs, migrations, CI/CD | When a step requires release preparation |
-| [Run Validator](./run-validator) | Utility | Validate run file completeness at phase-end checkpoints | At phase-end or run-end checkpoints |
-| [Security](./security) | Role | Audit security vulnerabilities, implement security controls | When a step requires security review or hardening |
+| Agent | Type | Purpose | When Dispatched |
+|-------|------|---------|-----------------|
+| [Gate Fixer](./gate-fixer) | Utility | Fix failing quality gates with minimal changes | When gates fail during pipeline |
+| [Run Validator](./run-validator) | Utility | Validate run files, state.yaml, evidence completeness | At phase-end or run-end checkpoints |
 
 ## How Agents Communicate
 
 Agents do not call each other directly. The communication path is always:
 
-1. The Controller dispatches an agent with a `step_spec`.
-2. The agent reads prior step outputs from the evidence trail (`prior_outputs` in `step_spec.context`).
-3. The agent produces a `step_output` or specialist-specific output format.
-4. The Controller stores the output and uses it to inform subsequent dispatches.
+1. The pipeline dispatches an agent with a task input (step objective, context files, allowed paths).
+2. The agent reads the `agent-protocol` skill for input/output format.
+3. The agent reads its role card or focus card from `role-cards.md`.
+4. The agent reads prior step outputs from the evidence trail.
+5. The agent produces structured output to `evidence/<epic_id>/<run_id>/steps/`.
+6. The pipeline stores the output and uses it to inform subsequent dispatches.
 
-This design means every inter-agent dependency is explicit and traceable in the evidence trail.
+Every inter-agent dependency is explicit and traceable in the evidence trail.
 
 ## Scope Enforcement
 
-Every agent receives an `allowed_paths` list and a `forbidden_paths` list. Agents are required to:
+Every agent receives an `allowed_paths` list. Agents must:
 
 - Only modify files within `allowed_paths`
-- Never touch files in `forbidden_paths`
-- Report `status: blocked` if the task requires changes outside `allowed_paths`
-
-This prevents agents from making unauthorized changes to unrelated parts of the codebase.
+- Report `result: escalate` if the task requires changes outside allowed paths
+- A second violation triggers FSM transition to ESCALATION state
 
 ## Related
 
 - [Skills Overview](../skills/overview)
-- [Epic Orchestration Skill](../skills/epic-orchestration)
-- [Quality Gates](../skills/quality-gates)
+- [Pipeline Skill](../skills/pipeline)
+- [Role Cards Skill](../skills/role-cards)
+- [Agent Protocol Skill](../skills/agent-protocol)

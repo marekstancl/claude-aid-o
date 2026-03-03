@@ -12,20 +12,25 @@ ai-orchestrator/
     marketplace.json            # Marketplace manifest
   plugins/aid-orchestrator/     # The plugin
     .claude-plugin/plugin.json  # Plugin manifest
-    agents/                     # 18 specialized agents
-    commands/                   # 14 slash commands (verify: ls commands/*.md | wc -l)
-    skills/                     # 27 skills (verify: ls skills/*.md | wc -l)
-    scripts/                    # Pipeline scripts for deterministic plan-to-EPIC transformations
-      aid-auto-pipeline.sh      # Master orchestration script (Plan → EPICs → plan.json → run → queue)
+    agents/                     # 7 controller agents
+    commands/                   # 8 slash commands
+    skills/                     # 8 core skills (+ extras outside manifest)
+    scripts/                    # Bash controller layer
+      aid-fsm.sh                # 6-state deterministic FSM
+      aid-run-gates.sh          # Quality gate runner
+      aid-release.sh            # Version bump + tag automation
+      aid-auto-pipeline.sh      # Master orchestration (Plan → EPICs → plan.json → run → queue)
       aid-plan-to-epic.sh       # Plan.md → EPIC.md
-      aid-epic-to-json.sh       # EPIC.md → plan.json + plan_progress.json
+      aid-epic-to-json.sh       # EPIC.md → plan.json
       aid-json-to-run.sh        # plan.json → run.md
-      aid-queue-add.sh          # EPIC → epic-queue.yaml entry
-      lib/common.sh             # Shared bash functions
+      aid-queue-add.sh          # EPIC → queue entry
+      lib/                      # aid-stage-log.sh, aid-token-count.sh, common.sh
+      gates/scope-check.sh      # Scope validation gate
     defaults/                   # Files copied by /aid-init into target projects
-      policies/                 # gates.yaml, decision-policies.yaml, slack-config.yaml, memory-config.yaml
-      templates/                # plan.md, epic.md, plan.schema.json, run-*.md
-      playbooks/                # 11 role-based playbooks
+      execution.yaml            # Gates + dispatch config
+      orchestration.yaml        # Controller settings
+      integrations.yaml         # External service config
+      templates/                # plan.md, epic.md, plan.schema.json
     README.md                   # Plugin documentation
   CHANGELOG.md                  # Version history
 ```
@@ -59,14 +64,14 @@ When users run `/aid-init`, it creates:
 
 | Command | Purpose |
 |---------|---------|
-| `/aid-init` | Initialize or upgrade .aid-o/ workspace |
-| `/aid-setup` | Interactive project onboarding |
-| `/aid-help` | Show AID documentation |
-| `/aid-plan-epic` | Parse Plan → EPICs, Plan JSON, run files, queue entries (script-based pipeline) |
-| `/aid-run-epic` | Run full EPIC orchestration pipeline |
-| `/aid-epic-status` | Show pipeline status |
-| `/aid-epic-queue` | Manage EPIC execution queue |
+| `/aid-do [task]` | Fast Mode — implement small task with < 2 min overhead |
+| `/aid-plan [topic]` | Brainstorm → architecture → plan.json |
+| `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE |
+| `/aid-status [id]` | Pipeline status, FSM state, queue |
+| `/aid-init` | Initialize or upgrade .aid-o/ workspace (10-file structure) |
 | `/aid-audit` | Run project health audit |
+| `/aid-stop` | Emergency stop — save progress |
+| `/aid-help [topic]` | Progressive help (Level 0–3) |
 
 ## Contributing
 
@@ -192,15 +197,16 @@ The force-refresh command resets the cached clone to match the remote.
 <!-- AID-O START -->
 ## AID Orchestrator
 
-This project uses AID for multi-agent orchestration.
+This project uses AID v2.0 for multi-agent orchestration.
 
 **Workspace:** `.aid-o/`
 **Commands:** `/aid-help` for full documentation
-**Quick start:** `/aid-setup` → create EPIC → `/aid-run-epic`
+**Quick start:** `/aid-init` → `/aid-plan "topic"` → `/aid-run`
+**Fast mode:** `/aid-do "small task"` (< 2 min overhead)
 
 **Key paths:**
 - Plans: `.aid-o/01-plans/`
-- EPICs: `.aid-o/02-epics/`
-- Config: `.aid-o/03-config/`
-- Engine: `.aid-o/04-engine/`
+- Tasks: `.aid-o/tasks/`
+- Config: `.aid-o/config/`
+- Work: `.aid-o/work/`
 <!-- AID-O END -->

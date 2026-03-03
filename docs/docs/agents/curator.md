@@ -1,77 +1,64 @@
 ---
-sidebar_position: 6
+sidebar_position: 5
 title: "Curator Agent"
-description: "Collect improvement observations from agents, deduplicate against backlog, and propose actionable improvements."
+description: "Collects improvement observations, deduplicates against backlog, proposes improvements, and extracts lessons learned."
 ---
 
 # Curator Agent
 
-The Curator agent runs once after all steps complete and quality gates pass, during the CURATOR_RESOLVE state. It collects improvement observations recorded by worker agents throughout the run, deduplicates them against the existing backlog, analyzes patterns across observations, and produces formal improvement proposals for the Orchestrator to evaluate.
+The Curator agent runs once after all steps complete and quality gates pass. It collects improvement observations from worker agents, deduplicates them against the existing backlog, analyzes patterns, generates formal improvement proposals, and extracts reusable lessons from the completed run.
+
+In v2, the Curator merges the responsibilities of the former Curator and Lessons Extractor agents into a single post-run specialist.
 
 ## Role
 
-The Curator is a **specialist agent**, not a role agent. It does not execute plan steps and does not communicate directly with the PM. All of its proposals route through the Orchestrator, which auto-evaluates them using rules from `decision-policies.yaml` before any reach the PM.
+The Curator is a **specialist agent**. It does not execute plan steps and does not communicate directly with the PM. All proposals route through the pipeline, which auto-evaluates them using rules from `decision-policies.yaml`.
 
 ## When Dispatched
 
 - During CURATOR_RESOLVE state, after all EPIC steps complete and quality gates pass
-- Runs before PM_APPROVAL, in parallel with the Lessons Extractor agent
-- Triggered by the `epic-orchestration` skill
+- Runs before PM_APPROVAL
+- Triggered by the pipeline (see [Pipeline](../skills/pipeline))
 
 ## Capabilities
 
-### Collection
+### Phase 1: Collect Improvement Notes
+Reads all step outputs from `evidence/<epic_id>/<run_id>/steps/*/output.md`, extracts `improvement_notes` sections, and merges into a flat list with source agent and step metadata.
 
-Reads all `improvement_notes` arrays from every step output file at `evidence/{epic_id}/{run_id}/steps/*/step_output.json`. Merges them into a single flat list, tagging each note with its source agent and step.
+### Phase 2: Deduplicate Against Backlog
+Compares each note against `.aid-o/work/backlog.md`:
+- **Exact match** (same type + area + >80% overlap): adds source to existing entry
+- **Similar** (same area + related type): merges, keeps more specific suggestion
+- **New**: adds to pending queue for proposal generation
 
-### Deduplication
+### Phase 3: Pattern Analysis
+- **Hotspot:** 3+ notes on same area
+- **Cross-agent consensus:** multiple distinct roles report same issue (higher weight)
+- **Persistent:** same note across 2+ runs unresolved
 
-Compares each collected note against `.aid-o/04-engine/backlog.md`:
-- **Exact match** (same type + area + >80% observation overlap): adds the source to the existing entry, does not create a duplicate
-- **Similar match** (same area + related type): merges observations, keeps the more specific suggestion
-- **New**: adds to the pending queue for proposal generation
+### Phase 4: Generate Proposals
+Formal proposals for notes with priority `high`, 3+ sources, `security` medium+, or persistent 2+ runs. Each includes title, rationale, proposed action, effort (S/M/L), and category.
 
-### Pattern Analysis
+### Phase 5: Pre-Flight Status Update
+Status updates BEFORE implementation: write `status: implementing` to backlog.md, dispatch fix agent, update to `implemented` or `deferred: fix failed`.
 
-- **Hotspot detection:** three or more notes targeting the same area flag it as a hotspot
-- **Cross-agent consensus:** when multiple distinct agent roles report the same issue, the signal is weighted higher than one agent reporting it multiple times
-- **Persistent issues:** notes that appeared in a previous run and remain unresolved are flagged as persistent
+### Phase 6: Auto-Evaluate (2-Tier)
+- Tier 1: YAML rules from `decision-policies.yaml`
+- Tier 2: Default — effort S: approve, effort M/L: defer (PM decides)
 
-### Priority Escalation
-
-- Three or more agents reporting the same area + type → escalate to `high`
-- `security` type at any priority → minimum `medium`
-- Same note persisting across two or more runs → escalate one level
-- Note matching a `lessons-learned.md` pattern → flagged as "recurring — needs systemic fix"
-
-Priority can only go up, never down.
-
-### Proposal Generation
-
-Generates a formal proposal for each note that is: priority `high`, reported by three or more independent sources, `security` type at medium/high, or persistent across two or more runs without resolution. Each proposal includes a title, rationale citing agent evidence, proposed action, effort estimate, and cost/benefit analysis.
-
-### Backlog Management
-
-Updates `.aid-o/04-engine/backlog.md` with new entries assigned sequential `IMP-NNN` IDs (for example, `IMP-001`, `IMP-002`). Never deletes entries — they only change status. Proposals are written to the correct category section: Bugs, Features, Refactoring/Tech Debt, or Performance.
-
-## Tools Available
-
-Read access to all `evidence/{epic_id}/{run_id}/steps/*/step_output.json` files. Read/write access to `.aid-o/04-engine/backlog.md` and `.aid-o/04-engine/lessons-learned.md`. Optionally stores proposals in Qdrant for cross-project pattern detection (silently skipped if Qdrant is unavailable).
+### Phase 7: Lessons Extraction
+Extract reusable commands and insights not already in `command-history.md` or `lessons-learned.md`. Each item gets `dedup_status`: NEW, DUPLICATE, or CROSS_PROJECT.
 
 ## Key Behaviors
 
-- **Never modifies source code.** Analyzes and proposes only.
-- **Never communicates directly with the PM.** Always routes through the Orchestrator.
-- **Preserves backlog history.** Entries are never deleted, only status-changed.
-- **IMP-NNN IDs are sequential and never reused**, even for rejected or implemented proposals.
-- **Deduplication threshold is >80% observation overlap.** Below 80% is treated as a separate issue.
-- The Orchestrator auto-evaluates proposals using a 3-tier algorithm: explicit YAML rules → Qdrant past-decision similarity → default action.
-- Approved proposals may be fixed immediately within the same EPIC by dispatching fix agents during CURATOR_RESOLVE.
-- At PM_APPROVAL, the PM sees a compact Curator summary and can override rejected proposals or teach new auto-rules.
+- **Never modifies source code.** Analyze and propose only.
+- **Never communicates with PM.** Routes through pipeline.
+- **Preserves backlog history.** Never deletes entries, only status changes.
+- **Sequential IMP-NNN IDs** never reused.
+- **Model:** sonnet
 
 ## Related
 
 - [Auditor Agent](./auditor)
-- [Lessons Extractor Agent](./lessons-extractor)
-- [Improvement Proposals Skill](../skills/improvement-proposals)
-- [Epic Orchestration Skill](../skills/epic-orchestration)
+- [Pipeline Skill](../skills/pipeline)
+- [Memory Skill](../skills/memory)

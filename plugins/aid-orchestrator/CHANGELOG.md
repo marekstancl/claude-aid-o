@@ -3,6 +3,44 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.0.0] — 2026-03-03
+
+### Breaking Changes
+- **11-state LLM FSM → 6-state bash FSM** — States reduced from IDLE/PLANNING/PLAN_REVIEW/EXECUTING/PHASE_CHECK/NEXT_PHASE/GATES/GATE_RETRY/ESCALATION/CURATOR_RESOLVE/PM_APPROVAL/DONE to READY/EXECUTE/GATES/ESCALATION/DONE/ERROR. State transitions enforced by `aid-fsm.sh`, not LLM instructions.
+- **27 skills → 8 skills** — Consolidated from 27 cross-referencing skills to 8 focused skills (agent-protocol, pipeline, planner, brainstorming, quality-gates, run-management, memory, role-cards). Removed: epic-orchestration, dispatch-protocol, gates-engine, retry-engine, first-aid-controller, auto-escalation, auto-done-state, parallel-dispatch, cost-optimization, epic-queue, slack-mcp, workflow-intelligence, and 15 others.
+- **18 agents → 7 agents** — Consolidated from 18 role-based agents to 7 controller agents (implementer, verifier, gate-fixer, curator, auditor, project-scanner, run-validator). Removed: architect, backend, frontend, domain, qa, security, observability, docs-writer, release, code-reviewer, docs-reviewer, lessons-extractor, quality-gates-runner.
+- **17 commands → 8 commands** — New unified commands: `/aid-do`, `/aid-plan`, `/aid-run`, `/aid-status`, `/aid-help`, `/aid-init`, `/aid-audit`, `/aid-stop`. Removed: `/aid-brainstorm`, `/aid-plan-epic`, `/aid-run-epic`, `/aid-first-aid`, `/aid-setup`, `/aid-epic-queue`, `/aid-epic-status`, `/aid-research`, and 9 others.
+- **Directory structure** — `.aid-o/04-engine/` → `.aid-o/work/`, `.aid-o/02-epics/` → `.aid-o/tasks/`, `.aid-o/03-config/` → `.aid-o/config/`. Init creates 10 files (down from 40+).
+- **10 policy YAMLs → 3** — `execution.yaml` (gates + dispatch), `project.yaml` (stack + preferences), `permissions.yaml` (agent permissions). Removed: decision-policies.yaml, dispatch-strategy.yaml, gates.yaml, memory-config.yaml, slack-config.yaml, and 5 others.
+
+### Added
+- **Fast Mode (`/aid-do`)** — < 2 min overhead for tasks < 2h. Creates Q-NNN.md quick log, skips full EPIC pipeline. Automatic scope detection.
+- **Bash FSM (`aid-fsm.sh`)** — Deterministic 6-state finite state machine. States: READY → EXECUTE → GATES → DONE (happy path), with ESCALATION and ERROR branches. All transitions validated in bash, not LLM.
+- **Bash gate runner (`aid-run-gates.sh`)** — Deterministic quality gate execution with JSON output, timeout handling, retry logic. Replaces LLM-manual gate evaluation.
+- **Pipeline automation scripts** — `aid-auto-pipeline.sh` (orchestrator), `aid-plan-to-epic.sh`, `aid-epic-to-json.sh`, `aid-json-to-run.sh`, `aid-queue-add.sh`. All deterministic operations moved from LLM to bash.
+- **Stage logging (`aid-stage-log.sh`)** — Structured timeline.jsonl event logging with standardized format across all pipeline operations.
+- **Token estimator (`aid-token-count.sh`)** — Character-based token estimation for prose/code/mixed content types.
+- **`@aid/contract` package** — Shared TypeScript types for all `.aid-o/` data formats (AidFsmState, AidState, AidGatesReport, AidTimeline, etc.).
+- **Progressive help (`/aid-help`)** — 4-level disclosure: Level 0 (cheat sheet), Level 1 (command detail), Level 2 (architecture), Level 3 (troubleshooting).
+- **Scope check gate** — `scripts/gates/scope-check.sh` verifies implementation stays within EPIC-defined file scope.
+- **173 tests across 13 suites** — Up from 88 tests / 6 suites in v1.7.0. Full coverage of FSM, gates, pipeline, stage logging, token counting, scope checking.
+
+### Changed
+- **~87% token reduction** — Plugin prompt tokens reduced from ~400K to ~50K by consolidating skills/agents/commands and moving deterministic logic to bash scripts.
+- **`/aid-plan` merges 3 old commands** — Replaces `/aid-brainstorm` + `/aid-write-plan` + `/aid-plan-epic` into single progressive workflow.
+- **`/aid-run` merges 2 old commands** — Replaces `/aid-run-epic` + `/aid-first-aid` with unified command supporting `--auto` flag.
+- **`/aid-status` merges 2 old commands** — Replaces `/aid-epic-status` + `/aid-epic-queue` with combined view.
+- **`/aid-init` merges `/aid-setup`** — Single idempotent init command creating 10-file `.aid-o/` structure with stack auto-detection.
+- **Role cards consolidated** — All agent role definitions in single `role-cards.md` (8 roles + 4 focus cards) instead of 18 separate agent files.
+- **Pipeline skill consolidated** — Single `pipeline.md` replaces 14 old orchestration skills, documenting all 6 FSM states.
+- **Evidence paths** — `stage_log.jsonl` → `timeline.jsonl`, `plan_progress.json` → `state.yaml`.
+- **aid-server paths** — Updated all Express routes and WebSocket handlers for v2 `.aid-o/` structure.
+
+# Changelog
+
+All notable changes to the AID Orchestrator plugin are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/).
+
 ## [1.7.0] — 2026-02-28
 
 ### Added

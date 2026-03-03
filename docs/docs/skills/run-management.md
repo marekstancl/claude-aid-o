@@ -1,96 +1,109 @@
 ---
-sidebar_position: 20
+sidebar_position: 4
 title: "Run Management"
-description: "Defines the document hierarchy (plan, epic, run), run file lifecycle protocols, ID system, and the mandatory transitions for brainstorming-end, phase-end, and run-end."
+description: "Run lifecycle, ID generation, document hierarchy (Plan/Task/Quick), evidence structure, and workspace file protocols."
 ---
 
 # Run Management
 
-The run management skill defines how AID tracks work within a single run: what a run file is, when to create one, how it evolves with the code, and the mandatory lifecycle protocols at each transition point. It also defines the document hierarchy that distinguishes plans, epics, and runs, and the ID system that connects them.
+The run management skill defines how AID tracks work: what a run file is, when to create one, how it evolves, and the mandatory lifecycle protocols at each transition point. It also defines the document hierarchy (Plan/Task/Quick) and the ID system.
 
-## Purpose
+## Document Hierarchy
 
-Without a run file, work is unrecoverable after a context reset: there is no record of what was decided, what changed, where things were left off, or what to do next. The run file is the living document of a run — not a static template but an evolving record of decisions, phases, commits, and outcomes. It is what makes handoffs possible and continuations coherent.
+Three levels, no overlap:
 
-## When Used
+| Document | Purpose | Location |
+|----------|---------|----------|
+| **Plan** | Forming ideas, rough approach | `.aid-o/plans/` |
+| **Task** | Complex work (3+ runs), breakdown | `.aid-o/tasks/` |
+| **Quick** | Single-conversation fast work | Q-NNN.md (FAST MODE) |
+| **Run** | Detailed work plan for one run | `.aid-o/work/tasks/` |
 
-- Created at the start of every non-trivial run (multi-file, multi-phase work)
-- Updated after every commit and at every phase-end
-- Read at the start of every continuation run
-- Archived at run completion
-- Referenced by `agent-core` (Run Start Protocol reads active-work.md which links to the current run file)
+Never mix locations. The directory IS the document type.
 
-## Key Concepts
+## ID System
 
-### Document Hierarchy
-
-Plans, EPICs, and runs serve distinct purposes. Using the wrong document type in the wrong location is a hard error:
-
-| Document | Purpose | Location | Lifecycle |
-|---|---|---|---|
-| **Plan** | Forming ideas, rough approach | `.aid-o/01-plans/` | Static — written once, referenced |
-| **Epic** | Complex task specification, breakdown into runs | `.aid-o/02-epics/` | Updated after each run (progress, decisions) |
-| **Run** | Detailed work plan for a single run | `.aid-o/04-engine/runs/` | Actively evolves with the code |
-
-Never store a run file in `.aid-o/`, never put an EPIC in plans/, never put a plan in epics/. The directory is the document type.
-
-### Run File as a Living Document
-
-The run file starts as a plan and ends as a record:
-- **At start**: describes what will be done (based on EPIC or plan + previous run state)
-- **During work**: gets updated as phases complete, decisions are made, commits are recorded
-- **At end**: captures what actually happened (may differ from the plan) — this is its most important value
-- **After archival**: serves as context for the next run in the same EPIC
-
-### ID System
-
-All IDs are sequential, derived from `.aid-o/03-config/counter.yaml`:
+Sequential IDs from `.aid-o/config/counter.yaml`:
 
 | Document | Format | Example |
-|---|---|---|
-| Plan | `P{NNN}` | `P005` |
+|----------|--------|---------|
+| Plan | `P{NNN}` | `P001` |
 | EPIC from plan | `E-{NNN}-{phase}_{total}` | `E-005-1_4` |
 | Ad-hoc EPIC | `E-{NNN}` | `E-001` |
 | Run | `R-{EPIC_ID}-{run_number}` | `R-005-1_4-1` |
 
-Run file names encode their ID and topic: `R-005-1_4-1-gui-foundation.md`. Branch names match: `run/R-005-1_4-1-gui-foundation`.
+Run file names encode ID and topic: `R-005-1_4-1-gui-foundation.md`. Branch: `run/R-005-1_4-1-gui-foundation`.
 
-### Lifecycle Protocols
+## Run Lifecycle
 
-**Brainstorming-End**: present a session summary and ask PM "Plan or Run?" — use the design as reference for a single run, or execute as an EPIC?
+### Phase 1: Initialization
+1. Read `active.md`, `command-history.md`, `lessons-learned.md`
+2. Read `project.yaml` (if missing or >7 days old, run `/aid-init`)
+3. New run: assess complexity, generate ID, create run file from template, get PM approval, create branch
+4. Continuation: load run file, review last phase, announce next steps
 
-**Run-Start**: create run file using the appropriate template, describe the planned work, get PM approval, then create the branch. Never create a branch before PM approval.
+### Phase 2: Work Loop
+```
+Loop:
+  1. Announce phase start
+  2. Implement + self-test
+  3. PHASE-END CHECKPOINT (HARD STOP)
+  4. PM GO -> quality gates -> commit -> next phase
+  5. PM STOP -> handoff
+```
 
-**Phase-End** (hard stop): summarize what was accomplished in this phase, update the run file and active-work.md, check context window size, and wait for PM GO before proceeding. Never continue to the next phase without PM acknowledgment.
+**PHASE-END is a HARD STOP.** Before continuing: update run file, update active.md, write summary, propose QA steps if testable, check context window, STOP and ask PM. Do NOT continue without PM GO.
 
-**Run-End**: run documentation impact analysis per the project's docs platform playbook, update workspace files (command-history.md, lessons-learned.md, backlog.md), make the final commit, get PM approval for PR/merge, and archive the run file to `runs/archive/`.
+### Phase 3: Run-End
+1. Final quality gates
+2. Update project documentation (mandatory impact analysis)
+3. Update workspace files (command-history, lessons-learned, backlog)
+4. Present completion options to PM
+5. Archive run file to `runs/archive/`
 
-### Workspace Files
+### Phase 4: Handoff (Optional)
+When work is paused mid-implementation. Handoff block includes: completed tasks with commits, current progress, next steps, decisions made, key locations, how to test, branch info.
 
-At run-end, the agent updates:
-- `command-history.md` — new working commands discovered this run
-- `lessons-learned.md` — new gotchas, debugging insights, best practices
-- `active-work.md` — current focus, recent work, next steps (for the next run's context)
-- `backlog.md` — any issues discovered but not fixed this run
+## Run Closure (DONE State)
 
-## How It Works
+1. Write `state.yaml`: `state: DONE`
+2. Append to `timeline.jsonl`
+3. Run [Curator](../agents/curator) agent (post-gate hook)
+4. Write lessons to `backlog.md`
+5. Archive task file to `.aid-o/tasks/archive/`
+6. Update `active.md`
 
-Every run starts with reading active-work.md (the authoritative current state), command-history.md, and lessons-learned.md. If a current run file is referenced in active-work.md, load it — this is a continuation.
+## Workspace Files
 
-For a new run: determine complexity (trivial = TodoList only, standard = run file + branch, complex = suggest EPIC). Create the run file from a template in `.aid-o/03-config/templates/`. Get PM approval. Create the branch.
+Updated at run-end:
+- `command-history.md` -- new working commands
+- `lessons-learned.md` -- new insights
+- `active.md` -- current focus, recent work, next steps
+- `backlog.md` -- issues discovered but not fixed
 
-Work proceeds in phases. Each phase ends with the phase-end protocol. After the final phase, the run-end protocol runs. The run file is archived to `runs/archive/` after the PR is merged or the work is otherwise complete.
+## v2 Workspace Layout
 
-## Configuration
-
-Run templates are in `.aid-o/03-config/templates/`. The project profile at `.aid-o/04-engine/memory/project-profile.yaml` provides:
-- `project.paths.runs_completed` — archive destination
-- `project.paths.run_log` — run log file to update at completion
-- `project.docs.platform` — determines which docs playbook to load at run-end
+```
+.aid-o/
+  plans/           # Plans (archive/)
+  tasks/           # Task specs / EPICs (archive/)
+  config/          # PM config: policies/, templates/, playbooks/
+    project.yaml   # From /aid-init
+    counter.yaml   # ID counters
+  work/            # AI workspace
+    tasks/         # Active run files (archive/)
+    active.md
+    backlog.md
+    lessons-learned.md
+    command-history.md
+    evidence/      # EPIC execution evidence
+    timeline.jsonl
+    state.yaml
+```
 
 ## Related
 
-- [Agent Core](../skills/agent-core)
-- [Epic Orchestration](../skills/epic-orchestration)
-- [Quality Gates](../skills/quality-gates)
-- [Brainstorming](../skills/brainstorming)
+- [Agent Protocol](./agent-protocol) -- output format for evidence
+- [Pipeline](./pipeline) -- FSM states and transitions
+- [Quality Gates](./quality-gates) -- pre-commit checks
+- [Memory](./memory) -- context loading

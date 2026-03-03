@@ -152,7 +152,7 @@ sequenceDiagram
 
 ## Diagram 7: Evidence Trail Structure
 
-*(Phase 1, Step 4)* — Two evidence paths: FAST MODE uses `quick/Q-NNN.md`, EPIC MODE uses full `evidence/{epic_id}/{run_id}/` directory with JSONL timeline and per-step outputs.
+*(Phase 1, Step 4)* — Two evidence paths: FAST MODE uses `quick/Q-NNN.md`, EPIC MODE uses full `evidence/<epic_id>/<run_id>/` directory with JSONL timeline and per-step outputs.
 
 ```mermaid
 graph LR

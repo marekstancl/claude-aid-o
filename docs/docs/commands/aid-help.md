@@ -1,69 +1,130 @@
 ---
-sidebar_position: 7
+sidebar_position: 8
 title: "/aid-help"
-description: "Show AID documentation and help topics"
+description: "Progressive disclosure help — Level 0 (cheat sheet) through Level 3 (architecture deep-dive)"
 ---
 
 # /aid-help
 
-Show AID documentation — commands, workflow, agent roles, configuration options, and FAQ. This is AID's self-knowledge command: it explains how the entire system works without requiring you to read the source files.
+Show AID documentation with progressive disclosure -- new users see 3 commands, power users see everything. Help level is auto-detected from workspace state.
 
 ## Usage
 
 ```bash
-/aid-help [topic]
+/aid-help               # Show your level (auto-detected from usage history)
+/aid-help <topic>       # Jump to topic: do, run, plan, status, gates, config, fsm
 ```
 
-## Parameters
+### Examples
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `topic` | string | No | Specific topic to display. If omitted, shows a full overview. |
+```bash
+# Auto-detected level overview
+/aid-help
 
-## Available Topics
+# Deep dive into /aid-run
+/aid-help run
+
+# Quality gates reference
+/aid-help gates
+
+# Configuration files reference
+/aid-help config
+
+# 6-state FSM diagram and transitions
+/aid-help fsm
+```
+
+## Progressive Disclosure Levels
+
+Help level is auto-detected from workspace state:
+
+| Condition | Level | What You See |
+|-----------|-------|-------------|
+| No `.aid-o/` or 0 completed tasks | **Level 0: Getting Started** | 3 commands: `/aid-do`, `/aid-run`, `/aid-status` |
+| 1--4 completed tasks (Q-NNN + done EPICs) | **Level 1: Working with Tasks** | Queue management + planning modes |
+| 5+ completed tasks | **Level 2: Configuration** | Gates, project profile, permissions |
+| Custom gates configured OR `autonomous_mode: true` | **Level 3: Power User** | FSM debugging, token monitoring, analytics |
+
+Completed task count is derived from:
+- Quick logs: files in `.aid-o/work/quick/Q-*.md`
+- Task runs: `state: DONE` in `.aid-o/work/evidence/*/*/state.yaml`
+
+All levels up to and including the detected level are shown.
+
+### Level 0: Getting Started
+
+```text
+AID Orchestrator — Getting Started
+====================================
+
+Commands you need:
+  /aid-do "task"    → Implement in < 2 min. No planning overhead.
+  /aid-run          → Full pipeline. For complex multi-step work.
+  /aid-status       → See what's running or queued.
+
+Start here: /aid-do "your first task"
+Need planning first? /aid-plan
+```
+
+### Level 1: Working with Tasks
+
+```text
+Queue management:
+  /aid-status queue add .aid-o/tasks/E-001.md   → queue task
+  /aid-status queue pause | resume               → control auto-pickup
+
+Planning:
+  /aid-plan                → brainstorm + write plan (auto-detect)
+  /aid-plan write spec.md  → write plan from spec file
+  /aid-plan epic plan.md   → generate EPICs from plan
+```
+
+### Level 2: Configuration
+
+```text
+Gates: edit .aid-o/config/execution.yaml → customize test/lint/build commands
+Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
+Permissions: .aid-o/config/permissions.yaml → autonomous_mode: true for /aid-run --auto
+
+Audit: /aid-audit → project health score (0-100) with recommendations
+```
+
+### Level 3: Power User
+
+```text
+FSM debugging:
+  /aid-status <task-id>                    → shows state.yaml FSM state
+  cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
+
+Token monitoring:
+  bash scripts/aid-token-count.sh plugins/aid-orchestrator/skills/*.md
+  → shows token count per file (target: total < 50K)
+
+Emergency: /aid-stop → halt running task and enter ESCALATION state
+```
+
+## Help Topics
+
+Detailed reference for specific areas, accessed via `/aid-help <topic>`:
 
 | Topic | What It Covers |
 |-------|---------------|
-| `commands` | Detail on every command |
-| `workflow` | Plan → EPIC → Run flow |
-| `epic` | How to write an EPIC |
-| `agents` | 18 agent roles and specialists |
-| `planning` | Planner, parallelization, analysis groups |
-| `gates` | Quality gates and retry logic |
-| `evidence` | Evidence store structure |
-| `config` | Configuration files |
-| `slack` | Slack integration and PM communication |
-| `queue` | EPIC queue and autonomous pipeline |
-| `memory` | Qdrant vector memory and semantic search |
-| `analytics` | Performance analysis of orchestration metrics |
-| `inputs` | Input files for brainstorming |
-| `examples` | Interactive project prompts to try `/aid-brainstorm` |
-| `faq` | Frequently asked questions |
+| `do` | Scope detection, escalation triggers, quick log format |
+| `run` | 6-state FSM, PRE-FLIGHT pipeline, `--auto` mode |
+| `plan` | Brainstorm, write, epic modes and auto-detection |
+| `status` | Overview, task detail, queue management |
+| `gates` | Gate types, `execution.yaml` configuration, retry logic |
+| `config` | `project.yaml`, `execution.yaml`, `permissions.yaml` reference |
+| `fsm` | 6-state FSM diagram, valid transitions, `state.yaml` format |
 
-## Examples
+## Key Behaviors
 
-```bash
-# Full overview of everything
-/aid-help
+- **Progressive disclosure** -- shows only relevant levels, avoids overwhelming new users
+- **Level 0 = 3 commands** -- `/aid-do`, `/aid-run`, `/aid-status` (all a beginner needs)
+- **All commands referenced exist** -- never references deleted v1 commands
+- **Topics are deep dives** -- shown when PM asks `/aid-help <topic>`
 
-# How the Plan → EPIC → Run workflow works
-/aid-help workflow
+## Related Commands
 
-# Details on all 18 agent roles
-/aid-help agents
-
-# How quality gates and retries work
-/aid-help gates
-
-# FAQ
-/aid-help faq
-```
-
-## How It Works
-
-The command checks whether a `.aid-o/` workspace exists in the current project, then presents the requested topic as formatted text in chat. If the workspace is initialized, it includes live counts of active EPICs and recent runs in the overview.
-
-## Related
-
-- [`/aid-setup`](./aid-setup) — interactive onboarding for new projects
-- [`/aid-init`](./aid-init) — initialize the `.aid-o/` workspace
+- [`/aid-init`](./aid-init) -- initialize workspace (if Level 0 detected)
+- [`/aid-do`](./aid-do) -- the first command new users should try

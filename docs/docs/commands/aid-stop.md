@@ -1,14 +1,12 @@
 ---
-sidebar_position: 13
+sidebar_position: 7
 title: "/aid-stop"
-description: "Emergency stop — disengage FIRST AID auto-mode immediately"
+description: "Emergency stop — halt execution, save progress, restore state"
 ---
 
 # /aid-stop
 
-Immediately disengage FIRST AID autonomous orchestration mode. This is the emergency stop for auto-mode — it halts autonomous execution, restores original permissions, saves progress, and returns control to you.
-
-The command is designed to be **fast and non-blocking**: every step is resilient to partial failures. The goal is always to return to manual mode, even if some cleanup steps encounter errors.
+Emergency stop for running tasks. Halts autonomous execution, saves progress for later resume, and returns control to the PM. Designed to be **fast and non-blocking** -- every step is resilient to partial failures.
 
 ## Usage
 
@@ -18,69 +16,71 @@ The command is designed to be **fast and non-blocking**: every step is resilient
 
 No arguments. No confirmation prompt. Immediate execution.
 
-## Prerequisites
+## What It Does
 
-- FIRST AID auto-mode must be active (started with [`/aid-first-aid`](./aid-first-aid))
-- State file: `.aid-o/04-engine/auto-mode-state.yaml`
-- Permission backup: `.aid-o/03-config/permissions-backup.json`
+### Stop Sequence
 
-If auto-mode is not active, the command reports the current mode and exits without modifying any files.
+Each step is independent -- if one fails, the error is logged and the sequence continues. The goal is always to return to manual mode.
 
-## Stop Sequence
-
-The stop sequence always runs to completion, even if individual steps fail:
-
-1. **Verify auto-mode is active** — reads `auto-mode-state.yaml`; exits cleanly if mode is already `manual`
-2. **Set mode to `paused`** — prevents the Controller from dispatching new agents (first write operation)
-3. **Restore permissions** — atomic write of the original `~/.claude/settings.json` from the backup
-4. **Save final progress state** — updates `auto-mode-state.yaml` to `mode: manual` with current progress and `resumable: true`
-5. **Log stop event** — appends to the active EPIC's `stage_log.jsonl`
-6. **Display status message** — shows permissions status, progress summary, and resume options
+1. **Verify active execution** -- reads `.aid-o/work/evidence/{task_id}/{run_id}/state.yaml`. If no task is running, reports "Nothing to stop" and exits without modifying files
+2. **Set mode to paused** -- prevents the controller from dispatching new agents (first write operation)
+3. **Save progress state** -- updates `state.yaml` to `state: ESCALATION` with current step, gate retries, and `resumable: true`
+4. **Log stop event** -- appends to `timeline.jsonl`:
+   ```json
+   {
+     "timestamp": "2026-03-03T10:15:00Z",
+     "state": "AID_STOP",
+     "action": "execution_halted",
+     "trigger": "/aid-stop",
+     "progress": {
+       "current_task": "E-003-1_2",
+       "current_step": "step_3_backend",
+       "steps_executed": 2
+     }
+   }
+   ```
+5. **Display status** -- shows progress summary and resume options
 
 ## Output
 
 ```text
-FIRST AID disengaged.
-━━━━━━━━━━━━━━━━━━━━
+AID stopped.
+====================================
 
 Mode:        manual
-Permissions: restored
 Progress:    saved
 
-  EPIC:  E-005-1_1
-  Step:  step_3_backend (EXECUTING)
-  Done:  1 EPICs, 6 steps
+  Task:  E-003-1_2 — Add Auth System
+  Step:  step_3_backend (EXECUTE)
+  Done:  2/7 steps
 
 Resume options:
-  /aid-first-aid         Resume autonomous mode from saved progress
-  /aid-run-epic E-005-1_1     Continue this EPIC manually (step by step)
-  /aid-epic-status E-005-1_1  Check current EPIC status
+  /aid-run --resume         Resume from saved progress
+  /aid-run E-003-1_2        Continue this task manually
+  /aid-status E-003-1_2     Check current task status
 ```
-
-If permission restore failed, a clear warning is displayed with instructions to fix `~/.claude/settings.json` manually.
 
 ## Important Behaviors
 
-**Running agents are not interrupted.** `/aid-stop` prevents the Controller from dispatching the *next* agent. The currently executing agent completes its step normally — interrupting mid-execution could leave files in an inconsistent state. This is by design.
+**Running agents are not interrupted.** `/aid-stop` prevents the controller from dispatching the *next* agent. The currently executing agent completes its step normally -- interrupting mid-execution could leave files in an inconsistent state. This is by design.
 
-**Progress is always saved.** The session is fully resumable with `/aid-first-aid --resume`.
+**Progress is always saved.** The session is fully resumable with `/aid-run --resume`.
 
-**Queued EPICs are untouched.** Remaining EPICs stay queued and are picked up when you resume.
+**Queued tasks are untouched.** Remaining tasks stay in `.aid-o/config/queue.yaml` and are picked up when you resume.
 
-**Permission restore is the most critical step.** Even if every other step fails, the command attempts permission restore and warns you clearly if it cannot complete it.
+**Progress saving is the most critical step.** Even if everything else fails, the PM should never lose track of where execution left off.
 
 ## Edge Cases
 
 | Situation | Behavior |
 |-----------|----------|
-| Auto-mode not active | Reports "nothing to stop", exits without modifying files |
-| State file corrupted | Attempts permission restore anyway; creates a fresh `manual` state file |
-| Permission backup missing | Logs a warning, displays "Permissions: unchanged (no backup found)" |
-| Currently executing agent | Agent completes normally; no new agents are dispatched after stop |
-| Queue has remaining EPICs | EPICs remain queued; resumed on `/aid-first-aid` |
+| No task running | Reports "Nothing to stop", exits without modifying files |
+| State file corrupted | Creates a fresh state file with `state: ERROR`, preserves evidence |
+| Currently executing agent | Agent completes normally; no new agents dispatched after stop |
+| Queue has remaining tasks | Tasks remain queued; resumed on `/aid-run --resume` |
 
-## Related
+## Related Commands
 
-- [`/aid-first-aid`](./aid-first-aid) — start or resume autonomous mode
-- [`/aid-run-epic`](./aid-run-epic) — continue an EPIC manually after stopping
-- [`/aid-epic-status`](./aid-epic-status) — check EPIC progress after stopping
+- [`/aid-run --resume`](./aid-run) -- resume from saved progress after stopping
+- [`/aid-run`](./aid-run) -- continue a specific task manually after stopping
+- [`/aid-status`](./aid-status) -- check task progress after stopping

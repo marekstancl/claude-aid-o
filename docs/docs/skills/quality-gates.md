@@ -1,91 +1,106 @@
 ---
-sidebar_position: 18
+sidebar_position: 4
 title: "Quality Gates"
-description: "The pre-commit 6-gate protocol that every agent must pass before committing: log analysis, documentation impact, code cleanup, git status, commit message format, and tests."
+description: "Bash-integrated gate reference: 6 quality gates, aid-run-gates.sh execution, per-project configuration."
 ---
 
 # Quality Gates
 
-The quality gates skill defines the six-gate protocol that every AID agent must complete before making a commit. All six gates must pass — if any gate fails, the agent fixes the issue and re-runs all gates from the beginning. This skill applies to individual agents doing single-run work; for post-EPIC step gates, see the [Gates Engine](../skills/gates-engine).
+The quality gates skill defines the 6 gates that run before every EPIC commit. In v2, gates are executed by `aid-run-gates.sh` (bash script), not by the LLM directly. Gate configuration lives in `.aid-o/config/execution.yaml`.
 
-## Purpose
+## When Gates Run
 
-Commits without quality checks accumulate problems that compound over time: broken startup logs that nobody notices, outdated documentation that misleads, debug statements that slip into production, credentials that get accidentally committed. The 6-gate protocol catches all of these before they enter the repository.
-
-The time investment is 3-5 minutes per commit. That is the cost. The benefit is a consistently clean repository where every commit is verifiably safe to merge.
-
-## When Used
-
-- Before every commit that includes code, configuration, refactoring, bug fixes, or features
-- Enforced by the `quality-gates-runner` utility agent
-- Referenced in `agent-core` as Absolute Rule #2
-- The `gates-engine` skill runs a separate, configurable set of gates after EPIC steps complete (different scope)
-
-## Key Concepts
-
-### Gate Ordering
-
-Gates must run in order. If any gate fails, fix the issue and restart from Gate 1:
-
-```text
-Code ready → Gate 1 → Gate 2 → Gate 3 → Gate 4 → Gate 5 → Gate 6 → Commit
-                 ↑_____________if any fails, restart from Gate 1____________|
+```
+Code ready -> FSM: GATES -> aid-run-gates.sh run-all -> ALL PASS -> FSM: DONE
+                                                      -> REQUIRED FAIL -> FSM: ESCALATION
 ```
 
-### Gate 1: Log Analysis and UI Smoke Test (CRITICAL)
+## The 6 Gates
 
-Verify changes do not break runtime and UI renders correctly.
+| Gate | Severity | Required | Max Retries | Purpose |
+|------|----------|----------|-------------|---------|
+| `tests_pass` | CRITICAL | Yes | 2 | Verify no regressions |
+| `lint_pass` | CRITICAL | Yes | 0 | Enforce code style |
+| `build_pass` | CRITICAL | Yes | 1 | Verify project builds |
+| `security_scan` | HIGH | Yes | 2 | Detect vulnerabilities |
+| `docs_updated` | MEDIUM | No | 1 | Keep docs synchronized (advisory) |
+| `scope_check` | HIGH | Yes | 0 | Verify commit matches EPIC scope |
 
-**Backend and frontend log check**: start the frontend dev server and the backend server, watch logs for 30 seconds each. Fail if any new ERRORs appear or the server crashes. Pre-existing known warnings are documented in the run file, not treated as failures.
+### Gate Details
 
-**Playwright UI smoke test** (only for UI changes): navigate to affected pages, check browser console for JavaScript errors, verify key elements are visible in the accessibility snapshot, take a screenshot as visual evidence. Skip for backend-only, config-only, and docs-only changes.
+**tests_pass** -- runs configured test command. Pass: exit 0. Fail: ESCALATION if retries exhausted.
 
-### Gate 2: Documentation Impact Analysis (CRITICAL)
+**lint_pass** -- runs configured lint command. No retry loop (auto-fix formatters run in pre-commit).
 
-Run `git diff --name-only` and for each changed file, determine which documentation is affected:
+**build_pass** -- runs configured build command. One retry allowed.
 
-| Code Change | Usually Affects |
-|---|---|
-| Database models | ERD, schema docs |
-| API endpoints | API docs, integration guides |
-| Core business logic | System overview, architecture |
-| UI components | Component docs, UI guide |
-| Any `feat:` or `fix:` commit | CHANGELOG.md |
-| Breaking changes | Migration guide |
+**security_scan** -- runs `npm audit` / `bandit` or configured scanner. Detects high/critical vulnerabilities.
 
-Update all affected documentation and stage the changes. If uncertain which docs need updating, escalate to PM with the list of changed files — do not guess.
+**docs_updated** -- advisory gate. Failure logged as WARNING, does not block DONE state.
 
-### Gate 3: Code Cleanup (HIGH)
+**scope_check** -- runs `scripts/gates/scope-check.sh`. Compares `git diff --cached --name-only` against EPIC scope. Deterministic result, no retries.
 
-Check for and remove: temporary files (`*.tmp`, `*.bak`), debug statements (`console.log`, `print()`, `debugger`, `pdb.set_trace()`), large commented-out code blocks, TODO/FIXME comments in production code (move to backlog), hardcoded credentials (replace with environment variables), and test data in production code (move to fixtures).
+## Gate Execution
 
-### Gate 4: Git Status Check (HIGH)
+```bash
+# Run all gates
+aid-run-gates.sh run-all .aid-o/config/execution.yaml {epic_id} {run_id}
 
-Review `git status` and `git diff --cached`. Verify that all code files with changes are staged, documentation is staged, and the CHANGELOG and run file are staged if appropriate. Verify that `.env` files, `node_modules/`, `__pycache__/`, `dist/`, and build artifacts are not staged.
+# Run single gate (debugging)
+aid-run-gates.sh run-gate tests_pass .aid-o/config/execution.yaml {epic_id} {run_id}
+```
 
-### Gate 5: Commit Message Format (MEDIUM)
-
-Verify the commit message follows the project format: `type(scope): description (YYYY-MM-DD HH:MM TZ)`. Valid types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`. The description must be specific enough to understand without reading the diff.
-
-### Gate 6: Tests Pass (CRITICAL)
-
-Run the project's test suite and verify all tests pass. If tests were added as part of this change, they must also pass. Use the project's configured test command from `project-profile.yaml`. A test failure at this gate means fixing the implementation or the test, then re-running all gates from Gate 1.
-
-## How It Works
-
-The agent runs each gate sequentially, documenting results in the run file. Any failure stops the sequence: the agent fixes the issue (without committing) and restarts at Gate 1. Only when all six gates pass is the commit allowed.
-
-The `quality-gates-runner` utility agent automates this sequence. It is invoked by the `agent-core` Absolute Rule #2 before every commit during EPIC execution.
+Each gate execution:
+1. Reads gate config from `execution.yaml`
+2. Runs command in subprocess
+3. Captures stdout/stderr + exit code
+4. Appends structured entry to `timeline.jsonl`
+5. Returns pass (exit 0) or fail (exit != 0)
 
 ## Configuration
 
-Gate commands adapt to the project's tech stack using `project-profile.yaml`:
-- Frontend test command: from `project.paths.frontend` and `project.tech_stack`
-- Backend test command: from `project.paths.backend` and `project.tech_stack`
-- Docs build command: from `project.docs.platform` and `project.docs.path`
+Per-project in `.aid-o/config/execution.yaml`:
+
+```yaml
+gates:
+  tests_pass:
+    command: "pytest tests/ -v"
+    required: true
+    max_retries: 2
+  lint_pass:
+    command: "ruff check . && npx eslint src/"
+    required: true
+    max_retries: 0
+  build_pass:
+    command: "npx vite build"
+    required: true
+    max_retries: 1
+  security_scan:
+    command: "npm audit --audit-level=high"
+    required: true
+    max_retries: 2
+  docs_updated:
+    command: "bash scripts/gates/docs-check.sh"
+    required: false
+    max_retries: 1
+  scope_check:
+    command: "bash scripts/gates/scope-check.sh"
+    required: true
+    max_retries: 0
+```
+
+## Integration
+
+| Component | Role |
+|-----------|------|
+| `aid-run-gates.sh` | Gate executor (runs commands, logs results) |
+| `execution.yaml` | Per-project gate config |
+| [Pipeline](./pipeline) GATES state | FSM state definition and transitions |
+| `timeline.jsonl` | Structured gate result log |
+| [Gate Fixer](../agents/gate-fixer) | Fixes gate failures when retries remain |
 
 ## Related
 
-- [Agent Core](../skills/agent-core)
-- [Gates Engine](../skills/gates-engine)
-- [Run Management](../skills/run-management)
+- [Pipeline](./pipeline) -- GATES state (section 5)
+- [Gate Fixer Agent](../agents/gate-fixer)
+- [Run Management](./run-management) -- evidence structure

@@ -1,311 +1,244 @@
 ---
 sidebar_position: 2
 title: "Orchestration Flow"
-description: "The 11-state Controller state machine that drives EPIC execution from start to finish."
+description: "The 6-state bash FSM that drives pipeline execution — states, transitions, and the scripts behind each state."
 ---
 
 # Orchestration Flow
 
-The Controller is implemented as a state machine in `skills/epic-orchestration.md`. Every transition between states is logged to `stage_log.jsonl` and produces evidence files. The machine has 11 states, with 3 additional internal transitions (NEXT_PHASE, ESCALATION, and GATE_RETRY).
+AID v2 uses a 6-state finite state machine implemented in `aid-fsm.sh`. Every transition is validated in bash — invalid transitions are rejected with an error. State is persisted to `state.yaml` and every event is logged to `timeline.jsonl`.
 
 ## State Diagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> IDLE : /aid-run-epic invoked
+    [*] --> READY : /aid-run or /aid-do invoked
 
-    IDLE --> PLANNING : EPIC parsed, branch created
-    PLANNING --> PLAN_REVIEW : Plan JSON generated
-    PLANNING --> ESCALATION : Planning fails
+    READY --> EXECUTE : plan approved or fast-mode start
 
-    PLAN_REVIEW --> EXECUTING : PM approves (GO)
-    PLAN_REVIEW --> PLANNING : PM requests revision
-    PLAN_REVIEW --> DONE : PM aborts
+    EXECUTE --> EXECUTE : next step (increment-step)
+    EXECUTE --> GATES : all steps complete
+    EXECUTE --> ESCALATION : step failure, scope violation
 
-    EXECUTING --> PHASE_CHECK : Step completes
-    PHASE_CHECK --> EXECUTING : More steps remain
-    PHASE_CHECK --> GATES : All steps complete
-    PHASE_CHECK --> ESCALATION : Critical analysis finding
+    GATES --> DONE : all required gates pass
+    GATES --> EXECUTE : gate-fixer applied fix, re-run step
+    GATES --> ESCALATION : required gate fails after max retries
 
-    GATES --> GATE_RETRY : Required gate fails, retries remain
-    GATE_RETRY --> GATES : Retry attempt complete
-    GATES --> ESCALATION : Required gate fails, retries exhausted
-    GATES --> CURATOR_RESOLVE : All required gates pass
-
-    ESCALATION --> EXECUTING : PM fix (re-dispatch)
-    ESCALATION --> GATES : PM fix (retry gate)
-    ESCALATION --> CURATOR_RESOLVE : PM skips gate
-    ESCALATION --> DONE : PM aborts
-
-    CURATOR_RESOLVE --> PM_APPROVAL : Proposals resolved
-    PM_APPROVAL --> DONE : PM approves
-    PM_APPROVAL --> ESCALATION : PM rejects
+    ESCALATION --> EXECUTE : PM provides fix, re-dispatch
+    ESCALATION --> GATES : PM says retry gates
 
     DONE --> [*]
 ```
 
+## Valid Transitions
+
+The FSM enforces a strict transition table. Any transition not in this list is rejected:
+
+| From | To | Trigger |
+|------|----|---------|
+| `READY` | `EXECUTE` | Plan approved (or fast-mode auto-approve) |
+| `EXECUTE` | `EXECUTE` | Next step in plan (self-transition via increment-step) |
+| `EXECUTE` | `GATES` | All plan steps complete |
+| `EXECUTE` | `ESCALATION` | Step fails, scope violation, or agent error |
+| `GATES` | `DONE` | All required gates pass |
+| `GATES` | `EXECUTE` | Gate-fixer modified code, need to re-run affected step |
+| `GATES` | `ESCALATION` | Required gate fails after max retries |
+| `ESCALATION` | `EXECUTE` | PM provides guidance, re-dispatch |
+| `ESCALATION` | `GATES` | PM says retry gates |
+
+There is no `ERROR` terminal state in the FSM itself. Unrecoverable errors are handled by the LLM layer (pipeline skill) which logs the error and presents options to the user. The FSM stays in its last valid state.
+
 ## States
 
-### IDLE
+### READY
 
-**Entry:** `/aid-run-epic <epic-file>` is invoked.
+**Entry:** `/aid-run` or `/aid-do` is invoked.
 
-**Actions:**
-1. Read and validate the EPIC file (must have Goal, Scope, Constraints, DoD, Acceptance Criteria sections).
-2. Read `decision-policies.yaml`, `gates.yaml`, and relevant playbooks.
-3. Probe memory availability: check `memory-config.yaml` and test Qdrant MCP connectivity if memory is enabled. Failures are warnings only — they never block execution.
-4. Search Qdrant for cross-project knowledge relevant to the EPIC goal (if memory is enabled). Top 3 results are passed to the Planner as context.
-5. Create a git branch: `epic/{epic_id}`. If the repository is not initialized, branch management is skipped and a warning is logged.
+**What happens:**
+1. `aid-fsm.sh init` creates `state.yaml` with epic_id, run_id, total_steps, mode, branch, and base_commit.
+2. The pipeline skill reads config files (`execution.yaml`, `orchestration.yaml`).
+3. For Epic Mode: the plan is presented for review (or auto-approved in autonomous mode).
+4. For Fast Mode: plan review is skipped.
 
-**Evidence:** `epic_input.md` copied to evidence directory.
+**Bash script:** `aid-fsm.sh init`
 
-**Exit:** EPIC structure is valid — transition to PLANNING.
+**LLM skill:** `pipeline` (reads plan, prepares dispatch context)
 
----
+**State file after init:**
+```yaml
+epic_id: E-20260303-a1b2
+run_id: R-20260303-001
+state: READY
+current_step: 0
+total_steps: 5
+mode: epic
+branch: epic/E-20260303-a1b2
+base_commit: abc123
+gate_retries: 0
+escalation_count: 0
+started_at: "2026-03-03T10:00:00Z"
+```
 
-### PLANNING
-
-**Entry:** IDLE completes successfully.
-
-**Actions:**
-1. Analyze the EPIC to identify required agent roles and their natural sequence.
-2. Build a dependency graph: which steps depend on prior steps.
-3. Identify parallel execution groups (steps that can run in the same wave because they have no mutual dependency).
-4. Generate Plan JSON conforming to `plan.schema.json`.
-5. Validate the Plan JSON against the schema.
-6. Generate a run file with objective, scope, phases, and quality gates.
-7. Run a run file quality check: objective must be 3+ sentences, scope must list IN and OUT items, each phase must have Goal/Agent/Inputs/Outputs/Constraints/Acceptance.
-
-**Plan generation ordering rules:**
-- Architect always runs first (API contracts before implementation).
-- Domain runs after Architect.
-- Backend and Frontend can run in parallel (both depend on Architect contracts only).
-- QA, Security, and Observability can run in parallel after implementation steps.
-- Docs runs after implementation.
-- Release runs last.
-
-**Evidence:** `plan.json` and run file saved to evidence directory.
-
-**Exit:** Valid Plan JSON produced — transition to PLAN_REVIEW. Planning failure — transition to ESCALATION.
+**Exit:** Transition to EXECUTE.
 
 ---
 
-### PLAN_REVIEW
+### EXECUTE
 
-**Entry:** Plan JSON generated.
+**Entry:** Plan approved, or returning from ESCALATION/GATES with fixes.
 
-**Actions (manual mode):**
-1. Format a rich plan summary showing waves, roles, file counts, dependencies, parallel groups, and optimization metrics.
-2. Send to PM via Slack (if configured) or present in chat.
-3. Wait for PM response: GO, REVISE, or ABORT.
+**What happens:**
+1. `aid-fsm.sh get-field current_step` determines which step to run.
+2. The pipeline skill dispatches the appropriate agent (implementer, verifier, etc.) with the step specification from `plan.json`.
+3. The agent writes code, runs tests, produces output.
+4. `aid-fsm.sh increment-step` advances the step counter.
+5. `aid-stage-log.sh` logs the step completion to `timeline.jsonl`.
+6. If more steps remain: self-transition (EXECUTE to EXECUTE).
+7. If all steps complete: transition to GATES.
 
-**Actions (FIRST AID auto-mode):**
-1. Run automated validations: schema check, completeness check, dependency graph cycle check, run file quality check.
-2. If all pass: auto-approve and transition to EXECUTING.
-3. If any fail: escalate to PM (E11 trigger — cannot proceed with invalid plan).
+**Bash scripts:** `aid-fsm.sh transition EXECUTE EXECUTE`, `aid-fsm.sh increment-step`, `aid-stage-log.sh`
 
-**PM responses:**
-- **GO** — Transition to EXECUTING.
-- **REVISE** — Return to PLANNING with PM feedback.
-- **ABORT** — Transition to DONE with status `aborted`.
+**LLM skill:** `pipeline` (dispatches agents via `agent-protocol`), `role-cards` (agent selection)
 
-**Evidence:** `pm_plan_approval.json` saved.
+**Evidence:** Step outputs in `.aid-o/work/evidence/<epic_id>/<run_id>/`
 
----
-
-### EXECUTING
-
-**Entry:** Plan approved, or PHASE_CHECK advances to next step.
-
-**Actions:**
-1. Read the next step from `plan_progress.json`.
-2. Retrieve relevant memory context from Qdrant (if enabled) for the step objective and agent role.
-3. Dispatch the agent for this step's role with: the step spec, allowed/forbidden paths, memory context, and git branch context.
-4. After the step agent returns: dispatch analysis agents (security, code-reviewer) in parallel if configured for this step.
-5. Wait for all dispatches to complete.
-
-**Agent dispatch includes:**
-- Role playbook from `.aid-o/03-config/playbooks/`
-- Step specification (objective, inputs, outputs, acceptance criteria, allowed_paths, forbidden_paths)
-- Memory context block (from Qdrant search, if enabled)
-- Git context (branch name, commit conventions)
-
-**Evidence:** `stage_log.jsonl` entry per dispatch, step output in `steps/step_N_role/`.
-
-**Exit:** Step completes with expected outputs — transition to PHASE_CHECK.
-
----
-
-### PHASE_CHECK
-
-**Entry:** EXECUTING step completes.
-
-**Actions:**
-1. Validate step outputs against acceptance criteria.
-2. Merge analysis agent results (if applicable): check for conflicts between parallel agent outputs.
-3. Check for critical findings from analysis agents.
-4. In FIRST AID auto-mode: run permission learning (detect PM-granted permissions and persist them).
-5. Apply `decision-policies.yaml` rules to determine next action.
-
-**Decision outcomes:**
-- More steps remain and no critical issues: update `plan_progress.json`, transition back to EXECUTING.
-- All steps complete and no critical issues: transition to GATES.
-- Critical analysis finding: transition to ESCALATION.
-
-**Evidence:** Phase check result appended to `stage_log.jsonl`.
+**Exit:** EXECUTE (next step), GATES (all done), or ESCALATION (failure).
 
 ---
 
 ### GATES
 
-**Entry:** All EPIC steps complete.
+**Entry:** All plan steps complete.
 
-**Actions:**
-1. Read `gates.yaml` from `.aid-o/03-config/policies/`.
-2. Execute gates in order. For each gate:
-   - **Command gates:** run the command via Bash, capture exit code and output.
-   - **Rule gates:** evaluate the logical rule (e.g., check if docs were updated when API changed).
-   - **Conditional gates:** evaluate the `when` condition first; skip if condition is false.
-3. Store raw output for each gate in `evidence/{epic_id}/{run_id}/gates/{gate_name}.txt`.
-4. Generate `gates_report.json` with per-gate results, retry history, and overall pass/fail status.
-5. Determine next action based on results and retry configuration.
+**What happens:**
+1. `aid-run-gates.sh run-all` reads gate definitions from `execution.yaml`.
+2. For each gate with a `command`: execute the command, capture exit code and output.
+3. For each gate with a `rule`: the LLM evaluates the rule (e.g., "docs updated if API changed").
+4. Results are logged to `timeline.jsonl` with gate name, result, exit code, and duration.
+5. If all required gates pass: transition to DONE.
+6. If a required gate fails and retries remain: dispatch `gate-fixer` agent, then retry.
+7. If a required gate fails and retries exhausted: transition to ESCALATION.
 
-**Gate outcome routing:**
-- All required gates pass: transition to CURATOR_RESOLVE.
-- Required gate fails, retries remain: transition to GATE_RETRY.
-- Required gate fails, retries exhausted: transition to ESCALATION.
+**Bash script:** `aid-run-gates.sh run-all`
 
-**Evidence:** `gates_report.json`, individual gate output files.
+**LLM skill:** `quality-gates` (for rule-based gates), `agent-protocol` (dispatches gate-fixer)
 
----
+**Gate output format (JSON per gate):**
+```json
+{
+  "gate": "tests_pass",
+  "result": "pass",
+  "exit_code": 0,
+  "duration_ms": 3200,
+  "output": "45 passed in 3.2s"
+}
+```
 
-### GATE_RETRY
-
-**Entry:** A required gate failed and the retry budget has not been exhausted.
-
-**Actions:**
-1. Generate fix instructions from the gate failure output (delegated to the gate-fixer agent role).
-2. Apply the fix (gate-fixer agent modifies code or config).
-3. Re-execute the failed gate command.
-4. Append the retry attempt to `gates_report.json`.
-
-**Exit:** Return to GATES to evaluate the full gate set again.
+**Exit:** DONE (all pass), EXECUTE (fix applied, re-run), or ESCALATION (retries exhausted).
 
 ---
 
 ### ESCALATION
 
-**Entry:** A failure that requires human judgment occurs.
+**Entry:** A failure that requires human judgment.
 
-**Actions:**
-1. Save progress snapshot to `plan_progress.json`.
-2. Stash uncommitted work: `git stash save "auto-escalation-{trigger_id}"`.
-3. Mark EPIC status as `paused` in `epic-queue.yaml`.
-4. Build structured escalation context with trigger ID, severity, EPIC progress, failure history, and a recommendation.
-5. Send notification to PM via Slack or chat with four options: Fix (A), Skip (B), Abort (C), Continue Manual (D).
-6. Wait for PM response.
+**What happens:**
+1. `aid-fsm.sh get-field escalation_count` is incremented.
+2. The pipeline skill builds a structured escalation message with: trigger, severity, progress, failure history, and a recommendation.
+3. The message is presented to the PM (inline or via Slack if configured).
+4. PM chooses: fix (provide guidance), skip, or abort.
 
-**PM options in FIRST AID auto-mode:**
-- **A (Fix):** PM provides guidance; Controller re-dispatches with the guidance prepended to the prompt and resets the retry counter.
-- **B (Skip):** Mark the triggering item as `skipped_by_pm` and advance.
-- **C (Abort):** Transition current EPIC to DONE with status `aborted`, pause the queue.
-- **D (Continue Manual):** Switch the current EPIC to manual orchestration mode; the PM drives the remaining steps.
+**Escalation triggers (from `execution.yaml`):**
+- Gate fails after max retry attempts
+- LLM cost exceeds budget
+- Agent produces no output or errors
+- Conflicting outputs from parallel agents
+- Security finding classified as CRITICAL
 
-**Evidence:** `escalations/escalation_{trigger_id}_{timestamp}.json`, `pm_decision.json`.
+**Bash script:** `aid-fsm.sh transition ... ESCALATION`
 
----
+**LLM skill:** `pipeline` (formats escalation, processes PM response)
 
-### CURATOR_RESOLVE
+**PM options:**
+| Option | Effect |
+|--------|--------|
+| Fix | PM provides guidance. Transition to EXECUTE with guidance prepended to agent prompt. |
+| Skip | Mark failing item as skipped. Transition to GATES (retry remaining gates). |
+| Abort | Pipeline stops. Curator still runs on partial evidence. |
 
-**Entry:** All required quality gates pass.
-
-**Actions (parallel dispatch):**
-1. **Curator agent:** Reviews `improvement_notes` from all step outputs, evaluates proposals against `decision-policies.yaml` rules and Qdrant history, approves or rejects each proposal, dispatches fix agents for approved proposals.
-2. **Lessons-Extractor agent:** Extracts lessons learned and working commands from the run, writes them to `lessons-learned.md` and `command-history.md`.
-
-**Curator proposal evaluation:**
-- Proposals are evaluated against `decision-policies.yaml` rules automatically.
-- Proposals requiring PM judgment that are not covered by policy rules are added to `backlog.md` for future runs.
-- Fix agents are dispatched for approved proposals within the current EPIC scope.
-
-**Evidence:** `curator_resolve_report.json`, updated `backlog.md`, updated `lessons-learned.md`.
-
-**Exit:** All proposals resolved (approved, rejected, or backlisted) and fixes applied — transition to PM_APPROVAL.
-
----
-
-### PM_APPROVAL
-
-**Entry:** Curator phase complete.
-
-**Actions:**
-1. Compile a final summary: all steps completed, gate results, Curator report, lessons extracted.
-2. Send to PM via Slack or chat.
-3. Wait for PM approval or rejection.
-
-**In FIRST AID auto-mode:** The Controller presents the summary and waits. PM_APPROVAL is always a PM touchpoint — it is not auto-approved.
-
-**PM responses:**
-- **Approved:** Transition to DONE.
-- **Rejected:** Transition to ESCALATION for PM to specify what needs to change.
-
-**Evidence:** `pm_decision.json` updated.
+**Exit:** EXECUTE (PM fix), GATES (PM retry).
 
 ---
 
 ### DONE
 
-**Entry:** PM approves the final result.
+**Entry:** All required gates pass.
 
-**Actions:**
-1. Merge the EPIC branch into the base branch.
-2. Archive evidence directory.
-3. Dispatch the Auditor agent (produces `audit-report.md` with a 0-100 quality score).
-4. Extract an example EPIC pattern for Qdrant storage if the EPIC is eligible (completed successfully, PM approval obtained).
-5. Send summary notifications via Slack.
-6. Index EPIC knowledge to Qdrant (decisions, patterns, audit findings).
-7. Check the EPIC queue for the next pending EPIC (auto-pickup if in FIRST AID mode).
+**What happens:**
+1. `aid-fsm.sh transition GATES DONE` records the terminal state.
+2. `aid-stage-log.sh` logs the completion event to `timeline.jsonl`.
+3. The pipeline skill dispatches the curator agent (evaluates improvement proposals, extracts lessons).
+4. The auditor agent runs a project health check.
+5. Evidence directory is finalized.
+6. In autonomous mode: checks the queue for the next pending run.
 
-**Evidence:** `final_report.md`, `audit-report.md`, `slack_log.jsonl`.
+**Bash script:** `aid-fsm.sh transition GATES DONE`
 
-## PM Decision Points
+**LLM skill:** `pipeline` (post-run cleanup), agents: `curator`, `auditor`
 
-There are three mandatory PM touchpoints in manual mode:
+**Exit:** Terminal state. Pipeline complete.
 
-| State | PM Action | Can Be Auto? |
-|-------|-----------|--------------|
-| PLAN_REVIEW | Approve, revise, or abort the generated plan | Yes (auto-mode validates and auto-approves) |
-| ESCALATION | Choose fix, skip, abort, or continue-manual | Never (always requires PM) |
-| PM_APPROVAL | Approve or reject final results before merge | Never (always requires PM) |
+---
 
-In FIRST AID auto-mode, PLAN_REVIEW is automated but ESCALATION and PM_APPROVAL always pause and wait for the PM.
+## Happy Path
 
-## Evidence Directory Structure
+The most common flow through the FSM:
 
-Every EPIC run produces a self-contained evidence directory:
-
+```mermaid
+flowchart LR
+    R[READY] -->|"plan approved"| E[EXECUTE]
+    E -->|"step 1..N"| E
+    E -->|"all steps done"| G[GATES]
+    G -->|"all pass"| D[DONE]
 ```
-.aid-o/04-engine/evidence/{epic_id}/{run_id}/
-  epic_input.md           # Copy of the original EPIC file
-  plan.json               # Generated execution plan
-  plan_progress.json      # Live step completion tracking
-  pm_plan_approval.json   # PM plan approval record
-  pm_decision.json        # Latest PM decision (escalation or final)
-  gates_report.json       # Gate execution results and retry history
-  curator_resolve_report.json
-  final_report.md
-  audit-report.md
-  stage_log.jsonl         # Append-only log of every state transition
-  memory_log.jsonl        # Memory store/find operation log
-  slack_log.jsonl         # Slack message history
-  steps/
-    step_1_architect/     # Per-step outputs
-    step_2_backend/
-    ...
-  gates/
-    tests_pass.txt        # Raw gate command output
-    lint_pass.txt
-    ...
-  escalations/
-    escalation_E1_{timestamp}.json
+
+## Gate Failure Path
+
+When a gate fails but is recoverable:
+
+```mermaid
+flowchart LR
+    G[GATES] -->|"test fails"| ESC[ESCALATION]
+    ESC -->|"PM: fix"| E[EXECUTE]
+    E -->|"gate-fixer patches code"| G2[GATES]
+    G2 -->|"all pass"| D[DONE]
 ```
+
+Or with auto-retry (within retry budget):
+
+```mermaid
+flowchart LR
+    G[GATES] -->|"lint fails, retries remain"| GF[gate-fixer agent]
+    GF -->|"applies fix"| G2[GATES re-run]
+    G2 -->|"all pass"| D[DONE]
+```
+
+## Timeline Events
+
+Every state transition and significant event is logged to `timeline.jsonl`:
+
+```jsonl
+{"ts":"2026-03-03T10:00:00Z","event":"fsm_init","state":"READY","epic_id":"E-20260303-a1b2"}
+{"ts":"2026-03-03T10:00:05Z","event":"fsm_transition","from":"READY","to":"EXECUTE"}
+{"ts":"2026-03-03T10:01:30Z","event":"step_complete","step":1,"agent":"implementer"}
+{"ts":"2026-03-03T10:03:00Z","event":"fsm_transition","from":"EXECUTE","to":"GATES"}
+{"ts":"2026-03-03T10:03:05Z","event":"gate_result","gate":"tests_pass","result":"pass","duration_ms":3200}
+{"ts":"2026-03-03T10:03:10Z","event":"gate_result","gate":"scope_check","result":"pass","duration_ms":150}
+{"ts":"2026-03-03T10:03:15Z","event":"fsm_transition","from":"GATES","to":"DONE"}
+```
+
+## State Persistence
+
+FSM state is persisted to `.aid-o/work/evidence/<epic_id>/<run_id>/state.yaml`. This file is the single source of truth for the current pipeline state. The `aid-fsm.sh` script reads and writes this file atomically — it validates the current state before allowing any transition.
+
+If Claude Code crashes mid-run, the state file preserves exactly where the pipeline was. On restart, `/aid-status` reads the state file and shows the current position. `/aid-run` can resume from the last recorded state.

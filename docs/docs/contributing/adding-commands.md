@@ -6,7 +6,28 @@ description: "Step-by-step guide to adding a new slash command to the AID plugin
 
 # Adding a Command
 
-AID commands are slash commands that users invoke directly in Claude Code (e.g., `/aid-help`, `/aid-run-epic`). Each command is a single Markdown file in `plugins/aid-orchestrator/commands/`. Claude Code reads the file and executes the instructions it contains.
+AID commands are slash commands that users invoke directly in Claude Code (e.g., `/aid-help`, `/aid-run`). Each command is a single Markdown file in `plugins/aid-orchestrator/commands/`. Claude Code reads the file and executes the instructions it contains.
+
+## v2 Command Structure
+
+AID v2 has 8 commands (reduced from v1's 14) organized around core workflows:
+
+| Command | Purpose | Complexity |
+|---------|---------|------------|
+| `/aid-do` | Fast mode — small task, minimal overhead | Low |
+| `/aid-plan` | Brainstorm → architecture → plan.json | Medium |
+| `/aid-run` | Execute full pipeline: READY → EXECUTE → GATES → DONE | High |
+| `/aid-status` | Pipeline status, FSM state, queue | Low |
+| `/aid-init` | Initialize or upgrade `.aid-o/` workspace | Medium |
+| `/aid-audit` | Run project health audit | Medium |
+| `/aid-stop` | Emergency stop — save progress | Low |
+| `/aid-help` | Progressive help (Level 0-3) | Low |
+
+V2 consolidated several v1 commands:
+- `/aid-brainstorm` + `/aid-plan-epic` + `/aid-research` merged into `/aid-plan`
+- `/aid-run-epic` + `/aid-first-aid` + `/aid-epic-queue` merged into `/aid-run`
+- `/aid-epic-status` + `/aid-analytics` merged into `/aid-status`
+- `/aid-setup` functionality absorbed into `/aid-init`
 
 ## Anatomy of a Command File
 
@@ -32,7 +53,7 @@ user_invocable: true
 
 ### Opening Summary
 
-Immediately after the frontmatter, write one or two sentences explaining what the command does. This is the text Claude reads first before executing:
+Immediately after the frontmatter, write one or two sentences explaining what the command does:
 
 ```markdown
 Show AID documentation — commands, workflow, agent roles, configuration, and FAQ.
@@ -52,13 +73,13 @@ Document the command's syntax and all accepted arguments:
 /aid-help [topic]
 \`\`\`
 
-**Topics:** `commands`, `workflow`, `epic`, `agents`, `planning`, `gates`
+**Topics:** `commands`, `workflow`, `agents`, `planning`, `gates`
 
 **Examples:**
 \`\`\`
 /aid-help                   # full overview
 /aid-help commands          # detail on every command
-/aid-help workflow          # Plan → EPIC → Run flow
+/aid-help workflow          # Plan → Run flow
 \`\`\`
 ```
 
@@ -66,18 +87,19 @@ Document the command's syntax and all accepted arguments:
 
 Describe what Claude should do when the command runs. Use numbered steps, decision trees, or conditional logic as needed. This is the executable specification — Claude follows it literally.
 
-For example, from `aid-help.md`:
+For commands with conditional branches (like `/aid-init`'s fresh-init vs. upgrade logic), use clear headings and numbered steps so Claude can follow the logic unambiguously.
+
+### Script Integration
+
+V2 commands often delegate deterministic work to bash scripts in `plugins/aid-orchestrator/scripts/`. Document which scripts the command invokes:
 
 ```markdown
-## Flow
+## Script Integration
 
-### Step 1: Check Environment
-
-1. Check if `.aid-o/` exists in current project
-2. If exists: note active EPICs count, runs count (for dynamic info)
+This command invokes:
+- `scripts/aid-fsm.sh` — to transition FSM state
+- `scripts/aid-run-gates.sh` — to execute quality gates
 ```
-
-For commands that have conditional branches (like `aid-init`'s fresh-init vs. upgrade logic), use clear headings and numbered steps so Claude can follow the logic unambiguously.
 
 ### Important Section
 
@@ -105,7 +127,7 @@ touch plugins/aid-orchestrator/commands/aid-summarize.md
 ```yaml
 ---
 name: aid-summarize
-description: Summarize all completed EPIC runs into a project summary
+description: Summarize all completed runs into a project summary
 user_invocable: true
 ---
 ```
@@ -117,11 +139,17 @@ Write clear, unambiguous instructions. Claude Code will execute whatever you wri
 1. **One-paragraph description** of what the command does
 2. **`## Usage`** — syntax and arguments
 3. **`## Flow`** — step-by-step execution logic
-4. **`## Important`** — rules Claude must not violate
+4. **`## Script Integration`** — which bash scripts the command invokes (if any)
+5. **`## Important`** — rules Claude must not violate
 
-### 4. Register in `plugin.json`
+### 4. Consider Script Delegation
 
-Open `plugins/aid-orchestrator/.claude-plugin/plugin.json`. Commands are not explicitly registered in `plugin.json` (Claude Code discovers them automatically from the `commands/` directory), but the plugin manifest's `description` and `keywords` may need updating if you are adding a significant new capability.
+V2 prefers deterministic bash scripts for file I/O, git operations, and gate execution. If your command needs to:
+- Read/write YAML or JSON files reliably
+- Execute git commands
+- Run shell tools and check exit codes
+
+...create a companion script in `plugins/aid-orchestrator/scripts/` and have the command invoke it via the Bash tool. See existing scripts for the pattern.
 
 ### 5. Update CHANGELOG
 
@@ -131,7 +159,7 @@ Add an entry to both `CHANGELOG.md` (root) and `plugins/aid-orchestrator/CHANGEL
 ## [X.Y.Z] — YYYY-MM-DD
 
 ### Added
-- **`/aid-summarize` command** — summarizes completed EPIC runs into a consolidated
+- **`/aid-summarize` command** — summarizes completed runs into a consolidated
   project summary for retrospective review.
 ```
 
@@ -141,9 +169,9 @@ Add a corresponding documentation page in `docs/docs/commands/aid-{your-command}
 
 ```yaml
 ---
-sidebar_position: 14
+sidebar_position: 9
 title: "/aid-summarize"
-description: "Summarize all completed EPIC runs into a project summary."
+description: "Summarize all completed runs into a project summary."
 ---
 ```
 
@@ -154,12 +182,17 @@ Because AID commands are Markdown files with natural language instructions, "tes
 1. **Install your local changes** — use the development installation path for your local plugin.
 2. **Run the command** with each argument variant documented in `## Usage`.
 3. **Verify the output** matches what the `## Flow` section specifies.
-4. **Check edge cases** — missing `.aid-o/` workspace, no active EPICs, invalid arguments.
+4. **Check edge cases** — missing `.aid-o/` workspace, no active runs, invalid arguments.
 
 For commands that modify files (like `/aid-init`), verify that:
 - Files are created/updated as documented
 - Existing files are not overwritten when they should be preserved
-- The CLAUDE.md marker-based merge works correctly (if applicable)
+- The workspace structure matches `.aid-o/config/`, `.aid-o/work/`, `.aid-o/tasks/`
+
+For commands that invoke scripts, verify that:
+- Scripts are called with the correct arguments
+- Script output is captured and presented correctly
+- Script failures are handled gracefully (error message to user, not silent failure)
 
 ## Conventions Checklist
 
@@ -170,6 +203,7 @@ Before submitting a PR for a new command:
 - [ ] Command name in frontmatter matches the filename
 - [ ] `## Usage` section with syntax and examples
 - [ ] `## Flow` section with numbered, unambiguous steps
+- [ ] `## Script Integration` section (if scripts are invoked)
 - [ ] `## Important` section with non-negotiable rules
 - [ ] CHANGELOG updated (both root and plugin)
 - [ ] Documentation page added in `docs/docs/commands/`

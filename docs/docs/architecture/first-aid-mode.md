@@ -1,281 +1,158 @@
 ---
 sidebar_position: 5
-title: "FIRST AID Mode"
-description: "Autonomous EPIC queue execution with permission sandwich, escalation triggers, and crash recovery."
+title: "Autonomous Mode"
+description: "Unattended pipeline execution with /aid-run --auto — auto-approved plans, escalation-only PM interaction."
 ---
 
-# FIRST AID Mode
+# Autonomous Mode
 
-:::danger Use at Your Own Risk
+Autonomous mode enables unattended pipeline execution. The same 6-state FSM runs, but plan approval at READY is auto-approved. Escalations still reach the PM.
 
-FIRST AID mode grants Claude Code **elevated permissions** for the duration of the session. Claude will autonomously edit files, run shell commands, install packages, push code, create GitHub releases, and call MCP tools — **without asking for confirmation**.
+Autonomous mode is activated with `/aid-run --auto` and stopped with `/aid-stop`.
 
-A hard-deny list blocks the most dangerous operations (`rm -rf /`, `git push --force`, `sudo`, `chmod 777`, etc.) and sensitive paths (`~/.ssh`, `~/.aws`, `/etc`). However, **autonomous AI agents can produce unexpected results**. Safety mechanisms (permission sandwich, 16 escalation triggers, crash recovery) reduce but do not eliminate risk.
+:::warning Use at Your Own Risk
 
-**Before starting FIRST AID:**
-- Review your EPIC queue carefully — Claude will execute everything in it
-- Run `/aid-first-aid --dry-run` to preview what will happen
-- Know that `/aid-stop` is available at any time to disengage
-- Check `permissions-auto.yaml` to understand exactly which commands are auto-allowed
+Autonomous mode allows Claude Code to execute commands, edit files, and run the full pipeline without asking for confirmation at each step. The PM is only contacted when an escalation trigger fires.
 
-**You are responsible for all actions performed in your environment.**
+Review your plan and `execution.yaml` gates before enabling autonomous mode. `/aid-stop` is available at any time.
 
 :::
 
-FIRST AID mode is the autonomous execution mode of AID Orchestrator. The PM approves the EPIC queue once, then the Controller runs all queued EPICs end-to-end without stopping at each decision point. Agent-driven quality checks replace manual approval gates, and a structured escalation protocol handles the 16 defined conditions that require human judgment.
-
-FIRST AID mode is started with `/aid-first-aid` and stopped with `/aid-stop`.
-
-## State Machine
-
-The mode has three values, stored in `.aid-o/04-engine/auto-mode-state.yaml`:
-
-| Mode | Meaning |
-|------|---------|
-| `manual` | Default. All PM decision points behave normally. |
-| `auto` | Autonomous execution. PM decision points use auto-mode logic. |
-| `paused` | An escalation triggered a pause. PM must resolve before resuming. |
-
-At every PM decision point (PLAN_REVIEW, PHASE_CHECK, PM_APPROVAL, DONE), the Controller reads the mode file and routes accordingly. If the file is missing or unreadable, the Controller defaults to `manual` — fail-safe behavior.
-
-## Permission Sandwich
-
-Before autonomous execution begins, the Controller elevates Claude Code's permissions to allow the commands needed to run an EPIC end-to-end without prompting. When execution ends (for any reason), permissions are restored to their original state. This backup-elevate-execute-restore cycle is called the **permission sandwich**.
+## How It Works
 
 ```mermaid
 stateDiagram-v2
-    [*] --> TempCleanup : /aid-first-aid invoked
+    [*] --> READY : /aid-run --auto
 
-    TempCleanup --> CheckOrphanedBackup : Clean up .tmp files
+    READY --> EXECUTE : plan auto-approved
 
-    CheckOrphanedBackup --> CrashRecovery : Backup exists (orphaned from crash)
-    CheckOrphanedBackup --> ReadSettings : No backup found
-
-    CrashRecovery --> ReadSettings : PM chose restore or keep
-    CrashRecovery --> ResumeAutoMode : PM chose resume
-
-    ReadSettings --> CreateDefault : settings.json missing
-    ReadSettings --> Abort : settings.json invalid JSON
-    ReadSettings --> AtomicBackup : settings.json valid
-
-    CreateDefault --> AtomicBackup : Default created
-
-    AtomicBackup --> ValidateBackup : Write .tmp, rename to final
-
-    ValidateBackup --> ResolveAutoPerms : Backup verified
-    ValidateBackup --> Abort : Backup verification failed
-
-    ResolveAutoPerms --> ParseAndValidate : Source resolved
-
-    ParseAndValidate --> HardDenyFilter : allow[] + learned[] merged
-
-    HardDenyFilter --> AtomicElevate : Dangerous entries removed
-
-    AtomicElevate --> AutoModeActive : settings.json elevated
-
-    state AutoModeActive {
-        [*] --> Executing
-        Executing --> PhaseCheck : Step completes
-        PhaseCheck --> PermissionLearning : Diff current vs applied
-        PermissionLearning --> Executing : Learned perms persisted (or none)
+    state EXECUTE {
+        [*] --> Step
+        Step --> Step : next step
+        Step --> [*] : all steps done
     }
 
-    AutoModeActive --> Restore : Queue complete
-    AutoModeActive --> Restore : /aid-stop
-    AutoModeActive --> Restore : Abort or continue-manual
-    AutoModeActive --> Restore : Unrecoverable error
+    EXECUTE --> GATES : all steps complete
+    EXECUTE --> ESCALATION : step failure
 
-    Restore --> DeleteBackup : settings.json restored from backup
-    Restore --> WarnPM : Backup missing or corrupted
+    GATES --> DONE : all pass
+    GATES --> ESCALATION : gate fails after retries
 
-    DeleteBackup --> [*] : Manual mode resumed
-    WarnPM --> [*] : PM must review settings.json manually
+    ESCALATION --> EXECUTE : PM fix
+    ESCALATION --> GATES : PM retry
 
-    Abort --> [*] : FIRST AID not started
+    DONE --> [*]
 
-    ResumeAutoMode --> AutoModeActive : Continue from saved state
+    note right of READY : Auto-approved\n(no PM review)
+    note right of ESCALATION : PM always\ncontacted here
 ```
 
-### Files Involved
+## Normal Mode vs Autonomous Mode
 
-| File | Location | Purpose |
-|------|----------|---------|
-| `settings.json` | `.claude/settings.json` | Claude Code permission file. Single source of truth for auto-allowed commands. |
-| `permissions-backup.json` | `.aid-o/03-config/permissions-backup.json` | Backup of original `settings.json`. Its presence signals an active or crashed auto-mode session. |
-| `permissions-auto.yaml` | `.aid-o/03-config/permissions-auto.yaml` | Auto-mode permission template. Project-specific overrides plugin defaults. |
-| `auto-mode-state.yaml` | `.aid-o/04-engine/auto-mode-state.yaml` | Tracks session state, applied permissions, and learned permissions. |
+| Aspect | Normal (`/aid-run`) | Autonomous (`/aid-run --auto`) |
+|--------|--------------------|---------------------------------|
+| Plan approval | PM reviews and approves | Auto-approved after validation |
+| Step execution | PM sees each state transition | Silent execution |
+| Gate failures (retryable) | Gate-fixer auto-retries | Gate-fixer auto-retries |
+| Gate failures (exhausted) | Escalation to PM | Escalation to PM |
+| Escalations | PM contacted | PM contacted |
+| Completion | Summary presented | Summary presented |
 
-### Step 1: Backup
+The key difference is plan approval. In normal mode, the PM reviews the plan at READY before execution begins. In autonomous mode, the plan is validated programmatically (schema check, dependency cycle check) and auto-approved if valid. If validation fails, it escalates to the PM.
 
-Before any EPIC processing begins:
+## Escalation Triggers
 
-1. Read `.claude/settings.json`. If missing, create a minimal default. If invalid JSON, abort — the PM must fix it manually.
-2. Check for an orphaned backup (a previous session that crashed). If found, execute crash recovery (see below).
-3. Atomic backup write: write `settings.json` content to a `.tmp` file, validate it is valid JSON, then rename to `permissions-backup.json`. Verify the final file matches the original.
+Autonomous mode runs silently until it encounters a condition that requires human judgment. These triggers pause execution and notify the PM:
 
-The temp-file-then-rename pattern ensures the backup is never in a partial state. If the process crashes before the rename, only the `.tmp` file exists and it is cleaned up on the next session start.
+### Critical (Immediate Halt)
 
-### Step 2: Elevate
+| Trigger | Detection |
+|---------|-----------|
+| Gate fails after max retries | Gate retry budget exhausted |
+| Security finding CRITICAL | Security scan output contains critical severity |
+| Agent error or no output | Agent dispatch returns empty or throws |
 
-1. Resolve the auto-mode permission template from one of three sources (in priority order): project-specific `permissions-auto.yaml`, plugin default `permissions-auto.yaml`, or a generated template.
-2. Parse the allow list: `allow[]` + `learned[]` (permissions learned from PM grants in prior sessions).
-3. Validate against the hard-deny list. Any dangerous patterns are removed unconditionally.
-4. Write the elevated `settings.json` atomically (temp file, validate, rename).
-5. Record the applied permissions in `auto-mode-state.yaml`.
+### High (Pause After Current Operation)
 
-### Step 3: Execute
+| Trigger | Detection |
+|---------|-----------|
+| Security finding HIGH | Security scan output |
+| Merge conflict | Dry-run merge fails between parallel branches |
+| Agent blocked | Agent output contains blocked status |
+| Budget exceeded | LLM cost exceeds configured limit |
 
-The Controller runs the EPIC queue autonomously. At each PHASE_CHECK, it runs **permission learning**: it compares the current `settings.json` against what was applied at elevation. If the PM granted new permissions through the Claude Code prompt during a step, those new entries are detected and persisted to `permissions-auto.yaml` for future sessions. Hard-deny list is enforced during learning — PM-granted dangerous permissions are never persisted.
+### Medium (Pause at Next State Boundary)
 
-### Step 4: Restore
+| Trigger | Detection |
+|---------|-----------|
+| Scope violation persists | Agent modifies forbidden_paths after re-dispatch |
+| Plan validation fails | Generated plan fails schema validation |
+| Escalation budget exceeded | Session reaches max escalations |
 
-On any exit event (queue complete, `/aid-stop`, abort, error):
-
-1. Read `permissions-backup.json`. If missing or corrupted, warn the PM — do not block other completion actions.
-2. Write backup content back to `settings.json` atomically.
-3. Delete `permissions-backup.json`.
-
-Restore is intentionally non-blocking. A failed restore is a PM-visible warning, not a pipeline stopper. The PM can always manually edit `.claude/settings.json` to fix permissions.
-
-### Hard Deny List
-
-These permissions are never allowed in auto-mode, regardless of configuration, PM grants, or permission learning. The list is enforced at elevation time and at permission learning time:
-
-**Always-blocked commands:**
-- `rm -rf /` and `rm -rf /*` — catastrophic filesystem destruction
-- `git push --force` and `git push -f` — irreversible remote history rewrite
-- `git reset --hard` — discards uncommitted work silently
-- `sudo` and `su` — privilege escalation beyond project scope
-- `chmod 777` — opens files to all users
-- `chown` — changes file ownership
-
-**Always-blocked paths:**
-- `/etc/*`, `/usr/*` — system configuration
-- `~/.ssh/*`, `~/.aws/*` — credentials and keys
-- `~/.gnupg/*` — GPG keys
-- `~/.config/claude/*` — Claude's own configuration
-
-### Crash Recovery
-
-If Claude Code crashes during auto-mode, `permissions-backup.json` is left behind. The backup file doubles as a crash indicator: its presence outside an active session means something went wrong.
-
-On the next session start (or when `/aid-first-aid` is invoked again), the Controller detects the orphaned backup and presents three options to the PM:
-
-- **A) Restore** (recommended) — restore original permissions from backup.
-- **B) Keep current** — keep the elevated permissions and delete the backup.
-- **C) Resume auto-mode** — restore from saved progress in `auto-mode-state.yaml` and continue executing from where the session was interrupted.
-
-## 16 Escalation Triggers
-
-Auto-mode runs silently until it encounters a situation that requires human judgment. These 16 triggers are the exhaustive list of conditions that pause auto-mode and notify the PM.
-
-### CRITICAL Triggers (Immediate Halt)
-
-No further work of any kind until the PM responds.
-
-| ID | Trigger | Detection |
-|----|---------|-----------|
-| **E1** | Step fails twice plus fresh approach fails | Step has 2 failed dispatches AND gate-fixer re-dispatch also failed |
-| **E2** | Security finding CRITICAL severity | Security agent or `bandit` output contains `Severity: CRITICAL` |
-| **E4** | Gate fails after maximum retries | Gate has exhausted all configured retry attempts |
-
-### HIGH Triggers (Pause After Current Atomic Operation)
-
-Complete the current commit or file write, then pause.
-
-| ID | Trigger | Detection |
-|----|---------|-----------|
-| **E3** | Security finding HIGH severity | Security agent output contains `Severity: HIGH` |
-| **E5** | Agent produces no output or errors | Agent dispatch returns empty response, timeout, or exception |
-| **E6** | Merge conflict between parallel agents | Dry-run merge fails between parallel execution branches |
-| **E7** | Agent explicitly flags "cannot resolve" | Agent output contains `status: "blocked"` or `status: "unable"` |
-| **E8** | Budget exceeded | Total cost exceeds configured budget limit |
-
-### MEDIUM Triggers (Pause at Phase Boundary)
-
-Complete the current step, then pause before starting the next one.
-
-| ID | Trigger | Detection |
-|----|---------|-----------|
-| **E9** | Scope violation persists after re-dispatch | Agent modifies `forbidden_paths` on second attempt |
-| **E10** | Conflicting outputs from parallel agents | Two agents produce contradictory decisions (detected during analysis merge) |
-| **E11** | Plan validation fails in auto PLAN_REVIEW | Generated plan JSON fails schema validation or run file quality check |
-| **E12** | Session escalation budget exceeded | Session escalation count reaches `max_escalations_per_session` (default: 3) |
-| **E13** | Architecture decision with multiple valid options | Architect agent outputs `decision_type: "requires_pm"` with two or more options |
-| **E14** | Test suite still failing after fix attempts | Test failures persist after 3 gate-fixer cycles (promoted to E1) |
-| **E15** | Version detection failure in release sub-phase | Release agent cannot determine current version from `version_files[]` |
-| **E16** | EPIC acceptance criteria are ambiguous | Planner or agent flags acceptance criteria as unparseable or contradictory |
-
-### Non-Escalation (Agent-Handled Automatically)
-
-These issues are resolved autonomously without notifying the PM:
+### Auto-Resolved (No PM Notification)
 
 | Condition | Action |
 |-----------|--------|
-| Low-severity security findings | Logged to `improvement_notes` |
-| Style/formatting lint failures | Auto-fixed by gate retry (`ruff check --fix`) |
-| Minor test failures (first or second attempt) | Agent re-dispatched with failure feedback |
-| Discovered issues of MEDIUM or INFO severity | Added to Curator backlog |
-| Conditional gate failure (non-required) | Logged as warning, execution continues |
-| Agent produces valid output with minor gaps | Output accepted, gaps logged in `improvement_notes` |
-| Flaky test (passes on re-run) | Pass result accepted, flakiness logged |
+| Low-severity security findings | Logged to improvement notes |
+| Style/formatting lint failures | Auto-fixed by gate-fixer |
+| Minor test failures (first attempt) | Agent re-dispatched with failure context |
+| Conditional gate failure | Warning logged, execution continues |
 
-### Escalation Notification Format
+## Escalation Format
 
-When a trigger fires, the PM receives a structured notification (via Slack if configured, otherwise in chat):
+When a trigger fires, the PM receives a structured notification:
 
-```
-AUTO-MODE ESCALATION — {trigger name}
-Auto-mode paused
+```text
+AUTONOMOUS MODE — Escalation
+Pipeline paused
 
-Trigger: {E1-E16} — {trigger name}
-Severity: CRITICAL | HIGH | MEDIUM
-EPIC: {epic_id} — {title}
-Progress: {N}/{M} steps ({percent}%)
-State: {state} → paused
+Trigger: gate fails after max retries
+Severity: CRITICAL
+EPIC: E-20260303-a1b2 — add pagination to users API
+Progress: 4/5 steps (80%)
+State: GATES → paused
 
 What happened:
-{description}
+  tests_pass gate failed 3 times. Last error: 2 tests failed (test_cursor_pagination, test_empty_page)
 
 What was tried:
-• Attempt 1: {action} → {result}
-• Attempt 2: {action} → {result}
+  - Attempt 1: gate-fixer patched cursor logic → still fails
+  - Attempt 2: gate-fixer added missing fixture → still fails
+  - Attempt 3: gate-fixer rewrote test setup → still fails
 
 Options:
-A) Fix — {context-specific description}
-B) Skip — continue to next step/gate
-C) Abort — stop this EPIC, pause queue
-D) Continue manual — finish this EPIC in manual mode
+  A) Fix — provide guidance for another attempt
+  B) Skip — skip this gate, proceed to DONE
+  C) Abort — stop pipeline
 
-Recommendation: {auto-generated}
-Session: Escalation {count}/{max}
+Recommendation: A — the test failures look like a data setup issue
 ```
 
-### PM Decision Options
+## PM Options
 
-| Option | What happens |
-|--------|-------------|
-| **A) Fix** | PM provides guidance. Retry counter resets. Controller re-dispatches with PM guidance prepended to the prompt. Auto-mode resumes. |
-| **B) Skip** | Triggering item marked as `skipped_by_pm`. Execution advances to the next step or gate. Auto-mode resumes. |
-| **C) Abort** | Current EPIC transitions to DONE with status `aborted`. Queue is paused. Curator and Lessons-Extractor still run on the partial evidence. |
-| **D) Continue manual** | Current EPIC switches to manual orchestration mode. PM drives the remaining steps. The remaining queue stays paused until the PM resumes it explicitly. |
+| Option | Effect |
+|--------|--------|
+| **Fix** | PM provides guidance. Retry counter resets. Transition to EXECUTE with guidance. |
+| **Skip** | Mark gate as `skipped_by_pm`. Proceed to DONE. |
+| **Abort** | Pipeline stops. Curator runs on partial evidence. |
 
-### Escalation Budget
+## Escalation Budget
 
-Auto-mode tracks escalation frequency per session to prevent runaway escalation loops. The default maximum is 3 escalations per session. When the count reaches the maximum, trigger E12 fires at the next EPIC boundary and the PM must review before the next EPIC starts.
+Autonomous mode tracks escalation frequency per session. Default maximum: 3 per session (configured in `orchestration.yaml` under `escalation.max_per_session`).
 
-The PM can tune the limit during any escalation by including `"set max escalations to N"` in their response.
+When the count reaches the maximum, the PM must review before execution continues. The budget resets when a new autonomous session starts.
 
-The budget resets when a new auto-mode session starts, not when an individual EPIC completes. This means escalations accumulate across all EPICs in a single queue run.
+## Enabling Autonomous Mode
 
-## Auto-Mode vs Manual Mode
+```bash
+# Start autonomous run
+/aid-run --auto
 
-| Aspect | Manual (default) | FIRST AID (auto) |
-|--------|-----------------|-------------------|
-| Plan approval | PM reviews every plan | Auto-validated by Controller |
-| Step execution | PM sees each state transition | Silent, PM not notified |
-| PM_APPROVAL | Always requires PM | Always requires PM |
-| Failures | Escalate per existing protocol | 16 triggers; non-trigger issues handled silently |
-| Permissions | Not elevated | Elevated for duration, restored on exit |
-| Queue processing | One EPIC at a time | All queued EPICs run end-to-end |
-| Stopping | Natural at each state boundary | `/aid-stop` or escalation trigger |
+# Check status during execution
+/aid-status
+
+# Stop at any time
+/aid-stop
+```
+
+`/aid-stop` saves progress to `state.yaml` and logs the stop event to `timeline.jsonl`. The pipeline can be resumed with `/aid-run` (normal mode) from the last recorded state.

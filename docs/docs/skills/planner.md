@@ -1,83 +1,89 @@
 ---
-sidebar_position: 17
+sidebar_position: 6
 title: "Planner"
-description: "Converts an EPIC specification into a validated Plan JSON by building a dependency graph, detecting parallel groups via topological sort, and auto-generating analysis groups for sensitive steps."
+description: "Script contract for aid-epic-to-json.sh: EPIC to plan.json conversion, dependency graph, wave assembly, and run splitting."
 ---
 
 # Planner
 
-The planner skill converts an EPIC specification into a validated Plan JSON that the Controller uses to drive execution. It builds a dependency graph from the EPIC's steps, runs a topological sort to detect which steps can run in parallel, applies default ordering rules when the EPIC is underspecified, and auto-generates `analysis_groups` for steps that are security-sensitive, high-complexity, or contract-changing.
+The planner skill documents the contract for `aid-epic-to-json.sh` -- the bash script that converts an EPIC specification into a `plan.json` execution artifact. All deterministic computation (dependency graph, wave assignment, parallel groups) is performed by the script. The LLM's role is limited to two decisions: validating the dependency graph and deciding whether to split runs.
 
 ## Purpose
 
-EPIC files describe intent: what each step should do and what it depends on. The Planner converts this intent into an executable plan: a JSON structure with validated dependencies, wave-based execution groups (respecting parallelism and file conflicts), analysis configurations, quality gate settings, and a file manifest for each step. Without the Planner, the Controller would have no structured execution schedule.
+The planner converts EPIC intent into an executable plan: a JSON structure with validated dependencies, wave-based execution groups, quality gate settings, and file manifests per step.
 
 ## When Used
 
-- Invoked by the Controller at PLANNING state after loading the EPIC
-- Output reviewed by PM at PLAN_REVIEW — PM can revise the plan before execution begins
-- Referenced by the Controller throughout EXECUTING state (which wave, which step, which files)
-- The `analysis_groups` section drives analysis dispatch at PHASE_CHECK
-- The `relevant_files` per step feeds the cost optimization strategy
+- Invoked from [Pipeline](./pipeline) PRE-FLIGHT state
+- Script output reviewed by PM at READY state
+- Referenced by the pipeline throughout EXECUTE state
 
-## Key Concepts
+## Script Contract
 
-### Dependency Graph Construction
+```bash
+aid-epic-to-json.sh <epic_file> <output_dir>
+```
 
-The Planner parses each EPIC step's `depends_on` list and builds a directed acyclic graph (DAG). It validates three conditions:
-1. No cycles (topological sort via Kahn's algorithm — if fewer nodes are sorted than total, a cycle exists)
-2. All referenced steps exist (no dangling dependencies)
-3. No self-dependencies
+**Writes:**
+- `plan.json` -- step list with waves, dependencies, parallel groups
+- `plan_progress.json` -- execution state tracker (all steps pending)
+- `execution.yaml` -- gates configuration derived from `gates.yaml`
 
-The output is a `dependencies[]` array with `before`, `after`, and `reason` fields for each edge.
+**Exits non-zero on:** circular dependencies, unknown step IDs, no steps found, missing required EPIC sections.
 
-### Wave Assembly
+The LLM does NOT generate plan.json inline. It invokes the script and reviews output.
 
-Steps are assigned to execution waves based on their dependency level:
-- Level 0: no dependencies (can run immediately)
-- Level N: max dependency level of all prerequisites + 1
-- Steps at the same level can run in parallel within a wave
+## Dependency Graph
 
-Waves are capped at 4 steps maximum. Larger levels are split into sub-waves, keeping same-domain steps together. Before finalizing a wave, the Planner checks for file path conflicts (two steps sharing `allowed_paths`) and splits conflicting steps into sequential sub-waves.
+The script builds a DAG from EPIC step `depends_on` fields:
 
-### Analysis Group Generation
+1. Parse EPIC steps into `(step_id, role, objective, depends_on[])` tuples
+2. Build adjacency list
+3. Validate: no cycles (Kahn's sort), all references exist, no self-dependencies
+4. Assign levels: `level(S) = max(level(dep)+1)` for each dependency
+5. Assemble waves: group same-level steps, split waves with 5+ into sub-waves of 4
 
-The Planner automatically generates `analysis_groups` for steps that match any of these triggers:
-- Security-sensitive: step role is `backend` or `frontend`, and the EPIC involves auth/payments/data
-- High-complexity: step has 3+ dependencies
-- Contract-changing: step modifies API contracts or database schema
+**Example:**
 
-The auto-selected merge strategy follows the decision flow: security review → union; large groups (3+) with no clear expert → consensus; architecture review → weighted. PM can override during PLAN_REVIEW.
+```
+Level 0: [step_1_architect]                         -> wave 0
+Level 1: [step_2_domain, step_4_frontend]           -> wave 1 (parallel)
+Level 2: [step_3_backend]                           -> wave 2
+Level 3: [step_5_qa, step_6_security, step_7_docs]  -> wave 3 (parallel)
+```
 
-### File Manifest (relevant_files)
+## Parallel Group Detection
 
-For each step, the Planner generates a `relevant_files` list — the files from previous steps that this step needs to read. This feeds the cost optimization strategy, allowing agents to read the right files immediately rather than discovering them through Glob operations.
+Steps at the same dependency level run in parallel. If two same-level steps have overlapping `allowed_paths`, the script places them in sequential sub-waves.
 
-The Architect agent in step 1 generates the project file manifest. The Planner extracts the subset of files relevant to each downstream step based on declared dependencies.
+## Run Split Decision (LLM)
 
-## How It Works
+The script does not split runs -- this is an LLM judgment call:
 
-1. Parse all EPIC steps into `(step_id, role, objective, depends_on[])` tuples
-2. Build the dependency graph and validate it
-3. Assign levels via topological sort
-4. Detect file path conflicts within same-level groups
-5. Assemble waves (maximum 4 steps, conflict-split as needed)
-6. Auto-generate analysis groups for qualifying steps
-7. Apply default quality gate configuration from `gates.yaml`
-8. Validate the complete plan against `defaults/templates/plan.schema.json`
-9. Output validated Plan JSON to the evidence directory
+- **More than 7 steps:** propose split (Run 1: waves 0-1 foundation, Run 2: waves 2+ implementation)
+- **7 or fewer steps:** single run
+- **Rule:** never split inside a wave
 
-If the EPIC has underspecified dependencies (no `depends_on` fields), the Planner applies a default ordering: architect → domain → backend → frontend → qa → security → docs.
+Present split proposal to PM before PRE-FLIGHT.
 
-## Configuration
+## Output: plan.json
 
-The plan schema is defined in `defaults/templates/plan.schema.json`. The Planner validates the generated plan against this schema before returning it. Schema validation failures cause the PLANNING state to fail and trigger ESCALATION.
+```json
+{
+  "epic_id": "EPIC-001",
+  "steps": [
+    { "id": "step_1_architect", "role": "architect", "objective": "...", "depends_on": [], "model": "opus" }
+  ],
+  "waves": [["step_1_architect"], ["step_2_domain", "step_4_frontend"]],
+  "parallel_groups": [["step_2_domain", "step_4_frontend"]],
+  "gates": ["tests_pass", "lint_pass", "security_scan_pass", "docs_updated"]
+}
+```
 
-Quality gate defaults come from `.aid-o/03-config/policies/gates.yaml`. Analysis group merge strategy defaults follow the decision flowchart in the `analysis-merge` skill.
+Model field is assigned from role card tiers, not dispatch config.
 
 ## Related
 
-- [Epic Orchestration](../skills/epic-orchestration)
-- [Analysis Merge](../skills/analysis-merge)
-- [Parallel Dispatch](../skills/parallel-dispatch)
-- [Cost Optimization](../skills/cost-optimization)
+- [Pipeline](./pipeline) -- PRE-FLIGHT invokes this skill
+- [Brainstorming](./brainstorming) -- produces the plan that becomes an EPIC
+- [Role Cards](./role-cards) -- model tier per role
