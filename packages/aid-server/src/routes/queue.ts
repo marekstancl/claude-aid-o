@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import yaml from 'js-yaml';
 import type { ProjectRegistry } from '../services/project-registry.js';
-import type { ProjectParams, EpicParams } from './types.js';
+import { isValidPathComponent, type ProjectParams, type EpicParams } from './types.js';
 
 export function queueRoutes(registry: ProjectRegistry): Router {
   const router = Router({ mergeParams: true });
@@ -27,7 +27,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
 
     res.json({
       ok: true,
-      data: { paused: queue?.paused ?? false, entries },
+      data: { paused: queue?.paused ?? false, queue: entries },
     });
   });
 
@@ -116,6 +116,7 @@ export function queueRoutes(registry: ProjectRegistry): Router {
   router.put('/:epicId', async (req: Request<EpicParams>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+    if (!isValidPathComponent(req.params.epicId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId' } });
 
     const queuePath = join(fs.aidoPath, '04-engine', 'epic-queue.yaml');
     const queue = await fs.readYaml<any>(queuePath);

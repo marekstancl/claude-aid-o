@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express';
 import { join } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
-import type { ProjectParams, EvidenceFileParams } from './types.js';
+import { isValidPathComponent, type ProjectParams, type EvidenceFileParams } from './types.js';
 
 export function evidenceRoutes(registry: ProjectRegistry): Router {
   const router = Router({ mergeParams: true });
@@ -47,6 +47,10 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
 
     const filePath = req.params['0'] ?? '';
     if (!filePath) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'File path required' } });
+
+    if (!isValidPathComponent(req.params.epicId) || !isValidPathComponent(req.params.runId)) {
+      return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId or runId' } });
+    }
 
     const fullPath = join(fs.aidoPath, '04-engine', 'evidence', req.params.epicId, req.params.runId, filePath);
 

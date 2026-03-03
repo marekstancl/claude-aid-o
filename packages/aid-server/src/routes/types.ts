@@ -1,4 +1,17 @@
-/** Shared route parameter types. */
+/** Shared route parameter types and validation utilities. */
+
+/** Validates a path component is safe to use in file system operations (CWE-22). */
+export function isValidPathComponent(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    !value.includes('/') &&
+    !value.includes('\\') &&
+    !value.includes('\0') &&
+    value !== '..' &&
+    value !== '.'
+  );
+}
 
 export interface ProjectParams {
   projectId: string;

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readdir, writeFile } from 'node:fs/promises';
 import yaml from 'js-yaml';
 import type { ProjectRegistry } from '../services/project-registry.js';
-import type { ProjectParams, EpicParams } from './types.js';
+import { isValidPathComponent, type ProjectParams, type EpicParams } from './types.js';
 
 export interface EpicMetadata {
   id: string;
@@ -148,6 +148,9 @@ export function epicRoutes(registry: ProjectRegistry): Router {
       });
     }
 
+    if (!isValidPathComponent(req.params.epicId)) {
+      return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId' } });
+    }
     const epicId = req.params.epicId;
 
     // Verify the EPIC file exists

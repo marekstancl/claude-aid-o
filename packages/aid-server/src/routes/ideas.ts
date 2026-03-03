@@ -2,7 +2,7 @@ import { Router, type Request } from 'express';
 import { join } from 'node:path';
 import { writeFile, mkdir } from 'node:fs/promises';
 import type { ProjectRegistry } from '../services/project-registry.js';
-import type { ProjectParams, IdeaParams, IdeaLinkBody } from './types.js';
+import { isValidPathComponent, type ProjectParams, type IdeaParams, type IdeaLinkBody } from './types.js';
 import type { FsReader } from '../services/fs-reader.js';
 
 function ideasPath(aidoPath: string): string {
@@ -64,6 +64,7 @@ export function ideaRoutes(registry: ProjectRegistry): Router {
   router.put('/:ideaId', async (req: Request<IdeaParams>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+    if (!isValidPathComponent(req.params.ideaId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid ideaId' } });
 
     const ideas = await readIdeas(fs);
     const idx = ideas.findIndex((i: any) => i.id === req.params.ideaId);
@@ -92,6 +93,7 @@ export function ideaRoutes(registry: ProjectRegistry): Router {
   router.put('/:ideaId/link', async (req: Request<IdeaParams, any, IdeaLinkBody>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+    if (!isValidPathComponent(req.params.ideaId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid ideaId' } });
 
     const ideas = await readIdeas(fs);
     const idx = ideas.findIndex((i: any) => i.id === req.params.ideaId);
@@ -126,6 +128,7 @@ export function ideaRoutes(registry: ProjectRegistry): Router {
   router.delete('/:ideaId', async (req: Request<IdeaParams>, res) => {
     const fs = registry.getFsReader(req.params.projectId);
     if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+    if (!isValidPathComponent(req.params.ideaId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid ideaId' } });
 
     const ideas = await readIdeas(fs);
     const filtered = ideas.filter((i: any) => i.id !== req.params.ideaId);
