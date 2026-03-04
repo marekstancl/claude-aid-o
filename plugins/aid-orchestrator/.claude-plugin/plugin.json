@@ -8,6 +8,5 @@
   "license": "AGPL-3.0-only",
   "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management", "fast-mode", "fsm"],
   "commands": "./commands/",
-  "skills": "./skills/",
-  "agents": "./agents/"
+  "skills": "./skills/"
 }
