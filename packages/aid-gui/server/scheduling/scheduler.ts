@@ -246,7 +246,7 @@ export class QueueScheduler extends EventEmitter {
   }
 
   /**
-   * Check if the EPIC queue is currently paused by reading epic-queue.yaml.
+   * Check if the EPIC queue is currently paused by reading queue.yaml.
    * Returns false if the file cannot be read (queue not initialized).
    */
   private async isQueuePaused(): Promise<boolean> {
@@ -256,7 +256,7 @@ export class QueueScheduler extends EventEmitter {
 
     // Derive .aid-o path from project path.
     const aidoPath = path.join(this.projectPath, '.aid-o');
-    const queueFilePath = path.join(aidoPath, '04-engine', 'epic-queue.yaml');
+    const queueFilePath = path.join(aidoPath, 'config', 'queue.yaml');
 
     try {
       const content = await fs.readFile(queueFilePath, 'utf-8');

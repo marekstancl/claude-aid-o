@@ -30,7 +30,7 @@ let aidoDir: string;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'evidence-search-test-'));
   aidoDir = path.join(tmpDir, '.aid-o');
-  await fs.mkdir(path.join(aidoDir, '04-engine', 'evidence'), { recursive: true });
+  await fs.mkdir(path.join(aidoDir, 'work', 'evidence'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -112,7 +112,7 @@ function createMockRegistry(): Record<string, unknown> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const EVIDENCE_DIR = () => path.join(aidoDir, '04-engine', 'evidence');
+const EVIDENCE_DIR = () => path.join(aidoDir, 'work', 'evidence');
 
 /** Write a text file, creating parent directories as needed. */
 async function writeTextFile(filePath: string, content: string): Promise<void> {
@@ -440,7 +440,7 @@ describe('Evidence Search — GET /api/p/:projectId/evidence/search', () => {
   it('does not expose files outside the evidence base via path traversal in file names', async () => {
     // Create a secret file above the evidence directory
     await writeTextFile(
-      path.join(aidoDir, '04-engine', 'secret.txt'),
+      path.join(aidoDir, 'work', 'secret.txt'),
       'SECRET_DATA\n',
     );
     // Create a normal evidence file for the run

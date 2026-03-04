@@ -1,6 +1,6 @@
-{"timestamp": "2026-02-24T14:40:00Z", "state": "IDLE", "step": null, "action": "load_epic", "details": "Loaded EPIC E-001-1_1 from .aid-o/02-epics/E-001-1_1-release-protocol.md", "result": "pass"}
+{"timestamp": "2026-02-24T14:40:00Z", "state": "IDLE", "step": null, "action": "load_epic", "details": "Loaded EPIC E-001-1_1 from .aid-o/tasks/E-001-1_1-release-protocol.md", "result": "pass"}
 {"timestamp": "2026-02-24T14:40:01Z", "state": "IDLE", "step": null, "action": "load_plan", "details": "Found existing plan.json (v1, 4 steps, 3 waves). Run: run_20260224_1957", "result": "pass"}
-{"timestamp": "2026-02-24T14:40:02Z", "state": "IDLE", "step": null, "action": "load_source_plan", "details": "Source plan loaded: .aid-o/01-plans/P001-release-protocol.md (316 lines)", "result": "pass"}
+{"timestamp": "2026-02-24T14:40:02Z", "state": "IDLE", "step": null, "action": "load_source_plan", "details": "Source plan loaded: .aid-o/plans/P001-release-protocol.md (316 lines)", "result": "pass"}
 {"timestamp": "2026-02-24T14:40:03Z", "state": "IDLE", "step": null, "action": "transition", "details": "IDLE -> PLAN_REVIEW (plan already exists, skipping PLANNING)", "result": "pass"}
 {"timestamp": "2026-02-24T14:42:00Z", "state": "PLAN_REVIEW", "step": null, "action": "pm_approval", "details": "PM approved plan via chat. Decision: GO", "result": "pass"}
 {"timestamp": "2026-02-24T14:42:01Z", "state": "PLAN_REVIEW", "step": null, "action": "transition", "details": "PLAN_REVIEW -> EXECUTING (step_1_architect)", "result": "pass"}

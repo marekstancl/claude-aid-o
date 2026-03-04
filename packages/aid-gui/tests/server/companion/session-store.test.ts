@@ -3,7 +3,7 @@
  *
  * Each test uses a temporary directory isolated via os.tmpdir() + mkdtemp.
  * The SessionStore constructor accepts aidoPath, which is the root of the
- * .aid-o/ directory. The store writes under <aidoPath>/04-engine/companion-sessions/.
+ * .aid-o/ directory. The store writes under <aidoPath>/work/companion-sessions/.
  *
  * Coverage:
  *   createSession   — creates a JSONL file with correct metadata header
@@ -91,7 +91,7 @@ describe('SessionStore — createSession', () => {
   });
 
   it('creates the sessions directory if it does not exist', async () => {
-    const sessionsDir = path.join(tmpDir, '04-engine', 'companion-sessions');
+    const sessionsDir = path.join(tmpDir, 'work', 'companion-sessions');
 
     // Directory must not exist yet
     let dirExists = true;
@@ -107,7 +107,7 @@ describe('SessionStore — createSession', () => {
   it('writes a JSONL file for the new session on disk', async () => {
     const session = await store.createSession('proj-1', 'stub');
 
-    const filePath = path.join(tmpDir, '04-engine', 'companion-sessions', `${session.id}.jsonl`);
+    const filePath = path.join(tmpDir, 'work', 'companion-sessions', `${session.id}.jsonl`);
     await expect(fs.access(filePath)).resolves.toBeUndefined();
   });
 

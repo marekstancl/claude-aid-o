@@ -119,7 +119,7 @@ export const EpicLifecycle: React.FC = () => {
         <div className="flex-1 flex flex-col items-center justify-center">
           <Layers size={48} className="text-white/10 mb-4" />
           <h3 className="text-lg font-medium text-white/30 mb-2">No EPICs found</h3>
-          <p className="text-sm text-white/20">Create EPICs in <code className="text-white/30">.aid-o/02-epics/</code> to get started</p>
+          <p className="text-sm text-white/20">Create EPICs in <code className="text-white/30">.aid-o/tasks/</code> to get started</p>
         </div>
       ) : (
         <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">

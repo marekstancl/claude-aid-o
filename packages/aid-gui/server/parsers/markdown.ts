@@ -1,7 +1,7 @@
 /**
  * Markdown parser for `.aid-o/` files.
  *
- * Handles: EPIC spec files (`.aid-o/02-epics/{epic_id}.md`), plan files,
+ * Handles: EPIC spec files (`.aid-o/tasks/{epic_id}.md`), plan files,
  * audit reports in Markdown format, and IDEAS.md.
  *
  * Uses `gray-matter` for frontmatter extraction. Section parsing is done

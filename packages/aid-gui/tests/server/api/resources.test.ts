@@ -48,7 +48,7 @@ async function writeFile(filePath: string, content: string): Promise<void> {
 
 const EPIC_SPEC_CONTENT = `---
 status: active
-plan_ref: .aid-o/01-plans/P001.md
+plan_ref: .aid-o/plans/P001.md
 plan_epics_total: 2
 runs_total: 1
 runs_completed: 0
@@ -97,7 +97,7 @@ No special constraints.
 
 const SECOND_EPIC_CONTENT = `---
 status: completed
-plan_ref: .aid-o/01-plans/P002.md
+plan_ref: .aid-o/plans/P002.md
 plan_epics_total: 1
 runs_total: 1
 runs_completed: 1
@@ -178,7 +178,7 @@ This plan has no title in frontmatter but has an H1 heading.
 // ===========================================================================
 
 describe('GET /api/p/default/epics', () => {
-  it('returns empty array when the 02-epics directory does not exist', async () => {
+  it('returns empty array when the tasks directory does not exist', async () => {
     const res = await request(createApp())
       .get('/api/p/default/epics')
       .expect(200);
@@ -188,8 +188,8 @@ describe('GET /api/p/default/epics', () => {
     expect(res.body.meta.total).toBe(0);
   });
 
-  it('returns empty array when 02-epics directory exists but is empty', async () => {
-    await fs.mkdir(path.join(aidoDir, '02-epics'), { recursive: true });
+  it('returns empty array when tasks directory exists but is empty', async () => {
+    await fs.mkdir(path.join(aidoDir, 'tasks'), { recursive: true });
 
     const res = await request(createApp())
       .get('/api/p/default/epics')
@@ -202,11 +202,11 @@ describe('GET /api/p/default/epics', () => {
 
   it('returns EPIC list entries when .md files exist', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-002-another.md'),
+      path.join(aidoDir, 'tasks', 'E-002-another.md'),
       SECOND_EPIC_CONTENT,
     );
 
@@ -225,7 +225,7 @@ describe('GET /api/p/default/epics', () => {
     expect(entry1).toBeDefined();
     expect(entry1.title).toContain('E-001 Test EPIC');
     expect(entry1.status).toBe('active');
-    expect(entry1.planRef).toBe('.aid-o/01-plans/P001.md');
+    expect(entry1.planRef).toBe('.aid-o/plans/P001.md');
 
     const entry2 = res.body.data.find(
       (e: { epicId: string }) => e.epicId === 'E-002-another',
@@ -236,11 +236,11 @@ describe('GET /api/p/default/epics', () => {
 
   it('ignores hidden files (starting with dot)', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', '.hidden-epic.md'),
+      path.join(aidoDir, 'tasks', '.hidden-epic.md'),
       EPIC_SPEC_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -255,11 +255,11 @@ describe('GET /api/p/default/epics', () => {
 
   it('ignores non-.md files in the epics directory', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '02-epics', 'notes.txt'),
+      path.join(aidoDir, 'tasks', 'notes.txt'),
       'Some notes',
     );
 
@@ -275,7 +275,7 @@ describe('GET /api/p/default/epics', () => {
 describe('GET /api/p/default/epics/:epicId', () => {
   it('returns parsed EPIC spec for existing EPIC', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -289,7 +289,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
     expect(data.epicId).toBe('E-001-test');
     expect(data.title).toContain('E-001 Test EPIC');
     expect(data.status).toBe('active');
-    expect(data.planRef).toBe('.aid-o/01-plans/P001.md');
+    expect(data.planRef).toBe('.aid-o/plans/P001.md');
     expect(data.planEpicsTotal).toBe(2);
     expect(data.runsTotal).toBe(1);
     expect(data.runsCompleted).toBe(0);
@@ -297,7 +297,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns parsed Goal and Context sections', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -312,7 +312,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns parsed scope with allowed and forbidden paths', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -328,7 +328,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns parsed DoD gates', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -341,7 +341,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns parsed acceptance criteria', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -368,7 +368,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns parsed steps table', async () => {
     await writeFile(
-      path.join(aidoDir, '02-epics', 'E-001-test.md'),
+      path.join(aidoDir, 'tasks', 'E-001-test.md'),
       EPIC_SPEC_CONTENT,
     );
 
@@ -388,7 +388,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 
   it('returns 404 for nonexistent EPIC', async () => {
     // Ensure the epics directory exists but the file does not.
-    await fs.mkdir(path.join(aidoDir, '02-epics'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'tasks'), { recursive: true });
 
     const res = await request(createApp())
       .get('/api/p/default/epics/nonexistent')
@@ -399,7 +399,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
     expect(res.body.error.message).toContain('nonexistent');
   });
 
-  it('returns 404 when the 02-epics directory does not exist at all', async () => {
+  it('returns 404 when the tasks directory does not exist at all', async () => {
     const res = await request(createApp())
       .get('/api/p/default/epics/E-001-test')
       .expect(404);
@@ -414,7 +414,7 @@ describe('GET /api/p/default/epics/:epicId', () => {
 // ===========================================================================
 
 describe('GET /api/p/default/plans', () => {
-  it('returns empty array when the 01-plans directory does not exist', async () => {
+  it('returns empty array when the plans directory does not exist', async () => {
     const res = await request(createApp())
       .get('/api/p/default/plans')
       .expect(200);
@@ -424,8 +424,8 @@ describe('GET /api/p/default/plans', () => {
     expect(res.body.meta.total).toBe(0);
   });
 
-  it('returns empty array when 01-plans directory exists but is empty', async () => {
-    await fs.mkdir(path.join(aidoDir, '01-plans'), { recursive: true });
+  it('returns empty array when plans directory exists but is empty', async () => {
+    await fs.mkdir(path.join(aidoDir, 'plans'), { recursive: true });
 
     const res = await request(createApp())
       .get('/api/p/default/plans')
@@ -438,7 +438,7 @@ describe('GET /api/p/default/plans', () => {
 
   it('returns plan list entries with frontmatter titles', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P001.md'),
+      path.join(aidoDir, 'plans', 'P001.md'),
       PLAN_CONTENT,
     );
 
@@ -458,7 +458,7 @@ describe('GET /api/p/default/plans', () => {
 
   it('falls back to H1 heading when frontmatter title is absent', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P002.md'),
+      path.join(aidoDir, 'plans', 'P002.md'),
       PLAN_NO_FRONTMATTER_TITLE,
     );
 
@@ -476,11 +476,11 @@ describe('GET /api/p/default/plans', () => {
 
   it('returns multiple plan entries sorted by filename', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P001.md'),
+      path.join(aidoDir, 'plans', 'P001.md'),
       PLAN_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P002.md'),
+      path.join(aidoDir, 'plans', 'P002.md'),
       PLAN_NO_FRONTMATTER_TITLE,
     );
 
@@ -495,11 +495,11 @@ describe('GET /api/p/default/plans', () => {
 
   it('ignores hidden files (starting with dot)', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', '.draft-plan.md'),
+      path.join(aidoDir, 'plans', '.draft-plan.md'),
       PLAN_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P001.md'),
+      path.join(aidoDir, 'plans', 'P001.md'),
       PLAN_CONTENT,
     );
 
@@ -514,15 +514,15 @@ describe('GET /api/p/default/plans', () => {
 
   it('ignores non-.md files', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P001.md'),
+      path.join(aidoDir, 'plans', 'P001.md'),
       PLAN_CONTENT,
     );
     await writeFile(
-      path.join(aidoDir, '01-plans', 'scratch.txt'),
+      path.join(aidoDir, 'plans', 'scratch.txt'),
       'scratch notes',
     );
     await writeFile(
-      path.join(aidoDir, '01-plans', 'data.json'),
+      path.join(aidoDir, 'plans', 'data.json'),
       '{}',
     );
 
@@ -538,7 +538,7 @@ describe('GET /api/p/default/plans', () => {
 describe('GET /api/p/default/plans/:planId', () => {
   it('returns parsed plan with frontmatter and body', async () => {
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P001.md'),
+      path.join(aidoDir, 'plans', 'P001.md'),
       PLAN_CONTENT,
     );
 
@@ -565,7 +565,7 @@ describe('GET /api/p/default/plans/:planId', () => {
 Just a plain markdown plan.
 `;
     await writeFile(
-      path.join(aidoDir, '01-plans', 'P003.md'),
+      path.join(aidoDir, 'plans', 'P003.md'),
       noFrontmatter,
     );
 
@@ -581,7 +581,7 @@ Just a plain markdown plan.
   });
 
   it('returns 404 for nonexistent plan', async () => {
-    await fs.mkdir(path.join(aidoDir, '01-plans'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'plans'), { recursive: true });
 
     const res = await request(createApp())
       .get('/api/p/default/plans/nonexistent')
@@ -592,7 +592,7 @@ Just a plain markdown plan.
     expect(res.body.error.message).toContain('nonexistent');
   });
 
-  it('returns 404 when the 01-plans directory does not exist at all', async () => {
+  it('returns 404 when the plans directory does not exist at all', async () => {
     const res = await request(createApp())
       .get('/api/p/default/plans/P001')
       .expect(404);
@@ -607,7 +607,7 @@ Just a plain markdown plan.
 // ===========================================================================
 
 describe('GET /api/p/default/config', () => {
-  it('returns empty config when the 03-config directory does not exist', async () => {
+  it('returns empty config when the config directory does not exist', async () => {
     const res = await request(createApp())
       .get('/api/p/default/config')
       .expect(200);
@@ -617,8 +617,8 @@ describe('GET /api/p/default/config', () => {
     expect(res.body.meta.total).toBe(0);
   });
 
-  it('returns empty config when 03-config directory exists but is empty', async () => {
-    await fs.mkdir(path.join(aidoDir, '03-config'), { recursive: true });
+  it('returns empty config when config directory exists but is empty', async () => {
+    await fs.mkdir(path.join(aidoDir, 'config'), { recursive: true });
 
     const res = await request(createApp())
       .get('/api/p/default/config')
@@ -638,7 +638,7 @@ describe('GET /api/p/default/config', () => {
     - frontend
 `;
     await writeFile(
-      path.join(aidoDir, '03-config', 'permissions-auto.yaml'),
+      path.join(aidoDir, 'config', 'permissions-auto.yaml'),
       yamlContent,
     );
 
@@ -661,11 +661,11 @@ describe('GET /api/p/default/config', () => {
 
   it('returns multiple parsed YAML config files', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', 'permissions-auto.yaml'),
+      path.join(aidoDir, 'config', 'permissions-auto.yaml'),
       'auto_approve: true\n',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'gates.yaml'),
+      path.join(aidoDir, 'config', 'gates.yaml'),
       'gates:\n  - tests_pass\n  - lint_pass\n',
     );
 
@@ -686,7 +686,7 @@ describe('GET /api/p/default/config', () => {
 
   it('parses .yml files as well as .yaml files', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', 'settings.yml'),
+      path.join(aidoDir, 'config', 'settings.yml'),
       'debug: false\n',
     );
 
@@ -702,11 +702,11 @@ describe('GET /api/p/default/config', () => {
 
   it('ignores hidden files (starting with dot)', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', '.hidden-config.yaml'),
+      path.join(aidoDir, 'config', '.hidden-config.yaml'),
       'secret: value\n',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'visible.yaml'),
+      path.join(aidoDir, 'config', 'visible.yaml'),
       'public: true\n',
     );
 
@@ -721,15 +721,15 @@ describe('GET /api/p/default/config', () => {
 
   it('ignores non-YAML files', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', 'notes.md'),
+      path.join(aidoDir, 'config', 'notes.md'),
       '# Config notes\n',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'data.json'),
+      path.join(aidoDir, 'config', 'data.json'),
       '{}',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'actual.yaml'),
+      path.join(aidoDir, 'config', 'actual.yaml'),
       'key: value\n',
     );
 
@@ -744,11 +744,11 @@ describe('GET /api/p/default/config', () => {
 
   it('skips backup files with .bak extension', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', 'config.yaml.bak'),
+      path.join(aidoDir, 'config', 'config.yaml.bak'),
       'old: data\n',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'config.yaml'),
+      path.join(aidoDir, 'config', 'config.yaml'),
       'new: data\n',
     );
 
@@ -763,11 +763,11 @@ describe('GET /api/p/default/config', () => {
 
   it('skips temporary files with .tmp extension', async () => {
     await writeFile(
-      path.join(aidoDir, '03-config', 'temp.yaml.tmp'),
+      path.join(aidoDir, 'config', 'temp.yaml.tmp'),
       'temp: data\n',
     );
     await writeFile(
-      path.join(aidoDir, '03-config', 'real.yaml'),
+      path.join(aidoDir, 'config', 'real.yaml'),
       'real: data\n',
     );
 

@@ -1,7 +1,7 @@
 /**
- * Usage API router — aggregated metrics from stage_log.jsonl files.
+ * Usage API router — aggregated metrics from timeline.jsonl files.
  *
- * Scans `.aid-o/04-engine/evidence/` for all `stage_log.jsonl` files,
+ * Scans `.aid-o/work/evidence/` for all `timeline.jsonl` files,
  * parses each with the JSONL parser, and aggregates activity metrics
  * into a UsageSummary.
  *
@@ -34,17 +34,17 @@ function emptyUsageSummary(): UsageSummary {
 }
 
 /**
- * Recursively scan the evidence directory for stage_log.jsonl files.
+ * Recursively scan the evidence directory for timeline.jsonl files.
  *
  * Expected structure:
- *   evidence/{epicId}/{runId}/stage_log.jsonl
+ *   evidence/{epicId}/{runId}/timeline.jsonl
  *
  * Returns an array of { epicId, runId, filePath } for each found file.
  */
 async function findStageLogFiles(
   aidoPath: string,
 ): Promise<Array<{ epicId: string; runId: string; filePath: string }>> {
-  const evidenceDir = path.join(aidoPath, '04-engine', 'evidence');
+  const evidenceDir = path.join(aidoPath, 'work', 'evidence');
   const results: Array<{ epicId: string; runId: string; filePath: string }> = [];
 
   let epicDirs: string[];
@@ -84,7 +84,7 @@ async function findStageLogFiles(
       }
       if (!runStat.isDirectory()) continue;
 
-      const stageLogPath = path.join(runFullPath, 'stage_log.jsonl');
+      const stageLogPath = path.join(runFullPath, 'timeline.jsonl');
       try {
         await fs.access(stageLogPath);
         results.push({
@@ -93,7 +93,7 @@ async function findStageLogFiles(
           filePath: stageLogPath,
         });
       } catch {
-        // No stage_log.jsonl in this run directory — skip.
+        // No timeline.jsonl in this run directory — skip.
       }
     }
   }

@@ -1,7 +1,7 @@
 /**
  * JSON parser for `.aid-o/` files.
  *
- * Handles: plan.json, plan_progress.json, gates_report.json, pm_decision.json,
+ * Handles: plan.json, state.yaml, gates_report.json, pm_decision.json,
  * projects.json, and any other JSON data files.
  *
  * No external library required -- uses built-in JSON.parse. Never throws;

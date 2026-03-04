@@ -52,7 +52,7 @@ async function writeFile(filePath: string, content: string): Promise<void> {
   await fs.writeFile(filePath, content, 'utf-8');
 }
 
-const ENGINE_DIR = () => path.join(aidoDir, '04-engine');
+const ENGINE_DIR = () => path.join(aidoDir, 'work');
 const EVIDENCE_DIR = () => path.join(ENGINE_DIR(), 'evidence');
 const STATE_PATH = () => path.join(ENGINE_DIR(), 'auto-mode-state.yaml');
 
@@ -129,14 +129,14 @@ async function createRunDir(
       },
     ];
     await writeFile(
-      path.join(runDir, 'stage_log.jsonl'),
+      path.join(runDir, 'timeline.jsonl'),
       entries.map((e) => JSON.stringify(e)).join('\n') + '\n',
     );
   }
 
   if (opts.planProgress) {
     await writeFile(
-      path.join(runDir, 'plan_progress.json'),
+      path.join(runDir, 'state.yaml'),
       JSON.stringify({
         epicId,
         runId,
@@ -346,7 +346,7 @@ describe('Evidence API — GET /api/p/:projectId/evidence', () => {
     expect(e001.runs[0].hasGatesReport).toBe(true);
     // files should list the top-level file names.
     expect(e001.runs[0].files).toContain('plan.json');
-    expect(e001.runs[0].files).toContain('stage_log.jsonl');
+    expect(e001.runs[0].files).toContain('timeline.jsonl');
     expect(e001.runs[0].files).toContain('gates_report.json');
 
     // Find E-002 entry.
@@ -451,7 +451,7 @@ describe('Evidence API — GET /api/p/:projectId/evidence/:epicId/:runId', () =>
     expect(res.body.data.runId).toBe('run1');
     expect(Array.isArray(res.body.data.files)).toBe(true);
     expect(res.body.data.files).toContain('plan.json');
-    expect(res.body.data.files).toContain('stage_log.jsonl');
+    expect(res.body.data.files).toContain('timeline.jsonl');
     // Nested file should use relative path with OS separator.
     expect(res.body.data.files).toContain(
       path.join('steps', 'step_1', 'output.md'),
@@ -516,11 +516,11 @@ describe('Evidence API — GET /api/p/:projectId/evidence/:epicId/:runId/files/*
     await createRunDir('E-001', 'run1', { stageLog: true });
 
     const res = await request(createApp())
-      .get('/api/p/default/evidence/E-001/run1/files/stage_log.jsonl')
+      .get('/api/p/default/evidence/E-001/run1/files/timeline.jsonl')
       .expect(200);
 
     expect(res.body.ok).toBe(true);
-    expect(res.body.data.filePath).toBe('stage_log.jsonl');
+    expect(res.body.data.filePath).toBe('timeline.jsonl');
     expect(res.body.data.format).toBe('jsonl');
     expect(Array.isArray(res.body.data.content)).toBe(true);
     expect(res.body.data.content).toHaveLength(3);

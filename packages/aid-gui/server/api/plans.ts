@@ -4,7 +4,7 @@
  * GET /          — List all plans (summary entries)
  * GET /:planId   — Full parsed plan content
  *
- * Source directory: `{aidoPath}/01-plans/`
+ * Source directory: `{aidoPath}/plans/`
  */
 
 import { Router } from 'express';
@@ -53,7 +53,7 @@ function extractTitle(
 // ---------------------------------------------------------------------------
 
 router.get('/', async (req, res) => {
-  const plansDir = path.join(req.aidoPath, '01-plans');
+  const plansDir = path.join(req.aidoPath, 'plans');
 
   let files: string[];
   try {
@@ -118,7 +118,7 @@ router.get('/', async (req, res) => {
 
 router.get('/:planId', async (req, res) => {
   const { planId } = req.params;
-  const filePath = path.join(req.aidoPath, '01-plans', `${planId}.md`);
+  const filePath = path.join(req.aidoPath, 'plans', `${planId}.md`);
 
   let content: string;
   try {

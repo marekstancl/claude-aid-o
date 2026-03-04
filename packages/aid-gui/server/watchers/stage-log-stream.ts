@@ -1,7 +1,7 @@
 /**
- * Tail-follow streamer for `stage_log.jsonl` files.
+ * Tail-follow streamer for `timeline.jsonl` files.
  *
- * Watches a stage_log.jsonl file for new appended lines and emits parsed
+ * Watches a timeline.jsonl file for new appended lines and emits parsed
  * StageLogEvent objects. Maintains a circular buffer of the last N entries
  * (default 100) for replay when new clients connect.
  *
@@ -11,9 +11,9 @@
  *   const stream = new StageLogStream({ bufferSize: 100 });
  *   stream.on('event', (event: StageLogEvent) => { ... });
  *   stream.on('replay_ready', () => { ... });
- *   await stream.start('/path/to/stage_log.jsonl');
+ *   await stream.start('/path/to/timeline.jsonl');
  *   // Later, on file rotation:
- *   await stream.switchFile('/path/to/new/stage_log.jsonl');
+ *   await stream.switchFile('/path/to/new/timeline.jsonl');
  *   // On shutdown:
  *   stream.stop();
  */
@@ -101,10 +101,10 @@ class CircularBuffer<T> {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract epicId and runId from a stage_log.jsonl file path.
+ * Extract epicId and runId from a timeline.jsonl file path.
  *
  * Expected path pattern:
- *   .../.aid-o/04-engine/evidence/{epicId}/{runId}/stage_log.jsonl
+ *   .../.aid-o/work/evidence/{epicId}/{runId}/timeline.jsonl
  *
  * If the path does not match the expected pattern, returns placeholder values.
  */
@@ -112,8 +112,8 @@ function extractIdsFromPath(filePath: string): { epicId: string; runId: string }
   // Normalize separators to forward slashes for consistent matching.
   const normalized = filePath.replace(/\\/g, '/');
 
-  // Match: .../evidence/{epicId}/{runId}/stage_log.jsonl
-  const match = normalized.match(/evidence\/([^/]+)\/([^/]+)\/stage_log\.jsonl$/);
+  // Match: .../evidence/{epicId}/{runId}/timeline.jsonl
+  const match = normalized.match(/evidence\/([^/]+)\/([^/]+)\/timeline\.jsonl$/);
   if (match) {
     return { epicId: match[1], runId: match[2] };
   }
@@ -130,7 +130,7 @@ function extractIdsFromPath(filePath: string): { epicId: string; runId: string }
 // ---------------------------------------------------------------------------
 
 /**
- * Tail-follow streamer for stage_log.jsonl files.
+ * Tail-follow streamer for timeline.jsonl files.
  *
  * Emits:
  *   - `'event'`        — a new StageLogEvent for each appended line
@@ -161,12 +161,12 @@ export class StageLogStream extends EventEmitter {
   }
 
   /**
-   * Start tailing the specified stage_log.jsonl file.
+   * Start tailing the specified timeline.jsonl file.
    *
    * Reads any existing content into the buffer (up to bufferSize entries),
    * then watches for new appends.
    *
-   * @param filePath - Absolute path to the stage_log.jsonl file.
+   * @param filePath - Absolute path to the timeline.jsonl file.
    */
   async start(filePath: string): Promise<void> {
     if (this.watcher) {
@@ -207,7 +207,7 @@ export class StageLogStream extends EventEmitter {
    * Handle file rotation: stop watching the old file, clear the buffer,
    * and start tailing a new file from the beginning.
    *
-   * @param newFilePath - Absolute path to the new stage_log.jsonl file.
+   * @param newFilePath - Absolute path to the new timeline.jsonl file.
    */
   async switchFile(newFilePath: string): Promise<void> {
     this.stop();

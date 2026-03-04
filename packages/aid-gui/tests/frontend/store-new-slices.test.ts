@@ -65,7 +65,7 @@ function makeEvidenceEpic(overrides: Partial<EvidenceEpicEntry> = {}): EvidenceE
     runs: [
       {
         runId: 'run-001',
-        files: ['plan.json', 'stage_log.jsonl'],
+        files: ['plan.json', 'timeline.jsonl'],
         hasStageLog: true,
         hasPlan: true,
         hasGatesReport: false,
@@ -114,7 +114,7 @@ function makeStoredIdea(overrides: Partial<StoredIdea> = {}): StoredIdea {
 function makeQueueEntry(overrides: Partial<QueueScheduleEntry> = {}): QueueScheduleEntry {
   return {
     epicId: 'E-001',
-    path: '.aid-o/02-epics/E-001.md',
+    path: '.aid-o/tasks/E-001.md',
     priority: 'high',
     status: 'queued',
     addedAt: '2026-02-25T08:00:00.000Z',

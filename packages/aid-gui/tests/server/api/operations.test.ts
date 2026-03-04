@@ -52,8 +52,9 @@ async function writeFile(filePath: string, content: string): Promise<void> {
   await fs.writeFile(filePath, content, 'utf-8');
 }
 
-const ENGINE_DIR = () => path.join(aidoDir, '04-engine');
+const ENGINE_DIR = () => path.join(aidoDir, 'work');
 const EVIDENCE_DIR = () => path.join(ENGINE_DIR(), 'evidence');
+const CONFIG_DIR = () => path.join(aidoDir, 'config');
 
 // ===========================================================================
 // DECISIONS TESTS
@@ -168,7 +169,7 @@ describe('Decisions API -- GET /api/p/:projectId/decisions/pending', () => {
   it('returns empty array when all runs have decisions', async () => {
     const runDir = await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
     await writeFile(
-      path.join(runDir, 'plan_progress.json'),
+      path.join(runDir, 'state.yaml'),
       JSON.stringify({
         epicId: 'E-001',
         runId: 'run1',
@@ -194,7 +195,7 @@ describe('Decisions API -- GET /api/p/:projectId/decisions/pending', () => {
   it('returns pending decisions for runs awaiting PM approval', async () => {
     const runDir = await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
     await writeFile(
-      path.join(runDir, 'plan_progress.json'),
+      path.join(runDir, 'state.yaml'),
       JSON.stringify({
         epicId: 'E-001',
         runId: 'run1',
@@ -477,15 +478,15 @@ describe('Queue API -- GET /api/p/:projectId/queue', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('returns queue state when epic-queue.yaml exists', async () => {
+  it('returns queue state when queue.yaml exists', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -502,7 +503,7 @@ describe('Queue API -- GET /api/p/:projectId/queue', () => {
     expect(res.body.data.paused).toBe(false);
     expect(res.body.data.queue).toHaveLength(1);
     expect(res.body.data.queue[0].epicId).toBe('E-001');
-    expect(res.body.data.queue[0].path).toBe('.aid-o/02-epics/E-001.md');
+    expect(res.body.data.queue[0].path).toBe('.aid-o/tasks/E-001.md');
     expect(res.body.data.queue[0].priority).toBe('high');
     expect(res.body.data.queue[0].status).toBe('queued');
     expect(res.body.data.queue[0].addedAt).toBe('2026-01-01T00:00:00Z');
@@ -511,17 +512,17 @@ describe('Queue API -- GET /api/p/:projectId/queue', () => {
   it('returns queue with multiple entries', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
         '  - epic_id: E-002',
-        '    path: .aid-o/02-epics/E-002.md',
+        '    path: .aid-o/tasks/E-002.md',
         '    priority: medium',
         '    status: running',
         '    added_at: "2026-01-02T00:00:00Z"',
@@ -547,19 +548,19 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
 
     const res = await request(createApp())
       .post('/api/p/default/queue')
-      .send({ epicId: 'E-002', path: '.aid-o/02-epics/E-002.md' })
+      .send({ epicId: 'E-002', path: '.aid-o/tasks/E-002.md' })
       .expect(201);
 
     expect(res.body.ok).toBe(true);
     expect(res.body.data.epicId).toBe('E-002');
-    expect(res.body.data.path).toBe('.aid-o/02-epics/E-002.md');
+    expect(res.body.data.path).toBe('.aid-o/tasks/E-002.md');
     expect(res.body.data.priority).toBe('medium'); // default priority
     expect(res.body.data.status).toBe('queued');
     expect(res.body.data.addedAt).toBeDefined();
 
     // Verify the file was created on disk.
     const content = await fs.readFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       'utf-8',
     );
     expect(content).toContain('E-002');
@@ -568,12 +569,12 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
   it('adds an entry to an existing queue', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -584,7 +585,7 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
       .post('/api/p/default/queue')
       .send({
         epicId: 'E-002',
-        path: '.aid-o/02-epics/E-002.md',
+        path: '.aid-o/tasks/E-002.md',
         priority: 'critical',
       })
       .expect(201);
@@ -604,7 +605,7 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
   it('returns 400 when epicId is missing', async () => {
     const res = await request(createApp())
       .post('/api/p/default/queue')
-      .send({ path: '.aid-o/02-epics/E-002.md' })
+      .send({ path: '.aid-o/tasks/E-002.md' })
       .expect(400);
 
     expect(res.body.ok).toBe(false);
@@ -628,7 +629,7 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
       .post('/api/p/default/queue')
       .send({
         epicId: 'E-002',
-        path: '.aid-o/02-epics/E-002.md',
+        path: '.aid-o/tasks/E-002.md',
         priority: 'ultra',
       })
       .expect(400);
@@ -641,12 +642,12 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
   it('returns 400 for duplicate epicId', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -655,7 +656,7 @@ describe('Queue API -- POST /api/p/:projectId/queue', () => {
 
     const res = await request(createApp())
       .post('/api/p/default/queue')
-      .send({ epicId: 'E-001', path: '.aid-o/02-epics/E-001.md' })
+      .send({ epicId: 'E-001', path: '.aid-o/tasks/E-001.md' })
       .expect(400);
 
     expect(res.body.ok).toBe(false);
@@ -668,12 +669,12 @@ describe('Queue API -- PUT /api/p/:projectId/queue/:epicId', () => {
   it('updates entry priority', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: medium',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -700,12 +701,12 @@ describe('Queue API -- PUT /api/p/:projectId/queue/:epicId', () => {
   it('updates entry status', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -724,12 +725,12 @@ describe('Queue API -- PUT /api/p/:projectId/queue/:epicId', () => {
   it('returns 400 when no fields are provided', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -748,12 +749,12 @@ describe('Queue API -- PUT /api/p/:projectId/queue/:epicId', () => {
   it('returns 400 for invalid priority value', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -784,12 +785,12 @@ describe('Queue API -- PUT /api/p/:projectId/queue/:epicId', () => {
   it('returns 404 when epicId is not found in queue', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -811,17 +812,17 @@ describe('Queue API -- DELETE /api/p/:projectId/queue/:epicId', () => {
   it('removes a queued entry', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
         '  - epic_id: E-002',
-        '    path: .aid-o/02-epics/E-002.md',
+        '    path: .aid-o/tasks/E-002.md',
         '    priority: medium',
         '    status: queued',
         '    added_at: "2026-01-02T00:00:00Z"',
@@ -847,12 +848,12 @@ describe('Queue API -- DELETE /api/p/:projectId/queue/:epicId', () => {
   it('returns 400 when trying to remove a non-queued (running) entry', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: running',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -872,12 +873,12 @@ describe('Queue API -- DELETE /api/p/:projectId/queue/:epicId', () => {
   it('returns 400 when trying to remove a completed entry', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: completed',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -907,12 +908,12 @@ describe('Queue API -- DELETE /api/p/:projectId/queue/:epicId', () => {
   it('returns 404 when epicId is not found in queue', async () => {
     await mkdirs(ENGINE_DIR());
     await writeFile(
-      path.join(ENGINE_DIR(), 'epic-queue.yaml'),
+      path.join(CONFIG_DIR(), 'queue.yaml'),
       [
         'paused: false',
         'queue:',
         '  - epic_id: E-001',
-        '    path: .aid-o/02-epics/E-001.md',
+        '    path: .aid-o/tasks/E-001.md',
         '    priority: high',
         '    status: queued',
         '    added_at: "2026-01-01T00:00:00Z"',
@@ -950,7 +951,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
   });
 
   it('returns zero metrics when evidence directory exists but has no stage logs', async () => {
-    // Create evidence directories without stage_log.jsonl files.
+    // Create evidence directories without timeline.jsonl files.
     await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
 
     const res = await request(createApp())
@@ -962,7 +963,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
     expect(res.body.data.perEpic).toEqual([]);
   });
 
-  it('returns aggregated metrics when stage_log.jsonl exists', async () => {
+  it('returns aggregated metrics when timeline.jsonl exists', async () => {
     const runDir = await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
     const entries = [
       {
@@ -1007,7 +1008,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
       },
     ];
     await writeFile(
-      path.join(runDir, 'stage_log.jsonl'),
+      path.join(runDir, 'timeline.jsonl'),
       entries.map((e) => JSON.stringify(e)).join('\n') + '\n',
     );
 
@@ -1032,7 +1033,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
     // EPIC 1, run 1.
     const run1Dir = await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
     await writeFile(
-      path.join(run1Dir, 'stage_log.jsonl'),
+      path.join(run1Dir, 'timeline.jsonl'),
       [
         JSON.stringify({
           timestamp: '2026-01-01T00:00:00Z',
@@ -1056,7 +1057,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
     // EPIC 2, run 1.
     const run2Dir = await mkdirs(EVIDENCE_DIR(), 'E-002', 'run1');
     await writeFile(
-      path.join(run2Dir, 'stage_log.jsonl'),
+      path.join(run2Dir, 'timeline.jsonl'),
       [
         JSON.stringify({
           timestamp: '2026-01-02T00:00:00Z',
@@ -1097,7 +1098,7 @@ describe('Usage API -- GET /api/p/:projectId/usage', () => {
   it('handles malformed JSONL lines gracefully', async () => {
     const runDir = await mkdirs(EVIDENCE_DIR(), 'E-001', 'run1');
     await writeFile(
-      path.join(runDir, 'stage_log.jsonl'),
+      path.join(runDir, 'timeline.jsonl'),
       [
         JSON.stringify({
           timestamp: '2026-01-01T00:00:00Z',

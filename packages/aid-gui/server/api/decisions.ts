@@ -5,7 +5,7 @@
  * GET  /pending    — Pending decisions (runs awaiting PM action)
  * POST /           — Write a new decision
  *
- * All paths are relative to `{req.aidoPath}/04-engine/evidence/`.
+ * All paths are relative to `{req.aidoPath}/work/evidence/`.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -76,7 +76,7 @@ function extractEpicAndRun(filePath: string): { epicId: string; runId: string } 
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
-    const evidenceDir = path.join(req.aidoPath, '04-engine', 'evidence');
+    const evidenceDir = path.join(req.aidoPath, 'work', 'evidence');
     const decisionFiles = await findFilesRecursive(evidenceDir, [
       'pm_decision.json',
       'pm_plan_approval.json',
@@ -131,10 +131,10 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
 router.get('/pending', async (req: Request, res: Response): Promise<void> => {
   try {
-    const evidenceDir = path.join(req.aidoPath, '04-engine', 'evidence');
+    const evidenceDir = path.join(req.aidoPath, 'work', 'evidence');
 
-    // Collect all plan_progress.json files to identify active runs.
-    const progressFiles = await findFilesRecursive(evidenceDir, ['plan_progress.json']);
+    // Collect all state.yaml files to identify active runs.
+    const progressFiles = await findFilesRecursive(evidenceDir, ['state.yaml']);
 
     // Collect all pm_decision.json files to know which runs already have decisions.
     const decisionFiles = await findFilesRecursive(evidenceDir, ['pm_decision.json']);
@@ -247,7 +247,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     //   path is constructed.
     // Layer 2 (resolve+startsWith): verifies the joined path stays within the
     //   evidence directory after OS canonicalization.
-    const evidenceDir = path.join(req.aidoPath, '04-engine', 'evidence');
+    const evidenceDir = path.join(req.aidoPath, 'work', 'evidence');
     const validation = validateEvidencePath(evidenceDir, epicId, runId);
     if (!validation.ok) {
       send400(res, validation.reason);

@@ -32,7 +32,7 @@ const router = Router();
 
 /** Base evidence directory path within .aid-o/. */
 function evidenceBase(aidoPath: string): string {
-  return path.join(aidoPath, '04-engine', 'evidence');
+  return path.join(aidoPath, 'work', 'evidence');
 }
 
 /**
@@ -136,7 +136,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
         // Check for key files.
         const [hasStageLog, hasPlan, hasGatesReport] = await Promise.all([
-          fileExists(path.join(runDirPath, 'stage_log.jsonl')),
+          fileExists(path.join(runDirPath, 'timeline.jsonl')),
           fileExists(path.join(runDirPath, 'plan.json')),
           fileExists(path.join(runDirPath, 'gates_report.json')),
         ]);
@@ -215,7 +215,7 @@ router.get('/:epicId', async (req: Request, res: Response): Promise<void> => {
       if (!(await isDirectory(runDirPath))) continue;
 
       const [hasStageLog, hasPlan, hasGatesReport] = await Promise.all([
-        fileExists(path.join(runDirPath, 'stage_log.jsonl')),
+        fileExists(path.join(runDirPath, 'timeline.jsonl')),
         fileExists(path.join(runDirPath, 'plan.json')),
         fileExists(path.join(runDirPath, 'gates_report.json')),
       ]);

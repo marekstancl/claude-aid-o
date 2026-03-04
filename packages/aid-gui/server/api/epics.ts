@@ -4,7 +4,7 @@
  * GET /         — List all EPICs (summary entries)
  * GET /:epicId  — Full parsed EPIC specification
  *
- * Source directory: `{aidoPath}/02-epics/`
+ * Source directory: `{aidoPath}/tasks/`
  */
 
 import { Router } from 'express';
@@ -21,7 +21,7 @@ const router = Router();
 // ---------------------------------------------------------------------------
 
 router.get('/', async (req, res) => {
-  const epicsDir = path.join(req.aidoPath, '02-epics');
+  const epicsDir = path.join(req.aidoPath, 'tasks');
 
   let files: string[];
   try {
@@ -85,7 +85,7 @@ router.get('/', async (req, res) => {
 
 router.get('/:epicId', async (req, res) => {
   const { epicId } = req.params;
-  const filePath = path.join(req.aidoPath, '02-epics', `${epicId}.md`);
+  const filePath = path.join(req.aidoPath, 'tasks', `${epicId}.md`);
 
   let content: string;
   try {

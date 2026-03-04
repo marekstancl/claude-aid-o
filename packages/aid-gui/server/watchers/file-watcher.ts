@@ -6,7 +6,7 @@
  * regex-based path rules, parses the file content using the appropriate
  * parser, and emits typed FileChangeEvent objects via Node.js EventEmitter.
  *
- * Stage log files (`stage_log.jsonl`) are explicitly excluded from this
+ * Stage log files (`timeline.jsonl`) are explicitly excluded from this
  * watcher — they are handled by the dedicated StageLogStream (tail-follow).
  *
  * Module: server/watchers/file-watcher.ts
@@ -46,74 +46,74 @@ const PATH_RULES: ReadonlyArray<{
 }> = [
   // Priority 1: Stage log — excluded from file watcher (handled by streamer)
   {
-    pattern: /^04-engine\/evidence\/[^/]+\/[^/]+\/stage_log\.jsonl$/,
+    pattern: /^work\/evidence\/[^/]+\/[^/]+\/timeline\.jsonl$/,
     classification: { topic: 'pipeline.stage_log', parser: 'jsonl', excluded: true },
   },
   // Priority 2: Pipeline state (FSM state, current EPIC/step)
   {
-    pattern: /^04-engine\/auto-mode-state\.yaml$/,
+    pattern: /^work\/auto-mode-state\.yaml$/,
     classification: { topic: 'pipeline', parser: 'yaml', excluded: false },
   },
   // Priority 3: Per-run progress tracking
   {
-    pattern: /^04-engine\/evidence\/[^/]+\/[^/]+\/plan_progress\.json$/,
-    classification: { topic: 'pipeline', parser: 'json', excluded: false },
+    pattern: /^work\/evidence\/[^/]+\/[^/]+\/state\.yaml$/,
+    classification: { topic: 'pipeline', parser: 'yaml', excluded: false },
   },
   // Priority 4: Execution plan (initial load)
   {
-    pattern: /^04-engine\/evidence\/[^/]+\/[^/]+\/plan\.json$/,
+    pattern: /^work\/evidence\/[^/]+\/[^/]+\/plan\.json$/,
     classification: { topic: 'pipeline', parser: 'json', excluded: false },
   },
-  // Priority 5: EPIC queue state and ordering
+  // Priority 5: Queue state and ordering
   {
-    pattern: /^04-engine\/epic-queue\.yaml$/,
+    pattern: /^config\/queue\.yaml$/,
     classification: { topic: 'queue', parser: 'yaml', excluded: false },
   },
   // Priority 6-8: Decision records (merge, plan approval, escalation)
   {
-    pattern: /^04-engine\/evidence\/[^/]+\/[^/]+\/pm_(decision|plan_approval|merge_approval)\.json$/,
+    pattern: /^work\/evidence\/[^/]+\/[^/]+\/pm_(decision|plan_approval|merge_approval)\.json$/,
     classification: { topic: 'decisions', parser: 'json', excluded: false },
   },
   // Priority 9-10: Gate reports (both paths)
   {
-    pattern: /^04-engine\/evidence\/[^/]+\/[^/]+\/(gates\/)?gates_report\.json$/,
+    pattern: /^work\/evidence\/[^/]+\/[^/]+\/(gates\/)?gates_report\.json$/,
     classification: { topic: 'pipeline', parser: 'json', excluded: false },
   },
   // Priority 11-13: Audit reports (YAML and Markdown, at EPIC or run level)
   // Parser is determined at runtime based on file extension.
   {
-    pattern: /^04-engine\/evidence(\/[^/]+){1,2}\/audit-report\.(yaml|md)$/,
+    pattern: /^work\/evidence(\/[^/]+){1,2}\/audit-report\.(yaml|md)$/,
     classification: { topic: 'audit', parser: null, excluded: false },
   },
   // Priority 14-16: Evidence catch-all (reports, step outputs, etc.)
   {
-    pattern: /^04-engine\/evidence\//,
+    pattern: /^work\/evidence\//,
     classification: { topic: 'evidence', parser: null, excluded: false },
   },
   // Priority 17: Configuration files
   {
-    pattern: /^03-config\//,
+    pattern: /^config\//,
     classification: { topic: 'config', parser: null, excluded: false },
   },
-  // Priority 18: EPIC spec changes
+  // Priority 18: Task spec changes
   {
-    pattern: /^02-epics\/.*\.md$/,
+    pattern: /^tasks\/.*\.md$/,
     classification: { topic: 'pipeline', parser: 'epicSpec', excluded: false },
   },
   // Priority 19-20: Plan documents and IDEAS
   {
-    pattern: /^01-plans\//,
+    pattern: /^plans\//,
     classification: { topic: 'config', parser: 'markdown', excluded: false },
   },
-  // Priority 21: Engine memory/knowledge base
+  // Priority 21: Run specification files
   {
-    pattern: /^04-engine\/memory\//,
-    classification: { topic: 'config', parser: null, excluded: false },
-  },
-  // Priority 22: Run specification files
-  {
-    pattern: /^04-engine\/runs\//,
+    pattern: /^work\/runs\//,
     classification: { topic: 'pipeline', parser: null, excluded: false },
+  },
+  // Priority 22: Engine knowledge base (catch-all for work/ not matched above)
+  {
+    pattern: /^work\//,
+    classification: { topic: 'config', parser: null, excluded: false },
   },
 ];
 
@@ -262,7 +262,7 @@ export class FileWatcher extends EventEmitter {
    *
    * @param filePath - Absolute path to the changed file.
    * @returns Classification result with topic, parser hint, and whether the
-   *          file should be excluded from this watcher (e.g., stage_log.jsonl).
+   *          file should be excluded from this watcher (e.g., timeline.jsonl).
    *          Returns null if the file does not match any classification rule.
    */
   classifyPath(filePath: string): PathClassification | null {
@@ -330,7 +330,7 @@ export class FileWatcher extends EventEmitter {
     }
 
     if (classification.excluded) {
-      // File is handled by another watcher (e.g., stage_log.jsonl by StageLogStream).
+      // File is handled by another watcher (e.g., timeline.jsonl by StageLogStream).
       return;
     }
 

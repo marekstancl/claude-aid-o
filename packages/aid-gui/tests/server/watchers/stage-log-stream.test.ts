@@ -14,7 +14,7 @@ import { StageLogStream } from '../../../server/watchers/stage-log-stream.ts';
 import type { StageLogEvent } from '../../../server/types.ts';
 
 // ---------------------------------------------------------------------------
-// Helper: create a stage_log.jsonl file with standard evidence path
+// Helper: create a timeline.jsonl file with standard evidence path
 // ---------------------------------------------------------------------------
 
 function makeStageLogEntry(overrides: Record<string, unknown> = {}): string {
@@ -37,9 +37,9 @@ describe('StageLogStream', () => {
 
   beforeEach(async () => {
     tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sls-test-'));
-    evidenceDir = path.join(tmpDir, '.aid-o', '04-engine', 'evidence', 'E-001', 'run1');
+    evidenceDir = path.join(tmpDir, '.aid-o', 'work', 'evidence', 'E-001', 'run1');
     await fsp.mkdir(evidenceDir, { recursive: true });
-    stageLogPath = path.join(evidenceDir, 'stage_log.jsonl');
+    stageLogPath = path.join(evidenceDir, 'timeline.jsonl');
   });
 
   afterEach(async () => {
@@ -256,10 +256,10 @@ describe('StageLogStream', () => {
     await stream.start(stageLogPath);
     expect(stream.bufferSize).toBe(1);
 
-    // Create new stage_log.jsonl for rotation
-    const newEvidenceDir = path.join(tmpDir, '.aid-o', '04-engine', 'evidence', 'E-002', 'run2');
+    // Create new timeline.jsonl for rotation
+    const newEvidenceDir = path.join(tmpDir, '.aid-o', 'work', 'evidence', 'E-002', 'run2');
     await fsp.mkdir(newEvidenceDir, { recursive: true });
-    const newStageLogPath = path.join(newEvidenceDir, 'stage_log.jsonl');
+    const newStageLogPath = path.join(newEvidenceDir, 'timeline.jsonl');
     await fsp.writeFile(
       newStageLogPath,
       makeStageLogEntry({ action: 'new_entry_1' }) + '\n' +

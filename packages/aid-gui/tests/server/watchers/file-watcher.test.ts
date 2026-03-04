@@ -26,7 +26,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies auto-mode-state.yaml as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/auto-mode-state.yaml',
+      '/project/.aid-o/work/auto-mode-state.yaml',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -35,20 +35,20 @@ describe('FileWatcher.classifyPath', () => {
     });
   });
 
-  it('classifies plan_progress.json as pipeline topic', () => {
+  it('classifies state.yaml as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/20260101T000000Z/plan_progress.json',
+      '/project/.aid-o/work/evidence/E-001/20260101T000000Z/state.yaml',
     );
     expect(result).toEqual({
       topic: 'pipeline',
-      parser: 'json',
+      parser: 'yaml',
       excluded: false,
     });
   });
 
   it('classifies plan.json as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/plan.json',
+      '/project/.aid-o/work/evidence/E-001/run1/plan.json',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -57,9 +57,9 @@ describe('FileWatcher.classifyPath', () => {
     });
   });
 
-  it('classifies epic-queue.yaml as queue topic', () => {
+  it('classifies queue.yaml as queue topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/epic-queue.yaml',
+      '/project/.aid-o/config/queue.yaml',
     );
     expect(result).toEqual({
       topic: 'queue',
@@ -68,9 +68,9 @@ describe('FileWatcher.classifyPath', () => {
     });
   });
 
-  it('classifies stage_log.jsonl as excluded', () => {
+  it('classifies timeline.jsonl as excluded', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/stage_log.jsonl',
+      '/project/.aid-o/work/evidence/E-001/run1/timeline.jsonl',
     );
     expect(result).not.toBeNull();
     expect(result!.excluded).toBe(true);
@@ -79,7 +79,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies pm_decision.json as decisions topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/pm_decision.json',
+      '/project/.aid-o/work/evidence/E-001/run1/pm_decision.json',
     );
     expect(result).toEqual({
       topic: 'decisions',
@@ -90,7 +90,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies pm_plan_approval.json as decisions topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/pm_plan_approval.json',
+      '/project/.aid-o/work/evidence/E-001/run1/pm_plan_approval.json',
     );
     expect(result).toEqual({
       topic: 'decisions',
@@ -101,7 +101,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies gates_report.json as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/gates_report.json',
+      '/project/.aid-o/work/evidence/E-001/run1/gates_report.json',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -112,7 +112,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies gates/gates_report.json as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/gates/gates_report.json',
+      '/project/.aid-o/work/evidence/E-001/run1/gates/gates_report.json',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -123,7 +123,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies audit-report.yaml as audit topic with yaml parser', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/audit-report.yaml',
+      '/project/.aid-o/work/evidence/E-001/run1/audit-report.yaml',
     );
     expect(result).not.toBeNull();
     expect(result!.topic).toBe('audit');
@@ -133,7 +133,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies audit-report.md as audit topic with markdown parser', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/audit-report.md',
+      '/project/.aid-o/work/evidence/E-001/run1/audit-report.md',
     );
     expect(result).not.toBeNull();
     expect(result!.topic).toBe('audit');
@@ -142,7 +142,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies evidence catch-all files as evidence topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-001/run1/steps/step_1/output.md',
+      '/project/.aid-o/work/evidence/E-001/run1/steps/step_1/output.md',
     );
     expect(result).not.toBeNull();
     expect(result!.topic).toBe('evidence');
@@ -150,7 +150,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies config directory files as config topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/03-config/permissions-auto.yaml',
+      '/project/.aid-o/config/permissions-auto.yaml',
     );
     expect(result).toEqual({
       topic: 'config',
@@ -161,7 +161,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies EPIC spec .md files as pipeline topic with epicSpec parser', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/02-epics/E-005-1_4-gui-foundation.md',
+      '/project/.aid-o/tasks/E-005-1_4-gui-foundation.md',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -172,7 +172,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies plan directory files as config topic with markdown parser', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/01-plans/P005-C.md',
+      '/project/.aid-o/plans/P005-C.md',
     );
     expect(result).toEqual({
       topic: 'config',
@@ -183,7 +183,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies engine memory files as config topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/memory/lessons-learned.md',
+      '/project/.aid-o/work/lessons-learned.md',
     );
     expect(result).toEqual({
       topic: 'config',
@@ -194,7 +194,7 @@ describe('FileWatcher.classifyPath', () => {
 
   it('classifies run spec files as pipeline topic', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/runs/run-spec.yaml',
+      '/project/.aid-o/work/runs/run-spec.yaml',
     );
     expect(result).toEqual({
       topic: 'pipeline',
@@ -215,11 +215,11 @@ describe('FileWatcher.classifyPath', () => {
 
   it('handles nested EPIC evidence paths correctly', () => {
     const result = watcher.classifyPath(
-      '/project/.aid-o/04-engine/evidence/E-005-2_4/20260225T143000Z/plan_progress.json',
+      '/project/.aid-o/work/evidence/E-005-2_4/20260225T143000Z/state.yaml',
     );
     expect(result).toEqual({
       topic: 'pipeline',
-      parser: 'json',
+      parser: 'yaml',
       excluded: false,
     });
   });
@@ -237,7 +237,8 @@ describe('FileWatcher lifecycle (filesystem)', () => {
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fw-test-'));
     aidoDir = path.join(tmpDir, '.aid-o');
-    await fs.mkdir(path.join(aidoDir, '04-engine'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'work'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'config'), { recursive: true });
   });
 
   afterEach(async () => {
@@ -277,8 +278,8 @@ describe('FileWatcher lifecycle (filesystem)', () => {
     const events: FileChangeEvent[] = [];
     watcher.on('event', (e: FileChangeEvent) => events.push(e));
 
-    const targetDir = path.join(aidoDir, '04-engine');
-    const filePath = path.join(targetDir, 'epic-queue.yaml');
+    const targetDir = path.join(aidoDir, 'config');
+    const filePath = path.join(targetDir, 'queue.yaml');
 
     await fs.writeFile(filePath, 'paused: false\nqueue: []\n');
 
@@ -293,9 +294,9 @@ describe('FileWatcher lifecycle (filesystem)', () => {
     expect(queueEvents[0].parsedData).not.toBeNull();
   });
 
-  it('does not emit events for excluded files (stage_log.jsonl)', async () => {
+  it('does not emit events for excluded files (timeline.jsonl)', async () => {
     watcher = new FileWatcher(aidoDir, { debounceMs: 20 });
-    const evidenceDir = path.join(aidoDir, '04-engine', 'evidence', 'E-001', 'run1');
+    const evidenceDir = path.join(aidoDir, 'work', 'evidence', 'E-001', 'run1');
     await fs.mkdir(evidenceDir, { recursive: true });
     await watcher.start();
 
@@ -303,13 +304,13 @@ describe('FileWatcher lifecycle (filesystem)', () => {
     watcher.on('event', (e: FileChangeEvent) => events.push(e));
 
     await fs.writeFile(
-      path.join(evidenceDir, 'stage_log.jsonl'),
+      path.join(evidenceDir, 'timeline.jsonl'),
       '{"timestamp":"2026-01-01T00:00:00Z","state":"IDLE","step":null,"action":"test","details":"test","result":"pass"}\n',
     );
 
     await new Promise((r) => setTimeout(r, 300));
 
-    // Should not have received any event for stage_log.jsonl
+    // Should not have received any event for timeline.jsonl
     const stageLogEvents = events.filter((e) => e.topic === 'pipeline.stage_log');
     expect(stageLogEvents.length).toBe(0);
   });
@@ -321,7 +322,7 @@ describe('FileWatcher lifecycle (filesystem)', () => {
     const events: FileChangeEvent[] = [];
     watcher.on('event', (e: FileChangeEvent) => events.push(e));
 
-    const filePath = path.join(aidoDir, '04-engine', 'auto-mode-state.yaml');
+    const filePath = path.join(aidoDir, 'work', 'auto-mode-state.yaml');
     await fs.writeFile(filePath, 'session:\n  mode: auto\n  session_id: FA-test\n');
 
     await new Promise((r) => setTimeout(r, 300));

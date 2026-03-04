@@ -287,7 +287,7 @@ describe('InsightsSlice — cross-slice isolation', () => {
   it('updating lessonEntries does not affect queueEntries', () => {
     useStore.getState().setQueueEntries([{
       epicId: 'E-001',
-      path: '.aid-o/02-epics/E-001.md',
+      path: '.aid-o/tasks/E-001.md',
       priority: 'high',
       status: 'queued',
       addedAt: '2026-02-27T00:00:00Z',

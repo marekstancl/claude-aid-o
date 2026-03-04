@@ -95,7 +95,7 @@ No backlog items yet.
 describe('GET /api/p/default/backlog', () => {
   it('returns parsed BacklogEntry[] from a valid 7-column table', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'backlog.md'),
+      path.join(aidoDir, 'work', 'backlog.md'),
       VALID_BACKLOG_MD,
     );
 
@@ -127,7 +127,7 @@ describe('GET /api/p/default/backlog', () => {
 
   it('skips malformed rows without crashing', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'backlog.md'),
+      path.join(aidoDir, 'work', 'backlog.md'),
       MALFORMED_BACKLOG_MD,
     );
 
@@ -142,7 +142,7 @@ describe('GET /api/p/default/backlog', () => {
 
   it('returns empty array for a file with no table', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'backlog.md'),
+      path.join(aidoDir, 'work', 'backlog.md'),
       EMPTY_BACKLOG_MD,
     );
 
@@ -156,7 +156,7 @@ describe('GET /api/p/default/backlog', () => {
 
   it('skips the header and separator rows of the table', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'backlog.md'),
+      path.join(aidoDir, 'work', 'backlog.md'),
       VALID_BACKLOG_MD,
     );
 

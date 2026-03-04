@@ -43,19 +43,19 @@ function resolveAidoPath(): string {
 }
 
 /**
- * Find the most recent stage_log.jsonl file path by reading auto-mode-state
+ * Find the most recent timeline.jsonl file path by reading auto-mode-state
  * or falling back to a glob of the evidence directory.
  *
- * Returns null if no stage_log.jsonl can be found (pipeline may not have run
+ * Returns null if no timeline.jsonl can be found (pipeline may not have run
  * yet). The StageLogStream will be started later when the FileWatcher detects
- * a new stage_log.jsonl file.
+ * a new timeline.jsonl file.
  */
 async function findActiveStageLog(aidoPath: string): Promise<string | null> {
   const fs = await import("node:fs/promises");
 
   // Strategy 1: Read auto-mode-state.yaml for the current EPIC/run.
   try {
-    const autoModeStatePath = path.join(aidoPath, "04-engine", "auto-mode-state.yaml");
+    const autoModeStatePath = path.join(aidoPath, "work", "auto-mode-state.yaml");
     const content = await fs.readFile(autoModeStatePath, "utf-8");
     // Simple regex to extract current EPIC and run from the YAML.
     const epicMatch = content.match(/current_epic:\s*["']?([^"'\s\n]+)/);
@@ -63,11 +63,11 @@ async function findActiveStageLog(aidoPath: string): Promise<string | null> {
     if (epicMatch && runMatch) {
       const stageLogPath = path.join(
         aidoPath,
-        "04-engine",
+        "work",
         "evidence",
         epicMatch[1],
         runMatch[1],
-        "stage_log.jsonl",
+        "timeline.jsonl",
       );
       try {
         await fs.access(stageLogPath);
@@ -80,9 +80,9 @@ async function findActiveStageLog(aidoPath: string): Promise<string | null> {
     // auto-mode-state.yaml may not exist; continue.
   }
 
-  // Strategy 2: Look for the most recently modified stage_log.jsonl in evidence.
+  // Strategy 2: Look for the most recently modified timeline.jsonl in evidence.
   try {
-    const evidencePath = path.join(aidoPath, "04-engine", "evidence");
+    const evidencePath = path.join(aidoPath, "work", "evidence");
     const epicDirs = await fs.readdir(evidencePath).catch(() => [] as string[]);
     let latestPath: string | null = null;
     let latestMtime = 0;
@@ -94,7 +94,7 @@ async function findActiveStageLog(aidoPath: string): Promise<string | null> {
 
       const runDirs = await fs.readdir(epicFullPath).catch(() => [] as string[]);
       for (const runDir of runDirs) {
-        const stageLogPath = path.join(epicFullPath, runDir, "stage_log.jsonl");
+        const stageLogPath = path.join(epicFullPath, runDir, "timeline.jsonl");
         try {
           const logStat = await fs.stat(stageLogPath);
           if (logStat.mtimeMs > latestMtime) {
@@ -102,7 +102,7 @@ async function findActiveStageLog(aidoPath: string): Promise<string | null> {
             latestPath = stageLogPath;
           }
         } catch {
-          // This run directory has no stage_log.jsonl; skip.
+          // This run directory has no timeline.jsonl; skip.
         }
       }
     }
@@ -198,13 +198,13 @@ export async function startServer(config?: ServerConfig): Promise<void> {
   fileWatcher.on("event", (event: FileChangeEvent) => {
     aidWebSocket.broadcast(event);
 
-    // Detect new stage_log.jsonl files for automatic rotation.
+    // Detect new timeline.jsonl files for automatic rotation.
     if (
       event.changeType === "add" &&
-      event.filePath.endsWith("stage_log.jsonl") &&
+      event.filePath.endsWith("timeline.jsonl") &&
       event.filePath !== stageLogStream.currentFilePath
     ) {
-      console.log(`[index] New stage_log.jsonl detected: ${event.filePath}`);
+      console.log(`[index] New timeline.jsonl detected: ${event.filePath}`);
       stageLogStream.switchFile(event.filePath).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[index] Failed to switch stage log file: ${msg}`);
@@ -250,7 +250,7 @@ export async function startServer(config?: ServerConfig): Promise<void> {
       console.error(`[FileWatcher] Failed to start: ${msg}`);
     });
 
-  // Start stage log stream if an active stage_log.jsonl exists.
+  // Start stage log stream if an active timeline.jsonl exists.
   findActiveStageLog(aidoPath)
     .then((stageLogPath) => {
       if (stageLogPath) {
@@ -258,7 +258,7 @@ export async function startServer(config?: ServerConfig): Promise<void> {
         return stageLogStream.start(stageLogPath);
       } else {
         console.log(
-          "[StageLogStream] No active stage_log.jsonl found — will start on detection",
+          "[StageLogStream] No active timeline.jsonl found — will start on detection",
         );
       }
     })

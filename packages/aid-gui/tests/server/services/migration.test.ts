@@ -5,8 +5,8 @@
  * packages/aid-server/src/services/ideas-migration.ts.
  *
  * File paths used by the service:
- *   - ideas.json: {projectRoot}/.aid-o/04-engine/ideas.json
- *   - IDEAS.md:   {projectRoot}/.aid-o/01-plans/IDEAS.md
+ *   - ideas.json: {projectRoot}/.aid-o/work/ideas.json        (v2 output)
+ *   - IDEAS.md:   {projectRoot}/.aid-o/plans/IDEAS.md
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -32,11 +32,11 @@ async function writeFile(filePath: string, content: string): Promise<void> {
 }
 
 function ideasJsonPath(): string {
-  return path.join(tmpDir, '.aid-o', '04-engine', 'ideas.json');
+  return path.join(tmpDir, '.aid-o', 'work', 'ideas.json');
 }
 
 function ideasMdPath(): string {
-  return path.join(tmpDir, '.aid-o', '01-plans', 'IDEAS.md');
+  return path.join(tmpDir, '.aid-o', 'plans', 'IDEAS.md');
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +236,8 @@ describe('import/export round-trip', () => {
 
     // Re-import from the exported MD into a fresh tmpDir
     const tmpDir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'roundtrip-'));
-    const mdPath2 = path.join(tmpDir2, '.aid-o', '01-plans', 'IDEAS.md');
-    const jsonPath2 = path.join(tmpDir2, '.aid-o', '04-engine', 'ideas.json');
+    const mdPath2 = path.join(tmpDir2, '.aid-o', 'plans', 'IDEAS.md');
+    const jsonPath2 = path.join(tmpDir2, '.aid-o', 'work', 'ideas.json');
 
     const exportedMd = await fs.readFile(ideasMdPath(), 'utf-8');
     await writeFile(mdPath2, exportedMd);

@@ -1,7 +1,7 @@
 /**
  * Unit tests for server/parsers/jsonl.ts
  *
- * Covers: valid JSONL from real stage_log fixture, camelCase key conversion,
+ * Covers: valid JSONL from real timeline fixture, camelCase key conversion,
  * malformed lines, empty content, empty lines skipped, and mixed valid/invalid.
  */
 
@@ -20,28 +20,28 @@ function readFixture(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Valid JSONL — stage_log.jsonl (real .aid-o/ data)
+// Valid JSONL — timeline.jsonl (real .aid-o/ data)
 // ---------------------------------------------------------------------------
 
-describe('parseJsonl — valid stage_log.jsonl', () => {
+describe('parseJsonl — valid timeline.jsonl', () => {
   it('parses all valid lines and returns the correct entry count', () => {
-    const content = readFixture('stage_log.jsonl');
-    const result = parseJsonl<StageLogEntry>(content, 'stage_log.jsonl');
+    const content = readFixture('timeline.jsonl');
+    const result = parseJsonl<StageLogEntry>(content, 'timeline.jsonl');
 
     // The fixture has 10 non-empty lines (plus a trailing newline that should be skipped).
     expect(result.data).toHaveLength(10);
   });
 
   it('returns no warnings for a fully valid JSONL file', () => {
-    const content = readFixture('stage_log.jsonl');
-    const result = parseJsonl<StageLogEntry>(content, 'stage_log.jsonl');
+    const content = readFixture('timeline.jsonl');
+    const result = parseJsonl<StageLogEntry>(content, 'timeline.jsonl');
 
     expect(result.warnings).toHaveLength(0);
   });
 
   it('converts snake_case keys to camelCase for every entry', () => {
-    const content = readFixture('stage_log.jsonl');
-    const result = parseJsonl<StageLogEntry>(content, 'stage_log.jsonl');
+    const content = readFixture('timeline.jsonl');
+    const result = parseJsonl<StageLogEntry>(content, 'timeline.jsonl');
 
     // All entries should have camelCase keys — spot-check first and last.
     const first = result.data?.[0];
@@ -55,8 +55,8 @@ describe('parseJsonl — valid stage_log.jsonl', () => {
   });
 
   it('parses the executing-state entry correctly (has a non-null step)', () => {
-    const content = readFixture('stage_log.jsonl');
-    const result = parseJsonl<StageLogEntry>(content, 'stage_log.jsonl');
+    const content = readFixture('timeline.jsonl');
+    const result = parseJsonl<StageLogEntry>(content, 'timeline.jsonl');
 
     const dispatchEntry = result.data?.find((e) => e.action === 'dispatch_agent');
     expect(dispatchEntry).toBeDefined();
@@ -65,8 +65,8 @@ describe('parseJsonl — valid stage_log.jsonl', () => {
   });
 
   it('propagates the source string in the result', () => {
-    const content = readFixture('stage_log.jsonl');
-    const source = 'fixtures/stage_log.jsonl';
+    const content = readFixture('timeline.jsonl');
+    const source = 'fixtures/timeline.jsonl';
     const result = parseJsonl<StageLogEntry>(content, source);
 
     expect(result.source).toBe(source);

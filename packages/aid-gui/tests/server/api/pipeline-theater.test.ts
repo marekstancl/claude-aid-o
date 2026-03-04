@@ -30,7 +30,7 @@ let aidoDir: string;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pipeline-theater-test-'));
   aidoDir = path.join(tmpDir, '.aid-o');
-  await fs.mkdir(path.join(aidoDir, '04-engine', 'evidence'), { recursive: true });
+  await fs.mkdir(path.join(aidoDir, 'work', 'evidence'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -77,9 +77,13 @@ function createMockRegistry(): Record<string, unknown> {
         }
       },
 
-      async readYaml<T>(_filePath: string): Promise<T | null> {
-        // Not needed for theater endpoint; return null by default.
-        return null;
+      async readYaml<T>(filePath: string): Promise<T | null> {
+        try {
+          const text = await fs.readFile(filePath, 'utf-8');
+          return JSON.parse(text) as T;
+        } catch {
+          return null;
+        }
       },
 
       async readJsonl<T>(filePath: string): Promise<T[]> {
@@ -117,7 +121,7 @@ function createMockRegistry(): Record<string, unknown> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const EVIDENCE_DIR = () => path.join(aidoDir, '04-engine', 'evidence');
+const EVIDENCE_DIR = () => path.join(aidoDir, 'work', 'evidence');
 
 /** Write a text file, creating parent directories as needed. */
 async function writeTextFile(filePath: string, content: string): Promise<void> {
@@ -151,14 +155,12 @@ function makePlan(epicId: string, runId: string, steps: Array<{ id: string; role
   });
 }
 
-/** Build a plan_progress.json with the given step statuses. */
-function makeProgress(
-  state: string,
-  stepStatuses: Record<string, { status: string; startedAt?: string; completedAt?: string }>,
-) {
+/** Build a state.yaml (v2 FSM format: state + current_step index). */
+function makeState(fsmState: string, currentStep: number, totalSteps?: number) {
   return JSON.stringify({
-    state,
-    steps: stepStatuses,
+    state: fsmState,
+    current_step: currentStep,
+    total_steps: totalSteps ?? currentStep,
   });
 }
 
@@ -194,7 +196,7 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
     expect(res.body.error.message).toContain('plan.json');
   });
 
-  it('returns theater data when plan.json exists but plan_progress.json is absent', async () => {
+  it('returns theater data when plan.json exists but state.yaml is absent', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
@@ -228,19 +230,10 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
         { id: 'step_2_backend', role: 'backend', objective: 'Implement endpoints' },
       ]),
     );
+    // v2: current_step=1 means step 0 is done, step 1 is executing (FSM state EXECUTE)
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('executing', {
-        step_1_architect: {
-          status: 'done',
-          startedAt: '2026-02-25T10:00:00Z',
-          completedAt: '2026-02-25T10:05:00Z',
-        },
-        step_2_backend: {
-          status: 'executing',
-          startedAt: '2026-02-25T10:05:00Z',
-        },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('EXECUTE', 1, 2),
     );
 
     const res = await request(createTestApp())
@@ -250,85 +243,19 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
     expect(res.body.ok).toBe(true);
     const { data } = res.body;
     expect(data.totalSteps).toBe(2);
-    expect(data.completedSteps).toBe(1); // only done counts
+    expect(data.completedSteps).toBe(1); // step 0 is done (idx < current_step)
 
     const step1 = data.steps.find((s: { id: string }) => s.id === 'step_1_architect');
     expect(step1.role).toBe('architect');
-    expect(step1.status).toBe('done');
-    expect(step1.startedAt).toBe('2026-02-25T10:00:00Z');
-    expect(step1.completedAt).toBe('2026-02-25T10:05:00Z');
+    expect(step1.status).toBe('done');       // idx 0 < current_step 1
     expect(step1.objective).toBe('Design API');
 
     const step2 = data.steps.find((s: { id: string }) => s.id === 'step_2_backend');
     expect(step2.role).toBe('backend');
-    expect(step2.status).toBe('executing');
-    expect(step2.startedAt).toBe('2026-02-25T10:05:00Z');
-    expect(step2.completedAt).toBeNull();
+    expect(step2.status).toBe('executing');  // idx 1 === current_step 1, FSM=EXECUTE
   });
 
-  it('calculates durationMs correctly from startedAt and completedAt', async () => {
-    const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
-    const startedAt = '2026-02-25T10:00:00.000Z';
-    const completedAt = '2026-02-25T10:02:30.000Z'; // 2m 30s = 150000ms
-
-    await writeTextFile(
-      path.join(runDir, 'plan.json'),
-      makePlan('E-001', 'run-001', [{ id: 'step_1', role: 'backend' }]),
-    );
-    await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('done', {
-        step_1: { status: 'done', startedAt, completedAt },
-      }),
-    );
-
-    const res = await request(createTestApp())
-      .get('/api/p/default/pipeline/theater/E-001/run-001')
-      .expect(200);
-
-    expect(res.body.ok).toBe(true);
-    const step = res.body.data.steps[0];
-    expect(step.durationMs).toBe(150_000);
-  });
-
-  it('sets durationMs to null for steps with no timing data', async () => {
-    const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
-    await writeTextFile(
-      path.join(runDir, 'plan.json'),
-      makePlan('E-001', 'run-001', [{ id: 'step_1', role: 'backend' }]),
-    );
-    // No plan_progress.json — steps have no timing
-
-    const res = await request(createTestApp())
-      .get('/api/p/default/pipeline/theater/E-001/run-001')
-      .expect(200);
-
-    expect(res.body.ok).toBe(true);
-    expect(res.body.data.steps[0].durationMs).toBeNull();
-  });
-
-  it('sets durationMs to null when only startedAt is present (not yet complete)', async () => {
-    const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
-    await writeTextFile(
-      path.join(runDir, 'plan.json'),
-      makePlan('E-001', 'run-001', [{ id: 'step_1', role: 'backend' }]),
-    );
-    await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('executing', {
-        step_1: { status: 'executing', startedAt: '2026-02-25T10:00:00Z' },
-      }),
-    );
-
-    const res = await request(createTestApp())
-      .get('/api/p/default/pipeline/theater/E-001/run-001')
-      .expect(200);
-
-    expect(res.body.ok).toBe(true);
-    expect(res.body.data.steps[0].durationMs).toBeNull();
-  });
-
-  it('counts completedSteps using both "done" and "completed" status values', async () => {
+  it('counts completedSteps based on steps before current_step index', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
@@ -338,13 +265,10 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
         { id: 'step_3' },
       ]),
     );
+    // v2: current_step=2 means steps 0 and 1 are done, step 2 is executing
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('executing', {
-        step_1: { status: 'done' },
-        step_2: { status: 'completed' }, // alternate spelling
-        step_3: { status: 'executing' },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('EXECUTE', 2, 3),
     );
 
     const res = await request(createTestApp())
@@ -362,12 +286,10 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       path.join(runDir, 'plan.json'),
       makePlan('E-001', 'run-001', [{ id: 'step_1' }, { id: 'step_2' }]),
     );
+    // v2: current_step=2 with 2 total steps means all steps done
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('done', {
-        step_1: { status: 'done' },
-        step_2: { status: 'done' },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('DONE', 2, 2),
     );
 
     const res = await request(createTestApp())
@@ -378,18 +300,16 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
     expect(res.body.data.overallStatus).toBe('done');
   });
 
-  it('derives overallStatus as "executing" when any step is in_progress or executing', async () => {
+  it('derives overallStatus as "EXECUTE" when FSM state is EXECUTE', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
       makePlan('E-001', 'run-001', [{ id: 'step_1' }, { id: 'step_2' }]),
     );
+    // v2: FSM state EXECUTE, current_step=1 (step 0 done, step 1 active)
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('pending', {
-        step_1: { status: 'done' },
-        step_2: { status: 'in_progress' },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('EXECUTE', 1, 2),
     );
 
     const res = await request(createTestApp())
@@ -397,10 +317,10 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       .expect(200);
 
     expect(res.body.ok).toBe(true);
-    expect(res.body.data.overallStatus).toBe('executing');
+    expect(res.body.data.overallStatus).toBe('EXECUTE');
   });
 
-  it('parses and includes stage_log.jsonl entries when present', async () => {
+  it('parses and includes timeline.jsonl entries when present', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
@@ -412,7 +332,7 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       { timestamp: '2026-02-25T10:01:00Z', state: 'EXECUTING', step: 'step_1', action: 'dispatch', result: 'success' },
     ];
     await writeTextFile(
-      path.join(runDir, 'stage_log.jsonl'),
+      path.join(runDir, 'timeline.jsonl'),
       logEntries.map((e) => JSON.stringify(e)).join('\n') + '\n',
     );
 
@@ -421,28 +341,28 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       .expect(200);
 
     expect(res.body.ok).toBe(true);
-    expect(Array.isArray(res.body.data.stageLog)).toBe(true);
-    expect(res.body.data.stageLog).toHaveLength(2);
-    expect(res.body.data.stageLog[0].action).toBe('start');
-    expect(res.body.data.stageLog[1].action).toBe('dispatch');
-    expect(res.body.data.stageLog[1].step).toBe('step_1');
+    expect(Array.isArray(res.body.data.timeline)).toBe(true);
+    expect(res.body.data.timeline).toHaveLength(2);
+    expect(res.body.data.timeline[0].action).toBe('start');
+    expect(res.body.data.timeline[1].action).toBe('dispatch');
+    expect(res.body.data.timeline[1].step).toBe('step_1');
   });
 
-  it('returns an empty stageLog array when stage_log.jsonl is absent', async () => {
+  it('returns an empty timeline array when timeline.jsonl is absent', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
       makePlan('E-001', 'run-001', [{ id: 'step_1' }]),
     );
-    // No stage_log.jsonl written
+    // No timeline.jsonl written
 
     const res = await request(createTestApp())
       .get('/api/p/default/pipeline/theater/E-001/run-001')
       .expect(200);
 
     expect(res.body.ok).toBe(true);
-    expect(Array.isArray(res.body.data.stageLog)).toBe(true);
-    expect(res.body.data.stageLog).toHaveLength(0);
+    expect(Array.isArray(res.body.data.timeline)).toBe(true);
+    expect(res.body.data.timeline).toHaveLength(0);
   });
 
   it('preserves plan step order in the theater steps array', async () => {
@@ -487,11 +407,10 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       path.join(runDir, 'plan.json'),
       makePlan('E-001', 'run-001', [{ id: 'step_1' }, { id: 'step_2' }, { id: 'step_3' }]),
     );
+    // v2: current_step=1 means step 0 is done
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('executing', {
-        step_1: { status: 'done' },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('EXECUTE', 1, 3),
     );
 
     const res = await request(createTestApp())
@@ -505,83 +424,16 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
     expect(res.body.data.completedSteps).toBe(1);
   });
 
-  it('accepts alternative camelCase startedAt/completedAt field names in progress data', async () => {
-    // The route accepts both startedAt and started_at; test camelCase variant here
-    const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
-    const start = '2026-02-25T10:00:00.000Z';
-    const end = '2026-02-25T10:01:00.000Z'; // 60000ms
-
-    await writeTextFile(
-      path.join(runDir, 'plan.json'),
-      makePlan('E-001', 'run-001', [{ id: 'step_1' }]),
-    );
-    await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      JSON.stringify({
-        state: 'done',
-        steps: {
-          step_1: {
-            status: 'done',
-            startedAt: start,     // camelCase
-            completedAt: end,     // camelCase
-          },
-        },
-      }),
-    );
-
-    const res = await request(createTestApp())
-      .get('/api/p/default/pipeline/theater/E-001/run-001')
-      .expect(200);
-
-    expect(res.body.ok).toBe(true);
-    const step = res.body.data.steps[0];
-    expect(step.durationMs).toBe(60_000);
-  });
-
-  it('accepts snake_case started_at/completed_at field names in progress data', async () => {
-    const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
-    const start = '2026-02-25T10:00:00.000Z';
-    const end = '2026-02-25T10:00:30.000Z'; // 30000ms
-
-    await writeTextFile(
-      path.join(runDir, 'plan.json'),
-      makePlan('E-001', 'run-001', [{ id: 'step_1' }]),
-    );
-    await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      JSON.stringify({
-        state: 'done',
-        steps: {
-          step_1: {
-            status: 'done',
-            started_at: start,     // snake_case
-            completed_at: end,     // snake_case
-          },
-        },
-      }),
-    );
-
-    const res = await request(createTestApp())
-      .get('/api/p/default/pipeline/theater/E-001/run-001')
-      .expect(200);
-
-    expect(res.body.ok).toBe(true);
-    const step = res.body.data.steps[0];
-    expect(step.durationMs).toBe(30_000);
-  });
-
-  it('returns overallStatus as "failed" when any step has failed status', async () => {
+  it('returns overallStatus matching FSM state for error/escalation states', async () => {
     const runDir = path.join(EVIDENCE_DIR(), 'E-001', 'run-001');
     await writeTextFile(
       path.join(runDir, 'plan.json'),
       makePlan('E-001', 'run-001', [{ id: 'step_1' }, { id: 'step_2' }]),
     );
+    // v2: FSM state ESCALATION — overallStatus reflects the FSM state directly
     await writeTextFile(
-      path.join(runDir, 'plan_progress.json'),
-      makeProgress('pending', {
-        step_1: { status: 'done' },
-        step_2: { status: 'failed' },
-      }),
+      path.join(runDir, 'state.yaml'),
+      makeState('ESCALATION', 1, 2),
     );
 
     const res = await request(createTestApp())
@@ -589,6 +441,6 @@ describe('Pipeline Theater — GET /api/p/:projectId/pipeline/theater/:epicId/:r
       .expect(200);
 
     expect(res.body.ok).toBe(true);
-    expect(res.body.data.overallStatus).toBe('failed');
+    expect(res.body.data.overallStatus).toBe('ESCALATION');
   });
 });

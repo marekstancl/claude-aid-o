@@ -23,7 +23,7 @@ let originalHome: string | undefined;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'api-feat-test-'));
   aidoDir = path.join(tmpDir, '.aid-o');
-  await fs.mkdir(path.join(aidoDir, '04-engine'), { recursive: true });
+  await fs.mkdir(path.join(aidoDir, 'work'), { recursive: true });
 
   // Override HOME so ~/.aid-gui/ storage resolves to our temp dir
   originalHome = process.env.HOME;
@@ -405,7 +405,7 @@ describe('Projects API — DELETE /api/projects/:id', () => {
 describe('Queue Scheduling — GET /api/p/default/queue/schedule', () => {
   it('returns default schedule config when none stored', async () => {
     // Need queue file to exist for the queue router
-    await fs.mkdir(path.join(aidoDir, '04-engine'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'work'), { recursive: true });
 
     const res = await request(createApp()).get('/api/p/default/queue/schedule');
     expect(res.status).toBe(200);

@@ -232,7 +232,7 @@ function dispatchEvent(msg: WsEventMessage): void {
             reviewCycles?: number;
           }>);
         } else if (Array.isArray(data.parsedData)) {
-          // plan_progress.json is an array: [{id, status, started_at, ...}]
+          // state.yaml is an array: [{id, status, started_at, ...}]
           const arr = data.parsedData as Array<{
             id: string;
             status: string;
@@ -417,7 +417,7 @@ async function resyncFromRest(projectId: string): Promise<void> {
     store.setSteps(stepsRes.value.data);
   }
 
-  // Step statuses (per-EPIC progress from plan_progress.json)
+  // Step statuses (per-EPIC progress from state.yaml)
   if (stepStatusesRes.status === 'fulfilled' && stepStatusesRes.value.ok) {
     const data = stepStatusesRes.value.data;
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {

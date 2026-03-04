@@ -1,7 +1,7 @@
 /**
  * Unit tests for server/parsers/json.ts
  *
- * Covers: valid JSON from real .aid-o/ fixtures (plan.json, plan_progress.json),
+ * Covers: valid JSON from real .aid-o/ fixtures (plan.json, state.yaml),
  * camelCase key conversion, malformed JSON, and empty content.
  */
 
@@ -51,7 +51,7 @@ describe('parseJson — valid plan.json', () => {
     // Source has "total_steps" — output should have "totalSteps".
     expect(result.data).toHaveProperty('totalSteps', 6);
     // Source has "source_plan" — output should have "sourcePlan".
-    expect(result.data).toHaveProperty('sourcePlan', '.aid-o/01-plans/P005-C-aid-gui-backend-post-prototype.md');
+    expect(result.data).toHaveProperty('sourcePlan', '.aid-o/plans/P005-C-aid-gui-backend-post-prototype.md');
   });
 
   it('does NOT retain raw snake_case keys', () => {
@@ -101,21 +101,21 @@ describe('parseJson — valid plan.json', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Valid JSON — plan_progress.json (real .aid-o/ data)
+// Valid JSON — state.yaml (real .aid-o/ data)
 // ---------------------------------------------------------------------------
 
-describe('parseJson — valid plan_progress.json', () => {
+describe('parseJson — valid state.yaml', () => {
   it('parses successfully with non-null data', () => {
-    const content = readFixture('plan_progress.json');
-    const result = parseJson<PlanProgress>(content, 'plan_progress.json');
+    const content = readFixture('state.yaml');
+    const result = parseJson<PlanProgress>(content, 'state.yaml');
 
     expect(result.data).not.toBeNull();
     expect(result.warnings).toHaveLength(0);
   });
 
   it('converts top-level snake_case keys', () => {
-    const content = readFixture('plan_progress.json');
-    const result = parseJson<PlanProgress>(content, 'plan_progress.json');
+    const content = readFixture('state.yaml');
+    const result = parseJson<PlanProgress>(content, 'state.yaml');
 
     expect(result.data).toHaveProperty('epicId', 'E-005-1_4-gui-foundation');
     expect(result.data).toHaveProperty('runId', '20260225T140000Z');
@@ -124,9 +124,9 @@ describe('parseJson — valid plan_progress.json', () => {
   });
 
   it('converts snake_case keys inside nested step progress objects', () => {
-    const content = readFixture('plan_progress.json');
+    const content = readFixture('state.yaml');
     // Access the raw parsed result as a plain record to inspect actual key names.
-    const result = parseJson<Record<string, unknown>>(content, 'plan_progress.json');
+    const result = parseJson<Record<string, unknown>>(content, 'state.yaml');
 
     // snakeToCamel converts object KEYS too, so "step_0_backend" -> "step0Backend"
     // and the inner fields "started_at" -> "startedAt" etc.
@@ -143,8 +143,8 @@ describe('parseJson — valid plan_progress.json', () => {
   });
 
   it('reflects the executing step correctly', () => {
-    const content = readFixture('plan_progress.json');
-    const result = parseJson<Record<string, unknown>>(content, 'plan_progress.json');
+    const content = readFixture('state.yaml');
+    const result = parseJson<Record<string, unknown>>(content, 'state.yaml');
 
     // "step_5_qa" -> "step5Qa" after snakeToCamel key conversion
     const steps = result.data?.steps as Record<string, Record<string, unknown>>;

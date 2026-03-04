@@ -4,7 +4,7 @@
  * GET  /          — List all audit reports across all EPICs
  * GET  /:epicId   — Audit report for a specific EPIC
  *
- * Scans `{req.aidoPath}/04-engine/evidence/` for audit-report.yaml and
+ * Scans `{req.aidoPath}/work/evidence/` for audit-report.yaml and
  * audit-report.md files.
  */
 
@@ -116,7 +116,7 @@ async function parseAuditFile(filePath: string): Promise<AuditReport | null> {
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
-    const evidenceDir = path.join(req.aidoPath, '04-engine', 'evidence');
+    const evidenceDir = path.join(req.aidoPath, 'work', 'evidence');
     const auditFiles = await findFilesRecursive(evidenceDir, AUDIT_FILENAMES);
 
     const reports: AuditReport[] = [];
@@ -162,7 +162,7 @@ router.get('/:epicId', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const epicEvidenceDir = path.join(req.aidoPath, '04-engine', 'evidence', epicId);
+    const epicEvidenceDir = path.join(req.aidoPath, 'work', 'evidence', epicId);
 
     // Verify the EPIC evidence directory exists.
     try {

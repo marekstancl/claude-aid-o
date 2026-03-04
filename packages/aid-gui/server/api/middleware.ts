@@ -112,14 +112,14 @@ export async function findActiveRun(aidoPath: string): Promise<ActiveRun | null>
 
   // Strategy 1: Read auto-mode-state.yaml for current EPIC
   try {
-    const statePath = path.join(aidoPath, '04-engine', 'auto-mode-state.yaml');
+    const statePath = path.join(aidoPath, 'work', 'auto-mode-state.yaml');
     const content = await fs.readFile(statePath, 'utf-8');
     const epicMatch = content.match(/current_epic_id:\s*(?:"([^"]+)"|(\S+))/);
     if (epicMatch) {
       const epicId = epicMatch[1] || epicMatch[2];
       if (epicId && epicId !== 'null') {
         // Find the latest run for this EPIC
-        const epicDir = path.join(aidoPath, '04-engine', 'evidence', epicId);
+        const epicDir = path.join(aidoPath, 'work', 'evidence', epicId);
         const runs = await fs.readdir(epicDir).catch(() => [] as string[]);
         const sortedRuns = runs.sort().reverse();
         if (sortedRuns.length > 0) {
@@ -138,7 +138,7 @@ export async function findActiveRun(aidoPath: string): Promise<ActiveRun | null>
   // Strategy 2: Find most recently modified evidence directory
   if (!result) {
     try {
-      const evidencePath = path.join(aidoPath, '04-engine', 'evidence');
+      const evidencePath = path.join(aidoPath, 'work', 'evidence');
       const epicDirs = await fs.readdir(evidencePath).catch(() => [] as string[]);
       let latestMtime = 0;
 

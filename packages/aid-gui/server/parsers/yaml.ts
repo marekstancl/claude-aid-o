@@ -1,7 +1,7 @@
 /**
  * YAML parser for `.aid-o/` files.
  *
- * Handles: epic-queue.yaml, auto-mode-state.yaml, gates.yaml,
+ * Handles: queue.yaml, auto-mode-state.yaml, gates.yaml,
  * decision-policies.yaml, and any other YAML configuration files.
  *
  * Uses `js-yaml` for YAML parsing. Never throws -- all errors are captured

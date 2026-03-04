@@ -2,7 +2,7 @@
  * Queue API router — CRUD operations on the EPIC execution queue
  * and scheduling engine endpoints.
  *
- * Reads and writes `.aid-o/04-engine/epic-queue.yaml`.
+ * Reads and writes `.aid-o/config/queue.yaml`.
  * All mutations use atomic write (write to .tmp, then rename) to avoid
  * partial writes on crash.
  *
@@ -35,9 +35,9 @@ const router = Router();
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Canonical path to the epic-queue.yaml file. */
+/** Canonical path to the queue.yaml file. */
 function queueFilePath(aidoPath: string): string {
-  return path.join(aidoPath, '04-engine', 'epic-queue.yaml');
+  return path.join(aidoPath, 'config', 'queue.yaml');
 }
 
 /** Valid priority values for queue entries. */
@@ -47,7 +47,7 @@ const VALID_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 const VALID_STATUSES = new Set(['queued', 'running', 'completed', 'failed', 'paused']);
 
 /**
- * Read and parse the epic-queue.yaml file.
+ * Read and parse the queue.yaml file.
  * Returns null if the file does not exist. Throws on other I/O errors.
  */
 async function readQueue(aidoPath: string): Promise<EpicQueue | null> {

@@ -103,7 +103,7 @@ const EVIDENCE_EPICS: EvidenceEpicEntry[] = [
     runs: [
       {
         runId: 'run-001',
-        files: ['plan.json', 'stage_log.jsonl', 'gates_report.json'],
+        files: ['plan.json', 'timeline.jsonl', 'gates_report.json'],
         hasStageLog: true,
         hasPlan: true,
         hasGatesReport: true,
@@ -167,7 +167,7 @@ const SCHEDULE_STATUS: ScheduleStatusResponse = {
 
 const QUEUE_ENTRY: QueueScheduleEntry = {
   epicId: 'E-001',
-  path: '.aid-o/02-epics/E-001.md',
+  path: '.aid-o/tasks/E-001.md',
   priority: 'high',
   status: 'queued',
   addedAt: '2026-02-25T08:00:00.000Z',

@@ -475,7 +475,7 @@ export interface UsagePerEpicEntry {
 /**
  * Response from GET /api/projects/:projectId/usage.
  *
- * Aggregated activity metrics computed from all stage_log.jsonl files.
+ * Aggregated activity metrics computed from all timeline.jsonl files.
  */
 export interface UsageResponse {
   /** Total number of stage log entries across all runs. */
@@ -663,7 +663,7 @@ export interface EvidenceRunEntry {
   runId: string;
   /** List of file names in this run directory. */
   files: string[];
-  /** Whether a stage_log.jsonl exists in this run. */
+  /** Whether a timeline.jsonl exists in this run. */
   hasStageLog: boolean;
   /** Whether a plan.json exists in this run. */
   hasPlan: boolean;
@@ -978,7 +978,7 @@ export interface EvidenceSearchResponse {
 /**
  * A single step in the pipeline theater view.
  *
- * Merges plan.json step data with plan_progress.json timing data.
+ * Merges plan.json step data with state.yaml timing data.
  */
 export interface TheaterStep {
   /** Step identifier (e.g., "step_1_architect"). */

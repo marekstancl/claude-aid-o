@@ -1,6 +1,6 @@
 ---
 status: active
-plan_ref: .aid-o/01-plans/P005-C-aid-gui-backend-post-prototype.md
+plan_ref: .aid-o/plans/P005-C-aid-gui-backend-post-prototype.md
 plan_epics_total: 4
 runs_total: 1
 runs_completed: 0

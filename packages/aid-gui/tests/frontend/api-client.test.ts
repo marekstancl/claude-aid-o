@@ -93,7 +93,7 @@ const QUEUE_RESPONSE: QueueResponse = {
   queue: [
     {
       epicId: 'E-002',
-      path: '.aid-o/02-epics/E-002.md',
+      path: '.aid-o/tasks/E-002.md',
       priority: 'high',
       status: 'queued',
       addedAt: '2026-02-25T09:00:00.000Z',

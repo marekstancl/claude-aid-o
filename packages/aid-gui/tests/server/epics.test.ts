@@ -35,7 +35,8 @@ let aidoDir: string;
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'epics-route-test-'));
   aidoDir = path.join(tmpDir, '.aid-o');
-  await fs.mkdir(path.join(aidoDir, '04-engine'), { recursive: true });
+  await fs.mkdir(path.join(aidoDir, 'work'), { recursive: true });
+  await fs.mkdir(path.join(aidoDir, 'config'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -91,7 +92,7 @@ function createTestApp(): express.Express {
 // ---------------------------------------------------------------------------
 
 async function writeEpic(fileName: string, content: string): Promise<void> {
-  const epicsDir = path.join(aidoDir, '02-epics');
+  const epicsDir = path.join(aidoDir, 'tasks');
   await fs.mkdir(epicsDir, { recursive: true });
   await fs.writeFile(path.join(epicsDir, fileName), content, 'utf-8');
 }
@@ -103,7 +104,7 @@ async function writeEpic(fileName: string, content: string): Promise<void> {
 const EPIC_WITH_FRONTMATTER = `---
 id: E-016
 status: active
-plan_ref: .aid-o/01-plans/P001.md
+plan_ref: .aid-o/plans/P001.md
 runs_total: 3
 runs_completed: 1
 ---
@@ -211,13 +212,13 @@ describe('GET /api/p/default/epics — frontmatter parsing', () => {
     expect(epic.runsCompleted).toBe(0);
   });
 
-  it('includes the correct path field in the format "02-epics/<fileName>"', async () => {
+  it('includes the correct path field in the format "tasks/<fileName>"', async () => {
     await writeEpic('E-016-companion.md', EPIC_WITH_FRONTMATTER);
 
     const res = await request(createTestApp()).get('/api/p/default/epics');
 
     const epic = res.body.data[0];
-    expect(epic.path).toBe('02-epics/E-016-companion.md');
+    expect(epic.path).toBe('tasks/E-016-companion.md');
   });
 
   it('includes the fileName field', async () => {
@@ -235,7 +236,7 @@ describe('GET /api/p/default/epics — frontmatter parsing', () => {
     const res = await request(createTestApp()).get('/api/p/default/epics');
 
     const epic = res.body.data[0];
-    expect(epic.planRef).toBe('.aid-o/01-plans/P001.md');
+    expect(epic.planRef).toBe('.aid-o/plans/P001.md');
   });
 });
 
@@ -244,7 +245,7 @@ describe('GET /api/p/default/epics — frontmatter parsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /api/p/default/epics — edge cases', () => {
-  it('returns 200 with empty array when 02-epics directory is missing', async () => {
+  it('returns 200 with empty array when tasks directory is missing', async () => {
     // Directory not created
     const res = await request(createTestApp()).get('/api/p/default/epics');
 
@@ -256,7 +257,7 @@ describe('GET /api/p/default/epics — edge cases', () => {
   it('excludes files that are not .md extension', async () => {
     await writeEpic('E-016-companion.md', EPIC_WITH_FRONTMATTER);
 
-    const epicsDir = path.join(aidoDir, '02-epics');
+    const epicsDir = path.join(aidoDir, 'tasks');
     await fs.writeFile(path.join(epicsDir, 'notes.txt'), 'not an epic');
     await fs.writeFile(path.join(epicsDir, 'README'), 'also not an epic');
 
@@ -392,7 +393,7 @@ describe('POST /api/p/default/epics/:epicId/run — success', () => {
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'now' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as { queue: { epic_id: string }[] };
 
@@ -417,7 +418,7 @@ describe('POST /api/p/default/epics/:epicId/run — success', () => {
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'now' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as { queue: { epic_id: string }[] };
 
@@ -439,7 +440,7 @@ describe('POST /api/p/default/epics/:epicId/run — success', () => {
       .post('/api/p/default/epics/E-018/run')
       .send({ mode: 'schedule' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as { queue: { epic_id: string }[] };
 
@@ -476,7 +477,7 @@ describe('POST /api/p/default/epics/:epicId/run — success', () => {
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'now' });
 
-    expect(res.body.data.path).toMatch(/^\.aid-o\/02-epics\//);
+    expect(res.body.data.path).toMatch(/^\.aid-o\/tasks\//);
   });
 });
 
@@ -486,7 +487,7 @@ describe('POST /api/p/default/epics/:epicId/run — success', () => {
 
 describe('POST /api/p/default/epics/:epicId/run — error cases', () => {
   it('returns 404 when EPIC does not exist', async () => {
-    await fs.mkdir(path.join(aidoDir, '02-epics'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'tasks'), { recursive: true });
 
     const res = await request(createTestApp())
       .post('/api/p/default/epics/E-999/run')
@@ -498,7 +499,7 @@ describe('POST /api/p/default/epics/:epicId/run — error cases', () => {
   });
 
   it('returns 404 when the epics directory does not exist', async () => {
-    // 02-epics directory was never created
+    // tasks directory was never created
     const res = await request(createTestApp())
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'now' });
@@ -558,14 +559,14 @@ describe('POST /api/p/default/epics/:epicId/run — error cases', () => {
       queue: [
         {
           epic_id: 'E-016',
-          path: '.aid-o/02-epics/E-016-companion.md',
+          path: '.aid-o/tasks/E-016-companion.md',
           priority: 'critical',
           status: 'completed',
           added_at: '2026-02-01T00:00:00.000Z',
         },
       ],
     };
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     await fs.writeFile(queuePath, yaml.dump(existingQueue), 'utf-8');
 
     const res = await request(createTestApp())
@@ -578,7 +579,7 @@ describe('POST /api/p/default/epics/:epicId/run — error cases', () => {
   });
 
   it('error response includes a message explaining the not-found condition', async () => {
-    await fs.mkdir(path.join(aidoDir, '02-epics'), { recursive: true });
+    await fs.mkdir(path.join(aidoDir, 'tasks'), { recursive: true });
 
     const res = await request(createTestApp())
       .post('/api/p/default/epics/E-999/run')
@@ -607,14 +608,14 @@ describe('POST /api/p/default/epics/:epicId/run — error cases', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/p/default/epics/:epicId/run — queue persistence', () => {
-  it('persists the queued entry to epic-queue.yaml with all required fields', async () => {
+  it('persists the queued entry to queue.yaml with all required fields', async () => {
     await writeEpic('E-016-companion.md', EPIC_WITH_FRONTMATTER);
 
     await request(createTestApp())
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'schedule' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as {
       queue: {
@@ -643,7 +644,7 @@ describe('POST /api/p/default/epics/:epicId/run — queue persistence', () => {
       .post('/api/p/default/epics/E-016/run')
       .send({ mode: 'now' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as { queue: { path: string }[] };
 
@@ -659,7 +660,7 @@ describe('POST /api/p/default/epics/:epicId/run — queue persistence', () => {
     await request(app).post('/api/p/default/epics/E-016/run').send({ mode: 'now' });
     await request(app).post('/api/p/default/epics/E-018/run').send({ mode: 'schedule' });
 
-    const queuePath = path.join(aidoDir, '04-engine', 'epic-queue.yaml');
+    const queuePath = path.join(aidoDir, 'config', 'queue.yaml');
     const raw = await fs.readFile(queuePath, 'utf-8');
     const parsed = yaml.load(raw) as { queue: { epic_id: string }[] };
 

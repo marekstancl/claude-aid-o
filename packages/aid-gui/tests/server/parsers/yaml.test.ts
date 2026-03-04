@@ -20,41 +20,41 @@ function readFixture(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Valid YAML — epic-queue.yaml (real .aid-o/ data)
+// Valid YAML — queue.yaml (real .aid-o/ data)
 // ---------------------------------------------------------------------------
 
-describe('parseYaml — valid epic-queue.yaml', () => {
+describe('parseYaml — valid queue.yaml', () => {
   it('parses the fixture successfully and returns non-null data', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     expect(result.data).not.toBeNull();
   });
 
   it('returns no warnings on a clean valid YAML document', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     expect(result.warnings).toHaveLength(0);
   });
 
   it('parses the paused flag correctly', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     expect(result.data?.paused).toBe(false);
   });
 
   it('parses the queue array with the correct number of entries', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     expect(result.data?.queue).toHaveLength(4);
   });
 
   it('converts snake_case keys to camelCase in the output', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     const firstEntry = result.data?.queue[0];
     // Source has "epic_id" — should be "epicId" in output.
@@ -68,8 +68,8 @@ describe('parseYaml — valid epic-queue.yaml', () => {
   });
 
   it('does NOT use raw snake_case keys (original keys must be absent)', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<Record<string, unknown>>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<Record<string, unknown>>(content, 'queue.yaml');
 
     const firstEntry = (result.data?.queue as Record<string, unknown>[])[0];
     expect(firstEntry).not.toHaveProperty('epic_id');
@@ -77,8 +77,8 @@ describe('parseYaml — valid epic-queue.yaml', () => {
   });
 
   it('parses the status and priority of the running EPIC correctly', () => {
-    const content = readFixture('epic-queue.yaml');
-    const result = parseYaml<EpicQueue>(content, 'epic-queue.yaml');
+    const content = readFixture('queue.yaml');
+    const result = parseYaml<EpicQueue>(content, 'queue.yaml');
 
     const running = result.data?.queue[0];
     expect(running?.status).toBe('running');
@@ -86,8 +86,8 @@ describe('parseYaml — valid epic-queue.yaml', () => {
   });
 
   it('propagates the source string in the result', () => {
-    const content = readFixture('epic-queue.yaml');
-    const source = 'fixtures/epic-queue.yaml';
+    const content = readFixture('queue.yaml');
+    const source = 'fixtures/queue.yaml';
     const result = parseYaml<EpicQueue>(content, source);
 
     expect(result.source).toBe(source);

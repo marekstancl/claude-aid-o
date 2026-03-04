@@ -129,7 +129,7 @@ const MALFORMED_LESSONS_MD = `# Project Insights
 describe('GET /api/p/default/lessons — Lessons Learned table', () => {
   it('returns LessonEntry[] with category "lesson" from lessons-only file', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'lessons-learned.md'),
+      path.join(aidoDir, 'work', 'lessons-learned.md'),
       LESSONS_ONLY_MD,
     );
 
@@ -152,7 +152,7 @@ describe('GET /api/p/default/lessons — Lessons Learned table', () => {
 describe('GET /api/p/default/lessons — Known Gotchas table', () => {
   it('returns entries with category "gotcha" from gotchas-only file', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'lessons-learned.md'),
+      path.join(aidoDir, 'work', 'lessons-learned.md'),
       GOTCHAS_ONLY_MD,
     );
 
@@ -174,7 +174,7 @@ describe('GET /api/p/default/lessons — Known Gotchas table', () => {
 describe('GET /api/p/default/lessons — mixed file', () => {
   it('returns mixed array with both lesson and gotcha entries', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'lessons-learned.md'),
+      path.join(aidoDir, 'work', 'lessons-learned.md'),
       MIXED_MD,
     );
 
@@ -208,7 +208,7 @@ describe('GET /api/p/default/lessons — edge cases', () => {
 
   it('skips malformed rows without crashing', async () => {
     await writeFile(
-      path.join(aidoDir, '04-engine', 'lessons-learned.md'),
+      path.join(aidoDir, 'work', 'lessons-learned.md'),
       MALFORMED_LESSONS_MD,
     );
 

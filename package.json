@@ -2,5 +2,8 @@
   "name": "ai-orchestrator",
   "version": "2.0.0",
   "private": true,
-  "workspaces": ["packages/*"]
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present"
+  }
 }

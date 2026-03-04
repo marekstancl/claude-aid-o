@@ -417,7 +417,7 @@ export interface WsFileChangeEventPayload {
 /**
  * Stage log event payload within a `WsEventMessage` or `WsReplayMessage`.
  *
- * Pushed when a new line is appended to a `stage_log.jsonl` file.
+ * Pushed when a new line is appended to a `timeline.jsonl` file.
  */
 export interface WsStageLogEventPayload {
   /** Discriminant for the event union. */

@@ -55,7 +55,7 @@ describe('parseMarkdownWithFrontmatter — valid markdown with frontmatter', () 
 
     const fm = result.data?.frontmatter;
     // Source has "plan_ref" — output should have "planRef".
-    expect(fm).toHaveProperty('planRef', '.aid-o/01-plans/P005-C-aid-gui-backend-post-prototype.md');
+    expect(fm).toHaveProperty('planRef', '.aid-o/plans/P005-C-aid-gui-backend-post-prototype.md');
     // Source has "plan_epics_total" — output should have "planEpicsTotal".
     expect(fm).toHaveProperty('planEpicsTotal', 4);
     expect(fm).toHaveProperty('status', 'active');
@@ -169,7 +169,7 @@ describe('parseEpicSpec — valid epic-sample.md', () => {
     const content = readFixture('epic-sample.md');
     const result = parseEpicSpec(content, 'E-005-1_4-gui-foundation.md');
 
-    expect(result.data?.planRef).toBe('.aid-o/01-plans/P005-C-aid-gui-backend-post-prototype.md');
+    expect(result.data?.planRef).toBe('.aid-o/plans/P005-C-aid-gui-backend-post-prototype.md');
   });
 
   it('extracts numeric frontmatter fields', () => {
@@ -360,7 +360,7 @@ describe('parseEpicSpec — inline minimal EPIC', () => {
   it('parses a minimal EPIC with all required sections', () => {
     const content = `---
 status: draft
-plan_ref: .aid-o/01-plans/P001.md
+plan_ref: .aid-o/plans/P001.md
 plan_epics_total: 1
 runs_total: 1
 runs_completed: 0

@@ -165,7 +165,7 @@ export const CommandCenter: React.FC = () => {
   const { epicsCompleted, epicsTotal } = pipelineProgress;
   const epicPct = epicsTotal > 0 ? Math.round((epicsCompleted / epicsTotal) * 100) : 0;
 
-  // Per-EPIC step progress — derived from real-time stepStatuses (plan_progress.json),
+  // Per-EPIC step progress — derived from real-time stepStatuses (state.yaml),
   // NOT from the aggregate pipelineProgress which accumulates across ALL EPICs.
   const { currentStepsDone, currentStepsTotal } = useMemo(() => {
     const entries = Object.values(stepStatuses);
@@ -321,8 +321,8 @@ export const CommandCenter: React.FC = () => {
           latestRun.hasPlan
             ? client.getEvidenceFile(entry.epicId, latestRun.runId, 'plan.json')
             : Promise.resolve(null),
-          latestRun.files.includes('plan_progress.json')
-            ? client.getEvidenceFile(entry.epicId, latestRun.runId, 'plan_progress.json')
+          latestRun.files.includes('state.yaml')
+            ? client.getEvidenceFile(entry.epicId, latestRun.runId, 'state.yaml')
             : Promise.resolve(null),
           latestRun.hasGatesReport
             ? client.getEvidenceFile(entry.epicId, latestRun.runId, 'gates_report.json')

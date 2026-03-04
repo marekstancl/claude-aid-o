@@ -1,7 +1,7 @@
 /**
  * JSONL (JSON Lines) parser for `.aid-o/` files.
  *
- * Handles: stage_log.jsonl, slack_log.jsonl, and any other JSONL files.
+ * Handles: timeline.jsonl, slack_log.jsonl, and any other JSONL files.
  *
  * No external library required -- parses line by line using built-in
  * JSON.parse. Malformed lines produce a warning but do not fail the whole

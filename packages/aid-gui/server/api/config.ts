@@ -3,7 +3,7 @@
  *
  * GET / — Config summary (all parsed YAML config files)
  *
- * Source directory: `{aidoPath}/03-config/`
+ * Source directory: `{aidoPath}/config/`
  */
 
 import { Router } from 'express';
@@ -37,7 +37,7 @@ function isYamlFile(filename: string): boolean {
 // ---------------------------------------------------------------------------
 
 router.get('/', async (req, res) => {
-  const configDir = path.join(req.aidoPath, '03-config');
+  const configDir = path.join(req.aidoPath, 'config');
 
   let files: string[];
   try {

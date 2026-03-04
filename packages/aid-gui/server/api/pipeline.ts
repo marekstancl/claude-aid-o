@@ -36,7 +36,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     let currentStepId: string | null = null;
     let session: PipelineState['session'] = undefined;
 
-    const statePath = path.join(aidoPath, '04-engine', 'auto-mode-state.yaml');
+    const statePath = path.join(aidoPath, 'work', 'auto-mode-state.yaml');
     try {
       const stateContent = await fs.readFile(statePath, 'utf-8');
       const stateResult = parseYaml<Record<string, unknown>>(stateContent, statePath);
@@ -55,7 +55,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
       // auto-mode-state.yaml does not exist — pipeline is idle.
     }
 
-    // Read plan_progress.json from the active run for progress counters.
+    // Read state.yaml from the active run for progress counters.
     let progress: PipelineState['progress'] = {
       epicsCompleted: 0,
       epicsTotal: 0,
@@ -70,10 +70,10 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
         currentEpicId = activeRun.epicId;
       }
 
-      const progressPath = path.join(activeRun.evidencePath, 'plan_progress.json');
+      const progressPath = path.join(activeRun.evidencePath, 'state.yaml');
       try {
         const progressContent = await fs.readFile(progressPath, 'utf-8');
-        const progressResult = parseJson<PlanProgress>(progressContent, progressPath);
+        const progressResult = parseYaml<PlanProgress>(progressContent, progressPath);
         if (progressResult.data) {
           const pp = progressResult.data;
 
@@ -101,7 +101,7 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
           };
         }
       } catch {
-        // plan_progress.json may not exist yet if run just started.
+        // state.yaml may not exist yet if run just started.
       }
     }
 
@@ -174,12 +174,12 @@ router.get('/stage-log', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const stageLogPath = path.join(activeRun.evidencePath, 'stage_log.jsonl');
+    const stageLogPath = path.join(activeRun.evidencePath, 'timeline.jsonl');
     let logContent: string;
     try {
       logContent = await fs.readFile(stageLogPath, 'utf-8');
     } catch {
-      send404(res, 'stage_log.jsonl');
+      send404(res, 'timeline.jsonl');
       return;
     }
 
