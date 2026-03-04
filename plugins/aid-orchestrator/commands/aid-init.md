@@ -163,12 +163,19 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
    Move: .aid-o/03-config/ → .aid-o/config/
    Move: .aid-o/04-engine/memory/ → .aid-o/work/
    Move: .aid-o/04-engine/evidence/ → .aid-o/work/evidence/
+   Rename: config/project-profile.yaml → config/project.yaml (if exists)
 
    Proceed? (Y/N)
    ```
 3. On PM approval → execute moves
-4. Create any missing v2 directories
+4. Rename known v1 files inside moved directories:
+   - `config/project-profile.yaml` → `config/project.yaml`
+   - `plan_progress.json` → `state.yaml` (inside each evidence run dir)
+   - `stage_log.jsonl` → `timeline.jsonl` (inside each evidence run dir)
 5. Remove empty v1 directories
+6. Run fresh-init logic (idempotent) — create any missing v2 template files:
+   - `config/permissions.yaml`, `work/active.md`, `work/backlog.md`, etc.
+   - Existing files are never overwritten
 
 ## Reference Files
 
