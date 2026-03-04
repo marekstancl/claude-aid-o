@@ -23,11 +23,9 @@ Called by `/aid-setup` router or `/aid-setup permissions`.
    Permission presets:
      (1) autonomous (recommended) — full autonomy, destructive ops denied
          auto_commit: true, auto_push: false
-     (2) steroids — unrestricted, everything allowed
-         auto_commit: true, auto_push: true
-     (3) custom — configure each setting manually
+     (2) custom — configure each setting manually
    ```
-4. If PM chooses (3) custom, ask interactively:
+4. If PM chooses (2) custom, ask interactively:
    - `autonomous_mode` (true/false)
    - `auto_commit` (true/false)
    - `auto_push` (true/false)
@@ -59,7 +57,7 @@ Merge `permissions.allow` and `permissions.deny` arrays from the chosen preset's
 ## Reference
 
 - Preset definitions: `defaults/policies/permissions.yaml`
-- Three presets: autonomous (default), steroids, custom
+- Two presets: autonomous (default), custom
 
 ## Output
 

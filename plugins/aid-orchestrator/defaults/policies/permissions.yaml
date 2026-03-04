@@ -7,62 +7,13 @@
 # - .claude/settings.local.json tells Claude Code what to AUTO-ALLOW without prompting (enforcement-level)
 # - /aid-setup writes BOTH files simultaneously (dual-write)
 
-active_preset: "autonomous"  # aspirin | autonomous | steroids
+active_preset: "autonomous"  # autonomous | custom
 
 presets:
-  aspirin:
-    description: "Eases the pain but asks before every action. Safe default."
-    claude_code_permissions:
-      # Tools
-      - "Glob"
-      - "Grep"
-      - "Read"
-      - "Edit"
-      - "Write"
-      - "NotebookEdit"
-      - "Task"
-      - "TodoWrite"
-      - "WebSearch"
-      - "WebFetch"
-      # Git (local only)
-      - "Bash(git add:*)"
-      - "Bash(git commit:*)"
-      - "Bash(git branch:*)"
-      - "Bash(git checkout:*)"
-      - "Bash(git diff:*)"
-      - "Bash(git log:*)"
-      - "Bash(git status:*)"
-      - "Bash(git stash:*)"
-      - "Bash(git merge:*)"
-      - "Bash(git worktree:*)"
-      # Testing & Linting
-      - "Bash(pytest:*)"
-      - "Bash(python -m pytest:*)"
-      - "Bash(ruff check:*)"
-      - "Bash(ruff format:*)"
-      - "Bash(npm test:*)"
-      - "Bash(npm run build:*)"
-      - "Bash(npx vitest:*)"
-      - "Bash(npx tsc:*)"
-      # Filesystem (read + basic write)
-      - "Bash(ls:*)"
-      - "Bash(mkdir:*)"
-      - "Bash(cp:*)"
-      - "Bash(mv:*)"
-      - "Bash(cat:*)"
-      - "Bash(head:*)"
-      - "Bash(tail:*)"
-      - "Bash(find:*)"
-      - "Bash(grep:*)"
-      - "Bash(wc:*)"
-      - "Bash(diff:*)"
-      # MCP tools
-      - "mcp__plugin_context7_context7__*"
-    notes: "No git push, no package install, no rm, no network commands"
-
   autonomous:
     description: "Max autonomy without destructive operations. Recommended default."
     claude_code_permissions:
+      # Core tools
       - "Glob"
       - "Grep"
       - "Read"
@@ -73,15 +24,128 @@ presets:
       - "TodoWrite"
       - "WebSearch"
       - "WebFetch"
-      - "Bash(*:*)"
-      # MCP tools
-      - "mcp__qdrant-memory__qdrant-store(*)"
-      - "mcp__qdrant-memory__qdrant-find(*)"
-      - "mcp__shared-github__*(*)"
-      - "mcp__shared-minio__*(*)"
-      - "mcp__shared-docker__*(*)"
-      - "mcp__shared-playwright__*(*)"
-      - "mcp__plugin_context7_context7__*(*)"
+      - "Bash(*)"
+      # ── Qdrant Memory ──
+      - "mcp__qdrant-memory__qdrant-find"
+      - "mcp__qdrant-memory__qdrant-store"
+      # ── Qdrant Brain ──
+      - "mcp__qdrant-brain__qdrant-find"
+      - "mcp__qdrant-brain__qdrant-store"
+      # ── Context7 ──
+      - "mcp__plugin_context7_context7__resolve-library-id"
+      - "mcp__plugin_context7_context7__query-docs"
+      # ── Docker ──
+      - "mcp__shared-docker__create-container"
+      - "mcp__shared-docker__deploy-compose"
+      - "mcp__shared-docker__get-logs"
+      - "mcp__shared-docker__list-containers"
+      # ── GitHub (non-destructive) ──
+      - "mcp__shared-github__add_comment_to_pending_review"
+      - "mcp__shared-github__add_issue_comment"
+      - "mcp__shared-github__add_reply_to_pull_request_comment"
+      - "mcp__shared-github__assign_copilot_to_issue"
+      - "mcp__shared-github__create_branch"
+      - "mcp__shared-github__create_or_update_file"
+      - "mcp__shared-github__create_pull_request"
+      - "mcp__shared-github__create_repository"
+      - "mcp__shared-github__fork_repository"
+      - "mcp__shared-github__get_commit"
+      - "mcp__shared-github__get_file_contents"
+      - "mcp__shared-github__get_label"
+      - "mcp__shared-github__get_latest_release"
+      - "mcp__shared-github__get_release_by_tag"
+      - "mcp__shared-github__get_tag"
+      - "mcp__shared-github__get_team_members"
+      - "mcp__shared-github__get_teams"
+      - "mcp__shared-github__get_me"
+      - "mcp__shared-github__issue_read"
+      - "mcp__shared-github__issue_write"
+      - "mcp__shared-github__list_branches"
+      - "mcp__shared-github__list_commits"
+      - "mcp__shared-github__list_issue_types"
+      - "mcp__shared-github__list_issues"
+      - "mcp__shared-github__list_pull_requests"
+      - "mcp__shared-github__list_releases"
+      - "mcp__shared-github__list_tags"
+      - "mcp__shared-github__merge_pull_request"
+      - "mcp__shared-github__pull_request_read"
+      - "mcp__shared-github__pull_request_review_write"
+      - "mcp__shared-github__push_files"
+      - "mcp__shared-github__request_copilot_review"
+      - "mcp__shared-github__search_code"
+      - "mcp__shared-github__search_issues"
+      - "mcp__shared-github__search_pull_requests"
+      - "mcp__shared-github__search_repositories"
+      - "mcp__shared-github__search_users"
+      - "mcp__shared-github__sub_issue_write"
+      - "mcp__shared-github__update_pull_request"
+      - "mcp__shared-github__update_pull_request_branch"
+      # ── GitHub (destructive — excluded) ──
+      # - "mcp__shared-github__delete_file"
+      # ── MinIO (non-destructive) ──
+      - "mcp__shared-minio__ask_object"
+      - "mcp__shared-minio__copy_object"
+      - "mcp__shared-minio__create_bucket"
+      - "mcp__shared-minio__download_object"
+      - "mcp__shared-minio__get_bucket_lifecycle"
+      - "mcp__shared-minio__get_bucket_replication"
+      - "mcp__shared-minio__get_bucket_tags"
+      - "mcp__shared-minio__get_bucket_versioning"
+      - "mcp__shared-minio__get_object_metadata"
+      - "mcp__shared-minio__get_object_presigned_url"
+      - "mcp__shared-minio__get_object_tags"
+      - "mcp__shared-minio__get_object_versions"
+      - "mcp__shared-minio__list_allowed_directories"
+      - "mcp__shared-minio__list_bucket_contents"
+      - "mcp__shared-minio__list_buckets"
+      - "mcp__shared-minio__list_local_files"
+      - "mcp__shared-minio__move_object"
+      - "mcp__shared-minio__set_bucket_tags"
+      - "mcp__shared-minio__set_bucket_versioning"
+      - "mcp__shared-minio__set_object_tags"
+      - "mcp__shared-minio__text_to_object"
+      - "mcp__shared-minio__upload_object"
+      # ── MinIO (destructive — excluded) ──
+      # - "mcp__shared-minio__delete_bucket"
+      # - "mcp__shared-minio__delete_object"
+      # ── Playwright ──
+      - "mcp__shared-playwright__browser_click"
+      - "mcp__shared-playwright__browser_close"
+      - "mcp__shared-playwright__browser_console_messages"
+      - "mcp__shared-playwright__browser_drag"
+      - "mcp__shared-playwright__browser_evaluate"
+      - "mcp__shared-playwright__browser_file_upload"
+      - "mcp__shared-playwright__browser_fill_form"
+      - "mcp__shared-playwright__browser_handle_dialog"
+      - "mcp__shared-playwright__browser_hover"
+      - "mcp__shared-playwright__browser_install"
+      - "mcp__shared-playwright__browser_navigate"
+      - "mcp__shared-playwright__browser_navigate_back"
+      - "mcp__shared-playwright__browser_network_requests"
+      - "mcp__shared-playwright__browser_press_key"
+      - "mcp__shared-playwright__browser_resize"
+      - "mcp__shared-playwright__browser_run_code"
+      - "mcp__shared-playwright__browser_select_option"
+      - "mcp__shared-playwright__browser_snapshot"
+      - "mcp__shared-playwright__browser_tabs"
+      - "mcp__shared-playwright__browser_take_screenshot"
+      - "mcp__shared-playwright__browser_type"
+      - "mcp__shared-playwright__browser_wait_for"
+      # ── Postgres ──
+      - "mcp__shared-postgres__query"
+      # ── Sequential Thinking ──
+      - "mcp__shared-sequential-thinking__sequentialthinking"
+      # ── Telegram (non-destructive) ──
+      - "mcp__shared-telegram__send_message"
+      - "mcp__shared-telegram__edit_message"
+      - "mcp__shared-telegram__search_dialogs"
+      - "mcp__shared-telegram__get_draft"
+      - "mcp__shared-telegram__set_draft"
+      - "mcp__shared-telegram__get_messages"
+      - "mcp__shared-telegram__media_download"
+      - "mcp__shared-telegram__message_from_link"
+      # ── Telegram (destructive — excluded) ──
+      # - "mcp__shared-telegram__delete_message"
     claude_code_deny:
       - "Bash(rm -rf:*)"
       - "Bash(git push --force:*)"
@@ -95,35 +159,8 @@ presets:
     notes: |
       Autonomous but safe. Agents can do anything except destructive operations.
       auto_commit: true, auto_push: false. PM reviews before push.
-
-  steroids:
-    description: "Full power, no questions. Required for FIRST AID. Destructive commands are always denied."
-    claude_code_permissions:
-      - "Glob"
-      - "Grep"
-      - "Read"
-      - "Edit"
-      - "Write"
-      - "NotebookEdit"
-      - "Task"
-      - "TodoWrite"
-      - "WebSearch"
-      - "WebFetch"
-      - "Bash(*:*)"
-      # MCP tools — explicit patterns for Claude Code auto-allow
-      - "mcp__qdrant-memory__qdrant-store(*)"
-      - "mcp__qdrant-memory__qdrant-find(*)"
-      - "mcp__shared-github__*(*)"
-      - "mcp__shared-minio__*(*)"
-      - "mcp__shared-docker__*(*)"
-      - "mcp__shared-playwright__*(*)"
-      - "mcp__plugin_context7_context7__*(*)"
-    notes: |
-      ⚠ USE AT YOUR OWN RISK — This preset grants unrestricted access. Agents can execute
-      arbitrary commands, install packages, send messages via Slack/MCP, and access all
-      filesystem paths. Destructive commands are ALWAYS denied (deny-list in settings.local.json).
-      Required for /aid-first-aid autonomous mode.
-      PM should explicitly confirm this choice during /aid-setup.
+      All MCP tools listed explicitly — wildcards not supported by Claude Code.
+      Destructive MCP ops (delete_*, drop) are commented out and excluded.
 
 # Role-specific overrides (merged with active_preset)
 role_overrides:

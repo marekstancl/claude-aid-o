@@ -64,7 +64,7 @@ Planning:
 
 ```
 Setup: /aid-setup → configure permissions, integrations, CLAUDE.md, stack scan
-  /aid-setup permissions    → choose autonomy level (autonomous/steroids/custom)
+  /aid-setup permissions    → choose autonomy level (autonomous/custom)
   /aid-setup integrations   → enable/disable MCP servers
   /aid-setup claude-md      → generate project context file
   /aid-setup scan           → re-detect tech stack
@@ -200,15 +200,14 @@ Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 ====================================
 Modular setup — run all or pick one module:
 
-  /aid-setup permissions    → choose preset: autonomous (default), steroids, custom
+  /aid-setup permissions    → choose preset: autonomous (default) or custom
   /aid-setup integrations   → detect & enable MCP servers (Qdrant, Context7, Slack, ...)
   /aid-setup claude-md      → generate CLAUDE.md with project context
   /aid-setup scan           → re-detect tech stack, update project.yaml
   /aid-setup all            → run everything (recommended for first setup)
 
 Permission presets:
-  autonomous (default): Bash(*:*) allowed, destructive ops denied, auto_commit: true
-  steroids: everything allowed, auto_push: true
+  autonomous (default): Bash(*) + all non-destructive MCPs allowed, auto_commit: true
   custom: configure each setting manually
 
 Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
