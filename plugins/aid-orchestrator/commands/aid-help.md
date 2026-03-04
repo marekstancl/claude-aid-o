@@ -40,8 +40,10 @@ Commands you need:
   /aid-do "task"    → Implement in < 2 min. No planning overhead.
   /aid-run          → Full pipeline. For complex multi-step work.
   /aid-status       → See what's running or queued.
+  /aid-setup        → Configure permissions, integrations, CLAUDE.md.
 
 Start here: /aid-do "your first task"
+First time? Run /aid-setup to configure your project.
 Need planning first? /aid-plan
 ```
 
@@ -61,6 +63,12 @@ Planning:
 ## Level 2: Configuration (5+ tasks completed)
 
 ```
+Setup: /aid-setup → configure permissions, integrations, CLAUDE.md, stack scan
+  /aid-setup permissions    → choose autonomy level (autonomous/steroids/custom)
+  /aid-setup integrations   → enable/disable MCP servers
+  /aid-setup claude-md      → generate project context file
+  /aid-setup scan           → re-detect tech stack
+
 Gates: edit .aid-o/config/execution.yaml → customize test/lint/build commands
 Project profile: .aid-o/config/project.yaml → stack, test/lint/build commands
 Permissions: .aid-o/config/permissions.yaml → autonomous_mode: true for /aid-run --auto
@@ -94,6 +102,7 @@ Detailed documentation for specific areas:
 /aid-help status    → /aid-status deep dive (overview, task detail, queue)
 /aid-help gates     → gate types, execution.yaml configuration, retry logic
 /aid-help config    → project.yaml, execution.yaml, permissions.yaml reference
+/aid-help setup     → /aid-setup deep dive (modules, presets, integrations)
 /aid-help fsm       → 6-state FSM diagram, valid transitions, state.yaml format
 ```
 
@@ -182,6 +191,27 @@ Valid transitions:
 
 State file: .aid-o/work/evidence/{id}/{run_id}/state.yaml
 Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
+```
+
+### Topic: setup
+
+```
+/aid-setup — Project Configuration
+====================================
+Modular setup — run all or pick one module:
+
+  /aid-setup permissions    → choose preset: autonomous (default), steroids, custom
+  /aid-setup integrations   → detect & enable MCP servers (Qdrant, Context7, Slack, ...)
+  /aid-setup claude-md      → generate CLAUDE.md with project context
+  /aid-setup scan           → re-detect tech stack, update project.yaml
+  /aid-setup all            → run everything (recommended for first setup)
+
+Permission presets:
+  autonomous (default): Bash(*:*) allowed, destructive ops denied, auto_commit: true
+  steroids: everything allowed, auto_push: true
+  custom: configure each setting manually
+
+Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 ```
 
 ## Important

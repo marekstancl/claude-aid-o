@@ -192,3 +192,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **Auto-detect stack** — reads project root files to suggest test/lint/build commands
 - **Upgrade path** — `--upgrade` migrates v1 paths to v2 with PM confirmation
 - If `$ARGUMENTS` is empty → auto-detect mode (fresh init or upgrade)
+- **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
