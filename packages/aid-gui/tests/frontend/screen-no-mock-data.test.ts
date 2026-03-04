@@ -31,9 +31,7 @@ import * as path from 'node:path';
 // Resolve screen paths relative to the project root
 // ---------------------------------------------------------------------------
 
-const SCREENS_DIR = path.resolve(
-  '/opt/_home/small-personal-projetcs/ai-orchestrator/packages/aid-gui/src/screens',
-);
+const SCREENS_DIR = path.resolve(__dirname, '../../src/screens');
 
 const SCREEN_FILES: Record<string, string> = {
   DecisionHub: path.join(SCREENS_DIR, 'DecisionHub.tsx'),

@@ -42,9 +42,7 @@ import * as path from 'node:path';
 // Source file paths
 // ---------------------------------------------------------------------------
 
-const SRC_DIR = path.resolve(
-  '/opt/_home/small-personal-projetcs/ai-orchestrator/packages/aid-gui/src/components',
-);
+const SRC_DIR = path.resolve(__dirname, '../../src/components');
 
 const ERROR_BOUNDARY_PATH = path.join(SRC_DIR, 'ErrorBoundary.tsx');
 const TOAST_PATH = path.join(SRC_DIR, 'Toast.tsx');
