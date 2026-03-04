@@ -79,7 +79,7 @@ Token monitoring:
   bash scripts/aid-token-count.sh plugins/aid-orchestrator/skills/*.md
   → shows token count per file (target: total < 50K)
 
-Analytics: /aid-analytics → task history, gate failure rates, token trends
+Audit: /aid-audit → project health, gate failure rates, recommendations
 Emergency: /aid-stop → halt running task and enter ESCALATION state
 ```
 
