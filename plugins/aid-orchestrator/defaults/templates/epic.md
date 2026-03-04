@@ -7,7 +7,7 @@ runs_total: 1          # from Run Breakdown (1 = single run)
 runs_completed: 0      # incremented at each run DONE
 ---
 
-<!-- plan_ref: Links this EPIC to its source plan in .aid-o/01-plans/.
+<!-- plan_ref: Links this EPIC to its source plan in .aid-o/plans/.
      When set, the execution pipeline reads the source plan for implementation detail.
      Agents receive relevant plan sections alongside EPIC step definitions.
      This is Variant B: EPIC = structured spec, Plan = implementation guide, both read during execution. -->

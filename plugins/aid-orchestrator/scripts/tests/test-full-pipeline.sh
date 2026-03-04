@@ -70,12 +70,13 @@ run_test() {
 make_workspace() {
   local name="$1"
   local ws="$TMPDIR_ROOT/$name"
-  mkdir -p "$ws/.aid-o/01-plans"
-  mkdir -p "$ws/.aid-o/02-epics"
-  mkdir -p "$ws/.aid-o/03-config"
-  mkdir -p "$ws/.aid-o/04-engine/runs"
+  mkdir -p "$ws/.aid-o/plans"
+  mkdir -p "$ws/.aid-o/tasks"
+  mkdir -p "$ws/.aid-o/config"
+  mkdir -p "$ws/.aid-o/work/evidence"
+  mkdir -p "$ws/.aid-o/work/runs"
   # Minimal counter YAML in the expected location
-  printf 'counter: 0\n' > "$ws/.aid-o/03-config/counter.yaml"
+  printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
   echo "$ws"
 }
 
@@ -258,12 +259,12 @@ fi
 # ===========================================================================
 run_test "EPIC .md files are created on disk for all 3 phases"
 
-if [[ "$pipeline_exit" -eq 0 && -d "$T01_WORKSPACE/.aid-o/02-epics" ]]; then
-  epic_file_count="$(find "$T01_WORKSPACE/.aid-o/02-epics" -maxdepth 1 -name "E-*.md" | wc -l | tr -d ' ')"
+if [[ "$pipeline_exit" -eq 0 && -d "$T01_WORKSPACE/.aid-o/tasks" ]]; then
+  epic_file_count="$(find "$T01_WORKSPACE/.aid-o/tasks" -maxdepth 1 -name "E-*.md" | wc -l | tr -d ' ')"
   if [[ "$epic_file_count" -eq 3 ]]; then
-    pass "3 EPIC .md files created in .aid-o/02-epics/"
+    pass "3 EPIC .md files created in .aid-o/tasks/"
   else
-    fail "3 EPIC .md files created" "found $epic_file_count in $T01_WORKSPACE/.aid-o/02-epics/"
+    fail "3 EPIC .md files created" "found $epic_file_count in $T01_WORKSPACE/.aid-o/tasks/"
   fi
 else
   fail "EPIC file count check" "skipped — workspace not available or pipeline failed"
@@ -317,10 +318,10 @@ fi
 # ===========================================================================
 run_test "run.md files are created in run directories for all 3 phases"
 
-if [[ "$pipeline_exit" -eq 0 && -d "$T01_WORKSPACE/.aid-o/04-engine/runs" ]]; then
-  run_md_count="$(find "$T01_WORKSPACE/.aid-o/04-engine/runs" -name "*.md" | wc -l | tr -d ' ')"
+if [[ "$pipeline_exit" -eq 0 && -d "$T01_WORKSPACE/.aid-o/work/runs" ]]; then
+  run_md_count="$(find "$T01_WORKSPACE/.aid-o/work/runs" -name "*.md" | wc -l | tr -d ' ')"
   if [[ "$run_md_count" -ge 3 ]]; then
-    pass "at least 3 run .md files created under .aid-o/04-engine/runs/ (found $run_md_count)"
+    pass "at least 3 run .md files created under .aid-o/work/runs/ (found $run_md_count)"
   else
     fail "at least 3 run .md files created" "found $run_md_count"
   fi
@@ -331,31 +332,31 @@ fi
 # ===========================================================================
 # TEST 10: Queue YAML file is created and contains 3 entries
 # ===========================================================================
-run_test "epic-queue.yaml is created and contains entries for all 3 EPICs"
+run_test "queue.yaml is created and contains entries for all 3 EPICs"
 
-queue_yaml="$T01_WORKSPACE/.aid-o/04-engine/epic-queue.yaml"
+queue_yaml="$T01_WORKSPACE/.aid-o/config/queue.yaml"
 if [[ "$pipeline_exit" -eq 0 && -f "$queue_yaml" ]]; then
   # Count epic_id lines in the YAML queue — each entry has one 'epic_id:' line
   entry_count="$(grep -c "epic_id:" "$queue_yaml" 2>/dev/null || echo "0")"
   if [[ "$entry_count" -eq 3 ]]; then
-    pass "epic-queue.yaml has 3 entries (one per phase)"
+    pass "queue.yaml has 3 entries (one per phase)"
   else
-    fail "epic-queue.yaml has 3 entries" "found $entry_count epic_id lines"
+    fail "queue.yaml has 3 entries" "found $entry_count epic_id lines"
   fi
 else
   if [[ ! -f "$queue_yaml" ]]; then
-    fail "epic-queue.yaml exists" "file not found: $queue_yaml"
+    fail "queue.yaml exists" "file not found: $queue_yaml"
   else
-    fail "epic-queue.yaml entry count" "skipped — pipeline failed"
+    fail "queue.yaml entry count" "skipped — pipeline failed"
   fi
 fi
 
 # ===========================================================================
 # TEST 11: Queue entries have status=queued
 # ===========================================================================
-run_test "All queue entries in epic-queue.yaml have status: queued"
+run_test "All queue entries in queue.yaml have status: queued"
 
-queue_yaml="$T01_WORKSPACE/.aid-o/04-engine/epic-queue.yaml"
+queue_yaml="$T01_WORKSPACE/.aid-o/config/queue.yaml"
 if [[ "$pipeline_exit" -eq 0 && -f "$queue_yaml" ]]; then
   non_queued="$(grep "status:" "$queue_yaml" 2>/dev/null | grep -v "queued" | wc -l | tr -d ' ')"
   if [[ "$non_queued" -eq 0 ]]; then
@@ -419,7 +420,7 @@ STDOUT14="" STDERR14=""
 run_pipeline "$ws14" "$MULTI_PHASE_PLAN" "separate" STDOUT14 STDERR14 || pipeline14_exit=$?
 
 if [[ "$pipeline14_exit" -eq 0 ]]; then
-  queue14="$ws14/.aid-o/04-engine/epic-queue.yaml"
+  queue14="$ws14/.aid-o/config/queue.yaml"
   if [[ -f "$queue14" ]]; then
     # In separate mode, depends_on should be empty (no cross-EPIC dependencies).
     # The manifest should report queue_mode: separate.

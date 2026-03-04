@@ -142,7 +142,7 @@ Each gate execution:
 1. Reads gate config from `execution.yaml`
 2. Runs the configured command in a subprocess
 3. Captures stdout/stderr + exit code
-4. Appends structured entry to `.aid-o/04-engine/timeline.jsonl`
+4. Appends structured entry to `.aid-o/work/timeline.jsonl`
 5. Returns `pass` (exit 0) or `fail` (exit ≠ 0)
 
 ---

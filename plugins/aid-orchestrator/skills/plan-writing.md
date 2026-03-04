@@ -14,7 +14,7 @@ The plan-writing skill is invoked in two modes:
 2. **Standalone** — called by `/aid-write-plan` command with a specification or requirements as input.
 
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
-**Output:** Exhaustive plan document (`.aid-o/01-plans/P{NNN}-{topic}.md`)
+**Output:** Exhaustive plan document (`.aid-o/plans/P{NNN}-{topic}.md`)
 
 ---
 
@@ -421,7 +421,7 @@ When invoked via `/aid-write-plan` without prior brainstorming:
 ### Phase 2: Codebase Deep-Dive
 
 ```
-1. Read project-profile.yaml for tech stack and conventions
+1. Read project.yaml for tech stack and conventions
 2. Identify files that will be created or modified:
    - Glob for existing files in relevant directories
    - Read key files to understand current patterns
@@ -585,7 +585,7 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 10. **NEVER write the plan without verifying AC-1 through AC-10** — each rule must be satisfied
 11. **ALWAYS make each step section self-contained** — agents receive individual sections, not the whole plan
 12. **ALWAYS follow the language split** — plan document in configured document_language, conversation in PM's language
-13. **ALWAYS write the plan to `.aid-o/01-plans/`** — never to any other location
+13. **ALWAYS write the plan to `.aid-o/plans/`** — never to any other location
 14. **ALWAYS generate proper plan IDs** — per `skills/epic-orchestration.md` ID Generation
 
 ---
@@ -608,21 +608,21 @@ After the plan is written to disk and confirmed to PM, present next steps. This 
 
 **Present to PM:**
 ```
-Plan complete: .aid-o/01-plans/{plan_id}-{topic}.md
+Plan complete: .aid-o/plans/{plan_id}-{topic}.md
 
 {step_count} implementation steps
 Roles: {unique roles across steps}
 Quality gates: passed (forbidden phrases: 0, completeness: 16/16)
 
 What's next?
-(A) Create EPIC from this plan → /aid-plan-epic .aid-o/01-plans/{plan_id}-{topic}.md
+(A) Create EPIC from this plan → /aid-plan-epic .aid-o/plans/{plan_id}-{topic}.md
 (B) Review and edit the plan first
 (C) Re-open brainstorming — add more items to plan
 (D) Stop here
 ```
 
 **Option A — Create EPIC:**
-Suggest running `/aid-plan-epic .aid-o/01-plans/{plan_id}-{topic}.md`. This command
+Suggest running `/aid-plan-epic .aid-o/plans/{plan_id}-{topic}.md`. This command
 runs the `aid-auto-pipeline.sh` script which creates all artifacts deterministically:
 EPIC files (one per phase), plan.json, run.md, and queue entries. The LLM's role is
 PM dialog and validation — the script handles all file creation.
@@ -656,7 +656,7 @@ Plan written. When ready:
 - `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)
-- `.aid-o/03-config/language.yaml` — document language configuration
+- `.aid-o/config/language.yaml` — document language configuration
 
 ---
 

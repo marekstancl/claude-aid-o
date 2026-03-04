@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-epic-to-json.sh — Convert an EPIC.md into plan.json + plan_progress.json
+# aid-epic-to-json.sh — Convert an EPIC.md into plan.json + state.yaml
 #
 # Usage:
 #   ./aid-epic-to-json.sh \
@@ -9,7 +9,7 @@
 #
 # Parses the EPIC, extracts steps/dependencies/parallel groups, auto-generates
 # analysis groups, builds a plan.json conforming to plan.schema.json, creates
-# plan_progress.json and an evidence directory.
+# state.yaml and an evidence directory.
 #
 # stdout: JSON manifest { plan_json, progress, run_id, evidence_dir }
 # stderr: JSON error on failure (see Exit Codes in README.md)
@@ -792,7 +792,7 @@ else
   run_id="R-${run_epic_part}-1"
 fi
 
-evidence_dir="${output_dir}/04-engine/evidence/${epic_id}/${run_id}"
+evidence_dir="${output_dir}/work/evidence/${epic_id}/${run_id}"
 mkdir -p "$evidence_dir" 2>/dev/null || error_exit "Cannot create evidence directory: $evidence_dir" 3
 
 # =============================================================================
@@ -802,11 +802,11 @@ plan_json_path="${evidence_dir}/plan.json"
 echo "$plan_json" > "$plan_json_path" || error_exit "Cannot write plan.json to $plan_json_path" 3
 
 # =============================================================================
-# Step 17: Generate plan_progress.json
+# Step 17: Generate state.yaml
 # =============================================================================
 progress_json="$(echo "$steps_json" | jq '[.[] | {id: .id, status: "pending", started_at: null, completed_at: null, agent_id: null, result: null}]')"
-progress_path="${evidence_dir}/plan_progress.json"
-echo "$progress_json" > "$progress_path" || error_exit "Cannot write plan_progress.json to $progress_path" 3
+progress_path="${evidence_dir}/state.yaml"
+echo "$progress_json" > "$progress_path" || error_exit "Cannot write state.yaml to $progress_path" 3
 
 # =============================================================================
 # Step 18: Copy EPIC to evidence as epic_input.md

@@ -320,7 +320,7 @@ Focus cards are for read-only verification agents. They do not write implementat
 ## VULCAN Specialty Roles
 
 Additional role cards for VULCAN project (LangGraph + Python async + multi-tenant).
-Load alongside standard role card when `project-profile.yaml → tech_stack` includes these.
+Load alongside standard role card when `project.yaml → tech_stack` includes these.
 
 ---
 

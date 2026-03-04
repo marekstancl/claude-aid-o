@@ -19,7 +19,7 @@ No arguments. No confirmation prompt. Immediate execution.
 ## Prerequisites
 
 - FIRST AID auto-mode must be active (or at least partially active)
-- State file: `.aid-o/04-engine/auto-mode-state.yaml`
+- State file: `.aid-o/work/auto-mode-state.yaml`
 
 If auto-mode is not active, inform PM and exit gracefully (see Edge Cases).
 
@@ -35,7 +35,7 @@ Execute these steps in order. Each step is independent — if one fails, log the
 
 ### Step 1: Verify Auto-Mode is Active
 
-1. Read `.aid-o/04-engine/auto-mode-state.yaml`
+1. Read `.aid-o/work/auto-mode-state.yaml`
 2. Check `mode` field:
    - If `mode: auto` → proceed with stop sequence
    - If `mode: paused` → already partially stopped; proceed with full stop
@@ -52,7 +52,7 @@ Execute these steps in order. Each step is independent — if one fails, log the
 
 **This is the FIRST write operation — it prevents the Controller from dispatching new agents.**
 
-1. Read current `.aid-o/04-engine/auto-mode-state.yaml`
+1. Read current `.aid-o/work/auto-mode-state.yaml`
 2. Capture current progress before modifying:
    - `current_epic` from `session.current_epic_id`
    - `current_step` from `session.current_step_id`
@@ -82,7 +82,7 @@ Execute these steps in order. Each step is independent — if one fails, log the
 
 ### Step 3: Save Final Progress State
 
-1. Update `.aid-o/04-engine/auto-mode-state.yaml` to final stopped state:
+1. Update `.aid-o/work/auto-mode-state.yaml` to final stopped state:
    ```yaml
    mode: manual
    stopped_at: "{now ISO 8601}"
@@ -104,7 +104,7 @@ Execute these steps in order. Each step is independent — if one fails, log the
 
 ### Step 4: Log Stop Event
 
-Append to the active EPIC's `stage_log.jsonl`:
+Append to the active EPIC's `timeline.jsonl`:
 
 ```json
 {
@@ -121,7 +121,7 @@ Append to the active EPIC's `stage_log.jsonl`:
 }
 ```
 
-Stage log location: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/stage_log.jsonl`
+Stage log location: `.aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl`
 
 If stage log write fails → continue (non-blocking).
 
@@ -143,9 +143,9 @@ Progress:    saved
   Done:  {epics_completed} EPICs, {steps_executed} steps
 
 Resume options:
-  /aid-first-aid         Resume autonomous mode from saved progress
-  /aid-run-epic {id}     Continue this EPIC manually (step by step)
-  /aid-epic-status {id}  Check current EPIC status
+  /aid-run               Resume autonomous mode from saved progress
+  /aid-run {id}          Continue this EPIC manually (step by step)
+  /aid-status {id}       Check current EPIC status
 ```
 
 ---
@@ -154,7 +154,7 @@ Resume options:
 
 ### Auto-mode not active
 
-If `.aid-o/04-engine/auto-mode-state.yaml` does not exist or `mode` is already `manual`:
+If `.aid-o/work/auto-mode-state.yaml` does not exist or `mode` is already `manual`:
 
 ```
 FIRST AID is not active. Nothing to stop.
@@ -181,7 +181,7 @@ This is by design — killing an agent mid-execution could leave files in an inc
 
 ### Queue has remaining EPICs
 
-Remaining EPICs in `.aid-o/04-engine/epic-queue.yaml` are untouched. They remain queued. When PM resumes with `/aid-first-aid`, the queue continues from where it stopped.
+Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued. When PM resumes with `/aid-run`, the queue continues from where it stopped.
 
 ---
 
@@ -189,9 +189,9 @@ Remaining EPICs in `.aid-o/04-engine/epic-queue.yaml` are untouched. They remain
 
 - `skills/epic-orchestration.md` — Controller state machine, evidence store structure
 - `skills/epic-queue.md` — Queue state, auto-pickup
-- `commands/aid-first-aid.md` — The inverse command (start auto-mode / resume)
-- `commands/aid-run-epic.md` — Manual EPIC execution (alternative to auto-mode)
-- `commands/aid-epic-status.md` — Check EPIC progress after stopping
+- `commands/aid-run.md` — The inverse command (start auto-mode / resume)
+- `commands/aid-run.md` — Manual EPIC execution (alternative to auto-mode)
+- `commands/aid-status.md` — Check EPIC progress after stopping
 
 ## Important
 

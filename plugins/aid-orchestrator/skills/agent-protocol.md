@@ -18,7 +18,7 @@ epic_id: E-003-1_2
 run_id: R-E003-1_2-1
 objective: "Implement POST /api/v1/epics endpoint"
 context_files:
-  - .aid-o/01-plans/P022-redesign.md#Step-2
+  - .aid-o/plans/P022-redesign.md#Step-2
   - packages/aid-server/src/routes/epics.ts
 allowed_paths:
   - packages/aid-server/src/
@@ -93,7 +93,7 @@ Run before writing output.md. A gate retry costs ~3000 tokens. This check costs 
 ruff check --fix {files} && ruff format {files}
 # TypeScript / JavaScript
 eslint --fix {files} && prettier --write {files}
-# Other: use tech_stack.lint from project-profile.yaml
+# Other: use tech_stack.lint from project.yaml
 ```
 
 **2. Remove debugging artifacts:**

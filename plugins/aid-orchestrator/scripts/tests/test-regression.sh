@@ -10,7 +10,7 @@
 #   - EPIC files:       frontmatter, Goal, Scope, Steps sections
 #   - plan.json:        epic_id, steps array, dependencies array, parallel_groups
 #   - run.md:           frontmatter, Phase sections
-#   - epic-queue.yaml:  epic_id, status, priority fields
+#   - queue.yaml:  epic_id, status, priority fields
 #
 # Usage:
 #   ./test-regression.sh
@@ -74,11 +74,12 @@ run_test() {
 make_workspace() {
   local name="$1"
   local ws="$TMPDIR_ROOT/$name"
-  mkdir -p "$ws/.aid-o/01-plans"
-  mkdir -p "$ws/.aid-o/02-epics"
-  mkdir -p "$ws/.aid-o/03-config"
-  mkdir -p "$ws/.aid-o/04-engine/runs"
-  printf 'counter: 0\n' > "$ws/.aid-o/03-config/counter.yaml"
+  mkdir -p "$ws/.aid-o/plans"
+  mkdir -p "$ws/.aid-o/tasks"
+  mkdir -p "$ws/.aid-o/config"
+  mkdir -p "$ws/.aid-o/work/evidence"
+  mkdir -p "$ws/.aid-o/work/runs"
+  printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
   echo "$ws"
 }
 
@@ -169,7 +170,7 @@ echo "--- Suite A: EPIC file structure ---"
 # ===========================================================================
 run_test "A1: Each generated EPIC file has YAML frontmatter (--- delimiters)"
 
-epic_dir="$SHARED_WS/.aid-o/02-epics"
+epic_dir="$SHARED_WS/.aid-o/tasks"
 if [[ -d "$epic_dir" ]]; then
   missing_frontmatter=""
   while IFS= read -r epic_file; do
@@ -287,9 +288,9 @@ fi
 echo ""
 echo "--- Suite B: plan.json structure ---"
 
-RUNS_DIR="$SHARED_WS/.aid-o/04-engine/runs"
-# plan.json files are written to the evidence/ tree, not runs/
-EVIDENCE_DIR="$SHARED_WS/.aid-o/04-engine/evidence"
+RUNS_DIR="$SHARED_WS/.aid-o/work/runs"
+# plan.json files are written to the evidence/ tree
+EVIDENCE_DIR="$SHARED_WS/.aid-o/work/evidence"
 
 # ===========================================================================
 # TEST B1: Each plan.json has all required top-level JSON fields
@@ -517,20 +518,20 @@ else
 fi
 
 # ===========================================================================
-# STRUCTURAL SUITE D: epic-queue.yaml structure
+# STRUCTURAL SUITE D: queue.yaml structure
 #
 # Verify that the generated queue file has the required YAML structure.
 # ===========================================================================
 
 echo ""
-echo "--- Suite D: epic-queue.yaml structure ---"
+echo "--- Suite D: queue.yaml structure ---"
 
-QUEUE_FILE="$SHARED_WS/.aid-o/04-engine/epic-queue.yaml"
+QUEUE_FILE="$SHARED_WS/.aid-o/config/queue.yaml"
 
 # ===========================================================================
 # TEST D1: Queue file has top-level 'queue:' and 'paused:' keys
 # ===========================================================================
-run_test "D1: epic-queue.yaml has top-level 'queue:' and 'paused:' keys"
+run_test "D1: queue.yaml has top-level 'queue:' and 'paused:' keys"
 
 if [[ -f "$QUEUE_FILE" ]]; then
   missing_keys=""
@@ -538,7 +539,7 @@ if [[ -f "$QUEUE_FILE" ]]; then
   grep -q "^paused:" "$QUEUE_FILE" 2>/dev/null || missing_keys="${missing_keys} paused:"
 
   if [[ -z "$missing_keys" ]]; then
-    pass "D1: epic-queue.yaml has top-level 'queue:' and 'paused:' keys"
+    pass "D1: queue.yaml has top-level 'queue:' and 'paused:' keys"
   else
     fail "D1: queue YAML top-level keys" "missing:$missing_keys"
   fi
@@ -549,7 +550,7 @@ fi
 # ===========================================================================
 # TEST D2: Every queue entry has epic_id, status, and priority fields
 # ===========================================================================
-run_test "D2: Every entry in epic-queue.yaml has epic_id, status, and priority fields"
+run_test "D2: Every entry in queue.yaml has epic_id, status, and priority fields"
 
 if [[ -f "$QUEUE_FILE" ]]; then
   # Parse each queue entry block and verify required fields exist.
@@ -743,12 +744,12 @@ fi
 # ===========================================================================
 # TEST E4: run_id values in manifest match the run directory names on disk
 # ===========================================================================
-run_test "E4: Each run_id in manifest matches a run directory that exists under .aid-o/04-engine/runs/"
+run_test "E4: Each run_id in manifest matches a run directory that exists under .aid-o/work/runs/"
 
 if echo "$SHARED_STDOUT" | jq . >/dev/null 2>&1; then
   missing_run_dirs=""
   while IFS= read -r run_id; do
-    expected_dir="$SHARED_WS/.aid-o/04-engine/runs/$run_id"
+    expected_dir="$SHARED_WS/.aid-o/work/runs/$run_id"
     [[ -d "$expected_dir" ]] || missing_run_dirs="${missing_run_dirs} $run_id"
   done < <(echo "$SHARED_STDOUT" | jq -r '.epics[].run_id' 2>/dev/null)
 

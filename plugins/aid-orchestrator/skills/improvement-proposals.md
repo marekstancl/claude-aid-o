@@ -125,8 +125,8 @@ Tag each note with its source (agent + step) if not already tagged.
 
 ```
 Read existing data:
-  .aid-o/04-engine/backlog.md          → known issues, proposals, history
-  .aid-o/04-engine/lessons-learned.md  → past lessons (avoid re-proposing solved issues)
+  .aid-o/work/backlog.md          → known issues, proposals, history
+  .aid-o/work/lessons-learned.md  → past lessons (avoid re-proposing solved issues)
 ```
 
 ### Step 3: Deduplicate
@@ -172,7 +172,7 @@ For each new/escalated note:
 
 ## 4. Backlog.md Format
 
-Location: `.aid-o/04-engine/backlog.md`
+Location: `.aid-o/work/backlog.md`
 
 ```markdown
 # Backlog

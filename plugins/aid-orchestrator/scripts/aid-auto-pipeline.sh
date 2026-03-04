@@ -10,9 +10,9 @@
 # Runs the full Plan-to-Queue pipeline for all phases of a plan. This is the
 # single entry point called by the /aid-plan-epic command. For each phase it:
 #   1. aid-plan-to-epic.sh  — Plan.md  -> EPIC.md
-#   2. aid-epic-to-json.sh  — EPIC.md  -> plan.json + plan_progress.json
+#   2. aid-epic-to-json.sh  — EPIC.md  -> plan.json + state.yaml
 #   3. aid-json-to-run.sh   — plan.json -> run.md
-#   4. aid-queue-add.sh     — EPIC     -> epic-queue.yaml entry
+#   4. aid-queue-add.sh     — EPIC     -> queue.yaml entry
 #
 # stdout: JSON manifest { plan_id, plan_path, epics, queue_mode, duration_ms }
 # stderr: JSON error on failure; progress messages prefixed with [INFO]
@@ -122,12 +122,13 @@ fi
 [[ ! -f "$plan_schema" ]]   && error_exit "Plan schema not found: $plan_schema" 2
 
 # Config paths (in the workspace, not the plugin)
-counter_yaml=".aid-o/03-config/counter.yaml"
-queue_yaml=".aid-o/04-engine/epic-queue.yaml"
+counter_yaml=".aid-o/config/counter.yaml"
+queue_yaml=".aid-o/config/queue.yaml"
 
 # Ensure workspace directories exist
-mkdir -p ".aid-o/02-epics" 2>/dev/null || error_exit "Cannot create .aid-o/02-epics directory" 3
-mkdir -p ".aid-o/04-engine/runs" 2>/dev/null || error_exit "Cannot create .aid-o/04-engine/runs directory" 3
+mkdir -p ".aid-o/tasks" 2>/dev/null || error_exit "Cannot create .aid-o/tasks directory" 3
+mkdir -p ".aid-o/work/evidence" 2>/dev/null || error_exit "Cannot create .aid-o/work/evidence directory" 3
+mkdir -p ".aid-o/work/runs" 2>/dev/null || error_exit "Cannot create .aid-o/work/runs directory" 3
 mkdir -p "$(dirname "$queue_yaml")" 2>/dev/null || error_exit "Cannot create queue directory" 3
 
 # =============================================================================
@@ -246,7 +247,7 @@ for phase in $(seq 1 "$total_phases"); do
     --phase "$phase" \
     --total "$total_phases" \
     --epic-template "$epic_template" \
-    --output-dir ".aid-o/02-epics" \
+    --output-dir ".aid-o/tasks" \
     --counter-yaml "$counter_yaml")"
 
   # Extract epic_id from the generated filename
@@ -280,7 +281,7 @@ for phase in $(seq 1 "$total_phases"); do
   # -------------------------------------------------------------------------
   # Phase N.c: plan.json -> run.md
   # -------------------------------------------------------------------------
-  run_output_dir=".aid-o/04-engine/runs/${run_id}"
+  run_output_dir=".aid-o/work/runs/${run_id}"
   mkdir -p "$run_output_dir" 2>/dev/null || true
 
   run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \

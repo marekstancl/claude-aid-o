@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-queue-add.sh — Add an EPIC entry to epic-queue.yaml
+# aid-queue-add.sh — Add an EPIC entry to queue.yaml
 #
 # Usage:
 #   ./aid-queue-add.sh \
@@ -86,13 +86,13 @@ if [[ -n "$depends_on" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Read or create epic-queue.yaml
+# Step 2: Read or create queue.yaml
 #
 # We parse the YAML into a JSON array using awk so we can leverage jq for
 # all validation logic (duplicate check, dep reference, cycle detection).
 # ---------------------------------------------------------------------------
 
-# parse_queue_to_json: read epic-queue.yaml, output JSON array of entries
+# parse_queue_to_json: read queue.yaml, output JSON array of entries
 # Each entry: {"epic_id":"...","status":"...","depends_on":["..."]}
 parse_queue_to_json() {
   local file="$1"

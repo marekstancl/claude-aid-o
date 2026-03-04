@@ -74,11 +74,11 @@ ELSE:
 ### Step 2: Load Configuration
 
 1. Read `skills/knowledge-acquisition.md` for the full research protocol
-2. Read `.aid-o/03-config/policies/memory-config.yaml` for knowledge configuration:
+2. Read `.aid-o/config/policies/memory-config.yaml` for knowledge configuration:
    - `knowledge.enabled` -- if false, warn PM and abort
    - `knowledge.context7.available` -- determines primary source
    - `knowledge.research.*` -- depth limits, chunk limits, source tiers
-3. Read `.aid-o/04-engine/memory/knowledge-base.yaml` for existing source index
+3. Read `.aid-o/work/knowledge-base.yaml` for existing source index
 4. Check Qdrant availability:
    - If Qdrant unavailable: warn PM that results will be run-only, continue
 

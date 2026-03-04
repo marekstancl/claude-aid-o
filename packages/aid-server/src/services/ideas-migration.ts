@@ -305,7 +305,7 @@ export async function exportToIdeasMd(projectRoot: string): Promise<void> {
     lines.push('');
   }
 
-  const dir = join(projectRoot, '.aid-o', '01-plans');
+  const dir = join(projectRoot, '.aid-o', 'plans');
   await mkdir(dir, { recursive: true });
   await writeFile(mdPath, lines.join('\n'), 'utf-8');
 

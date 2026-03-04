@@ -9,14 +9,14 @@ completed: YYYY-MM-DD HH:MM CET (if completed)
 ai_agent: {AI_NAME}
 epic_id: {epic-id} (if epic run)
 epic_run: {N} of {M} (if epic run)
-epic_file: .aid-o/02-epics/{epic-id}.md (if epic run)
+epic_file: .aid-o/tasks/{epic-id}.md (if epic run)
 plan_ref: {path to plan.json or plan file} (if exists)
 orchestrated: true|false (if orchestrated by Controller)
 ---
 
 # New Feature: {Title}
 
-> **Multi-Run Work?** If this feature requires 3+ runs or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/03-config/templates/epic.md`.
+> **Multi-Run Work?** If this feature requires 3+ runs or involves multiple components, consider creating an **Epic Breakdown** first using `.aid-o/config/templates/epic.md`.
 
 ## Objective
 <!-- MIN: 3-5 sentences. State WHAT you're building, WHY it's needed, and what SUCCESS looks like.

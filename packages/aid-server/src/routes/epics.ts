@@ -83,7 +83,7 @@ export function epicRoutes(registry: ProjectRegistry): Router {
       return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
     }
 
-    const epicsDir = join(fs.aidoPath, '02-epics');
+    const epicsDir = join(fs.aidoPath, 'tasks');
     let files: string[];
     try {
       files = await readdir(epicsDir);
@@ -119,7 +119,7 @@ export function epicRoutes(registry: ProjectRegistry): Router {
         runsTotal,
         runsCompleted,
         fileName,
-        path: `02-epics/${fileName}`,
+        path: `tasks/${fileName}`,
       });
     }
 
@@ -154,7 +154,7 @@ export function epicRoutes(registry: ProjectRegistry): Router {
     const epicId = req.params.epicId;
 
     // Verify the EPIC file exists
-    const epicsDir = join(fs.aidoPath, '02-epics');
+    const epicsDir = join(fs.aidoPath, 'tasks');
     let epicFileName: string | null = null;
     try {
       const files = await readdir(epicsDir);
@@ -188,7 +188,7 @@ export function epicRoutes(registry: ProjectRegistry): Router {
 
     const newEntry: QueueEntry = {
       epic_id: epicId,
-      path: `.aid-o/02-epics/${epicFileName}`,
+      path: `.aid-o/tasks/${epicFileName}`,
       priority: mode === 'now' ? 'critical' : 'medium',
       status: 'queued',
       added_at: new Date().toISOString(),

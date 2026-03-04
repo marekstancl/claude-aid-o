@@ -15,7 +15,7 @@ enforcement or blocking dispatch.
 This skill defines:
 1. How to estimate token counts from text (character-based heuristic)
 2. Where estimation runs in the dispatch flow
-3. How results are logged to stage_log.jsonl
+3. How results are logged to timeline.jsonl
 4. How to calibrate estimates using actual usage data
 
 ---
@@ -144,7 +144,7 @@ DISPATCH FLOW:
      v
   2. >>> ESTIMATE PROMPT TOKENS <<<          -- token-estimator runs here
      |   estimate_dispatch_tokens(prompt_components)
-     |   Log to stage_log.jsonl: dispatch_prompt_tokens
+     |   Log to timeline.jsonl: dispatch_prompt_tokens
      |
      v
   3. Controller dispatches agent (Task tool)
@@ -158,7 +158,7 @@ DISPATCH FLOW:
      v
   6. >>> ESTIMATE EXECUTION TOKENS <<<       -- token-estimator runs here
      |   estimate_execution_tokens(duration, tool_ops)
-     |   Log to stage_log.jsonl: estimated_execution_tokens
+     |   Log to timeline.jsonl: estimated_execution_tokens
      |
      v
   7. Controller proceeds to PHASE_CHECK
@@ -169,7 +169,7 @@ DISPATCH FLOW:
 Estimation MUST be non-blocking. If estimation fails for any reason (malformed
 text, missing Execution Summary, unexpected content type), the Controller:
 
-1. Logs the error to stage_log.jsonl with `"estimation_error": "{reason}"`
+1. Logs the error to timeline.jsonl with `"estimation_error": "{reason}"`
 2. Sets token fields to `null` (not 0 — null indicates missing data)
 3. Continues dispatch or proceeds to PHASE_CHECK normally
 4. NEVER retries estimation synchronously
@@ -193,8 +193,8 @@ ON ESTIMATION ERROR:
 
 ### Where Results Are Logged
 
-All token estimates are appended to `stage_log.jsonl` in the run's evidence
-directory: `.aid-o/04-engine/evidence/{epic_id}/{run_id}/stage_log.jsonl`
+All token estimates are appended to `timeline.jsonl` in the run's evidence
+directory: `.aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl`
 
 #### Pre-Dispatch Entry (after prompt assembly, before agent dispatch)
 

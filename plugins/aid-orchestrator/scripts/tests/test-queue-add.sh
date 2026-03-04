@@ -2,7 +2,7 @@
 # =============================================================================
 # test-queue-add.sh — Unit tests for aid-queue-add.sh
 #
-# Tests the EPIC -> epic-queue.yaml entry script.
+# Tests the EPIC -> queue.yaml entry script.
 # Verifies: adding to empty queue, duplicate detection, dependency wiring,
 #           cycle detection, EPIC ID format validation, and argument handling.
 #
@@ -58,7 +58,7 @@ make_queue_env() {
   local name="$1"
   local d="$TMPDIR_ROOT/$name"
   mkdir -p "$d"
-  echo "$d/epic-queue.yaml"
+  echo "$d/queue.yaml"
 }
 
 # ---------------------------------------------------------------------------

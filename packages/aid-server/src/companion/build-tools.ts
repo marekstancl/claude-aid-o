@@ -152,14 +152,14 @@ export async function buildCompanionTools(
 
     readEpic: tool({
       description:
-        'Read the full content of an EPIC specification from .aid-o/02-epics/. Pass just the filename.',
+        'Read the full content of an EPIC specification from .aid-o/tasks/. Pass just the filename.',
       parameters: z.object({
         filename: z
           .string()
           .describe('EPIC filename, e.g. "E-017.md"'),
       }),
       execute: async ({ filename }: { filename: string }) => {
-        const abs = join(fs.aidoPath, '02-epics', filename);
+        const abs = join(fs.aidoPath, 'tasks', filename);
         if (!abs.startsWith(fs.aidoPath)) return 'Error: invalid path';
         const content = await fs.readText(abs);
         if (!content) return `EPIC not found: ${filename}`;
@@ -172,14 +172,14 @@ export async function buildCompanionTools(
 
     readPlan: tool({
       description:
-        'Read the full content of a plan from .aid-o/01-plans/. Pass just the filename.',
+        'Read the full content of a plan from .aid-o/plans/. Pass just the filename.',
       parameters: z.object({
         filename: z
           .string()
           .describe('Plan filename, e.g. "plan-001.md"'),
       }),
       execute: async ({ filename }: { filename: string }) => {
-        const abs = join(fs.aidoPath, '01-plans', filename);
+        const abs = join(fs.aidoPath, 'plans', filename);
         if (!abs.startsWith(fs.aidoPath)) return 'Error: invalid path';
         const content = await fs.readText(abs);
         if (!content) return `Plan not found: ${filename}`;

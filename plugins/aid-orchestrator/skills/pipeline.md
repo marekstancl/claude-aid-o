@@ -5,7 +5,7 @@ must do. HOW (bash execution, transitions, file writes) is handled by scripts. T
 implements state transitions — it reads the current state, performs its role, then calls
 the appropriate script.
 
-**State file:** `.aid-o/04-engine/runs/{run_id}/state.yaml` (managed by `aid-fsm.sh`)
+**State file:** `.aid-o/work/runs/{run_id}/state.yaml` (managed by `aid-fsm.sh`)
 
 ---
 
@@ -38,7 +38,7 @@ ESCALATION → EXECUTE | GATES
 **No LLM involvement.** Scripts run sequentially, exit non-zero on failure.
 
 ```bash
-aid-epic-to-json.sh  <epic_file> <run_dir>     # EPIC → plan.json + plan_progress.json
+aid-epic-to-json.sh  <epic_file> <run_dir>     # EPIC → plan.json + state.yaml
 aid-json-to-run.sh   <run_dir>                  # plan.json → run.md
 aid-fsm.sh init      <epic_id> <run_id> \       # Create state.yaml (state: READY)
   <total_steps> <mode> <branch> <base_commit> <state_file>
@@ -57,7 +57,7 @@ calling PRE-FLIGHT.
 
 **LLM role:** Present the plan to PM and wait for approval.
 
-**Read:** `plan.json` from `.aid-o/04-engine/runs/{run_id}/`
+**Read:** `plan.json` from `.aid-o/work/runs/{run_id}/`
 
 **Present to PM:**
 ```
@@ -92,10 +92,10 @@ auto-transition to EXECUTE. If invalid, escalate (see §9).
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
 2. Load step definition from `plan.json` → `steps[current_step]`
-3. Load role playbook: `.aid-o/03-config/playbooks/{role}.md`
+3. Load role playbook: `.aid-o/config/playbooks/{role}.md`
 4. Assemble dispatch prompt (see Context Assembly below)
 5. Dispatch via Agent tool with `model` from `step.model` or `role_assignments` in
-   `.aid-o/03-config/policies/dispatch-config.yaml` (default: `opus`)
+   `.aid-o/config/policies/dispatch-config.yaml` (default: `opus`)
 6. Save output to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
 7. Verify output (see Output Verification below)
 
@@ -107,7 +107,7 @@ Dispatch prompt contains (in order):
 3. `## Your Task` — step objective, inputs, outputs, acceptance criteria
 4. `## Source Plan` — matching section from `plan_ref` file (if `epic.plan_ref` is set)
 5. Previous step outputs — from `evidence/.../steps/` (controlled by `step.context_scope`)
-6. `PERMISSIONS CONTEXT` — from `.aid-o/03-config/policies/permissions.yaml`
+6. `PERMISSIONS CONTEXT` — from `.aid-o/config/policies/permissions.yaml`
 
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
@@ -166,7 +166,7 @@ approved S/M proposals. Results included in PM_APPROVAL summary.
 
 **LLM role:** Present failure to PM with structured options. Execute PM's choice.
 
-**Read:** Current state from `state.yaml`, failure details from `stage_log.jsonl`.
+**Read:** Current state from `state.yaml`, failure details from `timeline.jsonl`.
 
 **Present to PM:**
 ```
@@ -218,7 +218,7 @@ In FIRST AID mode, add option D: "Continue manual".
 4. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
 5. **Auditor:** Dispatch `agents/auditor.md` — 5 audit types, score trend vs previous
 6. **Metrics:** Store EPIC summary to Qdrant (`aid-orchestration-log`) or fallback JSONL
-7. **Queue:** Read `epic-queue.yaml` → if next EPIC queued, `aid-queue-add.sh` auto-pickup
+7. **Queue:** Read `config/queue.yaml` → if next EPIC queued, `aid-queue-add.sh` auto-pickup
 
 **Evidence written:**
 ```
@@ -260,7 +260,7 @@ If task complexity grows (3+ files, multi-step) → suggest `/aid-plan-epic` ins
 
 **Activation:** `/aid-first-aid` → sets `auto-mode-state.yaml: mode: auto`
 
-**State file:** `.aid-o/04-engine/auto-mode-state.yaml`
+**State file:** `.aid-o/work/auto-mode-state.yaml`
 
 **LLM reads mode** at every decision point:
 ```
@@ -323,13 +323,13 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 ```
 
 1. Read `state.yaml` → `state`, `current_step`, `epic_id`, `run_id`
-2. Read `plan_progress.json` → verify completed steps match `current_step`
+2. Read `state.yaml` → verify completed steps match `current_step`
 3. If stash exists (`git stash list` shows `auto-escalation-*`): `git stash pop`
 4. Resume from current state (LLM continues from the state in `state.yaml`)
 
 **What to check before resuming:**
-- `plan_progress.json` — which steps are `done`
-- `stage_log.jsonl` — last event logged
+- `state.yaml` — which steps are `done`
+- `timeline.jsonl` — last event logged
 - `evidence/steps/` — which step outputs exist
 
 **Do NOT auto-resume after crash.** Report to PM:
@@ -342,7 +342,7 @@ Resume with: /aid-run-epic --resume {run_id}
 
 ## §12 Queue Management
 
-**Queue file:** `.aid-o/04-engine/epic-queue.yaml`
+**Queue file:** `.aid-o/config/queue.yaml`
 
 **Add to queue:**
 ```bash

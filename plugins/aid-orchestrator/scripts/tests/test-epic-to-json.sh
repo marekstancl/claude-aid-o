@@ -2,7 +2,7 @@
 # =============================================================================
 # test-epic-to-json.sh — Unit tests for aid-epic-to-json.sh
 #
-# Tests the EPIC.md -> plan.json + plan_progress.json conversion script.
+# Tests the EPIC.md -> plan.json + state.yaml conversion script.
 # Verifies: file generation, step count, parallel group detection,
 #           cycle detection, and error handling for missing arguments.
 #
@@ -124,9 +124,9 @@ else
 fi
 
 # ===========================================================================
-# TEST 3: Valid EPIC produces plan.json and plan_progress.json
+# TEST 3: Valid EPIC produces plan.json and state.yaml
 # ===========================================================================
-run_test "Valid EPIC produces plan.json and plan_progress.json"
+run_test "Valid EPIC produces plan.json and state.yaml"
 
 out_dir="$(make_output_dir "t03")"
 
@@ -146,10 +146,10 @@ else
 
   missing=""
   [[ -z "$plan_json_path" || ! -f "$plan_json_path" ]] && missing="${missing} plan.json"
-  [[ -z "$progress_path" || ! -f "$progress_path" ]] && missing="${missing} plan_progress.json"
+  [[ -z "$progress_path" || ! -f "$progress_path" ]] && missing="${missing} state.yaml"
 
   if [[ -z "$missing" ]]; then
-    pass "valid EPIC produces plan.json and plan_progress.json"
+    pass "valid EPIC produces plan.json and state.yaml"
   else
     fail "valid EPIC produces required output files" "missing:$missing (manifest: $manifest)"
   fi
@@ -199,22 +199,22 @@ else
 fi
 
 # ===========================================================================
-# TEST 6: plan_progress.json initializes all steps as 'pending'
+# TEST 6: state.yaml initializes all steps as 'pending'
 # ===========================================================================
-run_test "plan_progress.json initializes all steps with status: pending"
+run_test "state.yaml initializes all steps with status: pending"
 
 if [[ -n "$PROGRESS_PATH" && -f "$PROGRESS_PATH" ]]; then
   non_pending="$(jq '[.[] | select(.status != "pending")] | length' "$PROGRESS_PATH" 2>/dev/null)"
   total_entries="$(jq 'length' "$PROGRESS_PATH" 2>/dev/null)"
 
   if [[ "$total_entries" -gt 0 && "$non_pending" -eq 0 ]]; then
-    pass "plan_progress.json has $total_entries entries all with status=pending"
+    pass "state.yaml has $total_entries entries all with status=pending"
   else
-    fail "plan_progress.json all steps are pending" \
+    fail "state.yaml all steps are pending" \
       "total=$total_entries non-pending=$non_pending"
   fi
 else
-  fail "plan_progress.json status check" "skipped — progress file not available from TEST 3"
+  fail "state.yaml status check" "skipped — progress file not available from TEST 3"
 fi
 
 # ===========================================================================

@@ -23,4 +23,4 @@ Available audit types:
 If no type specified, ask the user which audit to run.
 
 Output: Markdown report with severity levels (Critical / Warning / Suggestion).
-Report stored in: `.aid-o/04-engine/evidence/{epic_id}/audit-report.md`
+Report stored in: `.aid-o/work/evidence/{epic_id}/audit-report.md`

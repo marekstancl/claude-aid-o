@@ -5,7 +5,7 @@ handles one transformation step, and `aid-auto-pipeline.sh` orchestrates them
 all in sequence.
 
 ```
-Plan.md --> EPIC.md --> plan.json --> run.md --> epic-queue.yaml
+Plan.md --> EPIC.md --> plan.json --> run.md --> queue.yaml
           (1)         (2)          (3)         (4)
                   aid-auto-pipeline.sh (5) = 1+2+3+4
 ```
@@ -61,25 +61,23 @@ All non-zero exits print a JSON object to stderr:
           v                                                 |
    +------------+     +----------------+     +-------------+|    +---------------+
    | Plan.md    |---->| EPIC.md        |---->| plan.json   ||--->| run.md        |
-   | (.aid-o/   |  1  | (.aid-o/       |  2  | plan_       ||  3 | (.aid-o/      |
-   |  01-plans/)|     |  02-epics/)    |     | progress.json||   |  04-engine/   |
-   +------------+     +----------------+     +-------------+|    |  runs/)       |
-                                                            |    +---------------+
+   | (.aid-o/   |  1  | (.aid-o/       |  2  | state.yaml  ||  3 | (.aid-o/      |
+   |  plans/)   |     |  tasks/)       |     |             ||    |  work/runs/)  |
+   +------------+     +----------------+     +-------------+|    +---------------+
                                                             |
                                                             |    +---------------+
-                                                            +--->| epic-queue    |
-                                                              4  | .yaml         |
-                                                                 | (.aid-o/      |
-                                                                 |  04-engine/)  |
+                                                            +--->| queue.yaml    |
+                                                              4  | (.aid-o/      |
+                                                                 |  config/)     |
                                                                  +---------------+
 ```
 
 Where the numbered arrows correspond to:
 
 1. `aid-plan-to-epic.sh` — Plan.md to EPIC.md
-2. `aid-epic-to-json.sh` — EPIC.md to plan.json + plan_progress.json
+2. `aid-epic-to-json.sh` — EPIC.md to plan.json + state.yaml
 3. `aid-json-to-run.sh` — plan.json to run.md
-4. `aid-queue-add.sh` — EPIC to epic-queue.yaml entry
+4. `aid-queue-add.sh` — EPIC to queue.yaml entry
 
 ---
 
@@ -97,7 +95,7 @@ phase defined in the plan.
 | `--plan <path>` | Yes | Path to the source Plan.md file |
 | `--phase <N>` | Yes | Phase number to extract (1-based index) |
 | `--total <T>` | Yes | Total number of phases in the plan |
-| `--epic-template <path>` | Yes | Path to the EPIC template file (.aid-o/03-config/templates/epic.md) |
+| `--epic-template <path>` | Yes | Path to the EPIC template file (.aid-o/config/templates/epic.md) |
 | `--output-dir <path>` | Yes | Directory where the generated EPIC file is written |
 | `--counter-yaml <path>` | Yes | Path to the EPIC counter YAML file for auto-incrementing EPIC IDs |
 
@@ -107,7 +105,7 @@ phase defined in the plan.
 - **stdout:** Absolute path to the generated EPIC file.
 
   ```
-  /project/.aid-o/02-epics/E-018-1_3.md
+  /project/.aid-o/tasks/E-018-1_3.md
   ```
 
 - **stderr:** JSON error on failure (see Exit Codes).
@@ -138,12 +136,12 @@ phase defined in the plan.
 
 ```bash
 ./aid-plan-to-epic.sh \
-  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --plan .aid-o/plans/2026-02-28-pipeline-scripts.md \
   --phase 1 \
   --total 3 \
-  --epic-template .aid-o/03-config/templates/epic.md \
-  --output-dir .aid-o/02-epics \
-  --counter-yaml .aid-o/04-engine/epic-counter.yaml
+  --epic-template .aid-o/config/templates/epic.md \
+  --output-dir .aid-o/tasks \
+  --counter-yaml .aid-o/work/epic-counter.yaml
 ```
 
 #### Phase Marker Format
@@ -182,7 +180,7 @@ The authoritative format reference is `skills/plan-writing.md` → **Phase Marke
 ### 2. aid-epic-to-json.sh
 
 **Purpose:** Parse an EPIC.md file and produce a `plan.json` (execution plan)
-and `plan_progress.json` (progress tracker), plus initialize an evidence
+and `state.yaml` (progress tracker), plus initialize an evidence
 directory for the run.
 
 #### Arguments
@@ -191,7 +189,7 @@ directory for the run.
 |------|----------|-------------|
 | `--epic <path>` | Yes | Path to the EPIC.md file |
 | `--schema <path>` | Yes | Path to plan.schema.json for validation |
-| `--output-dir <path>` | Yes | Directory where plan.json, plan_progress.json, and evidence/ are written |
+| `--output-dir <path>` | Yes | Directory where plan.json, state.yaml, and evidence/ are written |
 | `--plan-source <path>` | No | Path to the source Plan.md (populates `source_plan` in plan.json) |
 
 #### stdin / stdout Contract
@@ -201,10 +199,10 @@ directory for the run.
 
   ```json
   {
-    "plan_json": ".aid-o/04-engine/runs/R-E018-1/plan.json",
-    "progress": ".aid-o/04-engine/runs/R-E018-1/plan_progress.json",
+    "plan_json": ".aid-o/work/runs/R-E018-1/plan.json",
+    "progress": ".aid-o/work/runs/R-E018-1/state.yaml",
     "run_id": "R-E018-1",
-    "evidence_dir": ".aid-o/04-engine/runs/R-E018-1/evidence"
+    "evidence_dir": ".aid-o/work/runs/R-E018-1/evidence"
   }
   ```
 
@@ -221,7 +219,7 @@ directory for the run.
 6. Reads `## DoD Gates` to populate the `gates` array.
 7. Constructs the plan.json object conforming to `plan.schema.json`.
 8. Validates the generated JSON against the schema using `jq`.
-9. Initializes `plan_progress.json` with all steps set to `pending`.
+9. Initializes `state.yaml` with all steps set to `pending`.
 10. Creates the evidence directory.
 11. Prints the JSON manifest to stdout.
 
@@ -229,7 +227,7 @@ directory for the run.
 
 | Code | Condition |
 |------|-----------|
-| 0 | plan.json and plan_progress.json generated and validated |
+| 0 | plan.json and state.yaml generated and validated |
 | 1 | EPIC is malformed (missing Steps table, invalid dependencies, cycle detected) |
 | 2 | Missing dependency (bash/jq) |
 | 3 | EPIC file not found, schema file not found, output dir not writable |
@@ -238,10 +236,10 @@ directory for the run.
 
 ```bash
 ./aid-epic-to-json.sh \
-  --epic .aid-o/02-epics/E-018-1_3.md \
-  --schema .aid-o/03-config/templates/plan.schema.json \
-  --output-dir .aid-o/04-engine/runs/R-E018-1 \
-  --plan-source .aid-o/01-plans/2026-02-28-pipeline-scripts.md
+  --epic .aid-o/tasks/E-018-1_3.md \
+  --schema .aid-o/config/templates/plan.schema.json \
+  --output-dir .aid-o/work/runs/R-E018-1 \
+  --plan-source .aid-o/plans/2026-02-28-pipeline-scripts.md
 ```
 
 #### Portability Notes
@@ -274,7 +272,7 @@ with frontmatter, phase sections, and dependency information.
 - **stdout:** Absolute path to the generated run file.
 
   ```
-  /project/.aid-o/04-engine/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md
+  /project/.aid-o/work/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md
   ```
 
 - **stderr:** JSON error on failure.
@@ -315,10 +313,10 @@ with frontmatter, phase sections, and dependency information.
 
 ```bash
 ./aid-json-to-run.sh \
-  --plan-json .aid-o/04-engine/runs/R-E018-1/plan.json \
-  --run-template .aid-o/03-config/templates/run-new-feature.md \
-  --epic .aid-o/02-epics/E-018-1_3.md \
-  --output-dir .aid-o/04-engine/runs/R-E018-1 \
+  --plan-json .aid-o/work/runs/R-E018-1/plan.json \
+  --run-template .aid-o/config/templates/run-new-feature.md \
+  --epic .aid-o/tasks/E-018-1_3.md \
+  --output-dir .aid-o/work/runs/R-E018-1 \
   --run-id R-E018-1
 ```
 
@@ -332,7 +330,7 @@ with frontmatter, phase sections, and dependency information.
 
 ### 4. aid-queue-add.sh
 
-**Purpose:** Add an EPIC entry to the `epic-queue.yaml` file for queued
+**Purpose:** Add an EPIC entry to the `queue.yaml` file for queued
 execution. Validates against duplicates and runs cycle detection on the
 dependency graph.
 
@@ -344,7 +342,7 @@ dependency graph.
 | `--epic-path <path>` | Yes | Path to the EPIC.md file |
 | `--priority <level>` | No | Priority level: `critical`, `high`, `medium` (default), `low` |
 | `--depends-on <list>` | No | Comma-separated list of EPIC IDs this EPIC depends on |
-| `--queue-yaml <path>` | Yes | Path to the epic-queue.yaml file |
+| `--queue-yaml <path>` | Yes | Path to the queue.yaml file |
 
 #### stdin / stdout Contract
 
@@ -373,12 +371,12 @@ dependency graph.
 
 #### Queue Entry Format
 
-Each entry in `epic-queue.yaml`:
+Each entry in `queue.yaml`:
 
 ```yaml
 queue:
   - epic_id: E-018-1_3
-    epic_path: .aid-o/02-epics/E-018-1_3.md
+    epic_path: .aid-o/tasks/E-018-1_3.md
     priority: medium
     status: queued          # queued | running | completed | failed
     depends_on: []
@@ -399,10 +397,10 @@ queue:
 ```bash
 ./aid-queue-add.sh \
   --epic-id E-018-1_3 \
-  --epic-path .aid-o/02-epics/E-018-1_3.md \
+  --epic-path .aid-o/tasks/E-018-1_3.md \
   --priority medium \
   --depends-on E-017-1_1,E-017-2_1 \
-  --queue-yaml .aid-o/04-engine/epic-queue.yaml
+  --queue-yaml .aid-o/config/queue.yaml
 ```
 
 #### Portability Notes
@@ -445,21 +443,21 @@ plan.json and run.md, then enqueues them all.
   ```json
   {
     "plan_id": "P018",
-    "plan_path": ".aid-o/01-plans/2026-02-28-pipeline-scripts.md",
+    "plan_path": ".aid-o/plans/2026-02-28-pipeline-scripts.md",
     "epics": [
       {
         "epic_id": "E-018-1_3",
-        "epic_path": ".aid-o/02-epics/E-018-1_3.md",
-        "plan_json": ".aid-o/04-engine/runs/R-E018-1/plan.json",
-        "run_path": ".aid-o/04-engine/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md",
+        "epic_path": ".aid-o/tasks/E-018-1_3.md",
+        "plan_json": ".aid-o/work/runs/R-E018-1/plan.json",
+        "run_path": ".aid-o/work/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-1",
         "queue_status": "queued"
       },
       {
         "epic_id": "E-018-2_3",
-        "epic_path": ".aid-o/02-epics/E-018-2_3.md",
-        "plan_json": ".aid-o/04-engine/runs/R-E018-2/plan.json",
-        "run_path": ".aid-o/04-engine/runs/R-E018-2/2026-02-28-new-feature-pipeline-scripts.md",
+        "epic_path": ".aid-o/tasks/E-018-2_3.md",
+        "plan_json": ".aid-o/work/runs/R-E018-2/plan.json",
+        "run_path": ".aid-o/work/runs/R-E018-2/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-2",
         "queue_status": "queued"
       }
@@ -500,22 +498,22 @@ plan.json and run.md, then enqueues them all.
 ```bash
 # Default chain mode — each EPIC depends on the previous
 ./aid-auto-pipeline.sh \
-  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md
+  --plan .aid-o/plans/2026-02-28-pipeline-scripts.md
 
 # All EPICs independent (can run in parallel)
 ./aid-auto-pipeline.sh \
-  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --plan .aid-o/plans/2026-02-28-pipeline-scripts.md \
   --queue-mode separate
 
 # Custom dependencies
 ./aid-auto-pipeline.sh \
-  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --plan .aid-o/plans/2026-02-28-pipeline-scripts.md \
   --queue-mode custom \
   --depends-on E-017-1_1
 
 # Explicit plugin directory
 ./aid-auto-pipeline.sh \
-  --plan .aid-o/01-plans/2026-02-28-pipeline-scripts.md \
+  --plan .aid-o/plans/2026-02-28-pipeline-scripts.md \
   --plugin-dir plugins/aid-orchestrator
 ```
 
@@ -639,24 +637,24 @@ After running the full pipeline, the workspace looks like:
 
 ```
 .aid-o/
-  01-plans/
+  plans/
     2026-02-28-pipeline-scripts.md          # Source plan (input)
-  02-epics/
+  tasks/
     E-018-1_3.md                            # Generated EPIC (phase 1)
     E-018-2_3.md                            # Generated EPIC (phase 2)
     E-018-3_3.md                            # Generated EPIC (phase 3)
-  03-config/
+  config/
     templates/
       epic.md                               # EPIC template (input)
       plan.schema.json                      # JSON schema (input)
       run-new-feature.md                    # Run template (input)
-  04-engine/
+    queue.yaml                              # Execution queue
+  work/
     epic-counter.yaml                       # Auto-increment counter
-    epic-queue.yaml                         # Execution queue
     runs/
       R-E018-1/
         plan.json                           # Execution plan
-        plan_progress.json                  # Progress tracker
+        state.yaml                          # Progress tracker
         2026-02-28-new-feature-*.md         # Run file
         evidence/                           # Evidence directory
       R-E018-2/

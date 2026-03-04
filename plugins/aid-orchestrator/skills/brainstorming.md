@@ -13,7 +13,7 @@ This skill defines how AID conducts interactive brainstorming runs with the PM. 
 The brainstorming skill is invoked by the `/aid-brainstorm` command. It produces one artifact: a validated plan document. EPIC creation is a separate step via `/aid-plan-epic`.
 
 **Input:** PM's idea or topic + interactive Q&A
-**Output:** Plan document (`.aid-o/01-plans/P-*.md`)
+**Output:** Plan document (`.aid-o/plans/P-*.md`)
 
 ---
 
@@ -214,7 +214,7 @@ Output documents (plan, EPIC) follow the **configured document language**.
 
 ```
 Resolution order:
-1. Read .aid-o/03-config/language.yaml → document_language
+1. Read .aid-o/config/language.yaml → document_language
 2. Check scope flags:
    - scope.plans: true → plan document uses document_language
    - scope.plans: false → plan document uses English
@@ -225,7 +225,7 @@ Resolution order:
 ### Language Configuration Reference
 
 ```yaml
-# .aid-o/03-config/language.yaml
+# .aid-o/config/language.yaml
 language:
   document_language: "EN"                 # ISO 639-1 code for generated documents
   fallback_language: "EN"                 # Fallback if primary language is unsupported
@@ -408,7 +408,7 @@ Roles typically: all roles (architect → domain → backend + frontend → qa +
 - `defaults/templates/plan.md` — base plan document template
 - `skills/planner.md` — how plans become Plan JSON
 - `skills/run-management.md` — lifecycle integration
-- `.aid-o/03-config/language.yaml` — document language configuration
+- `.aid-o/config/language.yaml` — document language configuration
 
 ---
 
