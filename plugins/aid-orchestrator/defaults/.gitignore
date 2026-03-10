@@ -1,3 +1,13 @@
-# AID Orchestrator — runtime engine artifacts (not versioned)
-# Plans, EPICs, and config ARE versioned (design artifacts)
+# AID Orchestrator — runtime artifacts (not versioned)
+# Design artifacts (plans, tasks, config) ARE versioned
+
+# Runtime evidence and execution logs
+.aid-o/work/evidence/
+.aid-o/work/quick/
+.aid-o/work/timeline.jsonl
+
+# Runtime queue state
+.aid-o/config/queue.yaml
+
+# Legacy v1 structure
 .aid-o/04-engine/

@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.1.1] — 2026-03-10
+
+### Fixed
+- **`.gitignore` missing from `/aid-init`** — Init now creates `.gitignore` appended to project root, ignoring runtime artifacts (evidence, quick logs, timeline.jsonl, queue.yaml) while keeping design artifacts versioned
+- **Defaults `.gitignore` outdated** — Updated from v1 paths (`.aid-o/04-engine/`) to v2 structure
+
 ## [2.1.0] — 2026-03-10
 
 ### Changed

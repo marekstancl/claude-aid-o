@@ -13,10 +13,11 @@ Initialize a new `.aid-o/` workspace or upgrade existing v1.x workspace to v2.0 
 /aid-init --upgrade         # upgrade existing v1 .aid-o/ to v2
 ```
 
-## Files Created (10 total)
+## Files Created (11 total)
 
 ```
 .aid-o/
+  .gitignore              # ignores runtime artifacts, versions design artifacts
   config/
     project.yaml          # auto-detected: name, type, languages, test_cmd, lint_cmd, build_cmd
     permissions.yaml      # default: autonomous_mode: false
@@ -31,7 +32,26 @@ Initialize a new `.aid-o/` workspace or upgrade existing v1.x workspace to v2.0 
   work/evidence/          # empty directory (for run evidence)
 ```
 
-Total: 5 files + 5 empty directories = 10 items.
+Total: 6 files + 5 empty directories = 11 items.
+
+### .gitignore (copied from defaults/.gitignore)
+
+Appended to project root `.gitignore` (or created if missing). Content:
+
+```gitignore
+# AID Orchestrator — runtime artifacts (not versioned)
+# Design artifacts (plans, tasks, config) ARE versioned
+.aid-o/work/evidence/
+.aid-o/work/quick/
+.aid-o/work/timeline.jsonl
+.aid-o/config/queue.yaml
+.aid-o/04-engine/
+```
+
+**Rules:**
+- If project `.gitignore` already contains `.aid-o/` entries, skip (idempotent)
+- Append with `# AID Orchestrator` header for easy identification
+- Never overwrite existing `.gitignore` content
 
 ## Auto-Detection Logic
 
@@ -187,7 +207,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 ## Important
 
 - **Idempotent** — safe to run repeatedly, never destroys existing data
-- **10 items** — 5 files + 5 directories created on fresh init
+- **11 items** — 6 files + 5 directories created on fresh init
 - **Lazy creation** — advanced config created on first use, not at init
 - **Auto-detect stack** — reads project root files to suggest test/lint/build commands
 - **Upgrade path** — `--upgrade` migrates v1 paths to v2 with PM confirmation
