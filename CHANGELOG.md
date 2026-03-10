@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.1.0] — 2026-03-10
+
+### Changed
+- **Brainstorming skill refactored** — 34% smaller (415→272 lines) with 8 new capabilities: scope decomposition, MoSCoW prioritization, risk assessment protocol, prior-plan lookup, pre-decided solution handling, context-loss recovery, workflow/AI questioning hint, Docker Compose recommendation
+- **Design section templates extracted** — Moved to `defaults/templates/design-sections.md` as standalone reference, reducing brainstorming skill size while preserving all templates
+
+### Removed
+- **Obsolete planning docs** — Removed CRITICAL-ASSESSMENT.md and REDESIGN-PLAN-v2.md (completed, no longer relevant)
+
 ## [2.0.0] — 2026-03-03
 
 ### Breaking Changes
