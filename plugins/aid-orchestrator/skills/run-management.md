@@ -39,9 +39,16 @@ NEVER save run files into `.aid-o/` root. NEVER mix Plan/Task/Run locations.
 
 ## ID System
 
-> **Authoritative reference:** `skills/epic-orchestration.md` → "ID Generation" section.
-
 IDs are sequential from `.aid-o/config/counter.yaml`:
+
+```yaml
+# .aid-o/config/counter.yaml
+plan: 5       # next allocated: P006
+epic: 12      # next allocated: E-013
+run: 8        # next allocated: R-009
+```
+
+### ID Formats
 
 ```
 Plan:           P{NNN}                     (P001)
@@ -49,6 +56,18 @@ EPIC from plan: E-{NNN}-{phase}_{total}    (E-005-1_4)
 Ad-hoc EPIC:    E-{NNN}                    (E-001)
 Run:            R-{EPIC_ID}-{run_number}   (R-005-1_4-1)
 ```
+
+### Allocation Procedure
+
+1. READ counter.yaml → get current value for the ID type
+2. INCREMENT the counter by 1
+3. WRITE incremented value back to counter.yaml **immediately**
+4. USE the incremented value as the new ID
+
+Pre-allocation (e.g., for interim docs in `/aid-plan`) follows the same procedure —
+the counter is incremented at Step 1, not deferred to plan completion. If the plan
+is aborted, the ID is "consumed" (counter is not rolled back). This prevents
+collisions between concurrent sessions.
 
 - Run file: `R-005-1_4-1-gui-foundation.md` — branch: `run/R-005-1_4-1-gui-foundation`
 - Frontmatter: `id: R-005-1_4-1`, `epic_id: E-005-1_4`
@@ -76,7 +95,7 @@ Run:            R-{EPIC_ID}-{run_number}   (R-005-1_4-1)
 3. Read `.aid-o/config/project.yaml` — if missing or >7 days old, run `/aid-setup`
 4. If NEW run:
    a. Assess complexity — 3+ runs needed? → suggest Epic workflow to PM first
-   b. Generate run ID (see `skills/epic-orchestration.md`)
+   b. Generate run ID (see ID System section above)
    c. Create run file in `.aid-o/work/tasks/` from `.aid-o/config/templates/run-{type}.md`
       - **EPIC runs:** run file pre-created by `scripts/aid-json-to-run.sh`; Controller reads it
    d. Fill with DETAILED plan — objectives, affected files, approach, risks

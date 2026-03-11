@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.2.0] — 2026-03-11
+
+### Added
+- **Context Persistence (Interim Document)** — `/aid-plan` now creates `.aid-o/work/interim-P{NNN}.md` at session start, updated after each step with full conversation detail; survives context window overflow and session interruptions; auto-deleted on plan completion
+- **Concurrent brainstorm detection** — checks for existing interim docs before starting new brainstorm, offers resume or fresh start
+- **ID Allocation Procedure** — documented read-increment-write protocol for counter.yaml in run-management ID System section
+
+### Fixed
+- **Dead `epic-orchestration.md` references** — updated brainstorming.md, plan-writing.md, and run-management.md to reference run-management ID System instead
+- **Abort text accuracy** — "no files created" corrected to "no plan written, interim doc preserved"
+- **plan-writing.md missing interim cleanup** — added MUST rule 15 to delete interim doc after successful plan write
+
 ## [2.1.1] — 2026-03-10
 
 ### Fixed

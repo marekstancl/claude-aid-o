@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.1.1** (current) — Fix: `.gitignore` added to `/aid-init`, defaults updated to v2 structure
-- **v2.1.0** — Brainstorming skill refactored: 34% smaller, 8 new capabilities (scope decomposition, MoSCoW prioritization, risk assessment, prior-plan lookup)
-- **v2.0.0** — Complete redesign: 6-state bash FSM, Fast Mode, 87% token reduction (400K→50K), 8 consolidated commands, 173 tests
+- **v2.2.0** (current) — Context Persistence: interim docs survive context window overflow; ID allocation procedure; dead reference fixes
+- **v2.1.1** — Fix: `.gitignore` added to `/aid-init`, defaults updated to v2 structure
+- **v2.1.0** — Brainstorming skill refactored: 34% smaller, 8 new capabilities
 - **v1.7.0** — Security hardening, AI Companion, voice dictation, FIRST AID improvements
 - **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
 - **v1.5.0** — Token efficiency, model tiering, usage tracking

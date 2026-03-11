@@ -59,6 +59,9 @@ Interactive 8-step brainstorming flow — collaborate with PM to explore an idea
 2. If topic provided: use as brainstorming seed; if empty: ask PM
 3. Read `skills/brainstorming.md` for process rules
 4. Detect PM's language → conversation follows PM's language
+5. **Create interim document** — allocate plan ID (P{NNN} from counter.yaml) and write
+   `.aid-o/work/interim-P{NNN}.md` with topic, project context, and PM's initial input.
+   This doc persists full conversation detail across context window boundaries.
 
 Present: `=== Step 1/8: Context ===` with project summary.
 
@@ -106,11 +109,13 @@ Write an exhaustive implementation plan from specification or topic.
 
 1. **Input resolution** — read spec file, detect format (EPIC/plan/free-form)
 2. **Context** — read `config/project.yaml`, `work/active.md`, scan related plans
-3. **Codebase analysis** — identify affected areas, read key files, note patterns
-4. **Clarification** — max 5 questions if spec has gaps (skip if clear)
-5. **Plan assembly** — write section by section per `skills/plan-writing.md` template
-6. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (16 checks)
-7. **Write file** — generate plan ID (P{NNN}), write to `.aid-o/plans/{id}-{topic}.md`
+3. **Interim document** — allocate plan ID and create `.aid-o/work/interim-P{NNN}.md`
+   with input, context, and analysis notes (same as brainstorm mode)
+4. **Codebase analysis** — identify affected areas, read key files, note patterns
+5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
+6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
+7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (16 checks)
+8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
 
 Output: plan path, step count, quality gate results.
 
@@ -133,7 +138,7 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 
 ## Reference Files
 
-- `skills/brainstorming.md` — brainstorm process rules and principles
+- `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
 - `scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
@@ -142,9 +147,9 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 ## Important
 
 - **Auto-detect by default** — mode selection only when explicitly specified or ambiguous
-- **One file per mode** — brainstorm creates plan; write creates plan; epic creates EPICs + plan.json
+- **One output per mode** — brainstorm produces a plan; write produces a plan; epic produces EPICs + plan.json (interim docs are temporary)
 - **Quality gates are mandatory** — plans not written until gates pass
 - **Language split** — conversation in PM's language; documents per `config/project.yaml`
 - **YAGNI** — never propose over-engineered solutions
-- If PM aborts at any step → end gracefully, no files written
+- If PM aborts at any step → end gracefully, no final plan/EPIC files written (interim doc preserved for recovery)
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway

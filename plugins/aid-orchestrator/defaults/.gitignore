@@ -9,5 +9,8 @@
 # Runtime queue state
 .aid-o/config/queue.yaml
 
+# Interim brainstorming notes (temporary, deleted after plan completion)
+.aid-o/work/interim-*.md
+
 # Legacy v1 structure
 .aid-o/04-engine/

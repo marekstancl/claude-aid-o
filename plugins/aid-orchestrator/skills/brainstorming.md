@@ -184,8 +184,8 @@ RULE 2: Delegate plan writing to plan-writing skill (skills/plan-writing.md).
         After plan-writing completes, brainstorming is DONE.
 RULE 3: Pass all approved design details to plan-writing — do not summarize or omit.
         If PM approved a modification, the modified version goes into the document.
-RULE 4: Generate proper plan IDs per `skills/epic-orchestration.md` ID Generation section:
-        Plan: P{NNN} (from counter.yaml).
+RULE 4: Generate plan IDs per `skills/run-management.md` → ID System section:
+        Plan: P{NNN} (from counter.yaml, pre-allocated at Step 1).
 RULE 5: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan-epic
         (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
 ```
@@ -206,6 +206,37 @@ See `.aid-o/config/language.yaml` for full configuration options (scope per docu
 
 ---
 
+## Context Persistence (Interim Document)
+
+Long brainstorming sessions can exceed the context window. The interim document preserves
+full conversation detail so nothing is lost.
+
+```
+RULE 1: CREATE `.aid-o/work/interim-P{NNN}.md` at the START of /aid-plan (Step 1),
+        using the pre-allocated plan ID. Initial content: topic, project context,
+        PM's initial input, prior-plan references.
+RULE 2: UPDATE after each completed step — append full detail, not summaries:
+        - Each Q&A pair (question + PM answer + inferred defaults)
+        - MoSCoW prioritization results
+        - Chosen approach with full rationale and rejected alternatives
+        - Risk assessment table
+        - Each approved design section (complete content)
+        - All PM modifications and decisions
+RULE 3: Write for MACHINE CONSUMPTION — structure for reliable re-reading, not
+        human aesthetics. Use consistent headers (## Step N: {name}) so the agent
+        can parse on context resume.
+RULE 4: On context resume (new session), READ interim doc first. Announce:
+        "Found interim notes for P{NNN}. Resuming from Step {N}."
+        Do NOT re-ask questions already answered in the interim doc.
+RULE 5: DELETE the interim doc when plan-writing completes successfully.
+        On abort, KEEP the interim doc (it serves as recovery artifact).
+RULE 6: Before creating interim doc, CHECK if `.aid-o/work/interim-P*.md` already exists.
+        If found, announce: "Active brainstorm in progress (P{NNN}). (A) Resume it,
+        (B) Start new brainstorm with next ID." Prevents concurrent-session collisions.
+```
+
+---
+
 ## Brainstorming Run Lifecycle
 
 ### Starting a Brainstorming Run
@@ -216,9 +247,9 @@ Steps: (1) PM invokes `/aid-brainstorm [topic]` → (2) read project context →
 
 PM aborts by saying "stop", "cancel", "abort", or similar.
 
-- **Before Step 8** (no files written): end gracefully, no files created.
+- **Before Step 8** (no plan written): end gracefully, keep interim doc as recovery artifact.
 - **During Step 8**: plan-writing handles cleanup; ask PM "Keep partial plan file? (Y/N)".
-- **PM does not respond (new session):** Brainstorming state is lost. If PM restarts `/aid-brainstorm` on the same topic, check `.aid-o/plans/` for a partial plan from prior run. If found, offer: "(A) Continue from it, (B) Start fresh." If no partial plan exists, start fresh.
+- **PM does not respond (new session):** Check `.aid-o/work/interim-P*.md` for interim doc from prior run. If found, offer: "(A) Resume from interim notes, (B) Start fresh." If no interim doc, check `.aid-o/plans/` for partial plan. If nothing found, start fresh.
 
 ### Re-opening a Brainstorming Run
 
@@ -269,4 +300,4 @@ Use templates from `defaults/templates/design-sections.md` as guidance when pres
 
 ---
 
-**Last Updated:** 2026-03-10
+**Last Updated:** 2026-03-11

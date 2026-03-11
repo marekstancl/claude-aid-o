@@ -586,7 +586,8 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 11. **ALWAYS make each step section self-contained** — agents receive individual sections, not the whole plan
 12. **ALWAYS follow the language split** — plan document in configured document_language, conversation in PM's language
 13. **ALWAYS write the plan to `.aid-o/plans/`** — never to any other location
-14. **ALWAYS generate proper plan IDs** — per `skills/epic-orchestration.md` ID Generation
+14. **ALWAYS generate proper plan IDs** — per `skills/run-management.md` → ID System (pre-allocated at brainstorming Step 1)
+15. **ALWAYS delete the interim document after successful plan write** — remove `.aid-o/work/interim-P{NNN}.md` if it exists (cleanup from brainstorming context persistence)
 
 ---
 

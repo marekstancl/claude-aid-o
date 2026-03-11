@@ -41,10 +41,19 @@ Appended to project root `.gitignore` (or created if missing). Content:
 ```gitignore
 # AID Orchestrator — runtime artifacts (not versioned)
 # Design artifacts (plans, tasks, config) ARE versioned
+
+# Runtime evidence and execution logs
 .aid-o/work/evidence/
 .aid-o/work/quick/
 .aid-o/work/timeline.jsonl
+
+# Runtime queue state
 .aid-o/config/queue.yaml
+
+# Interim brainstorming notes (temporary, deleted after plan completion)
+.aid-o/work/interim-*.md
+
+# Legacy v1 structure
 .aid-o/04-engine/
 ```
 
