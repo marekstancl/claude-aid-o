@@ -220,7 +220,7 @@ If PM declines: run all steps as a single run.
 - `scripts/aid-epic-to-json.sh` — script that generates plan.json and state.yaml
 - `scripts/aid-auto-pipeline.sh` — master orchestrator (Plan → EPIC → plan.json → run.md → queue)
 - `defaults/templates/plan.schema.json` — full plan.json JSON schema
-- `skills/epic-orchestration.md` — PLANNING state references this skill (§2)
+- `skills/pipeline.md` — READY state references this skill (§2)
 - `defaults/policies/role-cards.md` — model tier per role (architect=opus, qa=sonnet, etc.)
 
 ---

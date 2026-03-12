@@ -95,7 +95,7 @@ auto-transition to EXECUTE. If invalid, escalate (see §9).
 3. Load role playbook: `.aid-o/config/playbooks/{role}.md`
 4. Assemble dispatch prompt (see Context Assembly below)
 5. Dispatch via Agent tool with `model` from `step.model` or `role_assignments` in
-   `.aid-o/config/policies/dispatch-config.yaml` (default: `opus`)
+   `plan.json` step `model` field or `orchestration.yaml` role tiers (default: `opus`)
 6. Save output to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
 7. Verify output (see Output Verification below)
 
@@ -122,8 +122,22 @@ After agent completes:
 
 On pass: `aid-fsm.sh increment-step <state_file>`
 
+### Review Checkpoint CP2 (per-step)
+
+After output verification passes, dispatch verifier (`code-review` focus) with step
+output + branch diff. See `agents/verifier.md` Auto-Dispatch Triggers for context assembly.
+Fix loop: gate-fixer → verifier re-check, max 2 iterations. E7 on exhaustion.
+Skip per `review-checkpoints.yaml` (`cp2_step_review`, `skip_trivial`).
+
+### Integration Review CP3 (pre-GATES)
+
+When all steps are done, before EXECUTE→GATES transition:
+dispatch TWO verifiers in parallel (`code-review` + `security`) with full diff since run start.
+Fix loop same as CP2. E7 on exhaustion.
+Skip per `review-checkpoints.yaml` (`cp3_integration_review`).
+
 If more steps remain: `aid-fsm.sh transition EXECUTE EXECUTE <state_file>`
-If all steps done: `aid-fsm.sh transition EXECUTE GATES <state_file>`
+If all steps done + CP3 pass: `aid-fsm.sh transition EXECUTE GATES <state_file>`
 On unrecoverable error: `aid-fsm.sh transition EXECUTE ESCALATION <state_file>`
 
 ### Parallel groups
@@ -159,6 +173,10 @@ When `plan.json` contains a parallel group (steps with same `wave`):
 (`agents/curator.md`) + Lessons-Extractor (`agents/lessons-extractor.md`) in parallel.
 Curator proposals auto-evaluated per `decision-policies.yaml`. Fix agents dispatched for
 approved S/M proposals. Results included in PM_APPROVAL summary.
+
+**Review Checkpoint CP4:** After curator fixes are applied, dispatch verifier (`code-review`)
+on curator-changed files only. If verifier FAIL → revert curator changes, log reversion.
+Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
 
 ---
 
@@ -202,6 +220,8 @@ In FIRST AID mode, add option D: "Continue manual".
 | E4 | Gate fails after max_attempts |
 | E5 | Agent produces no output |
 | E6 | Merge conflict in parallel group |
+| E7 | Verifier review failed after 2 fix-loop iterations |
+| E8 | Auditor found critical finding (blocks DONE) |
 
 ---
 
@@ -216,9 +236,12 @@ In FIRST AID mode, add option D: "Continue manual".
 3. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
    → delete run branch
 4. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
-5. **Auditor:** Dispatch `agents/auditor.md` — 5 audit types, score trend vs previous
-6. **Metrics:** Store EPIC summary to Qdrant (`aid-orchestration-log`) or fallback JSONL
-7. **Queue:** Read `config/queue.yaml` → if next EPIC queued, `aid-queue-add.sh` auto-pickup
+5. **Auditor:** Dispatch `agents/auditor.md` — 8 audit categories, score trend vs previous
+6. **Review Checkpoint CP5:** If auditor output has `blocking_findings: true` (any critical
+   severity finding), transition to ESCALATION (E8) instead of proceeding. PM must address
+   critical findings. Skip per `review-checkpoints.yaml` (`cp5_critical_gate`).
+7. **Metrics:** Store EPIC summary to Qdrant (`aid-orchestration-log`) or fallback JSONL
+8. **Queue:** Read `config/queue.yaml` → if next EPIC queued, `aid-queue-add.sh` auto-pickup
 
 **Evidence written:**
 ```
@@ -248,7 +271,10 @@ Designed for quick tasks that don't warrant a full EPIC.
 1. Log task to `.aid-o/logs/aid-do-log.jsonl` (action: `aid_do_start`)
 2. Dispatch single agent (default: sonnet) with task description
 3. Verify output (same as §4)
-4. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
+4. **Review Checkpoint CP6:** Dispatch verifier (`code-review`) on all changes.
+   Fix loop: gate-fixer → verifier, max 2. Advisory only (no ESCALATION in Fast Mode).
+   Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
+5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
 
 **No state.yaml.** No branch. No gates. No Curator. Quick log only.
 
@@ -367,7 +393,53 @@ Only READY entries are eligible for pickup.
 
 ---
 
-**Last Updated:** 2026-03-03
+## §13 Review Checkpoint Protocol
+
+Six automatic review checkpoints dispatch the verifier agent at key pipeline milestones.
+Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by `/aid-run`).
+
+### Checkpoint Summary
+
+| CP | Location | Verifier Focus | Fix Loop | Escalation |
+|----|----------|----------------|----------|------------|
+| CP1 | `/aid-plan` Step 9 | `docs-review` | No (PM decides) | None |
+| CP2 | EXECUTE after step verify | `code-review` | Yes (max 2) | E7 |
+| CP3 | EXECUTE→GATES transition | `code-review` + `security` | Yes (max 2) | E7 |
+| CP4 | DONE after curator | `code-review` | Yes (revert on fail) | None |
+| CP5 | DONE after auditor | N/A (auditor flag) | N/A | E8 |
+| CP6 | `/aid-do` post-implementation | `code-review` | Yes (max 2) | Advisory only |
+
+### Fix Loop Protocol
+
+```
+1. Verifier dispatched → produces review_result
+2. If PASS or PASS_WITH_NOTES → continue (notes logged, non-blocking)
+3. If FAIL + fix_loop_eligible:
+   a. Dispatch gate-fixer (source: verifier_review) with findings
+   b. Gate-fixer applies minimal fixes
+   c. Re-dispatch verifier (iteration 2)
+   d. If still FAIL → ESCALATION (E7) or warn PM (/aid-do)
+4. If FAIL + NOT fix_loop_eligible → ESCALATION immediately
+5. Max 2 iterations total, then escalate
+```
+
+### Trivial Skip Rule
+
+When `skip_trivial: true` in config:
+- CP2 and CP6 are skipped if the step/task changed ≤ `trivial_threshold.max_files` files
+  with ≤ `trivial_threshold.max_lines` total lines changed
+- CP1, CP3, CP4, CP5 are never skipped by this rule (always run when enabled)
+
+### Reference Files
+
+- `agents/verifier.md` — auto-dispatch triggers, context assembly, output format
+- `agents/gate-fixer.md` — accepts `verifier_review` source type
+- `agents/auditor.md` — `blocking_findings` flag for CP5
+- `config/policies/review-checkpoints.yaml` — per-checkpoint toggles, fix-loop config
+
+---
+
+**Last Updated:** 2026-03-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

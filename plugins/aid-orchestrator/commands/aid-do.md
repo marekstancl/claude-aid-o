@@ -73,7 +73,21 @@ After implementation, verify actual scope:
      Task completed but consider creating a retroactive plan for documentation.
      ```
 
-### Step 5: Quick Log
+### Step 5: Review Check (CP6)
+
+Dispatch verifier with `code-review` focus on `git diff` output (all changes from Step 3).
+
+1. If verifier PASS or PASS_WITH_NOTES → continue to Step 6
+2. If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer → re-verify (max 2 iterations)
+3. If fix loop fails → warn PM (advisory, no ESCALATION in Fast Mode):
+   ```
+   Review found issues that couldn't be auto-fixed:
+     - {finding 1}
+   Consider reviewing manually or escalating to /aid-plan.
+   ```
+4. Skip if `review_checkpoints.cp6_fast_mode_review: false` or changes are trivial
+
+### Step 6: Quick Log
 
 1. Determine next Q number:
    - Scan `.aid-o/work/quick/Q-*.md` for highest number
@@ -98,13 +112,13 @@ escalated_to_epic: false
 {implementation summary — 3-5 sentences}
 ```
 
-### Step 6: Git Commit
+### Step 7: Git Commit
 
 1. Stage changed files: `git add {changed_files}`
 2. Commit: `feat: {task description} (Q-{NNN})`
 3. Pre-commit hooks run gates automatically (if configured)
 
-### Step 7: Output
+### Step 8: Output
 
 ```
 Done: Q-{NNN} ({duration}s, {file_count} files)

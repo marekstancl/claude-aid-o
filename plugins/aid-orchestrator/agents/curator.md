@@ -11,7 +11,7 @@ model: sonnet
 deduplicates against backlog, proposes improvements, extracts lessons learned,
 and manages the pre-flight status update protocol for approved fixes.
 
-**Dispatched by:** Pipeline during CURATOR_RESOLVE state (after GATES pass, before PM_APPROVAL).
+**Dispatched by:** `skills/pipeline.md` during DONE state (§7), after GATES pass.
 
 ---
 

@@ -7,7 +7,7 @@ model: sonnet
 
 **Role:** Post-Epic comprehensive project health assessment, scoring, and trend tracking.
 **Type:** Specialist agent (post-Epic, not per-step — triggered after Epic DONE + merge).
-**Dispatched by:** `skills/epic-orchestration.md` from the DONE state, after successful merge.
+**Dispatched by:** `skills/pipeline.md` from the DONE state (§7), after successful merge.
 
 ---
 
@@ -406,6 +406,12 @@ These constraints are non-negotiable:
 - **NEVER** inflate or deflate scores — follow the scoring methodology exactly
 - Critical findings are **ALWAYS** reported — they must never be omitted or downgraded
 
+### Critical Finding Escalation
+- If ANY finding has severity `critical`, set `blocking_findings: true` in the output
+- Critical findings trigger ESCALATION (E8) — they block the DONE state transition
+- The orchestrator reads `blocking_findings` and transitions to ESCALATION instead of queue pickup
+- This applies to ALL audit categories (security, code quality, etc.)
+
 ### Finding Quality
 - Every finding MUST include: `area`, `audit_type`, `finding`, `recommendation`, `effort`
 - Findings must be specific: file paths, line numbers or ranges, concrete descriptions
@@ -536,6 +542,8 @@ audit_report:
     findings_persistent: {N}
     trend_direction: "improving|stable|declining"|null
 
+  blocking_findings: true|false    # true if any critical severity findings exist → triggers E8 ESCALATION
+
   summary: "Executive summary -- one paragraph overview of project health"
 
   recommended_actions:
@@ -609,7 +617,8 @@ Both artifacts are stored in `evidence/{epic_id}/`:
 9. GENERATE audit_report YAML
 10. GENERATE Markdown summary (human-readable)
 11. STORE both in evidence/{epic_id}/
-12. OUTPUT audit_report to Orchestrator
+12. SET blocking_findings = true if any finding has severity "critical"
+13. OUTPUT audit_report to Orchestrator (blocking_findings flag triggers E8 ESCALATION)
 ```
 
 ---
@@ -621,6 +630,8 @@ Both artifacts are stored in `evidence/{epic_id}/`:
   the code is merged.
 - Your report is the primary input for the Curator agent, which converts critical
   and high-priority findings into backlog items for future Epics.
+- **Critical findings trigger ESCALATION (E8)** — they block the DONE state transition.
+  The orchestrator reads `blocking_findings` from your output and prevents queue pickup.
 - Scores must be **reproducible**: given the same codebase, the same scoring
   methodology must produce the same scores. Do not apply subjective adjustments.
 - When a conditional audit's condition is borderline (e.g., a single `.jsx` file

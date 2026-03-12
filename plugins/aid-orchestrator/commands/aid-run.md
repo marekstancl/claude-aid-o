@@ -117,10 +117,21 @@ FSM initialized: READY
    - Dispatch all agents in single message (multiple Task calls)
    - Collect all outputs
 5. Verify outputs: present? scope respected? acceptance criteria met?
-6. Log to `timeline.jsonl`
+6. **Review Checkpoint CP2** — dispatch verifier (`code-review` focus) with step output + branch diff
+   - If verifier PASS → continue
+   - If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer with findings → re-dispatch verifier (max 2 iterations)
+   - If fix loop exhausts or `fix_loop_eligible: false` → ESCALATION (E7)
+   - Skip if `review_checkpoints.cp2_step_review: false` or step is trivial (see `skip_trivial` config)
+7. Log to `timeline.jsonl`
+
+**Integration Review (CP3):** When all steps are done, before transitioning to GATES:
+- Dispatch verifier with `code-review` + `security` focuses in parallel (full diff since run start)
+- Fix loop same as CP2 (gate-fixer → verifier, max 2 iterations)
+- Skip if `review_checkpoints.cp3_integration_review: false`
 
 **Transition:**
-- All steps done → GATES
+- All steps done + CP3 pass → GATES
+- CP3 fix loop exhausts → ESCALATION (E7)
 - Hard failure → ESCALATION
 - Next step available → EXECUTE (self-loop, increment `current_step`)
 
@@ -177,8 +188,16 @@ FSM initialized: READY
 4. Update `work/active.md`
 5. Generate `final_report.md`
 6. Dispatch Curator agent (post-processing: backlog proposals, lessons)
-7. Check queue → auto-start next task if queue not paused
-8. Log completion to `timeline.jsonl`
+7. **Review Checkpoint CP4** — dispatch verifier (`code-review`) on curator-changed files only
+   - If FAIL → revert curator changes, log reversion to timeline
+   - Skip if `review_checkpoints.cp4_curator_validation: false`
+8. Dispatch Auditor agent (8-category audit, scoring, trends)
+9. **Review Checkpoint CP5** — if auditor output has `blocking_findings: true`:
+   - Transition to ESCALATION (E8: "Auditor found critical finding")
+   - PM must address critical findings before DONE completes
+   - Skip if `review_checkpoints.cp5_critical_gate: false`
+10. Check queue → auto-start next task if queue not paused
+11. Log completion to `timeline.jsonl`
 
 **Output:**
 ```
@@ -211,6 +230,9 @@ Evidence: .aid-o/work/evidence/{id}/{run_id}/
 
 ## Important
 
+- **Review Checkpoints** — CP2-CP5 are dispatched automatically per `config/policies/review-checkpoints.yaml`; all are individually toggleable
+- **Escalation E7** — verifier review failed after 2 fix-loop iterations
+- **Escalation E8** — auditor found critical security finding (blocks DONE)
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state

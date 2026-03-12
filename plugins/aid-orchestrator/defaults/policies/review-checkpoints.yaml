@@ -1,0 +1,27 @@
+# Review Checkpoint Configuration
+# Controls automatic verifier dispatch at pipeline milestones.
+# See skills/pipeline.md §13 for full protocol documentation.
+
+review_checkpoints:
+  enabled: true                    # master switch — disables all checkpoints when false
+
+  # Per-checkpoint toggles
+  cp1_plan_review: true            # post-brainstorm plan quality (verifier:docs-review)
+  cp2_step_review: true            # per-step code review (verifier:code-review)
+  cp3_integration_review: true     # pre-GATES integration review (code-review + security)
+  cp4_curator_validation: true     # curator proposal validation (verifier:code-review)
+  cp5_critical_gate: true          # auditor critical findings block DONE
+  cp6_fast_mode_review: true       # post-/aid-do review (verifier:code-review)
+
+  # Fix loop settings
+  fix_loop:
+    max_iterations: 2              # max fix→re-verify cycles before escalation
+    auto_fix_severities:           # severities that trigger gate-fixer dispatch
+      - critical
+      - high
+
+  # Trivial skip — skip CP2/CP6 for small changes
+  skip_trivial: true
+  trivial_threshold:
+    max_files: 1                   # skip if changed files <= this
+    max_lines: 50                  # skip if total changed lines <= this

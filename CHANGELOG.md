@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.3.0] — 2026-03-12
+
+### Added
+- **Review Checkpoints (CP1-CP6)** — Automatic verifier dispatch at 6 pipeline milestones: post-brainstorm plan review, per-step code review, pre-GATES integration review, curator proposal validation, auditor critical-finding gate, and post-/aid-do quick review
+- **Fix Loop Protocol** — Verifier findings with Critical/High severity trigger gate-fixer dispatch + re-verification (max 2 iterations), replacing reactive gate-failure-only fixes
+- **Critical Finding Gate (CP5)** — Auditor critical findings now block DONE state, triggering ESCALATION instead of proceeding to queue
+- **Review Checkpoint Configuration** — New `review-checkpoints.yaml` policy file with per-checkpoint toggles, fix-loop settings, and trivial-skip threshold
+- **Escalation triggers E7, E8** — Verifier review failure after fix loop; auditor critical security finding
+- **Pipeline §13** — New Review Checkpoint Protocol section as authoritative reference
+
+### Changed
+- **Verifier agent** — Expanded from on-demand to automatic dispatch with fix-loop integration and checkpoint-specific context assembly
+- **Gate-fixer agent** — Now accepts verifier review findings as input (source: `verifier_review`), not just gate failures
+- **Auditor agent** — Critical findings produce `blocking_findings` flag that blocks DONE transition
+- **Pipeline §4-§8** — Updated with review checkpoint dispatch points at EXECUTE, GATES, DONE, and FAST MODE
+
+### Fixed
+- **Broken cross-references** — Fixed 5 stale v2 migration references: auditor.md, gate-fixer.md, curator.md, planner.md pointed to non-existent `epic-orchestration.md`/`retry-engine.md`; pipeline.md referenced non-existent `dispatch-config.yaml`
+
 ## [2.2.0] — 2026-03-11
 
 ### Added

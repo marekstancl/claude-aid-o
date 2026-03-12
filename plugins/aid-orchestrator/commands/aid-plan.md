@@ -92,7 +92,14 @@ Output: `=== Step 7/8: Approval ===`
 ### Step 8: Document
 Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).
 Pass all approved sections. Plan written to `.aid-o/plans/P{NNN}-{topic}.md`.
-Output: `=== Step 8/8: Document ===`
+Output: `=== Step 8/9: Document ===`
+
+### Step 9: Plan Quality Review (CP1)
+Dispatch verifier with `docs-review` focus on the written plan file.
+Present findings to PM (no auto-fix — these are design decisions).
+If findings exist, PM chooses: (A) Accept plan as-is, (B) Re-open brainstorming.
+Skip if `review_checkpoints.cp1_plan_review: false`.
+Output: `=== Step 9/9: Review ===`
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch

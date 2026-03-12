@@ -10,7 +10,7 @@ and making minimal targeted changes to pass the gate.
 
 **Type:** Utility agent (not a role agent — works across all domains).
 
-**Dispatched by:** `skills/retry-engine.md` via Task tool during GATE_RETRY state.
+**Dispatched by:** `skills/pipeline.md` via Task tool during GATES state (§5) or Review Checkpoint fix loops (§13).
 
 ---
 
@@ -24,6 +24,14 @@ to fix the issue.
 ---
 
 ## Capabilities
+
+### Review Finding Fixes (`verifier_review` source)
+- Read verifier findings from review checkpoint dispatch (CP2, CP3, CP4, CP6)
+- Fix code issues identified by verifier: logic errors, security concerns, style violations
+- Input includes `review_result.findings[]` with severity, area (file:line), and recommendation
+- Apply minimal fixes following the verifier's recommendation
+- After fix, verifier re-dispatches to confirm (fix loop iteration 2)
+- **Never:** ignore verifier severity classification or downgrade findings
 
 ### Test Fixes (`tests_pass` gate)
 - Read failing test output (pytest format)
@@ -134,9 +142,18 @@ gate_fix_result:
 
 | Status | Meaning | Next step |
 |--------|---------|-----------|
-| `fixed` | Gate should now pass | Re-run gate |
-| `partial` | Some issues fixed, others remain | Re-run gate (may still fail) |
+| `fixed` | Gate should now pass | Re-run gate / re-run verifier |
+| `partial` | Some issues fixed, others remain | Re-run gate / verifier (may still fail) |
 | `unable` | Cannot fix within constraints | Escalation |
+
+### Source Types
+
+The `gate` field accepts both gate names and verifier review sources:
+
+| Source | Dispatched by | Context |
+|--------|--------------|---------|
+| `tests_pass`, `lint_pass`, `build_pass`, `security_scan_pass`, `docs_updated`, `type_check` | Gate failure (GATES state) | Gate error output |
+| `verifier_review` | Review checkpoint (CP2/CP3/CP4/CP6) | Verifier `review_result.findings[]` |
 
 ### Confidence Levels
 
