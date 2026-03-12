@@ -52,7 +52,7 @@ What would you like to do?
 
 ## Mode: Brainstorm
 
-Interactive 8-step brainstorming flow — collaborate with PM to explore an idea.
+Interactive 9-step brainstorming flow — collaborate with PM to explore an idea.
 
 ### Step 1: Context
 1. If `.aid-o/` exists: read `config/project.yaml`, `work/active.md`, scan `plans/`

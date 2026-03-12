@@ -144,6 +144,7 @@ These files/dirs are created on first use of the feature that needs them:
 | `config/execution.yaml` | `/aid-run` | First EPIC run |
 | `config/queue.yaml` | `/aid-status queue add` | First queue entry |
 | `config/orchestration.yaml` | `/aid-run` | First EPIC run with custom config |
+| `config/policies/review-checkpoints.yaml` | `/aid-run` | First review checkpoint dispatch |
 
 ## Idempotency
 
