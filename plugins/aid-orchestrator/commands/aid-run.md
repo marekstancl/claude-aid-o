@@ -97,11 +97,22 @@ FSM initialized: READY
    Task: {id} — {title}
    Steps: {N} ({parallel_groups} parallel groups)
    Mode: {manual|auto}
-   ```
-4. In manual mode → ask PM: "Start execution? (Y/N)"
-5. In auto mode → proceed immediately
 
-**Transition:** → EXECUTE (on approval) | abort (on reject)
+   Quality Gates (will run after all steps):
+     • test_cmd: {actual command from execution.yaml}
+     • lint_cmd: {actual command}
+     • build_cmd: {actual command}
+     {list all gates with actual commands}
+
+   Options:
+     GO    — start execution (pause anytime with /aid-stop)
+     REVISE — modify plan (stay in READY)
+     ABORT  — cancel, no changes committed
+   ```
+4. In manual mode → wait for PM decision (GO/REVISE/ABORT)
+5. In auto mode → validate plan JSON schema, auto-GO
+
+**Transition:** → EXECUTE (GO) | stay READY (REVISE) | ERROR (ABORT)
 
 ### State: EXECUTE
 
@@ -157,17 +168,23 @@ FSM initialized: READY
 **Trigger:** Gate failure after max retries, agent error, scope violation, acceptance not met.
 
 **Actions:**
-1. Build escalation context (reason, attempts, options)
+1. Build escalation context (reason, attempts, per-type details)
 2. In manual mode → present to PM:
    ```
    ESCALATION: {reason}
    ====================================
-   {failure details}
+   EPIC: {epic_id} | Step: {current_step}/{total_steps}
+
+   {per-type context — see pipeline.md §6 per-type context blocks}
+
+   What was tried: {attempt history}
 
    Options:
-     (A) Fix — apply guidance and retry
-     (B) Skip — proceed with warning
-     (C) Abort — stop pipeline
+     (A) Fix — provide guidance, agent re-dispatches
+     (B) Skip — proceed to next state (warnings logged)
+     (C) Abort — halt EPIC, save progress (/aid-stop)
+
+   Recommendation: {auto-generated}
    ```
 3. In auto mode → apply auto-decision rules:
    - S-effort fix patterns → auto-fix
@@ -183,31 +200,45 @@ FSM initialized: READY
 
 **Actions:**
 1. Update `state.yaml`: `state: DONE`
-2. Merge step branches → task branch → main (or create PR)
-3. Archive run file
-4. Update `work/active.md`
-5. Generate `final_report.md`
-6. Dispatch Curator agent (post-processing: backlog proposals, lessons)
-7. **Review Checkpoint CP4** — dispatch verifier (`code-review`) on curator-changed files only
-   - If FAIL → revert curator changes, log reversion to timeline
+2. Archive run file → `runs/archive/`
+3. Update `work/active.md`
+4. Generate `final_report.md`
+5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
+6. Wait for both to complete
+7. **CP4** — verifier (`code-review`) on curator-proposed changes
+   - If FAIL → revert curator changes, log reversion
    - Skip if `review_checkpoints.cp4_curator_validation: false`
-8. Dispatch Auditor agent (8-category audit, scoring, trends)
-9. **Review Checkpoint CP5** — if auditor output has `blocking_findings: true`:
-   - Transition to ESCALATION (E8: "Auditor found critical finding")
-   - PM must address critical findings before DONE completes
-   - Skip if `review_checkpoints.cp5_critical_gate: false`
-10. Check queue → auto-start next task if queue not paused
-11. Log completion to `timeline.jsonl`
+8. **Curator auto-fix** — gate-fixer applies approved S + M effort proposals
+9. **Auditor auto-fix** — gate-fixer applies S + M effort `recommended_fixes` (where `auto_fixable: true`)
+10. **CP5** — check auditor `blocking_findings` flag → flag in PM summary
+11. **PM Summary** (see `pipeline.md` §7 for full template):
+    ```
+    DONE REVIEW — {epic_id}
+    Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
 
-**Output:**
-```
-Task Complete: {id} — {title}
-====================================
-Steps: {done}/{total}
-Gates: {pass}/{total}
-Duration: {time}
-Evidence: .aid-o/work/evidence/{id}/{run_id}/
-```
+    Auditor Score: {overall}/100 (trend: {delta})
+      Code: {n} | Security: {n} | Docs: {n} | Process: {n}
+
+    Curator: {applied} fixes applied (S/M), {deferred} deferred (L)
+    Auto-fixes: {count} from auditor recommendations
+
+    {if blocking_findings:}
+    ⛔ CRITICAL FINDINGS (block merge):
+      1. [{type}] {finding} — effort: {S|M|L}
+      Audit report: .aid-o/work/evidence/{id}/{run}/audit-report.md
+
+    Key outputs: {artifact list}
+    Evidence: .aid-o/work/evidence/{id}/{run_id}/
+
+    Options:
+      MERGE — release + merge to main + queue pickup
+      FIX   — provide guidance, re-run review cycle
+      ABORT — stop EPIC, no merge
+    ```
+12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
+13. Release automation (`aid-release.sh`)
+14. Branch merge: `git merge epic/{id} --no-ff` → delete run branch
+15. Queue pickup + metrics logging
 
 ### State: ERROR
 
@@ -230,9 +261,10 @@ Evidence: .aid-o/work/evidence/{id}/{run_id}/
 
 ## Important
 
-- **Review Checkpoints** — CP2-CP5 are dispatched automatically per `config/policies/review-checkpoints.yaml`; all are individually toggleable
+- **Review Checkpoints** — CP2-CP5 dispatched automatically per `config/policies/review-checkpoints.yaml`; individually toggleable
+- **Pre-merge review** — Curator + Auditor run in parallel BEFORE merge; PM approves via MERGE/FIX/ABORT
 - **Escalation E7** — verifier review failed after 2 fix-loop iterations
-- **Escalation E8** — auditor found critical security finding (blocks DONE)
+- **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state

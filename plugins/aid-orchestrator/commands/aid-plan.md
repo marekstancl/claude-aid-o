@@ -96,10 +96,23 @@ Output: `=== Step 8/9: Document ===`
 
 ### Step 9: Plan Quality Review (CP1)
 Dispatch verifier with `docs-review` focus on the written plan file.
-Present findings to PM (no auto-fix — these are design decisions).
-If findings exist, PM chooses: (A) Accept plan as-is, (B) Re-open brainstorming.
+Present findings to PM with full context (no auto-fix — design decisions).
 Skip if `review_checkpoints.cp1_plan_review: false`.
-Output: `=== Step 9/9: Review ===`
+Output:
+```
+=== Step 9/9: Review ===
+
+Plan: .aid-o/plans/{plan_id}-{title}.md
+
+Quality: {N} findings (Critical: {n}, High: {n}, Medium: {n})
+
+{findings list with severity, area, recommendation}
+
+Options:
+  (A) Accept as-is → proceed to EPIC generation
+  (B) Fix findings → apply recommendations, re-run review
+  (C) Re-open brainstorming → interim doc preserved, focus on flagged sections
+```
 
 **Rules (hard failures if violated):**
 1. ONE question at a time — never batch

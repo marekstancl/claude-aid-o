@@ -11,6 +11,17 @@ the appropriate script.
 
 ## §1 FSM States
 
+### Design Principle: 70/30 Deterministic-First
+
+70% of pipeline decisions are deterministic (bash scripts): state transitions,
+gate execution, scope validation, logging, archiving, pre-filter checks.
+30% require LLM reasoning: code generation, reviews, curation, auditing.
+
+**Rule:** Never dispatch an LLM agent when a bash check can answer the question.
+The pre-filter stage (§13) enforces this for review checkpoints.
+
+### FSM States
+
 Six states. Scripts handle transitions. LLM acts within a state.
 
 | State | Entry trigger | LLM role | Exit via |
@@ -20,7 +31,7 @@ Six states. Scripts handle transitions. LLM acts within a state.
 | **EXECUTE** | GO received or gate-fixer retry | Dispatch agent, verify output | `aid-fsm.sh transition EXECUTE GATES\|ESCALATION\|EXECUTE` |
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
 | **ESCALATION** | EXECUTE or GATES failure | Present options A/B/C to PM, act on response | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |
-| **DONE** | All gates pass | Archive run, merge branch, update queue | — |
+| **DONE** | All gates pass | Curator+Auditor parallel, PM summary, merge on approval | — |
 
 **Valid transitions** (enforced by `aid-fsm.sh transition`):
 
@@ -70,8 +81,16 @@ Wave execution:
   Wave 1: [backend] {objective}    ~{file_count} files  ← wave 0
   Wave 2: [qa]      {objective}    ~{file_count} files  ← wave 1
 
-Gates: {gates from execution.yaml}
-Reply: GO / REVISE / ABORT
+Quality Gates (will run after all steps):
+  • test_cmd: {actual command from execution.yaml}
+  • lint_cmd: {actual command}
+  • build_cmd: {actual command}
+  {list all gates from execution.yaml with actual commands}
+
+Options:
+  GO    — start execution (pause anytime with /aid-stop)
+  REVISE — modify plan (stay in READY)
+  ABORT  — cancel, no changes committed
 ```
 
 **PM response:**
@@ -169,14 +188,8 @@ When `plan.json` contains a parallel group (steps with same `wave`):
 **On gate failure (max_attempts exhausted):**
 `aid-fsm.sh transition GATES ESCALATION <state_file>`
 
-**Curator hook:** After all gates pass (before DONE), dispatch Curator agent
-(`agents/curator.md`) + Lessons-Extractor (`agents/lessons-extractor.md`) in parallel.
-Curator proposals auto-evaluated per `decision-policies.yaml`. Fix agents dispatched for
-approved S/M proposals. Results included in PM_APPROVAL summary.
-
-**Review Checkpoint CP4:** After curator fixes are applied, dispatch verifier (`code-review`)
-on curator-changed files only. If verifier FAIL → revert curator changes, log reversion.
-Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
+**Transition to DONE:** Curator, Auditor, CP4, and CP5 now execute in DONE state (§7).
+GATES only runs deterministic quality checks.
 
 ---
 
@@ -192,18 +205,30 @@ ESCALATION — {trigger_reason}
 EPIC: {epic_id} | Progress: {current_step}/{total_steps}
 State: {failed_state}
 
-What happened: {details — max 300 chars}
+{per-type context block — see below}
+
 What was tried: {attempt history}
 
 Options:
-  A) Fix — provide guidance, retry
-  B) Skip — mark as skipped, continue
-  C) Abort — stop EPIC, mark failed
+  A) Fix — provide guidance, agent re-dispatches
+  B) Skip — proceed to next state (warnings logged)
+  C) Abort — halt EPIC, save progress (/aid-stop)
 
 Recommendation: {auto-generated}
 ```
 
 In FIRST AID mode, add option D: "Continue manual".
+
+**Per-type context blocks** (include relevant block based on trigger):
+
+| Trigger | Context to show |
+|---------|----------------|
+| E1-E3 | Agent: {name}, Step: {N}, Error: {stderr/finding}, Files: {affected paths} |
+| E4 | Gate: {name}, Command: `{cmd}`, Exit: {code}, Retries: {N}/{max}, Output: {truncated} |
+| E5 | Agent: {name}, Step: {N}, Expected: `evidence/.../output.md`, Got: nothing |
+| E6 | Parallel group: wave {N}, Conflicting files: {list}, Branches: {list} |
+| E7 | Checkpoint: {CP2\|CP3}, Focus: {code-review\|security}, Findings: {list}, Fix attempts: {N}/2 |
+| E8 | Critical findings: {list from audit report}, Report: `.aid-o/work/evidence/{id}/{run}/audit-report.md` |
 
 **PM response execution:**
 - **A (Fix):** Apply guidance → `aid-fsm.sh transition ESCALATION EXECUTE|GATES <state_file>`
@@ -221,41 +246,81 @@ In FIRST AID mode, add option D: "Continue manual".
 | E5 | Agent produces no output |
 | E6 | Merge conflict in parallel group |
 | E7 | Verifier review failed after 2 fix-loop iterations |
-| E8 | Auditor found critical finding (blocks DONE) |
+| E8 | Auditor critical finding — PM chose ABORT in DONE summary |
 
 ---
 
 ## §7 DONE State
 
-**LLM role:** Orchestrate completion sequence in order.
+**LLM role:** Orchestrate pre-merge review and PM decision.
 
 1. **Run file:** Update `status: completed`, `completed: {timestamp}` in run.md frontmatter
-2. **Release:** Call `aid-release.sh` — detects version mismatch, bumps if needed
-   - Standalone/last EPIC: mandatory bump
-   - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
-3. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
-   → delete run branch
-4. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
-5. **Auditor:** Dispatch `agents/auditor.md` — 8 audit categories, score trend vs previous
-6. **Review Checkpoint CP5:** If auditor output has `blocking_findings: true` (any critical
-   severity finding), transition to ESCALATION (E8) instead of proceeding. PM must address
-   critical findings. Skip per `review-checkpoints.yaml` (`cp5_critical_gate`).
-7. **Metrics:** Store EPIC summary to Qdrant (`aid-orchestration-log`) or fallback JSONL
-8. **Queue:** Read `config/queue.yaml` → if next EPIC queued, `aid-queue-add.sh` auto-pickup
+2. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
+3. **Update:** `work/active.md` status
+4. **Final report:** Generate `evidence/{epic_id}/{run_id}/final_report.md`
+5. **Parallel dispatch:** Curator (`agents/curator.md`) + Auditor (`agents/auditor.md`)
+   dispatched simultaneously via two Agent tool calls in a single message
+6. **Wait:** Both agents must complete before continuing
+7. **CP4:** Verifier (`code-review`) on curator-proposed changes only.
+   If FAIL → revert curator changes, log reversion.
+   Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
+8. **Curator auto-fix:** Gate-fixer applies approved S + M effort proposals.
+   Tier 2 default: S=approve, M=approve, L=defer (PM decides in summary).
+9. **Auditor auto-fix:** Gate-fixer applies S + M effort items from auditor
+   `recommended_fixes` (where `auto_fixable: true`).
+10. **CP5:** Check auditor `blocking_findings` flag. If `true` → flag in summary
+    (critical findings block MERGE option). Skip per `review-checkpoints.yaml`.
+11. **PM Summary** (always shown, even in FIRST AID mode):
+
+```
+DONE REVIEW — {epic_id}
+Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
+
+Auditor Score: {overall}/100 (trend: {delta} vs previous)
+  Code: {score} | Security: {score} | Docs: {score} | Process: {score}
+
+Curator: {applied} fixes applied (S/M), {deferred} deferred (L)
+  Applied: {list of applied proposals with IDs}
+  Deferred: {list — PM can approve in backlog}
+
+Auto-fixes: {count} applied from auditor recommendations
+  {list of fixes with file paths}
+
+{if blocking_findings:}
+⛔ CRITICAL FINDINGS (block merge):
+  1. [{audit_type}] {finding} — effort: {S|M|L}
+     Recommendation: {recommendation}
+  Audit report: .aid-o/work/evidence/{epic_id}/{run_id}/audit-report.md
+
+Key outputs: {artifact list}
+
+Options:
+  MERGE — release + merge to main + queue pickup
+  FIX   — provide guidance, re-run review cycle
+  ABORT — stop EPIC, no merge (/aid-stop)
+```
+
+12. **PM decides:**
+    - **MERGE** → continue to step 13
+    - **FIX** → PM provides guidance → dispatch fixes → re-run steps 5-11
+    - **ABORT** → transition to ERROR (`status: aborted`, E8 logged)
+13. **Release:** Call `aid-release.sh` — version bump
+    - Standalone/last EPIC: mandatory bump
+    - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
+14. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+    → delete run branch
+15. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
+    Metrics stored to Qdrant (`aid-orchestration-log`) or fallback JSONL.
+
+**Auto-mode (FIRST AID):** If no `blocking_findings` and auditor score ≥ 80 → auto-MERGE.
+If `blocking_findings` or score < 80 → show summary, require PM decision.
 
 **Evidence written:**
 ```
 evidence/{epic_id}/{run_id}/
-  final_report.md        # Summary (steps, gates, duration, artifacts)
-  audit-report.md        # Auditor output
-  curator_resolve_report.json
-```
-
-**Completion summary** (present to PM unless FIRST AID mode):
-```
-EPIC Complete: {epic_id}
-Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
-Key outputs: {artifact list}
+  final_report.md              # Summary (steps, gates, duration, artifacts)
+  audit-report.md              # Auditor output
+  curator_resolve_report.json  # Curator proposals + actions
 ```
 
 ---
@@ -271,8 +336,10 @@ Designed for quick tasks that don't warrant a full EPIC.
 1. Log task to `.aid-o/logs/aid-do-log.jsonl` (action: `aid_do_start`)
 2. Dispatch single agent (default: sonnet) with task description
 3. Verify output (same as §4)
-4. **Review Checkpoint CP6:** Dispatch verifier (`code-review`) on all changes.
-   Fix loop: gate-fixer → verifier, max 2. Advisory only (no ESCALATION in Fast Mode).
+4. **Review Checkpoint CP6:** Pre-filter (§13) runs first on `git diff`.
+   If pre-filter clean + trivial → skip. If pre-filter finds pattern → immediate FAIL.
+   Otherwise dispatch verifier (`code-review`). Fix loop: gate-fixer → verifier, max 2.
+   Advisory only (no ESCALATION in Fast Mode).
    Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
 5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
 
@@ -302,6 +369,7 @@ IF file missing or unreadable → default to "manual" (fail-safe)
 | EXECUTE — review cycle exhausted | ESCALATION | Fresh-approach cycle, then ESCALATION |
 | ESCALATION | Options A/B/C | Options A/B/C/D (D = continue manual) |
 | PM_APPROVAL | Ask PM | Guardrail check → auto-approve if pass |
+| DONE — PM summary | Show MERGE/FIX/ABORT | Auto-MERGE if no blocking + score ≥ 80 |
 | DONE — version bump | Ask PM for intermediate | Auto-defer for intermediate, mandatory for last |
 | DONE — queue | Present "What's next?" | Auto-pickup next EPIC |
 
@@ -405,8 +473,8 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 | CP1 | `/aid-plan` Step 9 | `docs-review` | No (PM decides) | None |
 | CP2 | EXECUTE after step verify | `code-review` | Yes (max 2) | E7 |
 | CP3 | EXECUTE→GATES transition | `code-review` + `security` | Yes (max 2) | E7 |
-| CP4 | DONE after curator | `code-review` | Yes (revert on fail) | None |
-| CP5 | DONE after auditor | N/A (auditor flag) | N/A | E8 |
+| CP4 | DONE after curator (pre-merge) | `code-review` | Yes (revert on fail) | None |
+| CP5 | DONE after auditor (pre-merge) | N/A (auditor flag) | N/A | PM ABORT → E8 |
 | CP6 | `/aid-do` post-implementation | `code-review` | Yes (max 2) | Advisory only |
 
 ### Fix Loop Protocol
@@ -423,6 +491,20 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 5. Max 2 iterations total, then escalate
 ```
 
+### Pre-Filter Stage (CP2, CP3, CP6)
+
+Before dispatching verifier LLM, run deterministic bash checks on `git diff` output
+(new/changed lines only — `scan_target: diff_only`):
+
+1. Regex scan against `review-checkpoints.yaml → pre_filter.fail_patterns[]`
+2. Decision:
+   - **Pattern match found** → immediate FAIL (skip verifier LLM, enter fix loop directly)
+   - **Clean + trivial** (≤ threshold) → SKIP (no verifier needed)
+   - **Clean + non-trivial** → dispatch verifier (LLM review)
+
+Pre-filter applies to CP2, CP3, and CP6 only. CP1 (docs), CP4 (curator), CP5 (auditor flag)
+are not pre-filtered.
+
 ### Trivial Skip Rule
 
 When `skip_trivial: true` in config:
@@ -434,8 +516,8 @@ When `skip_trivial: true` in config:
 
 - `agents/verifier.md` — auto-dispatch triggers, context assembly, output format
 - `agents/gate-fixer.md` — accepts `verifier_review` source type
-- `agents/auditor.md` — `blocking_findings` flag for CP5
-- `config/policies/review-checkpoints.yaml` — per-checkpoint toggles, fix-loop config
+- `agents/auditor.md` — `blocking_findings` + `recommended_fixes` for CP5/auto-fix
+- `config/policies/review-checkpoints.yaml` — checkpoint toggles, fix-loop config, pre-filter patterns
 
 ---
 

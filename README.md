@@ -116,10 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.3.0** (current) — Review Checkpoints: 6 automatic verifier dispatch points, fix loop protocol, critical findings block DONE
+- **v2.4.0** (current) — Pre-merge review: parallel curator+auditor, PM merge gate, 70/30 deterministic pre-filter, enhanced PM UX
+- **v2.3.0** — Review Checkpoints: 6 automatic verifier dispatch points, fix loop protocol, critical findings block DONE
 - **v2.2.0** — Context Persistence: interim docs survive context window overflow; ID allocation procedure; dead reference fixes
-- **v2.1.0** — Brainstorming skill refactored: 34% smaller, 8 new capabilities
-- **v1.7.0** — Security hardening, AI Companion, voice dictation, FIRST AID improvements
 - **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
 - **v1.5.0** — Token efficiency, model tiering, usage tracking
 

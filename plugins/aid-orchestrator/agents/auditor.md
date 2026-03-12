@@ -6,8 +6,8 @@ model: sonnet
 # Auditor Agent
 
 **Role:** Post-Epic comprehensive project health assessment, scoring, and trend tracking.
-**Type:** Specialist agent (post-Epic, not per-step — triggered after Epic DONE + merge).
-**Dispatched by:** `skills/pipeline.md` from the DONE state (§7), after successful merge.
+**Type:** Specialist agent (post-Epic, not per-step — triggered in DONE state, pre-merge).
+**Dispatched by:** `skills/pipeline.md` from the DONE state (§7), in parallel with Curator, before merge.
 
 ---
 
@@ -408,8 +408,8 @@ These constraints are non-negotiable:
 
 ### Critical Finding Escalation
 - If ANY finding has severity `critical`, set `blocking_findings: true` in the output
-- Critical findings trigger ESCALATION (E8) — they block the DONE state transition
-- The orchestrator reads `blocking_findings` and transitions to ESCALATION instead of queue pickup
+- Critical findings block merge — they are surfaced in PM DONE summary with MERGE/FIX/ABORT options
+- The orchestrator reads `blocking_findings` and presents critical findings to PM before merge
 - This applies to ALL audit categories (security, code quality, etc.)
 
 ### Finding Quality
@@ -542,7 +542,17 @@ audit_report:
     findings_persistent: {N}
     trend_direction: "improving|stable|declining"|null
 
-  blocking_findings: true|false    # true if any critical severity findings exist → triggers E8 ESCALATION
+  blocking_findings: true|false    # true if any critical severity findings exist → blocks merge
+
+  recommended_fixes:               # S/M effort findings that gate-fixer can auto-apply (pre-merge)
+    - finding_ref: "security:login_endpoint"
+      effort: small
+      fix_description: "Add parameterized query to prevent SQL injection"
+      auto_fixable: true
+    - finding_ref: "code_quality:error_handling"
+      effort: medium
+      fix_description: "Add try/except blocks to 3 API endpoints"
+      auto_fixable: true
 
   summary: "Executive summary -- one paragraph overview of project health"
 

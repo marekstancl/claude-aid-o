@@ -31,12 +31,16 @@ The verifier is dispatched automatically at 6 pipeline milestones. Configuration
 | CP1 | Plan written (`/aid-plan` Step 9) | `docs-review` | Plan file content | No (PM decides) |
 | CP2 | Step completed (`/aid-run` EXECUTE) | `code-review` | Step output + `git diff` for step branch | Yes |
 | CP3 | All steps done (EXECUTE→GATES) | `code-review` + `security` (parallel) | Full `git diff` since run start | Yes |
-| CP4 | Curator proposals applied (DONE) | `code-review` | Curator-changed files only | Yes (revert on fail) |
-| CP5 | N/A — handled by auditor | — | — | — |
+| CP4 | Curator proposals applied (DONE, pre-merge) | `code-review` | Curator-proposed changes only | Yes (revert on fail) |
+| CP5 | N/A — handled by auditor `blocking_findings` flag | — | — | — |
 | CP6 | `/aid-do` post-implementation | `code-review` | `git diff` of all changes | Yes |
 
 **Skip rule:** If `skip_trivial: true` in config and step changed ≤ `trivial_threshold.max_files`
 files with ≤ `trivial_threshold.max_lines` total lines, skip CP2/CP6 for that step.
+
+**Pre-filter (CP2, CP3, CP6):** Before dispatching verifier, the orchestrator runs deterministic
+bash regex checks on `git diff` output (see `pipeline.md` §13 Pre-Filter Stage). If pre-filter
+finds a match → immediate FAIL without verifier dispatch. If clean + trivial → SKIP.
 
 ### Checkpoint-Specific Context Assembly
 
@@ -46,7 +50,7 @@ files with ≤ `trivial_threshold.max_lines` total lines, skip CP2/CP6 for that 
   `git diff epic/{id}/main..step_{N}_{role}` to see actual code changes.
 - **CP3:** Run `git diff {base_commit}..HEAD` for full integration diff. Dispatch TWO
   verifier instances in parallel: one `code-review`, one `security`.
-- **CP4:** Run `git diff HEAD~1..HEAD` (curator's commit) to review only curator changes.
+- **CP4:** Review curator-proposed changes (pre-merge, not yet committed to main).
 - **CP6:** Run `git diff` (unstaged + staged) for all `/aid-do` changes.
 
 ---

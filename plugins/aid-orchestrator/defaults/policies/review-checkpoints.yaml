@@ -25,3 +25,22 @@ review_checkpoints:
   trivial_threshold:
     max_files: 1                   # skip if changed files <= this
     max_lines: 50                  # skip if total changed lines <= this
+
+  # Pre-filter — deterministic bash regex checks before LLM dispatch (CP2/CP3/CP6)
+  # Runs on git diff output (new/changed lines only)
+  pre_filter:
+    enabled: true
+    scan_target: diff_only         # only scan new/changed lines from git diff
+    fail_patterns:
+      - name: hardcoded_secrets
+        pattern: '(?i)(password|secret|api.?key)\s*=\s*["''][^"'']+["'']'
+        severity: critical
+      - name: sql_injection
+        pattern: '(query|execute)\s*\(.*\+.*\)|(\$\{[^}]+\}.*(?:SELECT|INSERT|UPDATE|DELETE))'
+        severity: critical
+      - name: dangerous_eval
+        pattern: '\beval\s*\(|\bexec\s*\(|\bFunction\s*\('
+        severity: high
+      - name: debug_leftover
+        pattern: 'console\.log|debugger|binding\.pry|import pdb|print\('
+        severity: medium

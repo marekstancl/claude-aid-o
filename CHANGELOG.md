@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.4.0] — 2026-03-12
+
+### Added
+- **PM Merge Decision Gate** — DONE state presents combined curator+auditor summary, PM explicitly chooses MERGE/FIX/ABORT before code reaches main
+- **Parallel Curator+Auditor** — Both dispatch simultaneously in DONE state, reducing post-completion wait time
+- **Auditor Auto-Fix** — S and M effort recommendations trigger gate-fixer dispatch pre-merge via new `recommended_fixes` output field
+- **70/30 Design Principle** — Documented deterministic-first philosophy in pipeline §1: 70% bash, 30% LLM
+- **Review Pre-Filter** — Bash regex checks (secrets, SQL injection, eval, debug) run before CP2/CP3/CP6 verifier dispatch, skipping LLM when unnecessary
+- **Per-Escalation Templates (E1-E8)** — Each trigger shows specific context, findings, affected files, and available commands
+
+### Changed
+- **DONE State Flow** — Merge moved from step 3 to step 13 (after PM approval); prevents premature merge before review
+- **Curator Auto-Evaluation** — Tier 2 default: M-effort proposals now auto-approved (was: deferred to PM)
+- **PM Interaction Points** — Enhanced output at READY (gate details), CP1 (severity summary + 3 options), CP6 (evidence paths), scope warnings (actionable commands), and ESCALATION (per-type context blocks)
+- **Auditor Dispatch Timing** — Now dispatched pre-merge in parallel with Curator (was: post-merge sequential)
+
 ## [2.3.0] — 2026-03-12
 
 ### Added

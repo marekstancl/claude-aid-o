@@ -66,24 +66,34 @@ After implementation, verify actual scope:
 3. If actual changes > 5 files OR 3+ layers:
    - Warn PM:
      ```
-     ⚠ Scope exceeded Fast Mode threshold:
-       Files changed: {N} (threshold: 5)
-       Layers: {layer_list} (threshold: 3)
+     ⚠ Scope exceeded Fast Mode threshold
+       Files: {N} (limit: 5) | Layers: {layer_list} (limit: 3)
 
-     Task completed but consider creating a retroactive plan for documentation.
+     Task completed. Consider:
+       • /aid-plan "{task}" — create retroactive plan
+       • git diff HEAD~1 — review all changes
      ```
 
 ### Step 5: Review Check (CP6)
 
-Dispatch verifier with `code-review` focus on `git diff` output (all changes from Step 3).
+Pre-filter (§13) runs first on `git diff` output. If pre-filter clean + trivial → skip.
+If pre-filter match → immediate FAIL. Otherwise dispatch verifier (`code-review`).
 
 1. If verifier PASS or PASS_WITH_NOTES → continue to Step 6
 2. If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer → re-verify (max 2 iterations)
 3. If fix loop fails → warn PM (advisory, no ESCALATION in Fast Mode):
    ```
-   Review found issues that couldn't be auto-fixed:
-     - {finding 1}
-   Consider reviewing manually or escalating to /aid-plan.
+   ⚠ Code Review Issues (Advisory)
+
+   Checkpoint CP6 found:
+     - [{severity}] {finding}
+
+   Auto-fix attempted: failed after 2 iterations
+
+   Options:
+     • Review: git diff HEAD~1
+     • Evidence: .aid-o/work/quick/Q-{NNN}.md
+     • Escalate: /aid-plan "{task}" for full pipeline
    ```
 4. Skip if `review_checkpoints.cp6_fast_mode_review: false` or changes are trivial
 

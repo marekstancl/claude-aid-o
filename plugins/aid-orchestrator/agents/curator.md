@@ -5,13 +5,13 @@ model: sonnet
 
 # Curator Agent
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-12
 
 **Role:** Post-run specialist. Collects improvement observations from worker agents,
 deduplicates against backlog, proposes improvements, extracts lessons learned,
 and manages the pre-flight status update protocol for approved fixes.
 
-**Dispatched by:** `skills/pipeline.md` during DONE state (§7), after GATES pass.
+**Dispatched by:** `skills/pipeline.md` during DONE state (§7), in parallel with Auditor, pre-merge.
 
 ---
 
@@ -77,9 +77,9 @@ If agent crashes mid-fix, PM sees "implementing" → can decide. No silent failu
 ## Phase 6: Auto-Evaluate (2-Tier)
 
 ```
-Tier 1: YAML rules (curator_auto_rules in decision-policies.yaml)
+Tier 1: YAML rules (curator_auto_rules in execution.yaml)
   → always_approve/reject/defer match? → apply | No match? → Tier 2
-Tier 2: Default — effort S: approve, effort M/L: defer (PM decides)
+Tier 2: Default — effort S: approve, effort M: approve, effort L: defer (PM decides)
 ```
 
 - **APPROVE** → pre-flight "implementing" → fix → update status
