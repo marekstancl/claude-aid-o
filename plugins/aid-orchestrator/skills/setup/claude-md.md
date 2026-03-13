@@ -45,6 +45,19 @@ This project uses AID Orchestrator for task management.
 - Execution: `/aid-run`
 - Status: `/aid-status`
 - Help: `/aid-help`
+
+### Superpowers Conflict Resolution
+
+When `.aid-o/` exists, AID commands replace equivalent Superpowers skills:
+
+| Instead of | Use |
+|-----------|-----|
+| `superpowers:brainstorming` | `/aid-plan` |
+| `superpowers:writing-plans` | `/aid-plan` (auto-delegates to plan-writing skill) |
+| `superpowers:executing-plans` | `/aid-run` or `/aid-run --auto` |
+
+Compatible skills (use normally): `test-driven-development`, `verification-before-completion`,
+`requesting-code-review`, `systematic-debugging`, `dispatching-parallel-agents`.
 ```
 
 4. If CLAUDE.md already exists:

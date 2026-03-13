@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.4.0** (current) — Pre-merge review: parallel curator+auditor, PM merge gate, 70/30 deterministic pre-filter, enhanced PM UX
+- **v2.5.0** (current) — Plugin path discovery, brainstorming format template + handoff summary, Superpowers conflict resolution, documentation gate enforcement
+- **v2.4.0** — Pre-merge review: parallel curator+auditor, PM merge gate, 70/30 deterministic pre-filter, enhanced PM UX
 - **v2.3.0** — Review Checkpoints: 6 automatic verifier dispatch points, fix loop protocol, critical findings block DONE
-- **v2.2.0** — Context Persistence: interim docs survive context window overflow; ID allocation procedure; dead reference fixes
 - **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
 - **v1.5.0** — Token efficiency, model tiering, usage tracking
 

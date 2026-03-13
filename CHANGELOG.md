@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.5.0] — 2026-03-13
+
+### Added
+- **Plugin Path Discovery** — `/aid-init` discovers and caches plugin installation path in `config/plugin.yaml`; Script Execution Protocol in `agent-core.md` teaches all agents how to resolve `scripts/X.sh` references
+- **Brainstorming Question Format Template** — concrete format with Effort/Risk per option, recommendation with "Why not" reasoning, and webhook delivery example
+- **Brainstorming Handoff Summary** — plan-writing presents decision summary + 6 options including `/aid-run --auto` with `autonomous_mode` prerequisite warning
+- **Superpowers Conflict Resolution** — CLAUDE.md template includes conflict table (brainstorming, writing-plans, executing-plans → AID equivalents); 3 `skill_conflicts` entries in `orchestration.yaml`
+- **Documentation Gate Enforcement** — path-pattern correlation: `docs_updated` gate fails only when API-path files changed without doc updates; auditor escalates missing API docs to high severity
+
+### Changed
+- **PRE-FLIGHT Plugin Verification** — `/aid-run` and `/aid-do` verify `plugin_path` on startup with cache invalidation fallback
+- **Dispatch Context** — `agent-protocol.md` input format includes `plugin_path` for dispatched agents
+- **Brainstorming Rule 8** — now explicitly requires effort estimate (S/M/L) and risk (L/M/H) per option
+
+### Fixed
+- **`/aid-plan-epic` stale references** — replaced with `/aid-plan --epic` across brainstorming, plan-writing, pipeline, and planner skills (command merged in v2.0)
+- **`aid-plan.md` step count** — Steps 1-7 showed `/8` denominator instead of `/9` after CP1 review was added as Step 9
+
 ## [2.4.0] — 2026-03-12
 
 ### Added

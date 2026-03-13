@@ -63,31 +63,31 @@ Interactive 9-step brainstorming flow — collaborate with PM to explore an idea
    `.aid-o/work/interim-P{NNN}.md` with topic, project context, and PM's initial input.
    This doc persists full conversation detail across context window boundaries.
 
-Present: `=== Step 1/8: Context ===` with project summary.
+Present: `=== Step 1/9: Context ===` with project summary.
 
 ### Step 2: Analysis
 Present structured analysis (understanding, dimensions, challenges, clarification areas).
-Ask PM to confirm understanding. Output: `=== Step 2/8: Analysis ===`
+Ask PM to confirm understanding. Output: `=== Step 2/9: Analysis ===`
 
 ### Step 3: Questions
 Ask 3-7 clarifying questions ONE at a time (multiple choice preferred).
-Cover: scope, users, constraints, patterns, success criteria. Output: `=== Step 3/8: Questions ===`
+Cover: scope, users, constraints, patterns, success criteria. Output: `=== Step 3/9: Questions ===`
 
 ### Step 4: Approaches
 Propose 2-3 approaches with pros/cons/effort/risk. State recommendation.
-Ask PM to choose. Output: `=== Step 4/8: Approaches ===`
+Ask PM to choose. Output: `=== Step 4/9: Approaches ===`
 
 ### Step 5: Design
 Expand chosen approach: architecture, data model, API, implementation, testing, risks.
-Output: `=== Step 5/8: Design ===`
+Output: `=== Step 5/9: Design ===`
 
 ### Step 6: Sections
 Walk through design section by section, getting approval for each.
-Track: `[x] approved`, `[ ] pending`. Output: `=== Step 6/8: Sections ===`
+Track: `[x] approved`, `[ ] pending`. Output: `=== Step 6/9: Sections ===`
 
 ### Step 7: Approval
 Present complete design summary. Ask PM for final approval (Y/N/X).
-Output: `=== Step 7/8: Approval ===`
+Output: `=== Step 7/9: Approval ===`
 
 ### Step 8: Document
 Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).

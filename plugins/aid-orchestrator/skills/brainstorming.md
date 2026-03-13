@@ -8,7 +8,7 @@
 
 ## TL;DR
 
-Invoked by `/aid-brainstorm`. Governs questioning protocol, approach exploration, incremental design validation, and plan document generation. Produces one artifact: a validated plan document. EPIC creation is a separate step via `/aid-plan-epic`.
+Invoked by `/aid-brainstorm`. Governs questioning protocol, approach exploration, incremental design validation, and plan document generation. Produces one artifact: a validated plan document. EPIC creation is a separate step via `/aid-plan --epic`.
 
 **Input:** PM's idea or topic + interactive Q&A
 **Output:** Plan document (`.aid-o/plans/P-*.md`)
@@ -113,8 +113,10 @@ RULE 6: If PM says "you decide" or "whatever you think", make a decision
 RULE 7: Cover at least 3 of these categories: scope, users, constraints,
         patterns, scale, timeline, success criteria.
 RULE 8: Every question involving a directional choice MUST present 2-3 structured
-        options with labels (A/B/C), descriptions, and a recommendation with reasoning.
+        options with labels (A/B/C), effort estimate (S/M/L), risk (L/M/H),
+        and a recommendation with reasoning.
         For each recommended option, state why alternatives are less suitable.
+        Use the Question Format Template below.
 RULE 9: When the topic involves AI agents, workflows, or multi-service orchestration,
         ask about: platform/framework preferences, interaction model (chat vs. batch
         vs. event), and deployment strategy (Docker Compose recommended for 2+ services).
@@ -126,6 +128,46 @@ RULE 11: Before proposing approaches, present a brief MoSCoW prioritization of c
          requirements (Must / Should / Could / Won't). Ask PM to confirm or adjust.
          This takes ONE question slot. Prioritization feeds into approach effort estimates
          and plan scope section.
+```
+
+### Question Format Template
+
+Every directional question MUST follow this format:
+
+```
+=== Step {N}/{total}: {category} ===
+
+{Context sentence explaining why this matters.}
+
+(A) **{Option name}** — {1-line description}
+    Effort: {S/M/L} | Risk: {L/M/H}
+(B) **{Option name}** — {1-line description}
+    Effort: {S/M/L} | Risk: {L/M/H}
+(C) **{Option name}** — {1-line description}
+    Effort: {S/M/L} | Risk: {L/M/H}
+
+→ Recommended: **(B)** — {reason why B is best}
+  Why not A: {1-line reason}
+  Why not C: {1-line reason}
+```
+
+### Question Format Example
+
+```
+=== Step 3/7: Delivery Guarantees ===
+
+Webhook reliability is the #1 concern for enterprise consumers.
+
+(A) **Fire-and-forget** — Send once, no retry, consumer handles failures
+    Effort: S | Risk: H
+(B) **At-least-once with retry** — Exponential backoff, 3 retries, dead letter queue
+    Effort: M | Risk: L
+(C) **Exactly-once with idempotency** — Dedup keys, consumer ack, full delivery log
+    Effort: L | Risk: L
+
+→ Recommended: **(B)** — balances reliability with implementation effort
+  Why not A: Enterprise consumers expect retries; fire-and-forget causes silent data loss
+  Why not C: Exactly-once adds significant complexity; at-least-once with idempotent consumers achieves same practical result
 ```
 
 ### Approach Exploration Protocol
@@ -186,7 +228,7 @@ RULE 3: Pass all approved design details to plan-writing — do not summarize or
         If PM approved a modification, the modified version goes into the document.
 RULE 4: Generate plan IDs per `skills/run-management.md` → ID System section:
         Plan: P{NNN} (from counter.yaml, pre-allocated at Step 1).
-RULE 5: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan-epic
+RULE 5: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
         (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
 ```
 
@@ -264,7 +306,7 @@ When PM selects "Re-open brainstorming" in the plan-writing handoff:
 
 ### Transitioning to Execution
 
-Plan-writing skill presents next steps: (A) Create EPIC via `/aid-plan-epic {plan_path}`, (B) Review plan first, (C) Re-open brainstorming, (D) Stop. `/aid-plan-epic` runs `aid-auto-pipeline.sh` to create all artifacts deterministically.
+Plan-writing skill presents the handoff (see `skills/plan-writing.md` → Post-Write Handoff for authoritative format). The handoff includes a summary of decisions made during brainstorming and 6 options: generate EPIC, run manual, run autonomous, review, re-open brainstorming, or stop.
 
 ---
 
@@ -288,9 +330,9 @@ Use templates from `defaults/templates/design-sections.md` as guidance when pres
 
 ## Reference Files
 
-- `commands/aid-brainstorm.md` — command that invokes this skill (8-step flow)
+- `commands/aid-plan.md` — unified command that invokes this skill (9-step flow)
 - `skills/plan-writing.md` — Step 8 delegation (exhaustive plan doc, quality gates, handoff)
-- `commands/aid-plan-epic.md` — next step: EPIC creation from plan
+- `commands/aid-plan.md --epic` — next step: EPIC creation from plan
 - `scripts/aid-auto-pipeline.sh` — Plan.md → EPIC.md → plan.json → run.md → queue
 - `defaults/templates/plan.md` — base plan document template
 - `defaults/templates/design-sections.md` — design section templates for Step 5
@@ -300,4 +342,4 @@ Use templates from `defaults/templates/design-sections.md` as guidance when pres
 
 ---
 
-**Last Updated:** 2026-03-11
+**Last Updated:** 2026-03-13

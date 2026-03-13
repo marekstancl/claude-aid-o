@@ -131,6 +131,12 @@ Dispatch prompt contains (in order):
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
 
+### Documentation reminder
+
+For steps with `role: backend` or `role: frontend`:
+- If the step changes public API or user-visible behavior, the agent MUST update relevant docs (README, API docs, CHANGELOG) before marking the step complete.
+- The `docs_updated` gate in GATES state will fail if API-path files changed without corresponding docs updates.
+
 ### Output verification
 
 After agent completes:
@@ -345,7 +351,7 @@ Designed for quick tasks that don't warrant a full EPIC.
 
 **No state.yaml.** No branch. No gates. No Curator. Quick log only.
 
-If task complexity grows (3+ files, multi-step) → suggest `/aid-plan-epic` instead.
+If task complexity grows (3+ files, multi-step) → suggest `/aid-plan --epic` instead.
 
 ---
 

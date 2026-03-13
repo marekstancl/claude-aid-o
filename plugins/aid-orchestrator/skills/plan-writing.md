@@ -607,42 +607,58 @@ The plan document is consumed by `skills/dispatch-protocol.md` → Source Plan I
 
 After the plan is written to disk and confirmed to PM, present next steps. This handoff applies to BOTH Mode A (post-brainstorming) and Mode B (standalone).
 
-**Present to PM:**
+**Present to PM — Handoff Summary:**
 ```
-Plan complete: .aid-o/plans/{plan_id}-{topic}.md
+Plan {plan_id} complete. Here's what was decided:
 
-{step_count} implementation steps
-Roles: {unique roles across steps}
-Quality gates: passed (forbidden phrases: 0, completeness: 16/16)
+Topic: {topic}
+Approach: {chosen approach name} — {1-line summary}
+Scope: {N} design sections approved | Effort: {S/M/L} | Risk: {L/M/H}
+Key decisions:
+  - {most significant decision 1}
+  - {most significant decision 2}
+  - {most significant decision 3}
 
-What's next?
-(A) Create EPIC from this plan → /aid-plan-epic .aid-o/plans/{plan_id}-{topic}.md
-(B) Review and edit the plan first
-(C) Re-open brainstorming — add more items to plan
-(D) Stop here
+Plan: .aid-o/plans/{plan_id}-{topic}.md
+Steps: {step_count} | Roles: {unique roles}
+Quality gates: passed (forbidden phrases: 0, completeness: {N}/{total})
+
+Next Steps:
+(A) /aid-plan --epic {plan_path} — generate EPIC + execution artifacts
+(B) /aid-run {plan_path} — generate EPIC and start execution (manual mode)
+(C) /aid-run --auto {plan_path} — generate EPIC and start autonomous execution
+    ⚠ Requires autonomous_mode: true in .aid-o/config/permissions.yaml
+(D) Review plan — open .aid-o/plans/{plan_id}-{topic}.md
+(E) Re-open brainstorming — add/modify requirements (interim doc preserved)
+(F) Stop — plan saved, resume anytime with /aid-plan --resume {plan_id}
 ```
 
-**Option A — Create EPIC:**
-Suggest running `/aid-plan-epic .aid-o/plans/{plan_id}-{topic}.md`. This command
-runs the `aid-auto-pipeline.sh` script which creates all artifacts deterministically:
-EPIC files (one per phase), plan.json, run.md, and queue entries. The LLM's role is
-PM dialog and validation — the script handles all file creation.
+**Option A — Generate EPIC:**
+Runs `aid-auto-pipeline.sh` (via Script Execution Protocol) which creates all artifacts
+deterministically: EPIC files, plan.json, run.md, and queue entries.
 
-**Option B — Review plan:**
-PM reviews the plan file, makes edits if needed, then runs `/aid-plan-epic` when ready.
+**Option B — Manual Execution:**
+Generates EPIC (same as A) then immediately starts `/aid-run` in manual mode.
+PM approves each escalation.
 
-**Option C — Re-open brainstorming (Mode A only):**
-If invoked from brainstorming, return to brainstorming Step 3 with existing context. New requirements ADD to the plan (never overwrite approved sections). After re-validation, plan-writing is invoked again.
+**Option C — Autonomous Execution:**
+Generates EPIC then starts `/aid-run --auto`. S-effort fixes auto-approved,
+M-effort uses defaults, L-effort always escalates to PM.
+Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 
-If invoked standalone (Mode B), suggest `/aid-brainstorm` to explore alternatives.
+**Option D — Review plan:**
+PM reviews the plan file, makes edits if needed, then runs option A/B/C when ready.
 
-**Option D — Stop here:**
+**Option E — Re-open brainstorming (Mode A only):**
+If invoked from brainstorming, return to brainstorming Step 3 with existing context.
+New requirements ADD to the plan (never overwrite approved sections).
+If invoked standalone (Mode B), suggest `/aid-plan` to explore alternatives.
+
+**Option F — Stop here:**
 ```
-Plan written. When ready:
-  1. Run /aid-plan-epic {plan_path} to create EPIC and execution plan
-     (pipeline scripts generate all artifacts: EPIC files, plan.json, run.md, queue)
-  2. Run /aid-run-epic to start orchestration
-     (requires plan.json to already exist — created in step 1)
+Plan saved: .aid-o/plans/{plan_id}-{topic}.md
+Resume anytime: /aid-plan --resume {plan_id}
+Or generate EPIC later: /aid-plan --epic {plan_path}
 ```
 
 ---
@@ -653,7 +669,7 @@ Plan written. When ready:
 - `commands/aid-brainstorm.md` — brainstorming command that delegates Step 8 to this skill
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
 - `skills/dispatch-protocol.md` — agent dispatch (downstream — injects plan sections into agent prompts)
-- `commands/aid-plan-epic.md` — plan-to-EPIC conversion (downstream — reads plan and delegates to `aid-auto-pipeline.sh` for all artifact generation)
+- `commands/aid-plan --epic.md` — plan-to-EPIC conversion (downstream — reads plan and delegates to `aid-auto-pipeline.sh` for all artifact generation)
 - `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)

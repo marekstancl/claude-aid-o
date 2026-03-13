@@ -39,11 +39,16 @@ If not set, `--auto` prints a warning and falls back to manual mode.
 
 ## PRE-FLIGHT (before FSM starts)
 
-Before FSM transitions to READY, the bash pipeline runs:
+**Plugin path verification:**
+1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
+2. Verify: `test -f {plugin_path}/scripts/aid-fsm.sh`
+3. If stale or missing → re-discover: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh` → update `plugin.yaml`
+4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
-1. `scripts/aid-plan-to-epic.sh` — convert plan to task file (if running from plan)
-2. `scripts/aid-epic-to-json.sh` — parse DAG → plan.json
-3. `scripts/aid-json-to-run.sh` — plan.json → execution.yaml + state.yaml init
+**Bash pipeline** (using resolved `plugin_path`):
+1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to task file (if running from plan)
+2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse DAG → plan.json
+3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + state.yaml init
 
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
 PM must fix the underlying issue (missing steps, circular deps, invalid task format).

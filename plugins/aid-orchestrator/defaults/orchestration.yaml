@@ -97,7 +97,17 @@ release:
 # Known conflicts between plugins/skills. Used by /aid-setup.
 skill_conflicts:
   - id: "brainstorming-duplicate"
-    prefer: "aid-orchestrator:aid-brainstorm"
+    prefer: "aid-orchestrator:aid-plan"
     deny: "superpowers:brainstorming"
     reason: "Both provide brainstorming workflow. AID version is integrated with orchestration pipeline."
+    severity: high
+  - id: "writing-plans-duplicate"
+    prefer: "aid-orchestrator:aid-plan"
+    deny: "superpowers:writing-plans"
+    reason: "AID plan-writing skill is integrated with orchestration pipeline."
+    severity: high
+  - id: "executing-plans-duplicate"
+    prefer: "aid-orchestrator:aid-run"
+    deny: "superpowers:executing-plans"
+    reason: "AID /aid-run provides FSM, gates, and evidence tracking."
     severity: high

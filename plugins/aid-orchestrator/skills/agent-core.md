@@ -179,6 +179,25 @@ When you see a file reference without full path:
 
 ---
 
+## Script Execution Protocol
+
+All AID bash scripts (`aid-fsm.sh`, `aid-run-gates.sh`, `aid-auto-pipeline.sh`, etc.)
+live in the **plugin installation directory**, NOT in the target project.
+
+To execute any script referenced as `scripts/X.sh`:
+
+1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
+2. Execute: `bash {plugin_path}/scripts/X.sh [args]`
+3. If `plugin.yaml` missing or `plugin_path` stale (file not found):
+   - Fallback: `glob ~/.claude/plugins/**/aid-orchestrator/scripts/X.sh`
+   - Update `.aid-o/config/plugin.yaml` with resolved path
+4. CWD for script execution: always the **project root** (where `.aid-o/` lives)
+
+Scripts use `dirname ${BASH_SOURCE[0]}` internally for self-discovery,
+so the resolved path only needs to locate the entry script.
+
+---
+
 ## Documentation Update Protocol
 
 **Before EVERY commit:** Run documentation impact analysis.

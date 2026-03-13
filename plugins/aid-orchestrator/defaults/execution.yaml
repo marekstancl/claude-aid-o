@@ -23,8 +23,16 @@ gates:
   docs_updated:
     description: "Documentation updated for changed APIs/models"
     required: true
-    rule: "docs or CHANGELOG updated if code changes affect public API"
-    pass_criteria: "manual or automated check"
+    rule: "If files in API-relevant paths changed, docs must also change"
+    pass_criteria: |
+      api_paths=(routes/ api/ endpoints/ models/ schemas/ openapi/)
+      doc_paths=(README docs/ CHANGELOG *.md)
+      api_changed=$(git diff --name-only {base}..HEAD | grep -cE "$(IFS='|'; echo "${api_paths[*]}")" || true)
+      doc_changed=$(git diff --name-only {base}..HEAD | grep -cE "$(IFS='|'; echo "${doc_paths[*]}")" || true)
+      if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
+        echo "WARN: API files changed ($api_changed) but no docs updated"
+        exit 1
+      fi
 
   scope_check:
     description: "Verify changes are within EPIC scope"

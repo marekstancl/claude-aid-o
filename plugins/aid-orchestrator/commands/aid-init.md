@@ -135,6 +135,22 @@ _Source: user | agent | curator | audit_
 |----|----------|--------|---------|
 ```
 
+## Plugin Discovery
+
+After workspace creation, discover and cache the plugin installation path:
+
+1. Glob: `~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh`
+2. Extract plugin root: parent of `scripts/` directory
+3. Write to `.aid-o/config/plugin.yaml`:
+   ```yaml
+   plugin_path: "{resolved absolute path}"
+   discovered_at: "{ISO 8601}"
+   ```
+4. If glob returns multiple matches → use first, warn PM
+5. If glob returns nothing → warn: "Plugin scripts not found. `/aid-run` may not work."
+
+This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is always overwritten (not idempotent — path may change after plugin update).
+
 ## Lazy-Created (NOT at init time)
 
 These files/dirs are created on first use of the feature that needs them:

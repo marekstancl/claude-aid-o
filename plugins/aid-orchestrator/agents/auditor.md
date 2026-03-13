@@ -52,6 +52,7 @@ You run exactly 8 audit types. Five are mandatory (always run). Three are condit
 - API documentation vs actual endpoints (drift detection)
 - README accuracy and completeness (install, usage, config, contributing)
 - Missing docs for new public APIs or user-visible features
+  - **If `git diff` shows new/changed files in `routes/`, `api/`, `endpoints/`, `models/` and no corresponding doc updates → severity: high**
 - Broken links in documentation files
 - CHANGELOG completeness (entries for all user-visible changes in the Epic)
 - Inline documentation coverage (JSDoc/docstring presence on public APIs)

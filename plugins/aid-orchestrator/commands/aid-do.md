@@ -23,10 +23,11 @@ For tasks estimated under 2 hours of work. Creates a quick log entry (`Q-NNN.md`
 
 ## Flow
 
-### Step 1: Auto-Init
+### Step 1: Auto-Init + Plugin Verification
 
 1. If `.aid-o/` does not exist → run `/aid-init` automatically (silent, no PM interaction)
 2. If `.aid-o/work/quick/` does not exist → `mkdir -p .aid-o/work/quick/`
+3. Verify `plugin_path` from `.aid-o/config/plugin.yaml` — if missing or stale, re-discover via glob (see `skills/agent-core.md` Script Execution Protocol)
 
 ### Step 2: Scope Estimate
 

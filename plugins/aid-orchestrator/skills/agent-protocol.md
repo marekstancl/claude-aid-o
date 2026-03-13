@@ -25,6 +25,7 @@ allowed_paths:
 git_branch: epic/E-003-1_2
 base_commit: abc123f
 context_scope: previous_step | full_epic | none
+plugin_path: "/home/user/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator"
 ```
 
 **Reading order before starting:**
