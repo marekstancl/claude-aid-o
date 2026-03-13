@@ -17,5 +17,5 @@ jobs:
           }
           check_version "packages/aid-gui/package.json" '(?<="version": ")[^"]+'
           check_version "packages/aid-server/package.json" '(?<="version": ")[^"]+'
-          check_version "plugins/aid-orchestrator/.claude-plugin/plugin.json" '(?<="version": ")[^"]+'
-          # Add remaining version locations as they are identified
+          # Plugin has independent versioning (managed via CLAUDE.md Version File Registry)
+          # check_version "plugins/aid-orchestrator/.claude-plugin/plugin.json" '(?<="version": ")[^"]+'
