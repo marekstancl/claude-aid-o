@@ -5,7 +5,7 @@ model: sonnet
 
 # Curator Agent
 
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-03-14
 
 **Role:** Post-run specialist. Collects improvement observations from worker agents,
 deduplicates against backlog, proposes improvements, extracts lessons learned,
@@ -33,6 +33,12 @@ Read all step outputs:
 Extract `improvement_notes` sections. Merge into flat list with `source_agent`
 and `source_step` fields. Skip empty arrays.
 
+**Standards compliance input:** If an auditor report exists at
+`evidence/{epic_id}/{run_id}/audit-report.yaml` and contains a `standards_compliance`
+section, extract all findings and add them to the flat list with
+`source_agent: auditor` and `source_type: standards`. Each finding retains its
+`standard_rule` ID (e.g., `GEN-003`, `VUL-012`) for traceability.
+
 ---
 
 ## Phase 2: Deduplicate Against Backlog
@@ -50,6 +56,7 @@ Load `.aid-o/work/backlog.md` (existing entries + current IMP-{NNN} counter).
 ## Phase 3: Pattern Analysis & Priority
 
 - **Hotspot:** 3+ notes on same `area` → flag with all types and agents
+- **Standards hotspot:** Same standard rule violated 3+ times across different files → flag as systemic issue (auto-escalate to `high` priority, add tag `systemic_standard_violation`)
 - **Cross-agent consensus:** Multiple distinct roles report same issue → higher weight
 - **Persistent:** Same note across 2+ runs unresolved → flag as persistent
 
@@ -61,8 +68,18 @@ Escalation (priority only goes up):
 ## Phase 4: Generate Proposals
 
 Generate proposal for notes with: priority `high`, 3+ sources, `security` medium+,
-or persistent 2+ runs. Each includes: title, rationale (with evidence), proposed action,
-effort (S/M/L), category (bug/feature/refactoring/performance), cost/benefit.
+persistent 2+ runs, or `source_type: standards`. Each includes: title, rationale
+(with evidence), proposed action, effort (S/M/L), category
+(bug/feature/refactoring/performance), cost/benefit.
+
+**Standards-sourced proposals** additionally include:
+- `source_type: standards` — marks the proposal as originating from a standards violation
+- `standard_rule: "{GEN-XXX|VUL-XXX}"` — the specific rule ID that was violated
+
+Standards proposals follow the auto-rules in `execution.yaml → curator_auto_rules`:
+- `{source_type: standards, effort: S}` → `always_approve` (auto-fix immediately)
+- `{source_type: standards, effort: L}` → `always_defer` (PM decides)
+- `{source_type: standards, effort: M}` → `default_action: approve`
 
 ---
 
@@ -120,6 +137,8 @@ curator_report:
       rationale: "{evidence-based}"
       proposed_action: "{action}"
       sources: [{ agent: "{role}", step: "{step_id}" }]
+      source_type: null|standards          # null for non-standards proposals
+      standard_rule: null|"{GEN-XXX}"      # rule ID when source_type is standards
   lessons: { commands_new: N, lessons_new: N, duplicates_skipped: N }
   backlog_updates:
     added: [{ id, category, area }]

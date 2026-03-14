@@ -1,0 +1,332 @@
+# ============================================================================
+# Vulcan Ecosystem Standards
+# ============================================================================
+# Extends the general standard set with rules specific to the Vulcan
+# multi-tenant AI platform. Covers type safety, tenant isolation, agent
+# framework conventions, security (Rule of Two), and naming/config rules.
+# ============================================================================
+
+standard:
+  id: vulcan
+  name: "Vulcan Ecosystem Standards"
+  extends: general
+  version: "1.0.0"
+  description: "Standards for Vulcan multi-tenant AI platform projects"
+
+# ---------------------------------------------------------------------------
+# Overrides — escalate general rules for multi-tenant context
+# ---------------------------------------------------------------------------
+overrides:
+  - rule_id: GEN-005
+    severity: critical
+    reason: "DRY is essential in multi-tenant — duplicated logic leads to tenant-specific drift and security gaps"
+
+  - rule_id: GEN-010
+    severity: critical
+    reason: "Multi-tenant platform — security violations have cross-tenant blast radius"
+
+  - rule_id: GEN-011
+    severity: critical
+    reason: "Multi-tenant platform — authentication/authorization failures affect all tenants"
+
+  - rule_id: GEN-012
+    severity: critical
+    reason: "Multi-tenant platform — data exposure risks are amplified across tenant boundaries"
+
+# ---------------------------------------------------------------------------
+# Rules — Vulcan-specific
+# ---------------------------------------------------------------------------
+rules:
+  # =========================================================================
+  # Type Safety (D-006)
+  # =========================================================================
+  - id: VUL-001
+    category: type-safety
+    severity: error
+    title: "I/O models must be Pydantic BaseModel"
+    description: "All API input/output models must inherit from Pydantic BaseModel. Bare dict types are not allowed for API boundaries — they bypass validation and schema generation."
+    check_type: pattern
+    check_details: "Detect function signatures in router/endpoint files that use dict as parameter or return type instead of a BaseModel subclass"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-002
+    category: type-safety
+    severity: error
+    title: "No bare Any in public model fields"
+    description: "Public Pydantic model fields must not use bare Any type annotations. Use Union types, concrete types, or constrained generics instead."
+    check_type: pattern
+    check_details: "Find BaseModel subclasses with fields annotated as Any (without Optional or Union wrapper providing at least one concrete type)"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Deterministic Modules (D-007)
+  # =========================================================================
+  - id: VUL-003
+    category: architecture
+    severity: critical
+    title: "Core framework must not import LLM libraries"
+    description: "Core framework modules (router, security_gate, retry, trace_handler, errors) must remain deterministic and must NOT import LLM libraries (langchain, openai, anthropic, litellm)."
+    check_type: pattern
+    check_details: "Scan core framework modules for imports of langchain, openai, anthropic, or litellm packages"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-004
+    category: architecture
+    severity: critical
+    title: "Routing and error handling must be pure Python"
+    description: "Routing decisions and error handling logic must be implemented in pure deterministic Python — no LLM calls, no probabilistic branching."
+    check_type: structural
+    check_details: "Verify router and error handler modules contain no async LLM client calls or prompt-based decision logic"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Tenant Isolation
+  # =========================================================================
+  - id: VUL-005
+    category: tenant-isolation
+    severity: critical
+    title: "Database queries must use schema-per-tenant"
+    description: "All database queries must use the schema-per-tenant pattern via SQLAlchemy schema_translate_map. Direct schema references or cross-tenant queries are forbidden."
+    check_type: pattern
+    check_details: "Detect raw SQL with hardcoded schema names or SQLAlchemy queries missing schema_translate_map execution option"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-006
+    category: tenant-isolation
+    severity: critical
+    title: "Qdrant must use collection-per-tenant isolation"
+    description: "All Qdrant vector store operations must scope to tenant-specific collections. Shared or global collections are not permitted for tenant data."
+    check_type: pattern
+    check_details: "Verify Qdrant client calls use tenant-prefixed collection names and never access a shared collection for tenant-scoped data"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-007
+    category: tenant-isolation
+    severity: critical
+    title: "JWT tokens must embed tenant_id"
+    description: "All JWT tokens issued by the platform must include a tenant_id claim. Token validation must verify tenant_id presence and match against the request context."
+    check_type: pattern
+    check_details: "Check JWT creation/validation code for tenant_id claim handling"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Agent Framework
+  # =========================================================================
+  - id: VUL-008
+    category: agent-framework
+    severity: error
+    title: "Agents must inherit from BaseAgent"
+    description: "All agent implementations must inherit from the BaseAgent abstract class. Ad-hoc agent classes without the base class bypass lifecycle hooks, tracing, and security controls."
+    check_type: structural
+    check_details: "Find classes in agent directories that do not inherit from BaseAgent (directly or transitively)"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-009
+    category: agent-framework
+    severity: error
+    title: "Tool functions must return ToolResult"
+    description: "All tool functions exposed to agents must return a ToolResult Pydantic model. Raw dict, string, or untyped returns are not allowed."
+    check_type: pattern
+    check_details: "Detect tool-decorated functions whose return type is not ToolResult or a subclass of ToolResult"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Security — Rule of Two (D-010)
+  # =========================================================================
+  - id: VUL-010
+    category: security
+    severity: critical
+    title: "SessionSecurityProfile must classify tools"
+    description: "Every tool registration must include a SessionSecurityProfile classification as red (write/destructive), blue (read-only/safe), or neutral. Unclassified tools must not be loadable."
+    check_type: structural
+    check_details: "Verify all registered tools have a security_profile attribute set to red, blue, or neutral"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-011
+    category: security
+    severity: critical
+    title: "HITL required for red+blue tool sessions"
+    description: "When a session contains both red (destructive) and blue (read-only) tools, human-in-the-loop approval must be enforced before execution. This prevents prompt injection from escalating read access to write access."
+    check_type: custom
+    check_details: "Verify session security gate checks for mixed red/blue tool sets and enforces HITL approval flow"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: false  # custom = auditor-only (not deterministic)
+
+  # =========================================================================
+  # Architecture
+  # =========================================================================
+  - id: VUL-012
+    category: architecture
+    severity: error
+    title: "Channel adapters must normalize to UnifiedMessage"
+    description: "Channel adapters (Telegram, Slack, Web, etc.) must convert inbound messages to UnifiedMessage before passing to the orchestrator. Direct orchestrator access from adapters is forbidden."
+    check_type: structural
+    check_details: "Verify adapter modules output UnifiedMessage and do not directly call orchestrator internals"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-013
+    category: architecture
+    severity: warning
+    title: "MCP server integration via dependency injection"
+    description: "MCP server connections must be injected via the dependency injection container. Direct imports of MCP client modules in business logic are discouraged."
+    check_type: pattern
+    check_details: "Detect direct imports of MCP client modules outside the DI/provider layer"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: false
+
+  # =========================================================================
+  # Error Handling (D-013)
+  # =========================================================================
+  - id: VUL-014
+    category: error-handling
+    severity: error
+    title: "Custom exceptions must inherit VulcanError"
+    description: "All custom exceptions in the Vulcan codebase must inherit from the VulcanError hierarchy. Bare Exception subclasses bypass centralized error handling and tracing."
+    check_type: pattern
+    check_details: "Find classes inheriting from Exception or BaseException that do not have VulcanError in their MRO"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-015
+    category: error-handling
+    severity: error
+    title: "Retriable errors must use VulcanRetriableError"
+    description: "Errors that should trigger automatic retry must inherit from VulcanRetriableError and specify max_retries. Ad-hoc retry loops are not allowed."
+    check_type: pattern
+    check_details: "Detect retry loops (while/for with try/except) that do not use VulcanRetriableError and the standard retry decorator"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Naming Conventions
+  # =========================================================================
+  - id: VUL-016
+    category: naming
+    severity: error
+    title: "Tenant IDs must match ^[a-z0-9_]+$ (max 50 chars)"
+    description: "Tenant identifiers must be lowercase alphanumeric with underscores only, maximum 50 characters. This ensures compatibility with database schema names and collection prefixes."
+    check_type: pattern
+    check_details: "Validate tenant_id values and validation logic against the pattern ^[a-z0-9_]{1,50}$"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-017
+    category: naming
+    severity: warning
+    title: "Agent names must match directory name"
+    description: "Agent class names (lowercased) must match their containing directory name. This ensures consistent discovery, logging, and configuration mapping."
+    check_type: structural
+    check_details: "Compare agent class name (snake_case) against its parent directory name"
+    scan_target: structure
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: false
+
+  - id: VUL-018
+    category: naming
+    severity: warning
+    title: "Decision references must use D-NNN format"
+    description: "References to architecture decisions in code comments and docstrings must use the D-NNN format (e.g., D-006, D-010) for traceability."
+    check_type: pattern
+    check_details: "Find decision references that do not match the D-\\d{3} pattern"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: true
+    gate_blocking: false
+
+  # =========================================================================
+  # Configuration
+  # =========================================================================
+  - id: VUL-019
+    category: configuration
+    severity: error
+    title: "Environment variables must use VULCAN_ prefix"
+    description: "All application-specific environment variables must use the VULCAN_ prefix to avoid collisions with system or third-party variables."
+    check_type: pattern
+    check_details: "Detect os.environ or os.getenv calls reading non-standard env vars without VULCAN_ prefix (excluding well-known system vars like PATH, HOME, DATABASE_URL)"
+    scan_target: content
+    languages: ["python"]
+    auto_fixable: true
+    gate_blocking: true
+
+  - id: VUL-020
+    category: configuration
+    severity: error
+    title: "Tenant config must have required YAML sections"
+    description: "Tenant configuration files must be YAML and must contain the required top-level sections: tenant.id, tenant.orchestrator, and tenant.agents."
+    check_type: structural
+    check_details: "Parse tenant YAML configs and verify presence of tenant.id, tenant.orchestrator, and tenant.agents keys"
+    scan_target: content
+    languages: ["yaml"]
+    auto_fixable: false
+    gate_blocking: true
+
+  # =========================================================================
+  # Testing
+  # =========================================================================
+  - id: VUL-021
+    category: testing
+    severity: error
+    title: "Architecture decisions must have architecture tests"
+    description: "Every architecture decision (D-NNN) must have at least one corresponding test marked with @pytest.mark.architecture. This ensures decisions remain enforced as code evolves."
+    check_type: structural
+    check_details: "Cross-reference D-NNN decisions against test files containing @pytest.mark.architecture and matching D-NNN references"
+    scan_target: structure
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true
+
+  - id: VUL-022
+    category: testing
+    severity: error
+    title: "Pydantic I/O compliance verified by tests"
+    description: "Automated tests must verify that all API endpoints use Pydantic models for request/response bodies. This enforces VUL-001 at the test level."
+    check_type: structural
+    check_details: "Verify existence of tests that introspect FastAPI route signatures for Pydantic model usage"
+    scan_target: structure
+    languages: ["python"]
+    auto_fixable: false
+    gate_blocking: true

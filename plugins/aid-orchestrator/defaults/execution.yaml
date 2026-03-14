@@ -48,6 +48,14 @@ gates:
     timeout_seconds: 120
     when: "linting tools configured"
 
+  standards_compliance:
+    description: "Project standards compliance check (deterministic rules only)"
+    required: true
+    type: deterministic
+    when: "standards.active != 'none' in project.yaml"
+    rule: "Load active standard set, run pattern/structural/file-exists rules against git diff"
+    pass_criteria: "No gate_blocking violations found in changed files"
+
   type_check:
     description: "TypeScript type checking passes"
     required: false
@@ -206,8 +214,10 @@ curator_auto_rules:
     - { type: dx }
     - { type: security, priority: high }
     - { area: "docs/*" }
+    - { source_type: standards, effort: S }
   always_defer:
     - { type: architecture }
+    - { source_type: standards, effort: L }
   default_action: approve
   learning:
     enabled: true

@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.6.0] — 2026-03-14
+
+### Added
+- **Standards Enforcement System** — two standard sets (`general.yaml` with 26 language-agnostic rules, `vulcan.yaml` with 22 ecosystem-specific rules + 4 severity overrides) selectable during `/aid-init`
+- **Standards Gate** — new `standards_compliance` gate in `execution.yaml`, 100% deterministic (pattern/structural/file-exists rules only), custom/LLM rules are auditor-only advisory
+- **Standards Audit Category** — new conditional category I) in auditor with full-codebase scan, severity-based scoring (cap 5 violations/rule), 15% weight when active
+- **Standards Curator Integration** — hotspot detection (3+ violations of same rule = systemic), `source_type: standards` proposals with auto-approve for S-effort fixes
+- **Standards Dispatch Context** — agents receive filtered standards in prompt (gate-blocking first, filtered by language), omitted when `standards.active == 'none'`
+
+### Changed
+- **Auditor Category Count** — 8→9 categories (5 mandatory + 4 conditional), weight redistribution when standards active (Code 30→25%, Security 30→27%, Docs 25→23%)
+- **Agent Execution Summary** — includes `Standards violations noted: {count}` for trend tracking
+- **Init Flow** — standards profile selection (general/vulcan/none) with `project.yaml → standards` config block
+
 ## [2.5.0] — 2026-03-13
 
 ### Added

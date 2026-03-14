@@ -127,9 +127,37 @@ Dispatch prompt contains (in order):
 4. `## Source Plan` — matching section from `plan_ref` file (if `epic.plan_ref` is set)
 5. Previous step outputs — from `evidence/.../steps/` (controlled by `step.context_scope`)
 6. `PERMISSIONS CONTEXT` — from `.aid-o/config/policies/permissions.yaml`
+7. `STANDARDS CONTEXT` — loaded when `project.yaml → standards.active != 'none'`
 
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
+
+### Standards context (item 7)
+
+When `standards.active != 'none'` in `.aid-o/config/project.yaml`:
+
+1. Load the active standard set (`general.yaml`, or `general.yaml` + `vulcan.yaml` merged)
+2. Apply project-level overrides (`disabled_rules`, `severity_overrides`)
+3. **Filter by relevance:**
+   - Only include rules matching the project's `languages[]` from `project.yaml`
+   - Omit rules with `gate_blocking: false` from the prominent section (include as advisory)
+4. **Gate-blocking rules first:** Rules with `gate_blocking: true` are placed at the
+   top of the context block with a `⚠ GATE-BLOCKING` prefix
+5. Format as a `## Standards` section in the dispatch prompt:
+
+```
+## Standards ({profile} profile, {N} applicable rules)
+
+⚠ GATE-BLOCKING:
+- {RULE-ID}: {description} [severity: {severity}]
+- ...
+
+Advisory:
+- {RULE-ID}: {description} [severity: {severity}]
+- ...
+```
+
+When `standards.active == 'none'`: omit the Standards section entirely.
 
 ### Documentation reminder
 
@@ -527,7 +555,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-03-14
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

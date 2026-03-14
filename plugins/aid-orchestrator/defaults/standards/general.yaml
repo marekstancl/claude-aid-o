@@ -1,0 +1,573 @@
+# =============================================================================
+# General Development Standards — Universal, Language-Agnostic Baseline
+# =============================================================================
+# Enforced during code execution via AID quality gates.
+# These are CODE standards, not agent behavior rules.
+# =============================================================================
+
+standard:
+  id: general
+  name: "General Development Standards"
+  version: "1.0.0"
+  description: "Universal coding and project standards — language-agnostic baseline"
+
+categories:
+  - id: code-quality
+    name: "Code Quality"
+  - id: security
+    name: "Security"
+  - id: testing
+    name: "Testing"
+  - id: documentation
+    name: "Documentation"
+  - id: git
+    name: "Git Practices"
+  - id: api
+    name: "API Design"
+  - id: config
+    name: "Configuration"
+
+rules:
+  # ===========================================================================
+  # Code Quality
+  # ===========================================================================
+
+  - id: GEN-001
+    category: code-quality
+    severity: high
+    title: "No dead code"
+    description: >
+      Remove commented-out code blocks and unused imports. Dead code adds
+      noise, misleads readers, and increases maintenance burden. Use version
+      control to recover old code instead of commenting it out.
+    check_type: pattern
+    check_details: |
+      Commented-out code blocks (≥3 consecutive commented lines that look like
+      code rather than documentation). Unused import statements detected by
+      language-specific linters (e.g., pylint, eslint, rustc warnings).
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: true
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-002
+    category: code-quality
+    severity: high
+    title: "No empty catch/except blocks"
+    description: >
+      Every error handler must either log, re-raise, or explicitly document why
+      the exception is swallowed. Empty catch blocks silently hide bugs and make
+      debugging extremely difficult.
+    check_type: pattern
+    check_details: |
+      catch\s*\(.*\)\s*\{\s*\}          # JS/TS/Java/C#
+      except\s*.*:\s*pass\s*$           # Python
+      rescue\s*.*\n\s*end               # Ruby (empty rescue)
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: false
+
+  - id: GEN-003
+    category: code-quality
+    severity: medium
+    title: "Function length limit (~50 lines)"
+    description: >
+      Functions exceeding ~50 lines of logic (excluding blank lines, comments,
+      and docstrings) should be decomposed into smaller, well-named functions.
+      Long functions are harder to test, read, and maintain.
+    check_type: structural
+    check_details: >
+      Count executable lines per function/method. Flag any function with >50
+      lines of logic. Generated code (e.g., serializers, migrations) is exempt.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: false
+
+  - id: GEN-004
+    category: code-quality
+    severity: medium
+    title: "Max 4 function parameters"
+    description: >
+      Functions with more than 4 parameters indicate missing abstractions.
+      Group related parameters into a struct, dataclass, options object, or
+      similar construct to improve readability and reduce call-site errors.
+    check_type: structural
+    check_details: >
+      Parse function/method signatures and count parameters. Flag any with >4.
+      Exempt: constructors/initializers, framework-mandated signatures (e.g.,
+      Django views, CLI argument handlers), and variadic/kwargs parameters.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: false
+
+  - id: GEN-005
+    category: code-quality
+    severity: medium
+    title: "No code duplication (>5 identical lines)"
+    description: >
+      Blocks of 5+ identical or near-identical lines appearing in multiple
+      locations must be extracted into a shared function, utility, or base
+      class. Duplication leads to inconsistent fixes and increased maintenance.
+    check_type: structural
+    check_details: >
+      Detect duplicated blocks of ≥5 consecutive lines across the codebase.
+      Near-identical means differing only in variable names or literals. Exempt:
+      test setup/teardown boilerplate and generated code.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: false
+
+  - id: GEN-006
+    category: code-quality
+    severity: medium
+    title: "Descriptive naming — no single-letter variables"
+    description: >
+      All variables, functions, and classes must have descriptive names that
+      convey purpose. Single-letter variable names are only permitted for loop
+      iterators (i, j, k), coordinates (x, y, z), and well-established
+      mathematical conventions within math-heavy code.
+    check_type: pattern
+    check_details: |
+      Flag single-letter variable declarations/assignments outside of:
+      - for/while loop iterators
+      - lambda parameters in trivial expressions
+      - list/dict/set comprehension variables
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: false
+
+  - id: GEN-007
+    category: code-quality
+    severity: high
+    title: "No hardcoded magic numbers or strings"
+    description: >
+      Literal numbers (other than 0, 1, -1) and literal strings used for
+      control flow or configuration must be extracted into named constants.
+      Magic values make code fragile and obscure intent.
+    check_type: pattern
+    check_details: >
+      Flag raw numeric/string literals used in conditionals, assignments to
+      config-like variables, retry counts, timeouts, and size limits. Exempt:
+      test assertions, log messages, docstrings, and array indices 0/1.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: false
+
+  # ===========================================================================
+  # Security
+  # ===========================================================================
+
+  - id: GEN-008
+    category: security
+    severity: critical
+    title: "No hardcoded secrets or credentials"
+    description: >
+      Passwords, API keys, tokens, private keys, and connection strings must
+      never appear as literals in source code. Use environment variables,
+      secret managers, or encrypted config files.
+    check_type: pattern
+    check_details: |
+      password\s*=\s*["'][^"']+["']
+      api[_-]?key\s*=\s*["'][^"']+["']
+      secret\s*=\s*["'][^"']+["']
+      token\s*=\s*["'][^"']+["']
+      (AKIA|ABIA|ACCA|ASIA)[0-9A-Z]{16}        # AWS key pattern
+      -----BEGIN\s+(RSA|EC|DSA)?\s*PRIVATE KEY
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-009
+    category: security
+    severity: critical
+    title: "Input validation on external boundaries"
+    description: >
+      All data crossing trust boundaries (HTTP requests, file uploads, CLI
+      args, message queue payloads, database reads from untrusted sources)
+      must be validated and/or sanitized before use. Use schema validation
+      libraries (e.g., Pydantic, Zod, JSON Schema) at entry points.
+    check_type: custom
+    check_details: >
+      Verify that API endpoints, CLI handlers, and message consumers perform
+      input validation before processing. Look for schema/type validation at
+      the boundary layer, not deep inside business logic.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false  # custom = auditor-only (not deterministic)
+    cicero_confirmed: true
+
+  - id: GEN-010
+    category: security
+    severity: critical
+    title: "No SQL or command injection"
+    description: >
+      Use parameterized queries for all database operations. Use safe APIs
+      (e.g., subprocess with list args, not shell=True) for OS command
+      execution. Never interpolate user input into queries or commands.
+    check_type: pattern
+    check_details: |
+      f["'].*SELECT.*\{          # Python f-string SQL
+      f["'].*INSERT.*\{
+      f["'].*UPDATE.*\{
+      f["'].*DELETE.*\{
+      `.*SELECT.*\$\{            # JS template literal SQL
+      shell\s*=\s*True           # Python subprocess with shell=True
+      os\.system\(               # Python os.system (inherently unsafe)
+      exec\(.*\+                 # String concatenation in exec
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: false
+
+  - id: GEN-011
+    category: security
+    severity: high
+    title: "Pinned dependency versions"
+    description: >
+      All dependency declarations must pin exact versions or use lockfiles.
+      Wildcards (*), latest tags, and unbounded ranges (>=) are not permitted.
+      This ensures reproducible builds and protects against supply chain attacks.
+    check_type: pattern
+    check_details: |
+      "\*"                              # Wildcard version in package.json
+      "latest"                          # Latest tag
+      ">=\d+\.\d+\.\d+"$               # Unbounded lower-only range
+      Scan: package.json, requirements.txt, Cargo.toml, go.mod, Gemfile,
+      pyproject.toml, *.csproj
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-012
+    category: security
+    severity: high
+    title: "No stack traces in client-facing error responses"
+    description: >
+      Error responses returned to external clients (HTTP responses, API
+      replies, CLI output for end-users) must not include internal stack
+      traces, file paths, or implementation details. Log full details
+      server-side; return only safe, structured error messages to clients.
+    check_type: custom
+    check_details: >
+      Verify that error/exception handlers in API layers catch exceptions and
+      return sanitized error responses. Check that debug/development error
+      pages are disabled in production configuration.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false  # custom = auditor-only (not deterministic)
+    cicero_confirmed: false
+
+  # ===========================================================================
+  # Testing
+  # ===========================================================================
+
+  - id: GEN-013
+    category: testing
+    severity: high
+    title: "Tests exist for each module"
+    description: >
+      Every module, package, or significant source file must have a
+      corresponding test file. Test files follow the project's naming
+      convention (e.g., test_*.py, *.test.ts, *_test.go). Modules with
+      zero tests are flagged.
+    check_type: file-exists
+    check_details: >
+      For each source file in src/ or lib/, verify a corresponding test file
+      exists in the test directory. Mapping conventions: foo.py → test_foo.py,
+      foo.ts → foo.test.ts, foo.go → foo_test.go. Generated code and
+      configuration files are exempt.
+    scan_target: structure
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  # GEN-014 removed — duplicates the tests_pass gate in execution.yaml
+
+  - id: GEN-015
+    category: testing
+    severity: medium
+    title: "Tests are independent — no shared mutable state"
+    description: >
+      Each test must be runnable in isolation and in any order. Tests must not
+      depend on side effects from other tests. Use setup/teardown fixtures to
+      create fresh state. Shared mutable module-level variables between tests
+      are prohibited.
+    check_type: structural
+    check_details: >
+      Flag tests that modify module-level or class-level mutable variables
+      without reset in teardown. Detect tests that fail when run individually
+      but pass as part of a suite (order-dependent tests).
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  - id: GEN-016
+    category: testing
+    severity: medium
+    title: "Edge cases covered — happy path + error + boundary"
+    description: >
+      Test suites must include at minimum: (1) happy-path tests for normal
+      operation, (2) error-path tests for invalid inputs and failure modes,
+      (3) boundary tests for limits and edge values (empty input, max values,
+      null/nil/None, zero-length collections).
+    check_type: custom
+    check_details: >
+      Review test files for each module. Flag modules where all tests are
+      happy-path only (no assertions on error conditions or boundary values).
+      Look for patterns like assertRaises, expect(...).toThrow, should panic.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  # ===========================================================================
+  # Documentation
+  # ===========================================================================
+
+  - id: GEN-017
+    category: documentation
+    severity: high
+    title: "Public API has doc comments"
+    description: >
+      All public functions, classes, methods, and modules must have
+      documentation comments explaining purpose, parameters, return values,
+      and exceptions/errors. Internal/private members are encouraged but not
+      required. Use the language's standard docstring format.
+    check_type: structural
+    check_details: >
+      Scan public declarations (exported functions, public classes/methods) for
+      preceding doc comments. Language conventions: Python → docstrings,
+      JS/TS → JSDoc, Rust → /// doc comments, Go → preceding comment with
+      function name, Java → Javadoc.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-018
+    category: documentation
+    severity: high
+    title: "README exists with setup and usage instructions"
+    description: >
+      Every project root must contain a README file (README.md or similar) with
+      at minimum: project description, prerequisites, setup/installation
+      instructions, basic usage examples, and how to run tests.
+    check_type: file-exists
+    check_details: "README.md OR README.rst OR README.txt in project root"
+    scan_target: structure
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-019
+    category: documentation
+    severity: medium
+    title: "CHANGELOG maintained per release"
+    description: >
+      A CHANGELOG file (CHANGELOG.md or similar) must exist and be updated
+      with every release. Entries should follow Keep a Changelog format with
+      Added, Changed, Fixed, and Removed sections. Each entry must be
+      human-readable, not just a dump of commit messages.
+    check_type: file-exists
+    check_details: "CHANGELOG.md OR CHANGES.md OR HISTORY.md in project root"
+    scan_target: structure
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  # ===========================================================================
+  # Git Practices
+  # ===========================================================================
+
+  - id: GEN-020
+    category: git
+    severity: high
+    title: "Conventional commits format"
+    description: >
+      All commit messages must follow Conventional Commits specification:
+      type(scope): description. Valid types: feat, fix, docs, style, refactor,
+      perf, test, build, ci, chore, revert. The description must be lowercase,
+      imperative mood, and not end with a period.
+    check_type: pattern
+    check_details: |
+      ^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|release)(\(.+\))?(!)?:\s.+
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  - id: GEN-021
+    category: git
+    severity: medium
+    title: "Atomic commits — one logical change per commit"
+    description: >
+      Each commit should represent exactly one logical change. Do not mix
+      unrelated features, bug fixes, or refactors in a single commit. This
+      enables clean reverts, clear blame history, and meaningful changelogs.
+    check_type: custom
+    check_details: >
+      Review commit diffs for unrelated changes. Flag commits that modify
+      files across multiple unrelated subsystems without a clear common purpose.
+      Exempt: bulk renames, dependency updates, and formatting changes.
+    scan_target: both
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  - id: GEN-022
+    category: git
+    severity: high
+    title: "No large binary files in repository"
+    description: >
+      Binary files exceeding 1 MB must not be committed to the repository.
+      Use Git LFS, external storage (S3, CDN), or package registries for
+      large assets. Exceptions must be documented in .gitattributes.
+    check_type: custom
+    check_details: >
+      Scan staged files for binaries >1 MB. Check repository history for
+      recently added large files. Common offenders: compiled binaries, images,
+      videos, database dumps, ML model weights, .deb/.rpm packages.
+    scan_target: filenames
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: false
+
+  - id: GEN-023
+    category: git
+    severity: high
+    title: "Semantic versioning"
+    description: >
+      Projects must follow Semantic Versioning (semver.org): MAJOR.MINOR.PATCH.
+      Breaking changes increment MAJOR, new features increment MINOR, bug fixes
+      increment PATCH. Pre-release versions use suffixes (e.g., 1.0.0-beta.1).
+    check_type: pattern
+    check_details: |
+      Version tags and version fields must match: ^v?\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$
+    scan_target: both
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true
+
+  # ===========================================================================
+  # API Design
+  # ===========================================================================
+
+  - id: GEN-024
+    category: api
+    severity: medium
+    title: "Consistent resource naming"
+    description: >
+      API resource names must be lowercase, plural nouns, and use kebab-case
+      for multi-word resources. Examples: /users, /order-items, /project-tasks.
+      Avoid verbs in resource URIs (use HTTP methods instead), camelCase, and
+      singular nouns for collection endpoints.
+    check_type: pattern
+    check_details: |
+      Scan route/endpoint definitions for:
+      - camelCase in URL paths
+      - Singular nouns for collection endpoints (e.g., /user instead of /users)
+      - Verbs in resource segments (e.g., /getUsers, /createOrder)
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  - id: GEN-025
+    category: api
+    severity: medium
+    title: "Proper HTTP method semantics"
+    description: >
+      HTTP methods must follow standard semantics: GET for retrieval (safe,
+      idempotent), POST for creation, PUT for full replacement (idempotent),
+      PATCH for partial update, DELETE for removal (idempotent). GET and DELETE
+      must not accept request bodies. POST must not be used for retrieval.
+    check_type: custom
+    check_details: >
+      Scan route definitions for mismatched method-action pairs. Flag GET
+      routes that perform mutations, POST routes named "get" or "list", PUT
+      routes that partially update, and DELETE routes with request body parsing.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false
+    cicero_confirmed: true
+
+  - id: GEN-026
+    category: api
+    severity: high
+    title: "Consistent error response structure"
+    description: >
+      All API error responses must follow a uniform structure with at minimum:
+      an error code (machine-readable), a message (human-readable), and the
+      HTTP status code. Additional fields (details, request_id, timestamp)
+      are recommended. Never return raw exception strings or framework defaults.
+    check_type: custom
+    check_details: >
+      Verify that error handlers / exception middleware produce a consistent
+      JSON structure. Check that all error paths (validation errors, not found,
+      auth failures, server errors) return the same schema. Flag endpoints that
+      return inconsistent error formats.
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: false  # custom = auditor-only (not deterministic)
+    cicero_confirmed: true
+
+  # ===========================================================================
+  # Configuration
+  # ===========================================================================
+
+  - id: GEN-027
+    category: config
+    severity: high
+    title: "Configuration separated from code"
+    description: >
+      All environment-specific values (database URLs, service endpoints, feature
+      flags, ports, timeouts, credentials) must be externalized into environment
+      variables, config files, or a configuration management system. Source code
+      must not contain environment-specific literals. Follow the 12-Factor App
+      methodology for configuration.
+    check_type: pattern
+    check_details: |
+      Scan for hardcoded environment-specific values:
+      - localhost:\d{4,5} outside of test/dev config files
+      - Hardcoded database connection strings
+      - Hardcoded URLs to specific environments (staging, production)
+      - Feature flags as boolean literals instead of config lookups
+    scan_target: content
+    languages: ["*"]
+    auto_fixable: false
+    gate_blocking: true
+    cicero_confirmed: true

@@ -76,6 +76,24 @@ Read project root to detect stack and populate `config/project.yaml`:
 
 If multiple detected, list all. Commands are suggestions — PM can override in `project.yaml`.
 
+### Standards Selection
+
+After auto-detection completes, present the standards profile selection:
+
+```
+Standards profile:
+  (A) general — Universal development standards (recommended)
+  (B) vulcan — Vulcan ecosystem standards (includes general)
+  (C) none — No standards enforcement
+```
+
+**Rules:**
+- Default selection: `general` (option A) if PM does not respond
+- `vulcan` inherits all `general` rules + adds ecosystem-specific rules + can override severities
+- `none` disables all standards enforcement (no `standards_compliance` gate, no auditor category)
+- Selection is stored in `project.yaml` under the `standards` key
+- On re-run (`/aid-init` on existing workspace): if `standards` key already exists in `project.yaml`, show current selection and ask "Keep current ({current})? (Y/N)" — only re-prompt if PM says N
+
 ### project.yaml template
 
 ```yaml
@@ -86,6 +104,14 @@ test_cmd: "{detected or null}"
 lint_cmd: "{detected or null}"
 build_cmd: "{detected or null}"
 initialized_at: "{ISO 8601}"
+
+# Standards profile — selected during /aid-init
+standards:
+  active: general              # general | vulcan | none
+  selected_at: "{ISO 8601}"
+  overrides:
+    disabled_rules: []         # e.g., ["GEN-007", "VUL-013"]
+    severity_overrides: {}     # e.g., { "GEN-003": "low" }
 ```
 
 ### permissions.yaml template
@@ -238,4 +264,5 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **Auto-detect stack** — reads project root files to suggest test/lint/build commands
 - **Upgrade path** — `--upgrade` migrates v1 paths to v2 with PM confirmation
 - If `$ARGUMENTS` is empty → auto-detect mode (fresh init or upgrade)
+- **Standards** — selection stored in `project.yaml → standards.active`. Override individual rules via `standards.overrides.disabled_rules[]` or `standards.overrides.severity_overrides`
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."

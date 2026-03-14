@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.5.0** (current) — Plugin path discovery, brainstorming format template + handoff summary, Superpowers conflict resolution, documentation gate enforcement
+- **v2.6.0** (current) — Standards enforcement system: general (26 rules) + vulcan (22 rules), init selection, deterministic gate, auditor category, curator hotspots
+- **v2.5.0** — Plugin path discovery, brainstorming format template + handoff summary, Superpowers conflict resolution, documentation gate enforcement
 - **v2.4.0** — Pre-merge review: parallel curator+auditor, PM merge gate, 70/30 deterministic pre-filter, enhanced PM UX
-- **v2.3.0** — Review Checkpoints: 6 automatic verifier dispatch points, fix loop protocol, critical findings block DONE
 - **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
 - **v1.5.0** — Token efficiency, model tiering, usage tracking
 
