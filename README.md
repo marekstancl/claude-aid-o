@@ -116,11 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.6.0** (current) — Standards enforcement system: general (26 rules) + vulcan (22 rules), init selection, deterministic gate, auditor category, curator hotspots
+- **v2.7.0** (current) — Mechanically enforced FSM: precondition-verified transitions, audit trail, verify-state/set-field commands, gates state check + report persistence
+- **v2.6.0** — Standards enforcement system: general (26 rules) + vulcan (22 rules), init selection, deterministic gate, auditor category, curator hotspots
 - **v2.5.0** — Plugin path discovery, brainstorming format template + handoff summary, Superpowers conflict resolution, documentation gate enforcement
-- **v2.4.0** — Pre-merge review: parallel curator+auditor, PM merge gate, 70/30 deterministic pre-filter, enhanced PM UX
-- **v1.6.0** — Script-based pipeline, command rewrites, 76-test suite
-- **v1.5.0** — Token efficiency, model tiering, usage tracking
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

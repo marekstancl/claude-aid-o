@@ -2,11 +2,12 @@
 # aid-run-gates.sh — Deterministic gate runner
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
-#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file]
+#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>]
 
 set -euo pipefail
 
-source "$(dirname "${BASH_SOURCE[0]}")/lib/aid-stage-log.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 run_gate() {
   local gate_name="$1"
@@ -50,7 +51,28 @@ run_all_gates() {
   local run_id="$3"
   local timeline_file="${4:-.aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl}"
 
+  # Parse optional flags: --state-file, --report-file
+  local state_file="" report_file=""
+  shift 3; shift || true  # skip positional args (4th is timeline_file)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --state-file) state_file="$2"; shift 2 ;;
+      --report-file) report_file="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
   [[ -f "$execution_yaml" ]] || { echo "ERROR: execution_yaml not found: $execution_yaml" >&2; exit 1; }
+
+  # FSM state check: refuse to run if state is not GATES
+  if [[ -n "$state_file" ]]; then
+    local current_state
+    current_state=$("${SCRIPT_DIR}/aid-fsm.sh" get-state "$state_file")
+    if [[ "$current_state" != "GATES" ]]; then
+      echo "ERROR: FSM state must be GATES to run gates, found: $current_state" >&2
+      exit 1
+    fi
+  fi
 
   local overall="pass"
   local gates_json="{"
@@ -105,6 +127,12 @@ run_all_gates() {
 
   local report="{\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"overall\":\"${overall}\",\"completed_at\":\"${completed_at}\",\"gates\":${gates_json}}"
   echo "$report"
+
+  # Persist gates_report.json if --report-file specified
+  if [[ -n "$report_file" ]]; then
+    mkdir -p "$(dirname "$report_file")"
+    echo "$report" | jq . > "$report_file"
+  fi
 
   log_event "$timeline_file" "gates_complete" overall="$overall" epic_id="$epic_id"
 

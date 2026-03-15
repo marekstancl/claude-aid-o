@@ -37,6 +37,37 @@ Escalation rules for `--auto`:
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
 
+## MECHANICAL ENFORCEMENT PROTOCOL
+
+The FSM is mechanically enforced via precondition-verified transitions.
+Scripts WILL REFUSE to proceed if preconditions are not met.
+
+### Rules (non-negotiable):
+
+1. **Before any action:** `bash {plugin_path}/scripts/aid-fsm.sh verify-state <state_file>` — confirms current state + allowed transitions
+2. **Every state transition:** `bash {plugin_path}/scripts/aid-fsm.sh transition <from> <to> <state_file>` — verifies preconditions, exits non-zero if unmet
+3. **If transition fails:** STOP. Read the error message. Fix the precondition. Do NOT bypass.
+4. **PRE-FLIGHT is mandatory:** `READY→EXECUTE` requires `plan.json` to exist in run dir
+5. **Gates are mandatory:** `GATES→DONE` requires `gates_report.json` with `overall: pass`
+6. **Steps must complete:** `EXECUTE→GATES` requires `current_step >= total_steps`
+7. **Do NOT edit state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
+8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
+
+### Precondition failures are HARD STOPS:
+- Do NOT attempt alternative transitions to work around a failure
+- Do NOT modify `state.yaml` directly to bypass checks
+- Present the error to PM and wait for guidance
+- The error message tells you exactly what's missing
+
+### Gate execution:
+- Use `--state-file` and `--report-file` flags with `aid-run-gates.sh`:
+  ```
+  bash {plugin_path}/scripts/aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
+    --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json
+  ```
+- `--state-file` ensures gates only run when FSM is in GATES state
+- `--report-file` persists `gates_report.json` (required by `GATES→DONE` precondition)
+
 ## PRE-FLIGHT (before FSM starts)
 
 **Plugin path verification:**

@@ -3,6 +3,23 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.7.0] — 2026-03-15
+
+### Added
+- **Mechanically Enforced FSM** — `aid-fsm.sh transition` now verifies preconditions before allowing state changes: READY→EXECUTE requires `plan.json`, EXECUTE→GATES requires all steps complete, GATES→DONE requires `gates_report.json` with `overall: pass`, ESCALATION exits require `escalation_decision` set
+- **`verify-state` Command** — new `aid-fsm.sh verify-state` returns current state + allowed transitions as JSON for LLM orientation
+- **`set-field` Command** — new `aid-fsm.sh set-field` for structured state mutations (escalation decisions, custom fields)
+- **FSM Audit Trail** — all `aid-fsm.sh` operations (transitions, precondition failures, force overrides) logged to `timeline.jsonl` via `aid-stage-log.sh`
+- **`--force` Escape Hatch** — `aid-fsm.sh transition --force` bypasses preconditions with PM approval, logged as `fsm_force_override`
+- **Gates State Check** — `aid-run-gates.sh --state-file` refuses to run unless FSM state is GATES
+- **Gates Report Persistence** — `aid-run-gates.sh --report-file` auto-writes `gates_report.json` (required by GATES→DONE precondition)
+- **Mechanical Enforcement Protocol** — new section in `aid-run.md` with 8 non-negotiable rules for FSM compliance
+
+### Changed
+- **FSM Valid States** — added ERROR to `VALID_STATES`; added `→ERROR` transitions from READY, EXECUTE, GATES, ESCALATION
+- **Escalation Cleanup** — `escalation_decision` field auto-cleared when leaving ESCALATION state
+- **Pipeline §3-§6** — each section now documents which FSM preconditions enforce correct behavior
+
 ## [2.6.0] — 2026-03-14
 
 ### Added

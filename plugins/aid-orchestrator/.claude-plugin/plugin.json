@@ -1,6 +1,6 @@
 {
   "name": "aid-orchestrator",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "AID — AI Development Orchestrator. 6-state bash FSM, Fast Mode (<2 min overhead), 87% token reduction. Takes a task or EPIC, generates a Plan, dispatches role-based agents, enforces quality gates, and produces auditable evidence.",
   "author": {
     "name": "Marek Stancl"
