@@ -10,6 +10,7 @@
 #   aid-fsm.sh increment-step <state_file>
 #   aid-fsm.sh get-field <field> <state_file>
 #   aid-fsm.sh set-field <field> <value> <state_file>
+#   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
 
 set -euo pipefail
 
@@ -235,6 +236,13 @@ cmd_transition() {
     sed -i '/^escalation_decision:/d' "$state_file"
   fi
 
+  # Auto-set done_phase when entering DONE
+  if [[ "$to" == "DONE" ]]; then
+    # Remove any stale done_phase, then set to review
+    sed -i '/^done_phase:/d' "$state_file"
+    echo "done_phase: review" >> "$state_file"
+  fi
+
   # Update state (atomic via temp file + mv)
   local tmp_file="${state_file}.tmp"
   sed "s/^state: .*/state: $to/" "$state_file" > "$tmp_file"
@@ -273,7 +281,15 @@ cmd_verify_state() {
   done
   local allowed_json="[$(IFS=,; echo "${allowed[*]}")]"
 
-  echo "{\"state\":\"${state}\",\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"current_step\":${current_step},\"total_steps\":${total_steps},\"allowed_transitions\":${allowed_json}}"
+  # Include done_phase if in DONE state
+  local done_phase_json=""
+  if [[ "$state" == "DONE" ]]; then
+    local done_phase
+    done_phase=$(grep '^done_phase:' "$state_file" | awk '{print $2}' || echo "unknown")
+    done_phase_json=",\"done_phase\":\"${done_phase}\""
+  fi
+
+  echo "{\"state\":\"${state}\",\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"current_step\":${current_step},\"total_steps\":${total_steps},\"allowed_transitions\":${allowed_json}${done_phase_json}}"
 }
 
 cmd_increment_step() {
@@ -297,11 +313,110 @@ cmd_set_field() {
   local field="$1" value="$2" state_file="$3"
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
 
+  # Reserved fields — managed by dedicated commands only
+  case "$field" in
+    state) echo "ERROR: 'state' is reserved — use 'transition' command" >&2; exit 1 ;;
+    done_phase) echo "ERROR: 'done_phase' is reserved — use 'done-advance' command" >&2; exit 1 ;;
+  esac
+
   if grep -q "^${field}:" "$state_file"; then
     sed -i "s/^${field}: .*/${field}: ${value}/" "$state_file"
   else
     echo "${field}: ${value}" >> "$state_file"
   fi
+}
+
+# ─── DONE Sub-Phase Advancement ─────────────────────────────────────────
+# Phases within DONE: review → release
+# Preconditions for review → release:
+#   - curator-report exists (curator agent ran)
+#   - audit-report exists (auditor agent ran)
+#   - pm_decision field set to "merge"
+
+VALID_DONE_PHASES="review release"
+
+cmd_done_advance() {
+  local from_phase="$1" to_phase="$2" state_file="$3"
+  local force="false"
+  [[ "${4:-}" == "--force" ]] && force="true"
+
+  [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
+
+  # Must be in DONE state
+  local current_state
+  current_state=$(grep '^state:' "$state_file" | awk '{print $2}')
+  [[ "$current_state" == "DONE" ]] || {
+    echo "ERROR: done-advance requires state DONE, found: $current_state" >&2
+    exit 1
+  }
+
+  # Validate current phase matches
+  local current_phase
+  current_phase=$(grep '^done_phase:' "$state_file" | awk '{print $2}')
+  [[ "$current_phase" == "$from_phase" ]] || {
+    echo "ERROR: expected done_phase=$from_phase but found $current_phase" >&2
+    exit 1
+  }
+
+  # Validate phases
+  [[ " $VALID_DONE_PHASES " =~ " $to_phase " ]] || {
+    echo "ERROR: invalid done_phase: $to_phase (valid: $VALID_DONE_PHASES)" >&2
+    exit 1
+  }
+
+  # Precondition checks (skip with --force)
+  if [[ "$force" == "true" ]]; then
+    local timeline
+    timeline=$(derive_timeline "$state_file") || true
+    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="done-advance" from_phase="$from_phase" to_phase="$to_phase"
+    echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
+  else
+    # Check preconditions for review → release
+    if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
+      local epic_id run_id evidence_dir errors=0
+      epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+      run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+      evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+
+      # Curator report must exist
+      if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then
+        echo "PRECONDITION FAIL: Curator report not found in ${evidence_dir}/. Curator agent must run first." >&2
+        errors=$((errors + 1))
+      fi
+
+      # Auditor report must exist
+      if [[ ! -f "${evidence_dir}/audit-report.yaml" && ! -f "${evidence_dir}/audit-report.md" ]]; then
+        echo "PRECONDITION FAIL: Auditor report not found in ${evidence_dir}/. Auditor agent must run first." >&2
+        errors=$((errors + 1))
+      fi
+
+      # PM decision must be set to merge
+      local pm_decision
+      pm_decision=$(grep '^pm_decision:' "$state_file" | awk '{print $2}' || true)
+      [[ "$pm_decision" == "merge" ]] || {
+        echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
+        errors=$((errors + 1))
+      }
+
+      if [[ $errors -gt 0 ]]; then
+        local timeline
+        timeline=$(derive_timeline "$state_file") || true
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance_fail" from_phase="$from_phase" to_phase="$to_phase" errors="$errors"
+        echo "ERROR: ${errors} precondition(s) failed for done-advance $from_phase → $to_phase." >&2
+        exit 1
+      fi
+    fi
+  fi
+
+  # Advance phase
+  sed -i "s/^done_phase: .*/done_phase: ${to_phase}/" "$state_file"
+
+  # Audit trail
+  local timeline
+  timeline=$(derive_timeline "$state_file") || true
+  [[ -n "$timeline" ]] && log_event "$timeline" "fsm_done_advance" from_phase="$from_phase" to_phase="$to_phase"
+
+  echo "Done phase: $from_phase → $to_phase" >&2
 }
 
 # ─── Dispatch ───────────────────────────────────────────────────────────
@@ -313,7 +428,8 @@ case "${1:-}" in
   increment-step) shift; cmd_increment_step "$@" ;;
   get-field)      shift; cmd_get_field "$@" ;;
   set-field)      shift; cmd_set_field "$@" ;;
+  done-advance)   shift; cmd_done_advance "$@" ;;
   *)
-    echo "Usage: aid-fsm.sh <init|transition|get-state|verify-state|increment-step|get-field|set-field> [args...]" >&2
+    echo "Usage: aid-fsm.sh <init|transition|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
     exit 1 ;;
 esac

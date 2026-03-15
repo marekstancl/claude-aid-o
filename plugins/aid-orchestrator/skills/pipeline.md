@@ -31,10 +31,12 @@ Transitions are **rejected** (exit 1) if evidence of completed work is missing:
 | EXECUTE→GATES | `current_step >= total_steps` |
 | GATES→DONE | `gates_report.json` with `overall: pass` |
 | ESCALATION→EXECUTE/GATES | `escalation_decision` field set |
+| `done-advance review→release` | `curator-report` exists, `audit-report` exists, `pm_decision=merge` |
 
 All FSM operations are logged to `timeline.jsonl` for audit trail.
 Use `aid-fsm.sh verify-state` before any action to confirm allowed transitions.
 Use `--force` only with explicit PM approval (logged as `fsm_force_override`).
+DONE sub-phases use `aid-fsm.sh done-advance` (not `transition`).
 
 ### FSM States
 
@@ -320,6 +322,12 @@ set via `set-field`. The decision is automatically cleared after the transition 
 
 **LLM role:** Orchestrate pre-merge review and PM decision.
 
+**Mechanical enforcement:** DONE uses two sub-phases (`review` → `release`) managed by
+`aid-fsm.sh done-advance`. The `review` phase is auto-set on GATES→DONE transition.
+Advancing to `release` requires evidence: curator-report, audit-report, and `pm_decision=merge`.
+
+### Sub-phase: `review`
+
 1. **Run file:** Update `status: completed`, `completed: {timestamp}` in run.md frontmatter
 2. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
 3. **Update:** `work/active.md` status
@@ -367,15 +375,25 @@ Options:
 ```
 
 12. **PM decides:**
-    - **MERGE** → continue to step 13
+    - **MERGE** → set `pm_decision`, advance sub-phase, continue to step 13
     - **FIX** → PM provides guidance → dispatch fixes → re-run steps 5-11
     - **ABORT** → transition to ERROR (`status: aborted`, E8 logged)
-13. **Release:** Call `aid-release.sh` — version bump
+13. **Advance to release sub-phase** (mechanically enforced):
+    ```bash
+    aid-fsm.sh set-field pm_decision merge <state_file>
+    aid-fsm.sh done-advance review release <state_file>
+    ```
+    Preconditions: `curator-report` exists, `audit-report` exists, `pm_decision=merge`.
+    If any missing → script refuses (exit 1).
+
+### Sub-phase: `release`
+
+14. **Release:** Call `aid-release.sh` — version bump
     - Standalone/last EPIC: mandatory bump
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
-14. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+15. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
     → delete run branch
-15. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
+16. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
     Metrics stored to Qdrant (`aid-orchestration-log`) or fallback JSONL.
 
 **Auto-mode (FIRST AID):** If no `blocking_findings` and auditor score ≥ 80 → auto-MERGE.

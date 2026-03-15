@@ -234,13 +234,17 @@ FSM initialized: READY
 
 ### State: DONE
 
-**Actions:**
-1. Update `state.yaml`: `state: DONE`
+DONE uses two mechanically enforced sub-phases: `review` → `release`.
+Sub-phase transitions are managed by `done-advance` (not `transition`).
+
+**Sub-phase: `review`** (auto-set on GATES→DONE)
+
+1. Update `state.yaml`: `state: DONE`, `done_phase: review` (automatic)
 2. Archive run file → `runs/archive/`
 3. Update `work/active.md`
 4. Generate `final_report.md`
 5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
-6. Wait for both to complete
+6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
 7. **CP4** — verifier (`code-review`) on curator-proposed changes
    - If FAIL → revert curator changes, log reversion
    - Skip if `review_checkpoints.cp4_curator_validation: false`
@@ -272,9 +276,18 @@ FSM initialized: READY
       ABORT — stop EPIC, no merge
     ```
 12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
-13. Release automation (`aid-release.sh`)
-14. Branch merge: `git merge epic/{id} --no-ff` → delete run branch
-15. Queue pickup + metrics logging
+13. **Advance sub-phase:** PM chose MERGE →
+    ```
+    bash {plugin_path}/scripts/aid-fsm.sh set-field pm_decision merge <state_file>
+    bash {plugin_path}/scripts/aid-fsm.sh done-advance review release <state_file>
+    ```
+    Preconditions enforced: `curator-report` exists, `audit-report` exists, `pm_decision=merge`.
+
+**Sub-phase: `release`** (after `done-advance review release`)
+
+14. Release automation (`aid-release.sh`)
+15. Branch merge: `git merge epic/{id} --no-ff` → delete run branch
+16. Queue pickup + metrics logging
 
 ### State: ERROR
 
@@ -302,6 +315,7 @@ FSM initialized: READY
 - **Escalation E7** — verifier review failed after 2 fix-loop iterations
 - **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
+- **DONE sub-phases** — `review → release`, managed by `done-advance` (not `transition`); `set-field` rejects writes to `done_phase`
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state
 - **`--auto` replaces `/aid-first-aid`** — same autonomous behavior, integrated flag
