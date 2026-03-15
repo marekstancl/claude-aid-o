@@ -1,12 +1,58 @@
 #!/usr/bin/env bash
 # aid-release.sh — Version bumping, changelog, git tag
-# Usage: aid-release.sh <patch|minor|major> [--dry-run]
+# Usage: aid-release.sh <patch|minor|major> [--dry-run] [--evidence-dir <path>] [--skip-evidence-check]
+#
+# When --evidence-dir is provided, verifies that Curator and Auditor reports
+# exist before allowing release. This enforces the DONE state workflow.
 
 set -euo pipefail
 
-BUMP_TYPE="${1:?Usage: aid-release.sh <patch|minor|major> [--dry-run]}"
+BUMP_TYPE="${1:?Usage: aid-release.sh <patch|minor|major> [--dry-run] [--evidence-dir <path>]}"
 DRY_RUN=false
-[[ "${2:-}" == "--dry-run" ]] && DRY_RUN=true
+EVIDENCE_DIR=""
+SKIP_EVIDENCE=false
+
+shift
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true; shift ;;
+    --evidence-dir) EVIDENCE_DIR="$2"; shift 2 ;;
+    --skip-evidence-check) SKIP_EVIDENCE=true; shift ;;
+    *) shift ;;
+  esac
+done
+
+# ─── Evidence Check (DONE state enforcement) ─────────────────────────
+if [[ -n "$EVIDENCE_DIR" && "$SKIP_EVIDENCE" != "true" ]]; then
+  echo "Checking DONE state evidence in: $EVIDENCE_DIR" >&2
+  errors=0
+
+  # Curator report must exist
+  if [[ ! -f "${EVIDENCE_DIR}/curator-report.yaml" && ! -f "${EVIDENCE_DIR}/curator-report.md" ]]; then
+    echo "EVIDENCE FAIL: Curator report not found in ${EVIDENCE_DIR}/. Curator agent must run before release." >&2
+    errors=$((errors + 1))
+  fi
+
+  # Auditor report must exist
+  if [[ ! -f "${EVIDENCE_DIR}/audit-report.yaml" && ! -f "${EVIDENCE_DIR}/audit-report.md" ]]; then
+    echo "EVIDENCE FAIL: Auditor report not found in ${EVIDENCE_DIR}/. Auditor agent must run before release." >&2
+    errors=$((errors + 1))
+  fi
+
+  # Gates report must exist
+  if [[ ! -f "${EVIDENCE_DIR}/gates/gates_report.json" ]]; then
+    echo "EVIDENCE FAIL: gates_report.json not found in ${EVIDENCE_DIR}/gates/. Gates must pass before release." >&2
+    errors=$((errors + 1))
+  fi
+
+  if [[ $errors -gt 0 ]]; then
+    echo "ERROR: ${errors} evidence check(s) failed. Release blocked." >&2
+    echo "Use --skip-evidence-check to bypass (PM-only, will be logged)." >&2
+    exit 1
+  fi
+
+  echo "Evidence checks passed (curator, auditor, gates)." >&2
+fi
 
 # Validate bump type
 case "$BUMP_TYPE" in

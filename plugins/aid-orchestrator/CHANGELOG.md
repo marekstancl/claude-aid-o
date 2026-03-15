@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Gates State Check** — `aid-run-gates.sh --state-file` refuses to run unless FSM state is GATES
 - **Gates Report Persistence** — `aid-run-gates.sh --report-file` auto-writes `gates_report.json` (required by GATES→DONE precondition)
 - **Mechanical Enforcement Protocol** — new section in `aid-run.md` with 8 non-negotiable rules for FSM compliance
+- **Release Evidence Check** — `aid-release.sh --evidence-dir` refuses to run without curator-report, audit-report, and gates_report (enforces DONE state workflow)
 
 ### Changed
 - **FSM Valid States** — added ERROR to `VALID_STATES`; added `→ERROR` transitions from READY, EXECUTE, GATES, ESCALATION

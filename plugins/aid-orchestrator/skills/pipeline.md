@@ -370,7 +370,9 @@ Options:
     - **MERGE** → continue to step 13
     - **FIX** → PM provides guidance → dispatch fixes → re-run steps 5-11
     - **ABORT** → transition to ERROR (`status: aborted`, E8 logged)
-13. **Release:** Call `aid-release.sh` — version bump
+13. **Release:** Call `aid-release.sh <bump> --evidence-dir <evidence_dir>` — version bump
+    - **Evidence check (mechanical):** Script refuses to run unless curator-report, audit-report, and gates_report exist in evidence dir
+    - Use `--skip-evidence-check` only with explicit PM approval (escape hatch, like `--force`)
     - Standalone/last EPIC: mandatory bump
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
 14. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`

@@ -272,7 +272,9 @@ FSM initialized: READY
       ABORT — stop EPIC, no merge
     ```
 12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
-13. Release automation (`aid-release.sh`)
+13. Release automation: `aid-release.sh <bump> --evidence-dir <evidence_dir>`
+    - **Mechanical enforcement:** Script refuses to run without curator-report, audit-report, and gates_report in evidence dir
+    - `--skip-evidence-check` is PM-only escape hatch (like `--force` on FSM transitions)
 14. Branch merge: `git merge epic/{id} --no-ff` → delete run branch
 15. Queue pickup + metrics logging
 
