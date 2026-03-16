@@ -7,7 +7,7 @@
 #   aid-fsm.sh transition <from> <to> <state_file> [--force]
 #   aid-fsm.sh get-state <state_file>
 #   aid-fsm.sh verify-state <state_file>
-#   aid-fsm.sh increment-step <state_file>
+#   aid-fsm.sh increment-step <state_file> [--force]
 #   aid-fsm.sh get-field <field> <state_file>
 #   aid-fsm.sh set-field <field> <value> <state_file>
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
@@ -308,13 +308,25 @@ cmd_increment_step() {
     run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
 
-    if [[ ! -f "${evidence_dir}/step-${step}-verify.md" ]]; then
+    local verify_file="${evidence_dir}/step-${step}-verify.md"
+    if [[ ! -f "$verify_file" ]]; then
       echo "PRECONDITION FAIL: Step verification evidence not found." >&2
-      echo "Expected: ${evidence_dir}/step-${step}-verify.md" >&2
+      echo "Expected: ${verify_file}" >&2
       echo "Write verification (AC checklist + result) before advancing to next step." >&2
       local timeline
       timeline=$(derive_timeline "$state_file") || true
       [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="missing_step_verify"
+      exit 1
+    fi
+
+    # Validate content — must contain explicit PASS result
+    if ! grep -q '## Result: PASS' "$verify_file" 2>/dev/null; then
+      echo "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." >&2
+      echo "File: ${verify_file}" >&2
+      echo "Fix failing AC or mark '## Result: PASS' when all criteria met." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="step_verify_not_pass"
       exit 1
     fi
   else

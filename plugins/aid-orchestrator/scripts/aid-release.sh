@@ -4,9 +4,15 @@
 
 set -euo pipefail
 
-BUMP_TYPE="${1:?Usage: aid-release.sh <patch|minor|major> [--dry-run]}"
+BUMP_TYPE="${1:?Usage: aid-release.sh <patch|minor|major> [--dry-run] [--force]}"
 DRY_RUN=false
-[[ "${2:-}" == "--dry-run" ]] && DRY_RUN=true
+FORCE=false
+for arg in "${@:2}"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=true ;;
+    --force) FORCE=true ;;
+  esac
+done
 
 # Validate bump type
 case "$BUMP_TYPE" in
@@ -15,13 +21,36 @@ case "$BUMP_TYPE" in
 esac
 
 # Layer 2: FSM state check (soft — only when state.yaml exists)
-STATE_FILE=$(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null | head -1)
+# Correlate with current branch to find the right state.yaml
+STATE_FILE=""
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+BRANCH_ID=$(echo "$CURRENT_BRANCH" | cut -d'/' -f2)
+
+if [[ -d ".aid-o/work/runs/" ]]; then
+  while IFS= read -r _f; do
+    if [[ -n "$BRANCH_ID" ]] && grep -q "epic_id: ${BRANCH_ID}" "$_f" 2>/dev/null; then
+      STATE_FILE="$_f"
+      break
+    fi
+  done < <(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null)
+  # Fallback: if no branch match, take first (backward compat)
+  [[ -z "$STATE_FILE" ]] && STATE_FILE=$(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null | head -1)
+fi
+
 if [[ -n "$STATE_FILE" ]]; then
-  DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}')
-  FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}')
-  if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
+  FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}' || true)
+  DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}' || true)
+
+  if [[ "$FORCE" == "true" ]]; then
+    echo "WARNING: --force used, skipping FSM state check (state=${FSM_STATE}, done_phase=${DONE_PHASE:-N/A})" >&2
+  elif [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
     echo "ERROR: FSM state is DONE but done_phase=${DONE_PHASE:-<not set>}." >&2
     echo "Run Curator + Auditor first, then: aid-fsm.sh done-advance review release" >&2
+    echo "Or use --force to bypass (PM only)." >&2
+    exit 1
+  elif [[ "$FSM_STATE" =~ ^(READY|EXECUTE|GATES|ESCALATION)$ ]]; then
+    echo "ERROR: FSM state is ${FSM_STATE} — run is still in progress." >&2
+    echo "Complete the run before releasing. Or use --force to bypass (PM only)." >&2
     exit 1
   fi
 fi

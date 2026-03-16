@@ -17,7 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **DONE Sub-Phases** — `done_phase: review → release` within DONE state, managed by `aid-fsm.sh done-advance` with evidence-based preconditions (curator-report, audit-report, pm_decision=merge)
 - **Reserved Field Protection** — `set-field` rejects writes to `state` and `done_phase` (must use dedicated `transition`/`done-advance` commands)
 - **Release Script FSM Guard** — `aid-release.sh` refuses release when `state.yaml` exists with `done_phase != release` (Layer 2 defense)
-- **Git Pre-Commit Hook** — FSM guard on `task/*/epic/*` branches blocks commits in DONE/review and READY states (Layer 3 defense)
+- **Git Pre-Commit Hook** — FSM guard on `task/*` and `epic/*` branches blocks commits in DONE/review and READY states (Layer 3 defense)
 - **Hook Auto-Install** — `/aid-init` installs/upgrades pre-commit hook with marker-based append (coexists with existing hooks)
 - **Step Verification Enforcement** — `increment-step` refuses to advance without `step-{N}-verify.md` evidence file (AC checklist + visual check)
 - **Agent Dispatch Protocol** — 5 non-negotiable rules in pipeline.md: verbatim plan content, visual assets, post-step AC verification, visual verification for UI, resume-on-failure
