@@ -26,7 +26,7 @@ The plan-writing skill is invoked in two modes:
 
 ## Core Principle: Zero Information Loss
 
-The plan document is the **single source of truth** for implementation. Agents receive plan sections during dispatch (via `plan_ref` injection in `skills/dispatch-protocol.md`). Any detail missing from the plan is detail the agent will never see.
+The plan document is the **single source of truth** for implementation. Agents receive plan sections during dispatch (via `plan_ref` injection in `skills/pipeline.md` § 4). Any detail missing from the plan is detail the agent will never see.
 
 ```
 RULE: If it was discussed, decided, or approved — it MUST be in the plan.
@@ -599,7 +599,7 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 
 ## Integration with Dispatch Protocol
 
-The plan document is consumed by `skills/dispatch-protocol.md` → Source Plan Integration (Variant B). The dispatch protocol:
+The plan document is consumed by `skills/pipeline.md` § 4 → Source Plan Integration (Variant B). The dispatch protocol:
 
 1. Reads the plan via `plan_ref` or `source_plan` field
 2. Matches the current step to a plan section using header patterns: `### Step {N}`, `## Step {N}`, keyword matching
@@ -674,7 +674,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 - `commands/aid-write-plan.md` — standalone command that invokes this skill
 - `commands/aid-brainstorm.md` — brainstorming command that delegates Step 8 to this skill
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
-- `skills/dispatch-protocol.md` — agent dispatch (downstream — injects plan sections into agent prompts)
+- `skills/pipeline.md` § 4 — agent dispatch (downstream — injects plan sections into agent prompts)
 - `commands/aid-plan --epic.md` — plan-to-EPIC conversion (downstream — reads plan and delegates to `aid-auto-pipeline.sh` for all artifact generation)
 - `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)

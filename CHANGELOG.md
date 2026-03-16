@@ -27,6 +27,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Escalation Cleanup** — `escalation_decision` field auto-cleared when leaving ESCALATION state
 - **Pipeline §3-§6** — each section now documents which FSM preconditions enforce correct behavior
 
+### Fixed
+- **Dead Cross-References** — replaced 20+ references to deleted v1 files (dispatch-protocol.md, epic-orchestration.md) with v2 equivalents across 11 files
+- **v1 State Names** — replaced v1 FSM states (PM_APPROVAL, CURATOR_RESOLVE, PHASE_CHECK, IDLE) in pipeline.md; added v1 legacy headers to improvement-proposals.md and analytics.md
+- **v1 Directory Paths** — updated CLAUDE.md workspace structure from v1 (01-plans/, 04-engine/) to v2 (plans/, work/)
+- **Pre-Commit Hook** — removed dead case statement (non-functional code from refactoring)
+
 ## [2.6.0] — 2026-03-14
 
 ### Added

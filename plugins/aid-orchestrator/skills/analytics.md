@@ -3,6 +3,8 @@ name: analytics
 description: Analyze orchestration metrics from Qdrant to identify performance patterns, bottlenecks, and optimization opportunities across EPICs and projects.
 ---
 
+> ⚠️ **v1 Legacy Notice:** This skill references v1 state names. Mapping: PHASE_CHECK → GATES, CURATOR_RESOLVE → DONE sub-phase (review), PM_APPROVAL → DONE sub-phase (review). See pipeline.md for current FSM.
+
 # Analytics Skill
 
 ## Purpose
@@ -206,6 +208,6 @@ Recommendations:
 ## Reference Files
 
 - `skills/memory-mcp.md` -- memory protocol, Qdrant query functions
-- `skills/epic-orchestration.md` -- metric storage at PHASE_CHECK and DONE states
+- `skills/pipeline.md` -- metric storage at PHASE_CHECK and DONE states
 - `skills/cost-optimization.md` -- token estimation methodology
 - `commands/aid-analytics.md` -- user-facing command that invokes this skill

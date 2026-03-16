@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # aid-release.sh — Version bumping, changelog, git tag
-# Usage: aid-release.sh <patch|minor|major> [--dry-run]
+# Usage: aid-release.sh <patch|minor|major> [--dry-run] [--force]
+#
+# NOTE: Updates JSON version files only (4 of 8 version registry locations).
+# Remaining locations (CHANGELOGs, READMEs) must be updated manually.
+# See CLAUDE.md "Version File Registry" for the full 8-location list.
 
 set -euo pipefail
 

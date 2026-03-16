@@ -50,7 +50,7 @@ Six states. Scripts handle transitions. LLM acts within a state.
 
 | State | Entry trigger | LLM role | Exit via |
 |-------|--------------|----------|---------|
-| **PRE-FLIGHT** | `/aid-run-epic` invoked | None — bash only | → READY (auto) |
+| **PRE-FLIGHT** | `/aid-run` invoked | None — bash only | → READY (auto) |
 | **READY** | PRE-FLIGHT complete | Review plan, ask PM for GO | `aid-fsm.sh transition READY EXECUTE` |
 | **EXECUTE** | GO received or gate-fixer retry | Dispatch agent, verify output | `aid-fsm.sh transition EXECUTE GATES\|ESCALATION\|EXECUTE` |
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
@@ -81,7 +81,7 @@ aid-fsm.sh init      <epic_id> <run_id> \       # Create state.yaml (state: READ
 
 **On success:** `state.yaml` exists with `state: READY`, `plan.json` and `run.md` present.
 
-**On failure:** Script exits non-zero with JSON error on stderr. `/aid-run-epic` reports to PM.
+**On failure:** Script exits non-zero with JSON error on stderr. `/aid-run` reports to PM.
 
 PRE-FLIGHT does NOT create the git branch — that is done by the command layer before
 calling PRE-FLIGHT.
@@ -489,7 +489,7 @@ If task complexity grows (3+ files, multi-step) → suggest `/aid-plan --epic` i
 
 ## §9 Autonomous Mode (FIRST AID)
 
-**Activation:** `/aid-first-aid` → sets `auto-mode-state.yaml: mode: auto`
+**Activation:** `/aid-run --auto` → sets `auto-mode-state.yaml: mode: auto`
 
 **State file:** `.aid-o/work/auto-mode-state.yaml`
 
@@ -506,12 +506,12 @@ IF file missing or unreadable → default to "manual" (fail-safe)
 | READY — plan approval | Ask PM via Slack/chat | Validate JSON schema → auto-GO |
 | EXECUTE — review cycle exhausted | ESCALATION | Fresh-approach cycle, then ESCALATION |
 | ESCALATION | Options A/B/C | Options A/B/C/D (D = continue manual) |
-| PM_APPROVAL | Ask PM | Guardrail check → auto-approve if pass |
+| DONE — review sub-phase | Ask PM (MERGE/FIX/ABORT) | Guardrail check → auto-approve if pass |
 | DONE — PM summary | Show MERGE/FIX/ABORT | Auto-MERGE if no blocking + score ≥ 80 |
 | DONE — version bump | Ask PM for intermediate | Auto-defer for intermediate, mandatory for last |
 | DONE — queue | Present "What's next?" | Auto-pickup next EPIC |
 
-**Guardrails (PM_APPROVAL auto-check):** All gates pass + no unresolved CRITICAL issues
+**Guardrails (DONE review auto-check):** All gates pass + no unresolved CRITICAL issues
 + escalation_count < 3 + auditor trend ≤ 5-point decline.
 
 **Escalation budget:** max 3 escalations per session. On breach → E12 (PM must review).
@@ -567,7 +567,7 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 **Do NOT auto-resume after crash.** Report to PM:
 ```
 Stale state detected: {state} at step {current_step}/{total_steps}.
-Resume with: /aid-run-epic --resume {run_id}
+Resume with: /aid-run --resume {run_id}
 ```
 
 ---
@@ -584,7 +584,7 @@ Validates EPIC file, checks for duplicates, runs Kahn's cycle detection, appends
 
 **Queue pickup** (DONE state, action 7):
 1. `aid-queue-add.sh next` → returns next READY epic_id or empty
-2. If READY epic found: auto-load and start new IDLE→PRE-FLIGHT→READY cycle
+2. If READY epic found: auto-load and start new PRE-FLIGHT→READY cycle
 3. If queue paused or empty: log, present "Queue empty" to PM
 
 **Eligibility:** READY (deps completed) | WAITING (deps in progress) | BLOCKED (deps failed)

@@ -4,43 +4,37 @@
 
 _AID_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 
-# Only check on FSM-managed branches
-case "$_AID_BRANCH" in
-  task/*|epic/*) ;;
-  *) true; # AID-ORCHESTRATOR-HOOK-END
-esac
-
 if [[ "$_AID_BRANCH" == task/* || "$_AID_BRANCH" == epic/* ]]; then
 
-# Extract epic/task ID from branch name for targeted state.yaml lookup
-_AID_BRANCH_ID=$(echo "$_AID_BRANCH" | cut -d'/' -f2)
-_AID_STATE_FILE=""
+  # Extract epic/task ID from branch name for targeted state.yaml lookup
+  _AID_BRANCH_ID=$(echo "$_AID_BRANCH" | cut -d'/' -f2)
+  _AID_STATE_FILE=""
 
-# Find state.yaml matching the branch ID
-if [[ -d ".aid-o/work/runs/" ]]; then
-  while IFS= read -r _f; do
-    if grep -q "epic_id: ${_AID_BRANCH_ID}" "$_f" 2>/dev/null; then
-      _AID_STATE_FILE="$_f"
-      break
+  # Find state.yaml matching the branch ID
+  if [[ -d ".aid-o/work/runs/" ]]; then
+    while IFS= read -r _f; do
+      if grep -q "epic_id: ${_AID_BRANCH_ID}" "$_f" 2>/dev/null; then
+        _AID_STATE_FILE="$_f"
+        break
+      fi
+    done < <(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null)
+  fi
+
+  if [[ -n "$_AID_STATE_FILE" ]]; then
+    _AID_FSM_STATE=$(grep '^state:' "$_AID_STATE_FILE" | awk '{print $2}')
+    _AID_DONE_PHASE=$(grep '^done_phase:' "$_AID_STATE_FILE" | awk '{print $2}')
+
+    if [[ "$_AID_FSM_STATE" == "DONE" && "$_AID_DONE_PHASE" != "release" ]]; then
+      echo "AID HOOK: Commit blocked — FSM is in DONE/${_AID_DONE_PHASE:-review}." >&2
+      echo "Run Curator + Auditor, then: aid-fsm.sh done-advance review release" >&2
+      exit 1
     fi
-  done < <(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null)
-fi
 
-if [[ -n "$_AID_STATE_FILE" ]]; then
-  _AID_FSM_STATE=$(grep '^state:' "$_AID_STATE_FILE" | awk '{print $2}')
-  _AID_DONE_PHASE=$(grep '^done_phase:' "$_AID_STATE_FILE" | awk '{print $2}')
-
-  if [[ "$_AID_FSM_STATE" == "DONE" && "$_AID_DONE_PHASE" != "release" ]]; then
-    echo "AID HOOK: Commit blocked — FSM is in DONE/${_AID_DONE_PHASE:-review}." >&2
-    echo "Run Curator + Auditor, then: aid-fsm.sh done-advance review release" >&2
-    exit 1
+    if [[ "$_AID_FSM_STATE" == "READY" ]]; then
+      echo "AID HOOK: Commit blocked — FSM is in READY (not yet executing)." >&2
+      exit 1
+    fi
   fi
-
-  if [[ "$_AID_FSM_STATE" == "READY" ]]; then
-    echo "AID HOOK: Commit blocked — FSM is in READY (not yet executing)." >&2
-    exit 1
-  fi
-fi
 
 fi
 # AID-ORCHESTRATOR-HOOK-END

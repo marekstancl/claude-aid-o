@@ -10,7 +10,7 @@ runs_completed: 0
 
 > **NOTE:** This is a reference example, not a real EPIC. It demonstrates
 > the expected format, level of detail, and conventions for writing EPICs
-> that the AID Orchestrator can process through `/aid-plan-epic` and `/aid-run-epic`.
+> that the AID Orchestrator can process through `/aid-plan epic` and `/aid-run`.
 
 ## Context
 

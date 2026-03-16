@@ -7,7 +7,7 @@ user_invocable: false
 # Token Estimator — Dispatch Token Tracking
 
 **Skill:** token-estimator
-**Dependencies:** cost-optimization, dispatch-protocol, epic-state-machine
+**Dependencies:** cost-optimization, pipeline.md §4, pipeline.md §1
 
 ---
 
@@ -167,7 +167,7 @@ DISPATCH FLOW:
      |   Log to timeline.jsonl: estimated_execution_tokens
      |
      v
-  7. Controller proceeds to PHASE_CHECK
+  7. Controller proceeds to GATES
 ```
 
 ### Non-Blocking Behavior
@@ -177,7 +177,7 @@ text, missing Execution Summary, unexpected content type), the Controller:
 
 1. Logs the error to timeline.jsonl with `"estimation_error": "{reason}"`
 2. Sets token fields to `null` (not 0 — null indicates missing data)
-3. Continues dispatch or proceeds to PHASE_CHECK normally
+3. Continues dispatch or proceeds to GATES normally
 4. NEVER retries estimation synchronously
 5. NEVER blocks agent dispatch or post-dispatch processing
 
@@ -220,7 +220,7 @@ directory: `.aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl`
 }
 ```
 
-#### Post-Dispatch Entry (after agent returns, before PHASE_CHECK)
+#### Post-Dispatch Entry (after agent returns, before GATES)
 
 ```json
 {
@@ -382,7 +382,7 @@ See `defaults/policies/dispatch-config.yaml` for threshold configuration.
 | File | Relevance |
 |------|-----------|
 | `skills/cost-optimization.md` | BMK-001 baseline, token tracking schema, model tiers |
-| `skills/dispatch-protocol.md` | Dispatch flow where estimation integrates |
+| `skills/pipeline.md §4` | Dispatch flow where estimation integrates |
 | `skills/agent-core.md` | Execution Summary block (source of tool_operations_count) |
 | `skills/analytics.md` | Consumes token_profile and step_token_profile metrics |
 | `defaults/policies/dispatch-config.yaml` | Ratios, calibration config, budget thresholds |

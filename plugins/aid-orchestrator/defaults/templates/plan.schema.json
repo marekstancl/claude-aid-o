@@ -14,7 +14,7 @@
     "source_plan": {
       "type": ["string", "null"],
       "description": "Path to the source plan .md file (from EPIC plan_ref). Null for standalone EPICs without a source plan. When set, executing agents receive relevant plan sections for implementation detail.",
-      "examples": [".aid-o/01-plans/2026-02-19-aido-v040-measurement-optimization.md", null]
+      "examples": [".aid-o/plans/2026-02-19-aido-v040-measurement-optimization.md", null]
     },
     "version": {
       "type": "integer",

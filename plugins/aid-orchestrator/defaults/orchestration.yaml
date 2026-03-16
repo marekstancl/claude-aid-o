@@ -11,7 +11,7 @@ language:
   conversation_language: auto  # detected from PM input
 
 # ─── Models ──────────────────────────────────────────────────────────────
-# Simplified role→tier mapping. See dispatch-protocol skill for consumption.
+# Simplified role→tier mapping. See pipeline.md §4 for dispatch protocol.
 models:
   opus: [architect, backend, frontend]
   sonnet: [qa, security, docs-writer, curator, auditor, implementer, verifier]

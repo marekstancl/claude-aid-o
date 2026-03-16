@@ -54,10 +54,10 @@ When users run `/aid-init`, it creates:
 
 ```
 .aid-o/
-  01-plans/          # PM + AI brainstorming → plans (archive/ for completed)
-  02-epics/          # PM + AI detail → specifications (archive/ for completed)
-  03-config/         # PM-customizable (policies, templates, playbooks)
-  04-engine/         # AI internal (runs, memory, backlog, evidence)
+  plans/             # PM + AI brainstorming → plans (archive/ for completed)
+  tasks/             # PM + AI detail → EPIC specifications (archive/ for completed)
+  config/            # PM-customizable (policies, templates, playbooks)
+  work/              # AI internal (active, backlog, evidence, timeline)
 ```
 
 ## Key Commands
@@ -152,7 +152,7 @@ Every push to main MUST ensure these 8 locations are in sync:
 | 8 | `README.md` | `AGPL-3.0-only — see [LICENSE](LICENSE)` | Exact |
 
 These are also defined in `defaults/policies/release-policy.yaml` → `version_files[]`.
-The Release Sub-Phase in `skills/epic-orchestration.md` automates this during EPIC runs.
+The Release Sub-Phase in `skills/pipeline.md` §7 automates this during EPIC runs.
 
 **Pre-push check:** Before every `git push`, verify all 8 files show the same version:
 ```bash
@@ -205,7 +205,7 @@ This project uses AID v2.0 for multi-agent orchestration.
 **Fast mode:** `/aid-do "small task"` (< 2 min overhead)
 
 **Key paths:**
-- Plans: `.aid-o/01-plans/`
+- Plans: `.aid-o/plans/`
 - Tasks: `.aid-o/tasks/`
 - Config: `.aid-o/config/`
 - Work: `.aid-o/work/`

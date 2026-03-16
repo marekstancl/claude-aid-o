@@ -7,7 +7,7 @@ user_invocable: false
 # Planner — EPIC to Plan JSON
 
 **Skill:** planner
-**Dependencies:** epic-orchestration
+**Dependencies:** pipeline
 
 ---
 

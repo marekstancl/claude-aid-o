@@ -4,6 +4,8 @@ description: Standard format for improvement notes — collection protocol, dedu
 user_invocable: false
 ---
 
+> ⚠️ **v1 Legacy Notice:** This skill references v1 state names (PM_APPROVAL, CURATOR_RESOLVE). Mapping: PM_APPROVAL → DONE sub-phase (review) with pm_decision field, CURATOR_RESOLVE → DONE sub-phase (review). See pipeline.md §7 for current protocol.
+
 # Improvement Proposals Skill
 
 **Purpose:** Define the standard format for `improvement_notes`, collection protocol,
@@ -382,5 +384,5 @@ stored (logged to stage_log only), warning logged.
 | `backlog.md` | Storage format -- Section 4 |
 | `decision-policies.yaml` | `curator_auto_rules` -- Tier 1 YAML rules for auto-evaluate |
 | Qdrant (`curator_decision`) | Tier 2 learned decisions + decision storage |
-| `epic-orchestration.md` | CURATOR_RESOLVE state triggers Curator + auto-evaluate |
-| `run-epic.md` | CURATOR_RESOLVE state handling dispatches Curator |
+| `pipeline.md` | CURATOR_RESOLVE state triggers Curator + auto-evaluate |
+| `aid-run.md` | CURATOR_RESOLVE state handling dispatches Curator |
