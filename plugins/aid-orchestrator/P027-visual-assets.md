@@ -12,70 +12,84 @@ author: PM + AI
 
 AID agents repeatedly ignore visual specifications from plans. Root cause: agents receive text descriptions ("purple gradient banner") but never see actual mockups. In P011 (VL Process Flow), all structural components were correct but visual quality was zero — agents wrote their own CSS instead of matching the design.
 
+P011 post-mortem proved that **mockup source code** (exact TSX/CSS) produces dramatically better results than text descriptions or even PNG images. When agents received exact Tailwind classes from mockup source, the output matched perfectly.
+
 v2.7.0 added step verification enforcement (`increment-step` requires `step-{N}-verify.md` with `## Result: PASS`), but without visual assets in the pipeline, there's nothing to verify against.
 
 ## Goal
 
-Enable mockup images to flow through the entire AID pipeline — from brainstorming through plan writing, agent dispatch, and post-step visual verification — so that frontend agents implement to match the design, not their own interpretation.
+Enable visual assets (mockup source code, images, or AI Studio links) to flow through the entire AID pipeline as a **unified format** — regardless of input type, agents always receive the same structured output.
 
 ## Scope
 
 **In scope:**
+- 3 input types → 1 unified output format (visual-spec.yaml + source code if available)
 - Mockup storage convention in `.aid-o/plans/{plan_id}/mockups/`
-- `visual_refs` field in plan steps and `plan.schema.json`
-- Automatic `design-tokens.yaml` generation by orchestrator from mockups
+- `visual_refs` field in plan steps and `plan.schema.json` (+ `additionalProperties` fix)
+- `visual-spec.yaml` generation: from source code (exact) or PNG (approximate + PM validation)
 - Visual spec generation in Controller dispatch flow (pipeline.md §4)
 - Visual anchoring requirement for frontend agents (role-cards.md)
 - Post-step visual verification protocol (Playwright screenshot comparison)
-- Brainstorming integration (detect and associate mockups)
+- Brainstorming integration (detect and associate mockups from any source)
 - Plan-writing integration (generate visual spec section, assign visual_refs per step)
+- Forbidden phrase: text-only UI descriptions ("purple gradient") in plan-writing.md
 
 **Out of scope:**
-- URL-based mockup capture via Playwright (Tier 2 — future plan)
 - Automated pixel-diff tooling (LLM-based semantic comparison is sufficient)
 - Git LFS integration (not needed until repos exceed ~50MB of images)
-- Figma/design tool integrations
+- Figma/design tool native integrations
 
 ## Approach
 
-### Option A: Full Pipeline Integration (Recommended)
-Add `visual_refs` to plan schema, generate design tokens automatically, include structured visual spec in agent dispatch, require visual anchoring in frontend role card, formalize screenshot comparison in verification.
+### Option A: Multi-Source Pipeline with Unified Output (Recommended)
+3 input types (GitHub repo, AI Studio URL via Playwright, PNG images) → normalized to 1 output format (`visual-spec.yaml` + source files). Source code is Tier 1 authority; design tokens from PNG are Tier 2 fallback.
 
 **Pros:**
 - Covers entire pipeline end-to-end
-- Mechanical enforcement via existing `step-verify.md` (visual check section)
-- Design tokens provide concrete CSS values agents can copy
+- Source code (TSX/CSS) gives agents exact classes to copy — proven in P011 fix
+- PNG fallback with PM validation handles cases without source
+- Mechanical enforcement via existing `step-verify.md`
 
 **Cons:**
 - Touches 7+ files
-- Design token generation quality depends on LLM image understanding
+- Normalization logic adds complexity to brainstorming/plan-writing
 
-### Option B: Minimal — Just Pass Mockup Paths
-Only add `visual_refs` to plan schema and tell agents to Read the files. No design tokens, no structured spec, no visual verification formalization.
+### Option B: Source Code Only
+Only support mockup source code from GitHub repos. No PNG support, no Playwright.
 
 **Pros:**
-- Small change (2-3 files)
-- Quick to implement
+- Simplest — agent reads TSX files directly
+- No approximation — exact values always
 
 **Cons:**
-- Same "read the plan" problem — agents may Read the mockup but still implement differently
-- No structured spec means visual impression fades as context fills with code
-- No verification protocol
+- Not all mockups have source code (quick sketches, client-provided PNGs)
+- Limits PM workflow
 
 ### Decision
 
 **Chosen:** Option A
-**Rationale:** Option B doesn't solve the root cause. The P011 failure showed that agents need concrete, structured specifications (CSS values, spacing, colors) that stay in context throughout implementation, not just a visual reference that fades. Design tokens + visual anchoring + verification closes the loop.
+**Rationale:** Option B is too restrictive. PM needs flexibility — sometimes mockup is a GitHub repo, sometimes a screenshot, sometimes an AI Studio link. The unified output format (visual-spec.yaml) ensures agents always get the same dispatch format regardless of source.
 
 ## Architecture
 
-### Mockup Storage
+### 3 Inputs → 1 Output
+
+| Input | How orchestrator processes | Priority |
+|-------|--------------------------|----------|
+| **GitHub repo** (TSX/CSS source) | Read files directly via Read tool | **Tier 1** — exact values |
+| **Google AI Studio URL** | Playwright navigates → downloads source code | **Tier 1** — exact values |
+| **PNG/JPG image** | LLM reads → generates visual-spec.yaml, PM validates | **Tier 2** — approximate |
+
+Text-only descriptions ("purple gradient banner") are **forbidden** — plan-writing.md rejects them.
+
+### Mockup Storage (unified output)
 
 ```
 .aid-o/plans/{plan_id}/mockups/
-  dashboard-mockup.png           # Full-page or component-level mockup
-  sidebar-design.png             # Component-level mockup
-  design-tokens.yaml             # Auto-generated by orchestrator
+  visual-spec.yaml              # ALWAYS present — unified spec
+  CompanyDashboard.tsx          # Source code (Tier 1 — from GitHub/AI Studio)
+  Sidebar.tsx                   # Source code (Tier 1)
+  dashboard-mockup.png          # Screenshot (Tier 2 — when no source available)
 ```
 
 Mockups are co-located with the plan. When the plan is archived, mockups go with it.
@@ -83,53 +97,71 @@ Mockups are co-located with the plan. When the plan is archived, mockups go with
 ### Data Flow
 
 ```
-PM provides mockup (file/screenshot)
+PM provides mockup:
+  (A) GitHub repo URL → orchestrator clones/reads source files
+  (B) AI Studio URL → Playwright downloads source code
+  (C) PNG/JPG file → LLM reads image
         ↓
 Brainstorming: saved to plans/{plan_id}/mockups/
         ↓
-Plan-writing: orchestrator reads mockups, generates design-tokens.yaml,
-              assigns visual_refs per step
+Plan-writing: orchestrator generates visual-spec.yaml:
+  - From source (A/B): extract exact Tailwind classes, colors, spacing
+  - From PNG (C): LLM approximates → PM validates/corrects
+  Assigns visual_refs per step
         ↓
-Dispatch: Controller reads mockup → generates structured visual spec →
-          sends spec + file path to agent
+Dispatch: Controller sends agent:
+  1. visual-spec.yaml (always)
+  2. Source TSX/CSS verbatim in prompt (if available)
+  3. File paths for agent to Read
         ↓
-Agent: reads spec (primary), reads mockup (confirmation),
-       writes visual anchoring note, then implements
+Agent: reads spec + source (primary), writes Visual Anchoring, implements
         ↓
-Verification: Controller takes Playwright screenshot,
-              reads mockup + screenshot, compares semantically
+Verification: Playwright screenshot → compare against mockup/source
         ↓
 step-verify.md: includes visual comparison result
 ```
 
-### Design Tokens Format
+### visual-spec.yaml Format
 
 ```yaml
-# Auto-generated from mockup analysis — orchestrator reads PNG, produces this
+# Unified visual specification — always present regardless of input type
+source_type: github | ai_studio | image   # how this was generated
+source_accuracy: exact | approximate       # exact for source code, approximate for PNG
+
 colors:
   primary: "#6B46C1"
-  primary-gradient: "linear-gradient(135deg, #6B46C1, #9F7AEA)"
+  primary-gradient: "bg-gradient-to-r from-indigo-600 to-violet-600"
   background: "#F7FAFC"
   card-bg: "#FFFFFF"
-  card-shadow: "0 4px 6px rgba(0,0,0,0.1)"
+  card-shadow: "shadow-lg shadow-indigo-200"
 spacing:
-  grid-gap: "24px"
-  card-padding: "16px"
-  section-margin: "32px"
+  grid-gap: "gap-6"           # Tailwind class when from source
+  card-padding: "p-6"
+  section-margin: "mt-8"
 typography:
-  heading: "24px/1.2 Inter, sans-serif, 700"
-  subheading: "18px/1.3 Inter, sans-serif, 600"
-  body: "14px/1.5 Inter, sans-serif, 400"
+  heading: "text-2xl font-bold text-slate-900"
+  subheading: "text-lg font-semibold text-slate-700"
+  body: "text-sm text-slate-600"
+  label: "text-xs font-semibold text-slate-400 uppercase tracking-wider"
 layout:
-  sidebar-width: "240px"
-  main: "fluid"
-  right-panel: "320px"
+  type: "3-column"
+  sidebar: "w-60"
+  main: "flex-1"
+  right-panel: "w-80"
+
 components:
   - name: "stat-card"
-    description: "Icon left, number right, trend arrow bottom-right"
+    source_file: "CompanyDashboard.tsx"     # present only for Tier 1
+    source_lines: "48-64"                    # present only for Tier 1
+    classes: "bg-white border border-slate-200 rounded-2xl p-6 hover:border-indigo-300 hover:shadow-md"
   - name: "department-card"
-    description: "Icon top, name bold, health % green badge"
+    source_file: "CompanyDashboard.tsx"
+    source_lines: "98-124"
+    classes: "bg-white rounded-xl shadow-sm p-5 border border-slate-100"
 ```
+
+When `source_accuracy: exact` — values are extracted from actual source code (Tailwind classes, hex values).
+When `source_accuracy: approximate` — values are LLM-estimated from PNG, marked for PM validation.
 
 ## Implementation Steps
 
@@ -146,22 +178,23 @@ components:
 `plan.schema.json` defines the execution plan format consumed by `aid-epic-to-json.sh` and the Controller during dispatch. Adding `visual_refs` makes mockup references a first-class field that the dispatch protocol can rely on.
 
 **Implementation Detail:**
-Add to step properties:
+Add to step properties (inside the `additionalProperties: false` block at line ~140 — MUST add field there or validation breaks):
 ```json
 "visual_refs": {
   "type": "array",
   "items": { "type": "string" },
-  "description": "Relative paths to mockup images for this step (from project root). Controller reads these before dispatch and generates a structured visual specification for the agent.",
-  "examples": [".aid-o/plans/P011/mockups/dashboard-mockup.png"]
+  "description": "Relative paths to mockup files (source code or images) for this step. Controller reads these before dispatch and generates visual-spec.yaml.",
+  "examples": [".aid-o/plans/P011/mockups/CompanyDashboard.tsx", ".aid-o/plans/P011/mockups/dashboard-mockup.png"]
 }
 ```
-Also add optional top-level `visual_assets` object:
+Also add optional top-level `visual_assets` object (inside the top-level `additionalProperties: false` block at line ~248):
 ```json
 "visual_assets": {
   "type": "object",
   "properties": {
     "mockup_dir": { "type": "string", "description": "Path to mockups directory" },
-    "design_tokens": { "type": ["string", "null"], "description": "Path to design-tokens.yaml" }
+    "visual_spec": { "type": ["string", "null"], "description": "Path to visual-spec.yaml" },
+    "source_type": { "type": "string", "enum": ["github", "ai_studio", "image"], "description": "How mockups were provided" }
   }
 }
 ```
@@ -169,6 +202,7 @@ Also add optional top-level `visual_assets` object:
 **Error Handling:**
 - `visual_refs` is optional — plans without mockups work as before
 - Invalid paths in `visual_refs` are caught at dispatch time (Controller reads file, gets error, logs warning)
+- `additionalProperties: false` in schema requires both additions to be in the correct property blocks
 
 **Edge Cases:**
 - Plan with zero visual_refs — skip all visual dispatch logic, no design tokens
@@ -187,9 +221,9 @@ Also add optional top-level `visual_assets` object:
 **Effort:** S
 **AID Role:** backend
 
-### Step 2: Update plan-writing.md — Visual Specification section + mockup handling
+### Step 2: Update plan-writing.md — Visual Specification section + forbidden phrases + source code priority
 
-**Objective:** Extend plan-writing skill to handle mockups: generate design-tokens.yaml, add `## Visual Specification` conditional section, assign `visual_refs` per step.
+**Objective:** Extend plan-writing skill to handle mockups: generate visual-spec.yaml, add `## Visual Specification` conditional section, assign `visual_refs` per step, and ban text-only UI descriptions.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/skills/plan-writing.md` (lines ~104-108, conditional sections) — add `## Visual Specification` section
@@ -229,16 +263,22 @@ Plan-writing is invoked by brainstorming Step 8 (Mode A) or standalone (Mode B).
    Make this field optional — only for frontend/UI steps.
 
 4. Add generation rule: when mockups directory is non-empty, orchestrator MUST:
-   - Read each mockup image via Read tool
-   - Generate `design-tokens.yaml` with extracted colors, spacing, typography, layout
-   - Write `design-tokens.yaml` to `plans/{plan_id}/mockups/`
+   - **Source code available (Tier 1):** Read TSX/CSS files, extract exact Tailwind classes, hex values, spacing → generate `visual-spec.yaml` with `source_accuracy: exact`
+   - **PNG only (Tier 2):** Read images via Read tool, LLM approximates values → generate `visual-spec.yaml` with `source_accuracy: approximate` → show to PM for validation
+   - Write `visual-spec.yaml` to `plans/{plan_id}/mockups/`
    - Create Visual Specification section in the plan
    - Assign `visual_refs` to relevant frontend steps
+
+5. Add forbidden phrases to the Forbidden Phrase Detection table:
+   ```
+   | "purple gradient banner" (or any text-only UI description) | Vague — agent invents own design | Include exact CSS: `className="bg-gradient-to-r from-indigo-600 to-violet-600"` |
+   | "styled similar to mockup" | Which mockup? What styles? | Reference visual-spec.yaml component + exact classes |
+   ```
 
 **Error Handling:**
 - No mockups directory → skip Visual Specification section entirely
 - Mockup image unreadable → warn PM, continue without that mockup
-- Design token extraction uncertain → include `# APPROXIMATE` comment on uncertain values
+- Design token extraction uncertain (PNG source) → mark `source_accuracy: approximate`, PM validates
 
 **Edge Cases:**
 - Backend-only plan with no UI → no Visual Specification section, no `visual_refs` on any step
@@ -271,14 +311,16 @@ Brainstorming is the primary entry point where PM provides visual references. Cu
 
 **Implementation Detail:**
 1. In Step 1 (Context), after scanning `.aid-o/inputs/`:
-   - Detect image files (PNG, JPG, SVG, WEBP)
-   - Present found images to PM: "Found {N} images in inputs/. Associate with this plan? (Y/N)"
+   - Detect image files AND source code files (TSX, CSS, HTML)
+   - Present found files to PM: "Found {N} mockup files in inputs/. Associate with this plan? (Y/N)"
    - If Y: note for later copy (actual copy happens in Step 8 when plan ID is allocated)
 
-2. During conversation, when PM provides a file path to a mockup:
-   - Validate file exists and is an image
-   - Note for later copy
-   - Read and describe the image to confirm understanding
+2. During conversation, when PM provides a mockup reference, detect type:
+   - **GitHub repo URL** (e.g. `github.com/user/mockup-repo`) → note as `source_type: github`, clone/read in Step 8
+   - **Google AI Studio URL** → note as `source_type: ai_studio`, Playwright capture in Step 8
+   - **Local file path** (PNG/JPG) → note as `source_type: image`, copy in Step 8
+   - **Local file path** (TSX/CSS/HTML) → note as `source_type: github` (local source), copy in Step 8
+   - Validate file/URL exists, read and describe to confirm understanding
 
 3. In Step 5 (Design), if mockups are available:
    - Reference mockups in the architecture discussion
@@ -287,16 +329,21 @@ Brainstorming is the primary entry point where PM provides visual references. Cu
 
 4. In Step 8 (Document), before delegating to plan-writing:
    - Create `plans/{plan_id}/mockups/` directory
-   - Copy all associated mockups from inputs/ or noted paths
-   - Pass mockup paths and component mapping to plan-writing skill
+   - Process by source type:
+     - **github:** Read source files, copy TSX/CSS to mockups/
+     - **ai_studio:** Playwright navigates to URL, downloads source code, saves to mockups/
+     - **image:** Copy PNG/JPG to mockups/
+   - Pass mockup paths, source type, and component mapping to plan-writing skill
 
 **Error Handling:**
 - PM provides path to non-existent file → warn, ask to re-provide
+- GitHub URL inaccessible → warn PM, ask for local files instead
+- AI Studio URL requires auth → use Playwright credentials from `.aid-o/config/.env`
 - Image too large (>10MB) → warn PM, suggest optimizing before including
 
 **Edge Cases:**
 - PM provides mockups mid-conversation (not in Step 1) → still capture and associate
-- PM provides URL instead of file → note for Tier 2 (URL capture), for now ask for local file
+- Mixed sources (some GitHub, some PNG) → each processed by its type, all output to same mockups/
 - No mockups at all → proceed normally, no Visual Specification in plan
 
 **Dependencies:**
@@ -327,39 +374,40 @@ Pipeline §4 defines the EXECUTE state dispatch flow. Context assembly (7 items 
 1. Add item 8 to Context assembly list:
    ```
    8. `VISUAL CONTEXT` — loaded when step has `visual_refs` in plan.json:
-      a. Controller reads each mockup image via Read tool
-      b. Controller generates structured visual specification:
-         - Layout: grid structure, column widths, component placement
-         - Colors: exact hex values, gradients, shadows
-         - Typography: font family, sizes, weights, line heights
-         - Spacing: margins, padding, gaps (in px/rem)
-         - Components: list with visual description
-      c. If `design-tokens.yaml` exists in mockup dir, include verbatim
-      d. Include file paths for agent to Read as confirmation
+      a. Read `visual-spec.yaml` from mockup dir — include VERBATIM in prompt
+      b. If source files exist (TSX/CSS): read relevant source file + lines
+         from visual-spec.yaml component entries → paste VERBATIM in prompt
+      c. If only PNG: include file paths for agent to Read as confirmation
+      d. Priority: source code > visual-spec.yaml > PNG
    ```
 
 2. Add visual spec format for dispatch prompt:
    ```
-   ## Visual Specification (from mockup analysis)
+   ## Visual Specification
 
-   **Design Tokens:** (copy from design-tokens.yaml or generate)
-   {YAML content}
+   **Source:** visual-spec.yaml (source_accuracy: exact|approximate)
 
-   **Visual References (read these for confirmation):**
-   - .aid-o/plans/P011/mockups/dashboard-mockup.png — target dashboard layout
-   - .aid-o/plans/P011/mockups/sidebar-mockup.png — sidebar design
+   {visual-spec.yaml content — VERBATIM}
 
-   IMPORTANT: Read each visual reference file BEFORE implementing.
+   **Mockup Source Code (adapt to our data layer, DO NOT invent your own design):**
+   ```tsx
+   // From CompanyDashboard.tsx lines 48-64:
+   <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-6 text-white shadow-lg shadow-indigo-200">
+     ...exact JSX from mockup...
+   </div>
+   ```
+
+   IMPORTANT: Use the EXACT classes from the source code above.
    Write a "Visual Anchoring" section in your output BEFORE writing any code.
    ```
 
 3. Add rule 6 to Agent Dispatch Protocol:
    ```
    6. **Visual context for UI steps** — when step has `visual_refs`:
-      Controller reads each mockup, generates structured visual spec with
-      concrete CSS values, includes design-tokens.yaml verbatim, and adds
-      file paths for agent to Read. Agent MUST write Visual Anchoring
-      section before implementation code.
+      Controller reads visual-spec.yaml + source code (if available) and
+      pastes VERBATIM into prompt. Agent receives exact Tailwind classes
+      and JSX structure — adapts to our data layer, does NOT invent design.
+      Agent MUST write Visual Anchoring section before implementation code.
    ```
 
 **Error Handling:**
@@ -580,18 +628,22 @@ All changes are documentation/schema changes in the plugin. Testing approach:
 
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
-| LLM generates inaccurate design tokens from mockup | Medium | Medium | Include `# APPROXIMATE` caveat, PM can edit tokens manually |
+| LLM generates inaccurate visual-spec from PNG | Medium | Medium | `source_accuracy: approximate` + PM validation; source code (Tier 1) avoids this entirely |
 | Agents skip Visual Anchoring despite role card constraint | Medium | High | Step-verify.md visual check catches it post-hoc; increment-step blocks without PASS |
-| Mockup images bloat git repo | Low | Low | Optimize images before adding; consider .gitattributes for LFS if >50MB |
-| Frontend agent reads mockup but still implements differently | Medium | Medium | Structured spec (design tokens) provides concrete CSS values; visual comparison catches drift |
+| Mockup source/images bloat git repo | Low | Low | Optimize images before adding; source files are small (<100KB) |
+| Frontend agent has source code but still implements differently | Low | Medium | Source code gives exact classes — much less room for interpretation than PNG |
+| AI Studio Playwright capture fails (auth, timeout) | Medium | Low | Fallback: PM downloads source manually and provides as local file |
 
 ## Success Criteria
 
-- [ ] A frontend step with visual_refs receives: design tokens + structured visual spec + mockup paths in dispatch prompt
+- [ ] A frontend step with visual_refs receives: visual-spec.yaml + source code verbatim (if available) + mockup paths in dispatch prompt
 - [ ] Frontend agent produces Visual Anchoring section before implementation code
 - [ ] Post-step visual verification produces MATCH/PARTIAL/MISMATCH verdict
 - [ ] Plans without mockups are completely unaffected (zero overhead)
+- [ ] 3 input types (GitHub, AI Studio, PNG) all produce the same unified output format
+- [ ] Text-only UI descriptions are rejected by plan-writing forbidden phrase detection
 - [ ] All 7 files modified, plugin validates, CHANGELOGs updated
+- [ ] End-to-end: plan with mockups → dispatched agent receives visual-spec + source in prompt
 
 ## Next Steps
 
