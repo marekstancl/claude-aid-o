@@ -177,6 +177,28 @@ After workspace creation, discover and cache the plugin installation path:
 
 This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is always overwritten (not idempotent — path may change after plugin update).
 
+## Git Hook Installation
+
+After workspace creation (and on every re-run), install or update the FSM guard pre-commit hook:
+
+1. **Source template:** `{plugin_path}/defaults/hooks/pre-commit`
+2. **Target:** `.git/hooks/pre-commit`
+3. **Logic:**
+   - If target does NOT exist → copy template, `chmod +x`
+   - If target exists AND contains `AID-ORCHESTRATOR-HOOK-START` → replace block between START/END markers with new version (upgrade)
+   - If target exists WITHOUT marker → append template content to end of file (coexistence)
+4. **Skip if** `.git/` directory does not exist (not a git repo)
+
+```
+Hook installation:
+  [INSTALLED] .git/hooks/pre-commit — AID FSM guard (new)
+  [UPGRADED]  .git/hooks/pre-commit — AID FSM guard (updated block)
+  [APPENDED]  .git/hooks/pre-commit — AID FSM guard (added to existing hook)
+  [SKIPPED]   No .git/ directory found
+```
+
+**What the hook does:** On `task/*` and `epic/*` branches, checks FSM state. Blocks commits in DONE/review (Curator+Auditor not yet run) and READY (execution not started). All other branches pass unconditionally.
+
 ## Lazy-Created (NOT at init time)
 
 These files/dirs are created on first use of the feature that needs them:

@@ -14,6 +14,18 @@ case "$BUMP_TYPE" in
   *) echo "ERROR: bump type must be patch|minor|major" >&2; exit 1 ;;
 esac
 
+# Layer 2: FSM state check (soft — only when state.yaml exists)
+STATE_FILE=$(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null | head -1)
+if [[ -n "$STATE_FILE" ]]; then
+  DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}')
+  FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}')
+  if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
+    echo "ERROR: FSM state is DONE but done_phase=${DONE_PHASE:-<not set>}." >&2
+    echo "Run Curator + Auditor first, then: aid-fsm.sh done-advance review release" >&2
+    exit 1
+  fi
+fi
+
 # Read current version from root package.json
 [[ -f "package.json" ]] || { echo "ERROR: package.json not found in current directory" >&2; exit 1; }
 CURRENT=$(jq -r .version package.json)

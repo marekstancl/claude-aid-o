@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# AID-ORCHESTRATOR-HOOK-START (do not edit this block manually)
+# AID Orchestrator — FSM guard pre-commit hook
+# Blocks commits on FSM-managed branches when DONE state review is incomplete.
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+
+# Only check on FSM-managed branches
+case "$BRANCH" in
+  task/*|epic/*) ;;
+  *) exit 0 ;;
+esac
+
+STATE_FILE=$(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null | head -1)
+[[ -z "$STATE_FILE" ]] && exit 0
+
+FSM_STATE=$(grep '^state:' "$STATE_FILE" | awk '{print $2}')
+DONE_PHASE=$(grep '^done_phase:' "$STATE_FILE" | awk '{print $2}')
+
+if [[ "$FSM_STATE" == "DONE" && "$DONE_PHASE" != "release" ]]; then
+  echo "AID HOOK: Commit blocked — FSM is in DONE/${DONE_PHASE:-review}." >&2
+  echo "Run Curator + Auditor, then: aid-fsm.sh done-advance review release" >&2
+  exit 1
+fi
+
+if [[ "$FSM_STATE" == "READY" ]]; then
+  echo "AID HOOK: Commit blocked — FSM is in READY (not yet executing)." >&2
+  exit 1
+fi
+# AID-ORCHESTRATOR-HOOK-END
+exit 0

@@ -328,9 +328,13 @@ set via `set-field`. The decision is automatically cleared after the transition 
 
 **LLM role:** Orchestrate pre-merge review and PM decision.
 
-**Mechanical enforcement:** DONE uses two sub-phases (`review` → `release`) managed by
-`aid-fsm.sh done-advance`. The `review` phase is auto-set on GATES→DONE transition.
-Advancing to `release` requires evidence: curator-report, audit-report, and `pm_decision=merge`.
+**Mechanical enforcement (3 layers):**
+1. `aid-fsm.sh done-advance` — requires curator-report, audit-report, `pm_decision=merge`
+2. `aid-release.sh` — refuses release if `done_phase != release`
+3. Git pre-commit hook — blocks commits on `task/*/epic/*` branches in DONE/review
+
+Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
+on GATES→DONE transition.
 
 ### Sub-phase: `review`
 

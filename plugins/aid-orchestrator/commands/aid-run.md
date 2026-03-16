@@ -52,6 +52,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 6. **Steps must complete:** `EXECUTE→GATES` requires `current_step >= total_steps`
 7. **Do NOT edit state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
 8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
+9. **Multi-layer defense** — `aid-release.sh` and git pre-commit hook independently verify `done_phase` before allowing release/commit on FSM branches
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
