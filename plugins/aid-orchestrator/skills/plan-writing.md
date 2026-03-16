@@ -1,3 +1,9 @@
+---
+name: plan-writing
+description: Exhaustive plan document authoring with forbidden phrase detection, completeness gates, and traceability verification
+user_invocable: false
+---
+
 # Plan Writing — Exhaustive Plan Document Authoring
 
 **Skill:** plan-writing

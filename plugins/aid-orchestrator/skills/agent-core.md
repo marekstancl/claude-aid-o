@@ -1,3 +1,9 @@
+---
+name: agent-core
+description: Core agent rules — think-first protocol, role identification, file resolution, script execution, escalation
+user_invocable: false
+---
+
 # agent-core
 
 ## TL;DR — Absolute Rules

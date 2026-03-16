@@ -1,3 +1,9 @@
+---
+name: planner
+description: EPIC to plan.json conversion — dependency graph construction, wave assignment, parallel group detection, run splitting
+user_invocable: false
+---
+
 # Planner — EPIC to Plan JSON
 
 **Skill:** planner

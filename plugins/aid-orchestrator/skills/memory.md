@@ -1,3 +1,9 @@
+---
+name: memory
+description: Project context (project.yaml), active work tracking, timeline queries, backlog, quick logs
+user_invocable: false
+---
+
 # Memory — Project Context and Knowledge
 
 ## Project Profile (always available)

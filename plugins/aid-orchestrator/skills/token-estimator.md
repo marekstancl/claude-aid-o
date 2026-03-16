@@ -1,3 +1,9 @@
+---
+name: token-estimator
+description: Dispatch token tracking — character-based heuristic, execution estimation, calibration, budget alerts
+user_invocable: false
+---
+
 # Token Estimator — Dispatch Token Tracking
 
 **Skill:** token-estimator

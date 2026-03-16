@@ -1,3 +1,9 @@
+---
+name: brainstorming
+description: Interactive 9-step design and planning — questions, approaches, risk assessment, design validation, context persistence
+user_invocable: false
+---
+
 # Brainstorming — Interactive Design and Planning Skill
 
 **Skill:** brainstorming

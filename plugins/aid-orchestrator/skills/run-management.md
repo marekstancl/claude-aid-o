@@ -1,3 +1,9 @@
+---
+name: run-management
+description: Run lifecycle management — ID system, active work tracking, phase transitions, handoff protocol
+user_invocable: false
+---
+
 # Run Management - Instructions
 
 **Skill:** run-management

@@ -1,3 +1,9 @@
+---
+name: improvement-proposals
+description: Standard format for improvement notes — collection protocol, deduplication, Curator 3-tier evaluation
+user_invocable: false
+---
+
 # Improvement Proposals Skill
 
 **Purpose:** Define the standard format for `improvement_notes`, collection protocol,

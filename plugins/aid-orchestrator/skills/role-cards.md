@@ -1,3 +1,9 @@
+---
+name: role-cards
+description: Implementer role cards (8 roles) and verifier focus cards (4 roles) for all AID agents
+user_invocable: false
+---
+
 # Role Cards
 
 **Last Updated:** 2026-03-03

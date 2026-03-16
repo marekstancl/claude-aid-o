@@ -1,3 +1,9 @@
+---
+name: agent-protocol
+description: Universal agent boilerplate — input/output format, git discipline, pre-output quality check
+user_invocable: false
+---
+
 # Agent Protocol
 
 **Last Updated:** 2026-03-03

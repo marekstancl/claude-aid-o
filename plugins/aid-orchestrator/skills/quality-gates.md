@@ -1,3 +1,9 @@
+---
+name: quality-gates
+description: Six quality gates (tests, lint, build, security scan, docs, scope check) with gate execution protocol
+user_invocable: false
+---
+
 # Quality Gates - Instructions
 
 **Skill:** quality-gates

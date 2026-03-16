@@ -1,3 +1,9 @@
+---
+name: pipeline
+description: AID v2 pipeline reference — 6-state FSM (READY, EXECUTE, GATES, ESCALATION, DONE, ERROR) with state contracts
+user_invocable: false
+---
+
 # AID Orchestrator v2 — Pipeline Reference
 
 **Critical design rule:** This file describes WHAT happens in each state and what the LLM
