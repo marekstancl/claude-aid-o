@@ -294,9 +294,36 @@ cmd_verify_state() {
 
 cmd_increment_step() {
   local state_file="$1"
+  local force="false"
+  [[ "${2:-}" == "--force" ]] && force="true"
+
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
   local step
   step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
+
+  # Precondition: step verification evidence must exist
+  if [[ "$force" != "true" ]]; then
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+
+    if [[ ! -f "${evidence_dir}/step-${step}-verify.md" ]]; then
+      echo "PRECONDITION FAIL: Step verification evidence not found." >&2
+      echo "Expected: ${evidence_dir}/step-${step}-verify.md" >&2
+      echo "Write verification (AC checklist + result) before advancing to next step." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="missing_step_verify"
+      exit 1
+    fi
+  else
+    local timeline
+    timeline=$(derive_timeline "$state_file") || true
+    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="increment-step" step="$step"
+    echo "WARNING: --force used, skipping step verification check" >&2
+  fi
+
   local tmp="${state_file}.tmp"
   sed "s/^current_step: .*/current_step: $((step + 1))/" "$state_file" > "$tmp"
   mv "$tmp" "$state_file"

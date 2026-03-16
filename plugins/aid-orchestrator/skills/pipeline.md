@@ -159,6 +159,32 @@ Dispatch prompt contains (in order):
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
 
+### Agent Dispatch Protocol (non-negotiable)
+
+These 5 rules apply to EVERY agent dispatch — frontend, backend, tests, migrations.
+Violating them is the #1 cause of agents ignoring the plan.
+
+1. **VERBATIM plan content, not references** — extract the relevant plan section
+   (code snippets, AC, specifications) and paste it VERBATIM into the agent prompt.
+   NEVER send "read the plan and implement Step X". The agent MUST receive the actual
+   content, not a file path to read on its own.
+
+2. **Visual assets as context** — if mockups, screenshots, or design references exist
+   for the step, include them in the agent prompt. Text description of a visual
+   ("purple gradient banner") is NOT a substitute for the actual image.
+
+3. **Post-step verification against AC** — after agent completes, check EVERY
+   acceptance criterion from the plan 1-by-1. Write results to
+   `evidence/{epic_id}/{run_id}/step-{N}-verify.md`. `increment-step` REFUSES
+   to advance without this file.
+
+4. **Visual verification for UI steps** — after any step that changes UI: take a
+   Playwright screenshot and compare against mockup/plan. "Compiles" ≠ "looks right".
+   Include comparison in step-verify.md.
+
+5. **Resume on failure** — if AC are not met, resume the agent with specific failures
+   (not "try again"). Max 2 fix attempts, then ESCALATION.
+
 ### Standards context (item 7)
 
 When `standards.active != 'none'` in `.aid-o/config/project.yaml`:
@@ -200,7 +226,25 @@ After agent completes:
 - Forbidden paths modified? → Re-dispatch once with warning; 2nd violation → ESCALATION
 - Credit exhaustion detected? → Pause to `state: paused`, notify PM
 
-On pass: `aid-fsm.sh increment-step <state_file>`
+**Step verification evidence (mandatory):**
+After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
+```markdown
+# Step {N} Verification — {step_title}
+
+## Acceptance Criteria
+- [x] AC1 description — PASS (evidence: ...)
+- [x] AC2 description — PASS (evidence: ...)
+- [ ] AC3 description — FAIL (reason: ...)
+
+## Visual Check (UI steps only)
+Screenshot: {path or "N/A"}
+Matches mockup: YES/NO — {diff notes}
+
+## Result: PASS / FAIL
+```
+
+On PASS: `aid-fsm.sh increment-step <state_file>` (refuses without step-verify.md)
+On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 
 ### Review Checkpoint CP2 (per-step)
 

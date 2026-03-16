@@ -53,6 +53,9 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 7. **Do NOT edit state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
 8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
 9. **Multi-layer defense** — `aid-release.sh` and git pre-commit hook independently verify `done_phase` before allowing release/commit on FSM branches
+10. **Verbatim plan content** — NEVER send agents "read the plan". Extract relevant section and paste VERBATIM into agent prompt. Include code snippets, AC, mockups.
+11. **Step verification evidence** — `increment-step` REFUSES to advance without `step-{N}-verify.md` in evidence dir. Write AC checklist + visual check after every step.
+12. **Visual verification** — after any UI step: Playwright screenshot + compare with mockup. "Compiles" ≠ "looks right".
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
