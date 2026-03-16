@@ -81,6 +81,17 @@ RULE 6: For trivial topics, keep analysis to 3-4 lines. Skip dimensions/challeng
         that don't apply.
 RULE 7: No solution proposals or architecture suggestions — understanding and scoping only.
 RULE 8: Reference any input files PM provided in .aid-o/inputs/ briefly in analysis.
+```
+
+**Mockup detection:** After scanning inputs, detect mockup files (PNG, JPG, TSX, CSS, HTML).
+Present to PM: "Found {N} mockup files. Associate with this plan? (Y/N)". Note for copy in Step 8.
+During conversation, PM may provide mockup references in 3 forms:
+- **GitHub repo URL** → note as `source_type: github`
+- **Google AI Studio URL** → note as `source_type: ai_studio`
+- **Local file path** (image or source) → note as `source_type: image` or `github` (local source)
+All mockup references are collected and processed in Step 8 before delegating to plan-writing.
+
+```
 RULE 9: ASSESS SCOPE SIZE. If the topic describes multiple independent subsystems
         (e.g., "platform with chat, file storage, billing, and analytics"), flag this
         BEFORE asking detail questions. Present decomposition: list independent pieces,
@@ -223,18 +234,25 @@ RULE 7: After all sections: present summary with statuses, ask for final approva
 
 ```
 RULE 1: NEVER write files without explicit PM approval (Step 7 in command flow).
-RULE 2: Delegate plan writing to plan-writing skill (skills/plan-writing.md).
+RULE 2: **Mockup processing (before plan-writing delegation):**
+        - Create `plans/{plan_id}/mockups/` directory
+        - Process by source type:
+          - **github:** Read source files, copy TSX/CSS to mockups/
+          - **ai_studio:** Playwright navigates to URL, downloads source code, saves to mockups/
+          - **image:** Copy PNG/JPG to mockups/
+        - Pass mockup paths, source type, and component mapping to plan-writing skill
+RULE 3: Delegate plan writing to plan-writing skill (skills/plan-writing.md).
         Collect all approved content from Steps 3-7 (questions, chosen approach,
         risk table, design sections, PM modifications, final approval).
         Invoke plan-writing in Mode A (Post-Brainstorming), passing all collected
         sections + project context. Plan-writing handles document structure, quality
         gates, forbidden phrases, completeness verification, and handoff.
         After plan-writing completes, brainstorming is DONE.
-RULE 3: Pass all approved design details to plan-writing — do not summarize or omit.
+RULE 4: Pass all approved design details to plan-writing — do not summarize or omit.
         If PM approved a modification, the modified version goes into the document.
-RULE 4: Generate plan IDs per `skills/run-management.md` → ID System section:
+RULE 5: Generate plan IDs per `skills/run-management.md` → ID System section:
         Plan: P{NNN} (from counter.yaml, pre-allocated at Step 1).
-RULE 5: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
+RULE 6: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
         (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
 ```
 
@@ -320,6 +338,10 @@ Plan-writing skill presents the handoff (see `skills/plan-writing.md` → Post-W
 
 Use templates from `defaults/templates/design-sections.md` as guidance when presenting design sections in Step 5. Adapt based on the specific topic. Core sections: Architecture, Data Model, API. Add others as needed (Implementation, Testing, Security, Risks, Infrastructure, Migration).
 
+**Mockup mapping:** If mockups are available, ask PM which mockups map to which components/pages.
+Record component↔mockup mapping (e.g., "CompanyDashboard.tsx → dashboard page, lines 48-64 → stat cards").
+This mapping is passed to plan-writing for per-step `visual_refs` assignment.
+
 ---
 
 ## Common Brainstorming Patterns
@@ -348,4 +370,4 @@ Use templates from `defaults/templates/design-sections.md` as guidance when pres
 
 ---
 
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-16

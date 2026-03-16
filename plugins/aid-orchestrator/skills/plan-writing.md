@@ -106,6 +106,7 @@ The plan MUST contain these sections in this order:
 - `## Security` — Auth, permissions, data protection (when security was discussed)
 - `## UI Design` — Components, layouts, interactions (when frontend was discussed)
 - `## Migration Plan` — Before/after, rollback, data migration (when migration was discussed)
+- `## Visual Specification` — visual-spec.yaml, mockup source code references, component breakdown (when mockups exist in `plans/{plan_id}/mockups/`)
 
 **Section omission rule:** If brainstorming did not discuss a topic (e.g., no frontend, no API), the corresponding section is omitted entirely. Do NOT add empty or placeholder sections. Do NOT invent content for sections that were not discussed.
 
@@ -241,6 +242,7 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 
 **Effort:** {S / M / L}
 **AID Role:** {architect / domain / backend / frontend / qa / security / observability / docs / release}
+**Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 ```
 
 ### Mandatory Fields Per Step
@@ -285,6 +287,8 @@ These phrases indicate the AI is taking shortcuts instead of providing real deta
 | "refactor as necessary" | Unbounded scope | List each specific refactoring operation |
 | "configure appropriately" | What values? | Specify exact configuration keys and values |
 | "etc." / "and so on" / "..." | Hiding missing detail | Complete the list — if you can't, you don't know enough |
+| "purple gradient banner" (or any text-only UI color/style description) | Vague — agent invents own design | Include exact CSS: `className="bg-gradient-to-r from-indigo-600 to-violet-600"` or reference visual-spec.yaml |
+| "styled similar to mockup" | Which mockup? What styles? | Reference visual-spec.yaml component name + exact Tailwind classes |
 
 ### Forbidden Phrase Detection Protocol
 
@@ -683,4 +687,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-02-28
+**Last Updated:** 2026-03-16

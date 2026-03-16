@@ -113,6 +113,12 @@
             "default": false,
             "description": "Indicates this is an auto-generated wiring step that integrates shared files from parallel steps. Set to true only by the Planner's POST_WAVE_WIRING_CHECK."
           },
+          "visual_refs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Relative paths to mockup files (source code or images) for this step. Controller reads these before dispatch and generates visual-spec.yaml.",
+            "examples": [".aid-o/plans/P011/mockups/CompanyDashboard.tsx", ".aid-o/plans/P011/mockups/dashboard-mockup.png"]
+          },
           "wiring_context": {
             "type": "object",
             "description": "Context for wiring steps (only present when wiring=true). Describes which files are shared, which steps produced them, and what integration actions are expected.",
@@ -226,6 +232,16 @@
         "type": "string",
         "enum": ["tests_pass", "lint_pass", "security_scan_pass", "docs_updated"]
       }
+    },
+    "visual_assets": {
+      "type": "object",
+      "description": "Visual mockup metadata for the plan",
+      "properties": {
+        "mockup_dir": { "type": "string", "description": "Path to mockups directory" },
+        "visual_spec": { "type": ["string", "null"], "description": "Path to visual-spec.yaml" },
+        "source_type": { "type": "string", "enum": ["github", "ai_studio", "image"], "description": "How mockups were provided" }
+      },
+      "additionalProperties": false
     },
     "budget": {
       "type": "object",

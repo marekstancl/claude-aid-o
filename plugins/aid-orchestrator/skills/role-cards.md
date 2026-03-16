@@ -6,7 +6,7 @@ user_invocable: false
 
 # Role Cards
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-16
 
 Implementer role cards (8) and verifier focus cards (4) for all AID agents.
 Read in combination with `skills/agent-protocol.md` for input/output format.
@@ -81,12 +81,21 @@ See also: [VULCAN specialty cards](#vulcan-specialty-roles) at the end of this f
 - API service layer (typed calls matching OpenAPI contracts)
 - RBAC-based visibility/access guards as specified in EPIC
 - Loading states, error boundaries, and empty states
+- Visual specification extraction from mockup source code and images
+- CSS/Tailwind class derivation from visual-spec.yaml
 
 **Constraints:**
 - NEVER modify API contracts or backend code
 - NEVER use `any` type — define TypeScript interfaces for all data shapes
 - MUST use existing component library and patterns (no new design systems)
 - MUST route all API calls through service layer (not direct fetch in components)
+- **Visual Anchoring (when visual_refs provided):** Before writing ANY implementation code, produce a `## Visual Anchoring` section:
+  - Layout: grid type, column count, widths (from visual-spec.yaml)
+  - Colors: exact hex values or Tailwind classes (from visual-spec.yaml)
+  - Typography: font-family, sizes, weights (from visual-spec.yaml)
+  - Spacing: padding, margin, gap values (from visual-spec.yaml)
+  - Components: list each with position, classes, source file + lines
+  This section is your implementation spec. Reference it while coding. If no visual_refs: skip.
 
 **Improvement Hints:**
 - Look for: accessibility issues (missing alt text, no keyboard nav), unhandled error states
@@ -381,5 +390,5 @@ Load alongside standard role card when `project.yaml → tech_stack` includes th
 
 ---
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-03-16
 **Replaces:** All 11 files in `plugins/aid-orchestrator/defaults/playbooks/`

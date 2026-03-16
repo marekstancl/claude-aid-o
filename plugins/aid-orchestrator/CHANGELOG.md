@@ -20,7 +20,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Git Pre-Commit Hook** — FSM guard on `task/*` and `epic/*` branches blocks commits in DONE/review and READY states (Layer 3 defense)
 - **Hook Auto-Install** — `/aid-init` installs/upgrades pre-commit hook with marker-based append (coexists with existing hooks)
 - **Step Verification Enforcement** — `increment-step` refuses to advance without `step-{N}-verify.md` evidence file (AC checklist + visual check)
-- **Agent Dispatch Protocol** — 5 non-negotiable rules in pipeline.md: verbatim plan content, visual assets, post-step AC verification, visual verification for UI, resume-on-failure
+- **Agent Dispatch Protocol** — 6 non-negotiable rules in pipeline.md: verbatim plan content, visual assets, post-step AC verification, visual verification for UI, resume-on-failure, visual context dispatch
+- **Visual Assets Pipeline** — 3 input types (GitHub repo, AI Studio URL, PNG) → unified `visual-spec.yaml` output; `visual_refs` field in plan.schema.json; visual dispatch protocol in pipeline.md §4; Visual Anchoring requirement in frontend role card; screenshot comparison protocol (MATCH/PARTIAL/MISMATCH); forbidden text-only UI descriptions in plan-writing.md
 
 ### Changed
 - **FSM Valid States** — added ERROR to `VALID_STATES`; added `→ERROR` transitions from READY, EXECUTE, GATES, ESCALATION

@@ -155,13 +155,19 @@ Dispatch prompt contains (in order):
 5. Previous step outputs — from `evidence/.../steps/` (controlled by `step.context_scope`)
 6. `PERMISSIONS CONTEXT` — from `.aid-o/config/policies/permissions.yaml`
 7. `STANDARDS CONTEXT` — loaded when `project.yaml → standards.active != 'none'`
+8. `VISUAL CONTEXT` — loaded when step has `visual_refs` in plan.json:
+   a. Read `visual-spec.yaml` from mockup dir — include VERBATIM in prompt
+   b. If source files exist (TSX/CSS): read relevant source file + lines
+      from visual-spec.yaml component entries → paste VERBATIM in prompt
+   c. If only PNG: include file paths for agent to Read as confirmation
+   d. Priority: source code > visual-spec.yaml > PNG
 
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
 
 ### Agent Dispatch Protocol (non-negotiable)
 
-These 5 rules apply to EVERY agent dispatch — frontend, backend, tests, migrations.
+These 6 rules apply to EVERY agent dispatch — frontend, backend, tests, migrations.
 Violating them is the #1 cause of agents ignoring the plan.
 
 1. **VERBATIM plan content, not references** — extract the relevant plan section
@@ -171,7 +177,7 @@ Violating them is the #1 cause of agents ignoring the plan.
 
 2. **Visual assets as context** — if mockups, screenshots, or design references exist
    for the step, include them in the agent prompt. Text description of a visual
-   ("purple gradient banner") is NOT a substitute for the actual image.
+   ("purple gradient banner") is NOT a substitute for the actual image or source code.
 
 3. **Post-step verification against AC** — after agent completes, check EVERY
    acceptance criterion from the plan 1-by-1. Write results to
@@ -184,6 +190,12 @@ Violating them is the #1 cause of agents ignoring the plan.
 
 5. **Resume on failure** — if AC are not met, resume the agent with specific failures
    (not "try again"). Max 2 fix attempts, then ESCALATION.
+
+6. **Visual context for UI steps** — when step has `visual_refs`:
+   Controller reads `visual-spec.yaml` + source code (if available) and pastes
+   VERBATIM into prompt. Agent receives exact Tailwind classes and JSX structure —
+   adapts to our data layer, does NOT invent design. Agent MUST write Visual
+   Anchoring section before implementation code.
 
 ### Standards context (item 7)
 
@@ -236,15 +248,38 @@ After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
 - [x] AC2 description — PASS (evidence: ...)
 - [ ] AC3 description — FAIL (reason: ...)
 
-## Visual Check (UI steps only)
-Screenshot: {path or "N/A"}
-Matches mockup: YES/NO — {diff notes}
+## Visual Check (UI steps only — skip if no visual_refs)
+Mockup: {mockup_path}
+Screenshot: {evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png}
+
+| Aspect | Match | Notes |
+|--------|-------|-------|
+| Layout (grid, columns, placement) | YES/NO | {details} |
+| Colors (primary, bg, text, borders) | YES/NO | {details} |
+| Typography (sizes, weights, fonts) | YES/NO | {details} |
+| Spacing (padding, margins, gaps) | YES/NO | {details} |
+| Components (presence, completeness) | YES/NO | {details} |
+
+Verdict: MATCH / PARTIAL / MISMATCH
 
 ## Result: PASS / FAIL
 ```
 
 On PASS: `aid-fsm.sh increment-step <state_file>` (refuses without step-verify.md)
 On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
+
+**Visual verification protocol (frontend steps with visual_refs):**
+
+1. **Screenshot capture:** Start dev server if not running → Playwright navigates to
+   affected page → screenshot at 1280x720 → save to `evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png`
+2. **Semantic comparison:** Controller reads both images (mockup + screenshot), produces
+   the Visual Check table above (5 aspects: layout, colors, typography, spacing, components)
+3. **Thresholds:**
+   - **MATCH** — all aspects YES → PASS
+   - **PARTIAL** — layout YES, 1-2 minor color/spacing diffs → PASS_WITH_NOTES
+   - **MISMATCH** — layout NO or 3+ aspects NO → FAIL → resume agent with specific visual failures
+4. **FAIL handling:** Resume agent with the comparison table + mockup path. Max 2 visual fix attempts → ESCALATION.
+5. **Skip conditions:** No visual_refs on step → skip. Dev server not running → warn, skip, note in verify.
 
 ### Review Checkpoint CP2 (per-step)
 
@@ -659,7 +694,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-03-15
+**Last Updated:** 2026-03-16
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
