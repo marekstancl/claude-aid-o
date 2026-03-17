@@ -108,6 +108,11 @@ The plan MUST contain these sections in this order:
 - `## Migration Plan` — Before/after, rollback, data migration (when migration was discussed)
 - `## Visual Specification` — visual-spec.yaml, mockup source code references, component breakdown (when mockups exist in `plans/{plan_id}/mockups/`)
 
+**source_type: companion** — HTML files from Visual Companion brainstorming session.
+Extract CSS classes, layout structure (grid/flex/columns), color values, and component
+structure from HTML. The companion HTML IS the mockup source code — agents receive it
+verbatim, same as GitHub TSX/CSS source.
+
 **Section omission rule:** If brainstorming did not discuss a topic (e.g., no frontend, no API), the corresponding section is omitted entirely. Do NOT add empty or placeholder sections. Do NOT invent content for sections that were not discussed.
 
 ---
@@ -687,4 +692,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17

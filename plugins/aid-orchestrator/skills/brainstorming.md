@@ -89,7 +89,26 @@ During conversation, PM may provide mockup references in 3 forms:
 - **GitHub repo URL** → note as `source_type: github`
 - **Google AI Studio URL** → note as `source_type: ai_studio`
 - **Local file path** (image or source) → note as `source_type: image` or `github` (local source)
+- **Visual Companion** → HTML prototypes from active companion session. Note as `source_type: companion`.
 All mockup references are collected and processed in Step 8 before delegating to plan-writing.
+
+**Visual Companion offer:** After analysis, if the topic involves UI, visual design,
+or layout decisions, offer the browser companion:
+"This topic involves visual decisions. Want to use the Visual Companion?
+It shows interactive mockups in your browser during design.
+  (Y) Yes — start companion server (requires Node.js)
+  (N) No — text-only brainstorming (default)"
+
+If PM accepts:
+1. Start server: `bash {plugin_path}/lib/brainstorm-server/start-server.sh --project-dir {project_root}`
+2. Run `cd {plugin_path}/lib/brainstorm-server && npm install` if node_modules missing (first use)
+3. Save screen_dir from server response. Tell PM to open the URL.
+4. Note `visual_companion: active` in interim document
+5. See `skills/visual-companion.md` for the full companion guide
+
+If PM declines or topic is non-visual: skip. No re-asking.
+Fallback: If server fails to start → log warning, continue text-only.
+Offer `frontend-design` skill as alternative for static mockup generation.
 
 ```
 RULE 9: ASSESS SCOPE SIZE. If the topic describes multiple independent subsystems
@@ -217,6 +236,16 @@ RULE 3: Ask PM to confirm, add, or remove risks. ONE question: "Any risks
 RULE 4: For trivial topics (S-effort, single-component), reduce to 2 risks minimum.
 ```
 
+### Visual Delivery Decision (when companion is active)
+
+For each question/presentation in Steps 3-6, decide: browser or terminal?
+See `skills/visual-companion.md` → "When to Use" for the full taxonomy.
+
+**Quick rule:** A question *about* a UI topic is not automatically visual.
+"What kind of wizard?" = terminal. "Which wizard layout?" = browser.
+
+When returning to terminal after visual question, push a waiting screen to clear stale content.
+
 ### Design Validation Protocol
 
 ```
@@ -240,6 +269,8 @@ RULE 2: **Mockup processing (before plan-writing delegation):**
           - **github:** Read source files, copy TSX/CSS to mockups/
           - **ai_studio:** Playwright navigates to URL, downloads source code, saves to mockups/
           - **image:** Copy PNG/JPG to mockups/
+          - **companion:** Copy approved HTML screens from companion session dir to mockups/.
+            Stop server: `bash {plugin_path}/lib/brainstorm-server/stop-server.sh {screen_dir}`
         - Pass mockup paths, source type, and component mapping to plan-writing skill
 RULE 3: Delegate plan writing to plan-writing skill (skills/plan-writing.md).
         Collect all approved content from Steps 3-7 (questions, chosen approach,
@@ -370,4 +401,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17

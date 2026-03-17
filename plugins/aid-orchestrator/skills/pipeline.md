@@ -160,7 +160,8 @@ Dispatch prompt contains (in order):
    b. If source files exist (TSX/CSS): read relevant source file + lines
       from visual-spec.yaml component entries → paste VERBATIM in prompt
    c. If only PNG: include file paths for agent to Read as confirmation
-   d. Priority: source code > visual-spec.yaml > PNG
+   d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
+   e. Priority: source code > visual-spec.yaml > PNG
 
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
@@ -694,7 +695,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-03-16
+**Last Updated:** 2026-03-17
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
