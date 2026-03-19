@@ -250,6 +250,34 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 ```
 
+### E2E Verification Step (auto-added as last step)
+
+If the plan implements a feature with user-facing output (API, UI, data pipeline), the LAST step
+of the LAST phase MUST be an E2E Pipeline Verification step with `role: e2e`:
+
+```
+### Step {N}: E2E Pipeline Verification
+
+**Objective:** Verify the complete feature works end-to-end across all layers.
+Expand the high-level E2E scenarios from the design section into concrete checks:
+- Per scenario: specific DB queries, API calls, Playwright selectors, log patterns
+- Per layer: Docker logs (grep patterns), DB (table.column values), API (endpoint + expected response), UI (selectors + expected state)
+
+**E2E Scenarios (from design):**
+{paste high-level scenarios from brainstorming Step 5}
+
+**Acceptance Criteria:**
+- [ ] All scenarios pass on a single full run with 0 failures
+- [ ] At least 1 negative/edge case scenario included
+- [ ] Infrastructure started and healthy before test execution
+- [ ] Fix loop: any failures fixed and re-verified (max 3 cycles per check)
+
+**Effort:** M
+**AID Role:** e2e
+```
+
+Skip E2E step if: pure refactoring, docs-only, library with no runtime output.
+
 ### Mandatory Fields Per Step
 
 Every step MUST have ALL of these fields populated:

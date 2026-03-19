@@ -189,6 +189,16 @@ Dispatch prompt contains (in order):
    - Graceful skip if Qdrant unavailable (log warning, continue without memory)
    - Include in agent prompt under `## Project Memory Context` heading
 
+10. **E2E CONTEXT** (if step has `role: e2e`):
+   - Include ALL previous step outputs (not just last — agent needs full picture)
+   - Include `project.yaml` (infra detection: test_cmd, build_cmd, docker-compose path)
+   - Include `docker-compose.yml` if exists (services, ports, healthchecks)
+   - Include high-level E2E scenarios from plan objective
+   - Agent expands scenarios into concrete checks, starts infra if needed, executes
+   - **Fix loop:** failed checks → agent fixes code → reruns ONLY failed checks → max 3 cycles per check → escalation
+   - **Final rerun:** after all fixes, full E2E from scratch — must pass entirely on 1 run with 0 failures
+   - step-verify Result: PASS only if final full rerun = 0 failures
+
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
 
