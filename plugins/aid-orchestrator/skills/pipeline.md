@@ -13,6 +13,23 @@ the appropriate script.
 
 **State file:** `.aid-o/work/runs/{run_id}/state.yaml` (managed by `aid-fsm.sh`)
 
+## Controller Quick Reference (step dispatch loop)
+
+```
+1. verify-state → get current state + allowed transitions
+2. get-field current_step → step N
+3. Read plan.json steps[N] → objective, role, AC, paths
+4. Load role card from role-cards.md
+5. Assemble context: EPIC + task + plan + prev outputs + permissions + standards + visual + memory
+6. Dispatch agent (Agent tool with role)
+7. Validate output: files? scope? AC met? memory_writes present?
+8. Write step-{N}-verify.md (AC checklist + Memory Used/Written + Result: PASS)
+9. increment-step (bash validates verify file)
+10. If more steps → goto 2. If last step → CP3 integration review → transition EXECUTE→GATES
+```
+
+For full details on each item, see sections below.
+
 ---
 
 ## §1 FSM States
@@ -56,14 +73,15 @@ Six states. Scripts handle transitions. LLM acts within a state.
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
 | **ESCALATION** | EXECUTE or GATES failure | Present options A/B/C to PM, act on response | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |
 | **DONE** | All gates pass | Curator+Auditor parallel, PM summary, merge on approval | — |
+| **ERROR** | Unrecoverable failure or PM abort | Preserve evidence, report to PM | — (terminal) |
 
 **Valid transitions** (enforced by `aid-fsm.sh transition`):
 
 ```
-READY → EXECUTE
-EXECUTE → EXECUTE | GATES | ESCALATION
-GATES → DONE | EXECUTE | ESCALATION
-ESCALATION → EXECUTE | GATES
+READY → EXECUTE | ERROR
+EXECUTE → EXECUTE | GATES | ESCALATION | ERROR
+GATES → DONE | EXECUTE | ESCALATION | ERROR
+ESCALATION → EXECUTE | GATES | ERROR
 ```
 
 ---
@@ -138,7 +156,7 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 
 1. Read current step: `aid-fsm.sh get-field current_step <state_file>`
 2. Load step definition from `plan.json` → `steps[current_step]`
-3. Load role playbook: `.aid-o/config/playbooks/{role}.md`
+3. Load role card from `skills/role-cards.md` for the step's `role`
 4. Assemble dispatch prompt (see Context Assembly below)
 5. Dispatch via Agent tool with `model` from `step.model` or `role_assignments` in
    `plan.json` step `model` field or `orchestration.yaml` role tiers (default: `opus`)
@@ -270,6 +288,14 @@ Screenshot: {evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png}
 | Components (presence, completeness) | YES/NO | {details} |
 
 Verdict: MATCH / PARTIAL / MISMATCH
+
+## Memory Used
+- entry_id: {id} — {summary} (used for: {how it influenced implementation})
+- N/A — no relevant memory entries found (reason: {why})
+
+## Memory Written
+- type: {component|pattern|convention} — {summary} (source_file: {path})
+- N/A — no new reusable patterns introduced (reason: {why})
 
 ## Result: PASS / FAIL
 ```

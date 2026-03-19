@@ -12,7 +12,7 @@ Place sample data files here for AID to analyze during brainstorming runs.
 
 ## How It Works
 
-When you run `/aid-brainstorm`, AID automatically scans this directory and presents a summary of found files. This helps AID understand your data and ask better questions.
+When you run `/aid-plan brainstorm`, AID automatically scans this directory and presents a summary of found files. This helps AID understand your data and ask better questions.
 
 ## Notes
 

@@ -187,10 +187,8 @@ Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued.
 
 ## Reference Files
 
-- `skills/epic-orchestration.md` — Controller state machine, evidence store structure
-- `skills/epic-queue.md` — Queue state, auto-pickup
+- `skills/pipeline.md` — Controller state machine, evidence store structure
 - `commands/aid-run.md` — The inverse command (start auto-mode / resume)
-- `commands/aid-run.md` — Manual EPIC execution (alternative to auto-mode)
 - `commands/aid-status.md` — Check EPIC progress after stopping
 
 ## Important

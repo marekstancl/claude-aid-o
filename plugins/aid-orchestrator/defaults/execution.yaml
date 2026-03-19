@@ -22,16 +22,13 @@ gates:
 
   docs_updated:
     description: "Documentation updated for changed APIs/models"
-    required: true
-    rule: "If files in API-relevant paths changed, docs must also change"
-    pass_criteria: |
-      api_paths=(routes/ api/ endpoints/ models/ schemas/ openapi/)
-      doc_paths=(README docs/ CHANGELOG *.md)
-      api_changed=$(git diff --name-only {base}..HEAD | grep -cE "$(IFS='|'; echo "${api_paths[*]}")" || true)
-      doc_changed=$(git diff --name-only {base}..HEAD | grep -cE "$(IFS='|'; echo "${doc_paths[*]}")" || true)
+    required: false
+    type: deterministic
+    command: |
+      api_changed=$(git diff --name-only {base}..HEAD | grep -cE 'routes/|api/|endpoints/|models/|schemas/|openapi/' || true)
+      doc_changed=$(git diff --name-only {base}..HEAD | grep -cE 'README|docs/|CHANGELOG|\.md$' || true)
       if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
-        echo "WARN: API files changed ($api_changed) but no docs updated"
-        exit 1
+        echo "WARN: API files changed ($api_changed) but no docs updated"; exit 1
       fi
 
   scope_check:
@@ -50,11 +47,12 @@ gates:
 
   standards_compliance:
     description: "Project standards compliance check (deterministic rules only)"
-    required: true
-    type: deterministic
+    required: false
+    type: llm_evaluated
     when: "standards.active != 'none' in project.yaml"
     rule: "Load active standard set, run pattern/structural/file-exists rules against git diff"
     pass_criteria: "No gate_blocking violations found in changed files"
+    # NOTE: No bash command — evaluated by LLM auditor during DONE state review
 
   type_check:
     description: "TypeScript type checking passes"

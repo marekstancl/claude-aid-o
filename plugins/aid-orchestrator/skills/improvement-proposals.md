@@ -386,3 +386,5 @@ stored (logged to stage_log only), warning logged.
 | Qdrant (`curator_decision`) | Tier 2 learned decisions + decision storage |
 | `pipeline.md` | CURATOR_RESOLVE state triggers Curator + auto-evaluate |
 | `aid-run.md` | CURATOR_RESOLVE state handling dispatches Curator |
+
+**Last Updated:** 2026-03-19

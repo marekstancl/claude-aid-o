@@ -72,4 +72,4 @@ Structured report with:
 
 - `skills/analytics.md` -- analytics skill with report types and query patterns
 - `skills/memory-mcp.md` -- Qdrant query protocol
-- `skills/epic-orchestration.md` -- metric storage (PHASE_CHECK, DONE states)
+- `skills/pipeline.md` -- FSM states, metric storage in DONE state

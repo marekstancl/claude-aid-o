@@ -10,15 +10,16 @@ if [[ "$_AID_BRANCH" == task/* || "$_AID_BRANCH" == epic/* ]]; then
   _AID_BRANCH_ID=$(echo "$_AID_BRANCH" | cut -d'/' -f2)
   _AID_STATE_FILE=""
 
-  # Find state.yaml matching the branch ID
-  if [[ -d ".aid-o/work/runs/" ]]; then
+  # Find state.yaml or fsm-state.yaml matching the branch ID (search runs/ + evidence/)
+  for _AID_SEARCH_DIR in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
+    [[ -d "$_AID_SEARCH_DIR" ]] || continue
     while IFS= read -r _f; do
       if grep -q "epic_id: ${_AID_BRANCH_ID}" "$_f" 2>/dev/null; then
         _AID_STATE_FILE="$_f"
-        break
+        break 2
       fi
-    done < <(find .aid-o/work/runs/ -name "state.yaml" 2>/dev/null)
-  fi
+    done < <(find "$_AID_SEARCH_DIR" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null)
+  done
 
   if [[ -n "$_AID_STATE_FILE" ]]; then
     _AID_FSM_STATE=$(grep '^state:' "$_AID_STATE_FILE" | awk '{print $2}')

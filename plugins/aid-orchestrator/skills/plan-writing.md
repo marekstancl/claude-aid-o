@@ -16,7 +16,7 @@ user_invocable: false
 This skill defines how AID writes **exhaustive, implementation-ready plan documents**. It ensures that every detail from brainstorming (or a standalone specification) is captured in the plan — nothing is lost, nothing is summarized away, nothing is deferred to "see brainstorming notes."
 
 The plan-writing skill is invoked in two modes:
-1. **Post-brainstorming** — called by `/aid-brainstorm` Step 8 after PM approves all design sections. Receives approved sections as input.
+1. **Post-brainstorming** — called by `/aid-plan brainstorm` Step 8 after PM approves all design sections. Receives approved sections as input.
 2. **Standalone** — called by `/aid-write-plan` command with a specification or requirements as input.
 
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
@@ -41,7 +41,7 @@ This is not a summary document. This is not a high-level overview. This is the i
 
 ### Mode A: Post-Brainstorming
 
-Triggered by `/aid-brainstorm` Step 8 after PM approves all design sections.
+Triggered by `/aid-plan brainstorm` Step 8 after PM approves all design sections.
 
 **Input available:**
 - All approved design sections from brainstorming Steps 5-6 (architecture, data model, API, implementation, testing, risks)
@@ -680,11 +680,9 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ## Reference Files
 
-- `commands/aid-write-plan.md` — standalone command that invokes this skill
-- `commands/aid-brainstorm.md` — brainstorming command that delegates Step 8 to this skill
+- `commands/aid-plan.md` — unified command that invokes this skill (write mode or brainstorm Step 8)
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
 - `skills/pipeline.md` § 4 — agent dispatch (downstream — injects plan sections into agent prompts)
-- `commands/aid-plan --epic.md` — plan-to-EPIC conversion (downstream — reads plan and delegates to `aid-auto-pipeline.sh` for all artifact generation)
 - `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)

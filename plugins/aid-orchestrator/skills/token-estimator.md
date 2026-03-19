@@ -7,7 +7,7 @@ user_invocable: false
 # Token Estimator — Dispatch Token Tracking
 
 **Skill:** token-estimator
-**Dependencies:** cost-optimization, pipeline.md §4, pipeline.md §1
+**Dependencies:** pipeline.md §4, pipeline.md §1, defaults/orchestration.yaml
 
 ---
 
@@ -129,7 +129,7 @@ The character-based heuristic is an approximation. Measured accuracy:
 
 - Unicode-heavy content (CJK, emoji) compresses differently — estimates may
   undercount tokens by 20-30%. If the project is predominantly non-Latin,
-  adjust `chars_per_token` ratios in `dispatch-config.yaml`.
+  adjust `chars_per_token` ratios in `orchestration.yaml`.
 - Very short texts (< 100 chars) have high relative error — but these
   contribute negligibly to total token counts.
 - System prompt tokens (injected by the API, not visible to the Controller)
@@ -291,7 +291,7 @@ The initial ratios are derived from the BMK-001 benchmark (documented in
 | Ops per minute (avg) | ~3 |
 | Tokens per op (avg) | ~2,600 |
 
-These values are configured as defaults in `dispatch-config.yaml` under the
+These values are configured as defaults in `orchestration.yaml` under the
 `token_estimation` section.
 
 ### Calibration Process
@@ -315,7 +315,7 @@ calibrate_ratios(project_name):
   4. Compute actual tokens_per_op:
      IF actual_tool_ops is available:
        actual_tpo = estimated_tokens / actual_tool_ops
-  5. Update dispatch-config.yaml calibration section:
+  5. Update orchestration.yaml calibration section:
      token_estimation.calibration.last_calibration_date
      token_estimation.calibration.samples_used
      token_estimation.calibration.chars_per_token_adjusted
@@ -327,7 +327,7 @@ calibrate_ratios(project_name):
 1. **Minimum 3 EPIC runs** before calibration adjustments are applied.
    Fewer runs have too much variance.
 2. **Calibration is advisory** — adjusted ratios are stored in
-   `dispatch-config.yaml` but do not override the base ratios until PM
+   `orchestration.yaml` but do not override the base ratios until PM
    confirms via `/aid-setup` or manual edit.
 3. **Outlier rejection** — discard steps with duration < 30 seconds or
    > 3600 seconds (likely aborted or stuck). Discard steps with 0 tool
@@ -337,7 +337,7 @@ calibrate_ratios(project_name):
 
 ### Manual Calibration
 
-PMs can manually adjust ratios in `dispatch-config.yaml` based on observed
+PMs can manually adjust ratios in `orchestration.yaml` based on observed
 patterns:
 
 ```yaml
@@ -361,7 +361,7 @@ instead of the base `chars_per_token` values.
 ## Budget Alert Integration
 
 Token estimates feed into the advisory budget alert system defined in
-`dispatch-config.yaml`. The alert flow:
+`orchestration.yaml`. The alert flow:
 
 ```
 AFTER EACH STEP:
@@ -373,7 +373,7 @@ AFTER EACH STEP:
   4. Budget alerts appear in /aid-analytics reports for post-hoc review
 ```
 
-See `defaults/policies/dispatch-config.yaml` for threshold configuration.
+See `defaults/policies/orchestration.yaml` for threshold configuration.
 
 ---
 
@@ -385,7 +385,7 @@ See `defaults/policies/dispatch-config.yaml` for threshold configuration.
 | `skills/pipeline.md §4` | Dispatch flow where estimation integrates |
 | `skills/agent-core.md` | Execution Summary block (source of tool_operations_count) |
 | `skills/analytics.md` | Consumes token_profile and step_token_profile metrics |
-| `defaults/policies/dispatch-config.yaml` | Ratios, calibration config, budget thresholds |
+| `defaults/policies/orchestration.yaml` | Ratios, calibration config, budget thresholds |
 
 ---
 

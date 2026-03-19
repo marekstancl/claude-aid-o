@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.0.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.10.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.7.0** (current) — Mechanically enforced FSM: precondition-verified transitions, audit trail, verify-state/set-field commands, gates state check + report persistence
-- **v2.6.0** — Standards enforcement system: general (26 rules) + vulcan (22 rules), init selection, deterministic gate, auditor category, curator hotspots
-- **v2.5.0** — Plugin path discovery, brainstorming format template + handoff summary, Superpowers conflict resolution, documentation gate enforcement
+- **v2.10.0** (current) — Per-project agent memory via Qdrant: 10-category scan, FSM enforcement, kondice flow
+- **v2.9.0** — Universal aid-release.sh: config-driven version registry + fallback chain
+- **v2.8.0** — Visual assets pipeline, Visual Companion, plan-level DONE gate, step-verify content validation
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

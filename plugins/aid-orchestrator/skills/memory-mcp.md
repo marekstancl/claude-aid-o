@@ -259,6 +259,16 @@ If any memory_write entry fails validation:
 - No reason is provided
 - The step involved code changes (files_changed contains `.py`, `.ts`, `.js`, etc.)
 
+**Re-dispatch on validation failure:**
+When memory_writes fails validation, re-dispatch the agent with:
+```
+MEMORY VALIDATION FAILED: {specific failure reason}
+Your output was rejected because memory_writes {is missing | has summary < 20 words | has non-existent source_file | ...}.
+Re-submit your output with corrected memory_writes section. All other output is preserved.
+Original step objective: {objective}
+```
+Max 1 re-dispatch for memory_writes failure. If second attempt also fails → accept output with warning logged to timeline.
+
 ---
 
 ## 9. Reference

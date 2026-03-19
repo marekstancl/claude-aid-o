@@ -43,8 +43,8 @@ Code ready → FSM: GATES → aid-run-gates.sh run-all → ALL PASS → FSM: DON
 5. All gates pass → Curator hook → FSM: DONE
 
 Gates are configured per-project in `.aid-o/config/execution.yaml`.
-Default gates: tests_pass, lint_pass, build_pass, security_scan, scope_check.
-Optional: docs_updated (enabled by default, non-blocking).
+Default gates: tests_pass, lint_pass, build_pass, security_scan_pass, scope_check, type_check, standards_compliance.
+Optional: docs_updated (configured in execution.yaml).
 
 ---
 
@@ -83,7 +83,7 @@ Optional: docs_updated (enabled by default, non-blocking).
 
 ---
 
-### Gate 4: security_scan — HIGH
+### Gate 4: security_scan_pass — HIGH
 
 **Purpose:** Detect known vulnerabilities in dependencies and code.
 **Command:** from `execution.yaml` → `security_scan.command` (default: `npm audit` / `bandit`)

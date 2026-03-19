@@ -211,3 +211,5 @@ Recommendations:
 - `skills/pipeline.md` -- metric storage at PHASE_CHECK and DONE states
 - `skills/cost-optimization.md` -- token estimation methodology
 - `commands/aid-analytics.md` -- user-facing command that invokes this skill
+
+**Last Updated:** 2026-03-19

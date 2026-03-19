@@ -65,3 +65,5 @@ If `integrations.yaml → memory.cross_project.enabled: true`:
 - NEVER write to project.yaml (read-only, auto-generated)
 - NEVER delete entries from backlog.md
 - Qdrant is optional — all workflows work without it
+
+**Last Updated:** 2026-03-19

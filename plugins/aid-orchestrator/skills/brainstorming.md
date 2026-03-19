@@ -14,7 +14,7 @@ user_invocable: false
 
 ## TL;DR
 
-Invoked by `/aid-brainstorm`. Governs questioning protocol, approach exploration, incremental design validation, and plan document generation. Produces one artifact: a validated plan document. EPIC creation is a separate step via `/aid-plan --epic`.
+Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach exploration, incremental design validation, and plan document generation. Produces one artifact: a validated plan document. EPIC creation is a separate step via `/aid-plan --epic`.
 
 **Input:** PM's idea or topic + interactive Q&A
 **Output:** Plan document (`.aid-o/plans/P-*.md`)
@@ -338,7 +338,7 @@ RULE 6: Before creating interim doc, CHECK if `.aid-o/work/interim-P*.md` alread
 
 ### Starting a Brainstorming Run
 
-Steps: (1) PM invokes `/aid-brainstorm [topic]` → (2) read project context → (3) Initial Analysis Phase → (4-7) questions, approaches, risk assessment, design, approval → (8) delegate to plan-writing skill → plan-writing presents next steps.
+Steps: (1) PM invokes `/aid-plan brainstorm [topic]` → (2) read project context → (3) Initial Analysis Phase → (4-7) questions, approaches, risk assessment, design, approval → (8) delegate to plan-writing skill → plan-writing presents next steps.
 
 ### Aborting a Brainstorming Run
 

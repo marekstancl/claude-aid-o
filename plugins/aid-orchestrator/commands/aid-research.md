@@ -73,8 +73,8 @@ ELSE:
 
 ### Step 2: Load Configuration
 
-1. Read `skills/knowledge-acquisition.md` for the full research protocol
-2. Read `.aid-o/config/policies/memory-config.yaml` for knowledge configuration:
+1. Read `defaults/integrations.yaml` for knowledge configuration (memory + knowledge sections)
+2. Configuration fields:
    - `knowledge.enabled` -- if false, warn PM and abort
    - `knowledge.context7.available` -- determines primary source
    - `knowledge.research.*` -- depth limits, chunk limits, source tiers
@@ -111,7 +111,7 @@ For MODE = "topic" or MODE = "deep":
      - If specific topic provided: proceed (topic-specific research is always allowed)
      - If MODE == "deep" AND existing depth == "quick": proceed (upgrade to deep)
 
-2. **Call `knowledge_research()`** following `skills/knowledge-acquisition.md`:
+2. **Call `knowledge_research()`** following `skills/memory-mcp.md`:
    ```
    result = knowledge_research(
      framework = framework,
@@ -250,7 +250,7 @@ Key topics indexed:
 Rejected chunks: {M}
   Reasons: {summary of rejection reasons, e.g., "3 too short, 1 duplicate"}
 
-Knowledge is now available for /aid-brainstorm and agent dispatch.
+Knowledge is now available for /aid-plan brainstorm and agent dispatch.
 ```
 
 **Already indexed output:**
@@ -319,7 +319,7 @@ All errors are non-blocking. No research failure ever blocks the PM workflow.
 
 ## Reference Files
 
-- `skills/knowledge-acquisition.md` -- full research protocol, quality gates, storage architecture
+- `skills/memory-mcp.md` -- full research protocol, quality gates, storage architecture
 - `skills/memory-mcp.md` -- Qdrant storage protocol, memory_store / memory_find functions
 - `commands/aid-setup.md` -- MCP configuration (Context7, Qdrant setup)
 - `defaults/policies/memory-config.yaml` -- knowledge configuration schema
