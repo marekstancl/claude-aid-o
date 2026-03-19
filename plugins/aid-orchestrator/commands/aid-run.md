@@ -60,6 +60,8 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 12. **Visual verification** — after any UI step: Playwright screenshot + compare with mockup. "Compiles" ≠ "looks right".
 13. **Plan-level DONE gate** — `aid-fsm.sh init` blocks new cross-plan run if previous plan has unreviewed C+A findings (no `ca-review-complete` marker)
 14. **Per-plan C+A review** — after last EPIC in a plan, ALL C+A findings (S+M+L) must be addressed before starting next plan
+15. **Sequential dispatch** — `orchestration.yaml → max_parallel: 1`. Dispatch ONE agent at a time. After each agent returns: validate output, commit, write step-verify, increment-step. NEVER dispatch multiple agents in parallel.
+16. **Per-step commit** — MUST `git commit` after each step completes, BEFORE calling `increment-step`. One commit per step, not bulk commits at the end.
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure

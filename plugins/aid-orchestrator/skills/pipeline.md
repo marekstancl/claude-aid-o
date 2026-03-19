@@ -349,7 +349,13 @@ if `current_step < total_steps`. `EXECUTE→EXECUTE` is rejected if `current_ste
 
 ### Parallel groups
 
-When `plan.json` contains a parallel group (steps with same `wave`):
+**TEMPORARY: Sequential execution enforced.** `orchestration.yaml → dispatch.max_parallel: 1`.
+All steps execute one at a time regardless of wave grouping. This prevents:
+- Mega-commits (controller must commit per step)
+- Placeholder verify files (controller validates after each agent returns)
+- Memory bypass (controller injects memory per dispatch)
+
+When parallel is re-enabled (post Agent SDK migration):
 - Dispatch all agents in the group simultaneously (single message, multiple Agent calls)
 - Each agent writes to its own `steps/step_{N}_{role}/` subdirectory
 - After all complete: check for merge conflicts before advancing

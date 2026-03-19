@@ -19,8 +19,8 @@ models:
 
 # ─── Dispatch ────────────────────────────────────────────────────────────
 dispatch:
-  strategy: worktrees
-  max_parallel: 4
+  strategy: sequential          # TEMPORARY: force sequential until Agent SDK migration
+  max_parallel: 1               # ONE agent at a time — prevents mega-commits and placeholder verify
   worktree_base: .claude/worktrees
 
 # ─── Escalation ─────────────────────────────────────────────────────────
