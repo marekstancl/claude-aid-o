@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# AID-ORCHESTRATOR-PREPUSH-START (do not edit this block manually)
+# AID Orchestrator — version bump check before push
+# Blocks push if feat:/fix: commits exist since last tag without version bump.
+
+_AID_LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+
+if [[ -z "$_AID_LAST_TAG" ]]; then
+  # No tags yet — nothing to check
+  exit 0
+fi
+
+_AID_COMMITS=$(git log "${_AID_LAST_TAG}..HEAD" --oneline --no-merges 2>/dev/null || true)
+
+if [[ -z "$_AID_COMMITS" ]]; then
+  exit 0
+fi
+
+# Check if any feat: or fix: commits exist without a release: commit after them
+_AID_HAS_FEAT=false
+_AID_HAS_FIX=false
+_AID_HAS_RELEASE=false
+
+while IFS= read -r _line; do
+  _msg="${_line#* }"
+  [[ "$_msg" =~ ^feat ]] && _AID_HAS_FEAT=true
+  [[ "$_msg" =~ ^fix ]] && _AID_HAS_FIX=true
+  [[ "$_msg" =~ ^release: ]] && _AID_HAS_RELEASE=true
+done <<< "$_AID_COMMITS"
+
+if [[ "$_AID_HAS_RELEASE" == "true" ]]; then
+  # Release commit exists — version was bumped
+  exit 0
+fi
+
+if [[ "$_AID_HAS_FEAT" == "true" || "$_AID_HAS_FIX" == "true" ]]; then
+  _AID_COUNT=$(echo "$_AID_COMMITS" | wc -l)
+  echo "" >&2
+  echo "AID HOOK: Push blocked — $_AID_COUNT commits since $_AID_LAST_TAG without version bump." >&2
+  echo "" >&2
+  if [[ "$_AID_HAS_FEAT" == "true" ]]; then
+    echo "  feat: commits found → run: bash plugins/aid-orchestrator/scripts/aid-release.sh auto" >&2
+  else
+    echo "  fix: commits found → run: bash plugins/aid-orchestrator/scripts/aid-release.sh auto" >&2
+  fi
+  echo "" >&2
+  echo "  Or push without bump: git push --no-verify" >&2
+  echo "" >&2
+  exit 1
+fi
+# AID-ORCHESTRATOR-PREPUSH-END
+exit 0

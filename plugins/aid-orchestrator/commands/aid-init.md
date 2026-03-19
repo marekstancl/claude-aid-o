@@ -179,7 +179,9 @@ This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is a
 
 ## Git Hook Installation
 
-After workspace creation (and on every re-run), install or update the FSM guard pre-commit hook:
+After workspace creation (and on every re-run), install or update both git hooks:
+
+### pre-commit (FSM guard)
 
 1. **Source template:** `{plugin_path}/defaults/hooks/pre-commit`
 2. **Target:** `.git/hooks/pre-commit`
@@ -198,6 +200,14 @@ Hook installation:
 ```
 
 **What the hook does:** On `task/*` and `epic/*` branches, checks FSM state. Blocks commits in DONE/review (Curator+Auditor not yet run) and READY (execution not started). All other branches pass unconditionally.
+
+### pre-push (version bump check)
+
+1. **Source template:** `{plugin_path}/defaults/hooks/pre-push`
+2. **Target:** `.git/hooks/pre-push`
+3. **Logic:** Same as pre-commit (copy/append/upgrade with markers)
+
+**What the hook does:** Blocks push if `feat:` or `fix:` commits exist since last git tag without a corresponding `release:` commit. Suggests running `aid-release.sh auto`. Bypass: `git push --no-verify`.
 
 ## Lazy-Created (NOT at init time)
 
