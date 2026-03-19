@@ -177,22 +177,23 @@ After workspace creation, discover and cache the plugin installation path:
 
 This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is always overwritten (not idempotent — path may change after plugin update).
 
-## Memory Deep Scan (optional)
+## Memory Deep Scan (automatic)
 
-After plugin discovery, if `integrations.yaml → memory.enabled: true`:
+After plugin discovery, automatically detect and initialize agent memory:
 
-1. **Check Qdrant availability** — attempt `qdrant-find` with test query
-2. If available → dispatch Scanner agent in **full scan mode** (Mode C)
-3. **PM notification:** "Running deep codebase scan for agent memory... (15-30 min for medium project)"
-4. Scanner produces entries per 10-category checklist (see `agents/project-scanner.md` Mode C)
-5. Controller validates entry quality (see `skills/memory-mcp.md` quality rules)
-6. Controller writes entries to Qdrant via `qdrant-store`
-7. **Report:** "Memory scan complete: {N} entries stored across {M} categories"
+1. **Check Qdrant availability** — attempt `qdrant-find` with test query (collection: `aid-agent-memory`)
+2. **If available:**
+   a. Set `memory.enabled: true` in `config/integrations.yaml` (if not already)
+   b. Dispatch Scanner agent in **full scan mode** (Mode C from `agents/project-scanner.md`)
+   c. **PM notification:** "Running deep codebase scan for agent memory... (15-30 min for medium project)"
+   d. Scanner produces entries per 10-category checklist
+   e. Controller validates entry quality (see `skills/memory-mcp.md` quality rules)
+   f. Controller writes entries to Qdrant via `qdrant-store`
+   g. **Report:** "Memory scan complete: {N} entries stored across {M} categories"
+3. **If Qdrant unavailable:** warn "Qdrant not available — memory disabled. Agents will work without project context. Configure Qdrant MCP and re-run `/aid-init` to enable."
 
-**Skip if:**
-- `memory.enabled: false` (default) — no scan, no warning
-- Qdrant unavailable — warn: "Memory scan skipped — Qdrant not available. Run `/aid-init` again after configuring Qdrant."
-- Re-run on existing workspace with existing memory entries — ask PM: "Memory entries already exist ({N}). Re-scan? (Y/N)" Default: N (keep existing).
+**Re-run on existing workspace:**
+- If memory entries already exist → ask PM: "Memory entries exist ({N}). Re-scan? (Y/N)" Default: N (keep existing).
 
 ## Git Hook Installation
 

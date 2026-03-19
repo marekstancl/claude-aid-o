@@ -33,7 +33,7 @@ slack:
 # See: skills/memory-mcp.md for protocol details.
 # Requires: Qdrant MCP server configured in .mcp.json
 memory:
-  enabled: false
+  enabled: true
   collection_name: "aid-agent-memory"
 
   scanner:
