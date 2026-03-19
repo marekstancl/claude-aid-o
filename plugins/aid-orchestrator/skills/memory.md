@@ -34,10 +34,30 @@ Format: sections for Bugs / Features / Refactoring / Performance, each with
 Location: `.aid-o/work/quick/Q-NNN.md`
 Auto-created by `/aid-do`. Read-only for agents.
 
-## Optional: Shared Brain (if configured)
-If `integrations.yaml` has `qdrant.enabled: true`:
+## Agent Memory (Qdrant — if configured)
+
+Per-project vector memory enabling agents to understand existing code, reuse components, and follow established patterns. See `skills/memory-mcp.md` for full protocol.
+
+**When enabled** (`integrations.yaml → memory.enabled: true`):
+
+| When | What | Who |
+|------|------|-----|
+| `/aid-init` | Full deep scan → 60-150 entries across 10 categories | Scanner agent |
+| EXECUTE per step | Query memory for relevant context → inject into agent prompt | Controller |
+| EXECUTE per step | Agent proposes `memory_writes` in output | Subagent |
+| DONE per Plan | Incremental scan + kondice verification | Scanner agent |
+| DONE per Plan | Memory Health audit (stale, conflicts, coverage) | Auditor agent |
+
+**Entry quality rules:** summary ≥20 words, code_example 3-15 lines (real code), tags ≥3, source_file must exist. See `memory-mcp.md` for schema and rejection criteria.
+
+**FSM enforcement:** `increment-step` requires `## Memory Used` and `## Memory Written` sections in step-verify.md.
+
+**If Qdrant unavailable:** All workflows continue without memory. Graceful skip, warning logged.
+
+## Optional: Shared Brain (cross-project)
+If `integrations.yaml → memory.cross_project.enabled: true`:
   - Use `qdrant-find` for cross-project knowledge search (lessons, patterns)
-  - Use `qdrant-store` after EPIC completion to index lessons
+  - Separate from per-project agent memory (different collection/query scope)
   If Qdrant unavailable: skip silently. Never block on Qdrant.
 
 ## Rules

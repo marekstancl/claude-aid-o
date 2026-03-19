@@ -409,6 +409,27 @@ cmd_increment_step() {
       [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_commit_ref"
       exit 1
     fi
+
+    # Memory sections — must contain ## Memory Used and ## Memory Written
+    if ! grep -qE '^## Memory Used' "$verify_file" 2>/dev/null; then
+      echo "PRECONDITION FAIL: Step verification missing '## Memory Used' section." >&2
+      echo "File: ${verify_file}" >&2
+      echo "List memory entries used (or 'N/A — <reason>' if none applicable)." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_used"
+      exit 1
+    fi
+
+    if ! grep -qE '^## Memory Written' "$verify_file" 2>/dev/null; then
+      echo "PRECONDITION FAIL: Step verification missing '## Memory Written' section." >&2
+      echo "File: ${verify_file}" >&2
+      echo "List new memory entries proposed (or 'N/A — <reason>' if none applicable)." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_written"
+      exit 1
+    fi
   else
     local timeline
     timeline=$(derive_timeline "$state_file") || true

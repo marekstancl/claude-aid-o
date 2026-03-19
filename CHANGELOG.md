@@ -26,6 +26,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Plan-Level DONE Gate** — `aid-fsm.sh init` blocks cross-plan run if previous plan has unreviewed C+A findings (`ca-review-complete` marker required); enforces "dispatch per EPIC, validate per Plan" model
 - **Step-Verify Content Validation** — `increment-step` now requires at least one `- [x]` AC checklist item and one commit hash (7+ hex chars); prevents minimal "Result: PASS" without substance
 - **Plan.json Init Warning** — `aid-fsm.sh init` warns when plan.json steps lack `objective` field
+- **Per-Project Agent Memory (Qdrant)** — 10-category deep codebase scan (architecture, API, data, UI, config, testing, conventions, security, DevOps/CI-CD, cross-cutting concerns); `memory-mcp.md` skill with entry schema, quality rules (≥20 word summary, real code examples, 5 rejection criteria), store/find protocol, supersede pattern; pipeline §4 memory READ (2-tier context injection ~1500 tokens); pipeline §7 Scanner dispatch at plan boundary; `memory_writes` mandatory in agent output; `## Memory Used` + `## Memory Written` enforced in step-verify by `increment-step`; Auditor Memory Health category (stale detection, conflict detection, coverage check); kondice flow (auditor flags → scanner verifies)
 
 ### Changed
 - **FSM Valid States** — added ERROR to `VALID_STATES`; added `→ERROR` transitions from READY, EXECUTE, GATES, ESCALATION

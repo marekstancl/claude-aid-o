@@ -34,22 +34,48 @@ slack:
 # Requires: Qdrant MCP server configured in .mcp.json
 memory:
   enabled: false
-  collection_name: "aid-memory"
+  collection_name: "aid-agent-memory"
 
-  cross_project:
-    enabled: true
-    max_results: 3
-
-  auto_index:
-    run_end: true
-    epic_done: true
-    gate_results: false
+  scanner:
+    full_budget: 150            # max entries for full scan (hard cap)
+    incremental_budget: 50      # max entries for incremental scan (25 create + 25 update)
+    refactoring_budget: 100     # raised budget for refactoring EPICs (50+50)
+    categories:                 # toggle per-category (all enabled by default)
+      architecture: true
+      api: true
+      data: true
+      ui: true                  # auto-skipped for backend-only projects
+      config: true
+      testing: true
+      conventions: true
+      security: true
+      devops: true
+      cross_cutting: true
+    exclude_paths:              # never scan these
+      - "**/generated/**"
+      - "**/dist/**"
+      - "**/node_modules/**"
+      - "**/__generated__/**"
+      - "**/vendor/**"
+      - "**/.next/**"
 
   search:
-    top_k: 3
+    top_k: 10                   # max results returned per query
+    top_k_detailed: 3           # results with full code_example included
     timeout_seconds: 5
     min_score: 0.4
+    max_context_tokens: 1500    # token budget for memory context injection
     pre_step_search: true
+
+  quality:
+    min_summary_words: 20
+    min_code_example_lines: 3
+    max_code_example_lines: 15
+    min_tags: 3
+
+  cross_project:
+    enabled: false              # disabled by default for MVP
+    max_results: 3
 
 # ─── Knowledge Acquisition ──────────────────────────────────────────────
 # See: skills/knowledge-acquisition.md for protocol details.

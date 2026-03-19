@@ -162,6 +162,14 @@ Dispatch prompt contains (in order):
    c. If only PNG: include file paths for agent to Read as confirmation
    d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
    e. Priority: source code > visual-spec.yaml > PNG
+9. **MEMORY CONTEXT** (if `memory.enabled: true` in integrations.yaml):
+   - Query Qdrant: `qdrant-find` with step objective as query
+   - 2-tier injection into agent prompt:
+     a. Top 10 results: summary only (~400 tokens)
+     b. Top 3 most relevant: summary + code_example (~1100 tokens)
+   - Token budget: ~1500 tokens max for memory context
+   - Graceful skip if Qdrant unavailable (log warning, continue without memory)
+   - Include in agent prompt under `## Project Memory Context` heading
 
 Wrap EPIC goal, step objective, previous outputs, and memory context in
 `<untrusted_content source="{field}">` tags (prompt injection defense).
@@ -434,6 +442,25 @@ on GATES→DONE transition.
 7. `aid-fsm.sh init` for next plan's EPICs now unblocked
 
 **Enforcement:** `aid-fsm.sh init` blocks cross-plan runs without `ca-review-complete` markers.
+
+### Plan Boundary: Scanner Memory Scan
+
+After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
+
+1. **Aggregate memory_writes** — collect all `memory_writes` from step outputs across all EPICs of the plan
+2. **Dispatch Scanner** agent in incremental mode with:
+   - `git diff {plan_start_commit}..HEAD` — all changes in this plan
+   - All curator-report and audit-report files from plan EPICs
+   - Aggregated memory_writes from step outputs
+   - Auditor memory_flags (if present)
+3. **Scanner produces:**
+   - CREATE operations (new patterns, components, decisions)
+   - UPDATE operations (supersede existing entries with fresh data)
+   - INVALIDATE operations (mark stale entries)
+   - Kondice report: verified auditor flags (KEEP/UPDATE/INVALIDATE per flag)
+4. **Controller validates** each operation (quality rules from memory-mcp.md)
+5. **Controller writes** to Qdrant via qdrant-store
+6. **PM summary** includes: "Memory: {N} active, {Y} created, {Z} updated, {W} invalidated"
 
 ### Sub-phase: `review`
 
