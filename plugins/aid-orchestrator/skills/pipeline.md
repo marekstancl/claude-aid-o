@@ -408,13 +408,32 @@ set via `set-field`. The decision is automatically cleared after the transition 
 
 **LLM role:** Orchestrate pre-merge review and PM decision.
 
-**Mechanical enforcement (3 layers):**
+**Mechanical enforcement (4 layers):**
 1. `aid-fsm.sh done-advance` — requires curator-report, audit-report, `pm_decision=merge`
 2. `aid-release.sh` — refuses release if `done_phase != release`
 3. Git pre-commit hook — blocks commits on `task/*/epic/*` branches in DONE/review
+4. **Plan-level DONE gate** — `aid-fsm.sh init` refuses new cross-plan run if previous plan has unreviewed C+A findings (`ca-review-complete` marker missing)
 
 Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
 on GATES→DONE transition.
+
+### C+A Execution Model: dispatch per EPIC, validate per Plan
+
+**Per-EPIC (non-blocking):**
+- Steps 1-5 as documented above (run file, archive, active.md, final_report, dispatch C+A)
+- C+A may run as background agents — OK to start next EPIC in same plan
+- done_phase stays `review` until plan-level checkpoint
+
+**Per-Plan checkpoint (HARD STOP after last EPIC in plan):**
+1. Wait for ALL pending C+A reports from all EPICs in this plan
+2. Read all reports, compile findings across all EPICs
+3. Apply ALL fixes — S, M, AND L effort (L findings are often trivial in practice)
+4. CP4 verifier on aggregated fixes
+5. Create `ca-review-complete` marker in each EPIC's evidence dir
+6. PM Summary with MERGE/FIX/ABORT for entire plan
+7. `aid-fsm.sh init` for next plan's EPICs now unblocked
+
+**Enforcement:** `aid-fsm.sh init` blocks cross-plan runs without `ca-review-complete` markers.
 
 ### Sub-phase: `review`
 
@@ -695,7 +714,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-03-19
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

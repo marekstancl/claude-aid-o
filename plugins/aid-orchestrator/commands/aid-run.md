@@ -58,6 +58,8 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 ### Agent dispatch rules (non-negotiable but instruction-enforced):
 11. **Verbatim plan content** — NEVER send agents "read the plan". Extract relevant section and paste VERBATIM into agent prompt. Include code snippets, AC, mockups.
 12. **Visual verification** — after any UI step: Playwright screenshot + compare with mockup. "Compiles" ≠ "looks right".
+13. **Plan-level DONE gate** — `aid-fsm.sh init` blocks new cross-plan run if previous plan has unreviewed C+A findings (no `ca-review-complete` marker)
+14. **Per-plan C+A review** — after last EPIC in a plan, ALL C+A findings (S+M+L) must be addressed before starting next plan
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
@@ -241,6 +243,7 @@ FSM initialized: READY
 ### State: DONE
 
 DONE uses two mechanically enforced sub-phases: `review` → `release`.
+**C+A model:** Dispatch per EPIC (background OK), validate per Plan (hard stop). See `pipeline.md §7`.
 Sub-phase transitions are managed by `done-advance` (not `transition`).
 
 **Sub-phase: `review`** (auto-set on GATES→DONE)

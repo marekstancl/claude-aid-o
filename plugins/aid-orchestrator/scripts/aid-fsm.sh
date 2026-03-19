@@ -3,7 +3,7 @@
 # Mechanically enforced: precondition-verified transitions + audit trail
 #
 # Usage:
-#   aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file>
+#   aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force]
 #   aid-fsm.sh transition <from> <to> <state_file> [--force]
 #   aid-fsm.sh get-state <state_file>
 #   aid-fsm.sh verify-state <state_file>
@@ -153,9 +153,45 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
+  local force="false"
+  [[ "${8:-}" == "--force" ]] && force="true"
+
   if [[ -f "$state_file" ]]; then
     echo "ERROR: state_file already exists: $state_file (prevent duplicate init)" >&2
     exit 1
+  fi
+
+  # Plan-level DONE gate: block cross-plan init if previous plan has unreviewed C+A findings
+  if [[ "$force" != "true" && -d ".aid-o/work/evidence" ]]; then
+    local current_plan_prefix
+    current_plan_prefix=$(echo "$epic_id" | grep -oP '^P\d+' || true)
+
+    if [[ -n "$current_plan_prefix" ]]; then
+      while IFS= read -r prev_state; do
+        local prev_epic prev_plan prev_done_phase prev_dir
+        prev_epic=$(grep '^epic_id:' "$prev_state" | awk '{print $2}')
+        prev_plan=$(echo "$prev_epic" | grep -oP '^P\d+' || true)
+        prev_done_phase=$(grep '^done_phase:' "$prev_state" | awk '{print $2}')
+        prev_dir=$(dirname "$prev_state")
+
+        # Only check EPICs from DIFFERENT completed plans
+        if [[ -n "$prev_plan" && "$prev_plan" != "$current_plan_prefix" && "$prev_done_phase" == "review" ]]; then
+          if [[ -f "${prev_dir}/audit-report.md" && ! -f "${prev_dir}/ca-review-complete" ]]; then
+            echo "PRECONDITION FAIL: Plan $prev_plan has unreviewed Curator/Auditor findings." >&2
+            echo "EPIC $prev_epic: audit-report exists but ca-review-complete marker missing." >&2
+            echo "Review findings, apply S+M+L fixes, then: touch ${prev_dir}/ca-review-complete" >&2
+            local timeline
+            timeline=$(derive_timeline "$state_file") || true
+            [[ -n "$timeline" ]] && log_event "$timeline" "fsm_init_blocked" reason="unreviewed_ca" blocking_epic="$prev_epic" blocking_plan="$prev_plan"
+            exit 1
+          fi
+        fi
+      done < <(find .aid-o/work/evidence -name "fsm-state.yaml" 2>/dev/null)
+    fi
+  fi
+
+  if [[ "$force" == "true" ]]; then
+    echo "WARNING: --force used, skipping plan-level DONE gate check" >&2
   fi
 
   mkdir -p "$(dirname "$state_file")"
@@ -179,6 +215,25 @@ EOF
   if [[ -n "$timeline" ]]; then
     mkdir -p "$(dirname "$timeline")"
     log_event "$timeline" "fsm_init" epic_id="$epic_id" run_id="$run_id" total_steps="$total_steps" mode="$mode"
+  fi
+
+  # Validate plan.json step content (warning only)
+  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  local plan_json="${evidence_dir}/plan.json"
+  if [[ -f "$plan_json" ]] && command -v python3 &>/dev/null; then
+    local empty_steps
+    empty_steps=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$plan_json'))
+    steps = d.get('steps', [])
+    empty = [s.get('id','?') for s in steps if 'objective' not in s or not s.get('objective')]
+    if empty: print(','.join(str(e) for e in empty))
+except: pass
+" 2>/dev/null || true)
+    if [[ -n "$empty_steps" ]]; then
+      echo "WARNING: plan.json has steps without 'objective': $empty_steps" >&2
+    fi
   fi
 
   echo "Initialized state: READY" >&2
@@ -327,6 +382,31 @@ cmd_increment_step() {
       local timeline
       timeline=$(derive_timeline "$state_file") || true
       [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="step_verify_not_pass"
+      exit 1
+    fi
+
+    # Validate content quality — must contain AC checklist and commit reference
+    local ac_count=0 commit_found=0
+    ac_count=$(grep -c '\- \[x\]' "$verify_file" 2>/dev/null) || ac_count=0
+    commit_found=$(grep -cE '[a-f0-9]{7,}' "$verify_file" 2>/dev/null) || commit_found=0
+
+    if [[ "$ac_count" -lt 1 ]]; then
+      echo "PRECONDITION FAIL: Step verification has no acceptance criteria checklist." >&2
+      echo "File: ${verify_file}" >&2
+      echo "Must contain at least one '- [x] ...' item matching plan AC." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_ac_checklist"
+      exit 1
+    fi
+
+    if [[ "$commit_found" -lt 1 ]]; then
+      echo "PRECONDITION FAIL: Step verification has no commit reference." >&2
+      echo "File: ${verify_file}" >&2
+      echo "Must contain at least one commit hash (7+ hex chars)." >&2
+      local timeline
+      timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_commit_ref"
       exit 1
     fi
   else
