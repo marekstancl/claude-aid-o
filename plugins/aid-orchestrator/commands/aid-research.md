@@ -224,106 +224,15 @@ For MODE = "url":
 
 ### Step 5: Present Results
 
-After research completes (any mode), present a PM-friendly summary.
+Report to PM: mode, source, chunks stored/rejected, key topics (up to 5), storage status (qdrant or run-only). If already indexed, show existing count and suggest --deep or topic-specific re-run. If failed, report reason and suggest alternatives (direct URL, spelling check).
 
-**Success output:**
-```
-Research Complete: {framework}
-====================================
-Topic: {topic or "general overview"}
-Mode: {quick | deep | url}
-Source: {context7 | websearch | manual}
-URL: {url (if URL mode)}
-
-Chunks stored: {N} ({M} rejected by quality gates)
-{Library ID: {id} (if Context7)}
-Storage: {qdrant (persistent) | run-only}
-
-{IF N > 0:}
-Key topics indexed:
-  - {section_1}: {brief description}
-  - {section_2}: {brief description}
-  - {section_3}: {brief description}
-  {... up to 5 sections}
-
-{IF M > 0:}
-Rejected chunks: {M}
-  Reasons: {summary of rejection reasons, e.g., "3 too short, 1 duplicate"}
-
-Knowledge is now available for /aid-plan brainstorm and agent dispatch.
-```
-
-**Already indexed output:**
-```
-Research: {framework}
-====================================
-Already indexed: {chunks_in_qdrant} chunks ({source}, indexed {date})
-Status: active (expires {valid_until})
-
-To refresh: wait until expiration or re-run with a specific topic:
-  /aid-research {framework} {suggested_topic}
-To upgrade to deep: /aid-research --deep {framework}
-```
-
-**No quality sources output:**
-```
-Research: {framework}
-====================================
-No quality sources found.
-
-Tried: {context7 | websearch | both}
-{IF context7: "Library not found in Context7"}
-{IF websearch: "No Tier 1/2 documentation pages found"}
-
-Suggestions:
-  - Provide a direct URL: /aid-research https://docs.example.com/
-  - Check the framework name spelling
-  - This framework may not have indexed documentation yet
-```
-
-**URL unreachable output:**
-```
-Research: {url}
-====================================
-URL unreachable.
-Error: {error_description}
-
-Suggestions:
-  - Verify the URL is accessible in your browser
-  - Check for authentication requirements (private docs are not supported)
-  - Try an alternative documentation URL
-```
-
-**Qdrant unavailable output (appended to any result):**
-```
-Note: Qdrant is not available. Research results are useful in this
-run only and will NOT be persisted for future runs or projects.
-Run /aid-setup to configure Qdrant for persistent knowledge storage.
-```
-
-## Error Handling
-
-All errors are non-blocking. No research failure ever blocks the PM workflow.
-
-| Error | Handling |
-|-------|----------|
-| Context7 MCP unavailable | Fall back to WebSearch silently |
-| Context7 library not found | Fall back to WebSearch for that framework |
-| WebSearch returns no Tier 1/2 results | Report "no quality sources", store nothing |
-| WebFetch fails for URL | Report "URL unreachable", abort that URL |
-| Qdrant MCP unavailable | Results are run-only, warn PM |
-| All sources fail | Report, proceed without knowledge |
-| knowledge-base.yaml missing | Create it from template, continue |
-| memory-config.yaml missing knowledge section | Use defaults (context7 if available, websearch otherwise) |
-| Chunk rejected by quality gates | Log reason, continue with remaining chunks |
+All errors are non-blocking — no research failure ever blocks PM workflow. Graceful degradation: Context7 unavailable → WebSearch fallback. Qdrant unavailable → run-only results.
 
 ## Reference Files
 
-- `skills/memory-mcp.md` -- full research protocol, quality gates, storage architecture
-- `skills/memory-mcp.md` -- Qdrant storage protocol, memory_store / memory_find functions
-- `commands/aid-setup.md` -- MCP configuration (Context7, Qdrant setup)
-- `defaults/policies/memory-config.yaml` -- knowledge configuration schema
-- `defaults/templates/knowledge-base.yaml` -- per-project reference index template
+- `skills/memory-mcp.md` — Qdrant storage protocol, quality gates
+- `commands/aid-setup.md` — MCP configuration (Context7, Qdrant)
+- `defaults/templates/knowledge-base.yaml` — per-project reference index
 
 ## Important
 

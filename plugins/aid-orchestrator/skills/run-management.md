@@ -7,7 +7,7 @@ user_invocable: false
 # Run Management - Instructions
 
 **Skill:** run-management
-**Dependencies:** agent-core
+**Dependencies:** agent-protocol
 
 ---
 
@@ -262,41 +262,15 @@ Discover → bugs.md → active.md Blockers (if blocking) → continue work → 
 
 ---
 
-## Configuration
-
-v2 `.aid-o/` layout (created by `/aid-init`):
-
-```
-.aid-o/
-  plans/           # Plans and design docs (archive/)
-  tasks/           # Task specs / EPICs (archive/)
-  config/          # PM config: policies/, templates/, playbooks/
-    project.yaml   # Project config (from /aid-setup)
-    counter.yaml   # ID counters
-  work/            # AI workspace
-    tasks/         # Active run files (archive/)
-    active.md      # Current state, recent work
-    backlog.md
-    lessons-learned.md
-    command-history.md
-    evidence/      # EPIC execution evidence
-    timeline.jsonl # FSM event log
-    state.yaml     # Current FSM state
-```
-
----
-
 ## Integration
 
 | Skill | How |
 |-------|-----|
-| agent-core | Run init protocol, role detection |
-| quality-gates | Pre-commit checks, final gates |
-| git-workflow | Branch naming, commit discipline |
-| documentation-protocol | Doc updates, same-commit principle |
-| debugging | Bug triage and fix workflows |
+| agent-protocol | Run init protocol, role detection |
 | pipeline.md | FSM states and transitions for EPIC orchestration |
-| aid-json-to-run.sh | Generates run files from plan.json for EPIC runs |
+| aid-json-to-run.sh | Generates run files from plan.json |
+
+For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 ---
 

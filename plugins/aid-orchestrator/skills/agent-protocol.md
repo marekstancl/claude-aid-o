@@ -194,4 +194,41 @@ Second violation of allowed_paths → orchestrator transitions to ESCALATION sta
 
 ---
 
+## Run Start — Context Loading Order
+
+**ALWAYS read in this order before starting work:**
+1. `active.md` (`.aid-o/work/active.md`) — current state, recent runs, blockers
+2. `project.yaml` (`.aid-o/config/project.yaml`) — tech stack, conventions, commands
+3. `memory_context` from task input — past patterns and decisions from Qdrant
+4. Determine: NEW task or CONTINUATION? If continuation → load run file + plan.
+
+---
+
+## File Resolution
+
+When you see a file reference without full path:
+1. Check `.aid-o/config/project.yaml` for project paths
+2. Check plugin `skills/` directory
+3. Search `.aid-o/` with Glob tool
+4. Ask PM if ambiguous
+
+---
+
+## Script Execution
+
+All AID bash scripts live in the **plugin directory**, not the target project.
+1. Read `plugin_path` from `.aid-o/config/plugin.yaml`
+2. Execute: `bash {plugin_path}/scripts/X.sh [args]`
+3. CWD: always the **project root** (where `.aid-o/` lives)
+
+---
+
+## Quick Rules
+
+**NEVER:** Code without plan. Commit without gates. Multiple changes in 1 commit. Work in main without approval. Commit credentials.
+
+**ALWAYS:** Identify role. Propose plan first. Quality gates before commit. Update run file after commit. Archive run after completion.
+
+---
+
 **Last Updated:** 2026-03-19
