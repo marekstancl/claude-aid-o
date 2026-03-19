@@ -170,7 +170,7 @@ sensible when reviewing plan.json — parallel steps must not write the same fil
 
 **File conflict resolution:** if two same-level steps have overlapping `allowed_paths`,
 the script places them in sequential sub-waves. The LLM should flag this in the
-PLAN_REVIEW summary so the PM knows parallelism was reduced.
+READY state summary so the PM knows parallelism was reduced.
 
 ---
 

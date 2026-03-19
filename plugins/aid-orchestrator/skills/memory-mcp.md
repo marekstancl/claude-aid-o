@@ -274,7 +274,7 @@ Max 1 re-dispatch for memory_writes failure. If second attempt also fails → ac
 ## 9. Reference
 
 - **Configuration:** `.aid-o/config/integrations.yaml` → `memory` section (collection name, search params, auto-index triggers)
-- **Project scanner:** `skills/project-scanner.md` — initial project scan that seeds memory with architecture patterns
+- **Project scanner:** `agents/project-scanner.md` — initial project scan that seeds memory with architecture patterns
 - **Pipeline integration:** `skills/pipeline.md` §4 (pre-step memory query) and §7 (post-EPIC memory indexing)
 - **File-based memory:** `skills/memory.md` — complementary file-based context (project.yaml, active.md, backlog)
 

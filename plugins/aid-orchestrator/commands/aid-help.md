@@ -84,7 +84,7 @@ FSM debugging:
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
 Token monitoring:
-  bash scripts/aid-token-count.sh plugins/aid-orchestrator/skills/*.md
+  bash scripts/lib/aid-token-count.sh plugins/aid-orchestrator/skills/*.md
   → shows token count per file (target: total < 50K)
 
 Audit: /aid-audit → project health, gate failure rates, recommendations

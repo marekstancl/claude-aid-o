@@ -17,7 +17,7 @@ This skill defines how AID writes **exhaustive, implementation-ready plan docume
 
 The plan-writing skill is invoked in two modes:
 1. **Post-brainstorming** — called by `/aid-plan brainstorm` Step 8 after PM approves all design sections. Receives approved sections as input.
-2. **Standalone** — called by `/aid-write-plan` command with a specification or requirements as input.
+2. **Standalone** — called by `/aid-plan write` command with a specification or requirements as input.
 
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
 **Output:** Exhaustive plan document (`.aid-o/plans/P{NNN}-{topic}.md`)
@@ -54,7 +54,7 @@ Triggered by `/aid-plan brainstorm` Step 8 after PM approves all design sections
 
 ### Mode B: Standalone
 
-Triggered by `/aid-write-plan` command with a specification file or topic.
+Triggered by `/aid-plan write` command with a specification file or topic.
 
 **Input available:**
 - Specification document or PM-described requirements
@@ -420,7 +420,7 @@ IF Completeness Gate fails:
 
 ## Standalone Mode Protocol (Mode B)
 
-When invoked via `/aid-write-plan` without prior brainstorming:
+When invoked via `/aid-plan write` without prior brainstorming:
 
 ### Phase 1: Input Analysis
 
