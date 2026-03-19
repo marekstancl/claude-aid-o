@@ -200,6 +200,15 @@ Quality Rules:
     4. Fabricated code — example not found verbatim in the codebase
     5. Generic / any-project-applicable — "Python uses snake_case" (not project-specific)
 
+  Post-Scan Self-Check (MANDATORY before reporting results):
+    Before presenting results to PM, verify:
+    - [ ] At least 1 entry per applicable category (skip only if project genuinely lacks it)
+    - [ ] Conventions category has entries (naming, error handling, imports) — NEVER skip this
+    - [ ] If project has decision docs (ADR, ecosystem-decisions) → entries exist for top decisions
+    - [ ] Every entry has a code_example with >= 3 lines of REAL project code
+    - [ ] No entry is purely descriptive without showing HOW to use the pattern
+    If any check fails → go back and produce missing entries before reporting.
+
 Output Format:
   - Full scan: list of qdrant-store operations + memory_scan_result YAML block
   - Incremental scan: list of CREATE/UPDATE/INVALIDATE operations + delta_summary YAML block
@@ -499,7 +508,11 @@ Why bad: No tier structure, no fixture patterns, no test DB strategy.
 - Type annotation completeness: full signatures vs partial, Pydantic for validation vs just types
 - Docstring style: Google, NumPy, JSDoc — actual examples from codebase
 - Module file template: what a "standard" new file looks like
-- ADR references in code: `D-xxx`, `ADR-xxx` in comments/docstrings — traceability to design decisions
+- **Decision documents (MANDATORY sub-scan):** Search for `ecosystem-decisions.md`, `ADR/`, `decisions/`,
+  `ARCHITECTURE.md`, or similar. If found, read the document and create ONE entry per decision with:
+  decision ID, title, rationale, and which code enforces it. Also grep codebase for `D-xxx`, `ADR-xxx`
+  references in comments/docstrings — map each reference back to its decision document.
+  This is critical — agents violating project decisions break architecture tests.
 - Commit message conventions: conventional commits, Jira IDs, scope prefixes
 - File organization within modules: `__init__.py` exports, one-class-per-file vs grouped
 
@@ -530,7 +543,7 @@ summary: "The project has custom exceptions."
 ```
 Why bad: No hierarchy details, no propagation pattern, no code showing usage.
 
-**Entries:** min 5, max 12 per project.
+**Entries:** min 5, max 12 per project. Decision documents sub-scan may add 5-15 extra entries (not counted against this limit).
 
 ---
 
