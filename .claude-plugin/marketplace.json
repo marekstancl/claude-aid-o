@@ -5,19 +5,24 @@
   },
   "metadata": {
     "description": "AID — AI Development Orchestrator for Claude Code. Controller + Workers architecture for multi-agent software development.",
-    "version": "2.7.0"
+    "version": "2.8.0"
   },
   "plugins": [
     {
       "name": "aid-orchestrator",
       "source": "./plugins/aid-orchestrator",
       "description": "AI Development Orchestrator with 6-state bash FSM, Fast Mode, and 87% token reduction. Dispatches role-based agents, enforces quality gates, and maintains auditable evidence trails.",
-      "version": "2.7.0",
+      "version": "2.8.0",
       "author": {
         "name": "Marek Stancl"
       },
       "category": "development",
-      "keywords": ["orchestration", "multi-agent", "quality-gates", "epic-management"]
+      "keywords": [
+        "orchestration",
+        "multi-agent",
+        "quality-gates",
+        "epic-management"
+      ]
     }
   ]
 }
