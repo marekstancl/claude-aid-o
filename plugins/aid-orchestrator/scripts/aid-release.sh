@@ -148,7 +148,7 @@ UPDATED=()
 # #1 + #2: CHANGELOG.md headers (both root and plugin)
 for cl in "$REPO_ROOT/CHANGELOG.md" "$REPO_ROOT/plugins/aid-orchestrator/CHANGELOG.md"; do
   if [[ -f "$cl" ]]; then
-    sed -i "s/## \[$CURRENT\]/## [$NEW_VERSION] — $TODAY/" "$cl"
+    sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$cl"
     UPDATED+=("$cl")
     echo "Updated: $cl"
   fi
