@@ -14,13 +14,19 @@ EPIC execution. Before each step, the controller queries memory for relevant con
 giving agents institutional knowledge accumulated across runs.
 
 **Collection design:**
-- Single collection: `aid-agent-memory`
-- Tenant isolation via `project_id` payload field
-- Each project uses its directory name as `project_id` (e.g., `my-app`)
+- Single collection: `shared-brain` (shared with personal brain via `qdrant-brain` MCP)
+- Tenant isolation via `project_id` in metadata payload + project name prefix in information text
+- Each project uses its directory name as `project_id` (e.g., `vulcan`, `vl-process-flow`)
 - Monorepos use `project/service-name` format (e.g., `my-app/api-gateway`)
-- Cross-project search is supported when `integrations.yaml` → `memory.cross_project.enabled: true`
 
-**Dependency:** Requires Qdrant MCP server configured in `.mcp.json`.
+**MCP tool:** `mcp__qdrant-brain__qdrant-store` and `mcp__qdrant-brain__qdrant-find`
+- MCP find does NOT support payload filtering — project isolation is via text prefix
+- Every stored entry MUST start with `[{PROJECT_ID}]` prefix in the information text
+- Example: `[vulcan] architecture: 4-layer backend with strict dependency direction...`
+- When searching: include project name in query — `"vulcan SQLAlchemy session pattern"`
+- Future: when MCP adds filter support, switch to payload-based filtering
+
+**Dependency:** Requires Qdrant MCP server (`qdrant-brain`) configured.
 If Qdrant is unavailable, all workflows degrade gracefully — memory is never a blocker.
 
 ---
@@ -81,7 +87,7 @@ Embed **ONLY the `summary` field** for vector search.
 Before every store operation, run `qdrant-find` with the summary text:
 
 ```
-existing = qdrant-find(query=summary, collection_name="aid-agent-memory")
+existing = mcp__qdrant-brain__qdrant-find(query=summary, collection_name="shared-brain")
 if any result with score >= 0.85:
     → Supersede the existing entry (see §6 Supersede Pattern)
     → Do NOT create a duplicate
@@ -101,8 +107,8 @@ All entries MUST pass validation before `qdrant-store`:
 ### Step 3: Store
 
 ```
-qdrant-store(
-    collection_name="aid-agent-memory",
+mcp__qdrant-brain__qdrant-store(
+    collection_name="shared-brain",
     content=summary,           # embedded text = summary only
     metadata={                 # all schema fields go in payload
         entry_id, project, category, tags, confidence,
@@ -131,9 +137,9 @@ Do NOT store entries that are:
 Use the current step's objective text as the search query:
 
 ```
-results = qdrant-find(
+results = mcp__qdrant-brain__qdrant-find(
     query=step_objective,
-    collection_name="aid-agent-memory",
+    collection_name="shared-brain",
     filter={ project: project_id }   # or omit filter for cross-project
 )
 ```
@@ -156,7 +162,7 @@ If results exceed budget, truncate from the bottom of the summary tier first.
 
 ```
 try:
-    results = qdrant-find(query, collection_name, timeout=5s)
+    results = mcp__qdrant-brain__qdrant-find(query, collection_name, timeout=5s)
 except (ConnectionError, Timeout, MCPUnavailable):
     log_warning("Qdrant unavailable — proceeding without memory context")
     results = []

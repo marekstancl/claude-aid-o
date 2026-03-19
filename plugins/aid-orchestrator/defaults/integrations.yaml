@@ -34,7 +34,8 @@ slack:
 # Requires: Qdrant MCP server configured in .mcp.json
 memory:
   enabled: true
-  collection_name: "aid-agent-memory"
+  collection_name: "shared-brain"       # shared with qdrant-brain MCP
+  mcp_tool: "qdrant-brain"              # use qdrant-brain (not qdrant-memory)
 
   scanner:
     full_budget: 150            # max entries for full scan (hard cap)
