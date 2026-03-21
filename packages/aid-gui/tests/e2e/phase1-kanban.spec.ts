@@ -10,7 +10,7 @@
  *
  *   npx playwright test tests/e2e/phase1-kanban.spec.ts
  *
- * Requires a running dev server on port 3910 (see playwright.config.ts).
+ * Requires a running dev server on port 3911 (see playwright.config.ts).
  */
 
 import { test, expect } from '@playwright/test';

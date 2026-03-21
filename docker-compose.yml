@@ -5,9 +5,9 @@
 #   docker compose up -d             # Start in background
 #   docker compose down              # Stop
 #
-# GUI:  http://localhost:3910
-# API:  http://localhost:3910/api/projects
-# WS:   ws://localhost:3910/ws
+# GUI:  http://localhost:3911
+# API:  http://localhost:3911/api/projects
+# WS:   ws://localhost:3911/ws
 
 services:
   aid-server:
@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile
     container_name: aid-orchestrator
     ports:
-      - "${AID_PORT:-3910}:3910"
+      - "${AID_PORT:-3911}:3911"
     volumes:
       # Mount the project directory so the server can read .aid-o/
       - .:/project:ro
@@ -26,14 +26,14 @@ services:
       # Read-write needed: Agent SDK writes debug logs to ~/.claude/debug/
       - ${HOME}/.claude:/root/.claude
     environment:
-      - AID_PORT=3910
+      - AID_PORT=3911
       - AID_HOST=0.0.0.0
       - AID_PROJECT_ROOT=/project
       - AID_CORS_ORIGINS=*
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3910/api/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3911/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
