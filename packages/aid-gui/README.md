@@ -13,7 +13,7 @@ The `aid-gui` package is the web-based dashboard for the AID — AI Development 
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 18
-- **aid-server running on port 9911** — the GUI is a front-end only; all data and AI features come from the server
+- **aid-server running on port 3910** — the GUI is a front-end only; all data and AI features come from the server
 
 Start aid-server first:
 
@@ -34,10 +34,10 @@ npm install
 npm run dev
 ```
 
-The GUI connects to `http://localhost:9911` by default. If aid-server is on a different host or port, set the environment variable:
+The GUI connects to `http://localhost:3910` by default. If aid-server is on a different host or port, set the environment variable:
 
 ```bash
-VITE_SERVER_URL=http://localhost:9911 npm run dev
+VITE_SERVER_URL=http://localhost:3910 npm run dev
 ```
 
 ## Build for Production

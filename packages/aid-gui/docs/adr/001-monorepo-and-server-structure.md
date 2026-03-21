@@ -11,7 +11,7 @@
 
 AID-GUI originated as a Google AI Studio prototype — a React + Express application
 with 9 dashboard screens for monitoring AID orchestration pipelines. The prototype
-lives in a standalone repository (`/opt/_home/small-personal-projetcs/AID-GUI/`)
+lives in a standalone repository (`/opt/eco/projects/aid-orchestrator/` (originally `/opt/_home/small-personal-projetcs/AID-GUI/`))
 and uses mock data hardcoded in `server.ts`. It carries several AI Studio artifacts
 that are no longer needed: `@google/genai` dependency, `better-sqlite3`, `dotenv`,
 `metadata.json`, and Gemini API key references in `vite.config.ts`.

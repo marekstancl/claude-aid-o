@@ -20,7 +20,7 @@
       "role": "backend",
       "objective": "Monorepo migration: Copy AID-GUI contents into packages/aid-gui/",
       "depends_on": [],
-      "inputs": ["AID-GUI repo at /opt/_home/small-personal-projetcs/AID-GUI/"],
+      "inputs": ["AID-GUI repo at /opt/eco/projects/aid-orchestrator/"],
       "outputs": ["packages/aid-gui/ directory with all AID-GUI contents"],
       "allowed_paths": ["package.json", "packages/aid-gui/", ".gitignore"],
       "forbidden_paths": ["plugins/", ".git/", "node_modules/"],

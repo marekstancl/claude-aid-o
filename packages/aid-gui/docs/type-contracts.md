@@ -864,9 +864,9 @@ all downstream agents have a consistent contract.
   {
     "id": "ai-orchestrator",
     "name": "AID Orchestrator",
-    "path": "/opt/_home/small-personal-projetcs/ai-orchestrator",
+    "path": "/opt/eco/projects/aid-orchestrator",
     "active": true,
-    "aido_path": "/opt/_home/small-personal-projetcs/ai-orchestrator/.aid-o",
+    "aido_path": "/opt/eco/projects/aid-orchestrator/.aid-o",
     "registered_at": "2026-02-25T14:00:00Z",
     "last_activity_at": "2026-02-25T14:30:00Z",
     "accessible": true

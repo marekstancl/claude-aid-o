@@ -39,15 +39,15 @@ RUN mkdir -p /app/packages/aid-gui && ln -s /app/gui-dist /app/packages/aid-gui/
 
 # Default environment
 ENV NODE_ENV=production
-ENV AID_PORT=9911
+ENV AID_PORT=3910
 ENV AID_HOST=0.0.0.0
 ENV AID_PROJECT_ROOT=/project
 ENV AID_CORS_ORIGINS=*
 
-EXPOSE 9911
+EXPOSE 3910
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null http://localhost:9911/api/health || exit 1
+  CMD wget -q -O /dev/null http://localhost:3910/api/health || exit 1
 
 CMD ["node", "dist/index.js"]
