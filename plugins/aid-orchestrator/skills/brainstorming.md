@@ -164,6 +164,22 @@ RULE 11: Before proposing approaches, present a brief MoSCoW prioritization of c
          requirements (Must / Should / Could / Won't). Ask PM to confirm or adjust.
          This takes ONE question slot. Prioritization feeds into approach effort estimates
          and plan scope section.
+RULE 12: **Roadmap detection.** After Step 5 (Design), if ANY of these are true:
+         - PM explicitly said "MVP plan", "roadmap", "fáze", "phases"
+         - Design has 3+ distinct phases/milestones
+         - Total effort estimate exceeds 4 weeks
+         - Design naturally splits into independently deliverable increments
+         → Ask PM:
+         ```
+         This project has {N} phases (~{weeks} weeks).
+         Plan type:
+           (A) MVP Roadmap — master plan with phases, each planned separately
+               → saves to docs/plans/, session prompts per phase
+           (B) Single detailed plan — all steps in one document
+               → saves to .aid-o/plans/P{NNN}, executable via /aid-run
+         ```
+         PM's answer determines plan type passed to plan-writing (RULE 7).
+         If PM doesn't respond or says "you decide" → default to (A) for 3+ phases.
 ```
 
 ### Question Format Template
