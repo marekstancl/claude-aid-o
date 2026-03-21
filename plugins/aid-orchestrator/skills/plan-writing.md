@@ -22,6 +22,21 @@ The plan-writing skill is invoked in two modes:
 **Input:** Approved design sections from brainstorming OR specification document + codebase analysis
 **Output:** Exhaustive plan document (`.aid-o/plans/P{NNN}-{topic}.md`)
 
+### Plan Types — Roadmap vs Executable
+
+| Type | What it is | Where it lives | Plan ID? | Runs via /aid-run? |
+|------|-----------|---------------|----------|-------------------|
+| **Executable plan** | Single-phase implementation plan, spustitelný přes FSM | `.aid-o/plans/P{NNN}-{topic}.md` | YES (from counter.yaml) | YES |
+| **Roadmap / MVP plan** | Multi-phase master plan with subfáze; NOT directly executable | `docs/plans/{project}-{topic}.md` | NO — no counter increment | NO — subfáze become executable plans |
+
+**Detection:** If the brainstormed plan has 3+ phases (MVP phases, milestones), it is a **roadmap**.
+Roadmaps are saved to `docs/plans/`, do NOT consume a plan ID, and are NOT tracked in `active.md`.
+Each subfáze of the roadmap becomes a separate executable plan with its own P{NNN} ID when the PM
+runs the `/aid-plan write` command from the generated session prompts.
+
+**Why:** Roadmaps never "complete" in FSM terms. They are living reference documents.
+Allocating plan IDs to them wastes counter space and creates phantom entries in plans/.
+
 ---
 
 ## Core Principle: Zero Information Loss
