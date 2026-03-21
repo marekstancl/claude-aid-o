@@ -278,6 +278,70 @@ Expand the high-level E2E scenarios from the design section into concrete checks
 
 Skip E2E step if: pure refactoring, docs-only, library with no runtime output.
 
+### MVP Plans — Session Prompt Generation (auto-added for multi-phase plans)
+
+When a plan has multiple phases/subfases (MVP plan, large EPIC with sub-phases), the plan writer
+MUST generate TWO additional outputs:
+
+**1. Commands section at end of plan** — per subfáze, one-liner command + context for writer:
+
+```markdown
+## Commands for Detailed Plan Generation
+
+> **IMPORTANT:** Before writing each phase plan, the plan writer MUST:
+> 1. Read current state of existing files referenced in the phase
+> 2. Compare what design docs expect vs what actually exists in code
+> 3. Identify stubs/placeholders vs working code
+> 4. Adapt plan to reality — don't redo what works, fix what's broken
+>
+> Detailed session prompts: `docs/plans/{project}-session-prompts.md`
+
+### {Phase Name}
+
+\```
+/aid-plan write {plan_file_path} {phase_id} {subfase_id}: {title}
+\```
+**Context for writer:** {2-3 sentences: what this subfase does, which files/dirs it touches,
+which design doc sections to reference, which gaps it addresses, key decisions/risks}
+```
+
+**2. Session prompts file** — `docs/plans/{project}-session-prompts.md` with detailed prompts
+per subfáze that can be copy-pasted into a new Claude Code window:
+
+```markdown
+# {Project} — Session Prompts for Claude Code
+
+> Copy each block into a **new Claude Code window** (VSCode or CLI).
+> Execute sequentially — each subfase depends on the previous.
+> Commit changes after each subfase before starting the next.
+> Master plan: `{plan_file_path}`
+
+---
+
+## {Phase}: {Title}
+
+### {Subfase ID}: {Title}
+
+\```
+{Detailed prompt with:}
+- Goal (1-2 sentences)
+- Items to implement (bullet list, specific)
+- Files CREATE: (exact paths)
+- Files MODIFY: (exact paths, what to change)
+- Reference documents: (paths + specific sections)
+- Key decisions: (what to decide, constraints)
+- Rules: (scope limits, what NOT to touch, commit conventions)
+- After completion: (what to verify, how to commit)
+\```
+
+**Prerequisites:** {what must be done/installed before this subfase}
+```
+
+**When to generate:** Any plan with 3+ phases or 10+ steps. Skip for simple single-phase plans.
+**Where to save:** Session prompts file at `docs/plans/{project}-session-prompts.md` (or `.aid-o/plans/` if no docs/ dir).
+**Quality rule:** Each session prompt must be SELF-CONTAINED — a developer opening a new CC window
+with zero context must be able to execute it. No "see previous phase" references without specifics.
+
 ### Mandatory Fields Per Step
 
 Every step MUST have ALL of these fields populated:

@@ -285,6 +285,12 @@ RULE 5: Generate plan IDs per `skills/run-management.md` → ID System section:
         Plan: P{NNN} (from counter.yaml, pre-allocated at Step 1).
 RULE 6: Brainstorming does NOT create EPICs. EPIC creation is handled by /aid-plan --epic
         (offered in plan-writing handoff), which delegates file creation to `aid-plan-to-epic.sh`.
+RULE 7: **MVP / multi-phase plans:** If the brainstormed plan has 3+ phases or is explicitly
+        an MVP plan, instruct plan-writing to generate:
+        (a) Commands section at end of plan — per subfáze `/aid-plan write` command + context
+        (b) Session prompts file — `docs/plans/{project}-session-prompts.md` with detailed
+            copy-pasteable prompts for each subfáze (self-contained, new-window ready).
+        See plan-writing.md "MVP Plans — Session Prompt Generation" for template.
 ```
 
 ---
