@@ -94,6 +94,32 @@ Standards profile:
 - Selection is stored in `project.yaml` under the `standards` key
 - On re-run (`/aid-init` on existing workspace): if `standards` key already exists in `project.yaml`, show current selection and ask "Keep current ({current})? (Y/N)" — only re-prompt if PM says N
 
+### Vulcan Standards — Ecosystem Docs Integration
+
+When `vulcan` standards are selected, the project CLAUDE.md must reference the authoritative ecosystem documents. These live in the global docs repo, NOT in the AID plugin — they are the single source of truth:
+
+**Mandatory references added to project CLAUDE.md:**
+```markdown
+## Ecosystem pravidla (závazná)
+
+Tento projekt je součástí VULCAN ekosystému. Následující dokumenty jsou závazné:
+
+- **Guardrails:** `/opt/eco/docs/docs/ecosystem/guardrails.md`
+- **Architektonická rozhodnutí:** `/opt/eco/docs/docs/ecosystem/decisions.md`
+- **Infrastruktura:** `/opt/eco/docs/docs/ecosystem/infrastructure.md`
+- **MCP Servery:** `/opt/eco/docs/docs/ecosystem/mcp-servers.md`
+- **Ecosystem overview:** `/opt/eco/docs/docs/ecosystem/index.md`
+
+Klíčová pravidla:
+- G-008: Port rozsahy per-projekt (viz guardrails.md)
+- G-009: docker-compose.yml pouze vlastní služby, shared-infra network external
+- G-015: Jeden Dockerfile (prod-ready), docker-compose.override.yml pro dev
+```
+
+**Agent MUST read these files** during standards-related work (auditor, planner, gate evaluation). The guardrails contain 19 rules (G-001 to G-019) covering architecture authority, language boundaries, integration patterns, deployment, security, and infrastructure.
+
+**Additionally:** VUL-001 to VUL-022 rules from `defaults/standards/vulcan.yaml` apply for code-level standards (Pydantic I/O, tenant isolation, agent patterns). The G-rules are ecosystem/infrastructure level; VUL-rules are code level. Both apply simultaneously.
+
 ### project.yaml template
 
 ```yaml

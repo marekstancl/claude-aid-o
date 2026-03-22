@@ -215,11 +215,11 @@ This project uses AID v2.0 for multi-agent orchestration.
 
 Tento projekt je součástí VULCAN ekosystému. Následující dokumenty jsou závazné:
 
-- **Ecosystem Docs:** `http://10.0.77.10:8800`
-- **Guardrails:** `http://10.0.77.10:8800/ecosystem/guardrails`
-- **Architektonicka rozhodnuti:** `http://10.0.77.10:8800/ecosystem/decisions`
-- **Infrastruktura:** `http://10.0.77.10:8800/ecosystem/infrastructure`
-- **MCP Servery:** `http://10.0.77.10:8800/ecosystem/mcp-servers`
+- **Guardrails:** `/opt/eco/docs/docs/ecosystem/guardrails.md`
+- **Architektonicka rozhodnuti:** `/opt/eco/docs/docs/ecosystem/decisions.md`
+- **Infrastruktura:** `/opt/eco/docs/docs/ecosystem/infrastructure.md`
+- **MCP Servery:** `/opt/eco/docs/docs/ecosystem/mcp-servers.md`
+- **Ecosystem overview:** `/opt/eco/docs/docs/ecosystem/index.md`
 
 Klíčová pravidla:
 - G-008: Port rozsah 3910-3919, offset +1 = app (3911). Host port = interní port.
