@@ -163,11 +163,14 @@ while IFS= read -r line; do
   fi
 done < "$plan"
 
-# Count step headers
+# Count step headers — accept multiple formats:
+#   ### Step N: ...       (preferred, level 3)
+#   ## Task N: ...        (common alternative, level 2)
+#   ## Step N: ...        (level 2 variant)
 step_count=0
 while IFS= read -r line; do
   line="${line//$'\r'/}"
-  if [[ "$line" =~ ^###[[:space:]]+Step[[:space:]]+[0-9]+ ]]; then
+  if [[ "$line" =~ ^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+ ]]; then
     step_count=$(( step_count + 1 ))
   fi
 done < "$plan"
@@ -211,7 +214,7 @@ else
 fi
 
 if [[ "$total_phases" -eq 0 ]]; then
-  error_exit "Cannot detect any phases in plan file. Expected EPIC/Phase markers or ### Step headers." 1
+  error_exit "Cannot detect any phases in plan file. Expected EPIC/Phase markers, ### Step N:, or ## Task N: headers." 1
 fi
 
 # =============================================================================

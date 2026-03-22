@@ -723,6 +723,11 @@ The plan document is consumed by `skills/pipeline.md` § 4 → Source Plan Integ
 
 **Implication for this skill:** Step headers MUST follow the pattern `### Step {N}: {Name}` to enable reliable section matching. The `{N}` must be a sequential integer starting from 1.
 
+**Pipeline compatibility:** The bash pipeline scripts (`aid-auto-pipeline.sh`, `aid-plan-to-epic.sh`) require:
+- A `## Implementation Steps` (or `## High-Level Steps`) section header — or at minimum step/task headers directly in the document
+- Step headers as `### Step {N}: {Descriptive Name}` (preferred) — `## Task {N}:` and `## Step {N}:` are also accepted but not recommended
+- Each step should have an `**Objective:**` field — the pipeline falls back to the header text after the colon, then to the first non-empty line of step content
+
 ---
 
 ## Post-Write Handoff

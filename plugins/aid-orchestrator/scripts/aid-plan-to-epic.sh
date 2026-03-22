@@ -125,13 +125,15 @@ slug="$(slugify "$title")"
 # of intervening ## headers inside code blocks.
 # ---------------------------------------------------------------------------
 
-# Quick check that a steps section exists (supports both formats)
-# Plans use either "## Implementation Steps" (detailed) or "## High-Level Steps" (standard template)
+# Quick check that a steps section exists (supports multiple formats)
+# Plans use "## Implementation Steps" (detailed), "## High-Level Steps" (standard template),
+# or may have step/task headers directly without a wrapper section.
 has_impl_steps="$(awk '
   { gsub(/\r$/, "") }
   /^## (Implementation Steps|High-Level Steps)/ { print "yes"; exit }
+  /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/ { print "yes"; exit }
 ' "$plan")"
-[[ "$has_impl_steps" != "yes" ]] && error_exit "Plan file missing '## Implementation Steps' or '## High-Level Steps' section" 1
+[[ "$has_impl_steps" != "yes" ]] && error_exit "Plan file missing step headers. Expected: '## Implementation Steps', '## High-Level Steps', '### Step N:', or '## Task N:'" 1
 
 # ---------------------------------------------------------------------------
 # Step 4: Detect phase boundaries and extract steps for this phase
@@ -166,11 +168,14 @@ while IFS= read -r line; do
     fi
     found_markers=1
   fi
-  # Match step headers: ### Step N: ...
-  if [[ "$line" =~ ^###[[:space:]]+Step[[:space:]]+([0-9]+) ]]; then
-    step_numbers+=("${BASH_REMATCH[1]}")
+  # Match step headers — multiple formats:
+  #   ### Step N: ...   (preferred)
+  #   ## Task N: ...    (common alternative)
+  #   ## Step N: ...    (level 2 variant)
+  if [[ "$line" =~ ^###?[[:space:]]+(Step|Task)[[:space:]]+([0-9]+) ]]; then
+    step_numbers+=("${BASH_REMATCH[2]}")
     if [[ "$current_marker_phase" -gt 0 ]]; then
-      step_to_phase["${BASH_REMATCH[1]}"]="$current_marker_phase"
+      step_to_phase["${BASH_REMATCH[2]}"]="$current_marker_phase"
     fi
   fi
 done < "$plan"
@@ -238,10 +243,11 @@ extract_step_content() {
     BEGIN { found = 0 }
     {
       gsub(/\r$/, "")
-      if ($0 ~ /^###[[:space:]]+Step[[:space:]]+/ ) {
+      # Match multiple header formats: ### Step N, ## Task N, ## Step N
+      if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/) {
         # Extract step number from this header
         line = $0
-        sub(/^###[[:space:]]+Step[[:space:]]+/, "", line)
+        sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
         sub(/:.*/, "", line)
         sub(/[^0-9].*/, "", line)
         if (found) exit
@@ -387,8 +393,10 @@ for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
   step_content="$(extract_step_content "$sn")"
 
-  # Extract objective (first line after **Objective:** or first paragraph)
-  # Stops at blank line OR next **BoldField:** marker
+  # Extract objective — priority chain:
+  #   1. Explicit **Objective:** field in step content
+  #   2. Text after colon in step header (### Step N: <objective text>)
+  #   3. First non-empty line of step content
   objective="$(echo "$step_content" | awk '
     BEGIN { found = 0 }
     {
@@ -403,9 +411,31 @@ for sn in "${phase_steps[@]}"; do
       if (found) print
     }
   ')"
-  # Fallback: use step header description
+  # Fallback 2: extract from step header text (after "Step N:" or "Task N:")
   if [[ -z "$objective" ]]; then
-    objective="$(echo "$step_content" | head -1)"
+    objective="$(awk -v snum="$sn" '
+      {
+        gsub(/\r$/, "")
+        if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+/) {
+          line = $0
+          sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
+          # Check if this is the right step number
+          num = line
+          sub(/:.*/, "", num)
+          sub(/[^0-9].*/, "", num)
+          if (num == snum) {
+            # Extract text after "N: " or "N — "
+            sub(/^[0-9]+[[:space:]]*[:—–-][[:space:]]*/, "", line)
+            if (line != "" && line != num) print line
+            exit
+          }
+        }
+      }
+    ' "$plan")"
+  fi
+  # Fallback 3: first non-empty line of step content
+  if [[ -z "$objective" ]]; then
+    objective="$(echo "$step_content" | awk 'NF { print; exit }')"
   fi
 
   # Extract AID Role
