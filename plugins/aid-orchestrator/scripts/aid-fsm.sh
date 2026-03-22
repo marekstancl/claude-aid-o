@@ -538,6 +538,29 @@ cmd_done_advance() {
         errors=$((errors + 1))
       }
 
+      # EPIC task file must be archived (moved to tasks/archive/)
+      local task_file
+      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
+      if [[ -n "$task_file" ]]; then
+        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
+        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
+        errors=$((errors + 1))
+      fi
+
+      # Check for P1 security findings in auditor report (blocking)
+      local audit_file=""
+      [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
+      [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
+      if [[ -n "$audit_file" ]]; then
+        local p1_count
+        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || echo "0")
+        if [[ "$p1_count" -gt 0 ]]; then
+          echo "PRECONDITION FAIL: Auditor report contains $p1_count P1/critical security finding(s)." >&2
+          echo "Address security findings before release. See: $audit_file" >&2
+          errors=$((errors + 1))
+        fi
+      fi
+
       if [[ $errors -gt 0 ]]; then
         local timeline
         timeline=$(derive_timeline "$state_file") || true
