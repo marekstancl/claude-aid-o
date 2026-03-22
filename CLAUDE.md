@@ -210,3 +210,18 @@ This project uses AID v2.0 for multi-agent orchestration.
 - Config: `.aid-o/config/`
 - Work: `.aid-o/work/`
 <!-- AID-O END -->
+
+## Ecosystem pravidla (závazná)
+
+Tento projekt je součástí VULCAN ekosystému. Následující dokumenty jsou závazné:
+
+- **Ecosystem Docs:** `http://10.0.77.10:8800`
+- **Guardrails:** `http://10.0.77.10:8800/ecosystem/guardrails`
+- **Architektonicka rozhodnuti:** `http://10.0.77.10:8800/ecosystem/decisions`
+- **Infrastruktura:** `http://10.0.77.10:8800/ecosystem/infrastructure`
+- **MCP Servery:** `http://10.0.77.10:8800/ecosystem/mcp-servers`
+
+Klíčová pravidla:
+- G-008: Port rozsah 3910-3919, offset +1 = app (3911). Host port = interní port.
+- G-009: docker-compose.yml pouze vlastní služby, shared-infra network external.
+- G-015: Jeden Dockerfile (prod-ready), docker-compose.override.yml pro dev.
