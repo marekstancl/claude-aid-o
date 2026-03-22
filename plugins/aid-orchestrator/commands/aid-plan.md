@@ -147,7 +147,7 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 1. **Validate** — confirm input is a Plan file (`type: plan` or `# Plan:` header)
 2. **Analyze** — count phases, extract plan ID and title
 3. **Queue mode** — ask PM: chain (A), separate (B), or custom (C) dependencies
-4. **Run pipeline** — `bash scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode>`
+4. **Run pipeline** — `bash {plugin_path}/scripts/aid-auto-pipeline.sh --plan <path> --queue-mode <mode>`
 5. **Validate output** — check JSON manifest, verify all files created
 6. **Report** — show created EPICs, queue status, next steps
 
@@ -161,7 +161,7 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
-- `scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
+- `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
 - `defaults/templates/plan.md` — base plan template
 
 ## Important

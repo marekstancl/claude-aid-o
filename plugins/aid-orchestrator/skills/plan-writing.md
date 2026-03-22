@@ -790,7 +790,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 - `commands/aid-plan.md` — unified command that invokes this skill (write mode or brainstorm Step 8)
 - `skills/brainstorming.md` — brainstorming skill (upstream — provides approved sections)
 - `skills/pipeline.md` § 4 — agent dispatch (downstream — injects plan sections into agent prompts)
-- `plugins/aid-orchestrator/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
+- `{plugin_path}/scripts/aid-auto-pipeline.sh` — pipeline script that creates EPIC files, plan.json, run.md, and queue entries from the plan document
 - `defaults/templates/plan.md` — base plan template (this skill extends it)
 - `skills/run-management.md` — plan lifecycle (archiving, location rules)
 - `.aid-o/config/language.yaml` — document language configuration

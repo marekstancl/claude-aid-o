@@ -417,7 +417,7 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 - `commands/aid-plan.md` — unified command that invokes this skill (9-step flow)
 - `skills/plan-writing.md` — Step 8 delegation (exhaustive plan doc, quality gates, handoff)
 - `commands/aid-plan.md --epic` — next step: EPIC creation from plan
-- `scripts/aid-auto-pipeline.sh` — Plan.md → EPIC.md → plan.json → run.md → queue
+- `{plugin_path}/scripts/aid-auto-pipeline.sh` — Plan.md → EPIC.md → plan.json → run.md → queue
 - `defaults/templates/plan.md` — base plan document template
 - `defaults/templates/design-sections.md` — design section templates for Step 5
 - `skills/planner.md` — how plans become Plan JSON
