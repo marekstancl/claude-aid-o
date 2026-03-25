@@ -102,6 +102,7 @@ The plan MUST contain these sections in this order:
 
 | Section | Content | Source |
 |---------|---------|--------|
+| `## Stakeholder Brief` | Non-technical summary: what, why, what it delivers, risks. Written for PM/stakeholders who won't read the full plan. 5-10 sentences. | Synthesized from all sections |
 | `## Context` | Why this plan exists, what triggered it | Brainstorming context / spec |
 | `## Goal` | One-sentence desired outcome | Brainstorming goal / spec |
 | `## Scope` | In-scope and out-of-scope items | Brainstorming scope |
@@ -129,6 +130,19 @@ structure from HTML. The companion HTML IS the mockup source code — agents rec
 verbatim, same as GitHub TSX/CSS source.
 
 **Section omission rule:** If brainstorming did not discuss a topic (e.g., no frontend, no API), the corresponding section is omitted entirely. Do NOT add empty or placeholder sections. Do NOT invent content for sections that were not discussed.
+
+### MVP/Roadmap Plans — Special Handling
+
+When brainstorming produces a multi-phase MVP plan (detected by: 4+ weeks effort, 3+ phases, or PM explicitly requests "MVP plan"):
+
+1. **Save to `docs/plans/`** — NOT `.aid-o/plans/`. MVP plans are roadmap documents, not executable plans. Do NOT allocate plan ID from counter.yaml.
+2. **Session prompts section** — after all phases, include `## Session Prompts for Detailed Plans`:
+   - Per subfáze: `/aid-plan write {mvp-plan-path} {phase} {subfáze}` command
+   - Context line for writer: 2-3 sentences describing scope, key references, gaps addressed
+3. **Separate session prompts file** — generate `docs/plans/{project}-session-prompts.md` with detailed copy-paste prompts per subfáze (goal, items, files CREATE/MODIFY, reference docs, key decisions, rules, prerequisites)
+4. **Important note at top of session prompts section:**
+   > Before writing each detailed plan, the plan writer MUST read current state of existing code,
+   > compare with architecture doc expectations, identify stubs vs working code, and adapt plan to reality.
 
 ---
 
@@ -710,6 +724,8 @@ RULE AC-10: DO NOT provide less detail for "simple" steps.
 13. **ALWAYS write the plan to `.aid-o/plans/`** — never to any other location
 14. **ALWAYS generate proper plan IDs** — per `skills/run-management.md` → ID System (pre-allocated at brainstorming Step 1)
 15. **ALWAYS delete the interim document after successful plan write** — remove `.aid-o/work/interim-P{NNN}.md` if it exists (cleanup from brainstorming context persistence)
+16. **ALWAYS include a documentation update step** — if the plan changes API, models, architecture, or workflow, the LAST implementation step (before E2E) MUST update shared documentation (Docusaurus, README, API docs). For vulcan ecosystem projects, this means updating `/opt/eco/docs/docs/` or project-level docs. No exceptions — undocumented changes are incomplete changes.
+17. **ALWAYS include a Stakeholder Brief** — first section after frontmatter. Non-technical summary for PM/stakeholders. Must answer: what, why, what it delivers, key risks. 5-10 sentences.
 
 ---
 

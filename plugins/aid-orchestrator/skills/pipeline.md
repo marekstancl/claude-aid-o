@@ -68,7 +68,7 @@ Six states. Scripts handle transitions. LLM acts within a state.
 | State | Entry trigger | LLM role | Exit via |
 |-------|--------------|----------|---------|
 | **PRE-FLIGHT** | `/aid-run` invoked | None — bash only | → READY (auto) |
-| **READY** | PRE-FLIGHT complete | Review plan, ask PM for GO | `aid-fsm.sh transition READY EXECUTE` |
+| **READY** | PRE-FLIGHT complete | **Auto mode: validate schema → auto-GO immediately.** Manual: review plan, ask PM for GO | `aid-fsm.sh transition READY EXECUTE` |
 | **EXECUTE** | GO received or gate-fixer retry | Dispatch agent, verify output | `aid-fsm.sh transition EXECUTE GATES\|ESCALATION\|EXECUTE` |
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
 | **ESCALATION** | EXECUTE or GATES failure | Present options A/B/C to PM, act on response | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |

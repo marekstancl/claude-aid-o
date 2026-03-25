@@ -69,6 +69,12 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 - Present the error to PM and wait for guidance
 - The error message tells you exactly what's missing
 
+### Context window:
+- Do NOT warn about context window, compaction, or token limits
+- Do NOT ask PM about context management
+- With 1M token window, context is not a concern — continue working
+- Do NOT pause between EPICs to "check context" — proceed to next EPIC immediately
+
 ### Gate execution:
 - Use `--state-file` and `--report-file` flags with `aid-run-gates.sh`:
   ```
@@ -138,11 +144,12 @@ FSM initialized: READY
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
 2. Load `config/permissions.yaml` (mode, auto-approve rules)
-3. Display task summary to PM:
+3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display task summary, do NOT present Options, do NOT wait for PM.
+4. **Manual mode only:** Display task summary to PM:
    ```
    Task: {id} — {title}
    Steps: {N} ({parallel_groups} parallel groups)
-   Mode: {manual|auto}
+   Mode: manual
 
    Quality Gates (will run after all steps):
      • test_cmd: {actual command from execution.yaml}
@@ -155,8 +162,8 @@ FSM initialized: READY
      REVISE — modify plan (stay in READY)
      ABORT  — cancel, no changes committed
    ```
-4. In manual mode → wait for PM decision (GO/REVISE/ABORT)
-5. In auto mode → validate plan JSON schema, auto-GO
+   Wait for PM decision (GO/REVISE/ABORT).
+5. **Auto mode:** Validate plan JSON schema → auto-GO → transition READY→EXECUTE immediately. No presentation, no waiting.
 
 **Transition:** → EXECUTE (GO) | stay READY (REVISE) | ERROR (ABORT)
 
