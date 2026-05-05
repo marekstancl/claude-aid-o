@@ -1,0 +1,18 @@
+[project]
+name = "svc-mcp-tg-bot"
+version = "1.0.0"
+description = "Telegram Alert MCP Server for AID v3 ekosystem"
+requires-python = ">=3.12"
+dependencies = [
+  "fastmcp>=0.2.0",
+  "httpx>=0.27.0",
+  "python-dotenv>=1.0.0",
+  "starlette>=0.37.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server"]
