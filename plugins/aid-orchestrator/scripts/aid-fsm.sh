@@ -132,6 +132,128 @@ try_telegram_alert() {
   return 0
 }
 
+# ─── P032 Step 4: Compliance.json Helpers ────────────────────────────────
+# evaluate_compliance_checks emits the 6-dimension `checks` object.
+# write_compliance_json wraps it with run metadata + overall verdict + writes
+# the per-EPIC compliance.json + emits the `compliance_written` timeline event.
+
+evaluate_compliance_checks() {
+  local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
+
+  # branch_correct: state.yaml.branch matches Session A naming convention
+  # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
+  # Session A scope; Sessions B/C may relax the regex.
+  local branch_value branch_correct
+  branch_value=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}')
+  if [[ "$branch_value" =~ ^task/E- ]]; then
+    branch_correct=true
+  else
+    branch_correct=false
+  fi
+
+  # execution_yaml_present: project-level config exists (eager-created by
+  # /aid-init or auto-recovered by aid-fsm.sh init in Step 1).
+  local exec_yaml_present
+  if [[ -f "${project_root}/.aid-o/config/execution.yaml" ]]; then
+    exec_yaml_present=true
+  else
+    exec_yaml_present=false
+  fi
+
+  # gates_generated_by: gates_report.json carries the runner's provenance.
+  # Hand-written reports (pre-Session-A pattern) lack this field.
+  local gates_report="${evidence_dir}/gates/gates_report.json"
+  local gates_genby
+  if [[ -f "$gates_report" ]] && jq -e '._generated_by' "$gates_report" >/dev/null 2>&1; then
+    gates_genby=true
+  else
+    gates_genby=false
+  fi
+
+  jq -nc \
+    --argjson bc  "$branch_correct" \
+    --argjson eyp "$exec_yaml_present" \
+    --argjson ggb "$gates_genby" \
+    '{
+      branch_correct:         $bc,
+      execution_yaml_present: $eyp,
+      gates_generated_by:     $ggb,
+      memory_substantive:     null,
+      verifier_outputs:       null,
+      dod_present:            null
+    }'
+}
+
+write_compliance_json() {
+  local epic_id=$1 run_id=$2 state_file=$3 evidence_dir=$4 project_root=$5
+  local compliance_file="${evidence_dir}/compliance.json"
+  local _timeline="${evidence_dir}/timeline.jsonl"
+
+  local deploy_era="post-session-a"
+  if fsm_check_grandfather; then
+    deploy_era="pre-session-a"
+  fi
+
+  local checks
+  if ! checks=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>&1); then
+    # Fallback: write skeleton so the aggregator can still see this EPIC ran;
+    # never abort done-advance because of telemetry — primary release path is
+    # what matters.
+    log_warn "compliance.json evaluation failed: ${checks}"
+    jq -nc \
+      --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
+      --arg era "$deploy_era" \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg note "evaluation failed: ${checks}" \
+      '{
+        epic_id: $epic, run_id: $run, aid_version: $ver,
+        deploy_era: $era, evaluated_at: $ts,
+        checks: {
+          branch_correct: null, execution_yaml_present: null, gates_generated_by: null,
+          memory_substantive: null, verifier_outputs: null, dod_present: null
+        },
+        overall: "fail",
+        notes: [$note]
+      }' > "$compliance_file"
+    log_event "$_timeline" "compliance_written" deploy_era="$deploy_era" overall="fail" checks_passed="0" checks_failed="0"
+    return 0
+  fi
+
+  # overall = pass if every check ∈ {true, null}, else fail.
+  # IMPORTANT: when Sessions B/C deploy, currently-null fields become true|false.
+  # The same logic must remain consistent — null ALWAYS means "not measured in
+  # this deployed era", NEVER "not applicable". Permissively counted as pass for
+  # the era's overall verdict so currently-undeployed dimensions don't drag down
+  # the score retroactively.
+  local overall
+  overall=$(echo "$checks" | jq -r '
+    [.[] | (. == true or . == null)] | all | if . then "pass" else "fail" end
+  ')
+
+  jq -nc \
+    --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
+    --arg era "$deploy_era" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson chks "$checks" \
+    --arg ov "$overall" \
+    '{
+      epic_id: $epic, run_id: $run, aid_version: $ver,
+      deploy_era: $era, evaluated_at: $ts,
+      checks: $chks, overall: $ov, notes: []
+    }' > "$compliance_file" || {
+    log_warn "compliance.json write failed for ${compliance_file} — skipping (telemetry is best-effort)"
+    return 0
+  }
+
+  local checks_passed checks_failed
+  checks_passed=$(echo "$checks" | jq '[.[] | select(. == true)] | length')
+  checks_failed=$(echo "$checks" | jq '[.[] | select(. == false)] | length')
+
+  log_event "$_timeline" "compliance_written" \
+    deploy_era="$deploy_era" overall="$overall" \
+    checks_passed="$checks_passed" checks_failed="$checks_failed"
+}
+
 # ─── Precondition Checks ───────────────────────────────────────────────
 # Called inside cmd_transition() AFTER whitelist check, BEFORE state update.
 # Returns 0 if preconditions met, 1 with error message if not.
@@ -774,6 +896,21 @@ cmd_done_advance() {
 
   # Advance phase
   sed -i "s/^done_phase: .*/done_phase: ${to_phase}/" "$state_file"
+
+  # P032 Step 4 (PM-authorized C4): write compliance.json after sed updates
+  # done_phase=release. evaluate_compliance_checks reads post-enforcement
+  # state.yaml.branch (set by Step 2 cmd_init) and the gate runner's
+  # provenance fields (set by Step 3 aid-run-gates.sh). Hook is best-effort
+  # — failures inside write_compliance_json log_warn but never abort the
+  # release path.
+  if [[ "$to_phase" == "release" ]]; then
+    local epic_id run_id evidence_dir project_root
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    project_root="$PWD"
+    write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
+  fi
 
   # Audit trail
   local timeline
