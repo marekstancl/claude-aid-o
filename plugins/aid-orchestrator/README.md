@@ -54,6 +54,34 @@ AID is a Claude Code plugin implementing Controller + Workers architecture for A
 /aid-run --auto
 ```
 
+## Worktree Development
+
+When developing the plugin itself (not consuming it from another project), work
+in a dedicated git worktree to avoid the chicken-and-egg problem where editing
+plugin scripts mid-flight breaks any AID instance currently running in another
+project (vulcan, sousto, etc.).
+
+```bash
+git worktree add ~/.claude-worktrees/<branch-name> -b feat/<branch-name>
+cd ~/.claude-worktrees/<branch-name>
+direnv allow                            # one-shot per worktree
+# AID_PLUGIN_PATH automatically set to $(pwd)/plugins/aid-orchestrator
+# scripts/ added to PATH so aid-fsm.sh, aid-run-gates.sh, etc. resolve directly
+```
+
+Other projects continue using the stable plugin from
+`~/.claude/plugins/marketplaces/claude-aid-o/`. Once the worktree branch is
+merged, run `claude plugin update aid-orchestrator@claude-aid-o` in those
+projects to pick up the new version.
+
+A committed `.envrc` template at the repo root pre-configures direnv for this
+workflow:
+
+```bash
+export AID_PLUGIN_PATH="$(pwd)/plugins/aid-orchestrator"
+PATH_add "$AID_PLUGIN_PATH/scripts"
+```
+
 ## Documentation
 
 - `/aid-help` — progressive help (Level 0-3)
