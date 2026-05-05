@@ -61,6 +61,22 @@ derive_timeline() {
   fi
 }
 
+# True if the working tree is a git worktree (git_dir under .git/worktrees/).
+# Used by PRE-FLIGHT branch enforcement to skip auto-checkout in worktree mode
+# where the caller (e.g., superpowers:using-git-worktrees) controls the branch.
+is_worktree() {
+  local git_dir
+  git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 1
+  [[ "$git_dir" == *.git/worktrees/* ]]
+}
+
+# Print a multi-line error to stderr and exit 1.
+# Use for unrecoverable PRE-FLIGHT / precondition failures with copy-paste fix.
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
 # ─── Precondition Checks ───────────────────────────────────────────────
 # Called inside cmd_transition() AFTER whitelist check, BEFORE state update.
 # Returns 0 if preconditions met, 1 with error message if not.
@@ -194,6 +210,78 @@ cmd_init() {
     echo "WARNING: --force used, skipping plan-level DONE gate check" >&2
   fi
 
+  # ─── PRE-FLIGHT: Branch Enforcement (P032 Step 2) ────────────────────
+  # Closes AID-001 (65% of pre-Session-A state.yaml claimed branch=main with
+  # no actual task branch, breaking done-advance git merge audit trail).
+  #
+  # Five HEAD states handled:
+  #   worktree    → skip enforcement (caller controls branch)
+  #   resume      → HEAD == task/E-{epic_id}/main → log_info, accept
+  #   fresh init  → HEAD ∈ {main, master, develop} → auto-checkout
+  #   mismatch    → HEAD == task/<other_epic>/main → emit event, hard fail
+  #   unusual     → anything else (feat/*, detached, ...) → warn, accept
+  #
+  # Timeline events for forensic visibility:
+  #   fsm_branch_mismatch_detected (hard fail case)
+  #   fsm_branch_unusual_detected  (warn case)
+  local timeline_path=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  mkdir -p "$(dirname "$timeline_path")"
+
+  if is_worktree; then
+    log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
+  else
+    local current_branch expected_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
+    expected_branch="task/${epic_id}/main"
+
+    case "$current_branch" in
+      "$expected_branch")
+        log_info "Resume case: HEAD already on $expected_branch"
+        ;;
+      main|master|develop)
+        log_info "Auto-creating branch: $expected_branch"
+        git checkout -b "$expected_branch" >/dev/null 2>&1 \
+          || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        ;;
+      task/E-*)
+        # Different EPIC's task branch — stale workspace from prior session.
+        log_event "$timeline_path" "fsm_branch_mismatch_detected" \
+          current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
+        die "ERROR: Currently on $current_branch, expected $expected_branch.
+
+Reason: AID v3 requires one task branch per EPIC for clean audit trail.
+        Different-EPIC branches indicate stale workspace from prior session.
+
+Fix: git checkout main && git branch -d $current_branch
+Then retry: aid-fsm.sh init ${epic_id} ..."
+        ;;
+      *)
+        # feat/*, refactor/*, detached HEAD, any non-task pattern.
+        # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
+        log_event "$timeline_path" "fsm_branch_unusual_detected" \
+          current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
+        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        ;;
+    esac
+  fi
+
+  # Uncommitted changes guard (always runs, even in worktree mode).
+  # PRE-FLIGHT must start from clean tree so done-advance merge has a clear
+  # diff to attribute to the EPIC.
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    die "Uncommitted changes present. Commit or stash before init:
+       git status   # review
+       git stash    # or commit"
+  fi
+
+  # C3 (PM-authorized): override caller's branch param ($5) with actual git
+  # state. Caller convention is to pass 'main' as a placeholder; what matters
+  # downstream is the branch we actually ended up on (after auto-checkout or
+  # in worktree mode). state.yaml.branch reflects post-enforcement reality.
+  local actual_branch
+  actual_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
+  branch="$actual_branch"
+
   # Auto-recover execution.yaml if missing (P032 Step 1).
   # Empty-stacks fallback is harmless and idempotent — pre-deploy projects keep
   # their custom config (the [[ ! -f ... ]] guard ensures we never overwrite).
@@ -208,6 +296,8 @@ cmd_init() {
   fi
 
   mkdir -p "$(dirname "$state_file")"
+  local _now_iso
+  _now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   cat > "$state_file" << EOF
 epic_id: $epic_id
 run_id: $run_id
@@ -219,7 +309,8 @@ branch: $branch
 base_commit: $base_commit
 gate_retries: 0
 escalation_count: 0
-started_at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+started_at: "${_now_iso}"
+created_at: ${_now_iso}
 EOF
 
   # Audit trail
