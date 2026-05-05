@@ -194,6 +194,19 @@ cmd_init() {
     echo "WARNING: --force used, skipping plan-level DONE gate check" >&2
   fi
 
+  # Auto-recover execution.yaml if missing (P032 Step 1).
+  # Empty-stacks fallback is harmless and idempotent — pre-deploy projects keep
+  # their custom config (the [[ ! -f ... ]] guard ensures we never overwrite).
+  if [[ ! -f .aid-o/config/execution.yaml ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh"
+    local -a _aid_stacks=()
+    mapfile -t _aid_stacks < <(detect_stacks "$PWD")
+    if compose_execution_yaml "$PWD" ".aid-o/config/execution.yaml" "${_aid_stacks[@]}"; then
+      log_info "Lazy-created .aid-o/config/execution.yaml with stacks: ${_aid_stacks[*]:-none}"
+    fi
+  fi
+
   mkdir -p "$(dirname "$state_file")"
   cat > "$state_file" << EOF
 epic_id: $epic_id

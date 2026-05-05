@@ -52,5 +52,19 @@ log_event() {
   return 0
 }
 
+# Severity-prefixed stderr loggers (P032 Step 1).
+# Use these instead of bare `echo "..." >&2` so logs are greppable.
+log_info() {
+  echo "[INFO] $*" >&2
+}
+
+log_warn() {
+  echo "[WARN] $*" >&2
+}
+
+log_error() {
+  echo "[ERROR] $*" >&2
+}
+
 # Export for use in subshells
-export -f log_event
+export -f log_event log_info log_warn log_error
