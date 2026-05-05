@@ -85,11 +85,20 @@ run_all_gates() {
   local execution_yaml="$1"
   local epic_id="$2"
   local run_id="$3"
-  local timeline_file="${4:-.aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl}"
+  shift 3
+
+  # Determine timeline_file: use positional $4 ONLY if it's not a flag.
+  # Bug fix (PM-reported): the previous `${4:-default}` + unconditional
+  # `shift` swallowed `--state-file` when caller skipped the positional
+  # arg, causing log_event to write to a literal file named "--state-file".
+  local timeline_file=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  if [[ -n "${1:-}" && "${1}" != --* ]]; then
+    timeline_file="$1"
+    shift
+  fi
 
   # Parse optional flags: --state-file, --report-file
   local state_file="" report_file=""
-  shift 3; shift || true  # skip positional args (4th is timeline_file)
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --state-file) state_file="$2"; shift 2 ;;

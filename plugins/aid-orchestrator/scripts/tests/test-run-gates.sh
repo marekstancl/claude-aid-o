@@ -111,3 +111,38 @@ teardown() { rm -rf "$TEST_DIR"; }
   run "$RUN_GATES" run-all "/nonexistent/execution.yaml" "E-TEST" "R-001" "$TIMELINE"
   [ "$status" -eq 1 ]
 }
+
+# --- P032 Step 3 bug regression (PM-reported, fixed in commit after 15a0cee) ---
+# Before fix: skipping the optional 4th positional made `${4:-default}` and
+# subsequent shifts swallow `--state-file` as if it were the timeline_file
+# path. log_event then wrote to a literal file named `--state-file` and
+# gate_runner_start/complete events never reached the real timeline.jsonl.
+
+@test "run-all: --state-file flag NOT consumed as timeline_file positional (P032 bug regression)" {
+  cd "$TEST_DIR"
+  cat > exec.yaml <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+YAML
+  mkdir -p .aid-o/work/evidence/E-X/R-1/gates
+  cat > .aid-o/work/evidence/E-X/R-1/state.yaml <<'YAML'
+state: GATES
+YAML
+
+  "$RUN_GATES" run-all "$TEST_DIR/exec.yaml" "E-X" "R-1" \
+    --state-file "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/state.yaml" \
+    --report-file "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/gates/gates_report.json" \
+    >/dev/null 2>&1
+
+  # Bug guard: the literal `./--state-file` file must NOT exist.
+  [ ! -f "$TEST_DIR/--state-file" ]
+
+  # Default timeline.jsonl path must exist and contain the framing events.
+  [ -f "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/timeline.jsonl" ]
+  run grep -q '"event":"gate_runner_start"' "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/timeline.jsonl"
+  [ "$status" -eq 0 ]
+  run grep -q '"event":"gate_runner_complete"' "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/timeline.jsonl"
+  [ "$status" -eq 0 ]
+}
