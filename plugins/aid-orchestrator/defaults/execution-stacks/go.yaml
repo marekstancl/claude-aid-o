@@ -1,0 +1,13 @@
+gates:
+go_test:
+  # DEPENDENCY: go toolchain (go test is built-in)
+  command: "go test ./..."
+  required_when: "*.go exists"
+go_lint:
+  # DEPENDENCY: golangci-lint must be installed (https://golangci-lint.run/usage/install)
+  command: "golangci-lint run"
+  required_when: "*.go exists"
+go_build:
+  # DEPENDENCY: go toolchain (go build is built-in)
+  command: "go build ./..."
+  required_when: "go.mod exists"
