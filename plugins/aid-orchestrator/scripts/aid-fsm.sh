@@ -385,6 +385,21 @@ cmd_init() {
   local force="false"
   [[ "${8:-}" == "--force" ]] && force="true"
 
+  # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
+  # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
+  # enforcement (git). Without these, downstream calls fail with cryptic
+  # messages; fail fast with concrete install hint.
+  if ! command -v git >/dev/null 2>&1; then
+    echo "ERROR: git not installed. Install: apt install git / brew install git" >&2
+    echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
+    exit 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq not installed. Install: apt install jq / brew install jq" >&2
+    echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
+    exit 1
+  fi
+
   if [[ -f "$state_file" ]]; then
     echo "ERROR: state_file already exists: $state_file (prevent duplicate init)" >&2
     exit 1
