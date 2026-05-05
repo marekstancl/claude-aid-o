@@ -77,6 +77,61 @@ die() {
   exit 1
 }
 
+# ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
+# All three read $state_file / $evidence_dir / $epic_id from caller scope
+# (matches existing derive_timeline / check_preconditions convention).
+
+# True if state.yaml.created_at predates the current AID deploy threshold.
+# Threshold sources (first non-empty wins):
+#   1. AID_DEPLOY_DATE env var (set by PM shell rc or per-invocation)
+#   2. ${AID_PLUGIN_PATH}/DEPLOY_DATE file (created in Step 9 release)
+# If no marker / no threshold → return 1 (fail-safe to post-deploy strict).
+# ISO 8601 UTC lex compare works here because both fields use the same
+# `date -u +%Y-%m-%dT%H:%M:%SZ` format (Step 2 cmd_init / Step 9 release).
+fsm_check_grandfather() {
+  local created_at
+  created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  [[ -z "$created_at" ]] && return 1
+  local deploy_date="${AID_DEPLOY_DATE:-}"
+  if [[ -z "$deploy_date" && -n "${AID_PLUGIN_PATH:-}" && -f "${AID_PLUGIN_PATH}/DEPLOY_DATE" ]]; then
+    deploy_date=$(<"${AID_PLUGIN_PATH}/DEPLOY_DATE")
+  fi
+  if [[ -z "$deploy_date" && -f "${SCRIPT_DIR}/../DEPLOY_DATE" ]]; then
+    deploy_date=$(<"${SCRIPT_DIR}/../DEPLOY_DATE")
+  fi
+  [[ -z "$deploy_date" ]] && return 1
+  [[ "$created_at" < "$deploy_date" ]]
+}
+
+# Count prior fsm_precondition_fail events on this EPIC matching from/to/reason.
+# Returns 0 (and echoes 0) when timeline is missing — first-attempt safe.
+fsm_count_recent_fails() {
+  local from=$1 to=$2 reason=$3
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg f "$from" --arg t "$to" --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .from==$f and .to==$t and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8818).
+# Never fails — if MCP service is unavailable, log info and continue.
+# Service deployed in Step 6; this helper works pre-deploy as a no-op.
+try_telegram_alert() {
+  local message=$1
+  local payload
+  payload=$(jq -nc --arg t "$message" '{text:$t, parse_mode:"HTML"}')
+  if curl -fsS -X POST http://localhost:8818/send_message \
+       -H "Content-Type: application/json" \
+       --data "$payload" \
+       --max-time 3 \
+       > /dev/null 2>&1; then
+    return 0
+  fi
+  log_info "Telegram alert skipped (svc-mcp-tg-bot not available — non-fatal)"
+  return 0
+}
+
 # ─── Precondition Checks ───────────────────────────────────────────────
 # Called inside cmd_transition() AFTER whitelist check, BEFORE state update.
 # Returns 0 if preconditions met, 1 with error message if not.
@@ -122,9 +177,45 @@ check_preconditions() {
       current=$(grep '^current_step:' "$state_file" | awk '{print $2}')
       total=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
       [[ "$current" -ge "$total" ]] || {
+        _PRECONDITION_FAIL_REASON="steps_incomplete"
         echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}. Not all steps completed." >&2
         return 1
       }
+
+      # P032 Step 3: enforce that gates_report.json was produced by aid-run-gates.sh.
+      # Hand-written reports lack `_generated_by` and are rejected — closes AID-005
+      # (99% of pre-Session-A reports were hand-written with no proof of execution).
+      # Pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE) skip this check
+      # via fsm_check_grandfather().
+      if ! fsm_check_grandfather; then
+        local gates_report="${evidence_dir}/gates/gates_report.json"
+        if [[ ! -f "$gates_report" ]] || ! jq -e '._generated_by' "$gates_report" >/dev/null 2>&1; then
+          _PRECONDITION_FAIL_REASON="gates_no_generated_by"
+          local attempt_count
+          attempt_count=$(fsm_count_recent_fails "$from" "$to" "gates_no_generated_by")
+          if (( attempt_count >= 3 )); then
+            local timeline="${evidence_dir}/timeline.jsonl"
+            log_event "$timeline" "fsm_precondition_repeated_fail" \
+              from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
+            try_telegram_alert "Repeated precondition fail (×${attempt_count}): EPIC=${epic_id}, transition=${from}→${to}, reason=gates_no_generated_by"
+          fi
+          cat <<EOF >&2
+PRECONDITION FAIL: gates_report.json missing _generated_by field.
+
+Reason: AID v3 requires gates to be executed by aid-run-gates.sh, not
+        hand-written. The _generated_by/_generated_at/_command_log fields
+        produced by the runner are forensic evidence the gates actually ran.
+
+Fix: rm ${gates_report}
+     bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
+       \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
+       --state-file ${state_file} \\
+       --report-file ${gates_report}
+Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
+EOF
+          return 1
+        fi
+      fi
       ;;
 
     GATES:DONE)
@@ -375,10 +466,16 @@ cmd_transition() {
     [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" from="$from" to="$to"
     echo "WARNING: --force used, skipping precondition checks for $from → $to" >&2
   else
+    # P032 Step 3: check_preconditions sets _PRECONDITION_FAIL_REASON before
+    # returning 1; we surface it in the timeline event so fsm_count_recent_fails
+    # can group repeated failures by reason.
+    _PRECONDITION_FAIL_REASON=""
     if ! check_preconditions "$from" "$to" "$state_file"; then
-      local timeline
+      local timeline reason
       timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" from="$from" to="$to"
+      reason="${_PRECONDITION_FAIL_REASON:-unspecified}"
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
+        from="$from" to="$to" reason="$reason"
       exit 1
     fi
   fi
