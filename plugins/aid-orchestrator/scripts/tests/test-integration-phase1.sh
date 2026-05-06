@@ -13,6 +13,12 @@ setup() {
 
   source "$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-stage-log.sh"
   source "$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-token-count.sh"
+
+  # P032 Step 2: cmd_init now PRE-FLIGHT-enforces a git working tree.
+  ( cd "$TEST_DIR" && git init -q \
+      && git config user.email t@t.io && git config user.name T \
+      && echo init > .gitkeep && git add .gitkeep && git commit -q -m initial )
+  cd "$TEST_DIR"
 }
 
 teardown() { rm -rf "$TEST_DIR"; }

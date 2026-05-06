@@ -7,10 +7,19 @@ setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../.." && pwd)"
   FSM="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-fsm.sh"
 
+  # P032 Step 2: cmd_init now PRE-FLIGHT-enforces a git working tree.
+  # Initialize a minimal repo in TEST_DIR so init_state's git checks succeed.
+  ( cd "$TEST_DIR" && git init -q \
+      && git config user.email t@t.io && git config user.name T \
+      && echo init > .gitkeep && git add .gitkeep && git commit -q -m initial )
+
   # Helper: init a fresh state file
   init_state() {
     "$FSM" init "E-001" "run-001" "5" "auto" "v2/redesign" "abc123" "$STATE_FILE" 2>/dev/null
   }
+
+  # Run all tests with TEST_DIR as cwd so PRE-FLIGHT git checks have a repo.
+  cd "$TEST_DIR"
 }
 
 teardown() { rm -rf "$TEST_DIR"; }

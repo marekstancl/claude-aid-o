@@ -1,0 +1,13 @@
+gates:
+rust_test:
+  # DEPENDENCY: cargo (rustup toolchain)
+  command: "cargo test"
+  required_when: "*.rs exists"
+rust_clippy:
+  # DEPENDENCY: clippy (rustup component add clippy)
+  command: "cargo clippy -- -D warnings"
+  required_when: "*.rs exists"
+rust_build:
+  # DEPENDENCY: cargo (rustup toolchain)
+  command: "cargo build --release"
+  required_when: "Cargo.toml exists"

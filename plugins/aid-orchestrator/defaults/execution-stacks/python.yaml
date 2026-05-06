@@ -1,0 +1,13 @@
+gates:
+py_test:
+  # DEPENDENCY: pytest must be installed (pip install pytest)
+  command: "pytest -q"
+  required_when: "*.py exists"
+py_lint:
+  # DEPENDENCY: ruff must be installed (pip install ruff)
+  command: "ruff check ."
+  required_when: "*.py exists"
+py_type_check:
+  # DEPENDENCY: mypy must be installed (pip install mypy)
+  command: "mypy --strict src/"
+  required_when: "*.py exists"

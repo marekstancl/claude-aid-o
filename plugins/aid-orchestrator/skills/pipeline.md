@@ -104,6 +104,26 @@ aid-fsm.sh init      <epic_id> <run_id> \       # Create state.yaml (state: READ
 PRE-FLIGHT does NOT create the git branch — that is done by the command layer before
 calling PRE-FLIGHT.
 
+### Branch Enforcement (NEW v2.16.0 — P032 Step 2)
+
+`aid-fsm.sh init` validates the git branch context before writing `state.yaml`. Five
+HEAD states are handled:
+
+| HEAD state | Action | Timeline event |
+|------------|--------|----------------|
+| `task/{epic_id}/main` (resume) | log_info, accept (continuing previous session) | — |
+| `main` / `master` / `develop` | auto-checkout `task/{epic_id}/main` (creates branch) | — |
+| `task/<other_epic>/main` (mismatch) | hard fail with copy-paste cleanup command | `fsm_branch_mismatch_detected` |
+| anything else (`feat/*`, detached HEAD, …) | log_warn, accept (PM context-aware) | `fsm_branch_unusual_detected` |
+| Worktree mode (git_dir under `.git/worktrees/`) | skip enforcement (caller controls branch) | — |
+
+The uncommitted-changes guard runs in all modes — dirty workdir is rejected with
+`git status` / `git stash` suggestion before init proceeds.
+
+`state.yaml.created_at` is stamped at init time (ISO 8601 UTC) and consumed by
+`fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
+`AID_DEPLOY_DATE` env var or `${AID_PLUGIN_PATH}/DEPLOY_DATE` file.
+
 ---
 
 ## §3 READY State
@@ -392,6 +412,38 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 **Transition to DONE:** Curator, Auditor, CP4, and CP5 now execute in DONE state (§7).
 GATES only runs deterministic quality checks.
 
+### EXECUTE→GATES Precondition (UPDATED v2.16.0 — P032 Step 3)
+
+For post-deploy EPICs (`state.yaml.created_at >= AID_DEPLOY_DATE`):
+
+- `gates_report.json` MUST contain `_generated_by` field (set by `aid-run-gates.sh`).
+- Hand-written reports are rejected with copy-paste remediation in stderr.
+- Repeated-fail detection: ≥ 3 same-reason fails on the same EPIC trigger
+  `fsm_precondition_repeated_fail` event + best-effort `try_telegram_alert()`
+  (HTTP POST to `localhost:8817/send_message`).
+
+For pre-deploy grandfathered EPICs (`created_at < AID_DEPLOY_DATE`): precondition
+skipped (legacy compat — preserves resumability of the 203 pre-Session-A EPIC dirs).
+
+`aid-run-gates.sh` writes three provenance fields on every successful run:
+
+| Field | Purpose |
+|-------|---------|
+| `_generated_by` | `aid-run-gates.sh@v<X.Y.Z>` — proves runner produced the report |
+| `_generated_at` | ISO 8601 UTC timestamp at write time |
+| `_command_log` | array of `{name, command, exit_code, duration_ms}` per gate |
+
+Plus two timeline events frame each run: `gate_runner_start` (with `report_path`,
+`gate_count`, `command_list`) and `gate_runner_complete` (with `report_path`,
+`overall`, `duration_sec`).
+
+Required workflow:
+
+1. Complete EXECUTE phase (all steps incremented).
+2. `bash $AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> --state-file <state.yaml> --report-file <gates_report.json>`
+3. `aid-fsm.sh transition EXECUTE GATES <state_file>` — validates `_generated_by`.
+4. On fail: read remediation in stderr, run the `aid-run-gates.sh run-all` command from it, retry transition.
+
 ---
 
 ## §6 ESCALATION State
@@ -466,6 +518,39 @@ set via `set-field`. The decision is automatically cleared after the transition 
 
 Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
 on GATES→DONE transition.
+
+### Compliance Telemetry (NEW v2.16.0 — P032 Step 4)
+
+After every successful `done-advance` to `release`, `aid-fsm.sh` writes
+`evidence/<epic>/<run>/compliance.json` capturing 6 enforcement dimensions:
+
+| Dimension | Session A status | Source |
+|-----------|------------------|--------|
+| `branch_correct` | measured | `state.yaml.branch` matches `^task/E-` |
+| `execution_yaml_present` | measured | file exists at `<project>/.aid-o/config/execution.yaml` |
+| `gates_generated_by` | measured | `gates_report.json._generated_by` field present |
+| `memory_substantive` | `null` | Session B/C territory |
+| `verifier_outputs` | `null` | Session B territory |
+| `dod_present` | `null` | downstream |
+
+`null` ALWAYS means "feature not yet measured by the deployed Session", NEVER
+"not applicable". When Sessions B/C deploy, currently-null fields become
+`true|false` and the same overall logic remains consistent.
+
+`overall: "pass"` if all checks ∈ {true, null}; else `"fail"`. Plus a
+`compliance_written` timeline event is emitted with `deploy_era`, `overall`,
+`checks_passed`, `checks_failed` payload.
+
+Aggregator: `bash $AID_PLUGIN_PATH/scripts/aid-compliance-report.sh --since YYYY-MM-DD`
+produces a pre vs post comparison table.
+
+Backfill (one-shot post-deploy): `bash $AID_PLUGIN_PATH/scripts/aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ`
+retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
+AND stamps missing `created_at:` field into `state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
+
+Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produces
+a forensic frequency table (file counts, branch hygiene, gate authenticity, top
+fsm_precondition_fail reasons) — productized version of the Krok 0 analysis.
 
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 

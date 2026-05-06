@@ -1,0 +1,13 @@
+gates:
+ts_test:
+  # DEPENDENCY: package.json scripts.test must exist
+  command: "npm test"
+  required_when: "*.ts OR *.tsx exists"
+ts_lint:
+  # DEPENDENCY: eslint must be installed (npm install --save-dev eslint)
+  command: "npx eslint . --ext .ts,.tsx"
+  required_when: "*.ts OR *.tsx exists"
+ts_type_check:
+  # DEPENDENCY: typescript must be installed (npm install --save-dev typescript)
+  command: "npx tsc --noEmit"
+  required_when: "tsconfig.json exists"

@@ -3,6 +3,40 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.16.0] — 2026-05-05
+
+### Added
+- **Branch Enforcement in PRE-FLIGHT** — `aid-fsm.sh init` automatically creates `task/{epic_id}/main` from main/master/develop, detects mismatch with copy-paste fix, respects worktree mode. Closes AID-001 (65% of pre-Session-A state.yaml claimed `branch: main` with no actual task branch, breaking done-advance audit trail).
+- **Real Gates Execution Provenance** — `aid-run-gates.sh` rewritten with yq parsing, emits `gate_runner_start` / `gate_runner_complete` timeline events and writes `_generated_by` / `_generated_at` / `_command_log` provenance fields into `gates_report.json`. EXECUTE→GATES precondition mechanically rejects hand-written reports.
+- **Lazy execution.yaml Creation** — `aid-init` (and `aid-fsm.sh init` auto-recovery) generates per-project `execution.yaml` from auto-detected stacks (Python, TypeScript, Go, Rust, bash) with `# DEPENDENCY` hint comments per gate command. Closes AID-006 (71% of projects had no execution.yaml).
+- **Compliance Telemetry** — `done-advance` writes per-EPIC `compliance.json` with 6-dimension schema (3 measured for Session A, 3 `null` for Sessions B/C). Standalone `aid-compliance-backfill.sh` for one-shot pre-deploy backfill (also stamps mid-FSM `state.yaml.created_at` per CP1 M2). Aggregator `aid-compliance-report.sh` produces pre vs post comparison with `--since` and `--era` filters.
+- **svc-mcp-tg-bot MCP Server** — new Docker service in `services/mcp-tg-bot/` (FastMCP, stdio + HTTP transport on port 8817 — see Removed section for the legacy MCP that previously held this port). `send_message` tool with HTML parse_mode default. Token shared via `/opt/eco/services/.env`. Includes `docker-compose.snippet.yml` for PM to integrate into `/opt/eco/services/docker-compose.yml`.
+- **FSM Repeated-Fail Telegram Alert** — `aid-fsm.sh` emits `fsm_precondition_repeated_fail` event and best-effort `try_telegram_alert()` HTTP POST to localhost:8817 when same precondition fails ≥ 3 times on the same EPIC.
+- **Parametrized Diagnostic Script** — `aid-diagnostic.sh` reusable forensic analyzer (refactored from Krok 0 logic, supports `--evidence-root`, `--output md|json`, `--limit`).
+- **bats Unit Test Suite** — 16 assertions across `test-aid-fsm.bats` (9), `test-aid-run-gates.bats` (3), `test-aid-init.bats` (4) covering all new FSM preconditions, gate runner provenance, and stack detection. Runs via `bats plugins/aid-orchestrator/scripts/tests/bats/`.
+- **Dependency Pre-flight Script** — `aid-check-deps.sh` verifies `bash`, `git`, `jq`, `yq` (mikefarah variant only), plus optional `bats`, `direnv`, `docker`, `curl`. cmd_init now has fail-fast guard for `git` + `jq`.
+- **README Requirements Section** — explicit dependency table in plugin README listing required runtime, optional dev, and optional Telegram-alerts tools with install commands per OS.
+- **Worktree Development Guide** — plugin README section + committed `.envrc` with `AID_PLUGIN_PATH=$(pwd)/plugins/aid-orchestrator` and `PATH_add` for direnv-driven worktree workflows.
+- **DEPLOY_DATE Marker File** — `plugins/aid-orchestrator/DEPLOY_DATE` (ISO 8601 UTC) consumed by `fsm_check_grandfather()` as the pre/post-Session-A threshold. Fallback chain: `AID_DEPLOY_DATE` env → `${AID_PLUGIN_PATH}/DEPLOY_DATE` → `${SCRIPT_DIR}/../DEPLOY_DATE`.
+
+### Changed
+- **pipeline.md** — three subsection rewrites: PRE-FLIGHT branch-enforcement catalog (5 HEAD states + 2 timeline events), GATES EXECUTE→GATES precondition with `_generated_by` requirement and grandfather caveat, DONE phase Compliance Telemetry section with 6-dimension table and null semantics caveat.
+- **state.yaml schema** — adds `created_at` field (ISO 8601 UTC) used by grandfather logic for backward-compat with pre-deploy EPICs.
+- **lib/aid-stage-log.sh** — new `log_info` / `log_warn` / `log_error` helpers with `[INFO]/[WARN]/[ERROR]` severity prefix on stderr (greppable, exported alongside `log_event`).
+- **fsm_precondition_fail timeline event** — now carries `reason` field (set by individual precondition cases via `_PRECONDITION_FAIL_REASON`) so `fsm_count_recent_fails` can group repeated failures by failure type.
+- **aid-fsm.sh::cmd_init** — overrides caller's `branch` arg ($5) with actual `git rev-parse --abbrev-ref HEAD` after PRE-FLIGHT enforcement so `state.yaml.branch` reflects post-enforcement reality (PM-authorized resolution C3).
+
+### Fixed
+- **Branch hygiene gap** — closes the 65% of pre-Session-A `state.yaml` files claiming `branch: main` with no actual task branch. New auto-checkout closes the loop with `done-advance` release sub-phase `git merge`.
+- **Fake gates reports** — closes the 0% gate-runner execution evidence in 93 analyzed timelines. Provenance fields make hand-written reports mechanically detectable.
+- **Missing execution.yaml** — closes the 5/7 (71%) projects lacking gate config, which forced agents into ad-hoc gate names per EPIC with no cross-project consistency.
+- **Mid-FSM EPIC unblock (CP1 M2)** — backfill stamps `created_at:` into existing `state.yaml` from earliest timeline event ts, preventing the ~14 mid-FSM EPICs identified in diagnostic-findings from becoming unresumable post-deploy.
+- **aid-run-gates.sh CLI parser** — fixed `${4:-default}` swallowing `--state-file` flag when caller skipped the optional 4th positional, which silently broke `gate_runner_start`/`gate_runner_complete` events for FSM-driven invocations. Regression test added to `test-run-gates.sh`.
+- **Test suite git-context invariant** — `test-fsm.sh` and `test-integration-phase1.sh` setup() now `git init` their mktemp dirs so PRE-FLIGHT branch enforcement (new in this version) finds a working tree. Existing tests preserved without behavioral change.
+
+### Removed
+- **Legacy `svc-mcp-telegram` MCP (port 8817 takeover)** — the previous general-purpose Telegram MCP at localhost:8817 is decommissioned and replaced by `svc-mcp-tg-bot` on the same port. The old MCP exposed 9 tools (send_message, edit_message, search_dialogs, get_draft, set_draft, get_messages, media_download, message_from_link, delete_message) for general Telegram interaction; the new MCP exposes 1 tool (send_message) focused on AID-internal alerting. PM verified zero call sites in repo before removal (only permissions.yaml whitelist + docs entries referenced it). `defaults/policies/permissions.yaml` updated accordingly: 9 `mcp__shared-telegram__*` whitelist entries collapsed into 1 `mcp__svc-mcp-tg-bot__send_message` entry.
+
 ## [2.15.0] — 2026-03-25
 
 ### Added

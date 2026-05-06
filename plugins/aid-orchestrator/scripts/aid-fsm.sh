@@ -61,6 +61,200 @@ derive_timeline() {
   fi
 }
 
+# True if the working tree is a git worktree (git_dir under .git/worktrees/).
+# Used by PRE-FLIGHT branch enforcement to skip auto-checkout in worktree mode
+# where the caller (e.g., superpowers:using-git-worktrees) controls the branch.
+is_worktree() {
+  local git_dir
+  git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 1
+  [[ "$git_dir" == *.git/worktrees/* ]]
+}
+
+# Print a multi-line error to stderr and exit 1.
+# Use for unrecoverable PRE-FLIGHT / precondition failures with copy-paste fix.
+die() {
+  printf '%s\n' "$*" >&2
+  exit 1
+}
+
+# ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
+# All three read $state_file / $evidence_dir / $epic_id from caller scope
+# (matches existing derive_timeline / check_preconditions convention).
+
+# True if state.yaml.created_at predates the current AID deploy threshold.
+# Threshold sources (first non-empty wins):
+#   1. AID_DEPLOY_DATE env var (set by PM shell rc or per-invocation)
+#   2. ${AID_PLUGIN_PATH}/DEPLOY_DATE file (created in Step 9 release)
+# If no marker / no threshold → return 1 (fail-safe to post-deploy strict).
+# ISO 8601 UTC lex compare works here because both fields use the same
+# `date -u +%Y-%m-%dT%H:%M:%SZ` format (Step 2 cmd_init / Step 9 release).
+fsm_check_grandfather() {
+  local created_at
+  created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  [[ -z "$created_at" ]] && return 1
+  local deploy_date="${AID_DEPLOY_DATE:-}"
+  if [[ -z "$deploy_date" && -n "${AID_PLUGIN_PATH:-}" && -f "${AID_PLUGIN_PATH}/DEPLOY_DATE" ]]; then
+    deploy_date=$(<"${AID_PLUGIN_PATH}/DEPLOY_DATE")
+  fi
+  if [[ -z "$deploy_date" && -f "${SCRIPT_DIR}/../DEPLOY_DATE" ]]; then
+    deploy_date=$(<"${SCRIPT_DIR}/../DEPLOY_DATE")
+  fi
+  [[ -z "$deploy_date" ]] && return 1
+  [[ "$created_at" < "$deploy_date" ]]
+}
+
+# Count prior fsm_precondition_fail events on this EPIC matching from/to/reason.
+# Returns 0 (and echoes 0) when timeline is missing — first-attempt safe.
+fsm_count_recent_fails() {
+  local from=$1 to=$2 reason=$3
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg f "$from" --arg t "$to" --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .from==$f and .to==$t and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
+# replaces the legacy svc-mcp-telegram MCP that previously held this port).
+# Never fails — if MCP service is unavailable, log info and continue.
+# Service deployed in Step 6; this helper works pre-deploy as a no-op.
+try_telegram_alert() {
+  local message=$1
+  local payload
+  payload=$(jq -nc --arg t "$message" '{text:$t, parse_mode:"HTML"}')
+  if curl -fsS -X POST http://localhost:8817/send_message \
+       -H "Content-Type: application/json" \
+       --data "$payload" \
+       --max-time 3 \
+       > /dev/null 2>&1; then
+    return 0
+  fi
+  log_info "Telegram alert skipped (svc-mcp-tg-bot not available — non-fatal)"
+  return 0
+}
+
+# ─── P032 Step 4: Compliance.json Helpers ────────────────────────────────
+# evaluate_compliance_checks emits the 6-dimension `checks` object.
+# write_compliance_json wraps it with run metadata + overall verdict + writes
+# the per-EPIC compliance.json + emits the `compliance_written` timeline event.
+
+evaluate_compliance_checks() {
+  local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
+
+  # branch_correct: state.yaml.branch matches Session A naming convention
+  # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
+  # Session A scope; Sessions B/C may relax the regex.
+  local branch_value branch_correct
+  branch_value=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}')
+  if [[ "$branch_value" =~ ^task/E- ]]; then
+    branch_correct=true
+  else
+    branch_correct=false
+  fi
+
+  # execution_yaml_present: project-level config exists (eager-created by
+  # /aid-init or auto-recovered by aid-fsm.sh init in Step 1).
+  local exec_yaml_present
+  if [[ -f "${project_root}/.aid-o/config/execution.yaml" ]]; then
+    exec_yaml_present=true
+  else
+    exec_yaml_present=false
+  fi
+
+  # gates_generated_by: gates_report.json carries the runner's provenance.
+  # Hand-written reports (pre-Session-A pattern) lack this field.
+  local gates_report="${evidence_dir}/gates/gates_report.json"
+  local gates_genby
+  if [[ -f "$gates_report" ]] && jq -e '._generated_by' "$gates_report" >/dev/null 2>&1; then
+    gates_genby=true
+  else
+    gates_genby=false
+  fi
+
+  jq -nc \
+    --argjson bc  "$branch_correct" \
+    --argjson eyp "$exec_yaml_present" \
+    --argjson ggb "$gates_genby" \
+    '{
+      branch_correct:         $bc,
+      execution_yaml_present: $eyp,
+      gates_generated_by:     $ggb,
+      memory_substantive:     null,
+      verifier_outputs:       null,
+      dod_present:            null
+    }'
+}
+
+write_compliance_json() {
+  local epic_id=$1 run_id=$2 state_file=$3 evidence_dir=$4 project_root=$5
+  local compliance_file="${evidence_dir}/compliance.json"
+  local _timeline="${evidence_dir}/timeline.jsonl"
+
+  local deploy_era="post-session-a"
+  if fsm_check_grandfather; then
+    deploy_era="pre-session-a"
+  fi
+
+  local checks
+  if ! checks=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>&1); then
+    # Fallback: write skeleton so the aggregator can still see this EPIC ran;
+    # never abort done-advance because of telemetry — primary release path is
+    # what matters.
+    log_warn "compliance.json evaluation failed: ${checks}"
+    jq -nc \
+      --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
+      --arg era "$deploy_era" \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg note "evaluation failed: ${checks}" \
+      '{
+        epic_id: $epic, run_id: $run, aid_version: $ver,
+        deploy_era: $era, evaluated_at: $ts,
+        checks: {
+          branch_correct: null, execution_yaml_present: null, gates_generated_by: null,
+          memory_substantive: null, verifier_outputs: null, dod_present: null
+        },
+        overall: "fail",
+        notes: [$note]
+      }' > "$compliance_file"
+    log_event "$_timeline" "compliance_written" deploy_era="$deploy_era" overall="fail" checks_passed="0" checks_failed="0"
+    return 0
+  fi
+
+  # overall = pass if every check ∈ {true, null}, else fail.
+  # IMPORTANT: when Sessions B/C deploy, currently-null fields become true|false.
+  # The same logic must remain consistent — null ALWAYS means "not measured in
+  # this deployed era", NEVER "not applicable". Permissively counted as pass for
+  # the era's overall verdict so currently-undeployed dimensions don't drag down
+  # the score retroactively.
+  local overall
+  overall=$(echo "$checks" | jq -r '
+    [.[] | (. == true or . == null)] | all | if . then "pass" else "fail" end
+  ')
+
+  jq -nc \
+    --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
+    --arg era "$deploy_era" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --argjson chks "$checks" \
+    --arg ov "$overall" \
+    '{
+      epic_id: $epic, run_id: $run, aid_version: $ver,
+      deploy_era: $era, evaluated_at: $ts,
+      checks: $chks, overall: $ov, notes: []
+    }' > "$compliance_file" || {
+    log_warn "compliance.json write failed for ${compliance_file} — skipping (telemetry is best-effort)"
+    return 0
+  }
+
+  local checks_passed checks_failed
+  checks_passed=$(echo "$checks" | jq '[.[] | select(. == true)] | length')
+  checks_failed=$(echo "$checks" | jq '[.[] | select(. == false)] | length')
+
+  log_event "$_timeline" "compliance_written" \
+    deploy_era="$deploy_era" overall="$overall" \
+    checks_passed="$checks_passed" checks_failed="$checks_failed"
+}
+
 # ─── Precondition Checks ───────────────────────────────────────────────
 # Called inside cmd_transition() AFTER whitelist check, BEFORE state update.
 # Returns 0 if preconditions met, 1 with error message if not.
@@ -106,9 +300,45 @@ check_preconditions() {
       current=$(grep '^current_step:' "$state_file" | awk '{print $2}')
       total=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
       [[ "$current" -ge "$total" ]] || {
+        _PRECONDITION_FAIL_REASON="steps_incomplete"
         echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}. Not all steps completed." >&2
         return 1
       }
+
+      # P032 Step 3: enforce that gates_report.json was produced by aid-run-gates.sh.
+      # Hand-written reports lack `_generated_by` and are rejected — closes AID-005
+      # (99% of pre-Session-A reports were hand-written with no proof of execution).
+      # Pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE) skip this check
+      # via fsm_check_grandfather().
+      if ! fsm_check_grandfather; then
+        local gates_report="${evidence_dir}/gates/gates_report.json"
+        if [[ ! -f "$gates_report" ]] || ! jq -e '._generated_by' "$gates_report" >/dev/null 2>&1; then
+          _PRECONDITION_FAIL_REASON="gates_no_generated_by"
+          local attempt_count
+          attempt_count=$(fsm_count_recent_fails "$from" "$to" "gates_no_generated_by")
+          if (( attempt_count >= 3 )); then
+            local timeline="${evidence_dir}/timeline.jsonl"
+            log_event "$timeline" "fsm_precondition_repeated_fail" \
+              from="$from" to="$to" reason="gates_no_generated_by" attempt_count="$attempt_count"
+            try_telegram_alert "Repeated precondition fail (×${attempt_count}): EPIC=${epic_id}, transition=${from}→${to}, reason=gates_no_generated_by"
+          fi
+          cat <<EOF >&2
+PRECONDITION FAIL: gates_report.json missing _generated_by field.
+
+Reason: AID v3 requires gates to be executed by aid-run-gates.sh, not
+        hand-written. The _generated_by/_generated_at/_command_log fields
+        produced by the runner are forensic evidence the gates actually ran.
+
+Fix: rm ${gates_report}
+     bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
+       \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
+       --state-file ${state_file} \\
+       --report-file ${gates_report}
+Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
+EOF
+          return 1
+        fi
+      fi
       ;;
 
     GATES:DONE)
@@ -156,6 +386,21 @@ cmd_init() {
   local force="false"
   [[ "${8:-}" == "--force" ]] && force="true"
 
+  # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
+  # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
+  # enforcement (git). Without these, downstream calls fail with cryptic
+  # messages; fail fast with concrete install hint.
+  if ! command -v git >/dev/null 2>&1; then
+    echo "ERROR: git not installed. Install: apt install git / brew install git" >&2
+    echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
+    exit 1
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "ERROR: jq not installed. Install: apt install jq / brew install jq" >&2
+    echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
+    exit 1
+  fi
+
   if [[ -f "$state_file" ]]; then
     echo "ERROR: state_file already exists: $state_file (prevent duplicate init)" >&2
     exit 1
@@ -194,7 +439,94 @@ cmd_init() {
     echo "WARNING: --force used, skipping plan-level DONE gate check" >&2
   fi
 
+  # ─── PRE-FLIGHT: Branch Enforcement (P032 Step 2) ────────────────────
+  # Closes AID-001 (65% of pre-Session-A state.yaml claimed branch=main with
+  # no actual task branch, breaking done-advance git merge audit trail).
+  #
+  # Five HEAD states handled:
+  #   worktree    → skip enforcement (caller controls branch)
+  #   resume      → HEAD == task/E-{epic_id}/main → log_info, accept
+  #   fresh init  → HEAD ∈ {main, master, develop} → auto-checkout
+  #   mismatch    → HEAD == task/<other_epic>/main → emit event, hard fail
+  #   unusual     → anything else (feat/*, detached, ...) → warn, accept
+  #
+  # Timeline events for forensic visibility:
+  #   fsm_branch_mismatch_detected (hard fail case)
+  #   fsm_branch_unusual_detected  (warn case)
+  local timeline_path=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
+  mkdir -p "$(dirname "$timeline_path")"
+
+  if is_worktree; then
+    log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
+  else
+    local current_branch expected_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || die "Not in a git repository"
+    expected_branch="task/${epic_id}/main"
+
+    case "$current_branch" in
+      "$expected_branch")
+        log_info "Resume case: HEAD already on $expected_branch"
+        ;;
+      main|master|develop)
+        log_info "Auto-creating branch: $expected_branch"
+        git checkout -b "$expected_branch" >/dev/null 2>&1 \
+          || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        ;;
+      task/E-*)
+        # Different EPIC's task branch — stale workspace from prior session.
+        log_event "$timeline_path" "fsm_branch_mismatch_detected" \
+          current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
+        die "ERROR: Currently on $current_branch, expected $expected_branch.
+
+Reason: AID v3 requires one task branch per EPIC for clean audit trail.
+        Different-EPIC branches indicate stale workspace from prior session.
+
+Fix: git checkout main && git branch -d $current_branch
+Then retry: aid-fsm.sh init ${epic_id} ..."
+        ;;
+      *)
+        # feat/*, refactor/*, detached HEAD, any non-task pattern.
+        # PM context-aware (e.g., manual exploration on feat/ branch) — accept with warning.
+        log_event "$timeline_path" "fsm_branch_unusual_detected" \
+          current_branch="$current_branch" expected_branch="$expected_branch" epic_id="$epic_id"
+        log_warn "Unusual branch: $current_branch (expected $expected_branch). Continuing — PM-controlled context assumed."
+        ;;
+    esac
+  fi
+
+  # Uncommitted changes guard (always runs, even in worktree mode).
+  # PRE-FLIGHT must start from clean tree so done-advance merge has a clear
+  # diff to attribute to the EPIC.
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    die "Uncommitted changes present. Commit or stash before init:
+       git status   # review
+       git stash    # or commit"
+  fi
+
+  # C3 (PM-authorized): override caller's branch param ($5) with actual git
+  # state. Caller convention is to pass 'main' as a placeholder; what matters
+  # downstream is the branch we actually ended up on (after auto-checkout or
+  # in worktree mode). state.yaml.branch reflects post-enforcement reality.
+  local actual_branch
+  actual_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
+  branch="$actual_branch"
+
+  # Auto-recover execution.yaml if missing (P032 Step 1).
+  # Empty-stacks fallback is harmless and idempotent — pre-deploy projects keep
+  # their custom config (the [[ ! -f ... ]] guard ensures we never overwrite).
+  if [[ ! -f .aid-o/config/execution.yaml ]] && [[ -f "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/aid-init-execution-yaml.sh"
+    local -a _aid_stacks=()
+    mapfile -t _aid_stacks < <(detect_stacks "$PWD")
+    if compose_execution_yaml "$PWD" ".aid-o/config/execution.yaml" "${_aid_stacks[@]}"; then
+      log_info "Lazy-created .aid-o/config/execution.yaml with stacks: ${_aid_stacks[*]:-none}"
+    fi
+  fi
+
   mkdir -p "$(dirname "$state_file")"
+  local _now_iso
+  _now_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   cat > "$state_file" << EOF
 epic_id: $epic_id
 run_id: $run_id
@@ -206,7 +538,8 @@ branch: $branch
 base_commit: $base_commit
 gate_retries: 0
 escalation_count: 0
-started_at: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+started_at: "${_now_iso}"
+created_at: ${_now_iso}
 EOF
 
   # Audit trail
@@ -271,10 +604,16 @@ cmd_transition() {
     [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" from="$from" to="$to"
     echo "WARNING: --force used, skipping precondition checks for $from → $to" >&2
   else
+    # P032 Step 3: check_preconditions sets _PRECONDITION_FAIL_REASON before
+    # returning 1; we surface it in the timeline event so fsm_count_recent_fails
+    # can group repeated failures by reason.
+    _PRECONDITION_FAIL_REASON=""
     if ! check_preconditions "$from" "$to" "$state_file"; then
-      local timeline
+      local timeline reason
       timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" from="$from" to="$to"
+      reason="${_PRECONDITION_FAIL_REASON:-unspecified}"
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
+        from="$from" to="$to" reason="$reason"
       exit 1
     fi
   fi
@@ -573,6 +912,21 @@ cmd_done_advance() {
 
   # Advance phase
   sed -i "s/^done_phase: .*/done_phase: ${to_phase}/" "$state_file"
+
+  # P032 Step 4 (PM-authorized C4): write compliance.json after sed updates
+  # done_phase=release. evaluate_compliance_checks reads post-enforcement
+  # state.yaml.branch (set by Step 2 cmd_init) and the gate runner's
+  # provenance fields (set by Step 3 aid-run-gates.sh). Hook is best-effort
+  # — failures inside write_compliance_json log_warn but never abort the
+  # release path.
+  if [[ "$to_phase" == "release" ]]; then
+    local epic_id run_id evidence_dir project_root
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    project_root="$PWD"
+    write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
+  fi
 
   # Audit trail
   local timeline

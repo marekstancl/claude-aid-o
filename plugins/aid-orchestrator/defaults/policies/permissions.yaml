@@ -135,17 +135,10 @@ presets:
       - "mcp__shared-postgres__query"
       # ── Sequential Thinking ──
       - "mcp__shared-sequential-thinking__sequentialthinking"
-      # ── Telegram (non-destructive) ──
-      - "mcp__shared-telegram__send_message"
-      - "mcp__shared-telegram__edit_message"
-      - "mcp__shared-telegram__search_dialogs"
-      - "mcp__shared-telegram__get_draft"
-      - "mcp__shared-telegram__set_draft"
-      - "mcp__shared-telegram__get_messages"
-      - "mcp__shared-telegram__media_download"
-      - "mcp__shared-telegram__message_from_link"
-      # ── Telegram (destructive — excluded) ──
-      # - "mcp__shared-telegram__delete_message"
+      # ── Telegram alerts (P032 v2.16.0 — replaces legacy shared-telegram MCP) ──
+      # svc-mcp-tg-bot exposes a single AID-internal alert tool;
+      # general-purpose Telegram interaction is no longer in scope for AID dispatch.
+      - "mcp__svc-mcp-tg-bot__send_message"
     claude_code_deny:
       - "Bash(rm -rf:*)"
       - "Bash(git push --force:*)"
