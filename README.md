@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.16.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.16.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.16.0** (current) — Session A foundation hardening: PRE-FLIGHT branch enforcement, real gates execution provenance, lazy execution.yaml, compliance telemetry, svc-mcp-tg-bot Telegram alerts, 16-assertion bats unit suite
+- **v2.16.1** (current) — Patch: aid-compliance-backfill.sh tolerates legacy v1 JSON state files + missing branch fields (post-deploy hotfix)
+- **v2.16.0** — Session A foundation hardening: PRE-FLIGHT branch enforcement, real gates execution provenance, lazy execution.yaml, compliance telemetry, svc-mcp-tg-bot Telegram alerts, 16-assertion bats unit suite
 - **v2.15.0** — Mechanically enforced FSM transitions, gates state check, audit trail in timeline.jsonl
-- **v2.10.0** — Per-project agent memory via Qdrant: 10-category scan, FSM enforcement, kondice flow
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

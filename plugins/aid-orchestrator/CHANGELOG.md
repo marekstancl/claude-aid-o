@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.16.1] — 2026-05-06
+
+### Fixed
+- **`aid-compliance-backfill.sh` aborts on legacy v1 evidence** — `set -euo pipefail` caused the backfill to abort on the first vulcan/sousto evidence dir whose `state.yaml` lacked a `branch:` field (`grep` returns 1 → pipefail propagates). Wrapped the `grep | awk` extraction (and the `jq | sort | head` pipeline in `backfill_state_created_at`) in `|| true`. Discovered during the v2.16.0 post-merge deploy run.
+- **`aid-compliance-backfill.sh` corrupts legacy v1 JSON state files** — some pre-v2 evidence dirs store `state.yaml` as a JSON array of step objects (legacy `plan_progress.json` format). The backfill appended `created_at: <ts>` directly, breaking JSON validity (the line landed on the same line as the closing `]` because the file lacked a trailing newline). Added file-format detection: if the first non-blank char is `[` or `{`, log a warning and skip stamping. Plus a defensive `printf '\n'` guard before any append on YAML files. Live tree was repaired with `sed` post-incident; no data loss.
+
 ## [2.16.0] — 2026-05-05
 
 ### Added
