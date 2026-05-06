@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.17.0] — 2026-05-06
+
+### Added
+- **CP1 Codebase Grounding Rule** — `plan-writing.md` Completeness Gate gains check #17 (16 → 17). Plans must verify every named external resource (functions, helpers, file paths, ports, services, commands, env vars) against the real codebase or running infra. Hand-wave like "presumably exists in some lib" or "should be available" is a hard fail. Addresses systematic CP1 blind spot identified in P032 retrospective: 5 PM-authorized resolutions (C1–C5 in P032) were all of this kind — reviewer cannot detect *absence* of helpers/files the plan presumes exist.
+- **Verifier Codebase Grounding Pass** — `/aid-plan` Step 9 (CP1 review) verifier dispatch now MUST extract a flat list from the plan of every named function, helper, file path, port, service, command, and env var, and verify each against the real codebase / running infra (`grep`, `ls`, `docker ps`, `command -v`). Each item gets VERIFIED (with location) or ABSENT (mapped to a Create step). Plans with ABSENT items not mapped to Create steps → REVISE_REQUIRED.
+- **`aid-compliance-report.sh --reflect`** — lightweight `/aid-reflect` (per AID-013). Per-dimension breakdown (pass / fail / null counts + 10-cell text bar chart) with pattern detection: 0 fails → ✅ green, 1 fail → ⚠️ INVESTIGATE (could be one-off), ≥ 2 fails → 🔴 SYSTEMATIC (hole in Session A enforcement). Recommended-next-action section addresses PM retrospective from P032: aggregate ≥ 80 % can hide a single dimension failing systematically; per-dimension trend is the actionable signal before Session B brainstorm.
+
 ## [2.16.1] — 2026-05-06
 
 ### Fixed

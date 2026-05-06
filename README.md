@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.16.1** (current) — Patch: aid-compliance-backfill.sh tolerates legacy v1 JSON state files + missing branch fields (post-deploy hotfix)
+- **v2.17.0** (current) — CP1 codebase grounding rule (Completeness Gate check #17 + verifier grounding pass) + `aid-compliance-report.sh --reflect` flag with per-dimension pattern detection (✅ / ⚠️ INVESTIGATE / 🔴 SYSTEMATIC) for Session A → B decision gate
+- **v2.16.1** — Patch: aid-compliance-backfill.sh tolerates legacy v1 JSON state files + missing branch fields (post-deploy hotfix)
 - **v2.16.0** — Session A foundation hardening: PRE-FLIGHT branch enforcement, real gates execution provenance, lazy execution.yaml, compliance telemetry, svc-mcp-tg-bot Telegram alerts, 16-assertion bats unit suite
-- **v2.15.0** — Mechanically enforced FSM transitions, gates state check, audit trail in timeline.jsonl
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
