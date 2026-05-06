@@ -28,7 +28,7 @@ SESSION_A_DIMENSIONS=(branch_correct execution_yaml_present gates_generated_by)
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--since YYYY-MM-DD] [--era pre|post|both] [--output md|json]
-                       [--evidence-roots "path1 path2 ..."]
+                       [--evidence-roots "path1 path2 ..."] [--reflect]
 
 Aggregates compliance.json files into a pre-vs-post trend report.
 
@@ -40,17 +40,22 @@ Options:
                            grouped {pre: [...], post: [...]}.
   --evidence-roots "..."   Space-separated paths. Defaults to 5 ekosystem
                            projects under /opt/eco/projects.
+  --reflect                Append per-dimension breakdown with bar chart,
+                           pattern detection (✅ / ⚠️ INVESTIGATE / 🔴 SYSTEMATIC),
+                           and recommended next action. Lightweight /aid-reflect
+                           per AID-013. Implies --output md.
   -h, --help               This help.
 
 Examples:
   $(basename "$0")
   $(basename "$0") --since 2026-04-01 --era post
+  $(basename "$0") --reflect --since 2026-05-06
   $(basename "$0") --output json | jq '.post | length'
 EOF
 }
 
 main() {
-  local since="" era="both" output="md"
+  local since="" era="both" output="md" reflect=false
   local -a evidence_roots=()
 
   while [[ $# -gt 0 ]]; do
@@ -59,10 +64,16 @@ main() {
       --era)            era="$2"; shift 2 ;;
       --output)         output="$2"; shift 2 ;;
       --evidence-roots) read -ra evidence_roots <<< "$2"; shift 2 ;;
+      --reflect)        reflect=true; shift ;;
       -h|--help)        usage; exit 0 ;;
       *)                echo "Unknown arg: $1" >&2; usage >&2; exit 1 ;;
     esac
   done
+
+  if "$reflect" && [[ "$output" == "json" ]]; then
+    echo "ERROR: --reflect requires --output md (default). JSON output is unaffected." >&2
+    exit 1
+  fi
 
   case "$era" in
     pre|post|both) ;;
@@ -159,6 +170,124 @@ EOF
 _No compliance.json files found under requested evidence roots (and filter)._
 Run \`aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ\` first
 to populate pre-Session-A baseline.
+EOF
+    return 0
+  fi
+
+  # ─── --reflect: per-dimension breakdown + pattern detection ────────
+  # Lightweight /aid-reflect (per AID-013). Inspects post-Session-A EPICs only;
+  # detects systematic failure patterns (≥ 2 fails on same dimension) and emits
+  # a recommended-next-action section. Replaces "stare at aggregate %" with
+  # "stare at per-dimension trend" — addresses PM retrospective from P032
+  # (aggregate ≥ 80 % can hide a single dimension failing systematically).
+  if ! "$reflect"; then
+    return 0
+  fi
+
+  if (( post_count == 0 )); then
+    cat <<EOF
+
+## Per-Dimension Reflect (post-Session-A focus)
+
+_No post-Session-A EPICs found. Run at least 1 EPIC after Session A deploy
+(\`aid-fsm.sh init …\` → full FSM cycle → \`done-advance\`) to populate live
+\`compliance.json\` files before \`--reflect\` produces meaningful output._
+EOF
+    return 0
+  fi
+
+  cat <<EOF
+
+## Per-Dimension Reflect (post-Session-A, n=${post_count})
+
+| Dimension | Pass | Fail | Null | % Pass | Bar | Pattern |
+|-----------|----:|----:|----:|-------:|:----|:--------|
+EOF
+
+  local any_systematic=false any_investigate=false
+  for dim in "${SESSION_A_DIMENSIONS[@]}"; do
+    local post_pass post_fail post_null pct
+    post_pass=$(jq -r --arg d "$dim" \
+      '[.[] | select(.deploy_era=="post-session-a") | .checks[$d]] | map(select(.==true))  | length' \
+      <<< "$all_compliance")
+    post_fail=$(jq -r --arg d "$dim" \
+      '[.[] | select(.deploy_era=="post-session-a") | .checks[$d]] | map(select(.==false)) | length' \
+      <<< "$all_compliance")
+    post_null=$(jq -r --arg d "$dim" \
+      '[.[] | select(.deploy_era=="post-session-a") | .checks[$d]] | map(select(.==null))  | length' \
+      <<< "$all_compliance")
+    pct=$(( post_count > 0 ? post_pass * 100 / post_count : 0 ))
+
+    # 10-char text bar chart (each cell = 10 %).
+    local filled=$(( pct / 10 )) bar=""
+    local i
+    for ((i=0; i<10; i++)); do
+      if (( i < filled )); then bar+="█"; else bar+="░"; fi
+    done
+
+    # Pattern label per PM retrospective threshold (P032 follow-up):
+    #   0 fails → ✅
+    #   1 fail  → ⚠️ INVESTIGATE  (could be one-off)
+    #   ≥ 2 fails → 🔴 SYSTEMATIC  (pattern)
+    local pattern
+    if   (( post_fail == 0 )); then pattern="✅ green"
+    elif (( post_fail == 1 )); then pattern="⚠️ INVESTIGATE (1/${post_count} fail)"; any_investigate=true
+    else                            pattern="🔴 SYSTEMATIC (${post_fail}/${post_count} fail)"; any_systematic=true
+    fi
+
+    printf "| %s | %d | %d | %d | %d%% | \`%s\` | %s |\n" \
+      "$dim" "$post_pass" "$post_fail" "$post_null" "$pct" "$bar" "$pattern"
+  done
+
+  cat <<EOF
+
+### Recommended next action
+
+EOF
+
+  if "$any_systematic"; then
+    cat <<EOF
+🔴 **STOP — investigate before Session B brainstorm.** At least one dimension
+shows a systematic failure pattern (≥ 2 fails in post-Session-A EPICs). This
+is not random variance; Session A enforcement has a hole on that dimension.
+
+Steps:
+  1. Run \`aid-diagnostic.sh --since <deploy-date> --output md\` and look for
+     new cheat patterns in the failing dimension's EPICs.
+  2. Inspect the failing EPICs manually:
+     \`jq -r 'select(.checks.<DIM> == false) | .epic_id' .../compliance.json\`
+  3. Identify root cause — agent found new bypass route, fixture bug, or genuine
+     enforcement gap?
+  4. Either patch Session A (small follow-up plan) OR fold the new pattern
+     into Session B scope BEFORE brainstorming.
+
+Do NOT proceed to Session B brainstorm until the failing dimension is green.
+EOF
+  elif "$any_investigate"; then
+    cat <<EOF
+⚠️ **Proceed with caution.** One dimension has a single fail in post-Session-A
+EPICs. This may be one-off variance (test fixture issue, race condition,
+manual PM intervention, …) or the start of a pattern.
+
+Steps:
+  1. Inspect the failing EPIC manually — confirm root cause is non-systemic.
+  2. If next 2-3 EPICs hit the same dimension → escalate to 🔴 SYSTEMATIC.
+  3. If non-recurring → safe to brainstorm Session B.
+
+Session B brainstorm is OK to start; track the flagged dimension closely.
+EOF
+  else
+    cat <<EOF
+✅ **Green light for Session B.** All Session A dimensions pass consistently
+across ${post_count} post-deploy EPICs. Foundation is solid; no bypass patterns
+detected.
+
+Recommended next steps before \`/aid-plan brainstorm\` for Session B:
+  1. Run \`aid-diagnostic.sh --since <deploy-date>\` (round 0.b — look for
+     NEW cheat surfaces that emerged after Session A deploy).
+  2. Compare with original Krok 0 findings; document new patterns in
+     \`docs/plans/AID-v3-diagnostic-findings-post-A.md\`.
+  3. \`/aid-plan brainstorm "Session B — CP2/CP3 verifier dispatch enforcement"\`.
 EOF
   fi
 }
