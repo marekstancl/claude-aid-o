@@ -779,35 +779,45 @@ echo "--- Suite F: Curator dispatch integrity ---"
 PIPELINE_MD="$PLUGIN_DIR/skills/pipeline.md"
 
 # ===========================================================================
-# TEST F1: pipeline.md §5 GATES contains a Curator hook section
+# TEST F1: pipeline.md §7 DONE has the Curator+Auditor dispatch model
+# (Architecture moved Curator from §5 GATES → §7 DONE in commit 1dee28e —
+# the previous "Curator hook" section was replaced by the C+A Execution
+# Model in §7 DONE. §5 GATES now back-points to §7 for Curator/Auditor.)
 # ===========================================================================
-run_test "F1: pipeline.md §5 GATES has Curator hook section"
+run_test "F1: pipeline.md §7 DONE has C+A Execution Model section"
 
 if [[ -f "$PIPELINE_MD" ]]; then
-  if grep -q 'Curator hook' "$PIPELINE_MD" 2>/dev/null; then
-    pass "F1: pipeline.md contains Curator hook in GATES state"
+  done_section="$(awk '
+    /^## §7 DONE/{found=1; next}
+    /^## §[0-9]/{if(found) exit}
+    found{print}
+  ' "$PIPELINE_MD" 2>/dev/null)"
+
+  if echo "$done_section" | grep -q 'C+A Execution Model'; then
+    pass "F1: pipeline.md §7 DONE contains C+A Execution Model"
   else
-    fail "F1: Curator hook in pipeline.md" \
-      "pipeline.md missing 'Curator hook' section in §5 GATES"
+    fail "F1: C+A Execution Model in §7 DONE" \
+      "pipeline.md §7 DONE missing 'C+A Execution Model' section"
   fi
 else
   fail "F1: pipeline.md exists" "not found: $PIPELINE_MD"
 fi
 
 # ===========================================================================
-# TEST F2: pipeline.md Curator hook has no conditional skipping on
-#          empty discovered_issues
+# TEST F2: pipeline.md §7 DONE Curator dispatch has no conditional skipping
+#          on empty discovered_issues (was previously in §5 GATES — moved
+#          along with the Curator architecture refactor)
 # ===========================================================================
-run_test "F2: pipeline.md Curator hook has no skip conditional on discovered_issues"
+run_test "F2: pipeline.md §7 DONE Curator dispatch has no skip conditional on discovered_issues"
 
 if [[ -f "$PIPELINE_MD" ]]; then
-  gates_section="$(awk '
-    /^## §5 GATES/{found=1; next}
+  done_section="$(awk '
+    /^## §7 DONE/{found=1; next}
     /^## §[0-9]/{if(found) exit}
     found{print}
   ' "$PIPELINE_MD" 2>/dev/null)"
 
-  skip_patterns="$(echo "$gates_section" \
+  skip_patterns="$(echo "$done_section" \
     | grep -iE '(if.*no.*(discovered_issues|issues).*skip|skip.*curator.*no.*issues|discovered_issues.*empty.*skip)' \
     || true)"
 
@@ -822,18 +832,20 @@ else
 fi
 
 # ===========================================================================
-# TEST F3: pipeline.md Curator hook is unconditional (dispatched after
-#          all gates pass — no "if" guard around the dispatch)
+# TEST F3: pipeline.md Curator dispatch is unconditional in §7 DONE.
+#          §5 GATES has the back-pointer "Transition to DONE: Curator,
+#          Auditor, CP4, and CP5 now execute in DONE state (§7)" and §7
+#          DONE has the "Parallel dispatch: Curator + Auditor" line.
 # ===========================================================================
-run_test "F3: pipeline.md Curator hook is dispatched unconditionally after gates pass"
+run_test "F3: pipeline.md Curator dispatch is unconditional (§5 GATES → §7 DONE handoff)"
 
 if [[ -f "$PIPELINE_MD" ]]; then
-  if grep -q 'After all gates pass' "$PIPELINE_MD" 2>/dev/null &&
-     grep -q 'dispatch Curator agent' "$PIPELINE_MD" 2>/dev/null; then
-    pass "F3: pipeline.md Curator dispatch is unconditional (after all gates pass)"
+  if grep -q 'Curator, Auditor.*now execute in DONE' "$PIPELINE_MD" 2>/dev/null &&
+     grep -q 'Parallel dispatch.*Curator.*Auditor' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F3: pipeline.md §5→§7 Curator handoff + §7 parallel dispatch present"
   else
     fail "F3: unconditional Curator dispatch" \
-      "pipeline.md missing 'After all gates pass' + 'dispatch Curator agent'"
+      "pipeline.md missing §5 'Curator, Auditor ... execute in DONE' back-pointer or §7 'Parallel dispatch: Curator + Auditor'"
   fi
 else
   fail "F3: pipeline.md exists" "not found: $PIPELINE_MD"
@@ -866,18 +878,22 @@ else
 fi
 
 # ===========================================================================
-# TEST F5: pipeline.md Curator hook dispatches both Curator and
-#          Lessons-Extractor agents (defense-in-depth: two observers)
+# TEST F5: pipeline.md §7 DONE Curator dispatch references both
+#          curator.md and auditor.md agents (defense-in-depth: two
+#          parallel observers — Curator proposes fixes, Auditor flags
+#          issues independently). The previously-checked
+#          `lessons-extractor.md` agent never existed in agents/ — the
+#          dual-observer pattern has always been Curator + Auditor.
 # ===========================================================================
-run_test "F5: pipeline.md Curator hook dispatches Curator + Lessons-Extractor"
+run_test "F5: pipeline.md §7 DONE references both curator.md + auditor.md agents"
 
 if [[ -f "$PIPELINE_MD" ]]; then
   if grep -q 'curator.md' "$PIPELINE_MD" 2>/dev/null &&
-     grep -q 'lessons-extractor.md' "$PIPELINE_MD" 2>/dev/null; then
-    pass "F5: pipeline.md Curator hook dispatches both agents"
+     grep -q 'auditor.md' "$PIPELINE_MD" 2>/dev/null; then
+    pass "F5: pipeline.md references both curator.md + auditor.md"
   else
-    fail "F5: Curator + Lessons-Extractor dispatch" \
-      "pipeline.md missing curator.md or lessons-extractor.md in Curator hook"
+    fail "F5: Curator + Auditor dispatch" \
+      "pipeline.md missing curator.md or auditor.md reference"
   fi
 else
   fail "F5: pipeline.md exists" "not found: $PIPELINE_MD"
