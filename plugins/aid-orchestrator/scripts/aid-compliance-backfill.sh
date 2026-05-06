@@ -48,6 +48,10 @@ EOF
 #   1. Earliest .ts from timeline.jsonl  (most accurate — actual init moment)
 #   2. state.yaml file mtime              (less accurate, post-migration safe)
 #   3. Current UTC time                   (last-resort fallback, never empty)
+#
+# Skips legacy v1 state files that store progress as JSON arrays (`[...]`)
+# or objects (`{...}`) — appending YAML `created_at:` would invalidate the
+# JSON. Detected by checking whether the first non-blank char is `[` or `{`.
 backfill_state_created_at() {
   local state_file=$1 timeline_file=$2
 
@@ -55,15 +59,31 @@ backfill_state_created_at() {
     return 0
   fi
 
+  # Format detection: legacy v1 state files are JSON, not YAML.
+  local first_char
+  first_char=$(awk 'NF{print substr($0,1,1); exit}' "$state_file" 2>/dev/null)
+  if [[ "$first_char" == "[" || "$first_char" == "{" ]]; then
+    log_warn "Skipping created_at stamp for legacy v1 JSON state file: $state_file"
+    return 0
+  fi
+
   local earliest_ts=""
   if [[ -f "$timeline_file" ]]; then
-    earliest_ts=$(jq -r '.ts // empty' "$timeline_file" 2>/dev/null | sort | head -1)
+    # `|| true` tolerates malformed JSONL (some legacy timelines have
+    # non-JSON lines, partial writes, etc.) — set -euo pipefail would
+    # otherwise abort the whole backfill on a single bad timeline.
+    earliest_ts=$(jq -r '.ts // empty' "$timeline_file" 2>/dev/null | sort | head -1 || true)
   fi
   if [[ -z "$earliest_ts" ]]; then
     earliest_ts=$(date -u -r "$state_file" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
                   || date -u +%Y-%m-%dT%H:%M:%SZ)
   fi
 
+  # Ensure file ends with newline so the appended `created_at:` lands on its
+  # own line (not concatenated with the previous unterminated line).
+  if [[ -s "$state_file" ]] && [[ "$(tail -c 1 "$state_file" | xxd -p)" != "0a" ]]; then
+    printf '\n' >> "$state_file"
+  fi
   echo "created_at: $earliest_ts" >> "$state_file"
   log_info "Backfilled created_at=$earliest_ts into $state_file"
 }
@@ -83,9 +103,14 @@ generate_pre_compliance() {
   gates_report="${run_dir}/gates/gates_report.json"
   project_root=$(echo "$run_dir" | sed 's|/.aid-o/work/evidence/.*||')
 
-  # branch_correct
+  # branch_correct — tolerant of legacy state files (some pre-v2 evidence
+  # stores state as JSON instead of YAML; some YAML state.yaml lacks the
+  # `branch:` field entirely). `|| true` prevents `set -euo pipefail` from
+  # aborting the whole backfill on a single malformed input.
   local branch_value="" branch_correct=false
-  [[ -f "$state_file" ]] && branch_value=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}')
+  if [[ -f "$state_file" ]]; then
+    branch_value=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}' || true)
+  fi
   [[ "$branch_value" =~ ^task/E- ]] && branch_correct=true
 
   # execution_yaml_present (project-level)
