@@ -42,6 +42,12 @@ docs/plans/
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 .aid-o/
 
-# Claude Code local settings
+# Claude Code local settings + per-project memory file
+# (CLAUDE.md is the project's private context for Claude Code — contains
+# internal infra refs, ops paths, personal context that shouldn't be on a
+# public repo. The .MD upper-case entry that lived here previously did not
+# match CLAUDE.md on case-sensitive filesystems, so the file was tracked
+# despite the gitignore intent. This pair (lower + upper) covers both.)
 .claude/
+CLAUDE.md
 CLAUDE.MD
