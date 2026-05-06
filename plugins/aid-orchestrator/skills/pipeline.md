@@ -420,7 +420,7 @@ For post-deploy EPICs (`state.yaml.created_at >= AID_DEPLOY_DATE`):
 - Hand-written reports are rejected with copy-paste remediation in stderr.
 - Repeated-fail detection: ≥ 3 same-reason fails on the same EPIC trigger
   `fsm_precondition_repeated_fail` event + best-effort `try_telegram_alert()`
-  (HTTP POST to `localhost:8818/send_message`).
+  (HTTP POST to `localhost:8817/send_message`).
 
 For pre-deploy grandfathered EPICs (`created_at < AID_DEPLOY_DATE`): precondition
 skipped (legacy compat — preserves resumability of the 203 pre-Session-A EPIC dirs).

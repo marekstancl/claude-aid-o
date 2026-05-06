@@ -114,14 +114,15 @@ fsm_count_recent_fails() {
      -n < "$timeline" 2>/dev/null || echo 0
 }
 
-# Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8818).
+# Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
+# replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
 # Service deployed in Step 6; this helper works pre-deploy as a no-op.
 try_telegram_alert() {
   local message=$1
   local payload
   payload=$(jq -nc --arg t "$message" '{text:$t, parse_mode:"HTML"}')
-  if curl -fsS -X POST http://localhost:8818/send_message \
+  if curl -fsS -X POST http://localhost:8817/send_message \
        -H "Content-Type: application/json" \
        --data "$payload" \
        --max-time 3 \

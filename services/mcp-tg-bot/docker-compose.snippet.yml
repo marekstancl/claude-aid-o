@@ -13,7 +13,7 @@
 #      elsewhere (default assumes ./aid-orchestrator/services/mcp-tg-bot
 #      relative to /opt/eco/services/).
 #   3. cd /opt/eco/services && docker compose up -d --build svc-mcp-tg-bot
-#   4. curl -fsS http://127.0.0.1:8818/health
+#   4. curl -fsS http://127.0.0.1:8817/health
 #
 # Token + chat ID live in /opt/eco/services/.env (per ekosystem convention,
 # NOT committed). See services/mcp-tg-bot/.env.example for the template.
@@ -28,11 +28,11 @@ services:
       # exposes the port. Defense-in-depth against future compose edits that
       # might flip the network back to bridge mode (plan §S.2 audit step).
       - MCP_HTTP_HOST=127.0.0.1
-      - MCP_HTTP_PORT=8818
+      - MCP_HTTP_PORT=8817
     network_mode: host
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8818/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8817/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

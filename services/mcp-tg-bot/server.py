@@ -2,7 +2,7 @@
 
 Two transports:
   • stdio  — used by Claude Code main + sub-agents via ~/.claude/.mcp.json
-  • HTTP   — used by FSM bash scripts via curl localhost:8818/send_message
+  • HTTP   — used by FSM bash scripts via curl localhost:8817/send_message
 
 Tools:
   • send_message(text, parse_mode="HTML", chat_id=None)
@@ -14,7 +14,7 @@ Endpoints:
 Configuration via env (loaded from container env_file: /opt/eco/services/.env):
   TELEGRAM_ALERT_BOT_TOKEN          required for actual delivery
   TELEGRAM_ALERT_DEFAULT_CHAT_ID    used when send_message chat_id is None
-  MCP_HTTP_PORT                     default 8818
+  MCP_HTTP_PORT                     default 8817
   MCP_HTTP_HOST                     default 127.0.0.1 (localhost-only — see plan §S.2)
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ mcp = FastMCP(name="svc-mcp-tg-bot", version="1.0.0")
 
 BOT_TOKEN = os.environ.get("TELEGRAM_ALERT_BOT_TOKEN", "")
 DEFAULT_CHAT_ID = os.environ.get("TELEGRAM_ALERT_DEFAULT_CHAT_ID", "")
-HTTP_PORT = int(os.environ.get("MCP_HTTP_PORT", "8818"))
+HTTP_PORT = int(os.environ.get("MCP_HTTP_PORT", "8817"))
 # Bind to 127.0.0.1 by default to prevent LAN exposure even when the
 # container runs with `network_mode: host` (plan §S.2 — Risks row LAN exposure).
 # Override only when explicit external access is needed.
@@ -106,7 +106,7 @@ async def health_check(request):
 @mcp.custom_route("/send_message", methods=["POST"])
 async def send_message_http(request):
     """HTTP wrapper for the send_message tool — used by FSM bash callers
-    (curl POST localhost:8818/send_message). Body shape:
+    (curl POST localhost:8817/send_message). Body shape:
         {"text": "...", "parse_mode": "HTML", "chat_id": null}
     """
     from starlette.responses import JSONResponse
