@@ -514,9 +514,35 @@ STRUCTURAL QUALITY:
 TRACEABILITY:
   16. Does the traceability verification report show all traces resolved?
 
+CODEBASE GROUNDING (added v2.17.0 — addresses CP1 systematic blind spot
+                    where reviewer cannot detect absence of helpers/files
+                    that the plan presumes exist):
+  17. Has every named external resource in the plan been verified to actually
+      exist in the real codebase (or explicitly mapped to a Create step)?
+      Resources to ground:
+        • Functions, helpers, library exports (e.g., log_info, fsm_check_grandfather)
+            → grep for definition; pass with "VERIFIED: defined at <path:line>" or
+              "ABSENT: will be created in Step <N>" — never "presumably exists" or
+              "should be in <some lib>".
+        • File paths referenced in Modify entries
+            → ls / stat; pass with "VERIFIED: exists" or "ABSENT: created in Step <N>".
+        • Ports (e.g., 8818, 8817)
+            → cross-check with running infra (`docker ps`) and existing 88XX
+              catalog; flag conflicts BEFORE plan write, not at deploy.
+        • Service / container names (e.g., svc-mcp-tg-bot, infra-postgres)
+            → docker ps; flag if name collides with running service.
+        • External commands (e.g., yq, bats, direnv, docker)
+            → command -v; mark as required dependency (Constraints) if not
+              already in repo's bootstrap.
+        • Env vars (e.g., AID_PLUGIN_PATH, TELEGRAM_ALERT_BOT_TOKEN)
+            → grep for export/declaration; document expected source if
+              user-supplied.
+      Hand-wave like "presumably exists in some lib" or "should be available"
+      is a hard fail — replace with concrete grep output or Create-step mapping.
+
 EVALUATION:
-  COUNT checks passed out of 16.
-  IF all 16 pass → write plan to disk
+  COUNT checks passed out of 17.
+  IF all 17 pass → write plan to disk
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.

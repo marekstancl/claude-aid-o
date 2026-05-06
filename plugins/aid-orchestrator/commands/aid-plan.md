@@ -98,6 +98,37 @@ Output: `=== Step 8/9: Document ===`
 Dispatch verifier with `docs-review` focus on the written plan file.
 Present findings to PM with full context (no auto-fix — design decisions).
 Skip if `review_checkpoints.cp1_plan_review: false`.
+
+**Codebase grounding pass (mandatory, added v2.17.0).**
+The verifier MUST perform a flat-list extraction + verification step in addition
+to the standard plan-writing.md checks. P032 retrospective showed CP1 has a
+systematic blind spot for *absence* — reviewer can detect when something
+mentioned in the plan looks wrong, but cannot detect that a helper / file /
+port / service the plan presumes exists in fact does not (5 PM-authorized
+resolutions in P032 — C1 through C5 — were all of this kind).
+
+Verifier dispatch prompt MUST include:
+1. Extract a flat list from the plan of every named:
+   - function / helper (e.g., `log_info`, `fsm_check_grandfather`)
+   - file path under Files entries (Create / Modify / Rewrite / Test)
+   - port (e.g., `8818`)
+   - service / container name (e.g., `svc-mcp-tg-bot`)
+   - external command (e.g., `yq`, `bats`)
+   - env var (e.g., `AID_PLUGIN_PATH`)
+2. For each item, verify against real codebase / running infra:
+   - Functions/helpers: `grep -rn "^<fn>()\|^function <fn>" plugins/`
+   - File paths: `ls <path>` (or note "Create step <N>" if Files entry creates it)
+   - Ports: `docker ps --format '{{.Ports}}' | grep <port>` — flag conflicts
+   - Services: `docker ps --format '{{.Names}}'` — flag collisions
+   - Commands: `command -v <cmd>`
+   - Env vars: `grep -rn "<VAR_NAME>"` for declarations / fallback handling
+3. Mark each: VERIFIED (with path:line or docker output) or ABSENT (with note
+   "to be created in Step N" — must map to a Create step in the plan).
+4. Plan with ABSENT items NOT mapped to a Create step → REVISE_REQUIRED.
+
+This is in addition to (not replacing) the standard plan-writing.md
+Forbidden Phrase + Completeness Gate (16 → 17 checks) verification.
+
 Output:
 ```
 === Step 9/9: Review ===
