@@ -603,6 +603,31 @@ set via `set-field`. The decision is automatically cleared after the transition 
 Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
 on GATES→DONE transition.
 
+### Epic Summary (auto-generated v2.18.0+)
+
+After every successful `done-advance review→release`, `aid-fsm.sh` invokes
+`aid-epic-summary.sh generate <evidence_dir>` (best-effort — failure logs a
+warning but never blocks release).
+
+Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
+
+| Section | Source |
+|---------|--------|
+| `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
+| `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
+| `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
+| `📋 Co dělat dál (PM akce)` | curator L-effort proposals, escalations, force override audit reminder |
+| `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
+
+**Trust level heuristics:**
+- `branch_correct=false` + `branch` starts with `feature/` → false alarm (feature branch convention); no trust penalty
+- `force_override_count > 0` → MEDIUM; audit-log.jsonl review required
+- `gate_retries > 0` → MEDIUM
+- `compliance.overall = false` → LOW
+- All green + 0 force + 0 retries → HIGH
+
+**IMP-089 forward-compat:** if `.aid-o/config/project.yaml` has a `branch_convention:` field, the trust heuristic respects it (even before IMP-089 ships).
+
 ### Compliance Telemetry (NEW v2.16.0 — P032 Step 4)
 
 After every successful `done-advance` to `release`, `aid-fsm.sh` writes
