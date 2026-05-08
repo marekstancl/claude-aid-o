@@ -388,6 +388,39 @@ Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
           return 1
         fi
+
+        # Session B CP3: verifier-output-cp3 preconditions (file presence + valid _generated_by)
+        local cp3_code_review="${evidence_dir}/verifier-output-cp3-code-review.md"
+        local cp3_security="${evidence_dir}/verifier-output-cp3-security.md"
+
+        if ! fsm_check_verifier_output "$cp3_code_review"; then
+          _PRECONDITION_FAIL_REASON="missing_cp3_code_review"
+          cat <<EOF >&2
+PRECONDITION FAIL: verifier-output-cp3-code-review.md missing or invalid.
+
+Reason: AID v3 Session B requires CP3 integration review before EXECUTE→GATES.
+        Both verifiers (code-review + security) must review the full EPIC diff.
+
+Fix: Dispatch TWO verifiers in parallel (single message, two Agent tool calls):
+     a. subagent_type: aid-orchestrator:verifier, focus: code-review
+     b. subagent_type: aid-orchestrator:verifier, focus: security
+     Each writes its verifier-output-cp3-{focus}.md with _generated_by + verdict.
+Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
+EOF
+          return 1
+        fi
+
+        if ! fsm_check_verifier_output "$cp3_security"; then
+          _PRECONDITION_FAIL_REASON="missing_cp3_security"
+          cat <<EOF >&2
+PRECONDITION FAIL: verifier-output-cp3-security.md missing or invalid.
+
+Reason: CP3 requires BOTH code-review AND security verifier outputs.
+        Security verifier must also be dispatched (mandatory).
+Fix: dispatch security verifier (see code-review error above for full instructions).
+EOF
+          return 1
+        fi
       fi
       ;;
 
