@@ -92,10 +92,10 @@ emit_shipped() {
 
   if [[ -n "$log_lines" ]]; then
     while IFS= read -r line; do
-      printf '- `%s`\n' "$line"
+      printf -- '- `%s`\n' "$line"
     done <<< "$log_lines"
   else
-    printf '- (git log nedostupný nebo žádné commity od startu EPIC)\n'
+    printf -- '- (git log nedostupný nebo žádné commity od startu EPIC)\n'
   fi
   printf '\n'
 }
@@ -113,21 +113,21 @@ emit_warnings() {
     local n
     n=$(jq -s '[.[] | select(.event=="fsm_branch_mismatch_detected")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( n > 0 )); then
-      printf '- **⚠️ Větev nesedí:** Detekován mismatch větve při inicializaci (%d×). Audit trail mohl být přerušen.\n' "$n"
+      printf -- '- **⚠️ Větev nesedí:** Detekován mismatch větve při inicializaci (%d×). Audit trail mohl být přerušen.\n' "$n"
       found_any=true
     fi
 
     # Unusual branch
     n=$(jq -s '[.[] | select(.event=="fsm_branch_unusual_detected")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( n > 0 )); then
-      printf '- **ℹ️ Neobvyklá větev:** Větev nesplňuje konvenci task/<id>/main, ale pokračovalo se (%d×).\n' "$n"
+      printf -- '- **ℹ️ Neobvyklá větev:** Větev nesplňuje konvenci task/<id>/main, ale pokračovalo se (%d×).\n' "$n"
       found_any=true
     fi
 
     # force_override events
     n=$(jq -s '[.[] | select(.event=="fsm_force_override")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( n > 0 )); then
-      printf '- **🔴 Force override:** FSM precondition bylo obejito --force %d×. Zkontroluj audit-log.jsonl.\n' "$n"
+      printf -- '- **🔴 Force override:** FSM precondition bylo obejito --force %d×. Zkontroluj audit-log.jsonl.\n' "$n"
       jq -rs '[.[] | select(.event=="fsm_force_override")
                | "  - `" + (.from // "?") + " → " + (.to // "?") + "`: "
                          + (.reason // "<bez důvodu>")] | .[]' \
@@ -138,14 +138,14 @@ emit_warnings() {
     # Repeated precondition failures
     n=$(jq -s '[.[] | select(.event | test("^fsm_precondition_repeated_fail"))] | length' "$timeline" 2>/dev/null || echo 0)
     if (( n > 0 )); then
-      printf '- **⚠️ Opakovaná selhání precondition:** %d× — možné systematické obcházení.\n' "$n"
+      printf -- '- **⚠️ Opakovaná selhání precondition:** %d× — možné systematické obcházení.\n' "$n"
       found_any=true
     fi
 
     # Increment-step failures (> 5 indicates churn)
     n=$(jq -s '[.[] | select(.event=="fsm_increment_fail")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( n > 5 )); then
-      printf '- **⚠️ Časté selhání increment-step:** %d× — možné opakované přeskakování verification.\n' "$n"
+      printf -- '- **⚠️ Časté selhání increment-step:** %d× — možné opakované přeskakování verification.\n' "$n"
       found_any=true
     fi
   fi
@@ -154,12 +154,12 @@ emit_warnings() {
   local gate_retries
   gate_retries=$(grep '^gate_retries:' "$state_file" | awk '{print $2}' 2>/dev/null) || gate_retries=0
   if (( ${gate_retries:-0} > 1 )); then
-    printf '- **⚠️ Opakované brány:** Quality gates musely být spuštěny %d× před úspěchem.\n' "$gate_retries"
+    printf -- '- **⚠️ Opakované brány:** Quality gates musely být spuštěny %d× před úspěchem.\n' "$gate_retries"
     found_any=true
   fi
 
   if ! $found_any; then
-    printf '- Žádná varování. EPIC proběhl bez obcházení nebo opakování.\n'
+    printf -- '- Žádná varování. EPIC proběhl bez obcházení nebo opakování.\n'
   fi
   printf '\n'
 }
@@ -183,7 +183,7 @@ emit_deferred() {
       | grep -v '^#' | head -5 || true)
     if [[ -n "$blocking" ]]; then
       printf 'Z audit reportu — blokující nebo L-effort nálezy:\n'
-      while IFS= read -r line; do printf '- %s\n' "$line"; done <<< "$blocking"
+      while IFS= read -r line; do printf -- '- %s\n' "$line"; done <<< "$blocking"
       found_any=true
     fi
   fi
@@ -199,13 +199,13 @@ emit_deferred() {
       | grep -v '^#' | head -5 || true)
     if [[ -n "$deferred" ]]; then
       printf 'Z curator reportu — odložené návrhy:\n'
-      while IFS= read -r line; do printf '- %s\n' "$line"; done <<< "$deferred"
+      while IFS= read -r line; do printf -- '- %s\n' "$line"; done <<< "$deferred"
       found_any=true
     fi
   fi
 
   if ! $found_any; then
-    printf '- Curator a auditor nehlásí žádné blokující nebo odložené položky.\n'
+    printf -- '- Curator a auditor nehlásí žádné blokující nebo odložené položky.\n'
   fi
   printf '\n'
 }
@@ -233,7 +233,7 @@ emit_pm_actions() {
     local fc
     fc=$(jq -s '[.[] | select(.event=="fsm_force_override")] | length' "$timeline" 2>/dev/null || echo 0)
     if (( ${fc:-0} > 0 )); then
-      printf '- Zkontroluj audit-log.jsonl — %d force override(s) vyžaduje ruční review před dalším EPIC.\n' "$fc"
+      printf -- '- Zkontroluj audit-log.jsonl — %d force override(s) vyžaduje ruční review před dalším EPIC.\n' "$fc"
       found_any=true
     fi
   fi
@@ -248,14 +248,14 @@ emit_pm_actions() {
     l_effort=$(grep -i -E '\bL-effort\b|effort.*:\s*L\b' "$curator_report" 2>/dev/null \
       | grep -v '^#' | head -3 || true)
     if [[ -n "$l_effort" ]]; then
-      printf '- L-effort návrhy z curatoru (vyžadují vlastní EPIC nebo PM rozhodnutí):\n'
+      printf -- '- L-effort návrhy z curatoru (vyžadují vlastní EPIC nebo PM rozhodnutí):\n'
       while IFS= read -r line; do printf '  - %s\n' "$line"; done <<< "$l_effort"
       found_any=true
     fi
   fi
 
   if ! $found_any; then
-    printf '- Žádné vyžadované PM akce identifikovány. EPIC je uzavřen.\n'
+    printf -- '- Žádné vyžadované PM akce identifikovány. EPIC je uzavřen.\n'
   fi
   printf '\n'
 }
@@ -322,9 +322,9 @@ emit_trust_signal() {
   printf '**Trust: %s**\n\n' "$trust"
 
   if (( ${#notes[@]} > 0 )); then
-    for note in "${notes[@]}"; do printf '- %s\n' "$note"; done
+    for note in "${notes[@]}"; do printf -- '- %s\n' "$note"; done
   else
-    printf '- Všechny compliance checks zelené, 0 force overrides, 0 gate retries.\n'
+    printf -- '- Všechny compliance checks zelené, 0 force overrides, 0 gate retries.\n'
   fi
   printf '\n'
 }

@@ -1264,6 +1264,11 @@ cmd_done_advance() {
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     project_root="$PWD"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
+
+    # IMP-090: best-effort epic-summary.md generation after compliance write.
+    # Failure logs a warning but never aborts the release path.
+    bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
+      2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
   fi
 
   # Audit trail
