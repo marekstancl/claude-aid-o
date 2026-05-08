@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.16.1
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.18.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.17.0** (current) — CP1 codebase grounding rule (Completeness Gate check #17 + verifier grounding pass) + `aid-compliance-report.sh --reflect` flag with per-dimension pattern detection (✅ / ⚠️ INVESTIGATE / 🔴 SYSTEMATIC) for Session A → B decision gate
+- **v2.18.0** (current) — CP2/CP3 verifier dispatch enforcement, `fsm_handle_force_override` unified dispatcher, compliance `deploy_era` + `verifier_outputs` schema, `--era`/`--compare` compliance report, auto-generated `epic-summary.md` (IMP-090), 33-assertion bats suite
+- **v2.17.0** — CP1 codebase grounding rule (Completeness Gate check #17 + verifier grounding pass) + `aid-compliance-report.sh --reflect` flag with per-dimension pattern detection (✅ / ⚠️ INVESTIGATE / 🔴 SYSTEMATIC) for Session A → B decision gate
 - **v2.16.1** — Patch: aid-compliance-backfill.sh tolerates legacy v1 JSON state files + missing branch fields (post-deploy hotfix)
-- **v2.16.0** — Session A foundation hardening: PRE-FLIGHT branch enforcement, real gates execution provenance, lazy execution.yaml, compliance telemetry, svc-mcp-tg-bot Telegram alerts, 16-assertion bats unit suite
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
