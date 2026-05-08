@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 # P032 Step 7 — aid-fsm.sh PRE-FLIGHT branch enforcement (Step 2)
 # + EXECUTE→GATES gates_report._generated_by precondition (Step 3) +
-# grandfather behavior. 9 assertions total.
+# grandfather behavior. P033 Step 9 adds CP2 verifier-output preconditions +
+# force_override --reason enforcement. 14 assertions total.
 
 load test-helpers.bash
 
@@ -109,4 +110,85 @@ teardown() {
 
   run "$FSM" transition EXECUTE GATES "$state_file"
   [ "$status" -eq 0 ]
+}
+
+# ─── P033 Step 9: CP2 verifier-output preconditions (3 assertions) ───────────
+
+# Helper: write a fully-valid step-N-verify.md for a given step number.
+write_valid_step_verify() {
+  local file="$1" step="${2:-3}"
+  mkdir -p "$(dirname "$file")"
+  cat > "$file" <<VERIFY
+# Step ${step} Verification
+
+## Result: PASS
+
+- [x] acceptance criterion met
+- [x] output files match expected paths
+
+Commit: abc1234def5678
+
+## Memory Used
+N/A — no prior memory applicable
+
+## Memory Written
+N/A — no new entries proposed
+VERIFY
+}
+
+@test "increment-step: missing verifier-output-step-N.md (post-deploy) → hard fail" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  # No verifier-output-step-3.md → CP2 precondition fails
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
+}
+
+@test "increment-step: verifier-output with verdict:pending (verifier not dispatched) → fail" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  # Pre-filter wrote pending; verifier was NOT dispatched
+  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: RUN\nverdict: pending\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "verifier-output-step-3.md missing or invalid" ]]
+}
+
+@test "increment-step: verifier-output with classification:SKIP (docs diff) → accept" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  # SKIP classification is valid without verdict (pre-filter wrote reason field instead)
+  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: SKIP\nreason: docs_only\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
+# ─── P033 Step 9: force_override --reason enforcement (2 assertions) ─────────
+
+@test "transition --force without --reason → die with examples" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+
+  run "$FSM" transition EXECUTE GATES "$state_file" --force
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "--reason" ]]
+  [[ "$output" =~ "min 20 characters" ]]
+}
+
+@test "increment-step --force with short reason (< 20 chars) → die" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+
+  run "$FSM" increment-step "$state_file" --force --reason "too short"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "min 20 characters" ]]
 }

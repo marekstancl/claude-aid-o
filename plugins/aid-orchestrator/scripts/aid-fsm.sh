@@ -1092,7 +1092,7 @@ Fix:
 
     # Session B: mid-EPIC plan.json tampering check (PM Q2 refinement #2)
     local stored_hash current_hash
-    stored_hash=$(grep '^plan_json_hash:' "$state_file" | awk '{print $2}')
+    stored_hash=$(grep '^plan_json_hash:' "$state_file" | awk '{print $2}') || true
     if [[ -n "$stored_hash" && -f "${evidence_dir}/plan.json" ]]; then
       current_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
       if [[ "$stored_hash" != "$current_hash" ]]; then
