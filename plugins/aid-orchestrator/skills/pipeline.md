@@ -61,6 +61,41 @@ Use `aid-fsm.sh verify-state` before any action to confirm allowed transitions.
 Use `--force` only with explicit PM approval (logged as `fsm_force_override`).
 DONE sub-phases use `aid-fsm.sh done-advance` (not `transition`).
 
+### force_override Usage Policy (v2.18.0+)
+
+`aid-fsm.sh <command> ... --force` requires `--reason "<text>"` with **minimum 20 characters**.
+Hard fail with copy-paste examples if missing or too short.
+
+**When `--force` is mandatory:**
+- Bypassing a FSM precondition when the check has a confirmed false-positive
+- Skipping plan-level DONE gate on `cmd_init` when prior-plan CA review was completed out-of-band
+- Skipping step verification in `cmd_increment_step` when verifier dispatch was unavailable (MCP outage)
+
+**Examples (accepted by dispatcher):**
+```
+aid-fsm.sh transition EXECUTE GATES $state_file --force --reason \
+  'plan.json bug — step 3 AC has typo blocking gates_no_generated_by check, fix in next EPIC'
+
+aid-fsm.sh transition GATES DONE $state_file --force --reason \
+  'security_scan false positive on test fixture, manually verified safe in commit abc1234'
+
+aid-fsm.sh increment-step $state_file --force --reason \
+  'step verifier dispatch unavailable due to MCP outage, manually reviewed diff in PR #42'
+
+aid-fsm.sh done-advance review release $state_file --force --reason \
+  'auditor agent dispatch failed retry-3, applying P1 finding fix manually'
+```
+
+**Telemetry (automatic, cannot be disabled):**
+- `fsm_force_override` timeline event records `from`, `to`, `reason`, `caller`, `operator` fields
+- Persistent entry to `.aid-o/work/audit-log.jsonl` (cross-EPIC trail, append-only)
+- `compliance.json` captures `force_override_count` (int) + `force_override_reasons` (array) per EPIC
+- `aid-compliance-report.sh --reflect` flags **🔴 SYSTEMATIC** if:
+  - avg force_override_count across post-session-b EPICs > 1, OR
+  - max per single EPIC > 3, OR
+  - ≥ 30 % of EPICs used force at all, OR
+  - any reason < 30 chars or matches low-quality regex `^(fix|bug|needed|done)$`
+
 ### FSM States
 
 Six states. Scripts handle transitions. LLM acts within a state.

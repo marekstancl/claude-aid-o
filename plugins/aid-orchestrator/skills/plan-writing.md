@@ -415,6 +415,10 @@ These phrases indicate the AI is taking shortcuts instead of providing real deta
 | "etc." / "and so on" / "..." | Hiding missing detail | Complete the list — if you can't, you don't know enough |
 | "purple gradient banner" (or any text-only UI color/style description) | Vague — agent invents own design | Include exact CSS: `className="bg-gradient-to-r from-indigo-600 to-violet-600"` or reference visual-spec.yaml |
 | "styled similar to mockup" | Which mockup? What styles? | Reference visual-spec.yaml component name + exact Tailwind classes |
+| "appropriate AC" | What is "appropriate"? | List each acceptance criterion explicitly with measurable condition |
+| "edge cases handled" | Which edge cases? | Enumerate each edge case: input, trigger condition, expected behavior |
+| "as appropriate" | Trigger condition undefined | Specify exactly when and why this applies |
+| "as the case may be" | Same vagueness as "as appropriate" | Specify which case, under what condition |
 
 ### Forbidden Phrase Detection Protocol
 
@@ -540,9 +544,25 @@ CODEBASE GROUNDING (added v2.17.0 — addresses CP1 systematic blind spot
       Hand-wave like "presumably exists in some lib" or "should be available"
       is a hard fail — replace with concrete grep output or Create-step mapping.
 
+STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation quality):
+  18. Does every plan step's `step.outputs` array contain concrete file paths
+      (no `src/**` wildcards, no `*` glob patterns)?
+      Wildcards devolve nuanced verifier deprivation (Session B CP2) toward total
+      deprivation, defeating the false-positive-prevention purpose.
+      REJECT:
+        • src/**
+        • tests/**/*.test.ts
+        • **
+      ACCEPT:
+        • src/lib/aid-init-execution-yaml.sh
+        • services/mcp-tg-bot/server.py
+      EXCEPTION: integration test plans where coverage is genuinely directory-
+      wide may use suffix patterns (e.g., tests/unit/*.bats) BUT must include
+      explicit `step.expected_count` field stating the expected file count.
+
 EVALUATION:
-  COUNT checks passed out of 17.
-  IF all 17 pass → write plan to disk
+  COUNT checks passed out of 18.
+  IF all 18 pass → write plan to disk
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
