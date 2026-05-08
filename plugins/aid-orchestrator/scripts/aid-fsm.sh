@@ -380,9 +380,37 @@ write_compliance_json() {
   local compliance_file="${evidence_dir}/compliance.json"
   local _timeline="${evidence_dir}/timeline.jsonl"
 
-  local deploy_era="post-session-a"
-  if fsm_check_grandfather; then
+  # Session B: three-tier deploy_era enum (pre-session-a | post-session-a | post-session-b).
+  # Session A hardcoded deploy date; Session B date read from DEPLOY_DATE file (Step 10),
+  # far-future fallback until that file is written.
+  local deploy_era
+  local _created_at _session_a_deploy _session_b_deploy
+  _created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  _session_a_deploy="2026-05-05T16:37:52Z"
+  if [[ -f "${SCRIPT_DIR}/../DEPLOY_DATE" ]]; then
+    _session_b_deploy=$(cat "${SCRIPT_DIR}/../DEPLOY_DATE" 2>/dev/null || echo "2099-01-01T00:00:00Z")
+  else
+    _session_b_deploy="2099-01-01T00:00:00Z"
+  fi
+
+  if [[ -z "$_created_at" || "$_created_at" < "$_session_a_deploy" ]]; then
     deploy_era="pre-session-a"
+  elif [[ "$_created_at" < "$_session_b_deploy" ]]; then
+    deploy_era="post-session-a"
+  else
+    deploy_era="post-session-b"
+  fi
+
+  # force_override fields: count + reasons from this EPIC's timeline.jsonl.
+  # M6 fallback: pre-Session-B events have no .reason field → substitute marker
+  # string so aggregator can identify them as historical noise (not actionable).
+  local force_count force_reasons
+  if [[ -f "$_timeline" ]]; then
+    force_count=$(jq -s '[.[] | select(.event=="fsm_force_override")] | length' "$_timeline" 2>/dev/null || echo "0")
+    force_reasons=$(jq -s '[.[] | select(.event=="fsm_force_override") | (.reason // "<pre-session-b legacy>")]' "$_timeline" 2>/dev/null || echo "[]")
+  else
+    force_count=0
+    force_reasons='[]'
   fi
 
   local checks
@@ -396,6 +424,8 @@ write_compliance_json() {
       --arg era "$deploy_era" \
       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg note "evaluation failed: ${checks}" \
+      --argjson fc "$force_count" \
+      --argjson fr "$force_reasons" \
       '{
         epic_id: $epic, run_id: $run, aid_version: $ver,
         deploy_era: $era, evaluated_at: $ts,
@@ -403,6 +433,8 @@ write_compliance_json() {
           branch_correct: null, execution_yaml_present: null, gates_generated_by: null,
           memory_substantive: null, verifier_outputs: null, dod_present: null
         },
+        force_override_count: $fc,
+        force_override_reasons: $fr,
         overall: "fail",
         notes: [$note]
       }' > "$compliance_file"
@@ -410,35 +442,42 @@ write_compliance_json() {
     return 0
   fi
 
-  # overall = pass if every check ∈ {true, null}, else fail.
-  # IMPORTANT: when Sessions B/C deploy, currently-null fields become true|false.
-  # The same logic must remain consistent — null ALWAYS means "not measured in
-  # this deployed era", NEVER "not applicable". Permissively counted as pass for
-  # the era's overall verdict so currently-undeployed dimensions don't drag down
-  # the score retroactively.
-  local overall
-  overall=$(echo "$checks" | jq -r '
-    [.[] | (. == true or . == null)] | all | if . then "pass" else "fail" end
-  ')
-
+  # overall: check the 4 top-level scalar dimensions + verifier_outputs.aggregate.
+  # verifier_outputs is now an object — use type-aware extraction for backward compat
+  # with any pre-Session-B compliance.json files that have boolean/null there.
+  # null counts as pass (= "not yet measured in this era").
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson chks "$checks" \
-    --arg ov "$overall" \
+    --argjson fc "$force_count" \
+    --argjson fr "$force_reasons" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
-      checks: $chks, overall: $ov, notes: []
+      checks: $chks,
+      force_override_count: $fc,
+      force_override_reasons: $fr,
+      overall: (
+        [$chks.branch_correct, $chks.execution_yaml_present, $chks.gates_generated_by,
+         ($chks.verifier_outputs | if type == "object" then .aggregate else . end)]
+        | all(. == true or . == null)
+        | if . then "pass" else "fail" end
+      ),
+      notes: []
     }' > "$compliance_file" || {
     log_warn "compliance.json write failed for ${compliance_file} — skipping (telemetry is best-effort)"
     return 0
   }
 
+  # Read back overall for the timeline event (avoid duplicate jq computation)
+  local overall
+  overall=$(jq -r '.overall' "$compliance_file" 2>/dev/null || echo "unknown")
+
   local checks_passed checks_failed
-  checks_passed=$(echo "$checks" | jq '[.[] | select(. == true)] | length')
-  checks_failed=$(echo "$checks" | jq '[.[] | select(. == false)] | length')
+  checks_passed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == true)] | length')
+  checks_failed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == false)] | length')
 
   log_event "$_timeline" "compliance_written" \
     deploy_era="$deploy_era" overall="$overall" \
