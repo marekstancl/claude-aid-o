@@ -164,6 +164,68 @@ fsm_check_verifier_output() {
   return 0
 }
 
+# Unified dispatcher for --force handling across cmd_init / cmd_transition /
+# cmd_increment_step / cmd_done_advance. Validates reason, emits extended
+# fsm_force_override timeline event with caller field, and writes persistent
+# audit log entry. Reads epic_id, run_id, evidence_dir from caller scope.
+fsm_handle_force_override() {
+  local from="$1" to="$2" state_file="$3" caller_cmd="$4"
+  shift 4
+  local reason=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  if [[ ${#reason} -lt 20 ]]; then
+    die "ERROR: --force requires --reason argument with min 20 characters (got ${#reason}).
+
+Reason: AID v3 telemetry needs forensic-grade audit trail of why FSM was bypassed.
+        Empty or short reasons defeat the audit purpose.
+
+Examples:
+  aid-fsm.sh transition EXECUTE GATES \$state_file --force --reason \\
+    'plan.json bug — step 3 AC has typo blocking gates_no_generated_by check, fix in next EPIC'
+  aid-fsm.sh transition GATES DONE \$state_file --force --reason \\
+    'security_scan false positive on test fixture, manually verified safe in commit abc1234'
+  aid-fsm.sh increment-step \$state_file --force --reason \\
+    'step verifier dispatch unavailable due to MCP outage, manually reviewed diff in PR #42'
+  aid-fsm.sh done-advance review release \$state_file --force --reason \\
+    'auditor agent dispatch failed retry-3, applying P1 finding fix manually'
+
+Then retry with --reason."
+  fi
+
+  local timeline="${evidence_dir}/timeline.jsonl"
+  local operator="${USER:-unknown}"
+
+  [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
+    from="$from" to="$to" reason="$reason" \
+    caller="$caller_cmd" operator="$operator"
+
+  fsm_emit_audit_log "fsm_force_override" \
+    --from "$from" --to "$to" \
+    --reason "$reason" --caller "$caller_cmd" --operator "$operator"
+}
+
+# Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
+# Audit log write failure is best-effort — never aborts primary FSM operation.
+fsm_emit_audit_log() {
+  local event_type="$1"; shift
+  local audit_log_file="${project_root}/.aid-o/work/audit-log.jsonl"
+  # project_root may be unset in early init paths — derive from CWD
+  audit_log_file="${project_root:-.}/.aid-o/work/audit-log.jsonl"
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "${epic_id:-unknown}" \
+    --run-id  "${run_id:-unknown}" \
+    --event   "$event_type" \
+    "$@" \
+    --output  "$audit_log_file" 2>/dev/null || true
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
