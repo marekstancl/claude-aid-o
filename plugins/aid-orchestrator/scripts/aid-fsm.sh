@@ -114,6 +114,56 @@ fsm_count_recent_fails() {
      -n < "$timeline" 2>/dev/null || echo 0
 }
 
+# Count fsm_precondition_fail events for (same step + same reason) — detects
+# "this step is structurally problematic" pattern (≥ 3 = step-level repeated fail).
+fsm_count_recent_fails_step() {
+  local step=$1 reason=$2
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg s "$step" --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .step==$s and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Count fsm_precondition_fail events for (same reason, any step) — detects
+# "agent systematically bypasses this check across steps" pattern (≥ 3 = EPIC-level).
+fsm_count_recent_fails_epic() {
+  local reason=$1
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
+# Returns 0 (pass) if file exists + has _generated_by + classification fields.
+# For RUN/FAIL classification also requires verdict != "pending" (verifier ran).
+fsm_check_verifier_output() {
+  local file=$1
+  [[ -f "$file" ]] || return 1
+  grep -q '^_generated_by:' "$file" || return 1
+  grep -q '^classification:' "$file" || return 1
+
+  local classification
+  classification=$(grep '^classification:' "$file" | awk '{print $2}')
+  case "$classification" in
+    SKIP)
+      grep -q '^reason:' "$file" || return 1
+      ;;
+    RUN|FAIL|FULL_REVIEW)
+      grep -q '^verdict:' "$file" || return 1
+      local verdict
+      verdict=$(grep '^verdict:' "$file" | awk '{print $2}')
+      [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
+      ;;
+    *)
+      return 1  # unknown classification
+      ;;
+  esac
+  return 0
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
