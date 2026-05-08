@@ -619,6 +619,14 @@ except: pass
     fi
   fi
 
+  # Session B: stamp plan.json sha256 for mid-EPIC tampering detection.
+  # Additive key — existing readers tolerate unknown keys via grep-awk pattern.
+  if [[ -f "${evidence_dir}/plan.json" ]]; then
+    local plan_hash
+    plan_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
+    echo "plan_json_hash: $plan_hash" >> "$state_file"
+  fi
+
   echo "Initialized state: READY" >&2
 }
 
@@ -818,6 +826,62 @@ cmd_increment_step() {
       timeline=$(derive_timeline "$state_file") || true
       [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_written"
       exit 1
+    fi
+
+    # Session B CP2: verifier-output-step-N.md precondition
+    if ! fsm_check_grandfather; then
+      local verifier_output="${evidence_dir}/verifier-output-step-${step}.md"
+
+      if ! fsm_check_verifier_output "$verifier_output"; then
+        local timeline
+        timeline=$(derive_timeline "$state_file") || true
+
+        # Repeated-fail telemetry (step-level and epic-level)
+        local attempt_step attempt_epic
+        attempt_step=$(fsm_count_recent_fails_step "$step" "missing_verifier_output")
+        attempt_epic=$(fsm_count_recent_fails_epic "missing_verifier_output")
+
+        if (( attempt_step >= 3 )); then
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_step" \
+            step="$step" precondition="missing_verifier_output" attempt_count="$attempt_step"
+          try_telegram_alert "Repeated step-level precondition fail (×${attempt_step}): EPIC=${epic_id}, step=${step}, precondition=missing_verifier_output"
+        fi
+        if (( attempt_epic >= 3 )); then
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_epic" \
+            precondition="missing_verifier_output" attempt_count="$attempt_epic"
+          try_telegram_alert "Systematic precondition bypass (×${attempt_epic}): EPIC=${epic_id}, precondition=missing_verifier_output across multiple steps"
+        fi
+
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
+          step="$step" reason="missing_verifier_output"
+
+        die "ERROR: verifier-output-step-${step}.md missing or invalid.
+
+Reason: AID v3 Session B requires per-step verifier dispatch (CP2). The pre-filter
+        classifies the step diff as SKIP/RUN/FAIL; for RUN/FAIL a verifier subagent
+        must run and update the output file before this increment.
+
+Fix:
+  1. bash \$AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify ${step} ${evidence_dir}
+  2. Based on exit code: 0=skip (already done), 10=run code-review verifier, 20=run security verifier
+  3. If RUN/FAIL, dispatch: subagent_type=aid-orchestrator:verifier with appropriate focus
+     Verifier writes verdict + findings to ${verifier_output}
+  4. Retry: aid-fsm.sh increment-step ${state_file}"
+      fi
+    fi
+
+    # Session B: mid-EPIC plan.json tampering check (PM Q2 refinement #2)
+    local stored_hash current_hash
+    stored_hash=$(grep '^plan_json_hash:' "$state_file" | awk '{print $2}')
+    if [[ -n "$stored_hash" && -f "${evidence_dir}/plan.json" ]]; then
+      current_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
+      if [[ "$stored_hash" != "$current_hash" ]]; then
+        die "ERROR: plan.json hash mismatch — modified mid-EPIC.
+Reason: Mid-EPIC plan.json edits could expand step.outputs to allow scope creep.
+        plan.json hash at init: ${stored_hash}
+        plan.json hash now:     ${current_hash}
+Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
+      fi
     fi
   else
     local timeline
