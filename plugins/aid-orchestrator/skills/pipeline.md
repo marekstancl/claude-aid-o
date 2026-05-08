@@ -346,19 +346,68 @@ On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 4. **FAIL handling:** Resume agent with the comparison table + mockup path. Max 2 visual fix attempts → ESCALATION.
 5. **Skip conditions:** No visual_refs on step → skip. Dev server not running → warn, skip, note in verify.
 
-### Review Checkpoint CP2 (per-step)
+### Review Checkpoint CP2 (per-step, ENFORCED v2.18.0+)
 
-After output verification passes, dispatch verifier (`code-review` focus) with step
-output + branch diff. See `agents/verifier.md` Auto-Dispatch Triggers for context assembly.
-Fix loop: gate-fixer → verifier re-check, max 2 iterations. E7 on exhaustion.
-Skip per `review-checkpoints.yaml` (`cp2_step_review`, `skip_trivial`).
+After step implementation + step-N-verify.md write, before `aid-fsm.sh increment-step`:
 
-### Integration Review CP3 (pre-GATES)
+1. **Pre-filter classification** (deterministic bash, no LLM):
+   ```
+   bash $AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify <N> <evidence_dir>
+   ```
+   Exit code:
+   - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
+   - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
+   - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
 
-When all steps are done, before EXECUTE→GATES transition:
-dispatch TWO verifiers in parallel (`code-review` + `security`) with full diff since run start.
-Fix loop same as CP2. E7 on exhaustion.
-Skip per `review-checkpoints.yaml` (`cp3_integration_review`).
+2. **Verifier dispatch** (only for RUN/FAIL):
+   ```
+   Agent({
+     subagent_type: "aid-orchestrator:verifier",
+     description: "CP2 step <N>",
+     prompt: <verifier prompt with focus=<derived>, diff, DoD, step.outputs, step.forbidden_paths>
+   })
+   ```
+   Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
+   Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
+
+3. **FSM precondition** (`aid-fsm.sh increment-step`):
+   - Rejects if verifier-output-step-N.md missing or has no `_generated_by` line (anti-fabrication).
+   - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
+   - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
+
+4. **Repeated-fail telemetry**:
+   - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.
+   - `fsm_precondition_repeated_fail_epic` (same precondition across different steps × 3) → systematic bypass.
+
+5. **Verifier deprivation rules** (per `agents/verifier.md`): verifier sees ONLY diff + DoD + step.outputs +
+   step.forbidden_paths. NO Architecture Context, NO Implementation Detail rationale, NO Memory queries.
+   Prompt explicitly says "you do NOT see why, only what changed."
+
+Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
+
+### Integration Review CP3 (pre-EXECUTE→GATES, ENFORCED v2.18.0+)
+
+After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
+
+1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
+   ```
+   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 code-review",
+          prompt: <full diff (run_start..HEAD), DoD list, plan.json overall>})
+   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 security",
+          prompt: <full diff, plan.json overall>})
+   ```
+
+2. **Outputs** (each verifier writes its dedicated file):
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
+
+3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
+   - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
+   - NEW Session B: both CP3 output files must exist with valid `_generated_by` (file presence is AC target).
+   - Verdicts are recorded but NOT a target — verdict is verdict (no Goodhart pressure to fake clean reviews).
+
+4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
+   Max 2 iterations per Session A pattern. E7 escalation on exhaustion.
 
 If more steps remain: `aid-fsm.sh transition EXECUTE EXECUTE <state_file>`
 If all steps done + CP3 pass: `aid-fsm.sh transition EXECUTE GATES <state_file>`

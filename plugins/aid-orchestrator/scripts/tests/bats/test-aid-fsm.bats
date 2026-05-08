@@ -83,12 +83,17 @@ teardown() {
   [[ "$output" =~ "aid-run-gates.sh run-all" ]]
 }
 
-@test "EXECUTE→GATES: present _generated_by → accept" {
+@test "EXECUTE→GATES: present _generated_by + CP3 outputs → accept" {
   local state_file="$TEST_EVIDENCE_DIR/state.yaml"
   write_post_deploy_state_yaml "$state_file"
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
     > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  # Session B CP3: both verifier-output-cp3-*.md required (file presence check)
+  printf '_generated_by: aid-orchestrator:verifier@abc123\nclassification: FULL_REVIEW\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  printf '_generated_by: aid-orchestrator:verifier@def456\nclassification: FULL_REVIEW\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
 
   run "$FSM" transition EXECUTE GATES "$state_file"
   [ "$status" -eq 0 ]
