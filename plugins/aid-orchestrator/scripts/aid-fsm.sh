@@ -529,7 +529,11 @@ cmd_init() {
   local branch="$5" base_commit="$6" state_file="$7"
 
   local force="false"
-  [[ "${8:-}" == "--force" ]] && force="true"
+  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  if [[ "${8:-}" == "--force" ]]; then
+    fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:9}"
+    force="true"
+  fi
 
   # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
   # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
@@ -728,7 +732,14 @@ except: pass
 cmd_transition() {
   local from="$1" to="$2" state_file="$3"
   local force="false"
-  [[ "${4:-}" == "--force" ]] && force="true"
+  if [[ "${4:-}" == "--force" ]]; then
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "$from" "$to" "$state_file" "transition" "${@:5}"
+    force="true"
+  fi
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
 
@@ -752,9 +763,6 @@ cmd_transition() {
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" from="$from" to="$to"
     echo "WARNING: --force used, skipping precondition checks for $from → $to" >&2
   else
     # P032 Step 3: check_preconditions sets _PRECONDITION_FAIL_REASON before
@@ -979,9 +987,11 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       fi
     fi
   else
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="increment-step" step="$step"
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
     echo "WARNING: --force used, skipping step verification check" >&2
   fi
 
@@ -1054,9 +1064,11 @@ cmd_done_advance() {
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="done-advance" from_phase="$from_phase" to_phase="$to_phase"
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
   else
     # Check preconditions for review → release
