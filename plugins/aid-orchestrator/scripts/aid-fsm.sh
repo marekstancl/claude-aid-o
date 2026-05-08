@@ -283,17 +283,95 @@ evaluate_compliance_checks() {
     gates_genby=false
   fi
 
+  # Session B: verifier_outputs object schema (CP2 per-step + CP3 code-review + security)
+  local cp2_dispatched cp2_verdict cp3_cr_d cp3_cr_v cp3_sec_d cp3_sec_v aggregate
+
+  # CP2 per-step: ALL step-*-verify.md must have a valid verifier-output-step-N.md
+  local total_steps cp2_passed cp2_failed
+  total_steps=$(find "$evidence_dir" -maxdepth 1 -name "step-*-verify.md" 2>/dev/null | wc -l)
+  cp2_passed=0; cp2_failed=0
+  for v in "$evidence_dir"/step-*-verify.md; do
+    [[ -f "$v" ]] || continue
+    local step_n
+    step_n=$(basename "$v" | grep -oP '\d+' || true)
+    [[ -z "$step_n" ]] && continue
+    local vo="${evidence_dir}/verifier-output-step-${step_n}.md"
+    if [[ -f "$vo" ]] && grep -q '^_generated_by:' "$vo" 2>/dev/null && grep -q '^classification:' "$vo" 2>/dev/null; then
+      cp2_passed=$((cp2_passed + 1))
+      local _v_status
+      _v_status=$(grep '^verdict:' "$vo" 2>/dev/null | awk '{print $2}' || true)
+      [[ "$_v_status" == "fail" ]] && cp2_failed=$((cp2_failed + 1))
+    fi
+  done
+
+  if (( total_steps == 0 )); then
+    cp2_dispatched=null; cp2_verdict=null
+  elif (( cp2_passed == total_steps )); then
+    cp2_dispatched=true
+    if   (( cp2_failed == 0 ));           then cp2_verdict='"pass"'
+    elif (( cp2_failed == total_steps )); then cp2_verdict='"fail"'
+    else                                       cp2_verdict='"mixed"'; fi
+  else
+    cp2_dispatched=false; cp2_verdict=null
+  fi
+
+  # CP3 code-review verifier output
+  local cp3_cr_file="${evidence_dir}/verifier-output-cp3-code-review.md"
+  if [[ -f "$cp3_cr_file" ]] && grep -q '^_generated_by:' "$cp3_cr_file" 2>/dev/null; then
+    cp3_cr_d=true
+    local _cp3_cr_v
+    _cp3_cr_v=$(grep '^verdict:' "$cp3_cr_file" 2>/dev/null | awk '{print $2}' || true)
+    cp3_cr_v="\"${_cp3_cr_v:-unknown}\""
+  else
+    cp3_cr_d=false; cp3_cr_v=null
+  fi
+
+  # CP3 security verifier output
+  local cp3_sec_file="${evidence_dir}/verifier-output-cp3-security.md"
+  if [[ -f "$cp3_sec_file" ]] && grep -q '^_generated_by:' "$cp3_sec_file" 2>/dev/null; then
+    cp3_sec_d=true
+    local _cp3_sec_v
+    _cp3_sec_v=$(grep '^verdict:' "$cp3_sec_file" 2>/dev/null | awk '{print $2}' || true)
+    cp3_sec_v="\"${_cp3_sec_v:-unknown}\""
+  else
+    cp3_sec_d=false; cp3_sec_v=null
+  fi
+
+  # aggregate: all three dispatched = true; null if CP2 is N/A (0 steps)
+  if [[ "$cp2_dispatched" == "true" && "$cp3_cr_d" == "true" && "$cp3_sec_d" == "true" ]]; then
+    aggregate=true
+  elif [[ "$cp2_dispatched" == "null" ]]; then
+    aggregate=null
+  else
+    aggregate=false
+  fi
+
   jq -nc \
-    --argjson bc  "$branch_correct" \
-    --argjson eyp "$exec_yaml_present" \
-    --argjson ggb "$gates_genby" \
+    --argjson bc      "$branch_correct" \
+    --argjson eyp     "$exec_yaml_present" \
+    --argjson ggb     "$gates_genby" \
+    --argjson cp2_d   "$cp2_dispatched" \
+    --argjson cp2_v   "$cp2_verdict" \
+    --argjson cp3crd  "$cp3_cr_d" \
+    --argjson cp3crv  "$cp3_cr_v" \
+    --argjson cp3secd "$cp3_sec_d" \
+    --argjson cp3secv "$cp3_sec_v" \
+    --argjson agg     "$aggregate" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
       gates_generated_by:     $ggb,
       memory_substantive:     null,
-      verifier_outputs:       null,
-      dod_present:            null
+      verifier_outputs: {
+        cp2_per_step_dispatched:    $cp2_d,
+        cp2_per_step_verdict:       $cp2_v,
+        cp3_code_review_dispatched: $cp3crd,
+        cp3_code_review_verdict:    $cp3crv,
+        cp3_security_dispatched:    $cp3secd,
+        cp3_security_verdict:       $cp3secv,
+        aggregate:                  $agg
+      },
+      dod_present: null
     }'
 }
 
