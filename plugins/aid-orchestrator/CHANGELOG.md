@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.18.1] — 2026-05-09
+
+### Fixed
+- **`aid-diagnostic.sh` 3 bugs** — (1) Branch hygiene now reads from `fsm-state.yaml` instead of `state.yaml` (which is the JSON steps array and has no `branch:` field); was reporting 88–100% "missing" for all projects. (2) Deploy era loop adds `post-session-b` so post-Session-B EPICs appear in the era distribution table — were previously silently dropped. (3) `collect_precondition_fail_reasons` → `collect_fsm_fail_reasons` extends jq filter to capture `fsm_increment_fail` and `fsm_done_advance_fail` in addition to `fsm_precondition_fail`; was missing 52% of all FSM fail events (the dominant category: `verify_no_*` format-discovery failures).
+
 ## [2.18.0] — 2026-05-08
 
 ### Added

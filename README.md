@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.18.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.18.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.18.0** (current) — CP2/CP3 verifier dispatch enforcement, `fsm_handle_force_override` unified dispatcher, compliance `deploy_era` + `verifier_outputs` schema, `--era`/`--compare` compliance report, auto-generated `epic-summary.md` (IMP-090), 33-assertion bats suite
+- **v2.18.1** (current) — `aid-diagnostic.sh` 3 bugs fixed (branch source, post-session-b era, fsm_increment_fail capture)
+- **v2.18.0** — CP2/CP3 verifier dispatch enforcement, `fsm_handle_force_override` unified dispatcher, compliance `deploy_era` + `verifier_outputs` schema, `--era`/`--compare` compliance report, auto-generated `epic-summary.md` (IMP-090), 33-assertion bats suite
 - **v2.17.0** — CP1 codebase grounding rule (Completeness Gate check #17 + verifier grounding pass) + `aid-compliance-report.sh --reflect` flag with per-dimension pattern detection (✅ / ⚠️ INVESTIGATE / 🔴 SYSTEMATIC) for Session A → B decision gate
 - **v2.16.1** — Patch: aid-compliance-backfill.sh tolerates legacy v1 JSON state files + missing branch fields (post-deploy hotfix)
 
