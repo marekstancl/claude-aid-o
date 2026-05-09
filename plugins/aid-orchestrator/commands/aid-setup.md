@@ -86,3 +86,6 @@ For each selected module:
 - **Re-runnable** — safe to run any module multiple times
 - **Non-destructive** — always shows changes and asks PM before writing
 - **Modular** — each module is independent, load only what's needed
+
+
+**Last Updated:** 2026-03-04

@@ -1,0 +1,45 @@
+version: "1.0"
+description: "Deterministic regex classifier for CP2 pre-filter. Conservative bias: false positive (FAIL) is preferable to false negative (RUN/SKIP missing security issue)."
+last_updated: "2026-05-08"
+
+skip_rules:
+  - id: docs_only
+    description: "All changed files are markdown/rst/txt or under docs/"
+    match_all_files: true
+    pattern: '\.(md|rst|txt)$|^docs/|^README'
+  - id: config_only_no_logic
+    description: "Only YAML/JSON/TOML config files (structural changes, no executable logic)"
+    match_all_files: true
+    pattern: '\.(yaml|yml|json|toml|ini|cfg|conf)$'
+
+fail_rules:
+  - id: exec_keyword
+    description: "Direct exec/eval/system/popen calls"
+    pattern: '\b(exec|eval|system|popen)\s*\('
+  - id: subprocess_shell_true
+    description: "subprocess with shell=True — arbitrary shell command injection vector"
+    pattern: 'subprocess\.[a-zA-Z]+\s*\([^)]*shell\s*=\s*True'
+  - id: hardcoded_secret_pattern
+    description: "Likely hardcoded credentials (password/secret/token/api_key assignment to long literal)"
+    pattern: '(password|secret|token|api_key|access_key)\s*=\s*[''""][a-zA-Z0-9_/+=]{16,}'
+  - id: shell_injection_pattern
+    description: "Shell command construction with string concatenation"
+    pattern: '(os\.system|subprocess.*Popen).*\+'
+  - id: dangerous_html
+    description: "Direct HTML rendering vectors that can introduce XSS"
+    pattern: '(dangerouslySetInnerHTML|innerHTML|outerHTML)\s*[=:]'
+  - id: sql_injection_pattern
+    description: "Likely SQL string concatenation (SELECT/INSERT/UPDATE/DELETE + literal concat)"
+    pattern: '(SELECT|INSERT|UPDATE|DELETE).*\+\s*[''"]'
+  - id: deserialize_dangerous
+    description: "Pickle/yaml unsafe load — arbitrary code execution via deserialization"
+    pattern: '(pickle\.loads?|yaml\.load(?!_safe))'
+  - id: dynamic_import
+    description: "Indirect import to evade exec_keyword regex"
+    pattern: '__import__\s*\(|importlib\.import_module'
+  - id: regex_bypass_attempts
+    description: "Single-char string concat that may obfuscate dangerous keywords"
+    pattern: '[''"][a-z][''"][[:space:]]*\+[[:space:]]*[''"][a-z]'
+
+run_rules:
+  default: true

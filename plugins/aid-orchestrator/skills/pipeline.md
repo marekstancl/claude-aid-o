@@ -61,6 +61,41 @@ Use `aid-fsm.sh verify-state` before any action to confirm allowed transitions.
 Use `--force` only with explicit PM approval (logged as `fsm_force_override`).
 DONE sub-phases use `aid-fsm.sh done-advance` (not `transition`).
 
+### force_override Usage Policy (v2.18.0+)
+
+`aid-fsm.sh <command> ... --force` requires `--reason "<text>"` with **minimum 20 characters**.
+Hard fail with copy-paste examples if missing or too short.
+
+**When `--force` is mandatory:**
+- Bypassing a FSM precondition when the check has a confirmed false-positive
+- Skipping plan-level DONE gate on `cmd_init` when prior-plan CA review was completed out-of-band
+- Skipping step verification in `cmd_increment_step` when verifier dispatch was unavailable (MCP outage)
+
+**Examples (accepted by dispatcher):**
+```
+aid-fsm.sh transition EXECUTE GATES $state_file --force --reason \
+  'plan.json bug — step 3 AC has typo blocking gates_no_generated_by check, fix in next EPIC'
+
+aid-fsm.sh transition GATES DONE $state_file --force --reason \
+  'security_scan false positive on test fixture, manually verified safe in commit abc1234'
+
+aid-fsm.sh increment-step $state_file --force --reason \
+  'step verifier dispatch unavailable due to MCP outage, manually reviewed diff in PR #42'
+
+aid-fsm.sh done-advance review release $state_file --force --reason \
+  'auditor agent dispatch failed retry-3, applying P1 finding fix manually'
+```
+
+**Telemetry (automatic, cannot be disabled):**
+- `fsm_force_override` timeline event records `from`, `to`, `reason`, `caller`, `operator` fields
+- Persistent entry to `.aid-o/work/audit-log.jsonl` (cross-EPIC trail, append-only)
+- `compliance.json` captures `force_override_count` (int) + `force_override_reasons` (array) per EPIC
+- `aid-compliance-report.sh --reflect` flags **🔴 SYSTEMATIC** if:
+  - avg force_override_count across post-session-b EPICs > 1, OR
+  - max per single EPIC > 3, OR
+  - ≥ 30 % of EPICs used force at all, OR
+  - any reason < 30 chars or matches low-quality regex `^(fix|bug|needed|done)$`
+
 ### FSM States
 
 Six states. Scripts handle transitions. LLM acts within a state.
@@ -346,19 +381,68 @@ On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 4. **FAIL handling:** Resume agent with the comparison table + mockup path. Max 2 visual fix attempts → ESCALATION.
 5. **Skip conditions:** No visual_refs on step → skip. Dev server not running → warn, skip, note in verify.
 
-### Review Checkpoint CP2 (per-step)
+### Review Checkpoint CP2 (per-step, ENFORCED v2.18.0+)
 
-After output verification passes, dispatch verifier (`code-review` focus) with step
-output + branch diff. See `agents/verifier.md` Auto-Dispatch Triggers for context assembly.
-Fix loop: gate-fixer → verifier re-check, max 2 iterations. E7 on exhaustion.
-Skip per `review-checkpoints.yaml` (`cp2_step_review`, `skip_trivial`).
+After step implementation + step-N-verify.md write, before `aid-fsm.sh increment-step`:
 
-### Integration Review CP3 (pre-GATES)
+1. **Pre-filter classification** (deterministic bash, no LLM):
+   ```
+   bash $AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify <N> <evidence_dir>
+   ```
+   Exit code:
+   - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
+   - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
+   - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
 
-When all steps are done, before EXECUTE→GATES transition:
-dispatch TWO verifiers in parallel (`code-review` + `security`) with full diff since run start.
-Fix loop same as CP2. E7 on exhaustion.
-Skip per `review-checkpoints.yaml` (`cp3_integration_review`).
+2. **Verifier dispatch** (only for RUN/FAIL):
+   ```
+   Agent({
+     subagent_type: "aid-orchestrator:verifier",
+     description: "CP2 step <N>",
+     prompt: <verifier prompt with focus=<derived>, diff, DoD, step.outputs, step.forbidden_paths>
+   })
+   ```
+   Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
+   Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
+
+3. **FSM precondition** (`aid-fsm.sh increment-step`):
+   - Rejects if verifier-output-step-N.md missing or has no `_generated_by` line (anti-fabrication).
+   - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
+   - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
+
+4. **Repeated-fail telemetry**:
+   - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.
+   - `fsm_precondition_repeated_fail_epic` (same precondition across different steps × 3) → systematic bypass.
+
+5. **Verifier deprivation rules** (per `agents/verifier.md`): verifier sees ONLY diff + DoD + step.outputs +
+   step.forbidden_paths. NO Architecture Context, NO Implementation Detail rationale, NO Memory queries.
+   Prompt explicitly says "you do NOT see why, only what changed."
+
+Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
+
+### Integration Review CP3 (pre-EXECUTE→GATES, ENFORCED v2.18.0+)
+
+After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
+
+1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
+   ```
+   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 code-review",
+          prompt: <full diff (run_start..HEAD), DoD list, plan.json overall>})
+   Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 security",
+          prompt: <full diff, plan.json overall>})
+   ```
+
+2. **Outputs** (each verifier writes its dedicated file):
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
+
+3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
+   - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
+   - NEW Session B: both CP3 output files must exist with valid `_generated_by` (file presence is AC target).
+   - Verdicts are recorded but NOT a target — verdict is verdict (no Goodhart pressure to fake clean reviews).
+
+4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
+   Max 2 iterations per Session A pattern. E7 escalation on exhaustion.
 
 If more steps remain: `aid-fsm.sh transition EXECUTE EXECUTE <state_file>`
 If all steps done + CP3 pass: `aid-fsm.sh transition EXECUTE GATES <state_file>`
@@ -518,6 +602,31 @@ set via `set-field`. The decision is automatically cleared after the transition 
 
 Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
 on GATES→DONE transition.
+
+### Epic Summary (auto-generated v2.18.0+)
+
+After every successful `done-advance review→release`, `aid-fsm.sh` invokes
+`aid-epic-summary.sh generate <evidence_dir>` (best-effort — failure logs a
+warning but never blocks release).
+
+Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
+
+| Section | Source |
+|---------|--------|
+| `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
+| `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
+| `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
+| `📋 Co dělat dál (PM akce)` | curator L-effort proposals, escalations, force override audit reminder |
+| `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
+
+**Trust level heuristics:**
+- `branch_correct=false` + `branch` starts with `feature/` → false alarm (feature branch convention); no trust penalty
+- `force_override_count > 0` → MEDIUM; audit-log.jsonl review required
+- `gate_retries > 0` → MEDIUM
+- `compliance.overall = false` → LOW
+- All green + 0 force + 0 retries → HIGH
+
+**IMP-089 forward-compat:** if `.aid-o/config/project.yaml` has a `branch_convention:` field, the trust heuristic respects it (even before IMP-089 ships).
 
 ### Compliance Telemetry (NEW v2.16.0 — P032 Step 4)
 

@@ -20,7 +20,13 @@ log_event() {
   for kv in "$@"; do
     key="${kv%%=*}"
     val="${kv#*=}"
-    # Escape special JSON characters
+    # Raw JSON array/object detected BEFORE escaping — pass through as-is.
+    # Used by aid-prefilter.sh for matched_rules (e.g. ["exec_keyword"]).
+    if [[ "${val:0:1}" == "[" || "${val:0:1}" == "{" ]]; then
+      json+=",\"${key}\":${val}"
+      continue
+    fi
+    # Escape special JSON characters in plain string values
     val="${val//\\/\\\\}"
     val="${val//\"/\\\"}"
     val="${val//$'\n'/\\n}"
@@ -68,3 +74,4 @@ log_error() {
 
 # Export for use in subshells
 export -f log_event log_info log_warn log_error
+

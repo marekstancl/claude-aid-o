@@ -197,3 +197,6 @@ Remaining EPICs in `.aid-o/config/queue.yaml` are untouched. They remain queued.
 - Progress saving is the most critical step. Even if everything else fails, the PM should never lose track of where auto-mode left off.
 - Running agents are NOT interrupted. The stop prevents *future* dispatches, not current execution. This is intentional — mid-execution interruption risks leaving the codebase in a broken state.
 - The stop sequence NEVER prompts for confirmation. When PM says stop, it stops. Immediately.
+
+
+**Last Updated:** 2026-03-19

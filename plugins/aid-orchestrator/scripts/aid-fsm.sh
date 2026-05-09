@@ -114,6 +114,118 @@ fsm_count_recent_fails() {
      -n < "$timeline" 2>/dev/null || echo 0
 }
 
+# Count fsm_precondition_fail events for (same step + same reason) — detects
+# "this step is structurally problematic" pattern (≥ 3 = step-level repeated fail).
+fsm_count_recent_fails_step() {
+  local step=$1 reason=$2
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg s "$step" --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .step==$s and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Count fsm_precondition_fail events for (same reason, any step) — detects
+# "agent systematically bypasses this check across steps" pattern (≥ 3 = EPIC-level).
+fsm_count_recent_fails_epic() {
+  local reason=$1
+  local timeline="${evidence_dir}/timeline.jsonl"
+  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
+  jq -r --arg r "$reason" \
+     '[inputs | select(.event=="fsm_precondition_fail" and .reason==$r)] | length' \
+     -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
+# Returns 0 (pass) if file exists + has _generated_by + classification fields.
+# For RUN/FAIL classification also requires verdict != "pending" (verifier ran).
+fsm_check_verifier_output() {
+  local file=$1
+  [[ -f "$file" ]] || return 1
+  grep -q '^_generated_by:' "$file" || return 1
+  grep -q '^classification:' "$file" || return 1
+
+  local classification
+  classification=$(grep '^classification:' "$file" | awk '{print $2}')
+  case "$classification" in
+    SKIP)
+      grep -q '^reason:' "$file" || return 1
+      ;;
+    RUN|FAIL|FULL_REVIEW)
+      grep -q '^verdict:' "$file" || return 1
+      local verdict
+      verdict=$(grep '^verdict:' "$file" | awk '{print $2}')
+      [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
+      ;;
+    *)
+      return 1  # unknown classification
+      ;;
+  esac
+  return 0
+}
+
+# Unified dispatcher for --force handling across cmd_init / cmd_transition /
+# cmd_increment_step / cmd_done_advance. Validates reason, emits extended
+# fsm_force_override timeline event with caller field, and writes persistent
+# audit log entry. Reads epic_id, run_id, evidence_dir from caller scope.
+fsm_handle_force_override() {
+  local from="$1" to="$2" state_file="$3" caller_cmd="$4"
+  shift 4
+  local reason=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reason) reason="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  if [[ ${#reason} -lt 20 ]]; then
+    die "ERROR: --force requires --reason argument with min 20 characters (got ${#reason}).
+
+Reason: AID v3 telemetry needs forensic-grade audit trail of why FSM was bypassed.
+        Empty or short reasons defeat the audit purpose.
+
+Examples:
+  aid-fsm.sh transition EXECUTE GATES \$state_file --force --reason \\
+    'plan.json bug — step 3 AC has typo blocking gates_no_generated_by check, fix in next EPIC'
+  aid-fsm.sh transition GATES DONE \$state_file --force --reason \\
+    'security_scan false positive on test fixture, manually verified safe in commit abc1234'
+  aid-fsm.sh increment-step \$state_file --force --reason \\
+    'step verifier dispatch unavailable due to MCP outage, manually reviewed diff in PR #42'
+  aid-fsm.sh done-advance review release \$state_file --force --reason \\
+    'auditor agent dispatch failed retry-3, applying P1 finding fix manually'
+
+Then retry with --reason."
+  fi
+
+  local timeline="${evidence_dir}/timeline.jsonl"
+  local operator="${USER:-unknown}"
+
+  [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
+    from="$from" to="$to" reason="$reason" \
+    caller="$caller_cmd" operator="$operator"
+
+  fsm_emit_audit_log "fsm_force_override" \
+    --from "$from" --to "$to" \
+    --reason "$reason" --caller "$caller_cmd" --operator "$operator"
+}
+
+# Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
+# Audit log write failure is best-effort — never aborts primary FSM operation.
+fsm_emit_audit_log() {
+  local event_type="$1"; shift
+  local audit_log_file="${project_root}/.aid-o/work/audit-log.jsonl"
+  # project_root may be unset in early init paths — derive from CWD
+  audit_log_file="${project_root:-.}/.aid-o/work/audit-log.jsonl"
+  bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
+    --epic-id "${epic_id:-unknown}" \
+    --run-id  "${run_id:-unknown}" \
+    --event   "$event_type" \
+    "$@" \
+    --output  "$audit_log_file" 2>/dev/null || true
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
@@ -171,17 +283,95 @@ evaluate_compliance_checks() {
     gates_genby=false
   fi
 
+  # Session B: verifier_outputs object schema (CP2 per-step + CP3 code-review + security)
+  local cp2_dispatched cp2_verdict cp3_cr_d cp3_cr_v cp3_sec_d cp3_sec_v aggregate
+
+  # CP2 per-step: ALL step-*-verify.md must have a valid verifier-output-step-N.md
+  local total_steps cp2_passed cp2_failed
+  total_steps=$(find "$evidence_dir" -maxdepth 1 -name "step-*-verify.md" 2>/dev/null | wc -l)
+  cp2_passed=0; cp2_failed=0
+  for v in "$evidence_dir"/step-*-verify.md; do
+    [[ -f "$v" ]] || continue
+    local step_n
+    step_n=$(basename "$v" | grep -oP '\d+' || true)
+    [[ -z "$step_n" ]] && continue
+    local vo="${evidence_dir}/verifier-output-step-${step_n}.md"
+    if [[ -f "$vo" ]] && grep -q '^_generated_by:' "$vo" 2>/dev/null && grep -q '^classification:' "$vo" 2>/dev/null; then
+      cp2_passed=$((cp2_passed + 1))
+      local _v_status
+      _v_status=$(grep '^verdict:' "$vo" 2>/dev/null | awk '{print $2}' || true)
+      [[ "$_v_status" == "fail" ]] && cp2_failed=$((cp2_failed + 1))
+    fi
+  done
+
+  if (( total_steps == 0 )); then
+    cp2_dispatched=null; cp2_verdict=null
+  elif (( cp2_passed == total_steps )); then
+    cp2_dispatched=true
+    if   (( cp2_failed == 0 ));           then cp2_verdict='"pass"'
+    elif (( cp2_failed == total_steps )); then cp2_verdict='"fail"'
+    else                                       cp2_verdict='"mixed"'; fi
+  else
+    cp2_dispatched=false; cp2_verdict=null
+  fi
+
+  # CP3 code-review verifier output
+  local cp3_cr_file="${evidence_dir}/verifier-output-cp3-code-review.md"
+  if [[ -f "$cp3_cr_file" ]] && grep -q '^_generated_by:' "$cp3_cr_file" 2>/dev/null; then
+    cp3_cr_d=true
+    local _cp3_cr_v
+    _cp3_cr_v=$(grep '^verdict:' "$cp3_cr_file" 2>/dev/null | awk '{print $2}' || true)
+    cp3_cr_v="\"${_cp3_cr_v:-unknown}\""
+  else
+    cp3_cr_d=false; cp3_cr_v=null
+  fi
+
+  # CP3 security verifier output
+  local cp3_sec_file="${evidence_dir}/verifier-output-cp3-security.md"
+  if [[ -f "$cp3_sec_file" ]] && grep -q '^_generated_by:' "$cp3_sec_file" 2>/dev/null; then
+    cp3_sec_d=true
+    local _cp3_sec_v
+    _cp3_sec_v=$(grep '^verdict:' "$cp3_sec_file" 2>/dev/null | awk '{print $2}' || true)
+    cp3_sec_v="\"${_cp3_sec_v:-unknown}\""
+  else
+    cp3_sec_d=false; cp3_sec_v=null
+  fi
+
+  # aggregate: all three dispatched = true; null if CP2 is N/A (0 steps)
+  if [[ "$cp2_dispatched" == "true" && "$cp3_cr_d" == "true" && "$cp3_sec_d" == "true" ]]; then
+    aggregate=true
+  elif [[ "$cp2_dispatched" == "null" ]]; then
+    aggregate=null
+  else
+    aggregate=false
+  fi
+
   jq -nc \
-    --argjson bc  "$branch_correct" \
-    --argjson eyp "$exec_yaml_present" \
-    --argjson ggb "$gates_genby" \
+    --argjson bc      "$branch_correct" \
+    --argjson eyp     "$exec_yaml_present" \
+    --argjson ggb     "$gates_genby" \
+    --argjson cp2_d   "$cp2_dispatched" \
+    --argjson cp2_v   "$cp2_verdict" \
+    --argjson cp3crd  "$cp3_cr_d" \
+    --argjson cp3crv  "$cp3_cr_v" \
+    --argjson cp3secd "$cp3_sec_d" \
+    --argjson cp3secv "$cp3_sec_v" \
+    --argjson agg     "$aggregate" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
       gates_generated_by:     $ggb,
       memory_substantive:     null,
-      verifier_outputs:       null,
-      dod_present:            null
+      verifier_outputs: {
+        cp2_per_step_dispatched:    $cp2_d,
+        cp2_per_step_verdict:       $cp2_v,
+        cp3_code_review_dispatched: $cp3crd,
+        cp3_code_review_verdict:    $cp3crv,
+        cp3_security_dispatched:    $cp3secd,
+        cp3_security_verdict:       $cp3secv,
+        aggregate:                  $agg
+      },
+      dod_present: null
     }'
 }
 
@@ -190,9 +380,37 @@ write_compliance_json() {
   local compliance_file="${evidence_dir}/compliance.json"
   local _timeline="${evidence_dir}/timeline.jsonl"
 
-  local deploy_era="post-session-a"
-  if fsm_check_grandfather; then
+  # Session B: three-tier deploy_era enum (pre-session-a | post-session-a | post-session-b).
+  # Session A hardcoded deploy date; Session B date read from DEPLOY_DATE file (Step 10),
+  # far-future fallback until that file is written.
+  local deploy_era
+  local _created_at _session_a_deploy _session_b_deploy
+  _created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  _session_a_deploy="2026-05-05T16:37:52Z"
+  if [[ -f "${SCRIPT_DIR}/../DEPLOY_DATE" ]]; then
+    _session_b_deploy=$(cat "${SCRIPT_DIR}/../DEPLOY_DATE" 2>/dev/null || echo "2099-01-01T00:00:00Z")
+  else
+    _session_b_deploy="2099-01-01T00:00:00Z"
+  fi
+
+  if [[ -z "$_created_at" || "$_created_at" < "$_session_a_deploy" ]]; then
     deploy_era="pre-session-a"
+  elif [[ "$_created_at" < "$_session_b_deploy" ]]; then
+    deploy_era="post-session-a"
+  else
+    deploy_era="post-session-b"
+  fi
+
+  # force_override fields: count + reasons from this EPIC's timeline.jsonl.
+  # M6 fallback: pre-Session-B events have no .reason field → substitute marker
+  # string so aggregator can identify them as historical noise (not actionable).
+  local force_count force_reasons
+  if [[ -f "$_timeline" ]]; then
+    force_count=$(jq -s '[.[] | select(.event=="fsm_force_override")] | length' "$_timeline" 2>/dev/null || echo "0")
+    force_reasons=$(jq -s '[.[] | select(.event=="fsm_force_override") | (.reason // "<pre-session-b legacy>")]' "$_timeline" 2>/dev/null || echo "[]")
+  else
+    force_count=0
+    force_reasons='[]'
   fi
 
   local checks
@@ -206,6 +424,8 @@ write_compliance_json() {
       --arg era "$deploy_era" \
       --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
       --arg note "evaluation failed: ${checks}" \
+      --argjson fc "$force_count" \
+      --argjson fr "$force_reasons" \
       '{
         epic_id: $epic, run_id: $run, aid_version: $ver,
         deploy_era: $era, evaluated_at: $ts,
@@ -213,6 +433,8 @@ write_compliance_json() {
           branch_correct: null, execution_yaml_present: null, gates_generated_by: null,
           memory_substantive: null, verifier_outputs: null, dod_present: null
         },
+        force_override_count: $fc,
+        force_override_reasons: $fr,
         overall: "fail",
         notes: [$note]
       }' > "$compliance_file"
@@ -220,35 +442,42 @@ write_compliance_json() {
     return 0
   fi
 
-  # overall = pass if every check ∈ {true, null}, else fail.
-  # IMPORTANT: when Sessions B/C deploy, currently-null fields become true|false.
-  # The same logic must remain consistent — null ALWAYS means "not measured in
-  # this deployed era", NEVER "not applicable". Permissively counted as pass for
-  # the era's overall verdict so currently-undeployed dimensions don't drag down
-  # the score retroactively.
-  local overall
-  overall=$(echo "$checks" | jq -r '
-    [.[] | (. == true or . == null)] | all | if . then "pass" else "fail" end
-  ')
-
+  # overall: check the 4 top-level scalar dimensions + verifier_outputs.aggregate.
+  # verifier_outputs is now an object — use type-aware extraction for backward compat
+  # with any pre-Session-B compliance.json files that have boolean/null there.
+  # null counts as pass (= "not yet measured in this era").
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
     --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --argjson chks "$checks" \
-    --arg ov "$overall" \
+    --argjson fc "$force_count" \
+    --argjson fr "$force_reasons" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
-      checks: $chks, overall: $ov, notes: []
+      checks: $chks,
+      force_override_count: $fc,
+      force_override_reasons: $fr,
+      overall: (
+        [$chks.branch_correct, $chks.execution_yaml_present, $chks.gates_generated_by,
+         ($chks.verifier_outputs | if type == "object" then .aggregate else . end)]
+        | all(. == true or . == null)
+        | if . then "pass" else "fail" end
+      ),
+      notes: []
     }' > "$compliance_file" || {
     log_warn "compliance.json write failed for ${compliance_file} — skipping (telemetry is best-effort)"
     return 0
   }
 
+  # Read back overall for the timeline event (avoid duplicate jq computation)
+  local overall
+  overall=$(jq -r '.overall' "$compliance_file" 2>/dev/null || echo "unknown")
+
   local checks_passed checks_failed
-  checks_passed=$(echo "$checks" | jq '[.[] | select(. == true)] | length')
-  checks_failed=$(echo "$checks" | jq '[.[] | select(. == false)] | length')
+  checks_passed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == true)] | length')
+  checks_failed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == false)] | length')
 
   log_event "$_timeline" "compliance_written" \
     deploy_era="$deploy_era" overall="$overall" \
@@ -338,6 +567,39 @@ Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
           return 1
         fi
+
+        # Session B CP3: verifier-output-cp3 preconditions (file presence + valid _generated_by)
+        local cp3_code_review="${evidence_dir}/verifier-output-cp3-code-review.md"
+        local cp3_security="${evidence_dir}/verifier-output-cp3-security.md"
+
+        if ! fsm_check_verifier_output "$cp3_code_review"; then
+          _PRECONDITION_FAIL_REASON="missing_cp3_code_review"
+          cat <<EOF >&2
+PRECONDITION FAIL: verifier-output-cp3-code-review.md missing or invalid.
+
+Reason: AID v3 Session B requires CP3 integration review before EXECUTE→GATES.
+        Both verifiers (code-review + security) must review the full EPIC diff.
+
+Fix: Dispatch TWO verifiers in parallel (single message, two Agent tool calls):
+     a. subagent_type: aid-orchestrator:verifier, focus: code-review
+     b. subagent_type: aid-orchestrator:verifier, focus: security
+     Each writes its verifier-output-cp3-{focus}.md with _generated_by + verdict.
+Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
+EOF
+          return 1
+        fi
+
+        if ! fsm_check_verifier_output "$cp3_security"; then
+          _PRECONDITION_FAIL_REASON="missing_cp3_security"
+          cat <<EOF >&2
+PRECONDITION FAIL: verifier-output-cp3-security.md missing or invalid.
+
+Reason: CP3 requires BOTH code-review AND security verifier outputs.
+        Security verifier must also be dispatched (mandatory).
+Fix: dispatch security verifier (see code-review error above for full instructions).
+EOF
+          return 1
+        fi
       fi
       ;;
 
@@ -384,7 +646,11 @@ cmd_init() {
   local branch="$5" base_commit="$6" state_file="$7"
 
   local force="false"
-  [[ "${8:-}" == "--force" ]] && force="true"
+  local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  if [[ "${8:-}" == "--force" ]]; then
+    fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:9}"
+    force="true"
+  fi
 
   # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
   # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
@@ -569,13 +835,28 @@ except: pass
     fi
   fi
 
+  # Session B: stamp plan.json sha256 for mid-EPIC tampering detection.
+  # Additive key — existing readers tolerate unknown keys via grep-awk pattern.
+  if [[ -f "${evidence_dir}/plan.json" ]]; then
+    local plan_hash
+    plan_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
+    echo "plan_json_hash: $plan_hash" >> "$state_file"
+  fi
+
   echo "Initialized state: READY" >&2
 }
 
 cmd_transition() {
   local from="$1" to="$2" state_file="$3"
   local force="false"
-  [[ "${4:-}" == "--force" ]] && force="true"
+  if [[ "${4:-}" == "--force" ]]; then
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "$from" "$to" "$state_file" "transition" "${@:5}"
+    force="true"
+  fi
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
 
@@ -599,9 +880,6 @@ cmd_transition() {
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" from="$from" to="$to"
     echo "WARNING: --force used, skipping precondition checks for $from → $to" >&2
   else
     # P032 Step 3: check_preconditions sets _PRECONDITION_FAIL_REASON before
@@ -769,10 +1047,68 @@ cmd_increment_step() {
       [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_written"
       exit 1
     fi
+
+    # Session B CP2: verifier-output-step-N.md precondition
+    if ! fsm_check_grandfather; then
+      local verifier_output="${evidence_dir}/verifier-output-step-${step}.md"
+
+      if ! fsm_check_verifier_output "$verifier_output"; then
+        local timeline
+        timeline=$(derive_timeline "$state_file") || true
+
+        # Repeated-fail telemetry (step-level and epic-level)
+        local attempt_step attempt_epic
+        attempt_step=$(fsm_count_recent_fails_step "$step" "missing_verifier_output")
+        attempt_epic=$(fsm_count_recent_fails_epic "missing_verifier_output")
+
+        if (( attempt_step >= 3 )); then
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_step" \
+            step="$step" precondition="missing_verifier_output" attempt_count="$attempt_step"
+          try_telegram_alert "Repeated step-level precondition fail (×${attempt_step}): EPIC=${epic_id}, step=${step}, precondition=missing_verifier_output"
+        fi
+        if (( attempt_epic >= 3 )); then
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_repeated_fail_epic" \
+            precondition="missing_verifier_output" attempt_count="$attempt_epic"
+          try_telegram_alert "Systematic precondition bypass (×${attempt_epic}): EPIC=${epic_id}, precondition=missing_verifier_output across multiple steps"
+        fi
+
+        [[ -n "$timeline" ]] && log_event "$timeline" "fsm_precondition_fail" \
+          step="$step" reason="missing_verifier_output"
+
+        die "ERROR: verifier-output-step-${step}.md missing or invalid.
+
+Reason: AID v3 Session B requires per-step verifier dispatch (CP2). The pre-filter
+        classifies the step diff as SKIP/RUN/FAIL; for RUN/FAIL a verifier subagent
+        must run and update the output file before this increment.
+
+Fix:
+  1. bash \$AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify ${step} ${evidence_dir}
+  2. Based on exit code: 0=skip (already done), 10=run code-review verifier, 20=run security verifier
+  3. If RUN/FAIL, dispatch: subagent_type=aid-orchestrator:verifier with appropriate focus
+     Verifier writes verdict + findings to ${verifier_output}
+  4. Retry: aid-fsm.sh increment-step ${state_file}"
+      fi
+    fi
+
+    # Session B: mid-EPIC plan.json tampering check (PM Q2 refinement #2)
+    local stored_hash current_hash
+    stored_hash=$(grep '^plan_json_hash:' "$state_file" | awk '{print $2}') || true
+    if [[ -n "$stored_hash" && -f "${evidence_dir}/plan.json" ]]; then
+      current_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
+      if [[ "$stored_hash" != "$current_hash" ]]; then
+        die "ERROR: plan.json hash mismatch — modified mid-EPIC.
+Reason: Mid-EPIC plan.json edits could expand step.outputs to allow scope creep.
+        plan.json hash at init: ${stored_hash}
+        plan.json hash now:     ${current_hash}
+Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
+      fi
+    fi
   else
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="increment-step" step="$step"
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
     echo "WARNING: --force used, skipping step verification check" >&2
   fi
 
@@ -845,9 +1181,11 @@ cmd_done_advance() {
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
-    local timeline
-    timeline=$(derive_timeline "$state_file") || true
-    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" action="done-advance" from_phase="$from_phase" to_phase="$to_phase"
+    local epic_id run_id evidence_dir
+    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+    fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
   else
     # Check preconditions for review → release
@@ -926,6 +1264,11 @@ cmd_done_advance() {
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     project_root="$PWD"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"
+
+    # IMP-090: best-effort epic-summary.md generation after compliance write.
+    # Failure logs a warning but never aborts the release path.
+    bash "$SCRIPT_DIR/aid-epic-summary.sh" generate "$evidence_dir" \
+      2>/dev/null || log_warn "epic-summary.md generation failed (non-fatal)"
   fi
 
   # Audit trail

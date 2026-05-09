@@ -204,3 +204,6 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - **YAGNI** — never propose over-engineered solutions
 - If PM aborts at any step → end gracefully, no final plan/EPIC files written (interim doc preserved for recovery)
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
+
+
+**Last Updated:** 2026-05-06

@@ -244,3 +244,6 @@ All errors are non-blocking — no research failure ever blocks PM workflow. Gra
 - **URL mode is PM-initiated.** The PM vouches for URL relevance by providing it. Assign at least "medium" confidence.
 - **Run-only fallback:** If Qdrant is unavailable, research still runs and results are displayed to PM. They are useful in the current run even without persistence.
 - If `.aid-o/` does not exist, warn PM and proceed with run-only results (no YAML updates, no persistent storage).
+
+
+**Last Updated:** 2026-03-19

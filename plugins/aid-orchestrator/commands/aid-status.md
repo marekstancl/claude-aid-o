@@ -179,3 +179,6 @@ Run /aid-run {id} to start execution.
 - **Lazy queue creation** — `.aid-o/config/queue.yaml` created on first `queue add`
 - **v2 paths only** — reads `state.yaml` (not `plan_progress.json`), `timeline.jsonl` (not `stage_log.jsonl`)
 - If `$ARGUMENTS` is empty → show overview (default)
+
+
+**Last Updated:** 2026-03-03

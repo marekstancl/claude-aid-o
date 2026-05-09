@@ -56,3 +56,6 @@ Project scan complete:
   {N} fields updated, {M} unchanged
 Written to: .aid-o/config/project.yaml
 ```
+
+
+**Last Updated:** 2026-03-04

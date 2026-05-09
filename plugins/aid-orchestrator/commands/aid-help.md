@@ -221,3 +221,6 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - **Topics are deep dives** — show when PM asks `/aid-help <topic>`
 - If `$ARGUMENTS` is empty → show auto-detected level overview
 - If `$ARGUMENTS` matches a topic → show that topic section only
+
+
+**Last Updated:** 2026-03-22

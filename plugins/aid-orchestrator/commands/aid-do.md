@@ -165,3 +165,6 @@ Escalation is always a **suggestion** — PM decides whether to act on it.
 - **Git commit is mandatory** — every `/aid-do` produces exactly one commit
 - **Escalation is advisory** — PM always has final say
 - If `$ARGUMENTS` is empty → ask PM: "What task should I implement?"
+
+
+**Last Updated:** 2026-03-19
