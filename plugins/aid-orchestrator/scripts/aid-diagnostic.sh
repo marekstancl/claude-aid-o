@@ -36,7 +36,7 @@ Reported sections (markdown mode):
   - Branch hygiene distribution (task/E-* vs main vs other)
   - Gate authenticity (_generated_by present vs hand-written/missing)
   - Compliance overall verdict distribution
-  - Top fsm_precondition_fail reasons (if reason field populated)
+  - Top FSM fail reasons (fsm_precondition_fail + fsm_increment_fail + fsm_done_advance_fail)
 
 Examples:
   $(basename "$0")                                          # all defaults
@@ -59,8 +59,9 @@ collect_run() {
   audit="${run_dir}/audit-report.md"
 
   local branch="" branch_kind="missing"
-  if [[ -f "$state_file" ]]; then
-    branch=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}' || echo "")
+  local fsm_state="${run_dir}/fsm-state.yaml"
+  if [[ -f "$fsm_state" ]]; then
+    branch=$(grep '^branch:' "$fsm_state" 2>/dev/null | awk '{print $2}' || echo "")
     if [[ "$branch" =~ ^task/E- ]]; then
       branch_kind="task_e_prefix"
     elif [[ "$branch" =~ ^task/ ]]; then
@@ -114,11 +115,13 @@ collect_run() {
     }'
 }
 
-# Emit fsm_precondition_fail reason top-N from a single run's timeline.
-collect_precondition_fail_reasons() {
+# Emit all FSM fail event reasons from a single run's timeline.
+# Covers fsm_precondition_fail (gate/CP prereqs), fsm_increment_fail (verify
+# file format errors — the most common category), and fsm_done_advance_fail.
+collect_fsm_fail_reasons() {
   local timeline=$1
   [[ ! -f "$timeline" ]] && return 0
-  jq -r 'select(.event == "fsm_precondition_fail") | .reason // "unspecified"' "$timeline" 2>/dev/null
+  jq -r 'select(.event | test("^fsm_precondition_fail$|^fsm_increment_fail$|^fsm_done_advance_fail$")) | .reason // "unspecified"' "$timeline" 2>/dev/null
 }
 
 main() {
@@ -166,7 +169,7 @@ main() {
       while IFS= read -r run_dir; do
         if (( limit > 0 && processed >= limit )); then break 3; fi
         collect_run "$run_dir" >> "$tmp"
-        collect_precondition_fail_reasons "${run_dir}/timeline.jsonl" >> "$reasons_tmp" || true
+        collect_fsm_fail_reasons "${run_dir}/timeline.jsonl" >> "$reasons_tmp" || true
         processed=$((processed + 1))
       done < <(find "$epic_dir" -maxdepth 1 -mindepth 1 -type d -name "R-*")
     done < <(find "$root" -maxdepth 1 -mindepth 1 -type d -name "E-*")
@@ -217,7 +220,7 @@ EOF
 
   cat <<EOF
 
-## Branch Hygiene (state.yaml.branch distribution)
+## Branch Hygiene (fsm-state.yaml.branch distribution)
 
 | Branch kind | Count | % of runs |
 |-------------|------:|----------:|
@@ -270,7 +273,7 @@ EOF
 |-----|------:|----------:|
 EOF
   local era
-  for era in pre-session-a post-session-a missing unknown; do
+  for era in pre-session-a post-session-a post-session-b missing unknown; do
     local n pct
     n=$(jq -r --arg e "$era" 'select(.compliance_deploy_era == $e) | .epic_id' "$tmp" | wc -l)
     [[ $n -eq 0 ]] && continue
@@ -278,11 +281,11 @@ EOF
     printf "| %s | %d | %d%% |\n" "$era" "$n" "$pct"
   done
 
-  # Top fsm_precondition_fail reasons
+  # Top FSM fail reasons (all event types)
   if [[ -s "$reasons_tmp" ]]; then
     cat <<EOF
 
-## Top fsm_precondition_fail Reasons
+## Top FSM Fail Reasons
 
 | Reason | Count |
 |--------|------:|
