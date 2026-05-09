@@ -373,3 +373,6 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - If `$ARGUMENTS` is empty → auto-detect mode (fresh init or upgrade)
 - **Standards** — selection stored in `project.yaml → standards.active`. Override individual rules via `standards.overrides.disabled_rules[]` or `standards.overrides.severity_overrides`
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
+
+
+**Last Updated:** 2026-05-05

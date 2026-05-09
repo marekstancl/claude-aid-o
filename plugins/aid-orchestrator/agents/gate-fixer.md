@@ -194,3 +194,6 @@ The `gate` field accepts both gate names and verifier review sources:
   set status: `unable` and explain what you tried.
 - You will be replaced by specialized role agents in Run 4 for domain-specific
   fixes. Until then, you handle all gate types.
+
+
+**Last Updated:** 2026-03-12

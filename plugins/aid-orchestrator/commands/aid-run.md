@@ -340,3 +340,6 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 - **`--resume` reads state.yaml** — picks up from last known state after crash/interrupt
 - If `$ARGUMENTS` is empty → auto-detect: find single active task or list for selection
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
+
+
+**Last Updated:** 2026-03-25
