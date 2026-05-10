@@ -190,10 +190,25 @@ Write an exhaustive implementation plan from specification or topic.
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
 5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
-7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (16 checks)
+7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
+9. **Plan Quality Review (CP1)** — dispatch verifier with `docs-review` focus
+   on the written plan file. **Identical to Mode: Brainstorm Step 9** —
+   perform the codebase grounding pass (mandatory), include the EVIDENCE
+   REQUIREMENT for every #17/17a-e/#19 verification, and save the review to
+   `.aid-o/work/cp1-review-{plan_id}.md`. Activate #19 (Design Defeat
+   Detection) when frontmatter `type: bug-fix` (per `skills/plan-writing.md`)
+   or pre-screening heuristic matches.
 
-Output: plan path, step count, quality gate results.
+   Present PM with options:
+     (A) Accept as-is → proceed to EPIC generation
+     (B) Fix findings → apply recommendations, re-run review
+     (C) Re-open spec — return to step 1 with annotated spec
+
+   Skip if `review_checkpoints.cp1_plan_review: false` in
+   `.aid-o/config/policies/review-checkpoints.yaml`.
+
+Output: plan path, step count, quality gate results, CP1 review verdict.
 
 ## Mode: Generate EPIC
 
