@@ -627,9 +627,62 @@ STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation qual
       wide may use suffix patterns (e.g., tests/unit/*.bats) BUT must include
       explicit `step.expected_count` field stating the expected file count.
 
+DESIGN DEFEAT DETECTION (added v2.20.0 — addresses systematic semantic gap
+                        where fix paths bypass own validation; activates only
+                        for type: bug-fix plans or via mechanical pre-screen):
+  19. For plans with `type: bug-fix` in frontmatter, the verifier MUST answer:
+      Q1: Which precondition/validation does this plan promise to fix?
+          (cite from plan ## Goal or ## Context)
+      Q2: Is the new code-path validated by the same precondition (not bypassing it)?
+          (analyze Implementation Detail blocks — does new code go through
+           the same wrapper/function as the broken path?)
+      Q3: If Q2 is "no" — is the bypass explicit + justified in plan body?
+          (e.g., "we skip cmd_transition because XYZ — alternate validation in YYY")
+
+      VERDICT MATRIX:
+        Q2: yes                          → PASS (new path properly validated)
+        Q2: no, Q3: yes (justified)     → PASS_WITH_NOTES (PM judgment call)
+        Q2: no, Q3: no (silent bypass)  → REVISE_REQUIRED — design defeat detected
+
+      Empirical evidence: P035 C2 (2026-05-10) — plan promised to fix
+      gates_no_generated_by precondition fail. Implementation Detail proposed
+      `yq -i '.state = "GATES"'` as transition mechanism — bypassing
+      cmd_transition() and therefore bypassing the very validation the plan
+      promised to enforce. CP1 review caught C2 on the 3rd pass; without it,
+      the fix would have silently failed its own purpose.
+
+      Pre-screening heuristic (mechanical, before LLM judgment) — narrowed
+      to STATE-mutation patterns only (NOT release/version mutations):
+        IF plan goal/context contains: fix|fail|bypass|precondition|validation
+        AND Implementation Detail contains state-mutation in protected files:
+              - yq -i ... fsm-state.yaml
+              - yq -i ... state.yaml
+              - sed -i ... fsm-state.yaml
+              - sed -i ... state.yaml
+              - direct file write to .aid-o/work/evidence/, work/active.md
+            EXPLICIT EXCLUDE (release/version mutations are NOT design defeat):
+              - sed -i on CHANGELOG.md, README.md
+              - sed/jq on .claude-plugin/*.json, plugin.json, marketplace.json
+              - any mutation to files listed in .aid-o/config/policies/release-policy.yaml
+                version_files[] (version bump targets — policy file installed by /aid-init)
+        AND NO cmd_<wrapper> invocation in same code block
+        → AUTOMATIC #19 activation regardless of frontmatter type
+
+      Edge cases:
+        • Plan has `type: bug-fix` but does not fix a precondition (e.g., string
+          typo) → Q1 returns "no precondition involved" → SKIP #19 graceful
+        • Plan fixes 2 different preconditions — answer Q1/Q2/Q3 per-precondition;
+          output table instead of single verdict
+        • Mixed Q3 evidence (some bypasses justified, some silent) →
+          REVISE_REQUIRED for the unjustified parts only
+        • Q1 ambiguous (no clear precondition) → escalate to PM clarification
+          before #19 verdict
+
 EVALUATION:
-  COUNT checks passed out of 23 (16 original + 17 + 17a-e (5) + 18 = 23).
-  IF all 23 pass → write plan to disk
+  COUNT checks passed out of 24 (16 original + 17 + 17a-e (5) + 18 + 19 = 24).
+  IF all 24 pass → write plan to disk
+  Note: Check #19 activates only for `type: bug-fix` plans or via pre-screening
+  heuristic above. For non-applicable plans, mark #19 as N/A (counts as PASS).
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
