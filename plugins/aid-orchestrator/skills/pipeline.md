@@ -521,7 +521,7 @@ Plus two timeline events frame each run: `gate_runner_start` (with `report_path`
 `gate_count`, `command_list`) and `gate_runner_complete` (with `report_path`,
 `overall`, `duration_sec`).
 
-#### Recommended Flow (v2.18.2+): aid-fsm.sh advance-to-gates
+#### Recommended Flow (v2.18.3+): aid-fsm.sh advance-to-gates
 
 Single atomic command runs the gates and — if they pass — performs `cmd_transition
 EXECUTE GATES`. Eliminates the chicken-egg problem between `aid-run-gates.sh`
