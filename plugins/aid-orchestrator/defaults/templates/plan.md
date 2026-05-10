@@ -62,6 +62,36 @@ author: PM + AI
 - {Business constraint}
 - {Timeline constraint}
 
+## Resources Verification
+
+> Auto-populated by `/aid-plan` Step 9 verifier dispatch (CP1). Each item must be
+> VERIFIED (with location/evidence) or ABSENT (mapped to a Create step in this plan
+> OR confirmed as PM-acknowledged risk).
+>
+> Detection: items extracted via grep/regex from whole plan body — no specific
+> `related_backlog` or similar field required. Verifier scans the entire plan.
+
+### Existing Resources (must exist in codebase)
+
+- [ ] Functions/helpers: {list extracted from plan + grep results}
+- [ ] File paths: {list extracted from Files entries + ls results}
+- [ ] Ports: {list + docker ps cross-check}
+- [ ] Services / containers: {list + docker ps name collision check}
+- [ ] External commands: {list + command -v results}
+- [ ] Environment variables: {list + grep declaration results}
+
+### Plan Assumptions (must match reality — Completeness Gate sub-checks 17a-17d)
+
+- [ ] Backlog IDs (T-NNN): {whole-plan regex `\bT-[0-9]+\b` + `git log --since="24 hours ago" --grep` grounding}
+- [ ] Test directory paths: {list + `find tests/ -type f -name "*<basename>*"` analog search}
+- [ ] DB field semantics: {regex `[A-Z][a-zA-Z]+\.[a-z_]+` + models.py stored vs computed verification}
+- [ ] File removal claims: {list + ls existence verification}
+
+### Resolution
+
+- [ ] All items VERIFIED OR mapped to a Create step in this plan
+- [ ] PM acknowledges any ABSENT items as out-of-scope risks (with rationale)
+
 ## Risks
 
 | Risk | Probability | Impact | Mitigation |
@@ -79,4 +109,4 @@ author: PM + AI
 
 ---
 
-**Last Updated:** {YYYY-MM-DD}
+**Last Updated:** 2026-05-10
