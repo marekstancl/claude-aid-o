@@ -115,6 +115,13 @@ Verifier dispatch prompt MUST include:
    - service / container name (e.g., `svc-mcp-tg-bot`)
    - external command (e.g., `yq`, `bats`)
    - env var (e.g., `AID_PLUGIN_PATH`)
+   - **backlog ID** (e.g., `T-132`) — extract via regex `\bT-[0-9]+\b` from the
+     entire plan body (whole-plan scan, no specific field — `related_backlog`
+     does not exist in current plan template)
+   - **test path** (e.g., `tests/integration/<file>`) from step Files entries
+   - **DB field reference** (e.g., `Session.validation_warnings`) extracted via
+     regex `[A-Z][a-zA-Z]+\.[a-z_]+` from plan body
+   - **file removal claim** (e.g., "delete X", `must_not_exist: true`) from plan body
 2. For each item, verify against real codebase / running infra:
    - Functions/helpers: `grep -rn "^<fn>()\|^function <fn>" plugins/`
    - File paths: `ls <path>` (or note "Create step <N>" if Files entry creates it)
@@ -122,12 +129,30 @@ Verifier dispatch prompt MUST include:
    - Services: `docker ps --format '{{.Names}}'` — flag collisions
    - Commands: `command -v <cmd>`
    - Env vars: `grep -rn "<VAR_NAME>"` for declarations / fallback handling
+   - **Backlog IDs:** `git log --since="24 hours ago" --grep="T-NNN" --all` — flag conflicts
+   - **Test paths:** `find tests/ -type f \( -name "*.py" -o -name "*.ts" -o -name "*.bats" \) -name "*<basename>*"` — flag existing analogs (POSIX `find`, no `fd` dependency)
+   - **DB fields:** `grep "<field>" <project>/db/models.py` — verify stored vs computed semantics
+   - **File removal:** `ls <path>` — verify file currently exists
 3. Mark each: VERIFIED (with path:line or docker output) or ABSENT (with note
-   "to be created in Step N" — must map to a Create step in the plan).
+   "to be created in Step N" — must map to a Create step in the plan). Specific
+   semantics for the new categories:
+   - **Backlog ID:** VERIFIED (free) or ABSENT (reserved by commit `<SHA>`)
+   - **Test path:** VERIFIED (no conflict) or ABSENT (analog exists at `<path>`)
+   - **DB field:** VERIFIED (matches claim) or ABSENT (claim mismatch — actual: `<stored|computed>`)
+   - **File removal:** VERIFIED (exists, can be deleted) or ABSENT (file not present)
 4. Plan with ABSENT items NOT mapped to a Create step → REVISE_REQUIRED.
+   Specific REVISE_REQUIRED conditions for the new categories:
+   - **Backlog ID ABSENT** → REVISE_REQUIRED unless plan explicitly states
+     "T-NNN to be allocated at plan-write time" (acceptable for plan-allocation candidates)
+   - **Test path ABSENT (analog exists)** → REVISE_REQUIRED — plan must choose
+     consistent location OR explicit "supersedes <existing path>"
+   - **DB field ABSENT (claim mismatch)** → REVISE_REQUIRED — plan must update
+     claim to match definition (stored → re-validation, computed → automatic)
+   - **File removal ABSENT (file missing)** → REVISE_REQUIRED — claim "delete"
+     is meaningless, file already does not exist
 
 This is in addition to (not replacing) the standard plan-writing.md
-Forbidden Phrase + Completeness Gate (16 → 17 checks) verification.
+Forbidden Phrase + Completeness Gate (22 checks: 16 original + #17 + 17a-d + #18) verification.
 
 Output:
 ```
@@ -206,4 +231,4 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
 
 
-**Last Updated:** 2026-05-06
+**Last Updated:** 2026-05-10
