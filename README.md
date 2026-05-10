@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.19.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.20.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,10 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.19.1** (current) — Completeness Gate sub-checks 17a-17d (backlog ID, test path, DB field, file removal grounding); `/aid-plan` Step 9 verifier prompt + plan template Resources Verification block; `test-cp1-grounding.sh` smoke test (P035 Phase 2)
-- **v2.18.3** — `aid-fsm.sh advance-to-gates` atomic gates+transition command (P035 Phase 1) eliminates `gates_no_generated_by` chicken-egg precondition fail
-- **v2.18.1** — `aid-diagnostic.sh` 3 bugs fixed (branch source, post-session-b era, fsm_increment_fail capture)
-- **v2.18.0** — CP2/CP3 verifier dispatch enforcement, `fsm_handle_force_override` unified dispatcher, compliance `deploy_era` + `verifier_outputs` schema, `--era`/`--compare` compliance report, auto-generated `epic-summary.md` (IMP-090), 33-assertion bats suite
+- **v2.20.0** (current) — Plan-quality enforcement (P036): Completeness Gate sub-check 17e (CLI invocation grounding) + check #19 (Design Defeat Detection for `type: bug-fix` plans); `## Plan Type` taxonomy in template (regular | bug-fix | refactor | docs); `/aid-plan write` Step 9 (CP1 review) + EVIDENCE REQUIREMENT in reviewer prompt; `test-plan-quality-enforcement.sh` smoke test
+- **v2.19.1** — `aid-release.sh` CHANGELOG-rename anomaly fix (IMP-093) + 3-branch `update_changelog` helper with bats coverage
+- **v2.19.0** — Completeness Gate sub-checks 17a-17d (backlog ID, test path, DB field, file removal grounding); `/aid-plan` Step 9 verifier prompt + plan template Resources Verification block; `test-cp1-grounding.sh` smoke test (P035 Phase 2)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

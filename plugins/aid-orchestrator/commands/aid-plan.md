@@ -151,8 +151,70 @@ Verifier dispatch prompt MUST include:
    - **File removal ABSENT (file missing)** → REVISE_REQUIRED — claim "delete"
      is meaningless, file already does not exist
 
+**EVIDENCE REQUIREMENT (added v2.20.0 — addresses CP1 false-memory blind spot):**
+
+Before the reviewer marks ANY item VERIFIED, the review output MUST capture
+concrete evidence in this format:
+
+```yaml
+item: <name>
+verdict: VERIFIED | ABSENT
+command_run: <exact command>
+output_excerpt: <path:line of match, or "0 matches" if grep returned empty>
+```
+
+Examples:
+
+VALID evidence (ABSENT):
+```yaml
+item: setup_test_evidence_dir (function)
+verdict: ABSENT
+command_run: grep -rn "^setup_test_evidence_dir()" plugins/aid-orchestrator/scripts/tests/bats/
+output_excerpt: (0 matches)
+```
+→ ABSENT verdict; must map to a Create step or REVISE_REQUIRED.
+
+VALID evidence (VERIFIED):
+```yaml
+item: cmd_transition (function)
+verdict: VERIFIED
+command_run: grep -n "^cmd_transition()" plugins/aid-orchestrator/scripts/aid-fsm.sh
+output_excerpt: aid-fsm.sh:849:cmd_transition()
+```
+→ VERIFIED at known location.
+
+INVALID evidence (REJECTED, requires retry):
+```yaml
+item: setup_test_evidence_dir (function)
+verdict: VERIFIED
+# (no command_run, no output_excerpt — "from memory")
+```
+→ REJECTED — false-memory pattern. Auto-retry with explicit "EVIDENCE REQUIRED"
+reminder; max 2 retries, then ESCALATION.
+
+Empirical evidence: P035 C3 (2026-05-10) — plan cited
+`setup_test_evidence_dir`, `setup_passing_execution_yaml`,
+`setup_failing_execution_yaml` as "existing helpers"; none existed. CP1
+review would have caught this if the reviewer had dispatched the mandatory
+greps; without the evidence requirement, the reviewer wrote "VERIFIED" from
+memory.
+
+This requirement applies to ALL #17 sub-checks (functions, files, ports,
+services, commands, env vars, CLI invocations) + 17a-d (per P035 Phase 2)
++ 17e (CLI invocation grounding) + #19 design defeat — Q1/Q2/Q3 answers
+MUST cite plan path:line + codebase path:line as evidence.
+
+Edge cases:
+  • Item cannot be verified with current command (e.g., docker port but
+    docker not running) → mark "PENDING — docker not running"; PM decides
+    accept-as-trust or block.
+  • Expensive command (~10s+) — orchestrator may batch greps into a single
+    multi-pattern command.
+  • Multiple matches per item → output_excerpt is first match + count
+    "+N more matches".
+
 This is in addition to (not replacing) the standard plan-writing.md
-Forbidden Phrase + Completeness Gate (22 checks: 16 original + #17 + 17a-d + #18) verification.
+Forbidden Phrase + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19) verification.
 
 Output:
 ```
@@ -190,10 +252,25 @@ Write an exhaustive implementation plan from specification or topic.
 4. **Codebase analysis** — identify affected areas, read key files, note patterns
 5. **Clarification** — max 5 questions if spec has gaps (skip if clear)
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
-7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (16 checks)
+7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
+9. **Plan Quality Review (CP1)** — dispatch verifier with `docs-review` focus
+   on the written plan file. **Identical to Mode: Brainstorm Step 9** —
+   perform the codebase grounding pass (mandatory), include the EVIDENCE
+   REQUIREMENT for every #17/17a-e/#19 verification, and save the review to
+   `.aid-o/work/cp1-review-{plan_id}.md`. Activate #19 (Design Defeat
+   Detection) when frontmatter `type: bug-fix` (per `skills/plan-writing.md`)
+   or pre-screening heuristic matches.
 
-Output: plan path, step count, quality gate results.
+   Present PM with options:
+     (A) Accept as-is → proceed to EPIC generation
+     (B) Fix findings → apply recommendations, re-run review
+     (C) Re-open spec — return to step 1 with annotated spec
+
+   Skip if `review_checkpoints.cp1_plan_review: false` in
+   `.aid-o/config/policies/review-checkpoints.yaml`.
+
+Output: plan path, step count, quality gate results, CP1 review verdict.
 
 ## Mode: Generate EPIC
 

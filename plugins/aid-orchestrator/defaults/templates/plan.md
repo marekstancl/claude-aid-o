@@ -1,12 +1,32 @@
 ---
 id: P{NNN}
-type: plan
+type: regular   # Plan content classification — enum: regular | bug-fix | refactor | docs
+                # Controls quality gate activation:
+                #   regular  → standard checks #1-18 + 17e
+                #   bug-fix  → standard + #19 (Design Defeat Detection)
+                #   refactor → standard + 17e + heightened #18
+                #   docs     → standard, skip behavior-related checks
+                # Default if missing: regular. Legacy `type: plan` is treated
+                # as alias for `regular` (P001-P035 backward-compat).
 status: draft
 created: YYYY-MM-DD
 author: PM + AI
 ---
 
 # Plan: {Title}
+
+## Plan Type
+
+This plan is type: `{regular | bug-fix | refactor | docs}` (per frontmatter `type:` field).
+
+| Type | Description | Activates |
+|------|-------------|-----------|
+| `regular` | Feature additions, new capabilities | Standard checks #1-18 + 17e |
+| `bug-fix` | Fixes existing precondition / validation / behavior failure | Standard + #19 (Design Defeat Detection) |
+| `refactor` | Code restructuring without behavior change | Standard + 17e + heightened #18 (outputs concreteness) |
+| `docs` | Documentation-only changes (markdown, comments) | Standard, skip behavior-related checks (#19, runtime grounding) |
+
+**Default if missing:** `regular`. Legacy `type: plan` (used by P001-P035) is treated as an alias for `regular`. Validation: invalid value → REVISE_REQUIRED with the valid enum list.
 
 ## Context
 
