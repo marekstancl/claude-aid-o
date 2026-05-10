@@ -83,7 +83,7 @@ author: PM + AI
 ### Plan Assumptions (must match reality — Completeness Gate sub-checks 17a-17d)
 
 - [ ] Backlog IDs (T-NNN): {whole-plan regex `\bT-[0-9]+\b` + `git log --since="24 hours ago" --grep` grounding}
-- [ ] Test directory paths: {list + `find tests/ -type f -name "*<basename>*"` analog search}
+- [ ] Test directory paths: {list + `find tests/ -type f \( -name "*.py" -o -name "*.ts" -o -name "*.bats" \) -name "*<basename>*"` analog search}
 - [ ] DB field semantics: {regex `[A-Z][a-zA-Z]+\.[a-z_]+` + models.py stored vs computed verification}
 - [ ] File removal claims: {list + ls existence verification}
 

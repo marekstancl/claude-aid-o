@@ -54,7 +54,7 @@ EOF
 
 # ─── Sub-check 17a: backlog ID extraction (whole-plan body, regex \bT-[0-9]+\b) ─
 
-EXTRACTED_BACKLOG=$(grep -oE '\bT-[0-9]+\b' "$TEST_DIR/test-plan.md" | sort -u | tr '\n' ',')
+EXTRACTED_BACKLOG=$(grep -oE '\bT-[0-9]+\b' "$TEST_DIR/test-plan.md" | sort -u | paste -sd ',' -)
 
 [[ "$EXTRACTED_BACKLOG" == *"T-132"* ]] || { echo "FAIL 17a: T-132 not extracted"; exit 1; }
 [[ "$EXTRACTED_BACKLOG" == *"T-133"* ]] || { echo "FAIL 17a: T-133 not extracted"; exit 1; }
