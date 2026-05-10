@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.18.3] — 2026-05-10
+
+### Added
+- **`aid-fsm.sh advance-to-gates` Atomic Command** — single command runs gates and routes through `cmd_transition EXECUTE GATES` on success. Eliminates the `gates_no_generated_by` chicken-egg precondition fail (P020 8×, P021 4× — 12 friction events across 3 EPICs). Atomicity: state changes only on full success; gates failure leaves state at EXECUTE (never modified). No new state added — `VALID_STATES` and `VALID_TRANSITIONS` unchanged. Single source of truth for preconditions remains `check_preconditions` (`_generated_by`, `fsm_check_verifier_output`, `fsm_check_grandfather`).
+- **Bats Coverage for advance-to-gates** — `test-aid-fsm.bats` expanded from 14 to 18 assertions covering all branches: success path, gates-fail path (state stays EXECUTE), missing CP3 outputs (cmd_transition rejects after gates pass), and aid-run-gates.sh env-var bypass behavior with and without `AID_GATES_TRIGGERED_BY_FSM=1`. New `test-helpers.bash` helpers: `seed_test_state_files`, `setup_passing_execution_yaml`, `setup_failing_execution_yaml`, `write_valid_verifier_output`.
+
+### Changed
+- **`aid-run-gates.sh` State Guard** — accepts env-var bypass `AID_GATES_TRIGGERED_BY_FSM=1` as the signal that the caller is `cmd_advance_to_gates`. Strict equality check (`=="1"`) prevents accidental bypass via truthy values. Manual two-step flow (state==GATES + run-all without env var) remains fully backward-compatible. Error message now hints at the atomic `advance-to-gates` alternative when state==EXECUTE without the env var.
+- **`pipeline.md §5 GATES State`** — adds Recommended Flow (v2.18.2+) subsection documenting `aid-fsm.sh advance-to-gates`; preserves Manual Two-Step Flow subsection for debugging and crash recovery. Both flows fully documented with semantics, env-var signal, and timeline events.
+
+### Fixed
+- **`gates_no_generated_by` Precondition Fail Class** — empirical motivation for the atomic command: P020 had 8 such failures, P021 had 4 — 12 friction events across 3 EPICs from a single root cause (chicken-egg between gates runner state guard and transition's `_generated_by` check). Target post-deploy: 0 fails of this type.
+
 ## [2.18.1] — 2026-05-09
 
 ### Fixed

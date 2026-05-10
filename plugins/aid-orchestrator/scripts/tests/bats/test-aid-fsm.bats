@@ -192,3 +192,75 @@ VERIFY
   [ "$status" -ne 0 ]
   [[ "$output" =~ "min 20 characters" ]]
 }
+
+# ─── P035 Step 4: advance-to-gates atomicity (4 assertions) ──────────────
+
+@test "advance-to-gates: success path EXECUTE→GATES via cmd_transition" {
+  seed_test_state_files "EXECUTE" "5" "5"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_pre_gates"
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_runner_complete"
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
+}
+
+@test "advance-to-gates: failure path leaves state at EXECUTE" {
+  seed_test_state_files "EXECUTE" "5" "5"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_failing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_pre_gates"
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_advance_to_gates_fail"
+  # No fsm_transition event — gates failed before transition
+  ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_transition"
+}
+
+@test "advance-to-gates: missing CP3 outputs → cmd_transition fails after gates pass" {
+  seed_test_state_files "EXECUTE" "5" "5"
+  # NOTE: NO CP3 output files (intentional — gates run, transition rejects)
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  # Gates ran independently of CP3 — runner exits 0
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_runner_complete"
+  # cmd_transition's check_preconditions sees missing CP3 outputs and rejects
+  [[ "$output" == *"verifier-output-cp3-code-review.md missing"* ]]
+  # State stayed EXECUTE because cmd_transition didn't commit
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
+}
+
+@test "aid-run-gates.sh: env-var bypass allows EXECUTE state when AID_GATES_TRIGGERED_BY_FSM=1" {
+  seed_test_state_files "EXECUTE" "1" "1"
+  local exec_yaml; exec_yaml="$TEST_EVIDENCE_DIR/execution.yaml"
+  setup_passing_execution_yaml "$exec_yaml"
+  local runner; runner="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+
+  # With env var: runner accepts EXECUTE state, runs gates, exits 0
+  AID_GATES_TRIGGERED_BY_FSM=1 run \
+    "$runner" run-all "$exec_yaml" "E-test" "R-test" \
+      --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" \
+      --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+
+  # Without env var: runner rejects (state==EXECUTE, expected GATES)
+  unset AID_GATES_TRIGGERED_BY_FSM
+  run "$runner" run-all "$exec_yaml" "E-test" "R-test" \
+      --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" \
+      --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FSM state must be GATES"* ]]
+  [[ "$output" == *"advance-to-gates"* ]]
+}

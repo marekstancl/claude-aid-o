@@ -111,12 +111,19 @@ run_all_gates() {
 
   require_yq_mikefarah
 
-  # FSM state check: refuse to run if state is not GATES
-  if [[ -n "$state_file" ]]; then
+  # FSM state check: refuse to run if state is not GATES, UNLESS caller is
+  # cmd_advance_to_gates (signaled via AID_GATES_TRIGGERED_BY_FSM=1, P035 Step 2).
+  # That caller has already validated EXECUTE state + step completion; the
+  # atomic flow runs gates with state==EXECUTE then commits transition via
+  # cmd_transition (which re-validates _generated_by from this run's report).
+  # Strict equality check `=="1"` — accidental bypass via truthy-but-not-1 values
+  # is excluded.
+  if [[ -n "$state_file" && "${AID_GATES_TRIGGERED_BY_FSM:-}" != "1" ]]; then
     local current_state
     current_state=$("${SCRIPT_DIR}/aid-fsm.sh" get-state "$state_file")
     if [[ "$current_state" != "GATES" ]]; then
-      echo "ERROR: FSM state must be GATES to run gates, found: $current_state" >&2
+      echo "ERROR: FSM state must be GATES to run gates, found: $current_state." >&2
+      echo "  For atomic gates+transition flow: use 'aid-fsm.sh advance-to-gates <state_file>' instead." >&2
       exit 1
     fi
   fi

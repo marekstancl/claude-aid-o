@@ -103,3 +103,74 @@ started_at: "$now"
 created_at: $now
 EOF
 }
+
+# ─── P035 Step 4 helpers (advance-to-gates atomicity tests) ──────────────
+
+# seed_test_state_files [state] [current_step] [total_steps] [epic_id] [run_id]
+#   Writes a minimal fsm-state.yaml under TEST_EVIDENCE_DIR (set by setup_test_evidence_dir).
+#   Defaults: state=EXECUTE, steps=1/1, epic=E-test, run=R-test.
+seed_test_state_files() {
+  local state="${1:-EXECUTE}"
+  local current_step="${2:-1}"
+  local total_steps="${3:-1}"
+  local epic_id="${4:-E-test}"
+  local run_id="${5:-R-test}"
+  local state_file="${TEST_EVIDENCE_DIR:?TEST_EVIDENCE_DIR not set; call setup_test_evidence_dir first}/fsm-state.yaml"
+  cat > "$state_file" <<EOF
+epic_id: $epic_id
+run_id: $run_id
+state: $state
+current_step: $current_step
+total_steps: $total_steps
+created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  echo "$state_file"
+}
+
+# setup_passing_execution_yaml [path]
+#   Writes a minimal execution.yaml with one always-pass gate (command: true).
+#   Default path: $TEST_EVIDENCE_DIR/execution.yaml.
+setup_passing_execution_yaml() {
+  local exec_yaml="${1:-${TEST_EVIDENCE_DIR}/execution.yaml}"
+  cat > "$exec_yaml" <<'EOF'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+    timeout_seconds: 5
+    max_retries: 1
+EOF
+  echo "$exec_yaml"
+}
+
+# setup_failing_execution_yaml [path]
+#   Writes a minimal execution.yaml with one always-fail gate (command: false).
+setup_failing_execution_yaml() {
+  local exec_yaml="${1:-${TEST_EVIDENCE_DIR}/execution.yaml}"
+  cat > "$exec_yaml" <<'EOF'
+gates:
+  always_fail:
+    command: "false"
+    required: true
+    timeout_seconds: 5
+    max_retries: 1
+EOF
+  echo "$exec_yaml"
+}
+
+# write_valid_verifier_output <file> [generator]
+#   Writes a verifier output that passes fsm_check_verifier_output (line-start
+#   _generated_by, classification: RUN, verdict: pass — not "pending").
+write_valid_verifier_output() {
+  local file="$1"
+  local generator="${2:-aid-orchestrator-verifier@test}"
+  mkdir -p "$(dirname "$file")"
+  cat > "$file" <<EOF
+_generated_by: $generator
+_generated_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+classification: RUN
+verdict: pass
+
+Test verifier output (synthetic for bats fixture).
+EOF
+}
