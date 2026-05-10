@@ -559,12 +559,20 @@ Reason: AID v3 requires gates to be executed by aid-run-gates.sh, not
         hand-written. The _generated_by/_generated_at/_command_log fields
         produced by the runner are forensic evidence the gates actually ran.
 
-Fix: rm ${gates_report}
-     bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
-       \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
-       --state-file ${state_file} \\
-       --report-file ${gates_report}
-Then retry: aid-fsm.sh transition EXECUTE GATES ${state_file}
+Recommended fix (v2.18.3+): use the atomic advance-to-gates command which runs
+gates and commits the transition in a single step:
+
+  rm ${gates_report}
+  bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
+
+Manual two-step alternative (debugging / crash recovery):
+
+  rm ${gates_report}
+  bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
+    \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
+    --state-file ${state_file} \\
+    --report-file ${gates_report}
+  bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
           return 1
         fi
@@ -929,7 +937,7 @@ cmd_transition() {
   echo "Transition: $from → $to" >&2
 }
 
-# Atomic gates run + EXECUTE→GATES transition (P035 Phase 1, v2.18.2).
+# Atomic gates run + EXECUTE→GATES transition (P035 Phase 1, v2.18.3).
 # Eliminates the chicken-egg precondition fail mode (gates_no_generated_by)
 # observed in P020 (8×) and P021 (4×). Routes through cmd_transition for full
 # precondition validation — single source of truth remains check_preconditions.
@@ -946,7 +954,13 @@ cmd_advance_to_gates() {
   current_step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
   total_steps=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
   evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-  timeline=$(derive_timeline "$state_file")
+  timeline=$(derive_timeline "$state_file") || true
+
+  # Validate numeric step fields (defensive — malformed state.yaml caught early).
+  if [[ ! "$current_step" =~ ^[0-9]+$ ]] || [[ ! "$total_steps" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: malformed state.yaml — current_step=$current_step total_steps=$total_steps must be integers" >&2
+    exit 1
+  fi
 
   # Cheap pre-flight guards (avoid invoking runner if obvious mismatch).
   if [[ "$current_state" != "EXECUTE" ]]; then
