@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.19.0] — 2026-05-10
+
+### Added
+- **Completeness Gate Sub-Checks 17a–17d** — `plan-writing.md` Completeness Gate extended with 4 new grounding categories aimed at empirical gaps from P019/P021/P032: (17a) backlog ID grounding via whole-plan `\bT-[0-9]+\b` regex + `git log --since="24 hours ago" --grep` — empirical: P021 T-132/T-133 reserved by commit 1907e77 same morning; (17b) test directory convention via POSIX `find tests/ -type f -name "*<basename>*"` — empirical: P021 plan said `tests/integration/`, reality `tests/unit/`; (17c) DB-field semantics via `[A-Z][a-zA-Z]+\.[a-z_]+` regex + `grep` on models.py for stored Column vs `@property`/computed — empirical: P021 assumed automatic, reality stored Column; (17d) file removal grounding via `ls <path>` existence check — empirical: P019 `must_not_exist` file actually existed at EPIC end. EVALUATION counter bumped 18 → 22.
+- **`commands/aid-plan.md` Step 9 Verifier Prompt Extension** — verifier dispatch prompt extended with extraction patterns and verification commands for the 4 new grounding categories. Each category gets explicit VERIFIED/ABSENT semantics and REVISE_REQUIRED conditions. Backlog ID ABSENT accepts "T-NNN to be allocated at plan-write time" as a plan-allocation candidate.
+- **`defaults/templates/plan.md` Resources Verification Block** — new section between Constraints and Risks with 12 checkbox items: 6 (Existing Resources from #17) + 4 (Plan Assumptions from #17a-d) + 2 (Resolution gates). Auto-populated by `/aid-plan` Step 9 verifier dispatch; PM-visible manual review checklist. Detection scope clarified as whole-plan body scan — no `related_backlog` or similar field required.
+- **`test-cp1-grounding.sh` Smoke Test** — bash smoke test that constructs a deliberately-broken plan with violations across all 4 sub-checks and verifies extraction patterns produce correct outputs. POSIX-only (`command -v find` guard, no `fd` dependency), trap-cleaned tmpdir, 5 PASS branches.
+
 ## [2.18.3] — 2026-05-10
 
 ### Added
@@ -11,7 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - **`aid-run-gates.sh` State Guard** — accepts env-var bypass `AID_GATES_TRIGGERED_BY_FSM=1` as the signal that the caller is `cmd_advance_to_gates`. Strict equality check (`=="1"`) prevents accidental bypass via truthy values. Manual two-step flow (state==GATES + run-all without env var) remains fully backward-compatible. Error message now hints at the atomic `advance-to-gates` alternative when state==EXECUTE without the env var.
-- **`pipeline.md §5 GATES State`** — adds Recommended Flow (v2.18.2+) subsection documenting `aid-fsm.sh advance-to-gates`; preserves Manual Two-Step Flow subsection for debugging and crash recovery. Both flows fully documented with semantics, env-var signal, and timeline events.
+- **`pipeline.md §5 GATES State`** — adds Recommended Flow (v2.18.3+) subsection documenting `aid-fsm.sh advance-to-gates`; preserves Manual Two-Step Flow subsection for debugging and crash recovery. Both flows fully documented with semantics, env-var signal, and timeline events.
 
 ### Fixed
 - **`gates_no_generated_by` Precondition Fail Class** — empirical motivation for the atomic command: P020 had 8 such failures, P021 had 4 — 12 friction events across 3 EPICs from a single root cause (chicken-egg between gates runner state guard and transition's `_generated_by` check). Target post-deploy: 0 fails of this type.
