@@ -586,6 +586,31 @@ CODEBASE GROUNDING (added v2.17.0 — addresses CP1 systematic blind spot
        unifyExtractedSources.ts after fix", reality: file existed with 374 lines
        after EPIC completion, was not deleted.
 
+  17e. CLI invocation grounding — for every cited shell command with arguments
+       in Implementation Detail blocks or step examples:
+       → Extract pattern: `bash <script> <args>` or `$ <script> <args>`
+       → Get actual interface:
+            <script> --help      (preferred — exit 0 indicates CLI parse OK)
+            head -100 <script>   (fallback — grep usage()/case statements)
+       → Compare cited args vs interface — flag mismatches:
+            cited:  aid-run-gates.sh --state-file <X>
+            actual: aid-run-gates.sh run-all <exec> <epic> <run>
+            → REVISE_REQUIRED — proposal: "use aid-run-gates.sh run-all execution.yaml E-XXX-Y_Z R-EXXX-Y"
+       Edge cases:
+         • Script lacks --help support → fallback to head + grep usage(); if
+           even fallback yields no output, mark MANUAL REVIEW + REVISE_REQUIRED
+         • Cited script not in codebase (already covered by #17 file paths) →
+           skip 17e to avoid double reporting
+         • Positional-arg scripts (e.g., aid-fsm.sh transition <from> <to>) →
+           parse case statement patterns from head
+         • Placeholder args with `<>` brackets → still flag if the flag/subcommand
+           itself is not in the interface
+         • Same script cited 5× with identical args → flag once (deduplicate)
+       Empirical evidence: P035 C1 (2026-05-10) — plan cited --state-file flag
+       which does not exist in aid-run-gates.sh; CP1 review caught this defect
+       on the 2nd pass — without it, EXECUTE would have failed with
+       "Unknown command: --state-file".
+
 STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation quality):
   18. Does every plan step's `step.outputs` array contain concrete file paths
       (no `src/**` wildcards, no `*` glob patterns)?
@@ -603,8 +628,8 @@ STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation qual
       explicit `step.expected_count` field stating the expected file count.
 
 EVALUATION:
-  COUNT checks passed out of 22 (16 original + 17 + 17a-d (4) + 18 = 22).
-  IF all 22 pass → write plan to disk
+  COUNT checks passed out of 23 (16 original + 17 + 17a-e (5) + 18 = 23).
+  IF all 23 pass → write plan to disk
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
