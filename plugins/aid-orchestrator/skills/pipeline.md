@@ -521,12 +521,51 @@ Plus two timeline events frame each run: `gate_runner_start` (with `report_path`
 `gate_count`, `command_list`) and `gate_runner_complete` (with `report_path`,
 `overall`, `duration_sec`).
 
-Required workflow:
+#### Recommended Flow (v2.18.2+): aid-fsm.sh advance-to-gates
 
-1. Complete EXECUTE phase (all steps incremented).
-2. `bash $AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> --state-file <state.yaml> --report-file <gates_report.json>`
-3. `aid-fsm.sh transition EXECUTE GATES <state_file>` — validates `_generated_by`.
-4. On fail: read remediation in stderr, run the `aid-run-gates.sh run-all` command from it, retry transition.
+Single atomic command runs the gates and — if they pass — performs `cmd_transition
+EXECUTE GATES`. Eliminates the chicken-egg problem between `aid-run-gates.sh`
+(required state==GATES) and the transition (required `gates_report.json` with
+`_generated_by`), which produced `gates_no_generated_by` precondition fails in
+P020 (8×) and P021 (4×) — 12 friction events across 3 EPICs.
+
+```bash
+bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates "$STATE_FILE"
+```
+
+Semantics:
+
+- **Pre-conditions** validated cheaply: state==EXECUTE, `current_step >= total_steps`,
+  `execution.yaml` exists. CP3 outputs are re-validated by `cmd_transition` after
+  gates pass (single source of truth remains `check_preconditions`).
+- **Atomicity:** gates fail → state stays EXECUTE (never modified); gates pass →
+  `cmd_transition` validates `_generated_by` from the just-written report
+  (guaranteed pass), state becomes GATES.
+- **Implementation signal:** Env var `AID_GATES_TRIGGERED_BY_FSM=1` is set by
+  `cmd_advance_to_gates` to bypass `aid-run-gates.sh`'s state guard. Manual
+  callers don't set this var. Strict equality check (`=="1"`) prevents accidental
+  bypass via truthy values.
+- **Timeline events:** `fsm_pre_gates` (before runner), `gate_runner_start` /
+  `gate_runner_complete` (runner internal), `fsm_transition from=EXECUTE to=GATES`
+  (success), `fsm_advance_to_gates_fail` (failure, with `runner_exit=<rc>` or
+  `transition_check_failed_after_gates_pass`).
+
+#### Manual Two-Step Flow (Backward-Compatible)
+
+For debugging, crash recovery, or scripts that need to inspect `gates_report.json`
+between gates run and transition, the original two-step flow remains supported:
+
+```bash
+# Step 1: Run gates (omit --state-file to skip state guard, OR use state==GATES)
+bash $AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \
+    "$EXECUTION_YAML" "$EPIC_ID" "$RUN_ID" \
+    --report-file "$REPORT_FILE"
+
+# Step 2: Transition to GATES (check_preconditions validates _generated_by)
+bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES "$STATE_FILE"
+```
+
+Use `advance-to-gates` for new code; manual flow stays for edge-case operations.
 
 ---
 
@@ -977,7 +1016,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-05-10
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
