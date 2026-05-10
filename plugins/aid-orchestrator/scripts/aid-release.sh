@@ -115,32 +115,67 @@ if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
 fi
 
 # ─── Detect version source (single source of truth) ─────────────────────
+#
+# Two-source detection (IMP-093 fix, v2.19.1):
+#   - CHANGELOG_HEADER   = newest "## [X.Y.Z]" in CHANGELOG.md (may be a
+#                          pre-written entry for the upcoming release)
+#   - RELEASED_VERSION   = .version field of plugin.json / marketplace.json
+#                          / package.json (= last actually released version)
+#
+# CURRENT (= the version we bump from) is RELEASED_VERSION when available,
+# otherwise CHANGELOG_HEADER. This prevents the 3x-observed bug where a
+# pre-written CHANGELOG entry for the upcoming release was treated as the
+# current released version and then renamed to the bumped version, silently
+# collapsing prior version's history.
 
 VERSION_SOURCE=""
+CHANGELOG_HEADER=""
+RELEASED_VERSION=""
 CURRENT=""
 
-# Priority: CHANGELOG.md > package.json > pyproject.toml
+# Read newest CHANGELOG header (if exists)
 if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
-  CURRENT=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1)
-  [[ -n "$CURRENT" ]] && VERSION_SOURCE="CHANGELOG.md"
+  CHANGELOG_HEADER=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1)
 fi
 
-if [[ -z "$CURRENT" && -f "$REPO_ROOT/package.json" ]]; then
-  CURRENT=$(python3 -c "import json; print(json.load(open('$REPO_ROOT/package.json')).get('version',''))" 2>/dev/null || true)
-  [[ -n "$CURRENT" ]] && VERSION_SOURCE="package.json"
+# Read actually released version from JSON sources (preferred over CHANGELOG)
+for jf in \
+  "$REPO_ROOT/plugins/aid-orchestrator/.claude-plugin/plugin.json" \
+  "$REPO_ROOT/.claude-plugin/marketplace.json" \
+  "$REPO_ROOT/package.json"; do
+  [[ -f "$jf" ]] || continue
+  if command -v jq &>/dev/null; then
+    v=$(jq -r '.version // .metadata.version // empty' "$jf" 2>/dev/null || true)
+    if [[ -n "$v" && "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      RELEASED_VERSION="$v"
+      VERSION_SOURCE="$(basename "$jf")"
+      break
+    fi
+  fi
+done
+
+# Fallback to pyproject.toml if no JSON found
+if [[ -z "$RELEASED_VERSION" && -f "$REPO_ROOT/pyproject.toml" ]]; then
+  RELEASED_VERSION=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1)
+  [[ -n "$RELEASED_VERSION" ]] && VERSION_SOURCE="pyproject.toml"
 fi
 
-if [[ -z "$CURRENT" && -f "$REPO_ROOT/pyproject.toml" ]]; then
-  CURRENT=$(grep -oP '^version\s*=\s*"\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/pyproject.toml" | head -1)
-  [[ -n "$CURRENT" ]] && VERSION_SOURCE="pyproject.toml"
+# CURRENT (bump from) = RELEASED_VERSION if available, otherwise CHANGELOG_HEADER
+if [[ -n "$RELEASED_VERSION" ]]; then
+  CURRENT="$RELEASED_VERSION"
+elif [[ -n "$CHANGELOG_HEADER" ]]; then
+  CURRENT="$CHANGELOG_HEADER"
+  VERSION_SOURCE="CHANGELOG.md"
 fi
 
 if [[ -z "$CURRENT" ]]; then
-  echo "ERROR: Cannot detect version. Need CHANGELOG.md (## [X.Y.Z]), package.json, or pyproject.toml." >&2
+  echo "ERROR: Cannot detect version. Need plugin.json/marketplace.json/package.json/pyproject.toml or CHANGELOG.md (## [X.Y.Z])." >&2
   exit 1
 fi
 
 echo "Version source: $VERSION_SOURCE ($CURRENT)"
+[[ -n "$CHANGELOG_HEADER" && "$CHANGELOG_HEADER" != "$CURRENT" ]] && \
+  echo "Note: CHANGELOG header is $CHANGELOG_HEADER (pre-written), released version is $CURRENT — will prepend new entry instead of renaming."
 
 IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
 case "$BUMP_TYPE" in
@@ -161,23 +196,67 @@ fi
 TODAY=$(date +%Y-%m-%d)
 UPDATED=()
 
-# Always update source
+# IMP-093 fix: CHANGELOG header logic depends on whether it's pre-written
+# for the upcoming release (header == NEW_VERSION) or stale at the previously
+# released version (header == CURRENT). Skip rename in either case.
+
+update_changelog() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  local header
+  header=$(grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$file" | head -1)
+  if [[ "$header" == "$NEW_VERSION" ]]; then
+    # Pre-written entry for upcoming release — header already correct, no-op.
+    echo "Skipped: $file (header already $NEW_VERSION — pre-written entry)"
+  elif [[ "$header" == "$CURRENT" ]]; then
+    # Stale header at released version — bump to new (existing behavior).
+    sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$file"
+    echo "Updated: $file (header $CURRENT → $NEW_VERSION)"
+  else
+    # Different state: prepend a new entry above the current top entry.
+    # This handles the case where CHANGELOG has been edited but doesn't match
+    # current OR new version (e.g., pre-written for an even newer version).
+    local tmp; tmp=$(mktemp)
+    {
+      head -4 "$file"   # # Changelog header + intro lines
+      echo ""
+      echo "## [$NEW_VERSION] — $TODAY"
+      echo ""
+      echo "### Changed"
+      echo ""
+      echo "- _PM/agent: fill in entry content_"
+      echo ""
+      tail -n +5 "$file"
+    } > "$tmp" && mv "$tmp" "$file"
+    echo "Updated: $file (prepended new $NEW_VERSION entry — fill in content)"
+  fi
+}
+
 case "$VERSION_SOURCE" in
   CHANGELOG.md)
-    sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$REPO_ROOT/CHANGELOG.md"
+    update_changelog "$REPO_ROOT/CHANGELOG.md"
     UPDATED+=("$REPO_ROOT/CHANGELOG.md")
+    ;;
+  plugin.json|marketplace.json)
+    # Source is JSON — handled by versioning.files[] loop below.
+    # Still need to update CHANGELOG.md if it exists.
+    if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
+      update_changelog "$REPO_ROOT/CHANGELOG.md"
+      UPDATED+=("$REPO_ROOT/CHANGELOG.md")
+    fi
     ;;
   package.json)
     tmp=$(mktemp)
     jq ".version = \"$NEW_VERSION\"" "$REPO_ROOT/package.json" > "$tmp" && mv "$tmp" "$REPO_ROOT/package.json"
     UPDATED+=("$REPO_ROOT/package.json")
+    echo "Updated: $REPO_ROOT/package.json (json: .version)"
     ;;
   pyproject.toml)
     sed -i "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" "$REPO_ROOT/pyproject.toml"
     UPDATED+=("$REPO_ROOT/pyproject.toml")
+    echo "Updated: $REPO_ROOT/pyproject.toml (toml: version)"
     ;;
 esac
-echo "Updated: $VERSION_SOURCE (source)"
 
 # Read versioning config from project.yaml if it exists
 PROJECT_YAML="$REPO_ROOT/.aid-o/config/project.yaml"
@@ -218,8 +297,9 @@ except:
         echo "Updated: $FILE_PATH (toml: $FILE_FIELD)"
         ;;
       changelog)
-        sed -i "s/## \[$CURRENT\].*/## [$NEW_VERSION] — $TODAY/" "$FULL_PATH"
-        echo "Updated: $FILE_PATH (changelog header)"
+        # IMP-093 fix: use prepend-aware update_changelog helper instead of
+        # blind sed-rename, to preserve pre-written entries.
+        update_changelog "$FULL_PATH"
         ;;
     esac
     # Collect for git add (in subshell — use temp file)

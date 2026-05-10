@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.19.1] — 2026-05-10
+
+### Fixed
+- **`aid-release.sh` CHANGELOG-rename anomaly (IMP-093)** — observed 3× across v2.18.3 + v2.19.0 releases: when a `## [X.Y.Z]` header was pre-written for the upcoming release (PM/agent edited CHANGELOG before invoking script), the previous logic did a blind `sed`-replace on the newest header and silently collapsed the pre-written entry's history. Fix: detect actually-released version from `plugin.json`/`marketplace.json`/`package.json` (not CHANGELOG header) and route through new `update_changelog` helper that has 3 branches: (a) header matches new_version → skip rename (entry already correct), (b) header matches released version → bump existing header (existing behavior), (c) header is some other version → prepend new entry above (preserves history). 3 new bats assertions in `test-aid-release.bats` cover all 3 branches.
+
+### Notes
+- **README regex pattern mismatch** — second part of IMP-093 diagnosis showed that `.aid-o/config/project.yaml` regex patterns like `"Plugin: {VERSION}"` don't match actual content `**Plugin:** 2.X.Y` (markdown bold prefix missing in pattern). Consumer projects must update their `.aid-o/config/project.yaml` regex patterns to escape `**` for sed: e.g., `"\\*\\*Plugin:\\*\\* {VERSION}"`. This repo's `.aid-o/config/project.yaml` (gitignored) was updated locally; downstream projects need to edit theirs once if affected.
+
 ## [2.19.0] — 2026-05-10
 
 ### Added

@@ -116,7 +116,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.19.0** (current) — Completeness Gate sub-checks 17a-17d (backlog ID, test path, DB field, file removal grounding); `/aid-plan` Step 9 verifier prompt + plan template Resources Verification block; `test-cp1-grounding.sh` smoke test (P035 Phase 2)
+- **v2.19.1** (current) — Completeness Gate sub-checks 17a-17d (backlog ID, test path, DB field, file removal grounding); `/aid-plan` Step 9 verifier prompt + plan template Resources Verification block; `test-cp1-grounding.sh` smoke test (P035 Phase 2)
 - **v2.18.3** — `aid-fsm.sh advance-to-gates` atomic gates+transition command (P035 Phase 1) eliminates `gates_no_generated_by` chicken-egg precondition fail
 - **v2.18.1** — `aid-diagnostic.sh` 3 bugs fixed (branch source, post-session-b era, fsm_increment_fail capture)
 - **v2.18.0** — CP2/CP3 verifier dispatch enforcement, `fsm_handle_force_override` unified dispatcher, compliance `deploy_era` + `verifier_outputs` schema, `--era`/`--compare` compliance report, auto-generated `epic-summary.md` (IMP-090), 33-assertion bats suite
