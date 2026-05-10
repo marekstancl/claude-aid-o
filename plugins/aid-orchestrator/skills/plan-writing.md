@@ -544,6 +544,48 @@ CODEBASE GROUNDING (added v2.17.0 — addresses CP1 systematic blind spot
       Hand-wave like "presumably exists in some lib" or "should be available"
       is a hard fail — replace with concrete grep output or Create-step mapping.
 
+  17a. Backlog ID grounding — for every `T-NNN` ID found in the plan body
+       (whole-plan regex `\bT-[0-9]+\b`, no specific field required):
+       → `git log --since="24 hours ago" --grep="T-NNN" --all`
+       → pass: zero matches in last 24h commits, OR plan explicitly states
+         "T-NNN to be allocated at plan-write time"
+       → fail: REVISE_REQUIRED with conflict list (commit SHA + msg),
+         propose T-NNN reassignment
+       Empirical evidence: P021 measure 2026-05-09 — T-132/T-133 reserved by
+       commit 1907e77 same morning in wan repo, plan didn't catch it.
+
+  17b. Test directory convention grounding — for every `tests/<dir>/<file>`
+       reference in the plan:
+       → `find tests/ -type f \( -name "*.py" -o -name "*.ts" -o -name "*.bats" \) -name "*<basename>*"`
+         (POSIX `find` — no `fd` dependency)
+       → pass: no analog in a sibling test sub-directory
+       → fail: REVISE_REQUIRED with consistent location proposal (e.g.,
+         "tests/unit/<file> already exists, plan should place new test in
+          unit/ not integration/")
+       Empirical evidence: P021 — plan said "tests/integration/test_canonical_view.py",
+       reality: existing "tests/unit/test_canonical_view.py" with SimpleNamespace.
+
+  17c. DB-field semantics grounding — for every "auto-recompute|automatic"
+       claim about a DB field (`<Model>.<field>` regex `[A-Z][a-zA-Z]+\.[a-z_]+`):
+       → grep "<field>" in `<project>/db/models.py` or schema files
+       → `Column = stored` (requires re-validation for changes)
+       → `@property | computed = computed-on-read`
+       → pass: claim matches definition
+       → fail: REVISE_REQUIRED with correction note (e.g., "validation_warnings
+         is a Column (stored), fix requires re-validation of existing records")
+       Empirical evidence: P021 — plan assumed automatic visibility of fix,
+       reality: stored Column, requires re-validation.
+
+  17d. File removal grounding — for every "delete <file>" claim or
+       `must_not_exist: true` assertion:
+       → `ls <path>` — file MUST currently exist (otherwise the claim is meaningless)
+       → pass: file exists OR mapped to "Create then immediately delete" pattern
+       → fail: REVISE_REQUIRED — file does not exist, "delete" is a no-op or
+         pre-condition is unmet
+       Empirical evidence: P019 — plan said "must_not_exist:
+       unifyExtractedSources.ts after fix", reality: file existed with 374 lines
+       after EPIC completion, was not deleted.
+
 STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation quality):
   18. Does every plan step's `step.outputs` array contain concrete file paths
       (no `src/**` wildcards, no `*` glob patterns)?
@@ -561,8 +603,8 @@ STEP OUTPUTS CONCRETENESS (added v2.18.0 — addresses verifier deprivation qual
       explicit `step.expected_count` field stating the expected file count.
 
 EVALUATION:
-  COUNT checks passed out of 18.
-  IF all 18 pass → write plan to disk
+  COUNT checks passed out of 22 (16 original + 17 + 17a-d (4) + 18 = 22).
+  IF all 22 pass → write plan to disk
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
@@ -864,4 +906,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-05-10
