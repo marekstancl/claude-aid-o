@@ -5,6 +5,7 @@
 # Usage:
 #   aid-fsm.sh init <epic_id> <run_id> <total_steps> <mode> <branch> <base_commit> <state_file> [--force]
 #   aid-fsm.sh transition <from> <to> <state_file> [--force]
+#   aid-fsm.sh advance-to-gates <state_file>
 #   aid-fsm.sh get-state <state_file>
 #   aid-fsm.sh verify-state <state_file>
 #   aid-fsm.sh increment-step <state_file> [--force]
@@ -928,6 +929,80 @@ cmd_transition() {
   echo "Transition: $from → $to" >&2
 }
 
+# Atomic gates run + EXECUTE→GATES transition (P035 Phase 1, v2.18.2).
+# Eliminates the chicken-egg precondition fail mode (gates_no_generated_by)
+# observed in P020 (8×) and P021 (4×). Routes through cmd_transition for full
+# precondition validation — single source of truth remains check_preconditions.
+# Atomicity: state changes only on full success path; gates failure leaves
+# state at EXECUTE (never modified).
+cmd_advance_to_gates() {
+  local state_file="${1:?state_file required}"
+  [[ ! -f "$state_file" ]] && { echo "ERROR: state file not found: $state_file" >&2; exit 1; }
+
+  local epic_id run_id current_state current_step total_steps evidence_dir timeline
+  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+  current_state=$(grep '^state:' "$state_file" | awk '{print $2}')
+  current_step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
+  total_steps=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  timeline=$(derive_timeline "$state_file")
+
+  # Cheap pre-flight guards (avoid invoking runner if obvious mismatch).
+  if [[ "$current_state" != "EXECUTE" ]]; then
+    echo "ERROR: advance-to-gates requires state==EXECUTE, found: $current_state" >&2
+    exit 1
+  fi
+  if (( current_step < total_steps )); then
+    echo "ERROR: advance-to-gates requires current_step ($current_step) >= total_steps ($total_steps). Not all steps completed." >&2
+    exit 1
+  fi
+
+  # Resolve execution.yaml + report path (matches /aid-run gate dispatch convention).
+  local execution_yaml="${AID_PROJECT_ROOT:-$(pwd)}/.aid-o/config/execution.yaml"
+  if [[ ! -f "$execution_yaml" ]]; then
+    echo "ERROR: execution.yaml not found at $execution_yaml. Set AID_PROJECT_ROOT or cd to project root." >&2
+    exit 1
+  fi
+  local report_file="${evidence_dir}/gates/gates_report.json"
+
+  # Emit pre-gates audit event (gate runner is about to start).
+  [[ -n "$timeline" ]] && log_event "$timeline" "fsm_pre_gates" \
+    epic_id="$epic_id" run_id="$run_id" \
+    execution_yaml="$execution_yaml" report_file="$report_file"
+
+  # Invoke runner with explicit FSM signal — Step 2 makes runner accept this.
+  local rc=0
+  AID_GATES_TRIGGERED_BY_FSM=1 \
+    "${SCRIPT_DIR}/aid-run-gates.sh" run-all \
+      "$execution_yaml" "$epic_id" "$run_id" \
+      --state-file "$state_file" \
+      --report-file "$report_file" \
+    || rc=$?
+
+  if (( rc == 0 )); then
+    # Gates passed — route through cmd_transition for full precondition validation.
+    # check_preconditions re-validates _generated_by, CP3 outputs, grandfather logic.
+    # The runner just wrote gates_report.json with _generated_by, so the check passes.
+    if cmd_transition EXECUTE GATES "$state_file"; then
+      echo "advance-to-gates: SUCCESS — gates passed, state=GATES"
+      return 0
+    else
+      # Surface cmd_transition error to user; state stays EXECUTE (transition didn't commit).
+      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_advance_to_gates_fail" \
+        reason="transition_check_failed_after_gates_pass" runner_exit="$rc"
+      echo "ERROR: advance-to-gates: gates passed but cmd_transition refused — see error above" >&2
+      return 1
+    fi
+  else
+    # Gates failed — state was never modified, leave at EXECUTE.
+    [[ -n "$timeline" ]] && log_event "$timeline" "fsm_advance_to_gates_fail" \
+      reason="gates_runner_exit_${rc}" runner_exit="$rc"
+    echo "advance-to-gates: FAIL — gates runner exit=$rc, state unchanged (EXECUTE)" >&2
+    return "$rc"
+  fi
+}
+
 cmd_get_state() {
   local state_file="$1"
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
@@ -1281,15 +1356,16 @@ cmd_done_advance() {
 
 # ─── Dispatch ───────────────────────────────────────────────────────────
 case "${1:-}" in
-  init)           shift; cmd_init "$@" ;;
-  transition)     shift; cmd_transition "$@" ;;
-  get-state)      shift; cmd_get_state "$@" ;;
-  verify-state)   shift; cmd_verify_state "$@" ;;
-  increment-step) shift; cmd_increment_step "$@" ;;
-  get-field)      shift; cmd_get_field "$@" ;;
-  set-field)      shift; cmd_set_field "$@" ;;
-  done-advance)   shift; cmd_done_advance "$@" ;;
+  init)              shift; cmd_init "$@" ;;
+  transition)        shift; cmd_transition "$@" ;;
+  advance-to-gates)  shift; cmd_advance_to_gates "$@" ;;
+  get-state)         shift; cmd_get_state "$@" ;;
+  verify-state)      shift; cmd_verify_state "$@" ;;
+  increment-step)    shift; cmd_increment_step "$@" ;;
+  get-field)         shift; cmd_get_field "$@" ;;
+  set-field)         shift; cmd_set_field "$@" ;;
+  done-advance)      shift; cmd_done_advance "$@" ;;
   *)
-    echo "Usage: aid-fsm.sh <init|transition|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
+    echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
     exit 1 ;;
 esac
