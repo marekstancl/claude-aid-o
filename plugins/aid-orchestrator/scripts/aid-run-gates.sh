@@ -14,6 +14,14 @@
 #       _generated_at:  ISO 8601 UTC timestamp
 #       _command_log:   array of {name, command, exit_code, duration_ms} per gate
 #   • System dependency: yq Go-based mikefarah variant (NOT Python kislyuk/yq)
+#
+# Gate command placeholders (substituted by resolve_placeholders before bash -c):
+#   {plan_path}    — absolute realpath of source plan.md, or literal "null" for Fast Mode EPICs
+#   {epic_id}      — EPIC identifier (e.g., E-037-1_2)
+#   {run_id}       — Run identifier within EPIC (e.g., R-E037-1)
+#   {base_commit}  — git SHA at EPIC start (recorded in state.yaml)
+#
+# Unknown {token} → fail-loud exit 1 (introduce new tokens via resolve_placeholders).
 
 set -euo pipefail
 
@@ -22,6 +30,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
+
+# Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
+# Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}.
+# Unknown {<token>} → fail-loud exit 1 (silent pass-through is a debug trap).
+#
+# Args: $1=command string, $2=epic_id, $3=run_id, $4=base_commit, $5=plan_path (may be "null" or empty)
+# Returns: resolved command string on stdout; exit 1 on unknown token.
+resolve_placeholders() {
+  local cmd="$1" epic="$2" run="$3" base="$4" plan="$5"
+
+  cmd="${cmd//\{epic_id\}/$epic}"
+  cmd="${cmd//\{run_id\}/$run}"
+  cmd="${cmd//\{base_commit\}/$base}"
+  cmd="${cmd//\{plan_path\}/$plan}"
+
+  # Fail-loud on any remaining {<token>} — gate authors must not introduce unknown placeholders
+  if [[ "$cmd" =~ \{[a-zA-Z_]+\} ]]; then
+    local bad_token="${BASH_REMATCH[0]}"
+    echo "ERROR: aid-run-gates.sh: unknown placeholder $bad_token in gate command" >&2
+    echo "  Valid tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}" >&2
+    return 1
+  fi
+
+  printf '%s' "$cmd"
+}
 
 run_gate() {
   local gate_name="$1"
@@ -132,6 +165,15 @@ run_all_gates() {
   local report_path="${report_file:-}"
   [[ -z "$report_path" ]] && report_path=".aid-o/work/evidence/${epic_id}/${run_id}/gates/gates_report.json"
 
+  # Phase 2 (P037) — pull base_commit and plan_path from state.yaml for placeholder resolution.
+  # Falls back to empty/null when state.yaml is absent (e.g., legacy/source-mode invocations).
+  local base_commit_resolved="" plan_path_resolved="null"
+  if [[ -n "$state_file" && -f "$state_file" ]]; then
+    base_commit_resolved=$(grep '^base_commit:' "$state_file" 2>/dev/null | awk '{print $2}' || echo "")
+    plan_path_resolved=$(grep '^plan_path:' "$state_file" 2>/dev/null | awk '{print $2}' || echo "null")
+    [[ -z "$plan_path_resolved" ]] && plan_path_resolved="null"
+  fi
+
   # ─── gate_runner_start (P032 Step 3) ──────────────────────────────
   local gate_count gate_names_json
   gate_count=$(yq '.gates | length' "$execution_yaml")
@@ -153,14 +195,27 @@ run_all_gates() {
   while IFS= read -r gate_name; do
     [[ -z "$gate_name" ]] && continue
 
-    local cmd required max_retries timeout_s
+    local cmd required max_retries timeout_s pass_criteria
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
     required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
     timeout_s=$(yq ".gates.\"${gate_name}\".timeout_seconds // 60" "$execution_yaml")
+    pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
 
     if [[ -z "$cmd" || "$cmd" == "null" ]]; then
       echo "WARN: gate '${gate_name}' has no command — skipping" >&2
+      continue
+    fi
+
+    # Phase 2 (P037) — resolve {token} placeholders before bash -c execution.
+    # Unknown tokens fail-loud — mark gate as fail and continue to next gate.
+    local resolved_cmd
+    if ! resolved_cmd=$(resolve_placeholders "$cmd" "$epic_id" "$run_id" "$base_commit_resolved" "$plan_path_resolved"); then
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="fail" reason="unknown_placeholder"
+      overall="fail"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0}"
       continue
     fi
 
@@ -169,9 +224,17 @@ run_all_gates() {
     local gate_result="" attempt=0 gate_exit=0
     for (( attempt=1; attempt<=max_retries+1; attempt++ )); do
       gate_exit=0
-      gate_result=$(run_gate "$gate_name" "$cmd" "$timeout_s" /dev/null) || gate_exit=$?
+      gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       local r
       r=$(echo "$gate_result" | jq -r '.result')
+      # Phase 2 (P037) — exit code 2 counts as pass when gate's pass_criteria mentions "exit 2"
+      # (graceful skip pattern, e.g., aid-plan-diff.sh Fast Mode / legacy plan).
+      local gate_ec
+      gate_ec=$(echo "$gate_result" | jq -r '.exit_code')
+      if [[ "$r" != "pass" && "$gate_ec" == "2" && "$pass_criteria" == *"exit 2"* ]]; then
+        gate_result=$(echo "$gate_result" | jq '.result = "pass"')
+        r="pass"
+      fi
       [[ "$r" == "pass" ]] && break
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done

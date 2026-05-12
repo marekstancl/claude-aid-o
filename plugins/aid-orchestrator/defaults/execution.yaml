@@ -25,8 +25,8 @@ gates:
     required: false
     type: deterministic
     command: |
-      api_changed=$(git diff --name-only {base}..HEAD | grep -cE 'routes/|api/|endpoints/|models/|schemas/|openapi/' || true)
-      doc_changed=$(git diff --name-only {base}..HEAD | grep -cE 'README|docs/|CHANGELOG|\.md$' || true)
+      api_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'routes/|api/|endpoints/|models/|schemas/|openapi/' || true)
+      doc_changed=$(git diff --name-only {base_commit}..HEAD | grep -cE 'README|docs/|CHANGELOG|\.md$' || true)
       if [[ $api_changed -gt 0 && $doc_changed -eq 0 ]]; then
         echo "WARN: API files changed ($api_changed) but no docs updated"; exit 1
       fi
@@ -36,6 +36,15 @@ gates:
     command: "plugins/aid-orchestrator/scripts/gates/scope-check.sh .aid-o/work/evidence/{epic_id}/allowed_paths.txt {base_commit}"
     required: true
     type: deterministic
+    max_retries: 0
+
+  plan_diff:
+    description: "Plan AC blocks materially satisfied in codebase HEAD"
+    required: true
+    type: deterministic
+    command: "plugins/aid-orchestrator/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit}"
+    timeout_seconds: 120
+    pass_criteria: "exit 0 (all present) or exit 2 (legacy plan / Fast Mode graceful skip)"
     max_retries: 0
 
   lint_pass:

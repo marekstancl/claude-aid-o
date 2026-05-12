@@ -805,12 +805,35 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
-  local force="false"
   local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-  if [[ "${8:-}" == "--force" ]]; then
-    fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:9}"
-    force="true"
-  fi
+
+  # Phase 2 (P037) — parse optional named flags after 7 positional args.
+  # Detect --plan <path> and --force in either order ($8/$9). Both are optional.
+  local plan_path_arg=""
+  local force="false"
+  local i=8
+  while [[ $i -le $# ]]; do
+    case "${!i}" in
+      --plan)
+        i=$((i + 1))
+        plan_path_arg="${!i:-}"
+        ;;
+      --plan=*)
+        plan_path_arg="${!i#--plan=}"
+        ;;
+      --force)
+        # Forwards ${@:i+1}; callers must pass --plan before --force when both present
+        # (fsm_handle_force_override consumes remaining args as reason payload).
+        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:i+1}"
+        force="true"
+        ;;
+      *)
+        # Unknown flag at this position — preserved as before; existing callers don't
+        # pass anything past $8 unless it's --force, so safe to ignore here.
+        ;;
+    esac
+    i=$((i + 1))
+  done
 
   # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
   # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
@@ -1002,6 +1025,15 @@ except: pass
     plan_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
     echo "plan_json_hash: $plan_hash" >> "$state_file"
   fi
+
+  # Phase 2 (P037) — write plan_path field with realpath-normalized absolute path or null.
+  # Gate command runs via bash -c from unknown cwd; we need absolute paths so
+  # aid-plan-diff.sh receives a usable --plan argument. "null" = Fast Mode (no plan).
+  local plan_path_value="null"
+  if [[ -n "$plan_path_arg" ]]; then
+    plan_path_value=$(realpath "$plan_path_arg" 2>/dev/null || echo "$plan_path_arg")
+  fi
+  echo "plan_path: $plan_path_value" >> "$state_file"
 
   echo "Initialized state: READY" >&2
 }
