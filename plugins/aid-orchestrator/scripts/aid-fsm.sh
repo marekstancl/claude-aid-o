@@ -481,9 +481,12 @@ evaluate_compliance_checks() {
   local plan_diff_file="${evidence_dir}/plan-diff.json"
 
   if [[ -f "$plan_diff_file" ]]; then
+    # Single jq read for both fields — /simplify efficiency finding (was 2 forks).
     local overall_verdict ac_count
-    overall_verdict=$(jq -r '.overall_verdict // empty' "$plan_diff_file" 2>/dev/null || echo "")
-    ac_count=$(jq -r '.ac_count // 0' "$plan_diff_file" 2>/dev/null || echo "0")
+    IFS=$'\t' read -r overall_verdict ac_count < <(
+      jq -r '[(.overall_verdict // ""), (.ac_count // 0)] | @tsv' "$plan_diff_file" 2>/dev/null \
+        || printf '\t0'
+    )
 
     if [[ "$ac_count" -eq 0 || "$overall_verdict" == "skipped" ]]; then
       plan_ac_match=null  # graceful skip — legacy plan or no AC patterns

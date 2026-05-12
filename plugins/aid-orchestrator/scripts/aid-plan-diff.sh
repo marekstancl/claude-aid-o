@@ -223,7 +223,9 @@ if [[ "$ac_count" -eq 0 ]]; then
 fi
 
 present_count=0; absent_count=0
-results_json="[]"
+# Collect per-AC NDJSON lines for batched slurp (avoids O(n) growing-payload
+# re-parse per AC — measurable at 44+ ACs per /simplify efficiency review).
+ac_result_lines=()
 
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
@@ -239,15 +241,22 @@ while IFS= read -r line; do
 
   # NOTE: jq reserves `label` as a keyword (label/break syntax), so we pass it
   # as $lbl. Same for `verdict` — rename to $vrd defensively.
-  results_json=$(echo "$results_json" | jq \
+  ac_result_lines+=("$(jq -nc \
     --arg lbl "$ac_label" \
     --arg text "$ac_text" \
     --arg ptype "$pat_type" \
     --arg vrd "$verdict" \
     --arg evidence "$evidence" \
     --argjson dur "$duration_ms" \
-    '. += [{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}]')
+    '{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}')")
 done <<< "$ac_lines"
+
+# Single jq slurp builds final results array — O(1) jq invocation vs O(n).
+if (( ${#ac_result_lines[@]} == 0 )); then
+  results_json="[]"
+else
+  results_json=$(printf '%s\n' "${ac_result_lines[@]}" | jq -sc '.')
+fi
 
 overall="pass"
 [[ "$absent_count" -gt 0 ]] && overall="fail"
