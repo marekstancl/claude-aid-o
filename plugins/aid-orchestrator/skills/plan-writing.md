@@ -678,11 +678,53 @@ DESIGN DEFEAT DETECTION (added v2.20.0 — addresses systematic semantic gap
         • Q1 ambiguous (no clear precondition) → escalate to PM clarification
           before #19 verdict
 
+PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
+                                  goalpost shift class identified in P019 F1+F2,
+                                  P021 F4, P022 F6, P023 F7; orthogonal to #17e
+                                  CLI grounding and #19 Design Defeat):
+  20. Plan-level AC section ## Acceptance Criteria must use executable verification_pattern.
+      Three sub-rules — all must pass:
+
+      20a. Every AC checkbox má sibling verification_pattern yaml block.
+           → Extract AC labels: `grep "^- \[ \] AC" <plan>` → list
+           → For each AC label: locate next ```yaml fenced block within 5 lines
+           → Block must start with `verification_pattern:`
+           → Missing block → REVISE_REQUIRED — list ACs missing patterns
+
+      20b. Every verification_pattern.type je jeden z 3 valid values.
+           → Valid types: "cmd" | "must_not_exist" | "must_contain"
+           → Invalid type (typo like "cmnd" or unsupported "must_match") →
+             REVISE_REQUIRED — list invalid AC labels + valid types
+
+      20c. Every pattern arguments are self-contained — no placeholder brackets.
+           → REJECT regex matches: `<[a-z_]+>` in cmd/file/regex/expected_exit fields
+                (e.g., `cmd: "test <path>"` is REJECT; `cmd: "test ./tests/"` is ACCEPT)
+           → REJECT unresolved shell variable refs: `\$[A-Z_]+` without explicit local
+             resolution in pattern context (e.g., `$REPO_ROOT/tests/` is REJECT;
+             `tests/` is ACCEPT)
+           → Placeholder/unresolved → REVISE_REQUIRED with concrete example
+
+      Edge cases:
+        • Legacy plans (P001-P036) bez ## Acceptance Criteria section nebo bez
+          verification_pattern bloků → CHECK #20 SKIPS (no violation). Detection:
+          if plan grep returns 0 AC labels → mark "plan_diff: skipped (legacy)".
+        • Plan has ## Acceptance Criteria section but 0 AC checkboxes → REVISE_REQUIRED
+          (section is template placeholder — must populate or remove).
+        • AC label has yaml block but missing `verification_pattern:` key (just other
+          yaml content) → REVISE_REQUIRED for that AC.
+
+      Empirical evidence: P022 F6 (2026-05-09) — plan Step 7 AC specified Playwright
+      E2E verification for Aneta+Hana sessions. Implementation substituted backend
+      API introspection without recording goalpost shift. tests_pass + scope_check
+      passed; DONE reached. Without #20-style executable AC check, the substitution
+      was invisible to gates.
+
 EVALUATION:
-  COUNT checks passed out of 24 (16 original + 17 + 17a-e (5) + 18 + 19 = 24).
-  IF all 24 pass → write plan to disk
+  COUNT checks passed out of 27 (24 existing + 20a + 20b + 20c).
+  IF all 27 pass → write plan to disk
   Note: Check #19 activates only for `type: bug-fix` plans or via pre-screening
   heuristic above. For non-applicable plans, mark #19 as N/A (counts as PASS).
+  Note: Check #20 skips for legacy plans (no AC section found); not a violation.
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
@@ -984,4 +1026,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-05-10
+**Last Updated:** 2026-05-12

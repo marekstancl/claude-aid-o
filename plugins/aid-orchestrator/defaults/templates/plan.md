@@ -112,6 +112,44 @@ This plan is type: `{regular | bug-fix | refactor | docs}` (per frontmatter `typ
 - [ ] All items VERIFIED OR mapped to a Create step in this plan
 - [ ] PM acknowledges any ABSENT items as out-of-scope risks (with rationale)
 
+## Acceptance Criteria
+
+> Plan-level AC (distinct from per-step AC). Each AC describes a state that
+> must hold in the codebase after EXECUTE+GATES+DONE. Each AC has a
+> `verification_pattern` block that `aid-plan-diff.sh` runs against codebase
+> HEAD to produce per-AC verdict (`present`|`absent`).
+>
+> **Three pattern types:**
+> - `cmd` — run shell command, check exit code matches `expected_exit`
+> - `must_not_exist` — file must be absent
+> - `must_contain` — file exists AND contains regex match (any matching line suffices)
+>
+> Patterns must be self-contained (no `<placeholder>` brackets, no unresolved variables).
+> Plan-writing Completeness Gate sub-check #20 enforces this for new plans.
+
+- [ ] AC1: {one-sentence claim}
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "{concrete shell command}"
+    expected_exit: 0
+  ```
+
+- [ ] AC2: {one-sentence claim}
+  ```yaml
+  verification_pattern:
+    type: must_not_exist
+    file: "{concrete file path relative to repo root}"
+  ```
+
+- [ ] AC3: {one-sentence claim}
+  ```yaml
+  verification_pattern:
+    type: must_contain
+    file: "{concrete file path}"
+    regex: "{regex — any line match suffices}"
+  ```
+
 ## Risks
 
 | Risk | Probability | Impact | Mitigation |
@@ -129,4 +167,4 @@ This plan is type: `{regular | bug-fix | refactor | docs}` (per frontmatter `typ
 
 ---
 
-**Last Updated:** 2026-05-10
+**Last Updated:** 2026-05-12
