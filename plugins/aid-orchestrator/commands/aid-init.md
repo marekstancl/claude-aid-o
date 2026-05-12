@@ -217,11 +217,25 @@ After workspace creation, discover and cache the plugin installation path:
    ```yaml
    plugin_path: "{resolved absolute path}"
    discovered_at: "{ISO 8601}"
+   dispatch_mode: subagent  # subagent | inline — override per project policy
    ```
 4. If glob returns multiple matches → use first, warn PM
 5. If glob returns nothing → warn: "Plugin scripts not found. `/aid-run` may not work."
 
 This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is always overwritten (not idempotent — path may change after plugin update).
+
+### Dispatch Mode Configuration
+
+`.aid-o/config/plugin.yaml` field `dispatch_mode` controls verifier dispatch enforcement:
+
+- `subagent` (default) — pipeline.md dispatches Agent() subagents; compliance check
+  cross-references _generated_by metadata against timeline.jsonl dispatch events.
+- `inline` — for projects with no-subagent policy (e.g., WAN). LLM writes
+  verifier-output-*.md directly in main context with _generated_by format
+  `main-context@<git-HEAD-sha>`; compliance check validates format + verifies SHA
+  exists in repository.
+
+Default subagent for new projects. WAN-style projects set `inline` manually after init.
 
 ## Memory Deep Scan (automatic)
 
@@ -375,4 +389,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-05-05
+**Last Updated:** 2026-05-12
