@@ -261,7 +261,11 @@ try_telegram_alert() {
 #     must resolve in the project's git object database.
 # Returns one of: "verified", "inline", "fabricated", "unknown".
 verify_provenance() {
-  local verifier_output_file=$1 focus=$2 step_n=$3 dispatch_mode=$4 timeline_file=$5 window_s=$6
+  # IMP-103 (v2.20.2): $3 (step_n) is intentionally unused — kept in signature for
+  # API stability and future per-step forensics (e.g. error-path attribution by
+  # step index). Renamed to _step_n to mark unused without shifting positional args
+  # at the 3 call sites (CP2 loop + CP3 code-review + CP3 security).
+  local verifier_output_file=$1 focus=$2 _step_n=$3 dispatch_mode=$4 timeline_file=$5 window_s=$6
 
   local generated_by generated_at
   generated_by=$(grep '^_generated_by:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
@@ -1516,17 +1520,24 @@ cmd_done_advance() {
 }
 
 # ─── Dispatch ───────────────────────────────────────────────────────────
-case "${1:-}" in
-  init)              shift; cmd_init "$@" ;;
-  transition)        shift; cmd_transition "$@" ;;
-  advance-to-gates)  shift; cmd_advance_to_gates "$@" ;;
-  get-state)         shift; cmd_get_state "$@" ;;
-  verify-state)      shift; cmd_verify_state "$@" ;;
-  increment-step)    shift; cmd_increment_step "$@" ;;
-  get-field)         shift; cmd_get_field "$@" ;;
-  set-field)         shift; cmd_set_field "$@" ;;
-  done-advance)      shift; cmd_done_advance "$@" ;;
-  *)
-    echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
-    exit 1 ;;
-esac
+# BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
+# only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
+# (`source aid-fsm.sh`), skip the case so test fixtures (e.g. test-anti-
+# fabrication.bats `_load_aid_fsm` shim) can pull in cmd_* + verify_provenance
+# functions without the unknown-arg exit 1 killing the test process.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  case "${1:-}" in
+    init)              shift; cmd_init "$@" ;;
+    transition)        shift; cmd_transition "$@" ;;
+    advance-to-gates)  shift; cmd_advance_to_gates "$@" ;;
+    get-state)         shift; cmd_get_state "$@" ;;
+    verify-state)      shift; cmd_verify_state "$@" ;;
+    increment-step)    shift; cmd_increment_step "$@" ;;
+    get-field)         shift; cmd_get_field "$@" ;;
+    set-field)         shift; cmd_set_field "$@" ;;
+    done-advance)      shift; cmd_done_advance "$@" ;;
+    *)
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
+      exit 1 ;;
+  esac
+fi

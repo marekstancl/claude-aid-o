@@ -81,10 +81,14 @@ export -f log_event log_info log_warn log_error
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
   fn="$1"; shift
   case "$fn" in
+    # IMP-104 (v2.20.2 cleanup): all 4 functions are dispatchable, but only
+    # log_event writes to the timeline file. log_info/log_warn/log_error are
+    # stderr-only severity-prefixed echoes — useful for shell pipelines but
+    # invisible to compliance check + downstream evidence consumers.
     log_event|log_info|log_warn|log_error) "$fn" "$@" ;;
     *)
       echo "ERROR: unknown function: $fn" >&2
-      echo "Available: log_event, log_info, log_warn, log_error" >&2
+      echo "Available: log_event (timeline write), log_info/log_warn/log_error (stderr only)" >&2
       echo "Library mode: source $0 && <fn> <args>" >&2
       exit 1
       ;;

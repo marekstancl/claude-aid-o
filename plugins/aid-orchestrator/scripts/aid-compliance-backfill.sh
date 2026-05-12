@@ -149,21 +149,35 @@ generate_pre_compliance() {
 
 # Phase 1 (P037) — second-pass backfill: add provenance fields to EXISTING compliance.json
 # Idempotent merge: if provenance fields already present (any value), skip; else add "unknown".
+#
+# Exit codes (IMP-102 — v2.20.2 cleanup, split from previous "return 1 means anything"):
+#   0 → fields added successfully
+#   1 → jq invocation failed (corrupted compliance.json or jq error)
+#   2 → already has cp2_per_step_provenance field (idempotent skip, not an error)
+#
+# Type note (IMP-100 — v2.20.2 cleanup): cp2_per_step_provenance shape MUST match
+# live writer in aid-fsm.sh evaluate_compliance_checks, which emits a JSON array
+# (one entry per CP2 step) — see aid-fsm.sh:498 + cp2_prov_array_json composition
+# at aid-fsm.sh:440-444. Backfill writes ["unknown"] (single-element array) rather
+# than scalar "unknown" so Phase 2 queries doing `| length` or `| .[0]` work on both
+# live and backfilled compliance.json files.
 backfill_provenance() {
   local compliance_file=$1
 
   # Skip if already has provenance fields (don't overwrite real values)
-  jq -e '.checks.verifier_outputs | has("cp2_per_step_provenance")' "$compliance_file" >/dev/null 2>&1 && return 1
+  jq -e '.checks.verifier_outputs | has("cp2_per_step_provenance")' "$compliance_file" >/dev/null 2>&1 && return 2
 
   # Merge provenance fields with "unknown" + append explanatory note
-  jq '.checks.verifier_outputs += {
-    cp2_per_step_provenance: "unknown",
+  if jq '.checks.verifier_outputs += {
+    cp2_per_step_provenance: ["unknown"],
     cp3_code_review_provenance: "unknown",
     cp3_security_provenance: "unknown",
     provenance_aggregate: "unknown"
-  } | .notes += ["P037 backfill: provenance fields added with value unknown — pre-Phase-1 baseline, no retroactive fail"]' "$compliance_file" > "${compliance_file}.tmp" \
-    && mv "${compliance_file}.tmp" "$compliance_file" \
-    && return 0
+  } | .notes += ["P037 backfill: provenance fields added with value unknown — pre-Phase-1 baseline, no retroactive fail"]' "$compliance_file" > "${compliance_file}.tmp" 2>/dev/null \
+    && mv "${compliance_file}.tmp" "$compliance_file" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "${compliance_file}.tmp" 2>/dev/null
   return 1
 }
 
@@ -232,17 +246,28 @@ main() {
   # === Step C (P037 Phase 1): second-pass — backfill provenance on EXISTING compliance.json files ===
   # Self-contained loop: re-iterates evidence roots with own find, does NOT depend on
   # run_dirs local var from Step A/B nested loops (which goes out of scope after line 213).
+  #
+  # IMP-102 (v2.20.2): split exit codes for forensic clarity.
+  #   backfill_provenance exit 0 → counter++ (success)
+  #   backfill_provenance exit 1 → errors++ (jq failed; corrupted compliance.json — visible in summary)
+  #   backfill_provenance exit 2 → skipped++ (idempotent skip; already migrated)
   echo "Step C: Backfilling provenance fields on existing compliance.json files..."
   local provenance_backfilled=0
+  local provenance_skipped=0
+  local provenance_errors=0
   for root in "${evidence_roots[@]}"; do
     [[ ! -d "$root" ]] && continue
     while IFS= read -r compliance; do
-      if backfill_provenance "$compliance"; then
-        provenance_backfilled=$((provenance_backfilled + 1))
-      fi
+      backfill_provenance "$compliance"
+      case $? in
+        0) provenance_backfilled=$((provenance_backfilled + 1)) ;;
+        2) provenance_skipped=$((provenance_skipped + 1)) ;;
+        *) provenance_errors=$((provenance_errors + 1))
+           echo "  WARN: backfill_provenance jq failure on $compliance" >&2 ;;
+      esac
     done < <(find "$root" -mindepth 3 -name "compliance.json" 2>/dev/null)
   done
-  echo "  Provenance fields backfilled: $provenance_backfilled"
+  echo "  Provenance: backfilled=${provenance_backfilled} skipped=${provenance_skipped} errors=${provenance_errors}"
 
   cat <<EOF
 Backfill complete:
@@ -250,6 +275,8 @@ Backfill complete:
   ${skipped} already present (skipped, idempotent)
   ${stamped} state.yaml stamped with created_at (mid-FSM unblock per CP1 M2)
   ${provenance_backfilled} provenance fields backfilled (P037 Phase 1)
+  ${provenance_skipped} provenance already-present (idempotent skip)
+  ${provenance_errors} provenance backfill errors (corrupted compliance.json — review above)
 EOF
 }
 
