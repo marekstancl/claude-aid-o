@@ -251,8 +251,79 @@ try_telegram_alert() {
 # write_compliance_json wraps it with run metadata + overall verdict + writes
 # the per-EPIC compliance.json + emits the `compliance_written` timeline event.
 
+# ─── P037 Step 3: Provenance Verification Helper ──────────────────────────
+# verify_provenance cross-references a verifier output's _generated_by/_generated_at
+# metadata against the actual dispatch evidence:
+#   - subagent mode: timeline.jsonl must show verifier_dispatch_start +
+#     verifier_dispatch_complete events for this focus within ±window_s of
+#     the claimed _generated_at timestamp.
+#   - inline mode: _generated_by must match main-context@<sha>, and the SHA
+#     must resolve in the project's git object database.
+# Returns one of: "verified", "inline", "fabricated", "unknown".
+verify_provenance() {
+  local verifier_output_file=$1 focus=$2 step_n=$3 dispatch_mode=$4 timeline_file=$5 window_s=$6
+
+  local generated_by generated_at
+  generated_by=$(grep '^_generated_by:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
+  generated_at=$(grep '^_generated_at:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
+
+  [[ -z "$generated_by" || -z "$generated_at" ]] && { echo "fabricated"; return; }
+
+  case "$dispatch_mode" in
+    subagent)
+      # Cross-reference timeline ±window_s
+      [[ ! -f "$timeline_file" ]] && { echo "fabricated"; return; }
+      local gen_epoch
+      gen_epoch=$(date -d "$generated_at" +%s 2>/dev/null || echo "0")
+      [[ "$gen_epoch" == "0" ]] && { echo "fabricated"; return; }
+      local min_epoch=$((gen_epoch - window_s))
+      local max_epoch=$((gen_epoch + window_s))
+
+      # TZ=UTC required: jq <1.7 fromdateiso8601 silently honors local TZ even with Z
+      # suffix, producing 1-3600s offset on non-UTC hosts (CEST/PST/etc). Discovered
+      # during P037 Step 5 bats smoke test (jq 1.6 on CEST host). $min/$max are UTC
+      # epochs from `date -d`; force jq to match.
+      local start_found complete_found
+      start_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
+        [.[] | select(.event == "verifier_dispatch_start" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
+      complete_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
+        [.[] | select(.event == "verifier_dispatch_complete" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
+
+      if [[ "$start_found" -ge 1 && "$complete_found" -ge 1 ]]; then
+        echo "verified"
+      else
+        echo "fabricated"
+      fi
+      ;;
+    inline)
+      # Validate main-context@<sha> format + SHA exists in repo
+      if [[ "$generated_by" =~ ^main-context@([a-f0-9]{7,40})$ ]]; then
+        local sha="${BASH_REMATCH[1]}"
+        if command -v git >/dev/null 2>&1 && git -C "$project_root" cat-file -e "$sha" 2>/dev/null; then
+          echo "inline"
+        else
+          echo "fabricated"
+        fi
+      else
+        echo "fabricated"
+      fi
+      ;;
+    *)
+      echo "fabricated"
+      ;;
+  esac
+}
+
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
+
+  # P037 Step 3: dispatch_mode resolution (used by verify_provenance below).
+  # Defaults: subagent + 60s window if yq missing or fields absent.
+  local dispatch_mode timeline_window_s
+  dispatch_mode=$(yq -r '.dispatch_mode // "subagent"' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "subagent")
+  [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]] && dispatch_mode="subagent"
+  timeline_window_s=$(yq -r '.dispatch.timeline_window_seconds // 60' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null || echo "60")
+  [[ -z "$timeline_window_s" || "$timeline_window_s" == "null" ]] && timeline_window_s=60
 
   # branch_correct: state.yaml.branch matches Session A naming convention
   # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
@@ -287,6 +358,10 @@ evaluate_compliance_checks() {
   # Session B: verifier_outputs object schema (CP2 per-step + CP3 code-review + security)
   local cp2_dispatched cp2_verdict cp3_cr_d cp3_cr_v cp3_sec_d cp3_sec_v aggregate
 
+  # P037 Step 3: per-step provenance tracking (parallel to dispatched/verdict).
+  local -a cp2_provenances=()
+  local cp3_cr_provenance="unknown" cp3_sec_provenance="unknown"
+
   # CP2 per-step: ALL step-*-verify.md must have a valid verifier-output-step-N.md
   local total_steps cp2_passed cp2_failed
   total_steps=$(find "$evidence_dir" -maxdepth 1 -name "step-*-verify.md" 2>/dev/null | wc -l)
@@ -302,6 +377,13 @@ evaluate_compliance_checks() {
       local _v_status
       _v_status=$(grep '^verdict:' "$vo" 2>/dev/null | awk '{print $2}' || true)
       [[ "$_v_status" == "fail" ]] && cp2_failed=$((cp2_failed + 1))
+      # P037 Step 3: provenance cross-reference for this verifier output
+      local _prov
+      _prov=$(verify_provenance "$vo" "cp2-step-${step_n}" "$step_n" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
+      cp2_provenances+=("$_prov")
+    else
+      # Missing or incomplete verifier output → unknown provenance for this step
+      cp2_provenances+=("unknown")
     fi
   done
 
@@ -323,8 +405,11 @@ evaluate_compliance_checks() {
     local _cp3_cr_v
     _cp3_cr_v=$(grep '^verdict:' "$cp3_cr_file" 2>/dev/null | awk '{print $2}' || true)
     cp3_cr_v="\"${_cp3_cr_v:-unknown}\""
+    # P037 Step 3: provenance cross-reference
+    cp3_cr_provenance=$(verify_provenance "$cp3_cr_file" "cp3-code-review" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
   else
     cp3_cr_d=false; cp3_cr_v=null
+    cp3_cr_provenance="unknown"
   fi
 
   # CP3 security verifier output
@@ -334,8 +419,11 @@ evaluate_compliance_checks() {
     local _cp3_sec_v
     _cp3_sec_v=$(grep '^verdict:' "$cp3_sec_file" 2>/dev/null | awk '{print $2}' || true)
     cp3_sec_v="\"${_cp3_sec_v:-unknown}\""
+    # P037 Step 3: provenance cross-reference
+    cp3_sec_provenance=$(verify_provenance "$cp3_sec_file" "cp3-security" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
   else
     cp3_sec_d=false; cp3_sec_v=null
+    cp3_sec_provenance="unknown"
   fi
 
   # aggregate: all three dispatched = true; null if CP2 is N/A (0 steps)
@@ -347,17 +435,58 @@ evaluate_compliance_checks() {
     aggregate=false
   fi
 
+  # P037 Step 3: per-step CP2 provenance as a JSON array (auditable per step).
+  local cp2_prov_array_json
+  if (( ${#cp2_provenances[@]} == 0 )); then
+    cp2_prov_array_json='[]'
+  else
+    cp2_prov_array_json=$(printf '%s\n' "${cp2_provenances[@]}" | jq -R . | jq -sc .)
+  fi
+
+  # P037 Step 3: provenance_aggregate — worst-of summary across all dispatches.
+  #   fabricated > mixed > all_inline > all_verified > all_fabricated (impossible if any verified/inline)
+  # Semantics: if any single provenance is "fabricated", aggregate is "fabricated".
+  # Else if all non-unknown are "verified" → "all_verified".
+  # Else if all non-unknown are "inline" → "all_inline".
+  # Else "mixed". If everything is unknown → "unknown".
+  local all_verified=true all_inline=true any_fabricated=false any_known=false
+  local p
+  for p in "${cp2_provenances[@]}" "$cp3_cr_provenance" "$cp3_sec_provenance"; do
+    [[ -z "$p" || "$p" == "unknown" ]] && continue
+    any_known=true
+    [[ "$p" == "fabricated" ]] && any_fabricated=true
+    [[ "$p" != "verified" ]] && all_verified=false
+    [[ "$p" != "inline" ]] && all_inline=false
+  done
+
+  local prov_agg
+  if $any_fabricated; then
+    prov_agg='"fabricated"'
+  elif ! $any_known; then
+    prov_agg='"unknown"'
+  elif $all_verified; then
+    prov_agg='"all_verified"'
+  elif $all_inline; then
+    prov_agg='"all_inline"'
+  else
+    prov_agg='"mixed"'
+  fi
+
   jq -nc \
-    --argjson bc      "$branch_correct" \
-    --argjson eyp     "$exec_yaml_present" \
-    --argjson ggb     "$gates_genby" \
-    --argjson cp2_d   "$cp2_dispatched" \
-    --argjson cp2_v   "$cp2_verdict" \
-    --argjson cp3crd  "$cp3_cr_d" \
-    --argjson cp3crv  "$cp3_cr_v" \
-    --argjson cp3secd "$cp3_sec_d" \
-    --argjson cp3secv "$cp3_sec_v" \
-    --argjson agg     "$aggregate" \
+    --argjson bc          "$branch_correct" \
+    --argjson eyp         "$exec_yaml_present" \
+    --argjson ggb         "$gates_genby" \
+    --argjson cp2_d       "$cp2_dispatched" \
+    --argjson cp2_v       "$cp2_verdict" \
+    --argjson cp2_prov    "$cp2_prov_array_json" \
+    --argjson cp3crd      "$cp3_cr_d" \
+    --argjson cp3crv      "$cp3_cr_v" \
+    --arg     cp3cr_prov  "$cp3_cr_provenance" \
+    --argjson cp3secd     "$cp3_sec_d" \
+    --argjson cp3secv     "$cp3_sec_v" \
+    --arg     cp3sec_prov "$cp3_sec_provenance" \
+    --argjson agg         "$aggregate" \
+    --argjson prov_agg    "$prov_agg" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
@@ -366,11 +495,15 @@ evaluate_compliance_checks() {
       verifier_outputs: {
         cp2_per_step_dispatched:    $cp2_d,
         cp2_per_step_verdict:       $cp2_v,
+        cp2_per_step_provenance:    $cp2_prov,
         cp3_code_review_dispatched: $cp3crd,
         cp3_code_review_verdict:    $cp3crv,
+        cp3_code_review_provenance: $cp3cr_prov,
         cp3_security_dispatched:    $cp3secd,
         cp3_security_verdict:       $cp3secv,
-        aggregate:                  $agg
+        cp3_security_provenance:    $cp3sec_prov,
+        aggregate:                  $agg,
+        provenance_aggregate:       $prov_agg
       },
       dod_present: null
     }'
@@ -447,6 +580,23 @@ write_compliance_json() {
   # verifier_outputs is now an object — use type-aware extraction for backward compat
   # with any pre-Session-B compliance.json files that have boolean/null there.
   # null counts as pass (= "not yet measured in this era").
+  local overall_pre notes_json
+  overall_pre=$(echo "$checks" | jq -r '
+    [.branch_correct, .execution_yaml_present, .gates_generated_by,
+     (.verifier_outputs | if type == "object" then .aggregate else . end)]
+    | all(. == true or . == null)
+    | if . then "pass" else "fail" end' 2>/dev/null || echo "fail")
+  notes_json='[]'
+
+  # P037 Step 3: provenance_aggregate fabricated override — if any verifier output
+  # has unverifiable _generated_by metadata, force overall=fail with explanation.
+  local prov_agg_value
+  prov_agg_value=$(echo "$checks" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
+  if [[ "$prov_agg_value" == "fabricated" ]]; then
+    overall_pre="fail"
+    notes_json=$(jq -nc --arg n "provenance_aggregate: fabricated — at least one verifier output has unverifiable _generated_by metadata" '[$n]')
+  fi
+
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
@@ -454,19 +604,16 @@ write_compliance_json() {
     --argjson chks "$checks" \
     --argjson fc "$force_count" \
     --argjson fr "$force_reasons" \
+    --arg     ovr "$overall_pre" \
+    --argjson nts "$notes_json" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
       checks: $chks,
       force_override_count: $fc,
       force_override_reasons: $fr,
-      overall: (
-        [$chks.branch_correct, $chks.execution_yaml_present, $chks.gates_generated_by,
-         ($chks.verifier_outputs | if type == "object" then .aggregate else . end)]
-        | all(. == true or . == null)
-        | if . then "pass" else "fail" end
-      ),
-      notes: []
+      overall: $ovr,
+      notes: $nts
     }' > "$compliance_file" || {
     log_warn "compliance.json write failed for ${compliance_file} — skipping (telemetry is best-effort)"
     return 0

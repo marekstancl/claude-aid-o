@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.20.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.20.1
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.20.0** (current) — Plan-quality enforcement (P036): Completeness Gate sub-check 17e (CLI invocation grounding) + check #19 (Design Defeat Detection for `type: bug-fix` plans); `## Plan Type` taxonomy in template (regular | bug-fix | refactor | docs); `/aid-plan write` Step 9 (CP1 review) + EVIDENCE REQUIREMENT in reviewer prompt; `test-plan-quality-enforcement.sh` smoke test
+- **v2.20.1** (current) — Verifier provenance verification (P037 Phase 1): timeline dispatch events around all CP1/CP2/CP3 verifier `Agent()` calls; `evaluate_compliance_checks` cross-references `_generated_by` against `timeline.jsonl` (±60s window) or validates `main-context@<sha>` for inline mode; `aid-compliance-backfill.sh` Step C idempotent merge for pre-Phase-1 compliance.json; `aid-stage-log.sh` CLI dispatcher; TZ=UTC fix for jq fromdateiso8601 on non-UTC hosts; `test-anti-fabrication.bats` (4 tests).
+- **v2.20.0** — Plan-quality enforcement (P036): Completeness Gate sub-check 17e (CLI invocation grounding) + check #19 (Design Defeat Detection for `type: bug-fix` plans); `## Plan Type` taxonomy in template (regular | bug-fix | refactor | docs); `/aid-plan write` Step 9 (CP1 review) + EVIDENCE REQUIREMENT in reviewer prompt; `test-plan-quality-enforcement.sh` smoke test
 - **v2.19.1** — `aid-release.sh` CHANGELOG-rename anomaly fix (IMP-093) + 3-branch `update_changelog` helper with bats coverage
-- **v2.19.0** — Completeness Gate sub-checks 17a-17d (backlog ID, test path, DB field, file removal grounding); `/aid-plan` Step 9 verifier prompt + plan template Resources Verification block; `test-cp1-grounding.sh` smoke test (P035 Phase 2)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

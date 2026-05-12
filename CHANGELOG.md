@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.20.1] — 2026-05-12
+
+### Added
+- **Verifier Provenance Verification (P037 Phase 1, AID-038)** — `aid-fsm.sh evaluate_compliance_checks` cross-references each `verifier-output-*.md` `_generated_by` field against `timeline.jsonl` `verifier_dispatch_start`/`_complete` events within a ±60s window for subagent mode, or validates `main-context@<commit-sha>` format with SHA verification for inline mode. Detected fabrication forces `compliance.overall: "fail"`.
+- **Timeline Dispatch Events** — `pipeline.md` now instructs LLM to emit `verifier_dispatch_start` and `verifier_dispatch_complete` events with payload `{agentId, focus, step_n, evidence_dir, ts}` around every CP1/CP2/CP3 verifier `Agent()` call.
+- **Honest Mode for No-Subagent Projects** — `.aid-o/config/plugin.yaml` new field `dispatch_mode: subagent | inline` (default subagent). Inline mode requires `_generated_by: main-context@<git-HEAD-sha>` format for verifier outputs; compliance check validates format + SHA existence rather than timeline match.
+- **CLI Dispatcher for aid-stage-log.sh** — library now supports `bash aid-stage-log.sh <fn> <args>` invocation in addition to existing source-mode usage. Guard via `BASH_SOURCE[0] == ${0}` keeps source-mode behavior unchanged. Required so `pipeline.md` and `aid-plan.md` LLM-rendered docs can invoke `log_event` directly without a separate source step. Unknown function exits 1 with stderr help message listing available functions.
+- **Anti-Fabrication Smoke Test** — new `plugins/aid-orchestrator/scripts/tests/bats/test-anti-fabrication.bats` (4 tests): verified subagent dispatch produces `provenance_aggregate: all_verified`; missing timeline events produce `fabricated` + `overall: fail`; inline mode with valid SHA produces `all_inline` + `pass`; CLI dispatcher regression test.
+
+### Changed
+- **`evaluate_compliance_checks` Schema** — `verifier_outputs` object now carries three new `*_provenance` fields (`cp2_per_step_provenance`, `cp3_code_review_provenance`, `cp3_security_provenance`) plus aggregate `provenance_aggregate: "all_verified" | "all_inline" | "mixed" | "fabricated" | "unknown"`. Pre-Phase-1 compliance.json files backfilled via `aid-compliance-backfill.sh` Step C (idempotent merge, adds `provenance: unknown` audit note attributing the migration to P037).
+
+### Fixed
+- **Compliance Telemetry Honesty** — post-Session-B telemetry (n=8 EPICs reporting 100% pass on all 4 dimensions) was previously vulnerable to fabricated `_generated_by` metadata. P023 reflection (NR 5, 2026-05-11) documented one such case in WAN project where agent wrote verifier outputs in main context but signed them as `aid-orchestrator:verifier@cp{2,3}-*`. Phase 1 enforcement detects this class of cheating.
+- **`verify_provenance` TZ Bug** — jq <1.7 silently honors local TZ in `fromdateiso8601` even with `Z` suffix, producing a 1-hour offset on non-UTC hosts (CEST/PST/etc) and reading every dispatch as fabricated. Both `jq -s` invocations in `verify_provenance()` are now prefixed `TZ=UTC` so date parsing matches the `date -d`-derived `$min`/`$max` UTC epochs. Surfaced by Step 5 bats smoke test on CEST host.
+
 ## [2.20.0] — 2026-05-10
 
 ### Added

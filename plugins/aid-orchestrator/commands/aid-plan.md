@@ -99,6 +99,33 @@ Dispatch verifier with `docs-review` focus on the written plan file.
 Present findings to PM with full context (no auto-fix — design decisions).
 Skip if `review_checkpoints.cp1_plan_review: false`.
 
+**Before `Agent()` call — log `verifier_dispatch_start` event:**
+```bash
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+  "$timeline_file" \
+  "verifier_dispatch_start" \
+  agentId="aid-orchestrator:verifier" \
+  focus="cp1" \
+  step_n="null" \
+  evidence_dir="$evidence_dir"
+```
+
+**After `Agent()` returns — log `verifier_dispatch_complete` event:**
+```bash
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+  "$timeline_file" \
+  "verifier_dispatch_complete" \
+  agentId="aid-orchestrator:verifier" \
+  focus="cp1" \
+  step_n="null" \
+  evidence_dir="$evidence_dir" \
+  output_file="$evidence_dir/verifier-output-cp1.md"
+```
+
+`<dispatch-focus>` substitution rule for CP1: `focus="cp1"`, `step_n="null"`.
+If `timeline_file` cannot be resolved (e.g., `state.yaml` not yet created
+for a brand-new plan), `log_event` is a silent no-op — pipeline continues.
+
 **Codebase grounding pass (mandatory, added v2.17.0).**
 The verifier MUST perform a flat-list extraction + verification step in addition
 to the standard plan-writing.md checks. P032 retrospective showed CP1 has a
@@ -262,6 +289,34 @@ Write an exhaustive implementation plan from specification or topic.
    Detection) when frontmatter `type: bug-fix` (per `skills/plan-writing.md`)
    or pre-screening heuristic matches.
 
+   **Before `Agent()` call — log `verifier_dispatch_start` event:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_start" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp1" \
+     step_n="null" \
+     evidence_dir="$evidence_dir"
+   ```
+
+   **After `Agent()` returns — log `verifier_dispatch_complete` event:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_complete" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp1" \
+     step_n="null" \
+     evidence_dir="$evidence_dir" \
+     output_file="$evidence_dir/verifier-output-cp1.md"
+   ```
+
+   `<dispatch-focus>` substitution rule for CP1: `focus="cp1"`, `step_n="null"`.
+   Same retry semantics as CP2/CP3 — if the verifier is re-dispatched
+   (e.g., PM chose option B "Fix findings"), the start/complete pair is
+   re-emitted; last pair is authoritative.
+
    Present PM with options:
      (A) Accept as-is → proceed to EPIC generation
      (B) Fix findings → apply recommendations, re-run review
@@ -308,4 +363,4 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
 
 
-**Last Updated:** 2026-05-10
+**Last Updated:** 2026-05-12

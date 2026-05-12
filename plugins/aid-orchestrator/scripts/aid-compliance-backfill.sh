@@ -147,6 +147,26 @@ generate_pre_compliance() {
     }'
 }
 
+# Phase 1 (P037) — second-pass backfill: add provenance fields to EXISTING compliance.json
+# Idempotent merge: if provenance fields already present (any value), skip; else add "unknown".
+backfill_provenance() {
+  local compliance_file=$1
+
+  # Skip if already has provenance fields (don't overwrite real values)
+  jq -e '.checks.verifier_outputs | has("cp2_per_step_provenance")' "$compliance_file" >/dev/null 2>&1 && return 1
+
+  # Merge provenance fields with "unknown" + append explanatory note
+  jq '.checks.verifier_outputs += {
+    cp2_per_step_provenance: "unknown",
+    cp3_code_review_provenance: "unknown",
+    cp3_security_provenance: "unknown",
+    provenance_aggregate: "unknown"
+  } | .notes += ["P037 backfill: provenance fields added with value unknown — pre-Phase-1 baseline, no retroactive fail"]' "$compliance_file" > "${compliance_file}.tmp" \
+    && mv "${compliance_file}.tmp" "$compliance_file" \
+    && return 0
+  return 1
+}
+
 main() {
   local deploy_date=""
   local -a evidence_roots=()
@@ -209,11 +229,27 @@ main() {
     done < <(find "$root" -maxdepth 1 -mindepth 1 -type d -name "E-*")
   done
 
+  # === Step C (P037 Phase 1): second-pass — backfill provenance on EXISTING compliance.json files ===
+  # Self-contained loop: re-iterates evidence roots with own find, does NOT depend on
+  # run_dirs local var from Step A/B nested loops (which goes out of scope after line 213).
+  echo "Step C: Backfilling provenance fields on existing compliance.json files..."
+  local provenance_backfilled=0
+  for root in "${evidence_roots[@]}"; do
+    [[ ! -d "$root" ]] && continue
+    while IFS= read -r compliance; do
+      if backfill_provenance "$compliance"; then
+        provenance_backfilled=$((provenance_backfilled + 1))
+      fi
+    done < <(find "$root" -mindepth 3 -name "compliance.json" 2>/dev/null)
+  done
+  echo "  Provenance fields backfilled: $provenance_backfilled"
+
   cat <<EOF
 Backfill complete:
   ${count} compliance.json generated (deploy_era=pre-session-a)
   ${skipped} already present (skipped, idempotent)
   ${stamped} state.yaml stamped with created_at (mid-FSM unblock per CP1 M2)
+  ${provenance_backfilled} provenance fields backfilled (P037 Phase 1)
 EOF
 }
 

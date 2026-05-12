@@ -75,3 +75,19 @@ log_error() {
 # Export for use in subshells
 export -f log_event log_info log_warn log_error
 
+# CLI dispatcher (P037 Phase 1) — allow `bash aid-stage-log.sh <fn> <args>` from
+# LLM-rendered docs in pipeline.md / aid-plan.md without requiring a source step.
+# Source-mode (BASH_SOURCE != $0) remains the canonical pattern for scripts.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] && [[ $# -gt 0 ]]; then
+  fn="$1"; shift
+  case "$fn" in
+    log_event|log_info|log_warn|log_error) "$fn" "$@" ;;
+    *)
+      echo "ERROR: unknown function: $fn" >&2
+      echo "Available: log_event, log_info, log_warn, log_error" >&2
+      echo "Library mode: source $0 && <fn> <args>" >&2
+      exit 1
+      ;;
+  esac
+fi
+
