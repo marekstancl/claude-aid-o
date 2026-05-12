@@ -279,10 +279,14 @@ verify_provenance() {
       local min_epoch=$((gen_epoch - window_s))
       local max_epoch=$((gen_epoch + window_s))
 
+      # TZ=UTC required: jq <1.7 fromdateiso8601 silently honors local TZ even with Z
+      # suffix, producing 1-3600s offset on non-UTC hosts (CEST/PST/etc). Discovered
+      # during P037 Step 5 bats smoke test (jq 1.6 on CEST host). $min/$max are UTC
+      # epochs from `date -d`; force jq to match.
       local start_found complete_found
-      start_found=$(jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
+      start_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
         [.[] | select(.event == "verifier_dispatch_start" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
-      complete_found=$(jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
+      complete_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
         [.[] | select(.event == "verifier_dispatch_complete" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
 
       if [[ "$start_found" -ge 1 && "$complete_found" -ge 1 ]]; then
