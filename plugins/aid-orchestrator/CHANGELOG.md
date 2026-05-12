@@ -3,6 +3,29 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.20.2] — 2026-05-12
+
+### Added
+- **Plan-AC Diff Gate (P037 Phase 2, AID-010)** — new deterministic gate `plan_diff` in `execution.yaml` runs `aid-plan-diff.sh` after EXECUTE→GATES. Script parses plan-level `## Acceptance Criteria` section, executes each `verification_pattern` (3 types: `cmd`, `must_not_exist`, `must_contain` with any-match regex semantics) against codebase HEAD, emits `plan-diff.json` with per-AC verdict. Fail if ≥1 AC absent.
+- **`aid-plan-diff.sh` Standalone Script** — new 281-line bash script under `plugins/aid-orchestrator/scripts/`. Standalone testable lifecycle (own provenance fields `_generated_by: aid-plan-diff.sh@v2.20.2`, own timeline events `plan_diff_start`/`plan_diff_complete`). 4 exit codes: 0 (all present), 1 (≥1 absent), 2 (graceful skip — Fast Mode or no AC section), 10 (input validation).
+- **Plan Template AC Block** — `defaults/templates/plan.md` extended with `## Acceptance Criteria` section template using executable `verification_pattern` blocks (3 example patterns: cmd, must_not_exist, must_contain). New plans (P038+) gain plan-level AC verification by default.
+- **Completeness Gate Sub-Check #20** — `plan-writing.md` Completeness Gate added 3 sub-rules (20a/20b/20c) enforcing `verification_pattern` block on every AC for new plans; legacy plans (P001-P036) without AC section skip the check (no violation). EVALUATION counter updated `out of 24` → `out of 27`.
+- **`compliance.json plan_ac_match` Dimension** — `evaluate_compliance_checks` reads `plan-diff.json`, sets `checks.plan_ac_match: true | false | null`. False forces `compliance.overall: "fail"`; null = graceful skip for legacy plans or missing plan-diff.json.
+- **`{plan_path}` Placeholder Token** — `aid-run-gates.sh` `resolve_placeholders()` helper substitutes 4 known tokens (`{plan_path}`, `{epic_id}`, `{run_id}`, `{base_commit}`) in gate commands via bash parameter expansion. `cmd_init` writes `plan_path:` field to state.yaml (realpath-normalized absolute path or literal `null` for Fast Mode EPICs). Unknown `{<token>}` triggers fail-loud exit — silent pass-through is a debug trap.
+- **Plan-AC Diff Smoke Test** — new `plugins/aid-orchestrator/scripts/tests/bats/test-plan-ac-diff.bats` (8 tests covering all 3 pattern types, fail path, Fast Mode null + empty, legacy skip, resolve_placeholders + cmd_init replicas). Full bats suite now 52/52 ok.
+
+### Changed
+- **`aid-run-gates.sh` Gate Command Resolution** — gate commands now pass through `resolve_placeholders()` before `bash -c` execution. Exit code 2 counts as pass when gate's `pass_criteria` mentions "exit 2" (graceful-skip pattern).
+- **`defaults/execution.yaml`** — legacy `{base}..HEAD` tokens in `docs_updated` gate renamed to `{base_commit}..HEAD` (aligning with `scope_check` convention; required for resolve_placeholders fail-loud safety). New `plan_diff:` gate entry appended after `scope_check:` (required: true, max_retries: 0, pass_criteria documents exit 0 or exit 2).
+
+### Fixed
+- **Goalpost Shift Detection** — Five EPICs (P019 F1+F2 frontend migration, P021 F4 backlog collision, P022 F6 Playwright→backend substitution, P023 F7 five concurrent shifts) previously passed to DONE without detection because gates didn't check plan AC reality vs implementation. Phase 2 `plan_diff` gate catches this class — every new plan with `verification_pattern` blocks gets per-AC executable verification on codebase HEAD before GATES→DONE.
+- **`cp2_per_step_provenance` Type Mismatch (IMP-100)** — backfill in `aid-compliance-backfill.sh` previously wrote scalar string `"unknown"` for `cp2_per_step_provenance`, while the live writer in `aid-fsm.sh evaluate_compliance_checks` emits a JSON array (one entry per CP2 step). Type drift created silent correctness risk for queries doing `| length`. Backfill now writes `["unknown"]` (single-element array) to match live writer shape. Other 3 fields (cp3_*, provenance_aggregate) remain scalar — consistent with live writer.
+- **`backfill_provenance` Silent Error Conflation (IMP-102)** — previously returned exit 1 for both "already-present skip" (normal) and "jq failure" (corrupted compliance.json). Step C caller incremented skip-count for both, masking real errors. Function now returns 0 (fixed), 1 (jq failure with stderr WARN), 2 (idempotent skip); caller case-statements on exit code and reports backfilled/skipped/errors separately in summary heredoc.
+- **`verify_provenance` Unused `step_n` Parameter (IMP-103)** — `$3` was received in signature but never referenced in body. Renamed to `_step_n` with code comment explaining intentional retention for future per-step forensic attribution. Positional API stable (no call-site changes needed).
+- **CLI Dispatcher Help Message Clarity (IMP-104)** — `aid-stage-log.sh` dispatcher previously listed `log_event`, `log_info`, `log_warn`, `log_error` uniformly in help text, leading users to expect timeline writes from all four. Comment + help message now distinguish: only `log_event` writes to timeline; `log_info`/`log_warn`/`log_error` are stderr-only severity-prefixed echoes.
+- **`aid-fsm.sh` Missing `BASH_SOURCE` Guard** — top-level case dispatcher previously exited 1 on unknown args even when the file was sourced (e.g. from bats test fixtures), killing the test process. Dispatcher now wrapped in `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then ... fi` (same pattern as `aid-stage-log.sh` fix from v2.20.1). Sourcing for testing purposes works cleanly. Existing `_load_aid_fsm` shim in `test-anti-fabrication.bats` becomes redundant but harmless.
+
 ## [2.20.1] — 2026-05-12
 
 ### Added

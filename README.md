@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.20.1
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.20.2
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.20.1** (current) — Verifier provenance verification (P037 Phase 1): timeline dispatch events around all CP1/CP2/CP3 verifier `Agent()` calls; `evaluate_compliance_checks` cross-references `_generated_by` against `timeline.jsonl` (±60s window) or validates `main-context@<sha>` for inline mode; `aid-compliance-backfill.sh` Step C idempotent merge for pre-Phase-1 compliance.json; `aid-stage-log.sh` CLI dispatcher; TZ=UTC fix for jq fromdateiso8601 on non-UTC hosts; `test-anti-fabrication.bats` (4 tests).
+- **v2.20.2** (current) — Plan-AC Diff Gate (P037 Phase 2): `aid-plan-diff.sh` + `plan_diff` deterministic gate + plan template AC section + Completeness Gate sub-check #20 (executable verification_pattern) + compliance.json plan_ac_match dimension. Plus 5 follow-up fixes folded from v2.20.1.1 backlog (cp2_per_step_provenance array shape, backfill exit code split, verify_provenance step_n marker, dispatcher help clarity, aid-fsm.sh BASH_SOURCE guard).
+- **v2.20.1** — Verifier provenance verification (P037 Phase 1): timeline dispatch events around all CP1/CP2/CP3 verifier `Agent()` calls; `evaluate_compliance_checks` cross-references `_generated_by` against `timeline.jsonl` (±60s window) or validates `main-context@<sha>` for inline mode; `aid-compliance-backfill.sh` Step C idempotent merge for pre-Phase-1 compliance.json; `aid-stage-log.sh` CLI dispatcher; TZ=UTC fix for jq fromdateiso8601 on non-UTC hosts; `test-anti-fabrication.bats` (4 tests).
 - **v2.20.0** — Plan-quality enforcement (P036): Completeness Gate sub-check 17e (CLI invocation grounding) + check #19 (Design Defeat Detection for `type: bug-fix` plans); `## Plan Type` taxonomy in template (regular | bug-fix | refactor | docs); `/aid-plan write` Step 9 (CP1 review) + EVIDENCE REQUIREMENT in reviewer prompt; `test-plan-quality-enforcement.sh` smoke test
-- **v2.19.1** — `aid-release.sh` CHANGELOG-rename anomaly fix (IMP-093) + 3-branch `update_changelog` helper with bats coverage
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

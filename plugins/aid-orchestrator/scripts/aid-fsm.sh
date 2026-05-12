@@ -476,10 +476,33 @@ evaluate_compliance_checks() {
     prov_agg='"mixed"'
   fi
 
+  # Phase 2 (P037) — plan_ac_match dimension
+  local plan_ac_match
+  local plan_diff_file="${evidence_dir}/plan-diff.json"
+
+  if [[ -f "$plan_diff_file" ]]; then
+    local overall_verdict ac_count
+    overall_verdict=$(jq -r '.overall_verdict // empty' "$plan_diff_file" 2>/dev/null || echo "")
+    ac_count=$(jq -r '.ac_count // 0' "$plan_diff_file" 2>/dev/null || echo "0")
+
+    if [[ "$ac_count" -eq 0 || "$overall_verdict" == "skipped" ]]; then
+      plan_ac_match=null  # graceful skip — legacy plan or no AC patterns
+    elif [[ "$overall_verdict" == "pass" ]]; then
+      plan_ac_match=true
+    elif [[ "$overall_verdict" == "fail" ]]; then
+      plan_ac_match=false
+    else
+      plan_ac_match=null  # unknown verdict — conservative skip
+    fi
+  else
+    plan_ac_match=null  # plan-diff.json missing — backward compat, treated as skip
+  fi
+
   jq -nc \
     --argjson bc          "$branch_correct" \
     --argjson eyp         "$exec_yaml_present" \
     --argjson ggb         "$gates_genby" \
+    --argjson pam         "$plan_ac_match" \
     --argjson cp2_d       "$cp2_dispatched" \
     --argjson cp2_v       "$cp2_verdict" \
     --argjson cp2_prov    "$cp2_prov_array_json" \
@@ -495,6 +518,7 @@ evaluate_compliance_checks() {
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
       gates_generated_by:     $ggb,
+      plan_ac_match:          $pam,
       memory_substantive:     null,
       verifier_outputs: {
         cp2_per_step_dispatched:    $cp2_d,
@@ -580,13 +604,14 @@ write_compliance_json() {
     return 0
   fi
 
-  # overall: check the 4 top-level scalar dimensions + verifier_outputs.aggregate.
+  # overall: check the top-level scalar dimensions + verifier_outputs.aggregate.
   # verifier_outputs is now an object — use type-aware extraction for backward compat
   # with any pre-Session-B compliance.json files that have boolean/null there.
   # null counts as pass (= "not yet measured in this era").
+  # Phase 2 (P037): plan_ac_match contributes to overall, null = no impact (skip).
   local overall_pre notes_json
   overall_pre=$(echo "$checks" | jq -r '
-    [.branch_correct, .execution_yaml_present, .gates_generated_by,
+    [.branch_correct, .execution_yaml_present, .gates_generated_by, .plan_ac_match,
      (.verifier_outputs | if type == "object" then .aggregate else . end)]
     | all(. == true or . == null)
     | if . then "pass" else "fail" end' 2>/dev/null || echo "fail")
@@ -628,8 +653,8 @@ write_compliance_json() {
   overall=$(jq -r '.overall' "$compliance_file" 2>/dev/null || echo "unknown")
 
   local checks_passed checks_failed
-  checks_passed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == true)] | length')
-  checks_failed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == false)] | length')
+  checks_passed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, .plan_ac_match, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == true)] | length')
+  checks_failed=$(echo "$checks" | jq '[.branch_correct, .execution_yaml_present, .gates_generated_by, .plan_ac_match, (.verifier_outputs | if type == "object" then .aggregate else . end)] | [.[] | select(. == false)] | length')
 
   log_event "$_timeline" "compliance_written" \
     deploy_era="$deploy_era" overall="$overall" \
@@ -805,12 +830,35 @@ cmd_init() {
   local epic_id="$1" run_id="$2" total_steps="$3" mode="$4"
   local branch="$5" base_commit="$6" state_file="$7"
 
-  local force="false"
   local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-  if [[ "${8:-}" == "--force" ]]; then
-    fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:9}"
-    force="true"
-  fi
+
+  # Phase 2 (P037) — parse optional named flags after 7 positional args.
+  # Detect --plan <path> and --force in either order ($8/$9). Both are optional.
+  local plan_path_arg=""
+  local force="false"
+  local i=8
+  while [[ $i -le $# ]]; do
+    case "${!i}" in
+      --plan)
+        i=$((i + 1))
+        plan_path_arg="${!i:-}"
+        ;;
+      --plan=*)
+        plan_path_arg="${!i#--plan=}"
+        ;;
+      --force)
+        # Forwards ${@:i+1}; callers must pass --plan before --force when both present
+        # (fsm_handle_force_override consumes remaining args as reason payload).
+        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:i+1}"
+        force="true"
+        ;;
+      *)
+        # Unknown flag at this position — preserved as before; existing callers don't
+        # pass anything past $8 unless it's --force, so safe to ignore here.
+        ;;
+    esac
+    i=$((i + 1))
+  done
 
   # P032 Step 9 (deps doc layer extension): preflight guard for jq + git.
   # cmd_init writes JSON timeline events (jq) and runs PRE-FLIGHT branch
@@ -1002,6 +1050,15 @@ except: pass
     plan_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
     echo "plan_json_hash: $plan_hash" >> "$state_file"
   fi
+
+  # Phase 2 (P037) — write plan_path field with realpath-normalized absolute path or null.
+  # Gate command runs via bash -c from unknown cwd; we need absolute paths so
+  # aid-plan-diff.sh receives a usable --plan argument. "null" = Fast Mode (no plan).
+  local plan_path_value="null"
+  if [[ -n "$plan_path_arg" ]]; then
+    plan_path_value=$(realpath "$plan_path_arg" 2>/dev/null || echo "$plan_path_arg")
+  fi
+  echo "plan_path: $plan_path_value" >> "$state_file"
 
   echo "Initialized state: READY" >&2
 }
