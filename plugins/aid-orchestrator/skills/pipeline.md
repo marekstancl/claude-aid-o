@@ -395,6 +395,18 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
 
 2. **Verifier dispatch** (only for RUN/FAIL):
+
+   **Before `Agent()` call — log `verifier_dispatch_start` event:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_start" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp2-step-<N>" \
+     step_n="<N>" \
+     evidence_dir="$evidence_dir"
+   ```
+
    ```
    Agent({
      subagent_type: "aid-orchestrator:verifier",
@@ -404,6 +416,24 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    ```
    Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
    Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
+
+   **After `Agent()` returns — log `verifier_dispatch_complete` event:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_complete" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp2-step-<N>" \
+     step_n="<N>" \
+     evidence_dir="$evidence_dir" \
+     output_file="$evidence_dir/verifier-output-step-<N>.md"
+   ```
+
+   `<dispatch-focus>` substitution rule for CP2: `focus="cp2-step-N"`, `step_n=N`
+   (literal step number). The same start/complete pair is re-emitted on every retry
+   in the CP2 fix loop (max 2 iterations) — timeline therefore contains 2× start +
+   2× complete events for retried steps; compliance check treats the last
+   complete event as authoritative provenance.
 
 3. **FSM precondition** (`aid-fsm.sh increment-step`):
    - Rejects if verifier-output-step-N.md missing or has no `_generated_by` line (anti-fabrication).
@@ -420,17 +450,69 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
 
 Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
 
+**Retry telemetry:** Every re-dispatch in the CP2 fix loop re-emits the same
+`verifier_dispatch_start` / `verifier_dispatch_complete` pair documented above
+(focus=`cp2-step-<N>`, step_n=`<N>`). Iteration 2 therefore appends a second
+start/complete pair to `timeline.jsonl`; provenance binding uses the last
+pair (closest to `_generated_at`).
+
 ### Integration Review CP3 (pre-EXECUTE→GATES, ENFORCED v2.18.0+)
 
 After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
 1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
+
+   **Before `Agent()` calls — log both `verifier_dispatch_start` events serially:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_start" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp3-code-review" \
+     step_n="null" \
+     evidence_dir="$evidence_dir"
+
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_start" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp3-security" \
+     step_n="null" \
+     evidence_dir="$evidence_dir"
+   ```
+
    ```
    Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 code-review",
           prompt: <full diff (run_start..HEAD), DoD list, plan.json overall>})
    Agent({subagent_type: "aid-orchestrator:verifier", description: "CP3 security",
           prompt: <full diff, plan.json overall>})
    ```
+
+   **After both `Agent()` calls return — log both `verifier_dispatch_complete` events serially:**
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_complete" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp3-code-review" \
+     step_n="null" \
+     evidence_dir="$evidence_dir" \
+     output_file="$evidence_dir/verifier-output-cp3-code-review.md"
+
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
+     "$timeline_file" \
+     "verifier_dispatch_complete" \
+     agentId="aid-orchestrator:verifier" \
+     focus="cp3-security" \
+     step_n="null" \
+     evidence_dir="$evidence_dir" \
+     output_file="$evidence_dir/verifier-output-cp3-security.md"
+   ```
+
+   `<dispatch-focus>` substitution rule for CP3: emit two pairs serially even
+   though the underlying `Agent()` calls run in parallel — focus values are
+   `cp3-code-review` and `cp3-security`, `step_n="null"` for both. Same retry
+   semantics as CP2 (last pair is authoritative).
 
 2. **Outputs** (each verifier writes its dedicated file):
    - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
@@ -443,6 +525,12 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
 4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
    Max 2 iterations per Session A pattern. E7 escalation on exhaustion.
+
+   **Retry telemetry:** Every re-dispatch in the CP3 fix loop re-emits both
+   `verifier_dispatch_start` and both `verifier_dispatch_complete` events
+   documented above (focus=`cp3-code-review` and `cp3-security`,
+   step_n=`null`). Iteration 2 appends 4 additional events to
+   `timeline.jsonl`; provenance binding uses the last pair per focus.
 
 If more steps remain: `aid-fsm.sh transition EXECUTE EXECUTE <state_file>`
 If all steps done + CP3 pass: `aid-fsm.sh transition EXECUTE GATES <state_file>`
@@ -1016,7 +1104,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-05-10
+**Last Updated:** 2026-05-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
