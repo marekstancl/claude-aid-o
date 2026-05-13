@@ -637,6 +637,66 @@ write_compliance_json() {
     notes_json=$(jq -nc --arg n "provenance_aggregate: fabricated — at least one verifier output has unverifiable _generated_by metadata" '[$n]')
   fi
 
+  # P038 Step 2: build failures[] array from flat checks + severity registry.
+  # Registry lookup is best-effort — missing yaml file, missing yq, or malformed
+  # yaml all fall through to "advisory" defaults (safe no-op until /aid-init
+  # copies the plugin default). Iterate only top-level scalar booleans of $checks
+  # (skip nested verifier_outputs object); the verifier_provenance failure is
+  # injected separately via prov_agg_value == "fabricated".
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+  local failures_json='[]'
+  local registry_json='{}'
+
+  # Step A: load registry into a JSON object (best-effort).
+  if [[ -f "$severity_yaml" ]]; then
+    if command -v yq >/dev/null 2>&1; then
+      registry_json=$(yq -o=json eval '.checks // {}' "$severity_yaml" 2>/dev/null || echo '{}')
+      # Guard against yq emitting non-JSON on malformed input.
+      if ! echo "$registry_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        log_warn "check-severity.yaml parse error — falling back to advisory defaults"
+        registry_json='{}'
+      fi
+    else
+      log_warn "yq not installed — failures[] severities default to advisory (install yq to enable per-check severity)"
+    fi
+  fi
+
+  # Step B: build failures[] from boolean-false top-level checks +
+  # provenance_aggregate fabricated marker; enrich each entry's severity +
+  # promoted_at from the registry, defaulting to advisory when absent.
+  failures_json=$(echo "$checks" | jq -c \
+    --argjson reg "$registry_json" \
+    --arg prov_agg "$prov_agg_value" \
+    '
+    def enrich(entry):
+      ($reg[entry.check] // null) as $r |
+      entry
+      | .severity    = (if $r then ($r.severity    // "advisory") else "advisory" end)
+      | .promoted_at = (if $r then ($r.promoted_at // null)       else null       end);
+
+    [
+      (to_entries[]
+        | select(.value == false)
+        | {check: .key,
+           severity: "advisory",
+           evidence: ("\(.key) returned false"),
+           promoted_at: null}
+        | enrich(.)),
+      (if $prov_agg == "fabricated" then
+        {check: "verifier_provenance",
+         severity: "advisory",
+         evidence: "provenance_aggregate=fabricated (1+ verifier outputs unverifiable)",
+         promoted_at: null}
+        | enrich(.)
+       else empty end)
+    ]
+    ' 2>/dev/null || echo '[]')
+
+  # Final safety net: if anything went sideways, force empty array.
+  if ! echo "$failures_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    failures_json='[]'
+  fi
+
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
@@ -644,12 +704,14 @@ write_compliance_json() {
     --argjson chks "$checks" \
     --argjson fc "$force_count" \
     --argjson fr "$force_reasons" \
+    --argjson fls "$failures_json" \
     --arg     ovr "$overall_pre" \
     --argjson nts "$notes_json" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
       checks: $chks,
+      failures: $fls,
       force_override_count: $fc,
       force_override_reasons: $fr,
       overall: $ovr,

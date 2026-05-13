@@ -298,6 +298,26 @@ Hook installation:
 
 **What the hook does:** Blocks push if `feat:` or `fix:` commits exist since last git tag without a corresponding `release:` commit. Suggests running `aid-release.sh auto`. Bypass: `git push --no-verify`.
 
+## Config Defaults Installation
+
+After workspace creation (and on every re-run), copy project-level config defaults from the plugin into `.aid-o/config/`. **Idempotent: existing target files are NEVER overwritten** — PM customizations are preserved across plugin upgrades.
+
+### check-severity.yaml (severity registry — P038)
+
+1. **Source template:** `{plugin_path}/defaults/check-severity.yaml`
+2. **Target:** `.aid-o/config/check-severity.yaml`
+3. **Logic:**
+   - If target does NOT exist → copy template
+   - If target exists → **skip** (do not overwrite; PM may have promoted/demoted checks)
+
+```
+Config defaults installation:
+  [INSTALLED] .aid-o/config/check-severity.yaml — severity registry (new)
+  [EXISTS]    .aid-o/config/check-severity.yaml — keeping existing (PM customizations preserved)
+```
+
+**What the registry does:** Maps each compliance check to either `severity: blocking` (cmd_done_advance refuses to advance review→release without `--force`) or `severity: advisory` (logged in `compliance.json failures[]` but does not block). See `skills/pipeline.md` §7 and `docs/plans/AID-v3-principles.md` §1 for the tiered-severity rationale.
+
 ## Lazy-Created (NOT at init time)
 
 These files/dirs are created on first use of the feature that needs them:
@@ -389,4 +409,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-05-12
+**Last Updated:** 2026-05-13
