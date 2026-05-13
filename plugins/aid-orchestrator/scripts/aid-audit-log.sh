@@ -64,25 +64,20 @@ cmd_append() {
       if [[ -z "$v" ]]; then
         json+=",\"${json_key}\":[]"
       else
-        local arr_json="" elem
-        IFS=',' read -ra elems <<< "$v"
-        for elem in "${elems[@]}"; do
-          elem="${elem//\\/\\\\}"
-          elem="${elem//\"/\\\"}"
-          if [[ -z "$arr_json" ]]; then
-            arr_json="\"${elem}\""
-          else
-            arr_json+=",\"${elem}\""
-          fi
-        done
-        json+=",\"${json_key}\":[${arr_json}]"
+        # Use jq for safe JSON escaping in array elements (handles all control chars).
+        # P038 CP3 security finding HIGH-1: hand-rolled escape misses TAB, CR, BEL, etc.
+        # jq -Rs '.' produces a correctly-escaped JSON string literal per RFC 8259.
+        # Use -c flag to ensure output is compact (single line for JSONL format).
+        local arr_json
+        arr_json=$(printf '%s\n' "${v//,/$'\n'}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+        json+=",\"${json_key}\":${arr_json}"
       fi
     else
-      # Escape JSON special chars in string values
-      v="${v//\\/\\\\}"
-      v="${v//\"/\\\"}"
-      v="${v//$'\n'/\\n}"
-      json+=",\"${json_key}\":\"${v}\""
+      # Use jq for safe JSON escaping (handles all control chars: TAB, CR, BEL, etc).
+      # P038 CP3 security finding HIGH-1: hand-rolled escape misses RFC 8259 requirements.
+      local v_json
+      v_json=$(printf '%s' "$v" | jq -Rs '.')
+      json+=",\"${json_key}\":${v_json}"
     fi
   done
 
