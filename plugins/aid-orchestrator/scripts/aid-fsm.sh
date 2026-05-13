@@ -1734,6 +1734,159 @@ EOF
   echo "Done phase: $from_phase → $to_phase" >&2
 }
 
+# ─── Severity promotion (P038 Step 4) ───────────────────────────────────
+# Closes the loop on AID-v3-principles.md §1 tiered-severity caveat:
+# advisory checks may be promoted to blocking once they demonstrate clean
+# operation. `promote-check` is the auditable mutator (writes the registry
+# + appends a check_promoted audit-log event). `check-promotion-candidates`
+# is the read-only observer (deterministic table; PM judgment input).
+# Both touch project-level state (.aid-o/config/check-severity.yaml +
+# .aid-o/work/audit-log.jsonl) — NOT FSM state.
+
+# Promote a check from advisory → blocking severity.
+# Writes .aid-o/config/check-severity.yaml in place via `yq -i`, appends a
+# check_promoted event to audit-log.jsonl. Exits 0 if already blocking
+# (idempotent). Requires --reason flag with min 20 characters.
+cmd_promote_check() {
+  local check_name="${1:-}" flag="${2:-}" reason="${3:-}"
+
+  [[ -z "$check_name" ]] && {
+    echo "Usage: aid-fsm.sh promote-check <check_name> --reason '<text ≥20 chars>'" >&2
+    exit 1
+  }
+  [[ "$flag" != "--reason" ]] && {
+    echo "ERROR: missing --reason flag" >&2
+    exit 1
+  }
+  [[ ${#reason} -lt 20 ]] && {
+    echo "ERROR: --reason must be ≥20 characters (got ${#reason})" >&2
+    exit 2
+  }
+
+  local project_root="$PWD"
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+
+  [[ -f "$severity_yaml" ]] || {
+    echo "ERROR: $severity_yaml not found — run /aid-init upgrade first" >&2
+    exit 1
+  }
+  command -v yq >/dev/null 2>&1 || {
+    echo "ERROR: yq required for promote-check" >&2
+    exit 1
+  }
+
+  local exists
+  exists=$(yq -r ".checks | has(\"${check_name}\")" "$severity_yaml" 2>/dev/null || echo "false")
+  [[ "$exists" == "true" ]] || {
+    echo "ERROR: check '${check_name}' not in registry. Add to ${severity_yaml} first." >&2
+    exit 1
+  }
+
+  local previous_severity today
+  previous_severity=$(yq -r ".checks.${check_name}.severity" "$severity_yaml" 2>/dev/null || echo "advisory")
+  today=$(date -u +%Y-%m-%d)
+
+  if [[ "$previous_severity" == "blocking" ]]; then
+    local already_at
+    already_at=$(yq -r ".checks.${check_name}.promoted_at // \"unknown\"" "$severity_yaml" 2>/dev/null || echo "unknown")
+    echo "INFO: ${check_name} is already severity:blocking (promoted_at: ${already_at})" >&2
+    exit 0
+  fi
+
+  yq -i ".checks.${check_name}.severity = \"blocking\" |
+         .checks.${check_name}.promoted_at = \"${today}\" |
+         .checks.${check_name}.promoted_reason = \"${reason}\"" "$severity_yaml" || {
+    echo "ERROR: yq write to ${severity_yaml} failed" >&2
+    exit 1
+  }
+
+  local operator="${USER:-unknown}"
+  fsm_emit_audit_log "check_promoted" \
+    --check "$check_name" \
+    --previous-severity "$previous_severity" \
+    --new-severity "blocking" \
+    --reason "$reason" \
+    --operator "$operator"
+
+  echo "Promoted: ${check_name} severity ${previous_severity} → blocking (reason logged to audit-log.jsonl)" >&2
+}
+
+# Scan audit-log.jsonl + compliance.json across EPICs to identify advisory
+# checks that meet the AID-v3-principles.md §1 promotion criterion:
+#   epic_count >= 5 AND force_override_rate < 0.05
+# Read-only: prints a text table. PM eyes-on input for `promote-check`.
+cmd_check_promotion_candidates() {
+  local project_root="$PWD"
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+  local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
+
+  [[ -f "$severity_yaml" ]] || {
+    echo "ERROR: $severity_yaml not found" >&2
+    exit 0
+  }
+
+  command -v yq >/dev/null 2>&1 || {
+    echo "ERROR: yq required" >&2
+    exit 0
+  }
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: jq required" >&2
+    exit 0
+  }
+
+  local advisory_checks
+  advisory_checks=$(yq -r '.checks | to_entries | map(select(.value.severity == "advisory")) | .[].key' "$severity_yaml" 2>/dev/null || true)
+
+  printf "%-40s %12s %16s %8s %s\n" "check" "epic_count" "override_count" "rate" "candidate"
+  printf "%-40s %12s %16s %8s %s\n" "----------------------------------------" "------------" "----------------" "--------" "---------"
+
+  if [[ -z "$advisory_checks" ]]; then
+    echo
+    echo "(no advisory checks in registry — nothing to evaluate)"
+    echo
+    echo "Promotion criterion: epic_count >= 5 AND rate < 0.05 (per AID-v3-principles.md §1)"
+    echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
+    return 0
+  fi
+
+  while IFS= read -r check; do
+    [[ -z "$check" ]] && continue
+
+    # epic_count = distinct EPICs whose compliance.json failures[] contains $check
+    local epic_count=0
+    if [[ -d ".aid-o/work/evidence" ]]; then
+      epic_count=$(find .aid-o/work/evidence -maxdepth 3 -name 'compliance.json' 2>/dev/null \
+        | while read -r f; do
+            jq -r --arg c "$check" 'select((.failures // []) | map(.check) | index($c)) | .epic_id // empty' "$f" 2>/dev/null || true
+          done \
+        | sort -u | grep -c -v '^$' || true)
+      epic_count="${epic_count:-0}"
+    fi
+
+    # override_count = audit-log.jsonl entries with event=fsm_force_override AND blocked_checks contains $check
+    local override_count=0
+    if [[ -f "$audit_log" ]]; then
+      override_count=$(jq -s --arg c "$check" '[.[] | select(.event == "fsm_force_override" and ((.blocked_checks // []) | index($c)))] | length' "$audit_log" 2>/dev/null || echo "0")
+      override_count="${override_count:-0}"
+    fi
+
+    local rate="0.00"
+    local candidate="no"
+    if [[ "$epic_count" -ge 5 ]]; then
+      rate=$(awk -v o="$override_count" -v e="$epic_count" 'BEGIN { printf "%.2f", o/e }')
+      if awk -v r="$rate" 'BEGIN { exit !(r < 0.05) }'; then
+        candidate="yes"
+      fi
+    fi
+
+    printf "%-40s %12s %16s %8s %s\n" "$check" "$epic_count" "$override_count" "$rate" "$candidate"
+  done <<< "$advisory_checks"
+
+  echo
+  echo "Promotion criterion: epic_count >= 5 AND rate < 0.05 (per AID-v3-principles.md §1)"
+  echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -1750,9 +1903,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     increment-step)    shift; cmd_increment_step "$@" ;;
     get-field)         shift; cmd_get_field "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
-    done-advance)      shift; cmd_done_advance "$@" ;;
+    done-advance)               shift; cmd_done_advance "$@" ;;
+    promote-check)              shift; cmd_promote_check "$@" ;;
+    check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates> [args...]" >&2
       exit 1 ;;
   esac
 fi
