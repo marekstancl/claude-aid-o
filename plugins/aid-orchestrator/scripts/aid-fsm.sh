@@ -172,14 +172,20 @@ fsm_check_verifier_output() {
 fsm_handle_force_override() {
   local from="$1" to="$2" state_file="$3" caller_cmd="$4"
   shift 4
-  local reason=""
+  local reason="" blocked_checks=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason) reason="$2"; shift 2 ;;
+      --blocked-checks) blocked_checks="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
+
+  # Normalize blocked_checks: strip surrounding commas + whitespace (comma-only delimiter)
+  blocked_checks="${blocked_checks// /}"
+  blocked_checks="${blocked_checks#,}"
+  blocked_checks="${blocked_checks%,}"
 
   if [[ ${#reason} -lt 20 ]]; then
     die "ERROR: --force requires --reason argument with min 20 characters (got ${#reason}).
@@ -205,11 +211,13 @@ Then retry with --reason."
 
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
     from="$from" to="$to" reason="$reason" \
-    caller="$caller_cmd" operator="$operator"
+    caller="$caller_cmd" operator="$operator" \
+    blocked_checks="$blocked_checks"
 
   fsm_emit_audit_log "fsm_force_override" \
     --from "$from" --to "$to" \
-    --reason "$reason" --caller "$caller_cmd" --operator "$operator"
+    --reason "$reason" --caller "$caller_cmd" --operator "$operator" \
+    --blocked-checks-array "$blocked_checks"
 }
 
 # Write a single entry to the cross-EPIC audit-log.jsonl (append-only).

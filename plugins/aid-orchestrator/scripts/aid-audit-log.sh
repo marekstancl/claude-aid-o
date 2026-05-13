@@ -2,6 +2,15 @@
 # aid-audit-log.sh — Append-only writer for cross-EPIC audit-log.jsonl.
 # Used by aid-fsm.sh for fsm_force_override events. Never truncates.
 # Schema: {"ts":"...","event":"...","epic_id":"...","run_id":"...","caller":"...","reason":"...","operator":"..."}
+#
+# Flag conventions (cmd_append):
+#   --<key> <value>          — serializes as JSON string  "<key>":"<value>"
+#   --<key>-array <csv>      — serializes as JSON array   "<key>":["a","b","c"]
+#                              (P038: blocked_checks support; empty/whitespace → [])
+#
+# KEY_TIDY: dashes in flag names are normalized to underscores in the JSON
+# key (e.g. --blocked-checks-array → "blocked_checks":[...]). Existing
+# single-word keys (caller, reason, operator) are unaffected.
 set -euo pipefail
 
 main() {
@@ -46,11 +55,35 @@ cmd_append() {
 
   for kv in "${extra_kvs[@]}"; do
     local k="${kv%%=*}" v="${kv#*=}"
-    # Escape JSON special chars in string values
-    v="${v//\\/\\\\}"
-    v="${v//\"/\\\"}"
-    v="${v//$'\n'/\\n}"
-    json+=",\"${k}\":\"${v}\""
+    # KEY_TIDY: dashes → underscores for JSON key compatibility
+    local json_key="${k//-/_}"
+
+    if [[ "$k" == *-array ]]; then
+      # -array suffix → serialize value as JSON array; strip suffix from key
+      json_key="${json_key%_array}"
+      if [[ -z "$v" ]]; then
+        json+=",\"${json_key}\":[]"
+      else
+        local arr_json="" elem
+        IFS=',' read -ra elems <<< "$v"
+        for elem in "${elems[@]}"; do
+          elem="${elem//\\/\\\\}"
+          elem="${elem//\"/\\\"}"
+          if [[ -z "$arr_json" ]]; then
+            arr_json="\"${elem}\""
+          else
+            arr_json+=",\"${elem}\""
+          fi
+        done
+        json+=",\"${json_key}\":[${arr_json}]"
+      fi
+    else
+      # Escape JSON special chars in string values
+      v="${v//\\/\\\\}"
+      v="${v//\"/\\\"}"
+      v="${v//$'\n'/\\n}"
+      json+=",\"${json_key}\":\"${v}\""
+    fi
   done
 
   json+="}"
