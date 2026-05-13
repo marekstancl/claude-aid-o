@@ -235,6 +235,85 @@ fsm_emit_audit_log() {
     --output  "$audit_log_file" 2>/dev/null || true
 }
 
+# P038 Step 3: pure helper that maps a flat checks{} JSON object to a
+# failures[] array, looking up severity in the project-level severity
+# registry (check-severity.yaml). Returns "[]" when no failures detected or
+# yq unavailable / registry file missing — all paths fall through to
+# advisory defaults so missing-config is a safe no-op.
+#
+# Inputs:
+#   $1 — checks_json (the JSON object produced by evaluate_compliance_checks)
+#   $2 — severity_yaml (absolute path to .aid-o/config/check-severity.yaml)
+#
+# Behavior:
+#   - When checks_json has a .verifier_outputs.provenance_aggregate == "fabricated"
+#     marker, a synthetic verifier_provenance failure entry is prepended.
+#   - Each boolean-false top-level scalar in checks_json yields one entry.
+#   - severity + promoted_at are enriched from the registry; missing keys
+#     default to {severity: "advisory", promoted_at: null}.
+#   - Output is always a JSON array (even on internal jq error → "[]").
+fsm_build_failures() {
+  local checks_json="$1" severity_yaml="$2"
+  local registry_json='{}'
+  local prov_agg_value
+  local failures_json='[]'
+
+  # Step A: load registry into a JSON object (best-effort).
+  if [[ -f "$severity_yaml" ]]; then
+    if command -v yq >/dev/null 2>&1; then
+      registry_json=$(yq -o=json eval '.checks // {}' "$severity_yaml" 2>/dev/null || echo '{}')
+      # Guard against yq emitting non-JSON on malformed input.
+      if ! echo "$registry_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        log_warn "check-severity.yaml parse error — falling back to advisory defaults"
+        registry_json='{}'
+      fi
+    else
+      log_warn "yq not installed — failures[] severities default to advisory (install yq to enable per-check severity)"
+    fi
+  fi
+
+  # Extract provenance_aggregate marker (synthetic verifier_provenance failure trigger).
+  prov_agg_value=$(echo "$checks_json" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
+
+  # Step B: build failures[] from boolean-false top-level checks +
+  # provenance_aggregate fabricated marker; enrich each entry's severity +
+  # promoted_at from the registry, defaulting to advisory when absent.
+  failures_json=$(echo "$checks_json" | jq -c \
+    --argjson reg "$registry_json" \
+    --arg prov_agg "$prov_agg_value" \
+    '
+    def enrich(entry):
+      ($reg[entry.check] // null) as $r |
+      entry
+      | .severity    = (if $r then ($r.severity    // "advisory") else "advisory" end)
+      | .promoted_at = (if $r then ($r.promoted_at // null)       else null       end);
+
+    [
+      (to_entries[]
+        | select(.value == false)
+        | {check: .key,
+           severity: "advisory",
+           evidence: ("\(.key) returned false"),
+           promoted_at: null}
+        | enrich(.)),
+      (if $prov_agg == "fabricated" then
+        {check: "verifier_provenance",
+         severity: "advisory",
+         evidence: "provenance_aggregate=fabricated (1+ verifier outputs unverifiable)",
+         promoted_at: null}
+        | enrich(.)
+       else empty end)
+    ]
+    ' 2>/dev/null || echo '[]')
+
+  # Final safety net: if anything went sideways, force empty array.
+  if ! echo "$failures_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    failures_json='[]'
+  fi
+
+  printf '%s\n' "$failures_json"
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
@@ -637,65 +716,13 @@ write_compliance_json() {
     notes_json=$(jq -nc --arg n "provenance_aggregate: fabricated — at least one verifier output has unverifiable _generated_by metadata" '[$n]')
   fi
 
-  # P038 Step 2: build failures[] array from flat checks + severity registry.
-  # Registry lookup is best-effort — missing yaml file, missing yq, or malformed
-  # yaml all fall through to "advisory" defaults (safe no-op until /aid-init
-  # copies the plugin default). Iterate only top-level scalar booleans of $checks
-  # (skip nested verifier_outputs object); the verifier_provenance failure is
-  # injected separately via prov_agg_value == "fabricated".
+  # P038 Step 3: failures[] is built by the shared fsm_build_failures helper
+  # so the cmd_done_advance precondition and write_compliance_json share one
+  # implementation. Helper is defensive against missing yq / missing registry /
+  # malformed yaml — all paths fall through to advisory defaults.
   local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
-  local failures_json='[]'
-  local registry_json='{}'
-
-  # Step A: load registry into a JSON object (best-effort).
-  if [[ -f "$severity_yaml" ]]; then
-    if command -v yq >/dev/null 2>&1; then
-      registry_json=$(yq -o=json eval '.checks // {}' "$severity_yaml" 2>/dev/null || echo '{}')
-      # Guard against yq emitting non-JSON on malformed input.
-      if ! echo "$registry_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
-        log_warn "check-severity.yaml parse error — falling back to advisory defaults"
-        registry_json='{}'
-      fi
-    else
-      log_warn "yq not installed — failures[] severities default to advisory (install yq to enable per-check severity)"
-    fi
-  fi
-
-  # Step B: build failures[] from boolean-false top-level checks +
-  # provenance_aggregate fabricated marker; enrich each entry's severity +
-  # promoted_at from the registry, defaulting to advisory when absent.
-  failures_json=$(echo "$checks" | jq -c \
-    --argjson reg "$registry_json" \
-    --arg prov_agg "$prov_agg_value" \
-    '
-    def enrich(entry):
-      ($reg[entry.check] // null) as $r |
-      entry
-      | .severity    = (if $r then ($r.severity    // "advisory") else "advisory" end)
-      | .promoted_at = (if $r then ($r.promoted_at // null)       else null       end);
-
-    [
-      (to_entries[]
-        | select(.value == false)
-        | {check: .key,
-           severity: "advisory",
-           evidence: ("\(.key) returned false"),
-           promoted_at: null}
-        | enrich(.)),
-      (if $prov_agg == "fabricated" then
-        {check: "verifier_provenance",
-         severity: "advisory",
-         evidence: "provenance_aggregate=fabricated (1+ verifier outputs unverifiable)",
-         promoted_at: null}
-        | enrich(.)
-       else empty end)
-    ]
-    ' 2>/dev/null || echo '[]')
-
-  # Final safety net: if anything went sideways, force empty array.
-  if ! echo "$failures_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    failures_json='[]'
-  fi
+  local failures_json
+  failures_json=$(fsm_build_failures "$checks" "$severity_yaml")
 
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
@@ -1552,6 +1579,7 @@ cmd_done_advance() {
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
+    local project_root="$PWD"
     epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
     run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
@@ -1561,9 +1589,66 @@ cmd_done_advance() {
     # Check preconditions for review → release
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
       local epic_id run_id evidence_dir errors=0
+      local project_root="$PWD"
       epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
       run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
       evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+
+      # P038 Step 3: tiered severity blocking precondition.
+      # Runs ONLY for review→release transition (other done-advance phases unchanged).
+      # Evaluates compliance checks inline (no file write), filters severity:blocking
+      # failures via the shared fsm_build_failures helper, and aborts with exit 2 +
+      # structured error message when any blocking failure is detected.
+      # Soft-fail design: missing check-severity.yaml / missing yq / telemetry
+      # crash all degrade to "no blocking failures detected" — release proceeds.
+      # See AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
+      local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+      local _checks_json _failures_json _blocking_count
+      if _checks_json=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null); then
+        _failures_json=$(fsm_build_failures "$_checks_json" "$severity_yaml")
+        _blocking_count=$(echo "$_failures_json" | jq '[.[] | select(.severity == "blocking")] | length' 2>/dev/null || echo "0")
+
+        if [[ "${_blocking_count:-0}" -gt 0 ]]; then
+          # Persist compliance.json so the failed release leaves an audit trail.
+          # Best-effort: write failure is non-fatal (telemetry over correctness).
+          write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null || true
+
+          local _blocking_list _blocking_names
+          _blocking_list=$(echo "$_failures_json" | jq -r '
+            [.[] | select(.severity == "blocking")] |
+            to_entries[] |
+            "  [\(.key + 1)] check=\(.value.check) severity=\(.value.severity)\n      evidence: \(.value.evidence)\n      promoted_at: \(.value.promoted_at // "unknown")"' 2>/dev/null || echo "  (failure list unavailable)")
+          _blocking_names=$(echo "$_failures_json" | jq -r '[.[] | select(.severity == "blocking") | .check] | join(",")' 2>/dev/null || echo "")
+
+          cat >&2 <<EOF
+ERROR: ${_blocking_count} blocking compliance failure(s) detected — cannot advance to release.
+
+${_blocking_list}
+
+Fix: address root cause (re-dispatch verifier subagents OR fix dispatch_mode config OR
+correct missing AC evidence), then retry:
+  aid-fsm.sh done-advance review release ${state_file}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh done-advance review release ${state_file} \\
+    --force \\
+    --reason '<≥20 chars explaining why this is acceptable>' \\
+    --blocked-checks '${_blocking_names}'
+
+Audit log entry will be appended to .aid-o/work/audit-log.jsonl with the full reason
+and blocked_checks list. See AID-v3-principles.md §1 for the enforcement contract.
+EOF
+
+          try_telegram_alert "🛑 ${epic_id}: ${_blocking_count} blocking compliance failure(s) — release blocked. Checks: ${_blocking_names}"
+
+          local _timeline="${evidence_dir}/timeline.jsonl"
+          [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
+            blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
+
+          exit 2
+        fi
+      fi
+      # End P038 Step 3 block. Falls through to existing curator/auditor checks.
 
       # Curator report must exist
       if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then
