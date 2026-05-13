@@ -26,6 +26,14 @@ checks:
     severity: blocking
     promoted_at: "2026-05-13"
     promoted_reason: "P037-2 plan-diff gate deployed v2.20.2 (P038 initial bootstrap)"
+  branch_correct:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  execution_yaml_present:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
   memory_substantive:
     severity: advisory
     promoted_at: null

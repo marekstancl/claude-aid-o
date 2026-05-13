@@ -805,6 +805,11 @@ Override appends an `fsm_force_override` event to `.aid-o/work/audit-log.jsonl`
 with `blocked_checks: ["check_a","check_b"]` JSON array, the reason, the
 operator (`$USER`), and the timestamp.
 
+**Soft-fail design:** if `yq` is not installed on the host OR `check-severity.yaml`
+is missing, `fsm_build_failures` defaults ALL failures to `severity: advisory`.
+Release proceeds; no blocking check fires. Install `yq` to enable per-check
+severity enforcement (`brew install yq` / `snap install yq`).
+
 **Severity registry:** `.aid-o/config/check-severity.yaml` (shipped by /aid-init).
 Initial bootstrap (v2.21.0):
 

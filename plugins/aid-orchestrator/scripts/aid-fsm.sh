@@ -1690,7 +1690,11 @@ EOF
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
       if [[ -n "$audit_file" ]]; then
         local p1_count
-        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || echo "0")
+        # Use `|| true` to prevent set -euo pipefail from aborting on grep exit 1 (0 matches).
+        # grep -c exits 1 and prints "0" when no lines match; || true ensures compound exits 0.
+        # The ${:-0} guard covers any edge case where grep produces empty output.
+        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || true)
+        p1_count="${p1_count:-0}"
         if [[ "$p1_count" -gt 0 ]]; then
           echo "PRECONDITION FAIL: Auditor report contains $p1_count P1/critical security finding(s)." >&2
           echo "Address security findings before release. See: $audit_file" >&2
