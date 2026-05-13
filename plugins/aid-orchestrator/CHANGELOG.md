@@ -3,6 +3,23 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.21.0] — 2026-05-13
+
+### Added
+- **Tiered severity registry** — `.aid-o/config/check-severity.yaml` declares each compliance check as `blocking` or `advisory`; shipped by `/aid-init` with initial bootstrap per AID-v3-principles.md §1
+- **`failures[]` array in compliance.json** — every release writes per-check failure entries with severity, evidence, and promoted_at, enabling deterministic blocking decisions
+- **`aid-fsm.sh promote-check`** — explicit advisory→blocking promotion with mandatory ≥20-char reason and forensic audit-log entry
+- **`aid-fsm.sh check-promotion-candidates`** — read-only scan of audit-log.jsonl identifying advisory checks that meet the AID-v3-principles.md §1 promotion criterion (force_override_rate < 0.05 across N≥5 EPICs)
+- **`aid-promote-checks.sh`** — PM-facing markdown report wrapping the candidate scan
+- **`test-tiered-severity.bats`** — 6 fixtures covering blocking-blocks, advisory-passes, --force-with-audit, short-reason-rejection, promote-check, and candidate identification
+
+### Changed
+- **`cmd_done_advance review→release`** — now refuses transition when any compliance failure has `severity: blocking`; structured error message includes per-failure evidence and copy-paste `--force --reason --blocked-checks` override snippet; per AID-v3-principles.md §1 "Detector without Enforcement is Decoration", this is the first concrete application of the principle and closes the P026 (WAN, 2026-05-13) failure mode
+- **`fsm_handle_force_override`** — accepts new `--blocked-checks "<comma-list>"` flag; propagates to both timeline.jsonl and audit-log.jsonl
+- **`aid-audit-log.sh cmd_append`** — new `--<key>-array "a,b,c"` flag-suffix convention emits JSON arrays in output entries; dash-to-underscore JSON key normalization for compatibility
+- **`pipeline.md §7 DONE State`** — new "Tiered Severity Enforcement" sub-section documenting the override flow, the severity table, and the promotion ceremony
+- **`write_compliance_json`** — populates `failures[]` array using check-severity.yaml registry; backward compatible (empty array when no failures)
+
 ## [2.20.2] — 2026-05-12
 
 ### Added

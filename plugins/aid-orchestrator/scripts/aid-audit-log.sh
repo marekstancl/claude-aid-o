@@ -2,6 +2,15 @@
 # aid-audit-log.sh — Append-only writer for cross-EPIC audit-log.jsonl.
 # Used by aid-fsm.sh for fsm_force_override events. Never truncates.
 # Schema: {"ts":"...","event":"...","epic_id":"...","run_id":"...","caller":"...","reason":"...","operator":"..."}
+#
+# Flag conventions (cmd_append):
+#   --<key> <value>          — serializes as JSON string  "<key>":"<value>"
+#   --<key>-array <csv>      — serializes as JSON array   "<key>":["a","b","c"]
+#                              (P038: blocked_checks support; empty/whitespace → [])
+#
+# KEY_TIDY: dashes in flag names are normalized to underscores in the JSON
+# key (e.g. --blocked-checks-array → "blocked_checks":[...]). Existing
+# single-word keys (caller, reason, operator) are unaffected.
 set -euo pipefail
 
 main() {
@@ -46,11 +55,30 @@ cmd_append() {
 
   for kv in "${extra_kvs[@]}"; do
     local k="${kv%%=*}" v="${kv#*=}"
-    # Escape JSON special chars in string values
-    v="${v//\\/\\\\}"
-    v="${v//\"/\\\"}"
-    v="${v//$'\n'/\\n}"
-    json+=",\"${k}\":\"${v}\""
+    # KEY_TIDY: dashes → underscores for JSON key compatibility
+    local json_key="${k//-/_}"
+
+    if [[ "$k" == *-array ]]; then
+      # -array suffix → serialize value as JSON array; strip suffix from key
+      json_key="${json_key%_array}"
+      if [[ -z "$v" ]]; then
+        json+=",\"${json_key}\":[]"
+      else
+        # Use jq for safe JSON escaping in array elements (handles all control chars).
+        # P038 CP3 security finding HIGH-1: hand-rolled escape misses TAB, CR, BEL, etc.
+        # jq -Rs '.' produces a correctly-escaped JSON string literal per RFC 8259.
+        # Use -c flag to ensure output is compact (single line for JSONL format).
+        local arr_json
+        arr_json=$(printf '%s\n' "${v//,/$'\n'}" | jq -Rsc 'split("\n") | map(select(length > 0))')
+        json+=",\"${json_key}\":${arr_json}"
+      fi
+    else
+      # Use jq for safe JSON escaping (handles all control chars: TAB, CR, BEL, etc).
+      # P038 CP3 security finding HIGH-1: hand-rolled escape misses RFC 8259 requirements.
+      local v_json
+      v_json=$(printf '%s' "$v" | jq -Rs '.')
+      json+=",\"${json_key}\":${v_json}"
+    fi
   done
 
   json+="}"

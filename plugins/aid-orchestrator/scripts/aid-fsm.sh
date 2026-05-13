@@ -172,14 +172,20 @@ fsm_check_verifier_output() {
 fsm_handle_force_override() {
   local from="$1" to="$2" state_file="$3" caller_cmd="$4"
   shift 4
-  local reason=""
+  local reason="" blocked_checks=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason) reason="$2"; shift 2 ;;
+      --blocked-checks) blocked_checks="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
+
+  # Normalize blocked_checks: strip surrounding commas + whitespace (comma-only delimiter)
+  blocked_checks="${blocked_checks// /}"
+  blocked_checks="${blocked_checks#,}"
+  blocked_checks="${blocked_checks%,}"
 
   if [[ ${#reason} -lt 20 ]]; then
     die "ERROR: --force requires --reason argument with min 20 characters (got ${#reason}).
@@ -205,11 +211,13 @@ Then retry with --reason."
 
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
     from="$from" to="$to" reason="$reason" \
-    caller="$caller_cmd" operator="$operator"
+    caller="$caller_cmd" operator="$operator" \
+    blocked_checks="$blocked_checks"
 
   fsm_emit_audit_log "fsm_force_override" \
     --from "$from" --to "$to" \
-    --reason "$reason" --caller "$caller_cmd" --operator "$operator"
+    --reason "$reason" --caller "$caller_cmd" --operator "$operator" \
+    --blocked-checks-array "$blocked_checks"
 }
 
 # Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
@@ -225,6 +233,85 @@ fsm_emit_audit_log() {
     --event   "$event_type" \
     "$@" \
     --output  "$audit_log_file" 2>/dev/null || true
+}
+
+# P038 Step 3: pure helper that maps a flat checks{} JSON object to a
+# failures[] array, looking up severity in the project-level severity
+# registry (check-severity.yaml). Returns "[]" when no failures detected or
+# yq unavailable / registry file missing — all paths fall through to
+# advisory defaults so missing-config is a safe no-op.
+#
+# Inputs:
+#   $1 — checks_json (the JSON object produced by evaluate_compliance_checks)
+#   $2 — severity_yaml (absolute path to .aid-o/config/check-severity.yaml)
+#
+# Behavior:
+#   - When checks_json has a .verifier_outputs.provenance_aggregate == "fabricated"
+#     marker, a synthetic verifier_provenance failure entry is prepended.
+#   - Each boolean-false top-level scalar in checks_json yields one entry.
+#   - severity + promoted_at are enriched from the registry; missing keys
+#     default to {severity: "advisory", promoted_at: null}.
+#   - Output is always a JSON array (even on internal jq error → "[]").
+fsm_build_failures() {
+  local checks_json="$1" severity_yaml="$2"
+  local registry_json='{}'
+  local prov_agg_value
+  local failures_json='[]'
+
+  # Step A: load registry into a JSON object (best-effort).
+  if [[ -f "$severity_yaml" ]]; then
+    if command -v yq >/dev/null 2>&1; then
+      registry_json=$(yq -o=json eval '.checks // {}' "$severity_yaml" 2>/dev/null || echo '{}')
+      # Guard against yq emitting non-JSON on malformed input.
+      if ! echo "$registry_json" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        log_warn "check-severity.yaml parse error — falling back to advisory defaults"
+        registry_json='{}'
+      fi
+    else
+      log_warn "yq not installed — failures[] severities default to advisory (install yq to enable per-check severity)"
+    fi
+  fi
+
+  # Extract provenance_aggregate marker (synthetic verifier_provenance failure trigger).
+  prov_agg_value=$(echo "$checks_json" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
+
+  # Step B: build failures[] from boolean-false top-level checks +
+  # provenance_aggregate fabricated marker; enrich each entry's severity +
+  # promoted_at from the registry, defaulting to advisory when absent.
+  failures_json=$(echo "$checks_json" | jq -c \
+    --argjson reg "$registry_json" \
+    --arg prov_agg "$prov_agg_value" \
+    '
+    def enrich(entry):
+      ($reg[entry.check] // null) as $r |
+      entry
+      | .severity    = (if $r then ($r.severity    // "advisory") else "advisory" end)
+      | .promoted_at = (if $r then ($r.promoted_at // null)       else null       end);
+
+    [
+      (to_entries[]
+        | select(.value == false)
+        | {check: .key,
+           severity: "advisory",
+           evidence: ("\(.key) returned false"),
+           promoted_at: null}
+        | enrich(.)),
+      (if $prov_agg == "fabricated" then
+        {check: "verifier_provenance",
+         severity: "advisory",
+         evidence: "provenance_aggregate=fabricated (1+ verifier outputs unverifiable)",
+         promoted_at: null}
+        | enrich(.)
+       else empty end)
+    ]
+    ' 2>/dev/null || echo '[]')
+
+  # Final safety net: if anything went sideways, force empty array.
+  if ! echo "$failures_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    failures_json='[]'
+  fi
+
+  printf '%s\n' "$failures_json"
 }
 
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
@@ -629,6 +716,14 @@ write_compliance_json() {
     notes_json=$(jq -nc --arg n "provenance_aggregate: fabricated — at least one verifier output has unverifiable _generated_by metadata" '[$n]')
   fi
 
+  # P038 Step 3: failures[] is built by the shared fsm_build_failures helper
+  # so the cmd_done_advance precondition and write_compliance_json share one
+  # implementation. Helper is defensive against missing yq / missing registry /
+  # malformed yaml — all paths fall through to advisory defaults.
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+  local failures_json
+  failures_json=$(fsm_build_failures "$checks" "$severity_yaml")
+
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
@@ -636,12 +731,14 @@ write_compliance_json() {
     --argjson chks "$checks" \
     --argjson fc "$force_count" \
     --argjson fr "$force_reasons" \
+    --argjson fls "$failures_json" \
     --arg     ovr "$overall_pre" \
     --argjson nts "$notes_json" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
       checks: $chks,
+      failures: $fls,
       force_override_count: $fc,
       force_override_reasons: $fr,
       overall: $ovr,
@@ -1482,6 +1579,7 @@ cmd_done_advance() {
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
+    local project_root="$PWD"
     epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
     run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
@@ -1491,9 +1589,71 @@ cmd_done_advance() {
     # Check preconditions for review → release
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
       local epic_id run_id evidence_dir errors=0
+      local project_root="$PWD"
       epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
       run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
       evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+
+      # P038 Step 3: tiered severity blocking precondition.
+      # Runs ONLY for review→release transition (other done-advance phases unchanged).
+      # Evaluates compliance checks inline (no file write), filters severity:blocking
+      # failures via the shared fsm_build_failures helper, and aborts with exit 2 +
+      # structured error message when any blocking failure is detected.
+      # Soft-fail design: missing check-severity.yaml / missing yq / telemetry
+      # crash all degrade to "no blocking failures detected" — release proceeds.
+      # See AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
+      local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+      local _checks_json _failures_json _blocking_count
+      if _checks_json=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null); then
+        _failures_json=$(fsm_build_failures "$_checks_json" "$severity_yaml")
+        _blocking_count=$(echo "$_failures_json" | jq '[.[] | select(.severity == "blocking")] | length' 2>/dev/null || echo "0")
+
+        if [[ "${_blocking_count:-0}" -gt 0 ]]; then
+          # Persist compliance.json so the failed release leaves an audit trail.
+          # Best-effort: write failure is non-fatal (telemetry over correctness).
+          write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null || true
+
+          local _blocking_list _blocking_names
+          # MEDIUM-2 trust boundary: _blocking_names and _blocking_list derive from
+          # failures[] in compliance.json (generated by FSM, not user input). Safe to echo.
+          # Registry key names are constrained by the alphanumeric+underscore pattern
+          # validated in cmd_promote_check. If future check names flow from user input,
+          # this heredoc would need printf '%q' escaping.
+          _blocking_list=$(echo "$_failures_json" | jq -r '
+            [.[] | select(.severity == "blocking")] |
+            to_entries[] |
+            "  [\(.key + 1)] check=\(.value.check) severity=\(.value.severity)\n      evidence: \(.value.evidence)\n      promoted_at: \(.value.promoted_at // "unknown")"' 2>/dev/null || echo "  (failure list unavailable)")
+          _blocking_names=$(echo "$_failures_json" | jq -r '[.[] | select(.severity == "blocking") | .check] | join(",")' 2>/dev/null || echo "")
+
+          cat >&2 <<EOF
+ERROR: ${_blocking_count} blocking compliance failure(s) detected — cannot advance to release.
+
+${_blocking_list}
+
+Fix: address root cause (re-dispatch verifier subagents OR fix dispatch_mode config OR
+correct missing AC evidence), then retry:
+  aid-fsm.sh done-advance review release ${state_file}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh done-advance review release ${state_file} \\
+    --force \\
+    --reason '<≥20 chars explaining why this is acceptable>' \\
+    --blocked-checks '${_blocking_names}'
+
+Audit log entry will be appended to .aid-o/work/audit-log.jsonl with the full reason
+and blocked_checks list. See AID-v3-principles.md §1 for the enforcement contract.
+EOF
+
+          try_telegram_alert "🛑 ${epic_id}: ${_blocking_count} blocking compliance failure(s) — release blocked. Checks: ${_blocking_names}"
+
+          local _timeline="${evidence_dir}/timeline.jsonl"
+          [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
+            blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
+
+          exit 2
+        fi
+      fi
+      # End P038 Step 3 block. Falls through to existing curator/auditor checks.
 
       # Curator report must exist
       if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then
@@ -1530,7 +1690,11 @@ cmd_done_advance() {
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
       if [[ -n "$audit_file" ]]; then
         local p1_count
-        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || echo "0")
+        # Use `|| true` to prevent set -euo pipefail from aborting on grep exit 1 (0 matches).
+        # grep -c exits 1 and prints "0" when no lines match; || true ensures compound exits 0.
+        # The ${:-0} guard covers any edge case where grep produces empty output.
+        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || true)
+        p1_count="${p1_count:-0}"
         if [[ "$p1_count" -gt 0 ]]; then
           echo "PRECONDITION FAIL: Auditor report contains $p1_count P1/critical security finding(s)." >&2
           echo "Address security findings before release. See: $audit_file" >&2
@@ -1579,6 +1743,177 @@ cmd_done_advance() {
   echo "Done phase: $from_phase → $to_phase" >&2
 }
 
+# ─── Severity promotion (P038 Step 4) ───────────────────────────────────
+# Closes the loop on AID-v3-principles.md §1 tiered-severity caveat:
+# advisory checks may be promoted to blocking once they demonstrate clean
+# operation. `promote-check` is the auditable mutator (writes the registry
+# + appends a check_promoted audit-log event). `check-promotion-candidates`
+# is the read-only observer (deterministic table; PM judgment input).
+# Both touch project-level state (.aid-o/config/check-severity.yaml +
+# .aid-o/work/audit-log.jsonl) — NOT FSM state.
+
+# Promote a check from advisory → blocking severity.
+# Writes .aid-o/config/check-severity.yaml in place via `yq -i`, appends a
+# check_promoted event to audit-log.jsonl. Exits 0 if already blocking
+# (idempotent). Requires --reason flag with min 20 characters.
+cmd_promote_check() {
+  local check_name="${1:-}" flag="${2:-}" reason="${3:-}"
+
+  [[ -z "$check_name" ]] && {
+    echo "Usage: aid-fsm.sh promote-check <check_name> --reason '<text ≥20 chars>'" >&2
+    exit 1
+  }
+  [[ "$flag" != "--reason" ]] && {
+    echo "ERROR: missing --reason flag" >&2
+    exit 1
+  }
+  [[ ${#reason} -lt 20 ]] && {
+    echo "ERROR: --reason must be ≥20 characters (got ${#reason})" >&2
+    exit 2
+  }
+
+  # Validate check_name against alphanumeric+underscore pattern (defense in depth).
+  # Registry keys must be stable identifiers; reject path traversal or shell metacharacters.
+  [[ "$check_name" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || {
+    echo "ERROR: check_name must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (got '$check_name')" >&2
+    exit 1
+  }
+
+  local project_root="$PWD"
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+
+  [[ -f "$severity_yaml" ]] || {
+    echo "ERROR: $severity_yaml not found — run /aid-init upgrade first" >&2
+    exit 1
+  }
+  command -v yq >/dev/null 2>&1 || {
+    echo "ERROR: yq required for promote-check" >&2
+    exit 1
+  }
+
+  # Escape reason for safe yq interpolation: replace backslash, double-quote, newline.
+  # P038 CP3 security finding CRITICAL-1: Prevent yq expression injection via --reason.
+  # check_name is already validated against ^[a-zA-Z_][a-zA-Z0-9_]*$, so safe for interpolation.
+  local reason_escaped="${reason//\\/\\\\}"  # Escape backslash first
+  reason_escaped="${reason_escaped//\"/\\\"}"  # Escape double-quote
+  reason_escaped="${reason_escaped//$'\n'/\\n}"  # Escape newline
+
+  local exists
+  exists=$(yq -r ".checks | has(\"${check_name}\")" "$severity_yaml" 2>/dev/null || echo "false")
+  [[ "$exists" == "true" ]] || {
+    echo "ERROR: check '${check_name}' not in registry. Add to ${severity_yaml} first." >&2
+    exit 1
+  }
+
+  local previous_severity today
+  previous_severity=$(yq -r ".checks.${check_name}.severity" "$severity_yaml" 2>/dev/null || echo "advisory")
+  today=$(date -u +%Y-%m-%d)
+
+  if [[ "$previous_severity" == "blocking" ]]; then
+    local already_at
+    already_at=$(yq -r ".checks.${check_name}.promoted_at // \"unknown\"" "$severity_yaml" 2>/dev/null || echo "unknown")
+    echo "INFO: ${check_name} is already severity:blocking (promoted_at: ${already_at})" >&2
+    exit 0
+  fi
+
+  # Update registry with escaped reason.
+  # TOCTOU note (MEDIUM-1): yq -i is not atomic; concurrent promote-check invocations
+  # on the same check can race. Mitigate via single-operator convention + audit-log.
+  # Future: wrap under flock(3) on severity.yaml.lock if multi-operator concurrency required.
+  yq -i ".checks.${check_name}.severity = \"blocking\" |
+         .checks.${check_name}.promoted_at = \"${today}\" |
+         .checks.${check_name}.promoted_reason = \"${reason_escaped}\"" "$severity_yaml" || {
+    echo "ERROR: yq write to ${severity_yaml} failed" >&2
+    exit 1
+  }
+
+  local operator="${USER:-unknown}"
+  fsm_emit_audit_log "check_promoted" \
+    --check "$check_name" \
+    --previous-severity "$previous_severity" \
+    --new-severity "blocking" \
+    --reason "$reason" \
+    --operator "$operator"
+
+  echo "Promoted: ${check_name} severity ${previous_severity} → blocking (reason logged to audit-log.jsonl)" >&2
+}
+
+# Scan audit-log.jsonl + compliance.json across EPICs to identify advisory
+# checks that meet the AID-v3-principles.md §1 promotion criterion:
+#   epic_count >= 5 AND force_override_rate < 0.05
+# Read-only: prints a text table. PM eyes-on input for `promote-check`.
+cmd_check_promotion_candidates() {
+  local project_root="$PWD"
+  local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
+  local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
+
+  [[ -f "$severity_yaml" ]] || {
+    echo "ERROR: $severity_yaml not found" >&2
+    exit 0
+  }
+
+  command -v yq >/dev/null 2>&1 || {
+    echo "ERROR: yq required" >&2
+    exit 0
+  }
+  command -v jq >/dev/null 2>&1 || {
+    echo "ERROR: jq required" >&2
+    exit 0
+  }
+
+  local advisory_checks
+  advisory_checks=$(yq -r '.checks | to_entries | map(select(.value.severity == "advisory")) | .[].key' "$severity_yaml" 2>/dev/null || true)
+
+  printf "%-40s %12s %16s %8s %s\n" "check" "epic_count" "override_count" "rate" "candidate"
+  printf "%-40s %12s %16s %8s %s\n" "----------------------------------------" "------------" "----------------" "--------" "---------"
+
+  if [[ -z "$advisory_checks" ]]; then
+    echo
+    echo "(no advisory checks in registry — nothing to evaluate)"
+    echo
+    echo "Promotion criterion: epic_count >= 5 AND rate < 0.05 (per AID-v3-principles.md §1)"
+    echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
+    return 0
+  fi
+
+  while IFS= read -r check; do
+    [[ -z "$check" ]] && continue
+
+    # epic_count = distinct EPICs whose compliance.json failures[] contains $check
+    local epic_count=0
+    if [[ -d ".aid-o/work/evidence" ]]; then
+      epic_count=$(find .aid-o/work/evidence -maxdepth 3 -name 'compliance.json' 2>/dev/null \
+        | while read -r f; do
+            jq -r --arg c "$check" 'select((.failures // []) | map(.check) | index($c)) | .epic_id // empty' "$f" 2>/dev/null || true
+          done \
+        | sort -u | grep -c -v '^$' || true)
+      epic_count="${epic_count:-0}"
+    fi
+
+    # override_count = audit-log.jsonl entries with event=fsm_force_override AND blocked_checks contains $check
+    local override_count=0
+    if [[ -f "$audit_log" ]]; then
+      override_count=$(jq -s --arg c "$check" '[.[] | select(.event == "fsm_force_override" and ((.blocked_checks // []) | index($c)))] | length' "$audit_log" 2>/dev/null || echo "0")
+      override_count="${override_count:-0}"
+    fi
+
+    local rate="0.00"
+    local candidate="no"
+    if [[ "$epic_count" -ge 5 ]]; then
+      rate=$(awk -v o="$override_count" -v e="$epic_count" 'BEGIN { printf "%.2f", o/e }')
+      if awk -v r="$rate" 'BEGIN { exit !(r < 0.05) }'; then
+        candidate="yes"
+      fi
+    fi
+
+    printf "%-40s %12s %16s %8s %s\n" "$check" "$epic_count" "$override_count" "$rate" "$candidate"
+  done <<< "$advisory_checks"
+
+  echo
+  echo "Promotion criterion: epic_count >= 5 AND rate < 0.05 (per AID-v3-principles.md §1)"
+  echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -1595,9 +1930,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     increment-step)    shift; cmd_increment_step "$@" ;;
     get-field)         shift; cmd_get_field "$@" ;;
     set-field)         shift; cmd_set_field "$@" ;;
-    done-advance)      shift; cmd_done_advance "$@" ;;
+    done-advance)               shift; cmd_done_advance "$@" ;;
+    promote-check)              shift; cmd_promote_check "$@" ;;
+    check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates> [args...]" >&2
       exit 1 ;;
   esac
 fi

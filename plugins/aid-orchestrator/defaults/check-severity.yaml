@@ -1,0 +1,56 @@
+# Severity registry — single source of truth for which compliance checks block
+# release vs which only log advisory failures. Edited by PM either manually or
+# via `aid-fsm.sh promote-check <name> --reason "..."`. Read by aid-fsm.sh at
+# done-advance precondition time and at compliance.json write time.
+#
+# Per AID-v3-principles.md §1 tiered severity caveat:
+# - New checks default to severity: advisory (logged, not blocking)
+# - Auto-promote criterion: force_override_rate[check] < 0.05 across N=5
+#   consecutive EPICs OR explicit PM promotion with reason
+# - All severity changes append a `check_promoted` event to audit-log.jsonl
+#
+# When this file is missing (e.g., fresh project before /aid-init upgrade):
+# all checks treated as severity: advisory (safe no-op default).
+
+version: 1
+checks:
+  verifier_provenance:
+    severity: blocking
+    promoted_at: "2026-05-13"
+    promoted_reason: "P037-1 detector + AID-v3-principles.md §1 anchor (P038 initial bootstrap)"
+  gates_generated_by:
+    severity: blocking
+    promoted_at: "2026-05-05"
+    promoted_reason: "Session A initial enforcement — 8+ EPICs of clean operation"
+  plan_ac_match:
+    severity: blocking
+    promoted_at: "2026-05-13"
+    promoted_reason: "P037-2 plan-diff gate deployed v2.20.2 (P038 initial bootstrap)"
+  branch_correct:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  execution_yaml_present:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  memory_substantive:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  dod_present:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  epic_compliance_coverage_ratio:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  ai_mechanics_friction_ratio:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null
+  iteration_density_per_step:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null

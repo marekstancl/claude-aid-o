@@ -788,6 +788,61 @@ Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produc
 a forensic frequency table (file counts, branch hygiene, gate authenticity, top
 fsm_precondition_fail reasons) — productized version of the Krok 0 analysis.
 
+### Tiered Severity Enforcement (NEW v2.21.0 — P038 AID-038 Phase 2)
+
+`cmd_done_advance review release` reads `compliance.json failures[]` and refuses
+transition when any failure has `severity: "blocking"`. PM-authorized override
+flow:
+
+```bash
+aid-fsm.sh done-advance review release <state_file> \
+  --force \
+  --reason '<≥20 chars explaining why this is acceptable>' \
+  --blocked-checks 'check_a,check_b'
+```
+
+Override appends an `fsm_force_override` event to `.aid-o/work/audit-log.jsonl`
+with `blocked_checks: ["check_a","check_b"]` JSON array, the reason, the
+operator (`$USER`), and the timestamp.
+
+**Soft-fail design:** if `yq` is not installed on the host OR `check-severity.yaml`
+is missing, `fsm_build_failures` defaults ALL failures to `severity: advisory`.
+Release proceeds; no blocking check fires. Install `yq` to enable per-check
+severity enforcement (`brew install yq` / `snap install yq`).
+
+**Severity registry:** `.aid-o/config/check-severity.yaml` (shipped by /aid-init).
+Initial bootstrap (v2.21.0):
+
+| Check                            | Severity  | Promoted at | Anchor                                                          |
+|----------------------------------|-----------|-------------|-----------------------------------------------------------------|
+| `verifier_provenance`            | blocking  | 2026-05-13  | P037-1 detector + AID-v3-principles.md §1                       |
+| `gates_generated_by`             | blocking  | 2026-05-05  | Session A initial enforcement                                   |
+| `plan_ac_match`                  | blocking  | 2026-05-13  | P037-2 plan-diff gate                                           |
+| `memory_substantive`             | advisory  | —           | Awaiting empirical track record                                 |
+| `dod_present`                    | advisory  | —           | Awaiting empirical track record                                 |
+| `epic_compliance_coverage_ratio` | advisory  | —           | Awaiting empirical track record                                 |
+| `ai_mechanics_friction_ratio`    | advisory  | —           | Awaiting empirical track record                                 |
+| `iteration_density_per_step`     | advisory  | —           | Awaiting empirical track record                                 |
+
+**Promotion ceremony (advisory → blocking):** per AID-v3-principles.md §1
+tiered severity caveat, promotion happens when:
+
+1. **Auto-criterion (empirical):** `force_override_rate[check] < 0.05` across
+   N≥5 consecutive EPICs where the check ran. Surface via:
+   ```bash
+   bash $AID_PLUGIN_PATH/scripts/aid-promote-checks.sh --format markdown
+   ```
+2. **Explicit PM action:**
+   ```bash
+   aid-fsm.sh promote-check <check_name> --reason '<text ≥20 chars>'
+   ```
+   Updates `.aid-o/config/check-severity.yaml` in place and appends a
+   `check_promoted` event to `audit-log.jsonl` (forensic trail).
+
+Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
+is Decoration`. P038 (v2.21.0) is the first concrete application of this
+principle in AID.
+
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
 **Per-EPIC (non-blocking):**
@@ -1104,7 +1159,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-05-12
+**Last Updated:** 2026-05-13
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
