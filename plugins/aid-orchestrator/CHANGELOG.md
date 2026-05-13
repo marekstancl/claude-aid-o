@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.21.1] — 2026-05-13
+
+### Fixed
+- **`try_telegram_alert` test-mode guard** — `AID_TEST_MODE=1` env var short-circuits the helper before any `jq` or `curl` invocation, so bats fixtures and smoke tests no longer fire real-world Telegram alerts. Discovered post-P038 ship: cmd_done_advance blocking precondition (Step 3) and 3 other call sites previously emitted ~30 alerts during fixture development with `E-TEST-038: 1 blocking compliance failure(s)`. Shared bats `setup_test_evidence_dir` (test-helpers.bash) and `test-tiered-severity.bats` `setup()` now export the guard. Convention: any future side-effect helper (mail/Slack/webhook) should mirror this pattern.
+
 ## [2.21.0] — 2026-05-13
 
 ### Added

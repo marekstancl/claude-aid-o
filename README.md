@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.21.0** (current) — tiered severity + merge blocking (AID-038 Phase 2)
+- **v2.21.1** (current) — hotfix: `AID_TEST_MODE` env-var guard pro `try_telegram_alert` (test fixtury už nespouští real-world alerty)
+- **v2.21.0** — tiered severity + merge blocking (AID-038 Phase 2)
 - **v2.20.2** — Plan-AC Diff Gate (P037 Phase 2): `aid-plan-diff.sh` + `plan_diff` deterministic gate + plan template AC section + Completeness Gate sub-check #20 (executable verification_pattern) + compliance.json plan_ac_match dimension. Plus 5 follow-up fixes folded from v2.20.1.1 backlog (cp2_per_step_provenance array shape, backfill exit code split, verify_provenance step_n marker, dispatcher help clarity, aid-fsm.sh BASH_SOURCE guard).
-- **v2.20.1** — Verifier provenance verification (P037 Phase 1): timeline dispatch events around all CP1/CP2/CP3 verifier `Agent()` calls; `evaluate_compliance_checks` cross-references `_generated_by` against `timeline.jsonl` (±60s window) or validates `main-context@<sha>` for inline mode; `aid-compliance-backfill.sh` Step C idempotent merge for pre-Phase-1 compliance.json; `aid-stage-log.sh` CLI dispatcher; TZ=UTC fix for jq fromdateiso8601 on non-UTC hosts; `test-anti-fabrication.bats` (4 tests).
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
