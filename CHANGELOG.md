@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.22.0] — 2026-05-13
+
+### Changed
+- **Visual Companion skill is now user-invocable** — `/visual-companion` slash command opens a standalone demo session for verifying the browser round-trip (server start, HTML push, click capture, events read) without going through the full `/aid-plan brainstorm` flow. Skill frontmatter flipped `user_invocable: false → true` and a new "Standalone Invocation" section was added with explicit start/stop steps, npm-install first-run handling, and node_modules fallback path. Skill remains backward-compatible with the existing brainstorming integration — per-question gate behavior inside `/aid-plan brainstorm` is unchanged.
+
 ## [2.21.1] — 2026-05-13
 
 ### Fixed

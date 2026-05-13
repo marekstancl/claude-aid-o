@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.21.1** (current) — hotfix: `AID_TEST_MODE` env-var guard pro `try_telegram_alert` (test fixtury už nespouští real-world alerty)
+- **v2.22.0** (current) — `/visual-companion` slash command pro standalone demo: skill je `user_invocable: true`, lze otestovat browser round-trip (server start → HTML → klik → events) mimo plnou brainstorming flow
+- **v2.21.1** — hotfix: `AID_TEST_MODE` env-var guard pro `try_telegram_alert` (test fixtury už nespouští real-world alerty)
 - **v2.21.0** — tiered severity + merge blocking (AID-038 Phase 2)
-- **v2.20.2** — Plan-AC Diff Gate (P037 Phase 2): `aid-plan-diff.sh` + `plan_diff` deterministic gate + plan template AC section + Completeness Gate sub-check #20 (executable verification_pattern) + compliance.json plan_ac_match dimension. Plus 5 follow-up fixes folded from v2.20.1.1 backlog (cp2_per_step_provenance array shape, backfill exit code split, verify_provenance step_n marker, dispatcher help clarity, aid-fsm.sh BASH_SOURCE guard).
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

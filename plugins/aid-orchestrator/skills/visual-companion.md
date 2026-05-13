@@ -1,14 +1,36 @@
 ---
 name: visual-companion
-description: Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision, P027 integration
-user_invocable: false
+description: Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision, P027 integration. Invokable directly via /visual-companion for standalone testing/demo, or auto-loaded by /aid-plan brainstorm when topic is UI-visual.
+user_invocable: true
 ---
 
 # Visual Companion Guide
 
 Browser-based visual brainstorming companion for showing mockups, diagrams, and options.
 
-## When to Use
+## Standalone Invocation (`/visual-companion`)
+
+When PM invokes this skill directly (outside `/aid-plan brainstorm`), treat it as
+a demo / smoke-test session:
+
+1. **Resolve plugin path** — read `.aid-o/config/plugin.yaml` → `plugin_path`. If
+   the file does not exist, fall back to `~/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator`.
+2. **First-run check** — if `{plugin_path}/lib/brainstorm-server/node_modules/`
+   is missing, run `cd {plugin_path}/lib/brainstorm-server && npm install` once.
+   Report stdout/stderr if it fails — do NOT silently fall back to terminal.
+3. **Start server** — `{plugin_path}/lib/brainstorm-server/start-server.sh --project-dir {project_root}`.
+   Parse the returned JSON, save `screen_dir` and `url`.
+4. **Tell PM the URL** explicitly and write one demo screen (e.g. `demo.html`
+   with 2-3 clickable options) so PM can verify the round-trip end-to-end.
+5. **Wait for PM** — when PM responds in terminal, read `$SCREEN_DIR/.events`
+   to confirm click capture works.
+6. **Stop on PM signal** — when PM says "stop"/"done"/"kill server", run
+   `{plugin_path}/lib/brainstorm-server/stop-server.sh $SCREEN_DIR`.
+
+Standalone mode skips the per-question gate from brainstorming (everything is
+visual by definition during a demo).
+
+## When to Use (within `/aid-plan brainstorm`)
 
 Decide per-question, not per-session. The test: **would the user understand this better by seeing it than reading it?**
 
@@ -282,4 +304,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-05-13
