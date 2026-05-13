@@ -6,7 +6,7 @@ user_invocable: false
 
 # Agent Protocol
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-05-13
 
 Universal boilerplate for all AID agents. Every agent dispatched by the AID orchestrator
 reads this file. Role-specific behavior is in `skills/role-cards.md`.
@@ -194,6 +194,25 @@ Second violation of allowed_paths → orchestrator transitions to ESCALATION sta
 
 ---
 
+## Tiered Severity Reference (v2.21.0)
+
+Compliance checks have severity levels that affect release blocking. Agents should
+remediate blocking failures before reaching DONE rather than relying on PM force-override.
+
+| Severity | Effect on release |
+|----------|-------------------|
+| `blocking` | `cmd_done_advance review→release` exits 2; PM must provide `--force --reason --blocked-checks` override |
+| `advisory` | Logged in `compliance.json failures[]` but does not block release |
+
+Initial v2.21.0 blocking checks: `verifier_provenance`, `gates_generated_by`, `plan_ac_match`.
+Initial advisory checks: `memory_substantive`, `dod_present`, `epic_compliance_coverage_ratio`,
+`ai_mechanics_friction_ratio`, `iteration_density_per_step`.
+
+Severity registry: `.aid-o/config/check-severity.yaml` (single source of truth).
+Full enforcement details: `skills/pipeline.md §7 — Tiered Severity Enforcement`.
+
+---
+
 ## Run Start — Context Loading Order
 
 **ALWAYS read in this order before starting work:**
@@ -231,4 +250,4 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-05-13
