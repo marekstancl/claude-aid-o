@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.22.1] — 2026-05-13
+
+### Fixed
+- **Visual Companion skill discovery (hotfix v2.22.0)** — moved `skills/visual-companion.md` → `skills/visual-companion/SKILL.md` directory structure. Claude Code's plugin loader only recognizes skills as user-invokable (slash-callable) when they live in `skills/<name>/SKILL.md` form; flat files are loaded for in-plugin reference but never registered as `/<name>` slash commands regardless of any `user_invocable` frontmatter flag. v2.22.0 release flipped the flag and added the standalone section but kept the flat-file shape, so `/visual-companion` did not appear in the command palette. This release fixes the structure only — no content changes.
+
 ## [2.22.0] — 2026-05-13
 
 ### Changed

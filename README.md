@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.22.0** (current) — `/visual-companion` slash command pro standalone demo: skill je `user_invocable: true`, lze otestovat browser round-trip (server start → HTML → klik → events) mimo plnou brainstorming flow
+- **v2.22.1** (current) — hotfix: skill přesun `skills/visual-companion.md` → `skills/visual-companion/SKILL.md` (CC plugin loader vyžaduje directory-formu pro slash-invokovatelné skills; flat file v2.22.0 se v command palette neobjevil)
+- **v2.22.0** — `/visual-companion` slash command pro standalone demo (skill obsah + frontmatter; struktura opravena v 2.22.1)
 - **v2.21.1** — hotfix: `AID_TEST_MODE` env-var guard pro `try_telegram_alert` (test fixtury už nespouští real-world alerty)
-- **v2.21.0** — tiered severity + merge blocking (AID-038 Phase 2)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
