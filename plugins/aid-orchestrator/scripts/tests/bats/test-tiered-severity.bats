@@ -25,6 +25,10 @@
 
 setup() {
   export TZ=UTC
+  # Suppress try_telegram_alert during fixture runs (P038 cmd_done_advance
+  # precondition fires alert on blocking compliance failures; without this
+  # guard each fixture would send a real Telegram message).
+  export AID_TEST_MODE=1
   TMPDIR_TEST="$(mktemp -d)"
   PROJECT_ROOT="$TMPDIR_TEST"
   EPIC_ID="E-TEST-038"

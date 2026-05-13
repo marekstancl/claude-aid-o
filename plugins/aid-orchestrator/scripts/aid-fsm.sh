@@ -318,7 +318,12 @@ fsm_build_failures() {
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
 # Service deployed in Step 6; this helper works pre-deploy as a no-op.
+#
+# Test-mode guard: bats fixtures and other test contexts export AID_TEST_MODE=1
+# in their setup() to suppress real-world side effects. The same guard pattern
+# should be added to any future side-effect helpers (mail, Slack, webhook).
 try_telegram_alert() {
+  [[ "${AID_TEST_MODE:-0}" == "1" ]] && return 0
   local message=$1
   local payload
   payload=$(jq -nc --arg t "$message" '{text:$t, parse_mode:"HTML"}')
