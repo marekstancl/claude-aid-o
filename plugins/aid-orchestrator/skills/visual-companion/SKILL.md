@@ -18,10 +18,25 @@ a demo / smoke-test session:
 2. **First-run check** — if `{plugin_path}/lib/brainstorm-server/node_modules/`
    is missing, run `cd {plugin_path}/lib/brainstorm-server && npm install` once.
    Report stdout/stderr if it fails — do NOT silently fall back to terminal.
-3. **Start server** — `{plugin_path}/lib/brainstorm-server/start-server.sh --project-dir {project_root}`.
-   Parse the returned JSON, save `screen_dir` and `url`.
-4. **Tell PM the URL** explicitly and write one demo screen (e.g. `demo.html`
-   with 2-3 clickable options) so PM can verify the round-trip end-to-end.
+3. **Determine network reachability — MANDATORY before starting server.**
+   Default `start-server.sh` binds to `127.0.0.1`, which is unreachable from
+   PM's browser if the agent is running on a remote dev server (SSH, VPN,
+   container). Choose binding based on context:
+
+   **3a. Detect remote session:**
+   - Check `$SSH_CONNECTION` / `$SSH_CLIENT` env vars — set means remote
+   - Run `hostname -I 2>/dev/null | awk '{print $1}'` — non-127.x.x.x = remote
+   - Or just ASK PM: "Spouštím server tady. Jsi přímo na téhle mašině, nebo
+     se připojuješ z jiného zařízení (VPN/SSH)?"
+
+   **3b. Pick command:**
+   - **Local (agent runs on PM's machine):** `start-server.sh --project-dir {project_root}` — defaults to `127.0.0.1`, URL `http://localhost:<port>`.
+   - **Remote (agent on dev server, PM on laptop/phone via VPN/SSH):**
+     `start-server.sh --project-dir {project_root} --host 0.0.0.0 --url-host <reachable-ip>` where `<reachable-ip>` is the VPN/LAN address PM uses to reach the host (e.g. `10.20.20.22`). Without `--host 0.0.0.0` the server binds loopback only and PM's browser gets connection refused. Without `--url-host <IP>` the returned URL still says `localhost` and PM can't paste it.
+
+4. **Tell PM the URL** explicitly (full `http://<host>:<port>`) and write one
+   demo screen (e.g. `demo.html` with 2-3 clickable options) so PM can verify
+   the round-trip end-to-end.
 5. **Wait for PM** — when PM responds in terminal, read `$SCREEN_DIR/.events`
    to confirm click capture works.
 6. **Stop on PM signal** — when PM says "stop"/"done"/"kill server", run
@@ -29,6 +44,47 @@ a demo / smoke-test session:
 
 Standalone mode skips the per-question gate from brainstorming (everything is
 visual by definition during a demo).
+
+## Refactoring or Redesigning Existing UI — Read the Code First
+
+Before drawing ANY mockup of a component, page, or row that **already exists
+in some codebase**, PAUSE and ask PM:
+
+> "Tohle vypadá jako redesign [komponenty / stránky / řádku]. Mám si nejdřív
+> načíst aktuální implementaci, abych věděl co tam reálně je za data a možné
+> hodnoty, a teprve potom navrhoval? (Y/N)"
+
+This is mandatory when ANY of these trigger:
+- PM uses words like **"redesign", "překresli", "navrhni nový vzhled",
+  "refaktoring vizuálu", "udělejme to jinak"**
+- PM shows a **screenshot of existing UI**
+- PM references an **existing page or component** by name ("zpracování",
+  "klient stránka", "list X", "row Y")
+- PM is in a project that contains the target component (check via `git
+  ls-files` / `find` before assuming greenfield)
+
+**Why this rule exists:** drawing mockups against guessed data shapes wastes
+tokens and time. Real components encode constraints (which fields exist,
+what enum values they accept, what overlays/badges fire under which
+conditions) that mockups must respect. Discovering those after 3 iterations
+forces a full rewrite. Read first, draw second.
+
+**If PM accepts:**
+1. Find the file — `grep -rln "<distinctive-czech-string-from-screenshot>" --include="*.tsx" --include="*.vue" --include="*.svelte" --include="*.html"` typically finds it in 1–2 hops
+2. Read the component itself + its data type (TypeScript interface, prop types, Pydantic model)
+3. **Write a structured inventory in chat** before any mockup:
+   - Which fields the component reads from data
+   - All possible enum values per field
+   - Conditional rendering rules (e.g. "X renders only when Y AND status ∈ Z")
+   - Visual variants (responsive, size, theme)
+   - List anything PM wants to add that **isn't in the data shape today** —
+     this needs backend decision before drawing
+4. Get PM confirmation that the inventory matches their mental model
+5. Only THEN start companion mockups
+
+**If PM declines** (e.g. "kresli, je to jen brainstorm"): proceed with
+mockups but explicitly state that data shapes are placeholders and mockups
+won't survive contact with the real component.
 
 ## When to Use (within `/aid-plan brainstorm`)
 
@@ -304,4 +360,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-05-14

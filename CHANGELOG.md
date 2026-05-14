@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.22.2] — 2026-05-14
+
+### Changed
+- **Visual Companion — explicit remote-host networking + read-first-before-redesign rule** — Standalone Invocation Step 3 now mandates picking server bind mode (`127.0.0.1` for local agent / `0.0.0.0 --url-host <IP>` for remote SSH-VPN setup) BEFORE starting the server, with detection cues (`$SSH_CONNECTION` env, `hostname -I`) and a direct ask-PM fallback. Previously the remote case was a buried footnote, leaving the agent to start a loopback-only server that PM's browser couldn't reach. Plus new "Refactoring or Redesigning Existing UI — Read the Code First" section: when PM references an existing component / screenshot / page name, agent MUST ask "should I read the current implementation first?" and produce a structured data-inventory in chat before any mockup. Saves the iteration cycles where mockups get drawn against guessed data shapes and need full rewrite after the real component is read.
+
 ## [2.22.1] — 2026-05-13
 
 ### Fixed
