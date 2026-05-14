@@ -104,7 +104,7 @@ If PM accepts:
 2. Run `cd {plugin_path}/lib/brainstorm-server && npm install` if node_modules missing (first use)
 3. Save screen_dir from server response. Tell PM to open the URL.
 4. Note `visual_companion: active` in interim document
-5. See `skills/visual-companion.md` for the full companion guide
+5. See `skills/visual-companion/SKILL.md` for the full companion guide
 
 If PM declines or topic is non-visual: skip. No re-asking.
 Fallback: If server fails to start → log warning, continue text-only.
@@ -255,7 +255,7 @@ RULE 4: For trivial topics (S-effort, single-component), reduce to 2 risks minim
 ### Visual Delivery Decision (when companion is active)
 
 For each question/presentation in Steps 3-6, decide: browser or terminal?
-See `skills/visual-companion.md` → "When to Use" for the full taxonomy.
+See `skills/visual-companion/SKILL.md` → "When to Use" for the full taxonomy.
 
 **Quick rule:** A question *about* a UI topic is not automatically visual.
 "What kind of wizard?" = terminal. "Which wizard layout?" = browser.

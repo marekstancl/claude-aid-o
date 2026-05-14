@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.22.2** (current) — visual-companion: explicitní networking discovery (lokální vs. remote dev server) v Step 3 + nová "Read code first" sekce — agent MUSÍ načíst existující komponentu/data shape předtím než kreslí redesign mockup
+- **v2.22.3** (current) — hotfix: opraveny 2 stale reference `skills/visual-companion.md` v `brainstorming.md` (zapomenuté při přesunu na directory-formu v 2.22.1, CI red od té doby)
+- **v2.22.2** — visual-companion: explicitní networking discovery (lokální vs. remote dev server) v Step 3 + nová "Read code first" sekce
 - **v2.22.1** — hotfix: skill přesun `skills/visual-companion.md` → `skills/visual-companion/SKILL.md` (CC plugin loader vyžaduje directory-formu pro slash-invokovatelné skills)
-- **v2.22.0** — `/visual-companion` slash command pro standalone demo (skill obsah + frontmatter; struktura opravena v 2.22.1)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.22.3] — 2026-05-14
+
+### Fixed
+- **`skills/brainstorming.md` references to renamed visual-companion path** — v2.22.1 moved `skills/visual-companion.md` → `skills/visual-companion/SKILL.md` but left two stale `skills/visual-companion.md` references in `brainstorming.md` (lines 107 and 258). The `test-instruction-consistency` bash suite caught it (`✗ Referenced file MISSING`) and CI went red since v2.22.1's push. Both references updated to the directory form.
+
 ## [2.22.2] — 2026-05-14
 
 ### Changed
