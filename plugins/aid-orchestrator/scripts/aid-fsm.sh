@@ -291,17 +291,23 @@ fsm_check_cp4_curator_validation() {
   # grep returns 0=match, 1=no-match, >=2=error (e.g. bad ERE). The old pipeline
   # swallowed ALL non-zero exits via `|| true`, so a malformed cp4_production_paths
   # regex looked identical to "no production files touched" → CP4 silently disabled.
-  # Probe the ERE in isolation; on error emit telemetry + stderr warning and treat
-  # CP4 as required (conservative), rather than silently skipping. Capture grep's
-  # raw exit code directly (not via `! ...`, which would rewrite $? to 0/1).
+  # FAIL CLOSED on malformed ERE: cannot prove production was NOT touched, so CP4
+  # is required. Capture grep's raw exit code directly (not via `! ...`, which
+  # would rewrite $? to 0/1).
   local grep_probe_rc=0
   printf '' | grep -E "^(${prod_paths})" >/dev/null 2>&1 || grep_probe_rc=$?
   if [[ "$grep_probe_rc" -ge 2 ]]; then
-    echo "WARNING: cp4_production_paths is not a valid ERE — CP4 detection may be unreliable: '${prod_paths}'" >&2
     fsm_emit_audit_log "cp4_glob_invalid" \
       --evidence-dir "$evidence_dir" \
       --glob "$prod_paths" \
       --reason "cp4_production_paths_invalid_ere"
+    echo "ERROR: cp4_production_paths is not a valid ERE — cannot evaluate CP4 (production-touch detection)." >&2
+    echo "  Glob: ${prod_paths}" >&2
+    echo "  Fix the glob in .aid-o/config/execution.yaml, OR override (audited):" >&2
+    echo "    aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+    echo "        --reason '<≥20 chars why skipping CP4 is acceptable>' \\" >&2
+    echo "        --blocked-checks 'cp4_curator_validation'" >&2
+    die "cp4_glob_invalid"
   fi
 
   # Did ANY commit in base_commit..HEAD touch production paths?

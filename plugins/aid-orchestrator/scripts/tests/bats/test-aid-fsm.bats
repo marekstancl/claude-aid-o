@@ -472,6 +472,52 @@ EOF
   grep -q 'apps/foo.ts' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
+@test "CP4: malformed glob ERE (curator + prod touch + bad glob) → fail-closed with audit" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Malformed ERE glob: unmatched paren
+  mkdir -p .aid-o/config
+  printf 'cp4_production_paths: "plugins/|scripts/(foo"\n' > .aid-o/config/execution.yaml
+  # Commit a production-path file so the range would match if the glob were valid
+  mkdir -p plugins/aid-orchestrator/skills
+  echo "prod change" > plugins/aid-orchestrator/skills/pipeline.md
+  git add plugins/aid-orchestrator/skills/pipeline.md
+  git commit -q -m "prod change"
+  _cp4_seed_state "$base"
+
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cp4_production_paths is not a valid ERE"* ]]
+  [[ "$output" == *"Glob: plugins/|scripts/(foo"* ]]
+  grep -q 'cp4_glob_invalid' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  grep -q 'cp4_production_paths_invalid_ere' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4: malformed glob ERE + streamlined mode (advisory) → streamlined skip happens first" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Malformed ERE glob: unmatched paren
+  mkdir -p .aid-o/config
+  printf 'cp4_production_paths: "plugins/|scripts/(bad"\n' > .aid-o/config/execution.yaml
+  # Commit a production-path file
+  mkdir -p plugins/aid-orchestrator/skills
+  echo "prod change" > plugins/aid-orchestrator/skills/pipeline.md
+  git add plugins/aid-orchestrator/skills/pipeline.md
+  git commit -q -m "prod change"
+  # Streamlined mode: CP4 is advisory, should skip before glob check
+  _streamlined_seed_state "true" "$base"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  run bash -c '
+    set -euo pipefail
+    source "'"$FSM"'"
+    epic_id=E-test run_id=R-test project_root="'"$TEST_PROJECT_ROOT"'"
+    fsm_check_cp4_curator_validation "'"$TEST_EVIDENCE_DIR"'" "'"$TEST_PROJECT_ROOT"'" "'"$state_file"'"
+  '
+  [ "$status" -eq 0 ]
+  grep -q 'cp4_skipped_streamlined_advisory' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
 @test "CP4 composer: apps/ monorepo layout → cp4_production_paths = apps/|services/|packages/|src/" {
   # Exercises resolve_cp4_production_paths via compose_execution_yaml.
   local composer="$AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh"
