@@ -326,6 +326,133 @@ _p040_seed_increment_preconditions() {
   grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
+# ─── P040 Step 3: CP4 curator-validation enforcement (5 assertions) ──────────
+
+# Helper: invoke fsm_check_cp4_curator_validation by sourcing aid-fsm.sh in a
+# subshell with epic_id/run_id/project_root in scope (needed by
+# fsm_emit_audit_log). Echoes exit code via `run`. Args: <evidence_dir> <project_root>.
+_run_cp4_check() {
+  local ev_dir="$1" proj_root="$2"
+  run bash -c '
+    set -euo pipefail
+    source "'"$FSM"'"
+    epic_id=E-test run_id=R-test project_root="'"$proj_root"'"
+    fsm_check_cp4_curator_validation "'"$ev_dir"'" "'"$proj_root"'"
+  '
+}
+
+# Helper: seed an fsm-state.yaml with a given base_commit under the evidence dir.
+_cp4_seed_state() {
+  local base="$1"
+  cat > "$TEST_EVIDENCE_DIR/fsm-state.yaml" <<EOF
+epic_id: E-test
+run_id: R-test
+state: DONE
+base_commit: $base
+EOF
+}
+
+@test "CP4: no curator-report → skip silently (no audit entry)" {
+  # No curator-report.md present → function returns 0 without touching audit log.
+  _cp4_seed_state "HEAD"
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
+    ! grep -q 'cp4_' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4: curator + production touch + missing CP4 file → block + audit" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Commit a production-path file so base_commit..HEAD touches production.
+  mkdir -p plugins/aid-orchestrator/skills
+  echo "pipeline change" > plugins/aid-orchestrator/skills/pipeline.md
+  git add plugins/aid-orchestrator/skills/pipeline.md
+  git commit -q -m "prod change"
+  _cp4_seed_state "$base"
+
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
+  grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  grep -q '"base"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  grep -q 'pipeline.md' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4: curator + docs-only range → skip + non-blocking telemetry" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Only docs / CHANGELOG touched in range → no production match.
+  mkdir -p docs
+  echo "doc change" > docs/notes.md
+  echo "changelog" > CHANGELOG.md
+  git add docs/notes.md CHANGELOG.md
+  git commit -q -m "docs only"
+  _cp4_seed_state "$base"
+
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  grep -q 'cp4_skip_no_prod_match' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4: NR 10 §3B range-scan — production touch at HEAD~1, docs-only at HEAD → block" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # HEAD~1: production file (aid-fsm.sh under scripts/).
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "prod change at HEAD~1"
+  # HEAD: docs-only commit (would pass a last-commit-only check).
+  mkdir -p docs
+  echo "changelog" > docs/CHANGELOG.md
+  git add docs/CHANGELOG.md
+  git commit -q -m "docs only at HEAD"
+  _cp4_seed_state "$base"
+
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
+  # Range scan caught the HEAD~1 production file despite docs-only last commit.
+  grep -q 'aid-fsm.sh' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4: consumer layout (cp4_production_paths=apps/|services/|packages/) → block on apps/ touch" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Consumer-style execution.yaml overriding the production glob.
+  mkdir -p .aid-o/config
+  printf 'cp4_production_paths: "apps/|services/|packages/"\n' > .aid-o/config/execution.yaml
+  mkdir -p apps
+  echo "consumer prod" > apps/foo.ts
+  git add apps/foo.ts
+  git commit -q -m "consumer prod change"
+  _cp4_seed_state "$base"
+
+  _run_cp4_check "$TEST_EVIDENCE_DIR" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CP4 (curator-validation) review missing"* ]]
+  grep -q 'apps/foo.ts' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "CP4 composer: apps/ monorepo layout → cp4_production_paths = apps/|services/|packages/|src/" {
+  # Exercises resolve_cp4_production_paths via compose_execution_yaml.
+  local composer="$AID_PLUGIN_PATH/scripts/lib/aid-init-execution-yaml.sh"
+  local proj="$TEST_TMPDIR/consumer"
+  mkdir -p "$proj/apps" "$proj/src"
+  local out="$proj/.aid-o/config/execution.yaml"
+  run bash -c '
+    set -euo pipefail
+    export AID_PLUGIN_PATH="'"$AID_PLUGIN_PATH"'"
+    source "'"$composer"'"
+    compose_execution_yaml "'"$proj"'" "'"$out"'" typescript
+  '
+  [ "$status" -eq 0 ]
+  grep -q 'cp4_production_paths: "apps/|services/|packages/|src/"' "$out"
+}
+
 @test "aid-run-gates.sh: env-var bypass allows EXECUTE state when AID_GATES_TRIGGERED_BY_FSM=1" {
   seed_test_state_files "EXECUTE" "1" "1"
   local exec_yaml; exec_yaml="$TEST_EVIDENCE_DIR/execution.yaml"

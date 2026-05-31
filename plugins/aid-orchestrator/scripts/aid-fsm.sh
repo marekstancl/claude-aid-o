@@ -246,6 +246,81 @@ fsm_check_orphan_dispatches() {
   die "missing_dispatch_complete: $(echo "$orphan_focuses" | head -3 | tr '\n' ' ')"
 }
 
+# fsm_check_cp4_curator_validation — Component C of P040 (Dispatch Lifecycle
+# Enforcement Bundle). Requires verifier-output-cp4-curator-validation.md when
+# curator-report.md exists AND any commit in base_commit..HEAD range touches
+# production code paths.
+#
+# Empirical anchor: NR 10 §3B + NR 12 (curator changes production code without
+# CP4 review). Enforcement principle: AID-v3-principles.md §1.
+fsm_check_cp4_curator_validation() {
+  local evidence_dir="$1"
+  local project_root="$2"
+  local curator_report="${evidence_dir}/curator-report.md"
+
+  # No curator commit = no CP4 needed; skip silently.
+  [[ ! -f "$curator_report" ]] && return 0
+
+  # Resolve base_commit from the FSM state file — scan the FULL EPIC range, not
+  # just HEAD. The state file is written as fsm-state.yaml in production but some
+  # callers/fixtures name it state.yaml; accept either (P040 Step 3 reconciliation).
+  local fsm_state_file="${evidence_dir}/fsm-state.yaml"
+  [[ ! -f "$fsm_state_file" && -f "${evidence_dir}/state.yaml" ]] && fsm_state_file="${evidence_dir}/state.yaml"
+  local base_commit
+  base_commit=$(yq -r '.base_commit' "$fsm_state_file" 2>/dev/null)
+  [[ -z "$base_commit" || "$base_commit" == "null" ]] && return 0  # fsm-state unreadable; conservative skip
+
+  # Resolve production-code glob (configurable per project; /aid-init auto-detects)
+  local prod_paths
+  prod_paths=$(yq -r '.cp4_production_paths // "plugins/|scripts/|src/|lib/|api/"' \
+                "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+                || echo "plugins/|scripts/|src/|lib/|api/")
+  [[ -z "$prod_paths" || "$prod_paths" == "null" ]] && prod_paths="plugins/|scripts/|src/|lib/|api/"
+
+  # Did ANY commit in base_commit..HEAD touch production paths?
+  # `|| true` guards against set -euo pipefail aborting when grep finds no match
+  # (exit 1) — the no-touch case is the legitimate skip path, not an error.
+  local touched_prod
+  touched_prod=$(git -C "$project_root" diff --name-only "${base_commit}..HEAD" 2>/dev/null \
+                   | grep -E "^(${prod_paths})" | head -1 || true)
+
+  if [[ -z "$touched_prod" ]]; then
+    # No production touch in EPIC range — emit non-blocking telemetry.
+    fsm_emit_audit_log "cp4_skip_no_prod_match" \
+      --base "$base_commit" \
+      --evidence-dir "$evidence_dir" \
+      --glob "$prod_paths"
+    return 0
+  fi
+
+  # Check for CP4 review file
+  local cp4_file="${evidence_dir}/verifier-output-cp4-curator-validation.md"
+  if [[ -f "$cp4_file" ]]; then
+    return 0
+  fi
+
+  # Hard fail with structured error
+  echo "ERROR: CP4 (curator-validation) review missing — cannot advance to release." >&2
+  echo "  EPIC range examined: ${base_commit}..HEAD" >&2
+  echo "  Production-code paths touched: $touched_prod (plus possibly others; first match shown)" >&2
+  echo "  Required file: $cp4_file" >&2
+  echo "" >&2
+  echo "Fix: dispatch curator-validation verifier and write its output to:" >&2
+  echo "  $cp4_file" >&2
+  echo "" >&2
+  echo "OR (PM-authorized override, audited):" >&2
+  echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+  echo "      --reason '<≥20 chars why this skip is acceptable>' \\" >&2
+  echo "      --blocked-checks 'cp4_curator_validation'" >&2
+
+  fsm_emit_audit_log "cp4_missing_fail" \
+    --base "$base_commit" \
+    --touched-prod "$touched_prod" \
+    --evidence-dir "$evidence_dir"
+
+  die "missing_cp4_curator_validation"
+}
+
 # Unified dispatcher for --force handling across cmd_init / cmd_transition /
 # cmd_increment_step / cmd_done_advance. Validates reason, emits extended
 # fsm_force_override timeline event with caller field, and writes persistent
@@ -1760,6 +1835,11 @@ EOF
         fi
       fi
       # End P038 Step 3 block. Falls through to existing curator/auditor checks.
+
+      # P040 Component C: CP4 enforcement (must run before existing curator-report check)
+      if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root"; then
+        return 1  # die() already called inside
+      fi
 
       # Curator report must exist
       if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then

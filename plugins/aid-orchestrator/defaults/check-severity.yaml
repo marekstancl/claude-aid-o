@@ -58,3 +58,7 @@ checks:
     severity: blocking
     promoted_at: "2026-05-31"
     promoted_reason: "P040 dispatch lifecycle enforcement — NR 8/10/13/14 evidence across 4 projects (fabricated provenance class)"
+  cp4_curator_validation:
+    severity: blocking
+    promoted_at: "2026-05-31"
+    promoted_reason: "P040 — NR 10 §3B + NR 12 cross-project evidence (curator commit touched production code without CP4 review)"

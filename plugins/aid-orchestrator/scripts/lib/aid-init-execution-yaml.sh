@@ -78,6 +78,65 @@ detect_stacks() {
   fi
 }
 
+# resolve_cp4_production_paths <project_root> [stack ...]
+#   P040 Component C: derive a project-specific production-code path glob from
+#   detected stack signatures. Pipe-separated regex alternation, matched as a
+#   left-anchored prefix against `git diff --name-only` output by the FSM CP4
+#   enforcement (fsm_check_cp4_curator_validation).
+#
+#   Layout signatures (most specific → least):
+#     - AID plugin self     → plugins/|scripts/|src/|lib/|api/
+#     - Payload/Next CMS     → src/apps/|src/payload\.config\.ts|src/collections/
+#     - Node/TS monorepo     → apps/|services/|packages/|src/
+#     - Python service       → src/|app/|api/|services/
+#     - Zero match           → AID-self default + WARNING comment (caller emits)
+#
+#   Writes results to GLOBALS (not stdout) so the caller reads both the glob and
+#   the no-match flag without a command-substitution subshell (which would drop
+#   the flag): sets _CP4_GLOB to the resolved alternation and _CP4_NO_MATCH=1
+#   when no signature matched, so compose_execution_yaml can emit the verify-me
+#   warning comment.
+resolve_cp4_production_paths() {
+  local project_root="$1"; shift
+  local stacks=("$@")
+  _CP4_NO_MATCH=0
+  _CP4_GLOB=""
+
+  # AID plugin self — the orchestrator repo itself.
+  if [[ -f "${project_root}/.claude-plugin/marketplace.json" \
+     || -d "${project_root}/plugins/aid-orchestrator" ]]; then
+    _CP4_GLOB="plugins/|scripts/|src/|lib/|api/"
+    return 0
+  fi
+
+  # Payload/Next CMS — payload.config.ts under src/ or a collections/ dir.
+  if [[ -f "${project_root}/src/payload.config.ts" \
+     || -d "${project_root}/src/collections" ]]; then
+    _CP4_GLOB='src/apps/|src/payload\.config\.ts|src/collections/'
+    return 0
+  fi
+
+  # Node/TS monorepo — apps/ or packages/ workspace layout.
+  if [[ -d "${project_root}/apps" || -d "${project_root}/packages" ]]; then
+    _CP4_GLOB="apps/|services/|packages/|src/"
+    return 0
+  fi
+
+  # Stack-based fallback (no special layout directory matched).
+  local s
+  for s in "${stacks[@]:-}"; do
+    case "$s" in
+      typescript) _CP4_GLOB="apps/|services/|packages/|src/"; return 0 ;;
+      python)     _CP4_GLOB="src/|app/|api/|services/";       return 0 ;;
+    esac
+  done
+
+  # Zero stacks / layouts matched — caller emits a verify-me warning.
+  _CP4_NO_MATCH=1
+  _CP4_GLOB="plugins/|scripts/|src/|lib/|api/"
+  return 0
+}
+
 compose_execution_yaml() {
   local project_root="$1"
   local output_file="$2"
@@ -101,6 +160,12 @@ compose_execution_yaml() {
   local now_iso
   now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   local stacks_label="${clean_stacks[*]:-none}"
+
+  # P040 Component C: resolve project-specific production-code glob for CP4 enforcement.
+  # Call directly (no command substitution) so _CP4_GLOB / _CP4_NO_MATCH globals survive.
+  local _CP4_GLOB="" _CP4_NO_MATCH=0
+  resolve_cp4_production_paths "$project_root" "${clean_stacks[@]:-}"
+  local cp4_glob="$_CP4_GLOB"
 
   mkdir -p "$(dirname "${output_file}")" || {
     echo "[ERROR] Cannot create directory for ${output_file}" >&2
@@ -146,10 +211,20 @@ notifications:
     alert_on_repeated_precondition_fail: true
     alert_threshold: 3
 EOF
+
+    # P040 Component C: production-code path glob for CP4 enforcement trigger.
+    echo ""
+    echo "# P040 Component C: production-code path glob for CP4 enforcement trigger."
+    echo "# Format: pipe-separated regex alternation; matched as left-anchored prefix"
+    echo "# against \`git diff --name-only\` output."
+    if (( ${_CP4_NO_MATCH:-0} == 1 )); then
+      echo "# WARNING: stack auto-detect produced no match — verify cp4_production_paths reflects your project's production-code layout"
+    fi
+    echo "cp4_production_paths: \"${cp4_glob}\""
   } > "${output_file}" || {
     echo "[ERROR] Cannot write to ${output_file} — check permissions or run /aid-init first." >&2
     return 1
   }
 }
 
-export -f detect_stacks compose_execution_yaml
+export -f detect_stacks compose_execution_yaml resolve_cp4_production_paths

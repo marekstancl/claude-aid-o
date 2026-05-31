@@ -230,3 +230,9 @@ curator_auto_rules:
     enabled: true
     similarity_threshold: 0.80
     min_decisions: 3
+
+# ─── CP4 Curator-Validation Enforcement (P040 Component C) ───────────────────
+# P040 Component C: production-code path glob for CP4 enforcement trigger.
+# Format: pipe-separated regex alternation; matched as left-anchored prefix
+# against `git diff --name-only` output.
+cp4_production_paths: "plugins/|scripts/|src/|lib/|api/"
