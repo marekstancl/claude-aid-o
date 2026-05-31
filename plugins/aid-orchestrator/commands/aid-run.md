@@ -341,5 +341,41 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 - If `$ARGUMENTS` is empty → auto-detect: find single active task or list for selection
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
 
+### `--streamlined` mode
 
-**Last Updated:** 2026-03-25
+Streamlined mode (P040 Component D) trades per-step verification depth for an
+integration-review checkpoint, suitable for low-risk EPICs (see the streamlined
+trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
+
+- **`cmd_init` writes `streamlined_mode: true`** into `fsm-state.yaml`. All
+  downstream FSM checks read this field via `yq`.
+- **`cmd_increment_step` skips per-step CP2** — the per-step
+  `verifier-output-step-N.md` (CP2) precondition is bypassed. All other step
+  preconditions (step-verify presence, `## Result: PASS`, AC checklist, commit
+  ref, Memory Used/Written) and the Component B orphan-dispatch check still run
+  in both modes.
+- **`done-advance review → release` requires integration review only** — instead
+  of accumulated per-step CP2 evidence, the transition refuses to advance unless
+  all three integration-review files exist in the run's evidence dir:
+  `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md`, and
+  `gates_report.json`. Missing any one hard-fails with `streamlined_integration_review`.
+- **CP4 curator validation is advisory** — when a curator commit touched
+  production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;
+  streamlined mode emits a `cp4_skipped_streamlined_advisory` audit event and
+  proceeds.
+- **Abandoned check fires on `< 3` timeline events** — a streamlined run whose
+  `timeline.jsonl` has fewer than 3 events (init + transition to EXECUTE + at
+  least one step/phase event) is treated as claimed-but-never-executed and
+  hard-fails with `streamlined_abandoned` (NR 12 SOUSTO P009 anchor).
+- **`compliance.json` emits `coverage_mode: "streamlined"`** plus
+  `skipped_dimensions: ["verifier_outputs.cp2_per_step", "verifier_outputs.cp4_curator_validation"]`
+  so the cross-EPIC aggregator distinguishes a legitimate streamlined run from a
+  full run that is missing that evidence. Full mode emits
+  `coverage_mode: "full"` and an empty `skipped_dimensions` array.
+
+Both streamlined checks are PM-overridable via
+`done-advance review release <state_file> --force --reason '<≥20 chars>' --blocked-checks 'streamlined_integration_review'`
+(or `streamlined_abandoned`), which writes an audited override entry.
+
+
+**Last Updated:** 2026-05-31

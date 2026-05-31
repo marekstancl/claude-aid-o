@@ -62,3 +62,11 @@ checks:
     severity: blocking
     promoted_at: "2026-05-31"
     promoted_reason: "P040 — NR 10 §3B + NR 12 cross-project evidence (curator commit touched production code without CP4 review)"
+  streamlined_abandoned:
+    severity: blocking
+    promoted_at: "2026-05-31"
+    promoted_reason: "P040 — NR 12 SOUSTO P009 prod-shipped-abandoned anchor (FSM stuck in EXECUTE/step 0, code shipped to PROD)"
+  streamlined_integration_review:
+    severity: blocking
+    promoted_at: "2026-05-31"
+    promoted_reason: "P040 — streamlined contract requires verifier-output-cp3-code-review.md + verifier-output-cp3-security.md + gates_report.json; this check enforces all three present at done-advance time"

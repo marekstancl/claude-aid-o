@@ -475,3 +475,162 @@ EOF
   [[ "$output" == *"FSM state must be GATES"* ]]
   [[ "$output" == *"advance-to-gates"* ]]
 }
+
+# ─── P040 Step 4: streamlined mode (Component D) — 7 assertions ──────────────
+
+# Helper: seed an fsm-state.yaml with streamlined_mode under TEST_EVIDENCE_DIR.
+# Args: <streamlined true|false> [base_commit]
+_streamlined_seed_state() {
+  local streamlined="$1"
+  local base="${2:-HEAD}"
+  cat > "$TEST_EVIDENCE_DIR/fsm-state.yaml" <<EOF
+epic_id: E-test
+run_id: R-test
+state: DONE
+base_commit: $base
+streamlined_mode: $streamlined
+EOF
+}
+
+# Helper: invoke a streamlined check function by sourcing aid-fsm.sh with
+# epic_id/run_id/project_root in scope (needed by fsm_emit_audit_log).
+# Args: <fn_name> <evidence_dir> <state_file> <project_root>.
+_run_streamlined_check() {
+  local fn="$1" ev_dir="$2" state_file="$3" proj_root="$4"
+  run bash -c '
+    set -euo pipefail
+    source "'"$FSM"'"
+    epic_id=E-test run_id=R-test project_root="'"$proj_root"'"
+    '"$fn"' "'"$ev_dir"'" "'"$state_file"'"
+  '
+}
+
+# Helper: write a 3-line timeline.jsonl (fsm_init + fsm_transition + one step).
+_write_three_event_timeline() {
+  cat > "$TEST_EVIDENCE_DIR/timeline.jsonl" <<'EOF'
+{"event":"fsm_init","epic_id":"E-test"}
+{"event":"fsm_transition","from":"READY","to":"EXECUTE"}
+{"event":"fsm_step_complete","step":1}
+EOF
+}
+
+@test "streamlined: init --streamlined writes streamlined_mode: true" {
+  run "$FSM" init $(build_default_init_args E-test) --streamlined
+  [ "$status" -eq 0 ]
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  grep -q '^streamlined_mode: true$' "$state_file"
+  # Heredoc shape preserved: unquoted/unindented epic_id parseable by grep parser.
+  [ "$(grep '^epic_id:' "$state_file" | awk '{print $2}')" = "E-test" ]
+}
+
+@test "streamlined: skips per-step CP2 (missing verifier-output) → increment-step exit 0" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3, post-deploy
+  echo "streamlined_mode: true" >> "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  # NO verifier-output-step-3.md (would fail CP2 in full mode); streamlined skips.
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+}
+
+@test "streamlined: compliance.json emits coverage_mode + skipped_dimensions" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  echo "streamlined_mode: true" >> "$state_file"
+  run bash -c '
+    set -euo pipefail
+    source "'"$FSM"'"
+    project_root="'"$TEST_PROJECT_ROOT"'"
+    write_compliance_json E-test R-test "'"$state_file"'" "'"$TEST_EVIDENCE_DIR"'" "'"$TEST_PROJECT_ROOT"'"
+  '
+  [ "$status" -eq 0 ]
+  local cj="$TEST_EVIDENCE_DIR/compliance.json"
+  [ -f "$cj" ]
+  [ "$(jq -r '.coverage_mode' "$cj")" = "streamlined" ]
+  jq -e '.skipped_dimensions == ["verifier_outputs.cp2_per_step","verifier_outputs.cp4_curator_validation"]' "$cj"
+}
+
+@test "streamlined: abandoned fires on <3 timeline events (NR 12 anchor)" {
+  _streamlined_seed_state true
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  # 2-event timeline (fsm_init + fsm_transition only) → fires
+  printf '{"event":"fsm_init"}\n{"event":"fsm_transition"}\n' > "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  _run_streamlined_check fsm_check_streamlined_abandoned "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"streamlined_abandoned"* ]]
+  grep -q 'streamlined_abandoned_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+
+  # 0-event timeline (missing file) → fires
+  rm -f "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  _run_streamlined_check fsm_check_streamlined_abandoned "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"streamlined_abandoned"* ]]
+
+  # 1-event timeline → fires
+  printf '{"event":"fsm_init"}\n' > "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  _run_streamlined_check fsm_check_streamlined_abandoned "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+
+  # 3-event timeline → does NOT fire
+  _write_three_event_timeline
+  _run_streamlined_check fsm_check_streamlined_abandoned "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "streamlined: integration-review missing CP3 code-review blocks" {
+  _streamlined_seed_state true
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _write_three_event_timeline
+  # Only cp3-security + gates_report present; cp3-code-review absent.
+  echo "sec" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  echo '{}' > "$TEST_EVIDENCE_DIR/gates_report.json"
+
+  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"verifier-output-cp3-code-review.md"* ]]
+  grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "streamlined: integration-review with all three files present passes" {
+  _streamlined_seed_state true
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _write_three_event_timeline
+  echo "code" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  echo "sec"  > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
+
+  _run_streamlined_check fsm_check_streamlined_integration_review "$TEST_EVIDENCE_DIR" "$state_file" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  # No integration-review-fail audit recorded.
+  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl" ] || \
+    ! grep -q 'streamlined_integration_review_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "streamlined: CP4 mode-aware skip → advisory audit, no missing_cp4 fail" {
+  local base; base=$(git rev-parse HEAD)
+  echo "curator ran" > "$TEST_EVIDENCE_DIR/curator-report.md"
+  # Commit a production-path file so base..HEAD touches plugins/.
+  mkdir -p plugins/aid-orchestrator/skills
+  echo "pipeline change" > plugins/aid-orchestrator/skills/pipeline.md
+  git add plugins/aid-orchestrator/skills/pipeline.md
+  git commit -q -m "prod change"
+  _streamlined_seed_state true "$base"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  # Integration-review files present (CP4 advisory short-circuit runs first anyway).
+  echo "code" > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  echo "sec"  > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  echo '{}'   > "$TEST_EVIDENCE_DIR/gates_report.json"
+
+  run bash -c '
+    set -euo pipefail
+    source "'"$FSM"'"
+    epic_id=E-test run_id=R-test project_root="'"$TEST_PROJECT_ROOT"'"
+    fsm_check_cp4_curator_validation "'"$TEST_EVIDENCE_DIR"'" "'"$TEST_PROJECT_ROOT"'" "'"$state_file"'"
+  '
+  [ "$status" -eq 0 ]
+  grep -q 'cp4_skipped_streamlined_advisory' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  ! grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
