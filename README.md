@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.23.0** (current) — section-review validate-then-verify: brainstorming Step 6 sekce validuje Sonnet kritik + Opus ground-truth re-grep, PM dostane claim-verification tabulku před schválením; Step 7 cross-section konzistenční check
+- **v2.24.0** (current) — NR 10-14 cross-project carry-over: FSM artifact templates (step-verify + verifier-output) dokumentují schema enforced by aid-fsm.sh preconditions; parser fenced-block bug fix v aid-plan-to-epic.sh (plans citující AID syntax už neselhávají); permissions.yaml sync s běžící MCP infrastrukturou (qdrant-memory/shared-docker/-minio/-postgres/-playwright odebrány, vulcan-memory + eco-admin GREEN přidány)
+- **v2.23.0** — section-review validate-then-verify: brainstorming Step 6 sekce validuje Sonnet kritik + Opus ground-truth re-grep, PM dostane claim-verification tabulku před schválením; Step 7 cross-section konzistenční check
 - **v2.22.3** — hotfix: opraveny 2 stale reference `skills/visual-companion.md` v `brainstorming.md` (zapomenuté při přesunu na directory-formu v 2.22.1, CI red od té doby)
-- **v2.22.2** — visual-companion: explicitní networking discovery (lokální vs. remote dev server) v Step 3 + nová "Read code first" sekce
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

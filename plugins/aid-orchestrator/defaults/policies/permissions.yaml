@@ -6,6 +6,11 @@
 # - permissions.yaml tells agents what they're ALLOWED to do (prompt-level)
 # - .claude/settings.local.json tells Claude Code what to AUTO-ALLOW without prompting (enforcement-level)
 # - /aid-setup writes BOTH files simultaneously (dual-write)
+#
+# 2026-05-31 — NR 11 audit: synced with running MCP setup (eco-prod/eco-dev).
+# Removed stale: qdrant-*, shared-docker, shared-telegram, shared-postgres,
+# shared-minio, shared-playwright.
+# Added: eco-admin, svc-mcp-tg-bot, vulcan-memory, plugin_*.
 
 active_preset: "autonomous"  # autonomous | custom
 
@@ -25,20 +30,17 @@ presets:
       - "WebSearch"
       - "WebFetch"
       - "Bash(*)"
-      # ── Qdrant Memory ──
-      - "mcp__qdrant-memory__qdrant-find"
-      - "mcp__qdrant-memory__qdrant-store"
-      # ── Qdrant Brain ──
+      # ── Qdrant Brain (legacy memory MCP — kept for back-compat with skills/memory-mcp.md) ──
       - "mcp__qdrant-brain__qdrant-find"
       - "mcp__qdrant-brain__qdrant-store"
-      # ── Context7 ──
+      # ── vulcan-memory (canonical memory MCP per user CLAUDE.md; non-destructive only) ──
+      - "mcp__vulcan-memory__vulcan-find"
+      - "mcp__vulcan-memory__vulcan-store"
+      - "mcp__vulcan-memory__vulcan-list"
+      # vulcan-delete excluded — destructive
+      # ── Context7 (plugin-loaded) ──
       - "mcp__plugin_context7_context7__resolve-library-id"
       - "mcp__plugin_context7_context7__query-docs"
-      # ── Docker ──
-      - "mcp__shared-docker__create-container"
-      - "mcp__shared-docker__deploy-compose"
-      - "mcp__shared-docker__get-logs"
-      - "mcp__shared-docker__list-containers"
       # ── GitHub (non-destructive) ──
       - "mcp__shared-github__add_comment_to_pending_review"
       - "mcp__shared-github__add_issue_comment"
@@ -82,57 +84,29 @@ presets:
       - "mcp__shared-github__update_pull_request_branch"
       # ── GitHub (destructive — excluded) ──
       # - "mcp__shared-github__delete_file"
-      # ── MinIO (non-destructive) ──
-      - "mcp__shared-minio__ask_object"
-      - "mcp__shared-minio__copy_object"
-      - "mcp__shared-minio__create_bucket"
-      - "mcp__shared-minio__download_object"
-      - "mcp__shared-minio__get_bucket_lifecycle"
-      - "mcp__shared-minio__get_bucket_replication"
-      - "mcp__shared-minio__get_bucket_tags"
-      - "mcp__shared-minio__get_bucket_versioning"
-      - "mcp__shared-minio__get_object_metadata"
-      - "mcp__shared-minio__get_object_presigned_url"
-      - "mcp__shared-minio__get_object_tags"
-      - "mcp__shared-minio__get_object_versions"
-      - "mcp__shared-minio__list_allowed_directories"
-      - "mcp__shared-minio__list_bucket_contents"
-      - "mcp__shared-minio__list_buckets"
-      - "mcp__shared-minio__list_local_files"
-      - "mcp__shared-minio__move_object"
-      - "mcp__shared-minio__set_bucket_tags"
-      - "mcp__shared-minio__set_bucket_versioning"
-      - "mcp__shared-minio__set_object_tags"
-      - "mcp__shared-minio__text_to_object"
-      - "mcp__shared-minio__upload_object"
-      # ── MinIO (destructive — excluded) ──
-      # - "mcp__shared-minio__delete_bucket"
-      # - "mcp__shared-minio__delete_object"
-      # ── Playwright ──
-      - "mcp__shared-playwright__browser_click"
-      - "mcp__shared-playwright__browser_close"
-      - "mcp__shared-playwright__browser_console_messages"
-      - "mcp__shared-playwright__browser_drag"
-      - "mcp__shared-playwright__browser_evaluate"
-      - "mcp__shared-playwright__browser_file_upload"
-      - "mcp__shared-playwright__browser_fill_form"
-      - "mcp__shared-playwright__browser_handle_dialog"
-      - "mcp__shared-playwright__browser_hover"
-      - "mcp__shared-playwright__browser_install"
-      - "mcp__shared-playwright__browser_navigate"
-      - "mcp__shared-playwright__browser_navigate_back"
-      - "mcp__shared-playwright__browser_network_requests"
-      - "mcp__shared-playwright__browser_press_key"
-      - "mcp__shared-playwright__browser_resize"
-      - "mcp__shared-playwright__browser_run_code"
-      - "mcp__shared-playwright__browser_select_option"
-      - "mcp__shared-playwright__browser_snapshot"
-      - "mcp__shared-playwright__browser_tabs"
-      - "mcp__shared-playwright__browser_take_screenshot"
-      - "mcp__shared-playwright__browser_type"
-      - "mcp__shared-playwright__browser_wait_for"
-      # ── Postgres ──
-      - "mcp__shared-postgres__query"
+      # ── Google Drive (still running per ecosystem MCP setup; read-only ops) ──
+      - "mcp__claude_ai_Google_Drive__list_recent_files"
+      - "mcp__claude_ai_Google_Drive__search_files"
+      - "mcp__claude_ai_Google_Drive__read_file_content"
+      - "mcp__claude_ai_Google_Drive__get_file_metadata"
+      - "mcp__claude_ai_Google_Drive__get_file_permissions"
+      - "mcp__claude_ai_Google_Drive__download_file_content"
+      # ── eco-admin (GREEN read-only tools only; YELLOW writes require Telegram approval) ──
+      - "mcp__eco-admin__list_containers"
+      - "mcp__eco-admin__get_service_status"
+      - "mcp__eco-admin__tail_logs"
+      - "mcp__eco-admin__network_status"
+      - "mcp__eco-admin__disk_usage"
+      - "mcp__eco-admin__memory_usage"
+      - "mcp__eco-admin__cpu_load"
+      - "mcp__eco-admin__query_logs"
+      - "mcp__eco-admin__query_metrics"
+      - "mcp__eco-admin__cost_today"
+      - "mcp__eco-admin__backup_status"
+      - "mcp__eco-admin__cert_status"
+      # YELLOW write tools NOT whitelisted — they require Telegram approval flow (ADR-17 D-077)
+      # ── Playwright (plugin-loaded; NOT auto-allowed in defaults — opt in per project) ──
+      # Add to .claude/settings.local.json explicitly when a project needs browser automation.
       # ── Sequential Thinking ──
       - "mcp__shared-sequential-thinking__sequentialthinking"
       # ── Telegram alerts (P032 v2.16.0 — replaces legacy shared-telegram MCP) ──

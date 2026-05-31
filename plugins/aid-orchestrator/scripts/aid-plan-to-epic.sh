@@ -128,10 +128,16 @@ slug="$(slugify "$title")"
 # Quick check that a steps section exists (supports multiple formats)
 # Plans use "## Implementation Steps" (detailed), "## High-Level Steps" (standard template),
 # or may have step/task headers directly without a wrapper section.
+# F13 (NR 14): skip fenced code blocks so quoted AID syntax does not falsely match.
 has_impl_steps="$(awk '
-  { gsub(/\r$/, "") }
-  /^## (Implementation Steps|High-Level Steps)/ { print "yes"; exit }
-  /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/ { print "yes"; exit }
+  BEGIN { in_fence = 0 }
+  {
+    gsub(/\r$/, "")
+    if ($0 ~ /^[[:space:]]*```/) { in_fence = 1 - in_fence; next }
+    if (in_fence) next
+    if ($0 ~ /^## (Implementation Steps|High-Level Steps)/) { print "yes"; exit }
+    if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/) { print "yes"; exit }
+  }
 ' "$plan")"
 [[ "$has_impl_steps" != "yes" ]] && error_exit "Plan file missing step headers. Expected: '## Implementation Steps', '## High-Level Steps', '### Step N:', or '## Task N:'" 1
 
@@ -149,16 +155,29 @@ has_impl_steps="$(awk '
 # If no markers found, divide steps evenly across phases.
 # ---------------------------------------------------------------------------
 
-# Get all step numbers and EPIC markers from the entire plan file
+# Get all step numbers and EPIC markers from the entire plan file.
+# F13 (NR 14, P039 plan-about-AID): skip lines inside ``` fenced blocks so
+# meta-plans that quote AID step/marker syntax do not mis-count steps.
+# Nested fences (4+ backticks) toggle in_fence twice which preserves the
+# "inside-a-fence" invariant. Tilde fences (~~~) are not handled.
 step_numbers=()
 declare -A phase_start_step
 declare -A phase_end_step
 declare -A step_to_phase
 found_markers=0
 current_marker_phase=0
+in_fence=0
 
 while IFS= read -r line; do
   line="${line//$'\r'/}"
+  # Toggle fence depth on lines starting with 3+ backticks (optional indent).
+  if [[ "$line" =~ ^[[:space:]]*\`\`\` ]]; then
+    if [[ "$in_fence" -eq 0 ]]; then in_fence=1; else in_fence=0; fi
+    continue
+  fi
+  # Skip header/marker detection while inside a fenced code block.
+  [[ "$in_fence" -eq 1 ]] && continue
+
   # Match EPIC markers: **EPIC N: Steps M-P — Title** or **EPIC N**
   if [[ "$line" =~ ^\*\*EPIC[[:space:]]+([0-9]+)(:[[:space:]]+Steps[[:space:]]+([0-9]+)-([0-9]+))? ]]; then
     current_marker_phase="${BASH_REMATCH[1]}"
@@ -239,22 +258,34 @@ fi
 # next **EPIC M:** marker, or section boundary), excluding the header itself.
 extract_step_content() {
   local step_num="$1"
+  # F13: track fence depth to ignore quoted ### Step / **EPIC** lines.
+  # Fence lines inside the matched step body ARE printed verbatim.
   awk -v snum="$step_num" '
-    BEGIN { found = 0 }
+    BEGIN { found = 0; in_fence = 0 }
     {
       gsub(/\r$/, "")
-      # Match multiple header formats: ### Step N, ## Task N, ## Step N
-      if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/) {
-        # Extract step number from this header
-        line = $0
-        sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
-        sub(/:.*/, "", line)
-        sub(/[^0-9].*/, "", line)
-        if (found) exit
-        if (line == snum) { found = 1; next }
+      # Fence toggles — when inside the matched step body, the fence line
+      # itself is part of the body and must be printed.
+      if ($0 ~ /^[[:space:]]*```/) {
+        in_fence = 1 - in_fence
+        if (found) print
+        next
       }
-      # Stop at EPIC markers (they separate step groups)
-      if (found && $0 ~ /^\*\*EPIC[[:space:]]+[0-9]+/) exit
+      # Only detect headers/markers outside of fenced blocks.
+      if (!in_fence) {
+        # Match multiple header formats: ### Step N, ## Task N, ## Step N
+        if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+[0-9]+/) {
+          # Extract step number from this header
+          line = $0
+          sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
+          sub(/:.*/, "", line)
+          sub(/[^0-9].*/, "", line)
+          if (found) exit
+          if (line == snum) { found = 1; next }
+        }
+        # Stop at EPIC markers (they separate step groups)
+        if (found && $0 ~ /^\*\*EPIC[[:space:]]+[0-9]+/) exit
+      }
       if (found) print
     }
   ' "$plan"
@@ -413,9 +444,13 @@ for sn in "${phase_steps[@]}"; do
   ')"
   # Fallback 2: extract from step header text (after "Step N:" or "Task N:")
   if [[ -z "$objective" ]]; then
+    # F13: ignore step headers inside fenced code blocks.
     objective="$(awk -v snum="$sn" '
+      BEGIN { in_fence = 0 }
       {
         gsub(/\r$/, "")
+        if ($0 ~ /^[[:space:]]*```/) { in_fence = 1 - in_fence; next }
+        if (in_fence) next
         if ($0 ~ /^###?[[:space:]]+(Step|Task)[[:space:]]+/) {
           line = $0
           sub(/^###?[[:space:]]+(Step|Task)[[:space:]]+/, "", line)
