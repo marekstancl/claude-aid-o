@@ -95,7 +95,14 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 **Bash pipeline** (using resolved `plugin_path`):
 1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to task file (if running from plan)
 2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse DAG → plan.json
-3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + state.yaml init
+3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + state.yaml init.
+   When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
+   `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
+   script forwards it to its Step 18 `aid-fsm.sh init` call, which writes
+   `streamlined_mode: true` into `fsm-state.yaml` (P040 Component D). Without this
+   passthrough the auto-init defaults to full mode regardless of the `/aid-run`
+   flag. The positional execution `mode` stays `full` — streamlined is a
+   separate dimension carried only by the `--streamlined` flag.
 
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
 PM must fix the underlying issue (missing steps, circular deps, invalid task format).

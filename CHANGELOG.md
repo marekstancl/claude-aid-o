@@ -15,7 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **coverage_mode + skipped_dimensions fields in compliance.json** — honest accounting of which dimensions were intentionally skipped per the streamlined contract. Field name `coverage_mode` (not `mode`) avoids collision with the existing fsm-state.yaml `mode` (manual/auto execution mode).
 - **Four blocking checks in defaults/check-severity.yaml** — `dispatch_orphan_complete`, `cp4_curator_validation`, `streamlined_abandoned`, `streamlined_integration_review`, all severity blocking per AID-v3-principles.md §1 with explicit PM promotion (NR 8-14 empirical evidence across 4 projects).
 - **cp4_production_paths field in defaults/execution.yaml** — configurable glob alternation for CP4 trigger detection; `/aid-init` stack-scan in `scripts/lib/aid-init-execution-yaml.sh` auto-populates project-specific defaults.
-- **aid-json-to-run.sh Step 18 auto-init** — calls `aid-fsm.sh init` after run.md generation when fsm-state.yaml is absent, eliminating state.yaml vs fsm-state.yaml confusion (NR 10/12/14 anchor).
+- **aid-json-to-run.sh Step 18 auto-init** — calls `aid-fsm.sh init` after run.md generation when fsm-state.yaml is absent, eliminating state.yaml vs fsm-state.yaml confusion (NR 10/12/14 anchor). Accepts a `--streamlined` passthrough (threaded from `/aid-run --streamlined` and `aid-auto-pipeline.sh`) that forwards to `cmd_init` so the auto-initialized state carries `streamlined_mode: true` — without it the streamlined activation switch would be unreachable.
 - **test-aid-emit-dispatch.bats** — eight fixtures covering start-only, start+complete pair, orphan complete, ceiling clamp, concurrent flock, missing output_file, malformed agent_id, inode-swap race.
 
 ### Changed

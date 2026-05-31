@@ -164,7 +164,10 @@ The uncommitted-changes guard runs in all modes — dirty workdir is rejected wi
 After running `aid-json-to-run.sh`, the FSM is initialized and the EPIC is ready
 for `/aid-run`. No manual `aid-fsm.sh init` call is required. To re-initialize
 (rare — e.g. `/aid-run --streamlined` after a default-mode init), delete
-`fsm-state.yaml` and re-run `aid-json-to-run.sh`. The dual-file layout
+`fsm-state.yaml` and re-run `aid-json-to-run.sh --streamlined`. The
+`--streamlined` flag is what makes the re-init write `streamlined_mode: true`
+(it is forwarded to the Step 18 `aid-fsm.sh init` call); re-running
+`aid-json-to-run.sh` WITHOUT the flag reproduces full mode. The dual-file layout
 (`state.yaml` + `fsm-state.yaml`) from earlier runs is still readable for backward
 compatibility, but new runs produce only `fsm-state.yaml` as the single source of truth.
 

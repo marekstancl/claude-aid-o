@@ -336,6 +336,94 @@ else
   pass "stdout path is absolute: $printed_path"
 fi
 
+# ===========================================================================
+# TEST 11: --streamlined flag drives streamlined_mode: true END-TO-END
+#          (CP3 activation gap guard — exercises the flag THROUGH
+#          aid-json-to-run.sh → Step 18 aid-fsm.sh init, NOT a direct
+#          aid-fsm.sh init --streamlined call).
+# ===========================================================================
+run_test "aid-json-to-run.sh --streamlined writes streamlined_mode: true to fsm-state.yaml"
+
+# Helper: read .streamlined_mode from a generated fsm-state.yaml. Prefer yq;
+# fall back to grep so the assertion works even without yq installed.
+read_streamlined_mode() {
+  local sf="$1"
+  if command -v yq >/dev/null 2>&1; then
+    # NOTE: do NOT use `// "default"` here — mikefarah yq treats a literal
+    # `false` value as empty for the `//` operator, so `false // "X"` yields "X".
+    # Plain selection returns the literal true/false (or "null" if absent).
+    yq -r '.streamlined_mode' "$sf" 2>/dev/null
+  else
+    grep -E '^streamlined_mode:' "$sf" 2>/dev/null | head -1 \
+      | sed -E 's/^streamlined_mode:[[:space:]]*//' | tr -d '"'
+  fi
+}
+
+out_dir="$(make_output_dir "t11")"
+run_id_on="R-STREAMLINED-ON"
+fsm_state_on="$WORK_REPO/.aid-o/work/evidence/E-TEST-001-1_1/${run_id_on}/fsm-state.yaml"
+rm -f "$fsm_state_on"
+
+actual_exit=0
+"$SCRIPT_UNDER_TEST" \
+  --plan-json "$PLAN_JSON" \
+  --run-template "$RUN_TEMPLATE" \
+  --epic "$EPIC_FILE" \
+  --output-dir "$out_dir" \
+  --run-id "$run_id_on" \
+  --streamlined \
+  >/dev/null 2>&1 || actual_exit=$?
+
+# init may auto-checkout task/E-TEST-001-1_1/main; restore main for next test.
+git checkout -q main 2>/dev/null || true
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "--streamlined run exits with code 0" "got exit code $actual_exit"
+elif [[ ! -f "$fsm_state_on" ]]; then
+  fail "Step 18 auto-init wrote fsm-state.yaml" "file not found: $fsm_state_on"
+else
+  sm_on="$(read_streamlined_mode "$fsm_state_on")"
+  if [[ "$sm_on" == "true" ]]; then
+    pass "--streamlined → fsm-state.yaml streamlined_mode: true"
+  else
+    fail "--streamlined → streamlined_mode: true" "got: '$sm_on'"
+  fi
+fi
+
+# ===========================================================================
+# TEST 12: NO flag → streamlined_mode: false END-TO-END (full mode default).
+# ===========================================================================
+run_test "aid-json-to-run.sh without --streamlined writes streamlined_mode: false"
+
+out_dir="$(make_output_dir "t12")"
+run_id_off="R-STREAMLINED-OFF"
+fsm_state_off="$WORK_REPO/.aid-o/work/evidence/E-TEST-001-1_1/${run_id_off}/fsm-state.yaml"
+rm -f "$fsm_state_off"
+
+actual_exit=0
+"$SCRIPT_UNDER_TEST" \
+  --plan-json "$PLAN_JSON" \
+  --run-template "$RUN_TEMPLATE" \
+  --epic "$EPIC_FILE" \
+  --output-dir "$out_dir" \
+  --run-id "$run_id_off" \
+  >/dev/null 2>&1 || actual_exit=$?
+
+git checkout -q main 2>/dev/null || true
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "full-mode run exits with code 0" "got exit code $actual_exit"
+elif [[ ! -f "$fsm_state_off" ]]; then
+  fail "Step 18 auto-init wrote fsm-state.yaml" "file not found: $fsm_state_off"
+else
+  sm_off="$(read_streamlined_mode "$fsm_state_off")"
+  if [[ "$sm_off" == "false" ]]; then
+    pass "no flag → fsm-state.yaml streamlined_mode: false"
+  else
+    fail "no flag → streamlined_mode: false" "got: '$sm_off'"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

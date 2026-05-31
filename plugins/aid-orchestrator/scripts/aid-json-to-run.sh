@@ -5,7 +5,13 @@
 # Usage:
 #   ./aid-json-to-run.sh \
 #     --plan-json <path> --run-template <path> --epic <path> \
-#     --output-dir <path> --run-id <R-xxx>
+#     --output-dir <path> --run-id <R-xxx> [--streamlined]
+#
+# --streamlined (optional, default off): forwarded to `aid-fsm.sh init` in
+# Step 18 so the auto-initialized FSM state carries streamlined_mode: true
+# (P040 Component D). This is a SEPARATE dimension from execution mode (which
+# stays positional "full"); without this flag /aid-run --streamlined would
+# silently produce a full-mode run (CP3 gap fix).
 #
 # Reads plan.json (steps, dependencies, gates, budget) and the EPIC file
 # (Goal, Context, Scope), then assembles a complete run.md matching the
@@ -31,6 +37,7 @@ run_template=""
 epic=""
 output_dir=""
 run_id=""
+streamlined=false   # P040 Component D activation flag (CP3 gap fix); forwarded to aid-fsm.sh init in Step 18
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --epic)          epic="$2";            shift 2 ;;
     --output-dir)    output_dir="$2";      shift 2 ;;
     --run-id)        run_id="$2";          shift 2 ;;
+    --streamlined)   streamlined=true;     shift 1 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -635,10 +643,23 @@ if [[ ! -f "$fsm_state_file" ]]; then
   # cross-EPIC mismatch and hard-fail. We therefore restore the original branch
   # after init (the EPIC's task branch is recreated at execution time via the
   # FSM resume case). Restore is a no-op for non-batch single-EPIC callers.
-  bash "${SCRIPT_DIR}/aid-fsm.sh" init \
-    "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
-    "$fsm_branch" "$fsm_base_commit" \
-    "$fsm_state_file"
+  # Forward --streamlined (P040 Component D) as a named flag AFTER the 7
+  # positional args. cmd_init parses --streamlined from $8+ and sets
+  # streamlined_mode: true, independent of the positional execution `mode`
+  # (which stays "full"). Without this, /aid-run --streamlined silently
+  # produced a full-mode run (CP3 activation gap).
+  if [[ "$streamlined" == "true" ]]; then
+    bash "${SCRIPT_DIR}/aid-fsm.sh" init \
+      "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
+      "$fsm_branch" "$fsm_base_commit" \
+      "$fsm_state_file" \
+      --streamlined
+  else
+    bash "${SCRIPT_DIR}/aid-fsm.sh" init \
+      "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
+      "$fsm_branch" "$fsm_base_commit" \
+      "$fsm_state_file"
+  fi
   fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then
     if git checkout "$fsm_branch" >/dev/null 2>&1; then
