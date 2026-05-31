@@ -156,6 +156,19 @@ Escalation is always a **suggestion** — PM decides whether to act on it.
 - `commands/aid-plan.md` — escalation target for complex tasks
 - `commands/aid-init.md` — auto-init on first use
 
+### Relationship to /aid-run --streamlined
+
+/aid-do is Fast Mode for sub-2-minute tasks. It is *conceptually* analogous to
+`/aid-run --streamlined` — a single low-overhead path with no per-step CP2
+verifier dispatch — but it bypasses the FSM entirely. Unlike `/aid-run
+--streamlined`, /aid-do does NOT write `fsm-state.yaml` or `compliance.json`,
+does NOT set `streamlined_mode` / `coverage_mode`, and is NOT subject to
+`cmd_done_advance` Component D enforcement (streamlined integration-review or
+abandoned-but-shipped checks). Its only artifacts are `.aid-o/work/quick/Q-NNN.md`
+plus one git commit. The `coverage_mode: "streamlined"` accounting and Component D
+checks apply only to `/aid-run --streamlined`, which walks the full
+plan→EPIC→run FSM pipeline.
+
 ## Important
 
 - **No FSM** — Fast Mode bypasses the state machine entirely

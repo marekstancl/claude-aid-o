@@ -5,7 +5,13 @@
 # Usage:
 #   ./aid-json-to-run.sh \
 #     --plan-json <path> --run-template <path> --epic <path> \
-#     --output-dir <path> --run-id <R-xxx>
+#     --output-dir <path> --run-id <R-xxx> [--streamlined]
+#
+# --streamlined (optional, default off): forwarded to `aid-fsm.sh init` in
+# Step 18 so the auto-initialized FSM state carries streamlined_mode: true
+# (P040 Component D). This is a SEPARATE dimension from execution mode (which
+# stays positional "full"); without this flag /aid-run --streamlined would
+# silently produce a full-mode run (CP3 gap fix).
 #
 # Reads plan.json (steps, dependencies, gates, budget) and the EPIC file
 # (Goal, Context, Scope), then assembles a complete run.md matching the
@@ -31,6 +37,7 @@ run_template=""
 epic=""
 output_dir=""
 run_id=""
+streamlined=false   # P040 Component D activation flag (CP3 gap fix); forwarded to aid-fsm.sh init in Step 18
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --epic)          epic="$2";            shift 2 ;;
     --output-dir)    output_dir="$2";      shift 2 ;;
     --run-id)        run_id="$2";          shift 2 ;;
+    --streamlined)   streamlined=true;     shift 1 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -600,11 +608,73 @@ mv "$tmp_file" "$output_path" || {
 }
 
 # =============================================================================
-# Step 17: Output absolute path to stdout
+# Step 17: Resolve absolute run.md path
 # =============================================================================
-# Resolve to absolute path
+# Resolve to absolute path (do NOT echo yet — Step 18 runs first; the absolute
+# path MUST remain the FINAL stdout line for aid-auto-pipeline.sh capture).
 if [[ "$output_path" == /* ]]; then
-  echo "$output_path"
+  abs_run_path="$output_path"
 else
-  echo "$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
+  abs_run_path="$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
 fi
+
+# =============================================================================
+# Step 18: P040 Component E — Auto-init FSM state (idempotent)
+# =============================================================================
+# Eliminates state.yaml vs fsm-state.yaml schema confusion (NR 10/12/14):
+# aid-json-to-run.sh now initializes the FSM directly so no manual
+# `aid-fsm.sh init` call is required before /aid-run.
+# Compute FSM init parameters from in-scope variables.
+fsm_evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation
+mkdir -p "$fsm_evidence_dir"
+fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
+fsm_mode="full"
+fsm_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+[[ -z "$fsm_branch" || "$fsm_branch" == "HEAD" ]] && error_exit "aid-json-to-run.sh Step 18: cannot determine current git branch (detached HEAD?)" 1
+[[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
+
+if [[ ! -f "$fsm_state_file" ]]; then
+  echo "P040 Component E: initializing FSM state at $fsm_state_file" >&2
+  # aid-fsm.sh init runs branch enforcement and may auto-checkout
+  # task/<epic_id>/main. aid-json-to-run.sh is a GENERATION-phase tool:
+  # aid-auto-pipeline.sh calls it once per EPIC in a single batch, so leaving
+  # the workdir on a per-EPIC task branch would make the NEXT EPIC's init see a
+  # cross-EPIC mismatch and hard-fail. We therefore restore the original branch
+  # after init (the EPIC's task branch is recreated at execution time via the
+  # FSM resume case). Restore is a no-op for non-batch single-EPIC callers.
+  # Forward --streamlined (P040 Component D) as a named flag AFTER the 7
+  # positional args. cmd_init parses --streamlined from $8+ and sets
+  # streamlined_mode: true, independent of the positional execution `mode`
+  # (which stays "full"). Without this, /aid-run --streamlined silently
+  # produced a full-mode run (CP3 activation gap).
+  if [[ "$streamlined" == "true" ]]; then
+    bash "${SCRIPT_DIR}/aid-fsm.sh" init \
+      "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
+      "$fsm_branch" "$fsm_base_commit" \
+      "$fsm_state_file" \
+      --streamlined
+  else
+    bash "${SCRIPT_DIR}/aid-fsm.sh" init \
+      "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
+      "$fsm_branch" "$fsm_base_commit" \
+      "$fsm_state_file"
+  fi
+  fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then
+    if git checkout "$fsm_branch" >/dev/null 2>&1; then
+      echo "P040 Component E: restored generation branch '$fsm_branch' after FSM init (was on '$fsm_after_branch')" >&2
+    else
+      echo "P040 Component E: WARNING — could not restore branch '$fsm_branch' after FSM init (now on '$fsm_after_branch')" >&2
+    fi
+  fi
+else
+  echo "P040 Component E: fsm-state.yaml already exists at $fsm_state_file; skipping init (idempotent)" >&2
+fi
+
+# =============================================================================
+# Step 19: Output absolute run.md path to stdout (MUST be final stdout line)
+# =============================================================================
+# aid-auto-pipeline.sh captures this stdout into $run_path. aid-fsm.sh init
+# above writes only to stderr / its own state file, so stdout is clean here.
+echo "$abs_run_path"

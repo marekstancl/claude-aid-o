@@ -5,7 +5,12 @@
 # Usage:
 #   ./aid-auto-pipeline.sh \
 #     --plan <path> [--queue-mode <chain|separate|custom>] \
-#     [--plugin-dir <path>] [--depends-on <E-xxx,E-yyy>]
+#     [--plugin-dir <path>] [--depends-on <E-xxx,E-yyy>] [--streamlined]
+#
+# --streamlined (optional, default off): passthrough forwarded to every
+# aid-json-to-run.sh invocation (Phase N.c), which in turn forwards it to
+# aid-fsm.sh init so each EPIC's FSM carries streamlined_mode: true
+# (P040 Component D activation; CP3 gap fix).
 #
 # Runs the full Plan-to-Queue pipeline for all phases of a plan. This is the
 # single entry point called by the /aid-plan-epic command. For each phase it:
@@ -32,6 +37,7 @@ plan=""
 queue_mode="chain"
 plugin_dir=""
 custom_depends=""
+streamlined=false   # P040 Component D passthrough → aid-json-to-run.sh → aid-fsm.sh init (CP3 gap fix)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -39,6 +45,7 @@ while [[ $# -gt 0 ]]; do
     --queue-mode)  queue_mode="$2";     shift 2 ;;
     --plugin-dir)  plugin_dir="$2";     shift 2 ;;
     --depends-on)  custom_depends="$2"; shift 2 ;;
+    --streamlined) streamlined=true;    shift 1 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -287,12 +294,22 @@ for phase in $(seq 1 "$total_phases"); do
   run_output_dir=".aid-o/work/runs/${run_id}"
   mkdir -p "$run_output_dir" 2>/dev/null || true
 
-  run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \
-    --plan-json "$plan_json_path" \
-    --run-template "$run_template" \
-    --epic "$epic_path" \
-    --output-dir "$run_output_dir" \
-    --run-id "$run_id")"
+  if [[ "$streamlined" == "true" ]]; then
+    run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \
+      --plan-json "$plan_json_path" \
+      --run-template "$run_template" \
+      --epic "$epic_path" \
+      --output-dir "$run_output_dir" \
+      --run-id "$run_id" \
+      --streamlined)"
+  else
+    run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \
+      --plan-json "$plan_json_path" \
+      --run-template "$run_template" \
+      --epic "$epic_path" \
+      --output-dir "$run_output_dir" \
+      --run-id "$run_id")"
+  fi
 
   # -------------------------------------------------------------------------
   # Phase N.d: Determine depends_on for queue entry

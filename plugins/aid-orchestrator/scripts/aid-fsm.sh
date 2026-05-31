@@ -165,6 +165,265 @@ fsm_check_verifier_output() {
   return 0
 }
 
+# fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
+# Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
+# start event lacks matching complete within expected_duration_max (default 600s
+# for CP2, 900s for CP3, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
+#
+# Empirical anchor: NR 8/10/13/14 fabricated provenance class across 4 projects.
+# Enforcement principle: AID-v3-principles.md §1.
+fsm_check_orphan_dispatches() {
+  local evidence_dir="$1"
+  local pending_file="${evidence_dir}/pending-dispatches.jsonl"
+
+  # No pending file = clean (no dispatches were started); skip.
+  [[ ! -f "$pending_file" ]] && return 0
+  # Empty pending file = all dispatches completed cleanly; skip.
+  [[ ! -s "$pending_file" ]] && return 0
+
+  local now_ts
+  now_ts=$(date -u +%s)
+
+  # Extract orphan focuses (start events whose ts+expected_duration_max < now).
+  # Malformed file = fail loud (see error handling below), NOT silent skip.
+  # NOTE: jq_rc must be captured via `|| jq_rc=$?` — under `set -euo pipefail`
+  # a bare failing command substitution assignment aborts the script before
+  # the next statement runs, so the malformed-file handler below never fires.
+  local orphan_focuses jq_err_file jq_rc=0
+  jq_err_file=$(mktemp -t orphan-jq-err.XXXXXX)
+  orphan_focuses=$(TZ=UTC jq -r --argjson now "$now_ts" '
+    select(.event == "start") |
+    select((.ts | fromdateiso8601) + .expected_duration_max < $now) |
+    .focus
+  ' "$pending_file" 2>"$jq_err_file") || jq_rc=$?  # TZ=UTC: jq<1.7 fromdateiso8601 honors local TZ even on Z suffix (P037 lesson, see ~L459)
+  if [[ $jq_rc -ne 0 ]]; then
+    local jq_stderr; jq_stderr=$(<"$jq_err_file"); rm -f "$jq_err_file"
+    echo "ERROR: pending-dispatches.jsonl is malformed; refusing to advance step." >&2
+    echo "  File: $pending_file" >&2
+    echo "  jq error: $jq_stderr" >&2
+    echo "  Fix: inspect file, repair JSONL syntax, OR override:" >&2
+    echo "    aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars>' \\" >&2
+    echo "        --blocked-checks 'dispatch_orphan_complete'" >&2
+    fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
+      --evidence-dir "$evidence_dir" --reason "pending_file_malformed"
+    die "pending_file_malformed: $pending_file"
+  fi
+  rm -f "$jq_err_file"
+  orphan_focuses=$(echo "$orphan_focuses" | sort -u)
+
+  if [[ -z "$orphan_focuses" ]]; then
+    return 0
+  fi
+
+  # Build structured stderr error
+  echo "ERROR: Orphan dispatch(es) detected — cannot advance step." >&2
+  local focus
+  while IFS= read -r focus; do
+    [[ -z "$focus" ]] && continue
+    local entry started max
+    entry=$(jq -c --arg f "$focus" 'select(.focus == $f and .event == "start")' "$pending_file" | tail -1)
+    started=$(echo "$entry" | jq -r '.ts')
+    max=$(echo "$entry" | jq -r '.expected_duration_max')
+    echo "  ORPHAN DISPATCH: focus=$focus started=$started max=${max}s" >&2
+    echo "  Fix: bash plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh complete \\" >&2
+    echo "         --focus $focus --output-file <verifier-output-*.md path> --evidence-dir $evidence_dir" >&2
+  done <<< "$orphan_focuses"
+
+  echo "" >&2
+  echo "OR (PM-authorized override, audited):" >&2
+  echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
+  echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
+
+  # Emit audit log
+  local focus_csv orphan_count
+  focus_csv=$(echo "$orphan_focuses" | paste -sd, -)
+  orphan_count=$(echo "$orphan_focuses" | grep -c .)
+  fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
+    --evidence-dir "$evidence_dir" \
+    --orphan-count "$orphan_count" \
+    --orphan-focus-list-array "$focus_csv"
+
+  die "missing_dispatch_complete: $(echo "$orphan_focuses" | head -3 | tr '\n' ' ')"
+}
+
+# fsm_check_cp4_curator_validation — Component C of P040 (Dispatch Lifecycle
+# Enforcement Bundle). Requires verifier-output-cp4-curator-validation.md when
+# curator-report.md exists AND any commit in base_commit..HEAD range touches
+# production code paths.
+#
+# Empirical anchor: NR 10 §3B + NR 12 (curator changes production code without
+# CP4 review). Enforcement principle: AID-v3-principles.md §1.
+fsm_check_cp4_curator_validation() {
+  local evidence_dir="$1"
+  local project_root="$2"
+  local state_file="${3:-}"
+  local curator_report="${evidence_dir}/curator-report.md"
+
+  # No curator commit = no CP4 needed; skip silently.
+  [[ ! -f "$curator_report" ]] && return 0
+
+  # P040 Component D coordination: streamlined mode treats CP4 as advisory.
+  local streamlined
+  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
+  if [[ "$streamlined" == "true" ]]; then
+    fsm_emit_audit_log "cp4_skipped_streamlined_advisory" \
+      --evidence-dir "$evidence_dir" --reason "streamlined_mode CP4 advisory per spec"
+    return 0
+  fi
+
+  # Resolve base_commit from the FSM state file — scan the FULL EPIC range, not
+  # just HEAD. The state file is written as fsm-state.yaml in production but some
+  # callers/fixtures name it state.yaml; accept either (P040 Step 3 reconciliation).
+  local fsm_state_file="${evidence_dir}/fsm-state.yaml"
+  [[ ! -f "$fsm_state_file" && -f "${evidence_dir}/state.yaml" ]] && fsm_state_file="${evidence_dir}/state.yaml"
+  local base_commit
+  base_commit=$(yq -r '.base_commit' "$fsm_state_file" 2>/dev/null)
+  [[ -z "$base_commit" || "$base_commit" == "null" ]] && return 0  # fsm-state unreadable; conservative skip
+
+  # Resolve production-code glob (configurable per project; /aid-init auto-detects)
+  local prod_paths
+  prod_paths=$(yq -r '.cp4_production_paths // "plugins/|scripts/|src/|lib/|api/"' \
+                "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+                || echo "plugins/|scripts/|src/|lib/|api/")
+  [[ -z "$prod_paths" || "$prod_paths" == "null" ]] && prod_paths="plugins/|scripts/|src/|lib/|api/"
+
+  # LOW-1: validate the prod_paths ERE before relying on a no-match result.
+  # grep returns 0=match, 1=no-match, >=2=error (e.g. bad ERE). The old pipeline
+  # swallowed ALL non-zero exits via `|| true`, so a malformed cp4_production_paths
+  # regex looked identical to "no production files touched" → CP4 silently disabled.
+  # FAIL CLOSED on malformed ERE: cannot prove production was NOT touched, so CP4
+  # is required. Capture grep's raw exit code directly (not via `! ...`, which
+  # would rewrite $? to 0/1).
+  local grep_probe_rc=0
+  printf '' | grep -E "^(${prod_paths})" >/dev/null 2>&1 || grep_probe_rc=$?
+  if [[ "$grep_probe_rc" -ge 2 ]]; then
+    fsm_emit_audit_log "cp4_glob_invalid" \
+      --evidence-dir "$evidence_dir" \
+      --glob "$prod_paths" \
+      --reason "cp4_production_paths_invalid_ere"
+    echo "ERROR: cp4_production_paths is not a valid ERE — cannot evaluate CP4 (production-touch detection)." >&2
+    echo "  Glob: ${prod_paths}" >&2
+    echo "  Fix the glob in .aid-o/config/execution.yaml, OR override (audited):" >&2
+    echo "    aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+    echo "        --reason '<≥20 chars why skipping CP4 is acceptable>' \\" >&2
+    echo "        --blocked-checks 'cp4_curator_validation'" >&2
+    die "cp4_glob_invalid"
+  fi
+
+  # Did ANY commit in base_commit..HEAD touch production paths?
+  # `|| true` guards against set -euo pipefail aborting when grep finds no match
+  # (exit 1) — the no-touch case is the legitimate skip path, not an error.
+  local touched_prod
+  touched_prod=$(git -C "$project_root" diff --name-only "${base_commit}..HEAD" 2>/dev/null \
+                   | grep -E "^(${prod_paths})" | head -1 || true)
+
+  if [[ -z "$touched_prod" ]]; then
+    # No production touch in EPIC range — emit non-blocking telemetry.
+    fsm_emit_audit_log "cp4_skip_no_prod_match" \
+      --base "$base_commit" \
+      --evidence-dir "$evidence_dir" \
+      --glob "$prod_paths"
+    return 0
+  fi
+
+  # Check for CP4 review file
+  local cp4_file="${evidence_dir}/verifier-output-cp4-curator-validation.md"
+  if [[ -f "$cp4_file" ]]; then
+    return 0
+  fi
+
+  # Hard fail with structured error
+  echo "ERROR: CP4 (curator-validation) review missing — cannot advance to release." >&2
+  echo "  EPIC range examined: ${base_commit}..HEAD" >&2
+  echo "  Production-code paths touched: $touched_prod (plus possibly others; first match shown)" >&2
+  echo "  Required file: $cp4_file" >&2
+  echo "" >&2
+  echo "Fix: dispatch curator-validation verifier and write its output to:" >&2
+  echo "  $cp4_file" >&2
+  echo "" >&2
+  echo "OR (PM-authorized override, audited):" >&2
+  echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+  echo "      --reason '<≥20 chars why this skip is acceptable>' \\" >&2
+  echo "      --blocked-checks 'cp4_curator_validation'" >&2
+
+  fsm_emit_audit_log "cp4_missing_fail" \
+    --base "$base_commit" \
+    --touched-prod "$touched_prod" \
+    --evidence-dir "$evidence_dir"
+
+  die "missing_cp4_curator_validation"
+}
+
+# fsm_check_streamlined_integration_review — Component D of P040. When
+# streamlined_mode is true, refuse done-advance review→release unless all three
+# integration-review evidence files exist. Closes the documented contract into
+# enforcement per AID-v3-principles.md §1 — Detector without Enforcement is Decoration.
+# Full mode skips this check (per-step CP2 evidence covers the same surface).
+fsm_check_streamlined_integration_review() {
+  local evidence_dir="$1"
+  local state_file="$2"
+  local streamlined
+  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
+  [[ "$streamlined" != "true" ]] && return 0
+  local cp3_code="${evidence_dir}/verifier-output-cp3-code-review.md"
+  local cp3_sec="${evidence_dir}/verifier-output-cp3-security.md"
+  local gates="${evidence_dir}/gates_report.json"
+  local missing=()
+  [[ -f "$cp3_code" ]] || missing+=("verifier-output-cp3-code-review.md")
+  [[ -f "$cp3_sec" ]]  || missing+=("verifier-output-cp3-security.md")
+  [[ -f "$gates" ]]    || missing+=("gates_report.json")
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    local joined
+    joined=$(IFS=', '; echo "${missing[*]}")
+    echo "ERROR: Streamlined run missing required integration-review evidence: ${joined}" >&2
+    echo "The streamlined contract requires verifier-output-cp3-code-review.md +" >&2
+    echo "verifier-output-cp3-security.md + gates_report.json in:" >&2
+    echo "  ${evidence_dir}" >&2
+    echo "" >&2
+    echo "Fix: dispatch CP3 code-review + CP3 security verifiers and run gates, then retry done-advance." >&2
+    echo "" >&2
+    echo "OR (PM-authorized override, audited):" >&2
+    echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+    echo "      --reason '<≥20 chars explaining why missing integration review is acceptable>' \\" >&2
+    echo "      --blocked-checks 'streamlined_integration_review'" >&2
+    fsm_emit_audit_log "streamlined_integration_review_fail" \
+      --evidence-dir "$evidence_dir" --missing "${joined}"
+    die "streamlined_integration_review"
+  fi
+  return 0
+}
+
+# fsm_check_streamlined_abandoned — Component D of P040. When streamlined_mode is
+# true, refuse done-advance if timeline.jsonl has <3 events (run claimed streamlined
+# but never executed past initial transition).
+# Empirical anchor: NR 12 SOUSTO P009. Enforcement: AID-v3-principles.md §1.
+fsm_check_streamlined_abandoned() {
+  local evidence_dir="$1"
+  local state_file="$2"
+  local streamlined
+  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
+  [[ "$streamlined" != "true" ]] && return 0
+  local timeline="${evidence_dir}/timeline.jsonl"
+  local event_count=0
+  [[ -f "$timeline" ]] && event_count=$(wc -l < "$timeline" | tr -d ' ')
+  if [[ "$event_count" -lt 3 ]]; then
+    echo "ERROR: Streamlined run abandoned — timeline.jsonl has $event_count event(s)." >&2
+    echo "A streamlined run requires at least 3 timeline events (init + transition to EXECUTE + at least one step/phase event);" >&2
+    echo "fewer indicates the FSM was never executed past the initial transition (NR 12 SOUSTO P009 anchor pattern)." >&2
+    echo "" >&2
+    echo "Fix: run the EPIC end-to-end via /aid-run, then retry done-advance." >&2
+    echo "" >&2
+    echo "OR (PM-authorized override, audited):" >&2
+    echo "  aid-fsm.sh done-advance review release <state_file> --force \\" >&2
+    echo "      --reason '<≥20 chars explaining why abandonment is acceptable>' \\" >&2
+    echo "      --blocked-checks 'streamlined_abandoned'" >&2
+    fsm_emit_audit_log "streamlined_abandoned_fail" \
+      --evidence-dir "$evidence_dir" --event-count "$event_count"
+    die "streamlined_abandoned"
+  fi
+  return 0
+}
+
 # Unified dispatcher for --force handling across cmd_init / cmd_transition /
 # cmd_increment_step / cmd_done_advance. Validates reason, emits extended
 # fsm_force_override timeline event with caller field, and writes persistent
@@ -729,6 +988,19 @@ write_compliance_json() {
   local failures_json
   failures_json=$(fsm_build_failures "$checks" "$severity_yaml")
 
+  # P040 Component D: emit coverage_mode + skipped_dimensions so the aggregator
+  # can distinguish streamlined runs (which legitimately skip per-step CP2 and
+  # CP4 curator validation) from full runs that are missing that evidence.
+  local streamlined mode_value skipped_dims
+  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
+  if [[ "$streamlined" == "true" ]]; then
+    mode_value="streamlined"
+    skipped_dims='["verifier_outputs.cp2_per_step","verifier_outputs.cp4_curator_validation"]'
+  else
+    mode_value="full"
+    skipped_dims='[]'
+  fi
+
   jq -nc \
     --arg epic "$epic_id" --arg run "$run_id" --arg ver "v3" \
     --arg era "$deploy_era" \
@@ -739,9 +1011,13 @@ write_compliance_json() {
     --argjson fls "$failures_json" \
     --arg     ovr "$overall_pre" \
     --argjson nts "$notes_json" \
+    --arg     mode "$mode_value" \
+    --argjson skipped "$skipped_dims" \
     '{
       epic_id: $epic, run_id: $run, aid_version: $ver,
       deploy_era: $era, evaluated_at: $ts,
+      coverage_mode: $mode,
+      skipped_dimensions: $skipped,
       checks: $chks,
       failures: $fls,
       force_override_count: $fc,
@@ -941,6 +1217,7 @@ cmd_init() {
   # Detect --plan <path> and --force in either order ($8/$9). Both are optional.
   local plan_path_arg=""
   local force="false"
+  local streamlined=false
   local i=8
   while [[ $i -le $# ]]; do
     case "${!i}" in
@@ -950,6 +1227,9 @@ cmd_init() {
         ;;
       --plan=*)
         plan_path_arg="${!i#--plan=}"
+        ;;
+      --streamlined)
+        streamlined=true
         ;;
       --force)
         # Forwards ${@:i+1}; callers must pass --plan before --force when both present
@@ -1047,9 +1327,18 @@ cmd_init() {
         log_info "Resume case: HEAD already on $expected_branch"
         ;;
       main|master|develop)
-        log_info "Auto-creating branch: $expected_branch"
-        git checkout -b "$expected_branch" >/dev/null 2>&1 \
-          || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        # P040 Component E: if the EPIC's task branch already exists (e.g. a
+        # prior aid-json-to-run.sh generation pass created it, or a re-init of
+        # the same EPIC), resume onto it instead of failing on `checkout -b`.
+        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
+          log_info "Resume case: checking out existing $expected_branch"
+          git checkout "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to checkout existing branch $expected_branch (check 'git status' for details)"
+        else
+          log_info "Auto-creating branch: $expected_branch"
+          git checkout -b "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        fi
         ;;
       task/E-*)
         # Different EPIC's task branch — stale workspace from prior session.
@@ -1117,6 +1406,7 @@ branch: $branch
 base_commit: $base_commit
 gate_retries: 0
 escalation_count: 0
+streamlined_mode: $streamlined
 started_at: "${_now_iso}"
 created_at: ${_now_iso}
 EOF
@@ -1165,7 +1455,40 @@ except: pass
   fi
   echo "plan_path: $plan_path_value" >> "$state_file"
 
+  # P040 Component E: absorb legacy state.yaml steps[] array into fsm-state.yaml
+  # (single source of truth — eliminates state.yaml vs fsm-state.yaml drift, NR 10/12/14).
+  # Appended AFTER the scalar heredoc + plan_json_hash/plan_path line-anchored
+  # appends so it never interferes with grep '^field:' readers. The nested
+  # steps: array is yq-parseable while the scalar fields above remain unquoted.
+  {
+    echo "steps:"
+    local _s
+    for (( _s=1; _s<=total_steps; _s++ )); do
+      echo "  - id: ${_s}"
+      echo "    name: \"\""
+      echo "    status: pending"
+      echo "    started_at: null"
+      echo "    completed_at: null"
+    done
+  } >> "$state_file"
+
   echo "Initialized state: READY" >&2
+}
+
+# read_steps_array — P040 Component E backward-compat reader. Prefers the
+# steps[] array in fsm-state.yaml (single source of truth); falls back to a
+# sibling legacy state.yaml for runs created before unification. Emits JSON.
+read_steps_array() {
+  local state_file="$1"
+  local evidence_dir; evidence_dir=$(dirname "$state_file")
+  local legacy="${evidence_dir}/state.yaml"
+  if yq -e '.steps' "$state_file" >/dev/null 2>&1; then
+    yq -o=json '.steps' "$state_file"
+  elif [[ -f "$legacy" ]] && yq -e '.steps' "$legacy" >/dev/null 2>&1; then
+    yq -o=json '.steps' "$legacy"
+  else
+    echo "[]"
+  fi
 }
 
 cmd_transition() {
@@ -1372,16 +1695,35 @@ cmd_increment_step() {
   [[ "${2:-}" == "--force" ]] && force="true"
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
-  local step
+
+  # P040 Component B: hoist scope vars to function-top so the reconciliation
+  # backstop (and audit logging) can run UNCONDITIONALLY, regardless of --force.
+  local step epic_id run_id evidence_dir project_root
   step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
+  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  project_root="$PWD"
+
+  # P040 Component D: streamlined mode skips per-step CP2 verifier enforcement.
+  local streamlined
+  streamlined=$(yq -r '.streamlined_mode // false' "$state_file" 2>/dev/null || echo "false")
+
+  # P040 Component B: parse --blocked-checks from caller args (positionals 3+),
+  # so the orphan check can be explicitly waived by PM (--force --blocked-checks).
+  local blocked_checks=""
+  local _args=("${@:3}")
+  local i
+  for (( i=0; i<${#_args[@]}; i++ )); do
+    if [[ "${_args[$i]}" == "--blocked-checks" ]]; then
+      blocked_checks="${_args[$((i+1))]:-}"
+      break
+    fi
+  done
+  blocked_checks="${blocked_checks// /}"; blocked_checks="${blocked_checks#,}"; blocked_checks="${blocked_checks%,}"
 
   # Precondition: step verification evidence must exist
   if [[ "$force" != "true" ]]; then
-    local epic_id run_id evidence_dir
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-
     local verify_file="${evidence_dir}/step-${step}-verify.md"
     if [[ ! -f "$verify_file" ]]; then
       echo "PRECONDITION FAIL: Step verification evidence not found." >&2
@@ -1451,7 +1793,9 @@ cmd_increment_step() {
     fi
 
     # Session B CP2: verifier-output-step-N.md precondition
-    if ! fsm_check_grandfather; then
+    # P040 Component D: streamlined mode skips per-step CP2 (covered by
+    # integration-review enforcement at done-advance instead).
+    if [[ "$streamlined" != "true" ]] && ! fsm_check_grandfather; then
       local verifier_output="${evidence_dir}/verifier-output-step-${step}.md"
 
       if ! fsm_check_verifier_output "$verifier_output"; then
@@ -1506,12 +1850,25 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       fi
     fi
   else
-    local epic_id run_id evidence_dir
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
     echo "WARNING: --force used, skipping step verification check" >&2
+  fi
+
+  # ---- P040 Component B: reconciliation backstop (orphan dispatch check) ----
+  # Run orphan check UNCONDITIONALLY unless PM explicitly waived via BOTH
+  # --force AND --blocked-checks dispatch_orphan_complete (HIGH-2 fix).
+  #
+  # Security rationale: the waiver MUST require --force so the --reason ≥20-char
+  # enforcement in fsm_handle_force_override runs (it is invoked from the --force
+  # branch above). A bare `--blocked-checks dispatch_orphan_complete` (no --force)
+  # would otherwise waive the orphan check with a canned audit reason, bypassing
+  # the forensic-grade reason requirement. Force ALONE (without
+  # dispatch_orphan_complete in --blocked-checks) still runs the orphan check.
+  if [[ "$force" == "true" && ",${blocked_checks}," == *",dispatch_orphan_complete,"* ]]; then
+    fsm_emit_audit_log "fsm_orphan_dispatch_waived" \
+      --evidence-dir "$evidence_dir" --reason "explicit_blocked_checks_waiver"
+  else
+    fsm_check_orphan_dispatches "$evidence_dir"   # dies on orphan
   fi
 
   local tmp="${state_file}.tmp"
@@ -1599,6 +1956,15 @@ cmd_done_advance() {
       run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
       evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
 
+      # P040 Component D: integration-review file existence (streamlined contract)
+      if ! fsm_check_streamlined_integration_review "$evidence_dir" "$state_file"; then
+        return 1
+      fi
+      # P040 Component D: abandoned-but-shipped check (timeline event count)
+      if ! fsm_check_streamlined_abandoned "$evidence_dir" "$state_file"; then
+        return 1
+      fi
+
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
       # Evaluates compliance checks inline (no file write), filters severity:blocking
@@ -1659,6 +2025,11 @@ EOF
         fi
       fi
       # End P038 Step 3 block. Falls through to existing curator/auditor checks.
+
+      # P040 Component C: CP4 enforcement (must run before existing curator-report check)
+      if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then
+        return 1  # die() already called inside
+      fi
 
       # Curator report must exist
       if [[ ! -f "${evidence_dir}/curator-report.yaml" && ! -f "${evidence_dir}/curator-report.md" ]]; then

@@ -367,5 +367,25 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - If PM aborts at any step → end gracefully, no final plan/EPIC files written (interim doc preserved for recovery)
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
 
+### Streamlined Mode Advisory (P040, v2.25.0+)
+
+`--streamlined` mode (P040 Component D) is appropriate for low-risk EPICs that
+skip per-step CP2 in favor of a single integration-review checkpoint at
+`done-advance`. These criteria are advisory — the planner surfaces them as a
+recommendation; the PM decides whether to pass `--streamlined` to `/aid-run`.
+
+An EPIC is a candidate for streamlined mode when ALL of the following hold:
+
+- **0 logic-changing files** — only docs, config, fixtures, or pure data edits;
+  no changes to control-flow or business logic.
+- **`< 5` files modified** — small, reviewable blast radius.
+- **`< 100` LOC delta** — net additions + deletions stay under one screen of review.
+- **0 security-sensitive paths** — nothing under auth, crypto, secrets, payment,
+  or other paths flagged `security_sensitive` in project config.
+
+When any criterion is exceeded, prefer full mode so per-step CP2 verification
+runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
+abandoned-run enforcement at `done-advance`.
+
 
 **Last Updated:** 2026-05-31

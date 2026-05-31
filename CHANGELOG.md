@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.25.0] — 2026-05-31
+
+### Added
+- **aid-emit-dispatch.sh wrapper** — new bash CLI with `start` and `complete` subcommands the orchestrator MUST call before/after every `Agent({subagent_type, prompt})` dispatch; writes `verifier_dispatch_start`/`_complete` events to timeline.jsonl plus tracks state in pending-dispatches.jsonl per evidence dir.
+- **fsm_check_orphan_dispatches function** — reconciliation backstop in cmd_increment_step that refuses step transitions when pending-dispatches.jsonl shows a start event older than expected_duration_max without matching complete.
+- **fsm_check_cp4_curator_validation function** — precondition in cmd_done_advance review→release that requires verifier-output-cp4-curator-validation.md when curator-report.md exists and any commit in `base_commit..HEAD` range touches production code paths. Mode-aware: skips with `cp4_skipped_streamlined_advisory` audit event when streamlined_mode is true.
+- **fsm_check_streamlined_integration_review function** — precondition in cmd_done_advance review→release that, when streamlined_mode is true, requires all three of `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md`, `gates_report.json` present in the evidence dir.
+- **fsm_check_streamlined_abandoned function** — abandoned-but-shipped detector in cmd_done_advance that fires when streamlined_mode is true and timeline.jsonl has fewer than 3 events.
+- **--streamlined CLI flag in cmd_init** — first-class lightweight execution mode that writes `streamlined_mode: true` into fsm-state.yaml and propagates through cmd_increment_step / cmd_done_advance / write_compliance_json.
+- **coverage_mode + skipped_dimensions fields in compliance.json** — honest accounting of which dimensions were intentionally skipped per the streamlined contract. Field name `coverage_mode` (not `mode`) avoids collision with the existing fsm-state.yaml `mode` (manual/auto execution mode).
+- **Four blocking checks in defaults/check-severity.yaml** — `dispatch_orphan_complete`, `cp4_curator_validation`, `streamlined_abandoned`, `streamlined_integration_review`, all severity blocking per AID-v3-principles.md §1 with explicit PM promotion (NR 8-14 empirical evidence across 4 projects).
+- **cp4_production_paths field in defaults/execution.yaml** — configurable glob alternation for CP4 trigger detection; `/aid-init` stack-scan in `scripts/lib/aid-init-execution-yaml.sh` auto-populates project-specific defaults.
+- **aid-json-to-run.sh Step 18 auto-init** — calls `aid-fsm.sh init` after run.md generation when fsm-state.yaml is absent, eliminating state.yaml vs fsm-state.yaml confusion (NR 10/12/14 anchor). Accepts a `--streamlined` passthrough (threaded from `/aid-run --streamlined` and `aid-auto-pipeline.sh`) that forwards to `cmd_init` so the auto-initialized state carries `streamlined_mode: true` — without it the streamlined activation switch would be unreachable.
+- **test-aid-emit-dispatch.bats** — eleven fixtures: the original eight (start-only, start+complete pair, orphan complete, ceiling clamp, concurrent flock, missing output_file, malformed agent_id, inode-swap race) plus three CP3-security fixtures (`--focus` injection rejected by allowlist, jq-escaped pending construction, per-start nonce prevents ledger double-clear).
+
+### Changed
+- **cmd_increment_step preconditions** — added Component B orphan-dispatch backstop after the existing memory_used/memory_written/verifier_output checks; conditionally skips the per-step verifier_output check when streamlined_mode is true.
+- **cmd_done_advance review→release preconditions** — added Component D streamlined_integration_review check, streamlined_abandoned check, and Component C CP4 enforcement (mode-aware in streamlined); all wired before the existing curator-report check; cites AID-v3-principles.md §1.
+- **write_compliance_json schema** — emits top-level coverage_mode and skipped_dimensions fields; backward-compatible (legacy compliance.json without these reads as coverage_mode "full", skipped_dimensions []). The `mode` → `coverage_mode` rename is a breaking change for any downstream consumer that read the v0 draft.
+- **fsm-state.yaml unified schema** — absorbs the legacy state.yaml steps[] array; backward-compat dual-file reader preserved.
+- **skills/pipeline.md** — new §4 Dispatch Protocol subsection documenting the mandatory aid-emit-dispatch.sh wrapper chain; PRE-FLIGHT auto-init note.
+- **skills/agent-protocol.md** — reference tables for the new audit events and check-severity entries.
+- **commands/aid-run.md, commands/aid-plan.md, commands/aid-do.md** — --streamlined flag documentation and advisory trigger criteria.
+
 ## [2.24.0] — 2026-05-31
 
 ### Added

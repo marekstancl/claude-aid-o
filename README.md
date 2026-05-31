@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.24.0** (current) — NR 10-14 cross-project carry-over: FSM artifact templates (step-verify + verifier-output) dokumentují schema enforced by aid-fsm.sh preconditions; parser fenced-block bug fix v aid-plan-to-epic.sh (plans citující AID syntax už neselhávají); permissions.yaml sync s běžící MCP infrastrukturou (qdrant-memory/shared-docker/-minio/-postgres/-playwright odebrány, vulcan-memory + eco-admin GREEN přidány)
+- **v2.25.0** (current) — dispatch lifecycle enforcement bundle (P040): aid-emit-dispatch.sh wrapper + pending-dispatches ledger, fsm_check_orphan_dispatches reconciliation backstop, CP4 curator-validation range-scan enforcement, first-class --streamlined mode (coverage_mode/skipped_dimensions honest accounting), state file unification (aid-json-to-run.sh auto-init); 4 new blocking checks
+- **v2.24.0** — NR 10-14 cross-project carry-over: FSM artifact templates (step-verify + verifier-output) dokumentují schema enforced by aid-fsm.sh preconditions; parser fenced-block bug fix v aid-plan-to-epic.sh (plans citující AID syntax už neselhávají); permissions.yaml sync s běžící MCP infrastrukturou (qdrant-memory/shared-docker/-minio/-postgres/-playwright odebrány, vulcan-memory + eco-admin GREEN přidány)
 - **v2.23.0** — section-review validate-then-verify: brainstorming Step 6 sekce validuje Sonnet kritik + Opus ground-truth re-grep, PM dostane claim-verification tabulku před schválením; Step 7 cross-section konzistenční check
-- **v2.22.3** — hotfix: opraveny 2 stale reference `skills/visual-companion.md` v `brainstorming.md` (zapomenuté při přesunu na directory-formu v 2.22.1, CI red od té doby)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

@@ -159,6 +159,18 @@ The uncommitted-changes guard runs in all modes — dirty workdir is rejected wi
 `fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
 `AID_DEPLOY_DATE` env var or `${AID_PLUGIN_PATH}/DEPLOY_DATE` file.
 
+### After aid-json-to-run.sh (PRE-FLIGHT)
+
+After running `aid-json-to-run.sh`, the FSM is initialized and the EPIC is ready
+for `/aid-run`. No manual `aid-fsm.sh init` call is required. To re-initialize
+(rare — e.g. `/aid-run --streamlined` after a default-mode init), delete
+`fsm-state.yaml` and re-run `aid-json-to-run.sh --streamlined`. The
+`--streamlined` flag is what makes the re-init write `streamlined_mode: true`
+(it is forwarded to the Step 18 `aid-fsm.sh init` call); re-running
+`aid-json-to-run.sh` WITHOUT the flag reproduces full mode. The dual-file layout
+(`state.yaml` + `fsm-state.yaml`) from earlier runs is still readable for backward
+compatibility, but new runs produce only `fsm-state.yaml` as the single source of truth.
+
 ---
 
 ## §3 READY State
@@ -396,15 +408,12 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
 
 2. **Verifier dispatch** (only for RUN/FAIL):
 
-   **Before `Agent()` call — log `verifier_dispatch_start` event:**
+   **Before `Agent()` call — emit dispatch start (P040 wrapper):**
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_start" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp2-step-<N>" \
-     step_n="<N>" \
-     evidence_dir="$evidence_dir"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+     --focus "cp2-step-<N>" \
+     --agent-id "aid-orchestrator:verifier" \
+     --evidence-dir "$evidence_dir"
    ```
 
    ```
@@ -417,16 +426,12 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
    Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
 
-   **After `Agent()` returns — log `verifier_dispatch_complete` event:**
+   **After `Agent()` returns — emit dispatch complete (P040 wrapper):**
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_complete" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp2-step-<N>" \
-     step_n="<N>" \
-     evidence_dir="$evidence_dir" \
-     output_file="$evidence_dir/verifier-output-step-<N>.md"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+     --focus "cp2-step-<N>" \
+     --output-file "$evidence_dir/verifier-output-step-<N>.md" \
+     --evidence-dir "$evidence_dir"
    ```
 
    `<dispatch-focus>` substitution rule for CP2: `focus="cp2-step-N"`, `step_n=N`
@@ -456,29 +461,54 @@ Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verif
 start/complete pair to `timeline.jsonl`; provenance binding uses the last
 pair (closest to `_generated_at`).
 
+### Dispatch Protocol (P040, v2.25.0+)
+
+Per AID-v3-principles.md §1 — Detector without Enforcement is Decoration — every
+`Agent({subagent_type, prompt})` dispatch MUST be wrapped by paired calls to
+`aid-emit-dispatch.sh start` (before) and `aid-emit-dispatch.sh complete` (after).
+The orchestrator does NOT skip these calls; if it does, `cmd_increment_step` blocks
+the next step transition via the reconciliation backstop (Component B of P040).
+
+**Before each Agent() dispatch:**
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+  --focus "<cp1 | cp2-step-N | cp3-code-review | cp3-security | cp4-curator-validation>" \
+  --agent-id "<subagent_type, e.g., aid-orchestrator:verifier>" \
+  --evidence-dir "$evidence_dir"
+```
+
+**After each Agent() dispatch returns:**
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+  --focus "<same value as start>" \
+  --output-file "$evidence_dir/verifier-output-<focus>.md" \
+  --evidence-dir "$evidence_dir"
+```
+
+If the Agent() call crashes between start and complete, the pending entry remains and
+the next `cmd_increment_step` blocks with `missing_dispatch_complete: <focus>`. PM
+resolves by emitting the complete event (if the agent did run) or
+`--force --reason "<≥20 chars>" --blocked-checks "dispatch_orphan_complete"`.
+
 ### Integration Review CP3 (pre-EXECUTE→GATES, ENFORCED v2.18.0+)
 
 After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
 1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
 
-   **Before `Agent()` calls — log both `verifier_dispatch_start` events serially:**
+   **Before `Agent()` calls — emit both dispatch starts serially (P040 wrapper):**
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_start" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp3-code-review" \
-     step_n="null" \
-     evidence_dir="$evidence_dir"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+     --focus "cp3-code-review" \
+     --agent-id "aid-orchestrator:verifier" \
+     --evidence-dir "$evidence_dir"
 
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_start" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp3-security" \
-     step_n="null" \
-     evidence_dir="$evidence_dir"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+     --focus "cp3-security" \
+     --agent-id "aid-orchestrator:verifier" \
+     --evidence-dir "$evidence_dir"
    ```
 
    ```
@@ -488,25 +518,17 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
           prompt: <full diff, plan.json overall>})
    ```
 
-   **After both `Agent()` calls return — log both `verifier_dispatch_complete` events serially:**
+   **After both `Agent()` calls return — emit both dispatch completes serially (P040 wrapper):**
    ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_complete" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp3-code-review" \
-     step_n="null" \
-     evidence_dir="$evidence_dir" \
-     output_file="$evidence_dir/verifier-output-cp3-code-review.md"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+     --focus "cp3-code-review" \
+     --output-file "$evidence_dir/verifier-output-cp3-code-review.md" \
+     --evidence-dir "$evidence_dir"
 
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
-     "$timeline_file" \
-     "verifier_dispatch_complete" \
-     agentId="aid-orchestrator:verifier" \
-     focus="cp3-security" \
-     step_n="null" \
-     evidence_dir="$evidence_dir" \
-     output_file="$evidence_dir/verifier-output-cp3-security.md"
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+     --focus "cp3-security" \
+     --output-file "$evidence_dir/verifier-output-cp3-security.md" \
+     --evidence-dir "$evidence_dir"
    ```
 
    `<dispatch-focus>` substitution rule for CP3: emit two pairs serially even
@@ -892,6 +914,25 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 7. **CP4:** Verifier (`code-review`) on curator-proposed changes only.
    If FAIL → revert curator changes, log reversion.
    Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
+
+   **Dispatch protocol (P040, v2.25.0+):** wrap the CP4 verifier `Agent()` call
+   with the `aid-emit-dispatch.sh` start/complete pair (`--focus
+   "cp4-curator-validation"`), identical to CP2/CP3:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+     --focus "cp4-curator-validation" \
+     --agent-id "aid-orchestrator:verifier" \
+     --evidence-dir "$evidence_dir"
+   # Agent({subagent_type: "aid-orchestrator:verifier", description: "CP4 curator validation", ...})
+   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+     --focus "cp4-curator-validation" \
+     --output-file "$evidence_dir/verifier-output-cp4-curator-validation.md" \
+     --evidence-dir "$evidence_dir"
+   ```
+   `fsm_check_cp4_curator_validation` (Component C) requires
+   `verifier-output-cp4-curator-validation.md` when `curator-report.md` exists and
+   any commit in `base_commit..HEAD` touched production code; mode-aware skip
+   (`cp4_skipped_streamlined_advisory`) when `streamlined_mode` is true.
 8. **Curator auto-fix:** Gate-fixer applies approved S + M effort proposals.
    Tier 2 default: S=approve, M=approve, L=defer (PM decides in summary).
 9. **Auditor auto-fix:** Gate-fixer applies S + M effort items from auditor
