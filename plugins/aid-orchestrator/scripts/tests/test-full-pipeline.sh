@@ -77,6 +77,19 @@ make_workspace() {
   mkdir -p "$ws/.aid-o/work/runs"
   # Minimal counter YAML in the expected location
   printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
+  # P040 Component E: aid-json-to-run.sh Step 18 auto-inits the FSM
+  # (`aid-fsm.sh init`), which requires a git repo with a clean tree on a
+  # valid branch. The real auto-pipeline always runs inside a git project, so
+  # mirror that here: a committed, clean repo on `main`.
+  (
+    cd "$ws"
+    git init -q
+    git config user.email aid-test@example.com
+    git config user.name "AID Test"
+    git checkout -q -b main 2>/dev/null || git branch -m main
+    git add -A
+    git commit -q -m "seed workspace"
+  )
   echo "$ws"
 }
 

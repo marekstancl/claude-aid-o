@@ -634,3 +634,61 @@ EOF
   grep -q 'cp4_skipped_streamlined_advisory' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
   ! grep -q 'cp4_missing_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
+
+# ─── P040 Component E: steps[] array absorption + read_steps_array ────────
+
+@test "Component E: cmd_init writes steps[] array of length total_steps with id:1..N" {
+  # build_default_init_args passes total_steps=3.
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  # steps[] array present and correct length.
+  [ "$(yq '.steps | length' "$state_file")" = "3" ]
+  [ "$(yq '.steps[0].id' "$state_file")" = "1" ]
+  [ "$(yq '.steps[2].id' "$state_file")" = "3" ]
+  [ "$(yq '.steps[0].status' "$state_file")" = "pending" ]
+  # Heredoc shape preserved: unquoted/unindented scalars still grep-parseable.
+  [ "$(grep '^epic_id:' "$state_file" | awk '{print $2}')" = "E-test" ]
+  [ "$(grep '^total_steps:' "$state_file" | awk '{print $2}')" = "3" ]
+  # streamlined_mode scalar still present after steps[] append.
+  [ "$(yq '.streamlined_mode' "$state_file")" = "false" ]
+}
+
+@test "Component E: cmd_init --streamlined keeps steps[] + streamlined_mode true" {
+  run "$FSM" init $(build_default_init_args E-test) --streamlined
+  [ "$status" -eq 0 ]
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  [ "$(yq '.steps | length' "$state_file")" = "3" ]
+  [ "$(yq '.streamlined_mode' "$state_file")" = "true" ]
+  [ "$(grep '^epic_id:' "$state_file" | awk '{print $2}')" = "E-test" ]
+}
+
+@test "Component E: read_steps_array prefers fsm-state.yaml over legacy state.yaml" {
+  # fsm-state.yaml has 2 steps, legacy state.yaml has 5 — reader must pick fsm-state.
+  local fsm_state="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  local legacy="$TEST_EVIDENCE_DIR/state.yaml"
+  printf 'steps:\n  - id: 1\n    status: pending\n  - id: 2\n    status: pending\n' > "$fsm_state"
+  printf 'steps:\n  - id: 1\n  - id: 2\n  - id: 3\n  - id: 4\n  - id: 5\n' > "$legacy"
+  run bash -c 'source "'"$FSM"'"; read_steps_array "'"$fsm_state"'"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" = "2" ]
+}
+
+@test "Component E: read_steps_array falls back to legacy state.yaml when fsm-state lacks steps" {
+  local fsm_state="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  local legacy="$TEST_EVIDENCE_DIR/state.yaml"
+  # fsm-state.yaml has scalars but NO steps[]; legacy has steps[].
+  printf 'epic_id: E-test\nstate: READY\n' > "$fsm_state"
+  printf 'steps:\n  - id: 1\n  - id: 2\n  - id: 3\n' > "$legacy"
+  run bash -c 'source "'"$FSM"'"; read_steps_array "'"$fsm_state"'"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" = "3" ]
+}
+
+@test "Component E: read_steps_array returns [] when neither file has steps" {
+  local fsm_state="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  printf 'epic_id: E-test\nstate: READY\n' > "$fsm_state"
+  run bash -c 'source "'"$FSM"'"; read_steps_array "'"$fsm_state"'"'
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" = "0" ]
+}

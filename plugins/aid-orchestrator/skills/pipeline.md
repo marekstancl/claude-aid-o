@@ -159,6 +159,15 @@ The uncommitted-changes guard runs in all modes — dirty workdir is rejected wi
 `fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
 `AID_DEPLOY_DATE` env var or `${AID_PLUGIN_PATH}/DEPLOY_DATE` file.
 
+### After aid-json-to-run.sh (PRE-FLIGHT)
+
+After running `aid-json-to-run.sh`, the FSM is initialized and the EPIC is ready
+for `/aid-run`. No manual `aid-fsm.sh init` call is required. To re-initialize
+(rare — e.g. `/aid-run --streamlined` after a default-mode init), delete
+`fsm-state.yaml` and re-run `aid-json-to-run.sh`. The dual-file layout
+(`state.yaml` + `fsm-state.yaml`) from earlier runs is still readable for backward
+compatibility, but new runs produce only `fsm-state.yaml` as the single source of truth.
+
 ---
 
 ## §3 READY State

@@ -1304,9 +1304,18 @@ cmd_init() {
         log_info "Resume case: HEAD already on $expected_branch"
         ;;
       main|master|develop)
-        log_info "Auto-creating branch: $expected_branch"
-        git checkout -b "$expected_branch" >/dev/null 2>&1 \
-          || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        # P040 Component E: if the EPIC's task branch already exists (e.g. a
+        # prior aid-json-to-run.sh generation pass created it, or a re-init of
+        # the same EPIC), resume onto it instead of failing on `checkout -b`.
+        if git show-ref --verify --quiet "refs/heads/${expected_branch}"; then
+          log_info "Resume case: checking out existing $expected_branch"
+          git checkout "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to checkout existing branch $expected_branch (check 'git status' for details)"
+        else
+          log_info "Auto-creating branch: $expected_branch"
+          git checkout -b "$expected_branch" >/dev/null 2>&1 \
+            || die "Failed to create branch $expected_branch (check 'git status' for details)"
+        fi
         ;;
       task/E-*)
         # Different EPIC's task branch — stale workspace from prior session.
@@ -1423,7 +1432,40 @@ except: pass
   fi
   echo "plan_path: $plan_path_value" >> "$state_file"
 
+  # P040 Component E: absorb legacy state.yaml steps[] array into fsm-state.yaml
+  # (single source of truth — eliminates state.yaml vs fsm-state.yaml drift, NR 10/12/14).
+  # Appended AFTER the scalar heredoc + plan_json_hash/plan_path line-anchored
+  # appends so it never interferes with grep '^field:' readers. The nested
+  # steps: array is yq-parseable while the scalar fields above remain unquoted.
+  {
+    echo "steps:"
+    local _s
+    for (( _s=1; _s<=total_steps; _s++ )); do
+      echo "  - id: ${_s}"
+      echo "    name: \"\""
+      echo "    status: pending"
+      echo "    started_at: null"
+      echo "    completed_at: null"
+    done
+  } >> "$state_file"
+
   echo "Initialized state: READY" >&2
+}
+
+# read_steps_array — P040 Component E backward-compat reader. Prefers the
+# steps[] array in fsm-state.yaml (single source of truth); falls back to a
+# sibling legacy state.yaml for runs created before unification. Emits JSON.
+read_steps_array() {
+  local state_file="$1"
+  local evidence_dir; evidence_dir=$(dirname "$state_file")
+  local legacy="${evidence_dir}/state.yaml"
+  if yq -e '.steps' "$state_file" >/dev/null 2>&1; then
+    yq -o=json '.steps' "$state_file"
+  elif [[ -f "$legacy" ]] && yq -e '.steps' "$legacy" >/dev/null 2>&1; then
+    yq -o=json '.steps' "$legacy"
+  else
+    echo "[]"
+  fi
 }
 
 cmd_transition() {

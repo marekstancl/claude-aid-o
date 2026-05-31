@@ -600,11 +600,60 @@ mv "$tmp_file" "$output_path" || {
 }
 
 # =============================================================================
-# Step 17: Output absolute path to stdout
+# Step 17: Resolve absolute run.md path
 # =============================================================================
-# Resolve to absolute path
+# Resolve to absolute path (do NOT echo yet — Step 18 runs first; the absolute
+# path MUST remain the FINAL stdout line for aid-auto-pipeline.sh capture).
 if [[ "$output_path" == /* ]]; then
-  echo "$output_path"
+  abs_run_path="$output_path"
 else
-  echo "$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
+  abs_run_path="$(cd "$(dirname "$output_path")" && pwd)/$(basename "$output_path")"
 fi
+
+# =============================================================================
+# Step 18: P040 Component E — Auto-init FSM state (idempotent)
+# =============================================================================
+# Eliminates state.yaml vs fsm-state.yaml schema confusion (NR 10/12/14):
+# aid-json-to-run.sh now initializes the FSM directly so no manual
+# `aid-fsm.sh init` call is required before /aid-run.
+# Compute FSM init parameters from in-scope variables.
+fsm_evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"  # MUST match aid-fsm.sh cmd_init evidence_dir derivation
+mkdir -p "$fsm_evidence_dir"
+fsm_state_file="${fsm_evidence_dir}/fsm-state.yaml"
+fsm_mode="full"
+fsm_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+[[ -z "$fsm_branch" || "$fsm_branch" == "HEAD" ]] && error_exit "aid-json-to-run.sh Step 18: cannot determine current git branch (detached HEAD?)" 1
+[[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
+
+if [[ ! -f "$fsm_state_file" ]]; then
+  echo "P040 Component E: initializing FSM state at $fsm_state_file" >&2
+  # aid-fsm.sh init runs branch enforcement and may auto-checkout
+  # task/<epic_id>/main. aid-json-to-run.sh is a GENERATION-phase tool:
+  # aid-auto-pipeline.sh calls it once per EPIC in a single batch, so leaving
+  # the workdir on a per-EPIC task branch would make the NEXT EPIC's init see a
+  # cross-EPIC mismatch and hard-fail. We therefore restore the original branch
+  # after init (the EPIC's task branch is recreated at execution time via the
+  # FSM resume case). Restore is a no-op for non-batch single-EPIC callers.
+  bash "${SCRIPT_DIR}/aid-fsm.sh" init \
+    "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
+    "$fsm_branch" "$fsm_base_commit" \
+    "$fsm_state_file"
+  fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then
+    if git checkout "$fsm_branch" >/dev/null 2>&1; then
+      echo "P040 Component E: restored generation branch '$fsm_branch' after FSM init (was on '$fsm_after_branch')" >&2
+    else
+      echo "P040 Component E: WARNING — could not restore branch '$fsm_branch' after FSM init (now on '$fsm_after_branch')" >&2
+    fi
+  fi
+else
+  echo "P040 Component E: fsm-state.yaml already exists at $fsm_state_file; skipping init (idempotent)" >&2
+fi
+
+# =============================================================================
+# Step 19: Output absolute run.md path to stdout (MUST be final stdout line)
+# =============================================================================
+# aid-auto-pipeline.sh captures this stdout into $run_path. aid-fsm.sh init
+# above writes only to stderr / its own state file, so stdout is clean here.
+echo "$abs_run_path"

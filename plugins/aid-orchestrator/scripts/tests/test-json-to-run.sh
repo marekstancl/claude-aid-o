@@ -36,6 +36,27 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
+# Isolated clean git repo (P040 Component E).
+# aid-json-to-run.sh Step 18 now auto-inits the FSM (`aid-fsm.sh init`), which
+# enforces a clean working tree on a valid task/main branch. Run all script
+# invocations from a throwaway clean git repo so init succeeds and the real
+# repo's .aid-o/ is never touched. Fixture/template/output paths are absolute,
+# so changing cwd here is safe.
+WORK_REPO="$TMPDIR_ROOT/work-repo"
+mkdir -p "$WORK_REPO"
+(
+  cd "$WORK_REPO"
+  git init -q
+  git config user.email aid-test@example.com
+  git config user.name "AID Test"
+  git checkout -q -b main 2>/dev/null || git branch -m main
+  echo "seed" > .gitkeep
+  git add -A
+  git commit -q -m "seed"
+)
+cd "$WORK_REPO"
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 pass() {
