@@ -165,6 +165,87 @@ fsm_check_verifier_output() {
   return 0
 }
 
+# fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
+# Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
+# start event lacks matching complete within expected_duration_max (default 600s
+# for CP2, 900s for CP3, 600s for CP4, 1200s for CP1, hard ceiling 1800s).
+#
+# Empirical anchor: NR 8/10/13/14 fabricated provenance class across 4 projects.
+# Enforcement principle: AID-v3-principles.md §1.
+fsm_check_orphan_dispatches() {
+  local evidence_dir="$1"
+  local pending_file="${evidence_dir}/pending-dispatches.jsonl"
+
+  # No pending file = clean (no dispatches were started); skip.
+  [[ ! -f "$pending_file" ]] && return 0
+  # Empty pending file = all dispatches completed cleanly; skip.
+  [[ ! -s "$pending_file" ]] && return 0
+
+  local now_ts
+  now_ts=$(date -u +%s)
+
+  # Extract orphan focuses (start events whose ts+expected_duration_max < now).
+  # Malformed file = fail loud (see error handling below), NOT silent skip.
+  # NOTE: jq_rc must be captured via `|| jq_rc=$?` — under `set -euo pipefail`
+  # a bare failing command substitution assignment aborts the script before
+  # the next statement runs, so the malformed-file handler below never fires.
+  local orphan_focuses jq_err_file jq_rc=0
+  jq_err_file=$(mktemp -t orphan-jq-err.XXXXXX)
+  orphan_focuses=$(TZ=UTC jq -r --argjson now "$now_ts" '
+    select(.event == "start") |
+    select((.ts | fromdateiso8601) + .expected_duration_max < $now) |
+    .focus
+  ' "$pending_file" 2>"$jq_err_file") || jq_rc=$?  # TZ=UTC: jq<1.7 fromdateiso8601 honors local TZ even on Z suffix (P037 lesson, see ~L459)
+  if [[ $jq_rc -ne 0 ]]; then
+    local jq_stderr; jq_stderr=$(<"$jq_err_file"); rm -f "$jq_err_file"
+    echo "ERROR: pending-dispatches.jsonl is malformed; refusing to advance step." >&2
+    echo "  File: $pending_file" >&2
+    echo "  jq error: $jq_stderr" >&2
+    echo "  Fix: inspect file, repair JSONL syntax, OR override:" >&2
+    echo "    aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars>' \\" >&2
+    echo "        --blocked-checks 'dispatch_orphan_complete'" >&2
+    fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
+      --evidence-dir "$evidence_dir" --reason "pending_file_malformed"
+    die "pending_file_malformed: $pending_file"
+  fi
+  rm -f "$jq_err_file"
+  orphan_focuses=$(echo "$orphan_focuses" | sort -u)
+
+  if [[ -z "$orphan_focuses" ]]; then
+    return 0
+  fi
+
+  # Build structured stderr error
+  echo "ERROR: Orphan dispatch(es) detected — cannot advance step." >&2
+  local focus
+  while IFS= read -r focus; do
+    [[ -z "$focus" ]] && continue
+    local entry started max
+    entry=$(jq -c --arg f "$focus" 'select(.focus == $f and .event == "start")' "$pending_file" | tail -1)
+    started=$(echo "$entry" | jq -r '.ts')
+    max=$(echo "$entry" | jq -r '.expected_duration_max')
+    echo "  ORPHAN DISPATCH: focus=$focus started=$started max=${max}s" >&2
+    echo "  Fix: bash plugins/aid-orchestrator/scripts/aid-emit-dispatch.sh complete \\" >&2
+    echo "         --focus $focus --output-file <verifier-output-*.md path> --evidence-dir $evidence_dir" >&2
+  done <<< "$orphan_focuses"
+
+  echo "" >&2
+  echo "OR (PM-authorized override, audited):" >&2
+  echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
+  echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
+
+  # Emit audit log
+  local focus_csv orphan_count
+  focus_csv=$(echo "$orphan_focuses" | paste -sd, -)
+  orphan_count=$(echo "$orphan_focuses" | grep -c .)
+  fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
+    --evidence-dir "$evidence_dir" \
+    --orphan-count "$orphan_count" \
+    --orphan-focus-list-array "$focus_csv"
+
+  die "missing_dispatch_complete: $(echo "$orphan_focuses" | head -3 | tr '\n' ' ')"
+}
+
 # Unified dispatcher for --force handling across cmd_init / cmd_transition /
 # cmd_increment_step / cmd_done_advance. Validates reason, emits extended
 # fsm_force_override timeline event with caller field, and writes persistent
@@ -1372,16 +1453,31 @@ cmd_increment_step() {
   [[ "${2:-}" == "--force" ]] && force="true"
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
-  local step
+
+  # P040 Component B: hoist scope vars to function-top so the reconciliation
+  # backstop (and audit logging) can run UNCONDITIONALLY, regardless of --force.
+  local step epic_id run_id evidence_dir project_root
   step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
+  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
+  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+  evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+  project_root="$PWD"
+
+  # P040 Component B: parse --blocked-checks from caller args (positionals 3+),
+  # so the orphan check can be explicitly waived by PM (--force --blocked-checks).
+  local blocked_checks=""
+  local _args=("${@:3}")
+  local i
+  for (( i=0; i<${#_args[@]}; i++ )); do
+    if [[ "${_args[$i]}" == "--blocked-checks" ]]; then
+      blocked_checks="${_args[$((i+1))]:-}"
+      break
+    fi
+  done
+  blocked_checks="${blocked_checks// /}"; blocked_checks="${blocked_checks#,}"; blocked_checks="${blocked_checks%,}"
 
   # Precondition: step verification evidence must exist
   if [[ "$force" != "true" ]]; then
-    local epic_id run_id evidence_dir
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
-
     local verify_file="${evidence_dir}/step-${step}-verify.md"
     if [[ ! -f "$verify_file" ]]; then
       echo "PRECONDITION FAIL: Step verification evidence not found." >&2
@@ -1506,12 +1602,17 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       fi
     fi
   else
-    local epic_id run_id evidence_dir
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-    evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
     echo "WARNING: --force used, skipping step verification check" >&2
+  fi
+
+  # ---- P040 Component B: reconciliation backstop (orphan dispatch check) ----
+  # Run orphan check UNCONDITIONALLY unless PM explicitly waived via --blocked-checks.
+  if [[ ",${blocked_checks}," != *",dispatch_orphan_complete,"* ]]; then
+    fsm_check_orphan_dispatches "$evidence_dir"   # dies on orphan
+  else
+    fsm_emit_audit_log "fsm_orphan_dispatch_waived" \
+      --evidence-dir "$evidence_dir" --reason "explicit_blocked_checks_waiver"
   fi
 
   local tmp="${state_file}.tmp"

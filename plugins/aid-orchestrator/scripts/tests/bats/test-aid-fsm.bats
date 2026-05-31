@@ -242,6 +242,90 @@ VERIFY
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
 
+# ─── P040 Step 2: orphan dispatch reconciliation backstop (4 assertions) ─────
+
+# Helper: seed the increment-step happy-path preconditions for step 3
+# (valid step-3-verify.md + valid non-pending verifier-output-step-3.md).
+_p040_seed_increment_preconditions() {
+  local state_file="$1"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@abc123\nclassification: RUN\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+}
+
+@test "increment-step: clean/empty pending-dispatches → step advances" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  # Empty (size 0) pending file = all dispatches completed cleanly → skip.
+  : > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+}
+
+@test "increment-step: orphan start (no complete, past max) → step blocked + audit" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  # Start far in the past, expected_duration_max:60 → orphan.
+  printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "ORPHAN DISPATCH: focus=cp2-step-1" ]]
+  # current_step NOT incremented (still 3)
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+  grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "increment-step: --force --blocked-checks bypass → advances with waiver audit" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file" --force \
+    --reason "PM-authorized override for known stale dispatch — emit script crashed mid-run; verified manually" \
+    --blocked-checks "dispatch_orphan_complete"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+  grep -q 'fsm_orphan_dispatch_waived' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  # No NEW fail event was emitted for this waived invocation.
+  ! grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "increment-step: malformed pending-dispatches → fail loud + audit reason" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  printf '%s\n' 'this is not json {{{' > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "pending-dispatches.jsonl is malformed" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+  grep -q '"reason":"pending_file_malformed"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+@test "increment-step: TZ=UTC orphan detection (tight 100s margin, past deadline) → blocked" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  # Compute timestamp 100 seconds ago in UTC. Start + 60s deadline = orphan now.
+  # This tests that TZ=UTC jq parsing catches the orphan (without TZ=UTC,
+  # a CEST+0200 host would understate by 7200s and miss the orphan).
+  local ts_100s_ago
+  ts_100s_ago=$(date -u -d '100 seconds ago' +%Y-%m-%dT%H:%M:%SZ)
+  printf '%s\n' "{\"ts\":\"$ts_100s_ago\",\"event\":\"start\",\"focus\":\"cp2-step-1\",\"agent_id\":\"aid-orchestrator:verifier\",\"step_n\":1,\"evidence_dir\":\"x\",\"expected_duration_max\":60}" \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "ORPHAN DISPATCH: focus=cp2-step-1" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+  grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
 @test "aid-run-gates.sh: env-var bypass allows EXECUTE state when AID_GATES_TRIGGERED_BY_FSM=1" {
   seed_test_state_files "EXECUTE" "1" "1"
   local exec_yaml; exec_yaml="$TEST_EVIDENCE_DIR/execution.yaml"
