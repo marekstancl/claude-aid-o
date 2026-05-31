@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.23.0] — 2026-05-31
+
+### Added
+- **Section-Review Validate-Then-Verify** — brainstorming Step 6 sections now run a Sonnet `section-review` critic followed by an Opus ground-truth re-grep, presenting the PM a claim-verification table (validator claim → real command + output → ✓/✗) before approval; Step 7 adds a `cross-section-review` consistency check over the assembled plan.
+
+### Fixed
+- **Verifier focus card naming** — the `security-review` card in `role-cards.md` is renamed to `security` to match the canonical focus name used plugin-wide (orchestration tier, CP3 dispatch, planner, aid-run, epic templates); resolves a latent card-name mismatch with the registry.
+
 ## [2.22.3] — 2026-05-14
 
 ### Fixed

@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.21.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.23.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.22.3** (current) — hotfix: opraveny 2 stale reference `skills/visual-companion.md` v `brainstorming.md` (zapomenuté při přesunu na directory-formu v 2.22.1, CI red od té doby)
+- **v2.23.0** (current) — section-review validate-then-verify: brainstorming Step 6 sekce validuje Sonnet kritik + Opus ground-truth re-grep, PM dostane claim-verification tabulku před schválením; Step 7 cross-section konzistenční check
+- **v2.22.3** — hotfix: opraveny 2 stale reference `skills/visual-companion.md` v `brainstorming.md` (zapomenuté při přesunu na directory-formu v 2.22.1, CI red od té doby)
 - **v2.22.2** — visual-companion: explicitní networking discovery (lokální vs. remote dev server) v Step 3 + nová "Read code first" sekce
-- **v2.22.1** — hotfix: skill přesun `skills/visual-companion.md` → `skills/visual-companion/SKILL.md` (CC plugin loader vyžaduje directory-formu pro slash-invokovatelné skills)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
