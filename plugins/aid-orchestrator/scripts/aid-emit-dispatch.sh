@@ -70,6 +70,18 @@ cmd_start() {
     exit 1
   fi
 
+  # HIGH-1 defense-in-depth: allowlist the --focus value. A crafted focus such as
+  # 'cp2-step-1","event":"complete","z":"' previously survived raw printf
+  # interpolation and produced VALID JSONL with a duplicate "event" key, which
+  # jq's last-key-wins resolved to event="complete" — making fsm_check_orphan_dispatches
+  # skip a real expired orphan. The jq -nc construction below already neutralizes
+  # injection, but we reject malformed focuses outright so they never enter the ledger.
+  # Allowlist covers: cp1, cp2-step-N, cp3-code-review, cp3-security, cp4-curator-validation.
+  if [[ ! "$focus" =~ ^cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?$ ]]; then
+    echo "ERROR: --focus does not match allowed pattern ^cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?\$ (got: $focus)" >&2
+    exit 1
+  fi
+
   [[ -z "$exp_dur" ]] && exp_dur=$(default_duration_for_focus "$focus")
   exp_dur=$(clamp_duration "$exp_dur")
 
@@ -83,10 +95,37 @@ cmd_start() {
   local lockfile="${pending}.lock"
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+  # MEDIUM-1: per-entry collision-safe nonce. cmd_complete removes ONLY the line
+  # with this exact nonce, so two same-focus starts in the same wall-clock second
+  # plus one complete no longer double-clear (which previously dropped the second,
+  # never-completed dispatch and let the orphan check pass). $RANDOM is 0..32767;
+  # concatenating two draws plus nanosecond time makes within-run collision
+  # vanishingly unlikely.
+  local nonce
+  nonce="${RANDOM}${RANDOM}-$(date +%s%N)"
+
   # Emit timeline event
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_start" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
     evidence_dir="$evidence_dir" expected_duration_max="$exp_dur"
+
+  # Build the pending-ledger line with jq -nc + --arg/--argjson so EVERY field is
+  # RFC-8259-escaped (HIGH-1 fix). Raw printf interpolation of --focus/--evidence-dir
+  # let a crafted value inject a duplicate "event" key and defeat the orphan check.
+  # step_n is pre-validated upstream (regex capture is digits-only, else literal
+  # `null`), so --argjson safely emits a JSON number or null — never a quoted string.
+  local pending_line
+  pending_line=$(jq -nc \
+    --arg     ts        "$ts" \
+    --arg     focus     "$focus" \
+    --arg     agent_id  "$agent_id" \
+    --argjson step_n    "$step_n" \
+    --arg     evidence_dir "$evidence_dir" \
+    --argjson expected_duration_max "$exp_dur" \
+    --arg     nonce     "$nonce" \
+    '{ts: $ts, event: "start", focus: $focus, agent_id: $agent_id,
+      step_n: $step_n, evidence_dir: $evidence_dir,
+      expected_duration_max: $expected_duration_max, nonce: $nonce}')
 
   # Append to pending ledger under flock on SEPARATE .lock sidecar.
   # Anti-race rationale (H11): cmd_complete swaps the inode of $pending via
@@ -96,9 +135,7 @@ cmd_start() {
   touch "$lockfile"
   (
     flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
-    printf '{"ts":"%s","event":"start","focus":"%s","agent_id":"%s","step_n":%s,"evidence_dir":"%s","expected_duration_max":%d}\n' \
-      "$ts" "$focus" "$agent_id" "$step_n" "$evidence_dir" "$exp_dur" \
-      >> "$pending"
+    printf '%s\n' "$pending_line" >> "$pending"
   ) 200>"$lockfile"
 }
 
@@ -152,12 +189,23 @@ cmd_complete() {
     s_ts=$(echo "$match" | jq -r '.ts')
     a_id=$(echo "$match" | jq -r '.agent_id')
     s_n=$(echo "$match" | jq -r '.step_n')
+    # MEDIUM-1: capture the matched entry's unique nonce so we remove EXACTLY one
+    # line. Legacy entries (pre-nonce) yield "null" here; for those we fall back to
+    # the old focus+ts predicate so old ledgers still drain.
+    s_nonce=$(echo "$match" | jq -r '.nonce // "null"')
 
     # Remove matching line from pending file (atomic via temp + rename).
     # Inode of $pending changes here — that is why the flock must be on the
     # SEPARATE .lock sidecar (H11 fix), not on the data file itself.
     tmp=$(mktemp "${pending}.XXXXXX")
-    jq -c --arg f "$focus" --arg ts "$s_ts" 'select(.focus != $f or .ts != $ts)' "$pending" > "$tmp"
+    if [[ "$s_nonce" == "null" ]]; then
+      # Legacy entry without a nonce — preserve original focus+ts removal.
+      jq -c --arg f "$focus" --arg ts "$s_ts" 'select(.focus != $f or .ts != $ts)' "$pending" > "$tmp"
+    else
+      # Remove ONLY the line carrying this exact nonce (one entry), so concurrent
+      # same-focus+same-ts dispatches are not both cleared.
+      jq -c --arg n "$s_nonce" 'select((.nonce // "") != $n)' "$pending" > "$tmp"
+    fi
     mv "$tmp" "$pending"
 
     printf '%s\t%s\t%s\n' "$s_ts" "$a_id" "$s_n" > "$resultf"

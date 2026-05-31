@@ -261,7 +261,7 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 | `streamlined_abandoned_fail` | `fsm_check_streamlined_abandoned` in cmd_done_advance | streamlined_mode true + timeline has <3 events |
 | `streamlined_integration_review_fail` | `fsm_check_streamlined_integration_review` in cmd_done_advance | streamlined_mode true + one or more of cp3-code-review/cp3-security/gates_report.json missing |
 
-**Advisory/telemetry (5):**
+**Advisory/telemetry (6):**
 
 | Event type | Emitter | Trigger |
 |------------|---------|---------|
@@ -270,6 +270,7 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 | `cp4_skip_no_prod_match` | `fsm_check_cp4_curator_validation` | curator-report exists but `base_commit..HEAD` touched zero production paths |
 | `cp4_skipped_streamlined_advisory` | `fsm_check_cp4_curator_validation` | streamlined_mode=true → CP4 mode-aware skip (advisory) |
 | `cp4_glob_evaluated` | `fsm_check_cp4_curator_validation` | telemetry: which production_glob pattern loaded and which range scanned *(planned — not yet emitted in v2.25.0)* |
+| `cp4_glob_invalid` | `fsm_check_cp4_curator_validation` | `cp4_production_paths` is not a well-formed ERE (grep -E exit ≥2) — CP4 cannot evaluate; surfaced instead of silently skipping (CP3 security hardening) |
 
 ### P040 check-severity registry additions (4 new blocking entries)
 

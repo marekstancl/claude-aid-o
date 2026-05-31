@@ -287,6 +287,23 @@ fsm_check_cp4_curator_validation() {
                 || echo "plugins/|scripts/|src/|lib/|api/")
   [[ -z "$prod_paths" || "$prod_paths" == "null" ]] && prod_paths="plugins/|scripts/|src/|lib/|api/"
 
+  # LOW-1: validate the prod_paths ERE before relying on a no-match result.
+  # grep returns 0=match, 1=no-match, >=2=error (e.g. bad ERE). The old pipeline
+  # swallowed ALL non-zero exits via `|| true`, so a malformed cp4_production_paths
+  # regex looked identical to "no production files touched" → CP4 silently disabled.
+  # Probe the ERE in isolation; on error emit telemetry + stderr warning and treat
+  # CP4 as required (conservative), rather than silently skipping. Capture grep's
+  # raw exit code directly (not via `! ...`, which would rewrite $? to 0/1).
+  local grep_probe_rc=0
+  printf '' | grep -E "^(${prod_paths})" >/dev/null 2>&1 || grep_probe_rc=$?
+  if [[ "$grep_probe_rc" -ge 2 ]]; then
+    echo "WARNING: cp4_production_paths is not a valid ERE — CP4 detection may be unreliable: '${prod_paths}'" >&2
+    fsm_emit_audit_log "cp4_glob_invalid" \
+      --evidence-dir "$evidence_dir" \
+      --glob "$prod_paths" \
+      --reason "cp4_production_paths_invalid_ere"
+  fi
+
   # Did ANY commit in base_commit..HEAD touch production paths?
   # `|| true` guards against set -euo pipefail aborting when grep finds no match
   # (exit 1) — the no-touch case is the legitimate skip path, not an error.
@@ -1832,12 +1849,20 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   fi
 
   # ---- P040 Component B: reconciliation backstop (orphan dispatch check) ----
-  # Run orphan check UNCONDITIONALLY unless PM explicitly waived via --blocked-checks.
-  if [[ ",${blocked_checks}," != *",dispatch_orphan_complete,"* ]]; then
-    fsm_check_orphan_dispatches "$evidence_dir"   # dies on orphan
-  else
+  # Run orphan check UNCONDITIONALLY unless PM explicitly waived via BOTH
+  # --force AND --blocked-checks dispatch_orphan_complete (HIGH-2 fix).
+  #
+  # Security rationale: the waiver MUST require --force so the --reason ≥20-char
+  # enforcement in fsm_handle_force_override runs (it is invoked from the --force
+  # branch above). A bare `--blocked-checks dispatch_orphan_complete` (no --force)
+  # would otherwise waive the orphan check with a canned audit reason, bypassing
+  # the forensic-grade reason requirement. Force ALONE (without
+  # dispatch_orphan_complete in --blocked-checks) still runs the orphan check.
+  if [[ "$force" == "true" && ",${blocked_checks}," == *",dispatch_orphan_complete,"* ]]; then
     fsm_emit_audit_log "fsm_orphan_dispatch_waived" \
       --evidence-dir "$evidence_dir" --reason "explicit_blocked_checks_waiver"
+  else
+    fsm_check_orphan_dispatches "$evidence_dir"   # dies on orphan
   fi
 
   local tmp="${state_file}.tmp"

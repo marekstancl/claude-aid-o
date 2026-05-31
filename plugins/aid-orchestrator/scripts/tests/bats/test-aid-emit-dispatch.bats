@@ -133,3 +133,73 @@ teardown() {
   run bash -c "jq -e . '$PENDING' >/dev/null"
   [ "$status" -eq 0 ]
 }
+
+# 9. HIGH-1: JSON-injection focus is rejected by the allowlist (exit 1, no state)
+@test "HIGH-1 crafted --focus with injected event key is rejected (exit 1)" {
+  run bash "$SCRIPT" start \
+    --focus 'cp2-step-1","event":"complete","z":"' \
+    --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--focus does not match allowed pattern"* ]]
+  # No partial pending state written.
+  [ ! -f "$PENDING" ]
+}
+
+# 10. HIGH-1: even if the allowlist were bypassed, jq -nc stores focus as a literal
+#     string — no injected duplicate "event" key. We prove the construction is safe
+#     by feeding a benign-but-quote-bearing focus through a relaxed allowlist check:
+#     here we assert the production allowlist + jq combo for a VALID focus yields
+#     event=="start" and the exact focus string, and that an orphan check on an
+#     EXPIRED such entry still fires (injection can no longer flip event to complete).
+@test "HIGH-1 pending entry is well-formed JSON and orphan check still fires" {
+  # Valid focus, but force it expired so the orphan check would normally die.
+  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier \
+    --evidence-dir "$EVID" --expected-duration-max 1
+
+  # Pending line: event is literally "start", focus is the exact string, nonce present.
+  run jq -r '.event' "$PENDING"
+  [ "$output" = "start" ]
+  run jq -r '.focus' "$PENDING"
+  [ "$output" = "cp3-security" ]
+  run jq -e '.nonce != null' "$PENDING"
+  [ "$status" -eq 0 ]
+  # Exactly one "event" key (no injected duplicate).
+  run bash -c "head -1 '$PENDING' | grep -o '\"event\"' | wc -l | tr -d ' '"
+  [ "$output" = "1" ]
+
+  # Backdate ts so it is unambiguously expired, then run the orphan check via the
+  # FSM helper — it must DIE (orphan detected), proving injection cannot suppress it.
+  tmp="$(mktemp)"
+  jq -c '.ts = "2000-01-01T00:00:00Z"' "$PENDING" > "$tmp" && mv "$tmp" "$PENDING"
+  run bash -c '
+    source "'"${BATS_TEST_DIRNAME}"'/../../aid-fsm.sh" >/dev/null 2>&1 || true
+    fsm_check_orphan_dispatches "'"$EVID"'"
+  '
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Orphan dispatch"* || "$output" == *"missing_dispatch_complete"* ]]
+}
+
+# 11. MEDIUM-1: two same-focus starts in the same second + one complete leaves
+#     EXACTLY ONE pending entry (the second start), not zero. The unique nonce
+#     prevents the double-clear that previously dropped a live dispatch.
+@test "MEDIUM-1 two same-focus starts + one complete keeps exactly one entry" {
+  touch "${TMPDIR_TEST}/out.md"
+  # Two starts for the same focus, back-to-back (likely same wall-clock second).
+  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  bash "$SCRIPT" start --focus cp3-security --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+
+  # Force identical ts on both lines to reproduce the same-second collision exactly.
+  tmp="$(mktemp)"
+  jq -c '.ts = "2026-01-01T00:00:00Z"' "$PENDING" > "$tmp" && mv "$tmp" "$PENDING"
+
+  run bash -c "grep -c . '$PENDING'"
+  [ "$output" = "2" ]
+
+  bash "$SCRIPT" complete --focus cp3-security --output-file "${TMPDIR_TEST}/out.md" --evidence-dir "$EVID"
+
+  # Exactly one start survives (not zero) — the second, never-completed dispatch.
+  run bash -c "grep -c . '$PENDING'"
+  [ "$output" = "1" ]
+  run jq -e 'select(.event == "start" and .focus == "cp3-security")' "$PENDING"
+  [ "$status" -eq 0 ]
+}

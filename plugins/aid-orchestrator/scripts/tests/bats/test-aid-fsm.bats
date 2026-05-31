@@ -296,6 +296,41 @@ _p040_seed_increment_preconditions() {
   ! grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
+# HIGH-2: --blocked-checks WITHOUT --force must NOT waive the orphan check.
+# Before the fix, the waiver was honored independent of --force, so a bare
+# `--blocked-checks dispatch_orphan_complete` bypassed the --reason ≥20 enforcement.
+@test "increment-step: --blocked-checks WITHOUT --force → orphan still blocks (HIGH-2)" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  # No --force, no --reason — just the blocked-checks fence. Must STILL block.
+  run "$FSM" increment-step "$state_file" --blocked-checks "dispatch_orphan_complete"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "ORPHAN DISPATCH: focus=cp2-step-1" ]]
+  # current_step NOT incremented (still 3)
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+  grep -q 'fsm_orphan_dispatch_fail' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  # The waiver path was NOT taken.
+  ! grep -q 'fsm_orphan_dispatch_waived' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+}
+
+# HIGH-2 corollary: --force ALONE (no dispatch_orphan_complete in --blocked-checks)
+# still runs the orphan check — force does not bypass by itself.
+@test "increment-step: --force alone (no orphan waiver) → orphan still blocks" {
+  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  _p040_seed_increment_preconditions "$state_file"
+  printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file" --force \
+    --reason "PM override of step verification only — orphan dispatch must remain enforced here"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "ORPHAN DISPATCH: focus=cp2-step-1" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+}
+
 @test "increment-step: malformed pending-dispatches → fail loud + audit reason" {
   local state_file="$TEST_EVIDENCE_DIR/state.yaml"
   _p040_seed_increment_preconditions "$state_file"
