@@ -250,4 +250,36 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-05-13
+### P040 audit events (v2.25.0+)
+
+**Blocking failures (4):**
+
+| Event type | Emitter | Trigger |
+|------------|---------|---------|
+| `fsm_orphan_dispatch_fail` | `fsm_check_orphan_dispatches` in cmd_increment_step | start event without complete after expected_duration_max |
+| `cp4_missing_fail` | `fsm_check_cp4_curator_validation` in cmd_done_advance | any commit in `base_commit..HEAD` touched production code without CP4 review |
+| `streamlined_abandoned_fail` | `fsm_check_streamlined_abandoned` in cmd_done_advance | streamlined_mode true + timeline has <3 events |
+| `streamlined_integration_review_fail` | `fsm_check_streamlined_integration_review` in cmd_done_advance | streamlined_mode true + one or more of cp3-code-review/cp3-security/gates_report.json missing |
+
+**Advisory/telemetry (5):**
+
+| Event type | Emitter | Trigger |
+|------------|---------|---------|
+| `dispatch_completed_late` | `aid-emit-dispatch.sh complete` (stderr warning, not blocking) | duration_sec > expected_duration_max or > 1800s hard ceiling — stderr warning only, not a named audit event *(planned as audit event)* |
+| `fsm_orphan_dispatch_waived` | `fsm_check_orphan_dispatches` (after --force --blocked-checks) | PM explicitly waived orphan check with audited reason |
+| `cp4_skip_no_prod_match` | `fsm_check_cp4_curator_validation` | curator-report exists but `base_commit..HEAD` touched zero production paths |
+| `cp4_skipped_streamlined_advisory` | `fsm_check_cp4_curator_validation` | streamlined_mode=true → CP4 mode-aware skip (advisory) |
+| `cp4_glob_evaluated` | `fsm_check_cp4_curator_validation` | telemetry: which production_glob pattern loaded and which range scanned *(planned — not yet emitted in v2.25.0)* |
+
+### P040 check-severity registry additions (4 new blocking entries)
+
+| Check name | Severity | Promoted reason |
+|------------|----------|-----------------|
+| `dispatch_orphan_complete` | blocking | P040 — NR 8/10/13/14 evidence across 4 projects |
+| `cp4_curator_validation` | blocking | P040 — NR 10 §3B + NR 12 evidence |
+| `streamlined_abandoned` | blocking | P040 — NR 12 SOUSTO P009 anchor |
+| `streamlined_integration_review` | blocking | P040 — streamlined contract requires three integration-review artifacts |
+
+---
+
+**Last Updated:** 2026-05-31
