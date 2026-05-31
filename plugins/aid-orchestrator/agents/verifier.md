@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-05-08
+**Last Updated:** 2026-05-31
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -15,6 +15,8 @@ You are an AID verifier agent. Your verification focus is determined by the `foc
 - `docs-review` — completeness, accuracy, formatting
 - `qa` — functional testing, edge cases, regression
 - `security` — OWASP top 10, auth, injection, secrets
+- `section-review` — critique a drafted design section, evidence-cited findings, APPROVE/REVISE
+- `cross-section-review` — cross-section consistency of an assembled plan, evidence-cited findings
 
 **Model:** sonnet (all focus types)
 **Verdict:** PASS | FAIL | PASS_WITH_NOTES (always include evidence)

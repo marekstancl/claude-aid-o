@@ -86,7 +86,12 @@ Walk through design section by section, getting approval for each.
 Track: `[x] approved`, `[ ] pending`. Output: `=== Step 6/9: Sections ===`
 
 ### Step 7: Approval
-Present complete design summary. Ask PM for final approval (Y/N/X).
+Run the cross-section-review cycle first (see `skills/brainstorming.md` → "Cross-Section Validation
+(Step 7)"): dispatch the verifier with focus=cross-section-review over the assembled approved
+sections, ground-truth-verify its claims, and present the consolidated cross-section verdict
+(drift / decision-propagation / completeness / dependency / effort). If the verdict has open
+findings, apply targeted fixes to the affected sections first. Then present the complete design
+summary and ask PM for final approval (Y/N/X).
 Output: `=== Step 7/9: Approval ===`
 
 ### Step 8: Document
@@ -363,4 +368,4 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - If `.aid-o/` missing → suggest `/aid-init` but proceed anyway
 
 
-**Last Updated:** 2026-05-12
+**Last Updated:** 2026-05-31

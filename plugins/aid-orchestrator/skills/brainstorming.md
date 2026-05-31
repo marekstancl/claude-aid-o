@@ -27,7 +27,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 2. **Prefer multiple choice** — open-ended only when options cannot be predicted
 3. **Detailed output by default** — PM should never ask for more detail
 4. **2-3 approaches always** — never present a single option
-5. **Section-by-section approval** — never skip incremental validation
+5. **Section-by-section approval** — never skip incremental validation; each non-trivial section is validated by the `section-review` critic and ground-truth re-verified by the author before PM approval (see Design Validation Protocol)
 6. **Write files only after explicit PM approval** — Step 7 must be approved
 7. **Follow the language split** — conversation in PM language, documents in configured language
 8. **YAGNI** — do not add complexity the requirements do not demand
@@ -45,7 +45,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
    - When in doubt, be more specific rather than less. PM can always say "simplify."
 2. **Explore Alternatives** — Always offer 2-3 options with genuine tradeoffs, effort estimates (S/M/L), and risk. State the recommended option with reasoning.
    - Each option must be a real alternative, not a strawman. If PM asks "what do you recommend?", give a direct answer.
-3. **Incremental Validation** — Validate at every stage: questions → approach selection → section-by-section review → final approval. Never write files without explicit PM approval.
+3. **Incremental Validation** — Validate at every stage: questions → approach selection → section-by-section review → final approval. Never write files without explicit PM approval. Section and final approval are backed by the validate-then-verify cycle: a second model (Sonnet critic) validates, the author (Opus) ground-truth re-verifies every claim against the codebase, and the PM approves a verdict that carries the evidence table.
 4. **YAGNI** — Propose the simplest solution that meets stated requirements. Complexity is a cost; justify every layer of indirection.
    - Do not propose microservice architecture for a single-service problem. Default to simpler when scope is ambiguous.
 5. **PM Attention is the Bottleneck** — One question at a time, multiple choice over open-ended, short summaries before detailed sections.
@@ -273,7 +273,85 @@ RULE 5: If a modification in one section affects another, flag the dependency:
         "This change also affects {other section} — I'll update that when we get there."
 RULE 6: "Skip" means PM wants to review later — include in final review.
 RULE 7: After all sections: present summary with statuses, ask for final approval.
+
+— Validate-then-verify cycle (P039) — caller-agnostic; runs per NON-TRIVIAL section
+   BEFORE it is presented to PM. Written caller-agnostically (refers only to "the drafted
+   section" + "the validator findings"), so a future /aid-do or /aid-run CP2 caller can
+   reuse it; promote it to its own standalone skill file (a future `validate-then-verify`
+   skill) only when such a caller actually lands.
+
+RULE 8 (trivial floor): Architecture, Data Model, API, Implementation, Migration sections
+        are ALWAYS non-trivial — the trivial-skip judgment may only escalate UP, never
+        down. A non-trivial section skips the cycle only if it names zero codebase artifacts.
+RULE 9 (validate): After drafting a section, dispatch the Sonnet critic:
+          Agent({ subagent_type: "aid-orchestrator:verifier",
+                  description: "section-review {name}",
+                  prompt: <focus=section-review + verbatim section + codebase scope> })
+        The critic returns review_result findings, each with a file:line citation.
+        Do NOT wire stage-log events here (dead no-op in brainstorm — no FSM run).
+RULE 10 (ground-truth — MANDATORY, anti-hallucination): For EVERY key claim the critic
+        makes (file:line, helper signature, schema/class existence), the author goes BACK
+        into the codebase and confirms it with grep/Read. Reuse the CP1 EVIDENCE
+        REQUIREMENT contract verbatim (commands/aid-plan.md): a verification row whose
+        output_excerpt is from-memory/prose or lacks a command_run is REJECTED; max 2
+        retries, then flag PM "verification incomplete: {claims}". Taking findings at
+        nominal value and re-wording them as "I agree" is the EXACT failure this prevents.
+RULE 11 (stance): Per finding, record agree | disagree + one-line reason anchored to the
+        grep output, NOT the critic's word. A claim whose file:line cannot be confirmed is
+        marked ✗ and the stance defaults to DISAGREE (a hallucinated claim has no weight).
+RULE 12 (evidence record — MANDATORY): The verdict MUST embed the claim-verification table
+        (see Section Verdict Format). A verdict without the table is INCOMPLETE and MUST
+        NOT be shown to PM. Enforcement = AID-v3-principles §1 mechanism #3 (explicit PM
+        confirmation gate with logged justification) — NOT an FSM brake. A non-trivial
+        section whose table has zero rows = INCOMPLETE → loop back.
 ```
+
+### Section Verdict Format (P039 — validate-then-verify)
+
+After the cycle completes, present ONE consolidated verdict to PM in the conversation
+language, scannable (Key Principle #5). It REPLACES the bare "approve this section?" prompt.
+Six blocks, in order:
+
+1. **What I drafted** — ≤4 lines condensing the section.
+2. **Validator returned** — PASS→APPROVE / FAIL|PASS_WITH_NOTES→REVISE, with findings
+   marked 🚨 (critical) / ⚠ (low).
+3. **Claim verification** — the mandatory table (`command_run` is a VISIBLE column — the
+   anti-hallucination affordance; PM sees the real grep output):
+
+   | # | Validator claim (file:line) | command_run | output_excerpt | ✓/✗ | Opus stance |
+   |---|------------------------------|-------------|----------------|-----|-------------|
+
+4. **Validator recommends** — numbered recommendations.
+5. **My stance** — agree/disagree per finding + reason; explicit DISAGREEMENT is allowed
+   and expected — never silently capitulate to a claim ground-truth disproved.
+6. **Closing prompt** — "Souhlasíš / Upravit / Skip / Stop" (approve / revise / defer to
+   final review / abort).
+
+Severity/verdict vocabulary: reuse the verifier `review_result` enum unchanged (verdict
+PASS|FAIL|PASS_WITH_NOTES; severity critical|low). Map only at render: PASS→APPROVE,
+FAIL|PASS_WITH_NOTES→REVISE. Do NOT invent new labels.
+
+On approve-despite-✗ or -PENDING, record `pm_decision: <approve|revise> — <reason>` in the
+section's interim-doc block (satisfies mechanism #3's "recorded with reason"). Persistence:
+the table + verdict ride inside the existing approved-section content per Context Persistence
+RULE 2 — do NOT add a new `## Step N:` header (avoids the single-header-per-step collision).
+Evidence is ephemeral-by-design (interim doc deleted on success); it is NOT a long-term audit
+trail.
+
+### Cross-Section Validation (Step 7)
+
+Before final approval, run the cross-section profile over the ASSEMBLED approved sections:
+dispatch `Agent({ subagent_type: "aid-orchestrator:verifier", description:
+"cross-section-review", prompt: <focus=cross-section-review + all approved sections + plan
+summary> })`. It checks drift / decision-propagation / Files-summary completeness /
+dependency-graph / effort sanity — NOT a codebase re-validation (those claims were already
+verified per-section in Step 6). Anti-hallucination still applies, adapted: the author
+ground-truth-verifies the critic's claims — file-existence claims via ls/grep, consistency
+claims via cross-reference of the approved sections + interim doc; same "command_run +
+output_excerpt or INCOMPLETE" rule, with consistency rows citing the compared section
+locations (e.g. "§3 vs §5") instead of a codebase path. Reuse the review_result enum (no
+MINOR/MAJOR). 0 issues → PM final Y/N immediately; issues found → apply targeted fixes to the
+affected sections, then proceed to plan write.
 
 ### Document Generation Protocol
 
@@ -426,4 +504,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-03-17
+**Last Updated:** 2026-05-31

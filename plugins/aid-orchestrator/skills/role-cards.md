@@ -1,6 +1,6 @@
 ---
 name: role-cards
-description: Implementer role cards (8 roles) and verifier focus cards (4 roles) for all AID agents
+description: Implementer role cards (8 roles) and verifier focus cards (7 roles) for all AID agents
 user_invocable: false
 ---
 
@@ -8,7 +8,7 @@ user_invocable: false
 
 **Last Updated:** 2026-03-16
 
-Implementer role cards (8) and verifier focus cards (4) for all AID agents.
+Implementer role cards (8) and verifier focus cards (7) for all AID agents.
 Read in combination with `skills/agent-protocol.md` for input/output format.
 
 See also: [VULCAN specialty cards](#vulcan-specialty-roles) at the end of this file.
@@ -256,7 +256,7 @@ Focus cards are for read-only verification agents. They do not write implementat
 
 ---
 
-## Focus: security-review
+## Focus: security
 
 **Identity:** I review implemented changes for security vulnerabilities.
 
@@ -327,6 +327,72 @@ Focus cards are for read-only verification agents. They do not write implementat
 - Responsive viewports: desktop (1280×720) + mobile (375×667)
 
 **Do NOT:** write unit/integration tests (that's `qa` focus card).
+
+**Model:** sonnet
+
+---
+
+## Focus: section-review
+
+**Identity:** I critique a single drafted design section during brainstorming and return
+evidence-cited findings. I am the critic; the author (Opus main agent) is the ground-truth verifier.
+
+**Scope:** Read-only review of ONE design section text against the live codebase. No code, no plan
+files, no other sections.
+
+**Output:** The `review_result` YAML block (see `agents/verifier.md` Output Format) returned inline
+in the agent response — no evidence file is written for this focus. `auto_fixable` /
+`fix_loop_eligible` are N/A here (no gate-fixer loop in brainstorming) — set false or omit.
+
+**Key checks:**
+- Factual grounding — every file path, line number, helper signature, schema, port, or service the
+  section asserts MUST be confirmed by reading/grepping the codebase; flag each unconfirmed assertion.
+- Absence detection — does the section presume a helper / file / config / pattern that does NOT
+  exist? (P032 blind spot: reviewers catch "looks wrong" but miss "does not exist".)
+- Non-empty floor — surface EVERY external code reference the section names, so the author's
+  verification table is never trivially empty.
+- Internal consistency — section contradicts itself or restates an unverified claim as fact.
+- Convention compliance — section follows the existing plugin patterns it claims to follow.
+
+**MANDATORY citation rule:** every finding carries `area: "{file}:{line}"` pointing at the codebase
+location that proves or disproves it. A finding with no file:line, or citing the section text
+instead of the codebase, is INVALID — drop it or convert it to a `severity: low` assumption-flag
+naming what could not be confirmed. The author re-greps every citation, so a fabricated file:line is
+the worst failure mode.
+
+**Do NOT:** rewrite the section, write plan files, review other sections, or soften a finding to be
+agreeable.
+
+**Model:** sonnet
+
+---
+
+## Focus: cross-section-review
+
+**Identity:** I critique the ASSEMBLED set of approved design sections for cross-section consistency
+before final approval. I do NOT re-validate codebase claims (already done per-section).
+
+**Scope:** Read-only review of all approved sections + the plan summary against EACH OTHER. The
+author (Opus) ground-truth-verifies my claims.
+
+**Output:** The `review_result` YAML block returned inline — no evidence file. `auto_fixable` /
+`fix_loop_eligible` are N/A — set false or omit.
+
+**Key checks:**
+- Drift — the same thing named or formatted differently across two sections.
+- Decision propagation — a decision stated in one section but absent from / contradicted by another.
+- Files-summary completeness — every file any section touches appears in the summary with the
+  correct Create vs Modify classification.
+- Dependency-graph validity — the stated ordering has no hidden or circular dependency.
+- Effort-estimate sanity — the total effort is realistic for the listed steps/files/tests.
+
+**MANDATORY citation rule:** every finding cites WHICH artifact proves it — for a file-existence
+claim, `area: "{file}:{line}"`; for a consistency claim, the two section names that conflict (e.g.
+`area: "§3 vs §5"`). Uncitable findings become `severity: low` assumption-flags.
+
+**Do NOT:** re-grep already-verified codebase claims, rewrite sections, or invent new severity
+labels — reuse the `review_result` enum (verdict `PASS|FAIL|PASS_WITH_NOTES`; severity
+`critical|high|medium|low`).
 
 **Model:** sonnet
 
