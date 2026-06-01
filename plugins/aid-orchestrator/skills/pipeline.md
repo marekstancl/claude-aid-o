@@ -61,7 +61,7 @@ Use `aid-fsm.sh verify-state` before any action to confirm allowed transitions.
 Use `--force` only with explicit PM approval (logged as `fsm_force_override`).
 DONE sub-phases use `aid-fsm.sh done-advance` (not `transition`).
 
-### force_override Usage Policy (v2.18.0+)
+### force_override Usage Policy
 
 `aid-fsm.sh <command> ... --force` requires `--reason "<text>"` with **minimum 20 characters**.
 Hard fail with copy-paste examples if missing or too short.
@@ -139,7 +139,7 @@ aid-fsm.sh init      <epic_id> <run_id> \       # Create state.yaml (state: READ
 PRE-FLIGHT does NOT create the git branch — that is done by the command layer before
 calling PRE-FLIGHT.
 
-### Branch Enforcement (NEW v2.16.0 — P032 Step 2)
+### Branch Enforcement
 
 `aid-fsm.sh init` validates the git branch context before writing `state.yaml`. Five
 HEAD states are handled:
@@ -461,7 +461,7 @@ Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verif
 start/complete pair to `timeline.jsonl`; provenance binding uses the last
 pair (closest to `_generated_at`).
 
-### Dispatch Protocol (P040, v2.25.0+)
+### Dispatch Protocol
 
 Per AID-v3-principles.md §1 — Detector without Enforcement is Decoration — every
 `Agent({subagent_type, prompt})` dispatch MUST be wrapped by paired calls to
@@ -606,7 +606,7 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 **Transition to DONE:** Curator, Auditor, CP4, and CP5 now execute in DONE state (§7).
 GATES only runs deterministic quality checks.
 
-### EXECUTE→GATES Precondition (UPDATED v2.16.0 — P032 Step 3)
+### EXECUTE→GATES Precondition
 
 For post-deploy EPICs (`state.yaml.created_at >= AID_DEPLOY_DATE`):
 
@@ -631,7 +631,7 @@ Plus two timeline events frame each run: `gate_runner_start` (with `report_path`
 `gate_count`, `command_list`) and `gate_runner_complete` (with `report_path`,
 `overall`, `duration_sec`).
 
-#### Recommended Flow (v2.18.3+): aid-fsm.sh advance-to-gates
+#### Recommended Flow: aid-fsm.sh advance-to-gates
 
 Single atomic command runs the gates and — if they pass — performs `cmd_transition
 EXECUTE GATES`. Eliminates the chicken-egg problem between `aid-run-gates.sh`
@@ -777,7 +777,7 @@ Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
 
 **IMP-089 forward-compat:** if `.aid-o/config/project.yaml` has a `branch_convention:` field, the trust heuristic respects it (even before IMP-089 ships).
 
-### Compliance Telemetry (NEW v2.16.0 — P032 Step 4)
+### Compliance Telemetry
 
 After every successful `done-advance` to `release`, `aid-fsm.sh` writes
 `evidence/<epic>/<run>/compliance.json` capturing 6 enforcement dimensions:
@@ -810,7 +810,7 @@ Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produc
 a forensic frequency table (file counts, branch hygiene, gate authenticity, top
 fsm_precondition_fail reasons) — productized version of the Krok 0 analysis.
 
-### Tiered Severity Enforcement (NEW v2.21.0 — P038 AID-038 Phase 2)
+### Tiered Severity Enforcement
 
 `cmd_done_advance review release` reads `compliance.json failures[]` and refuses
 transition when any failure has `severity: "blocking"`. PM-authorized override
@@ -1200,7 +1200,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-06-01
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

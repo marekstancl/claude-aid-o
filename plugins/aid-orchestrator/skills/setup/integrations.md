@@ -25,7 +25,6 @@ Present to PM:
 ```
 MCP Integrations:
   [enabled]    qdrant-memory — project memory & semantic search
-  [disabled]   context7 — library documentation lookup
   [available]  shared-docker — container management
   [available]  shared-slack — Slack notifications
 
@@ -38,7 +37,7 @@ MCP Integrations:
 
 6. Write updated `config/integrations.yaml`:
    - Set `enabled: true/false` for each integration section
-   - If MCP name matches a known section (slack, memory, knowledge) → update that section
+   - If MCP name matches a known section (slack, memory) → update that section
    - If MCP is unknown → note in output but don't create arbitrary config sections
 
 ## Known MCP Mappings
@@ -46,7 +45,6 @@ MCP Integrations:
 | MCP Server Key | integrations.yaml Section | Description |
 |---|---|---|
 | `qdrant-memory` or `qdrant-brain` | `memory:` | Qdrant semantic search |
-| `*context7*` | `knowledge:` + `knowledge.context7:` | Library docs |
 | `*slack*` | `slack:` | PM notifications |
 | `*docker*` | (note only) | Container management |
 | `*playwright*` | (note only) | Browser testing |
@@ -56,7 +54,7 @@ MCP Integrations:
 
 ```
 Integrations updated:
-  enabled: qdrant-memory, context7
+  enabled: qdrant-memory
   disabled: shared-slack
 Written to: .aid-o/config/integrations.yaml
 ```

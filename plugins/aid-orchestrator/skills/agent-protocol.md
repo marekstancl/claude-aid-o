@@ -6,7 +6,7 @@ user_invocable: false
 
 # Agent Protocol
 
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-06-01
 
 Universal boilerplate for all AID agents. Every agent dispatched by the AID orchestrator
 reads this file. Role-specific behavior is in `skills/role-cards.md`.
@@ -194,7 +194,7 @@ Second violation of allowed_paths → orchestrator transitions to ESCALATION sta
 
 ---
 
-## Tiered Severity Reference (v2.21.0)
+## Tiered Severity Reference
 
 Compliance checks have severity levels that affect release blocking. Agents should
 remediate blocking failures before reaching DONE rather than relying on PM force-override.
@@ -250,7 +250,7 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-### P040 audit events (v2.25.0+)
+### P040 audit events
 
 **Blocking failures (4):**
 
@@ -283,4 +283,4 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-06-01

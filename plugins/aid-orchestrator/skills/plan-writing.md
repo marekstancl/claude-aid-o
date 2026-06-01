@@ -63,7 +63,6 @@ Triggered by `/aid-plan brainstorm` Step 8 after PM approves all design sections
 - PM's answers from Steps 3-4 (questions, approach selection)
 - PM's modifications and corrections from incremental validation
 - Project context from Step 1 (project profile, tech stack, existing code)
-- Knowledge context (if knowledge acquisition was active)
 
 **Contract:** The skill receives ALL brainstorming context. It does NOT re-ask PM questions. It does NOT explore alternatives. It writes.
 
@@ -461,7 +460,6 @@ Every piece of information from brainstorming must map to a plan section. Use th
 | PM's stated success criteria | `## Success Criteria` |
 | Docker/MCP decisions | `## Infrastructure` or `## Constraints` |
 | Workflow detection results | `## Architecture`, step details |
-| Knowledge context references | Inline citations in relevant sections |
 
 ### Traceability Verification
 

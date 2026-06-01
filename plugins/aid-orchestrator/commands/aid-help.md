@@ -26,7 +26,7 @@ Auto-detect user level from workspace state:
 
 Count completed tasks:
 - Quick logs: count files in `.aid-o/work/quick/Q-*.md`
-- Task runs: count `state: DONE` in `.aid-o/work/evidence/*/*/state.yaml`
+- Task runs: count `state: DONE` in `.aid-o/work/evidence/*/*/fsm-state.yaml`
 
 Show all levels up to and including the detected level.
 
@@ -201,7 +201,7 @@ Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 Modular setup — run all or pick one module:
 
   /aid-setup permissions    → choose preset: autonomous (default) or custom
-  /aid-setup integrations   → detect & enable MCP servers (Qdrant, Context7, Slack, ...)
+  /aid-setup integrations   → detect & enable MCP servers (Qdrant, Slack, ...)
   /aid-setup claude-md      → generate CLAUDE.md with project context
   /aid-setup scan           → re-detect tech stack, update project.yaml
   /aid-setup all            → run everything (recommended for first setup)
@@ -223,4 +223,4 @@ Prerequisite: /aid-init must run first (creates .aid-o/ workspace)
 - If `$ARGUMENTS` matches a topic → show that topic section only
 
 
-**Last Updated:** 2026-03-22
+**Last Updated:** 2026-06-01

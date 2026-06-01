@@ -76,7 +76,7 @@ Read project root to detect stack and populate `config/project.yaml`:
 
 If multiple detected, list all. Commands are suggestions — PM can override in `project.yaml`.
 
-### execution.yaml Generation (P032)
+### execution.yaml Generation
 
 After auto-detection, generate `.aid-o/config/execution.yaml` from per-stack template fragments under `defaults/execution-stacks/`. Idempotent: existing file is **not** overwritten.
 
@@ -294,7 +294,7 @@ Hook installation:
 
 1. **Source template:** `{plugin_path}/defaults/hooks/pre-push`
 2. **Target:** `.git/hooks/pre-push`
-3. **Logic:** Same as pre-commit (copy/append/upgrade with markers)
+3. **Logic:** Same copy/append/upgrade flow as pre-commit, but matched on pre-push's OWN marker `AID-ORCHESTRATOR-PREPUSH-START` (NOT the pre-commit `AID-ORCHESTRATOR-HOOK-START`) — idempotency depends on using the correct marker.
 
 **What the hook does:** Blocks push if `feat:` or `fix:` commits exist since last git tag without a corresponding `release:` commit. Suggests running `aid-release.sh auto`. Bypass: `git push --no-verify`.
 
@@ -409,4 +409,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-06-01

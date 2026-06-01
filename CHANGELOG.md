@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.26.0] — 2026-06-01
+
+### Changed
+- **Documentation hygiene** — stripped version-stamped headings (e.g. `(NEW v2.16.0 — P032)`) from pipeline.md, agent-protocol.md, and related skills/commands; refreshed stale `Last Updated` dates; reconciled the brainstorming severity-enum claim and the aid-status `{epic_id}` naming drift.
+
+### Fixed
+- **aid-help level detection** — counted `state: DONE` in `state.yaml` (never written by the FSM), so every user showed Level 0; now reads `fsm-state.yaml`.
+- **aid-init pre-push hook docs** — clarified pre-push uses its own marker `AID-ORCHESTRATOR-PREPUSH-START` (not the pre-commit marker), preventing duplicate hook blocks on re-run.
+- **CP4 curator-validation filename** — verifier-output-template + verifier.md now name the FSM-required `verifier-output-cp4-curator-validation.md`; corrected the false "FSM does NOT enforce" note.
+- **implementer model selection** — replaced the duplicated, incomplete model-tier list with a pointer to role-cards.md (single source of truth covering all roles).
+- **brainstorming prior-work scan** — globbed nonexistent `.aid-o/epics/`; now `.aid-o/tasks/`.
+
+### Removed
+- **aid-research command + knowledge/Context7 layer** — removed the never-wired on-demand research command, its knowledge-base template, the integrations `knowledge:` config, the `context_scope.knowledge` plan-schema flag, and all orphaned Context7 references; archived to `docs/plans/AID-audit-2026-06/removed/` (restorable). The layer had no producer wired and no consumer.
+
 ## [2.25.0] — 2026-05-31
 
 ### Added

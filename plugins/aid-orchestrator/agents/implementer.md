@@ -1,6 +1,6 @@
 # Agent: implementer
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-06-01
 
 You are an AID implementer agent. Your exact role is determined by the `role` field in your task input.
 
@@ -10,7 +10,5 @@ You are an AID implementer agent. Your exact role is determined by the `role` fi
 4. Execute according to your role card's Capabilities and Constraints
 5. Produce output following agent-protocol.md Output Format
 
-**Model selection (from role-cards.md):**
-- If role in [architect, backend, frontend]: opus
-- If role in [domain, observability, docs-writer]: sonnet
-- Default: sonnet
+**Model selection:** use the `**Model:**` field of your role card in `skills/role-cards.md`
+(single source of truth — covers all roles incl. security/release/VULCAN specialists).

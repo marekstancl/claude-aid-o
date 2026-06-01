@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.23.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.26.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.25.0** (current) — dispatch lifecycle enforcement bundle (P040): aid-emit-dispatch.sh wrapper + pending-dispatches ledger, fsm_check_orphan_dispatches reconciliation backstop, CP4 curator-validation range-scan enforcement, first-class --streamlined mode (coverage_mode/skipped_dimensions honest accounting), state file unification (aid-json-to-run.sh auto-init); 4 new blocking checks
+- **v2.26.0** (current) — P041 audit Wave 1 cleanup: removed the never-wired aid-research command + knowledge/Context7 layer (archived, restorable); fixed aid-help level detection (state.yaml→fsm-state.yaml), CP4 curator-validation filename, aid-init pre-push hook docs, implementer model selection, brainstorming prior-work glob; stripped version-stamped headings + refreshed stale dates across skills/commands
+- **v2.25.0** — dispatch lifecycle enforcement bundle (P040): aid-emit-dispatch.sh wrapper + pending-dispatches ledger, fsm_check_orphan_dispatches reconciliation backstop, CP4 curator-validation range-scan enforcement, first-class --streamlined mode (coverage_mode/skipped_dimensions honest accounting), state file unification (aid-json-to-run.sh auto-init); 4 new blocking checks
 - **v2.24.0** — NR 10-14 cross-project carry-over: FSM artifact templates (step-verify + verifier-output) dokumentují schema enforced by aid-fsm.sh preconditions; parser fenced-block bug fix v aid-plan-to-epic.sh (plans citující AID syntax už neselhávají); permissions.yaml sync s běžící MCP infrastrukturou (qdrant-memory/shared-docker/-minio/-postgres/-playwright odebrány, vulcan-memory + eco-admin GREEN přidány)
-- **v2.23.0** — section-review validate-then-verify: brainstorming Step 6 sekce validuje Sonnet kritik + Opus ground-truth re-grep, PM dostane claim-verification tabulku před schválením; Step 7 cross-section konzistenční check
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

@@ -26,7 +26,7 @@ Show pipeline status, task details, and queue management — unified view of eve
 
 1. **Scan active tasks:**
    - List files in `.aid-o/tasks/` (not `archive/`)
-   - For each, check `.aid-o/work/evidence/{task_id}/` for run data
+   - For each, check `.aid-o/work/evidence/{epic_id}/` for run data
 2. **Scan quick logs:**
    - Count files in `.aid-o/work/quick/Q-*.md`
    - Show last 3 by date
@@ -54,7 +54,7 @@ Use /aid-status <id> for details, /aid-status queue for queue management.
 ### `/aid-status <task-id>` — Detailed Task Status
 
 1. **Find evidence:**
-   - Look in `.aid-o/work/evidence/{task_id}/`
+   - Look in `.aid-o/work/evidence/{epic_id}/`
    - Find latest run_id (most recent subdirectory)
    - Load `state.yaml` (v2 state file)
    - Load `timeline.jsonl` (last 10 entries)
@@ -123,7 +123,7 @@ Auto-pickup: Active (1 READY, 1 WAITING, 1 BLOCKED)
 2. Reject if duplicate (already queued or running)
 3. Create `.aid-o/config/queue.yaml` if it doesn't exist (lazy-create)
 4. Add entry with default priority `medium`
-5. Confirm: `Added to queue: {task_id} (priority: {level}), position {N}`
+5. Confirm: `Added to queue: {epic_id} (priority: {level}), position {N}`
 
 ### `/aid-status queue pause`
 
@@ -156,10 +156,10 @@ Status: Not started (no evidence directory)
 Run /aid-run {id} to start execution.
 ```
 
-## Evidence Paths (v2)
+## Evidence Paths
 
 ```
-.aid-o/work/evidence/{task_id}/{run_id}/   — run evidence root
+.aid-o/work/evidence/{epic_id}/{run_id}/   — run evidence root
   state.yaml                                — FSM state (replaces plan_progress.json)
   timeline.jsonl                            — event log (replaces stage_log.jsonl)
 .aid-o/tasks/                               — task files (replaces 02-epics/)
@@ -181,4 +181,4 @@ Run /aid-run {id} to start execution.
 - If `$ARGUMENTS` is empty → show overview (default)
 
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-06-01

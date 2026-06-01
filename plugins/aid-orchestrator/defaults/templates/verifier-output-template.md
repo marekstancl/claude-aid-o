@@ -17,8 +17,8 @@
                                                                                             check_preconditions EXECUTE:GATES → fsm_check_verifier_output
     CP3 security       .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp3-security.md
                                                                                             check_preconditions EXECUTE:GATES → fsm_check_verifier_output
-    CP4 curator        .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp4-curator.md
-                                                                                            pipeline.md §7 DONE.review (NOT FSM-enforced)
+    CP4 curator-validation .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp4-curator-validation.md
+                                                                                            cmd_done_advance review→release → fsm_check_cp4_curator_validation (FSM-ENFORCED, full mode)
 
   GRANDFATHERING: pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE)
   skip ALL verifier-output FSM checks via fsm_check_grandfather. Post-deploy
@@ -39,7 +39,7 @@
     A. CP2 per-step          → verifier-output-step-{N}.md       (classification: SKIP | RUN | FAIL)
     B. CP3 code-review       → verifier-output-cp3-code-review.md (classification: FULL_REVIEW)
     C. CP3 security          → verifier-output-cp3-security.md    (classification: FULL_REVIEW)
-    D. CP4 curator           → verifier-output-cp4-curator.md     (classification: FULL_REVIEW; FSM does NOT enforce)
+    D. CP4 curator-validation → verifier-output-cp4-curator-validation.md (classification: FULL_REVIEW; FSM DOES enforce — fsm_check_cp4_curator_validation in cmd_done_advance, full mode)
 
   All four share the SAME header block (below). Only the `# {Variant Heading}`,
   the dispatch_label format inside `_generated_by:`, and the focus of "Findings"

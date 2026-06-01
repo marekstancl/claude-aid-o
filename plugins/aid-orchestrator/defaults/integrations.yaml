@@ -1,7 +1,7 @@
 # AID Integrations Configuration (v2)
 # Consolidated from: slack-config.yaml, memory-config.yaml
 #
-# Controls: Slack MCP integration, Qdrant memory, knowledge acquisition.
+# Controls: Slack MCP integration, Qdrant memory.
 # Both integrations are optional — disabled by default.
 
 # ─── Slack ───────────────────────────────────────────────────────────────
@@ -77,36 +77,3 @@ memory:
   cross_project:
     enabled: false              # disabled by default for MVP
     max_results: 3
-
-# ─── Knowledge Acquisition ──────────────────────────────────────────────
-# See: skills/knowledge-acquisition.md for protocol details.
-# Primary source: Context7 MCP; fallback: WebSearch
-knowledge:
-  enabled: false
-  primary_source: context7
-  fallback_source: websearch
-
-  context7:
-    available: false
-    scope: user
-
-  research:
-    default_depth: quick
-    deep_on_demand_only: true
-    max_frameworks_per_scan: 5
-    max_urls_per_framework: 3
-    max_chunks_per_source: 15
-
-  quality:
-    min_chunk_words: 50
-    max_chunk_tokens: 2000
-    dedup_threshold: 0.85
-    merge_threshold: 0.70
-
-  aging:
-    documentation_ttl_days: 90
-    pattern_ttl_days: 180
-    lesson_ttl_days: 365
-    stale_weight: 0.7
-    expired_weight: 0.3
-    exclude_after_days: 180

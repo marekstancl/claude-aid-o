@@ -61,7 +61,7 @@ Activates after reading PM's topic and all context, before questioning begins. M
 
 ```
 RULE 1: After reading the PM's topic and all available context, SEARCH for related
-        prior work: glob .aid-o/plans/*.md and .aid-o/epics/*.md for keyword overlap
+        prior work: glob .aid-o/plans/*.md and .aid-o/tasks/*.md for keyword overlap
         with the topic. If matches found, include a "Prior work found" line listing
         plan IDs and titles. If no matches, state "No prior plans overlap."
         Then PRESENT a structured analysis BEFORE asking any questions. Mandatory.
@@ -306,7 +306,7 @@ RULE 12 (evidence record — MANDATORY): The verdict MUST embed the claim-verifi
         section whose table has zero rows = INCOMPLETE → loop back.
 ```
 
-### Section Verdict Format (P039 — validate-then-verify)
+### Section Verdict Format
 
 After the cycle completes, present ONE consolidated verdict to PM in the conversation
 language, scannable (Key Principle #5). It REPLACES the bare "approve this section?" prompt.
@@ -327,8 +327,8 @@ Six blocks, in order:
 6. **Closing prompt** — "Souhlasíš / Upravit / Skip / Stop" (approve / revise / defer to
    final review / abort).
 
-Severity/verdict vocabulary: reuse the verifier `review_result` enum unchanged (verdict
-PASS|FAIL|PASS_WITH_NOTES; severity critical|low). Map only at render: PASS→APPROVE,
+Severity/verdict vocabulary: reuse the verifier `review_result` enum (verdict
+PASS|FAIL|PASS_WITH_NOTES; severity critical|high|medium|low — brainstorm section-review typically uses critical|low). Map only at render: PASS→APPROVE,
 FAIL|PASS_WITH_NOTES→REVISE. Do NOT invent new labels.
 
 On approve-despite-✗ or -PENDING, record `pm_decision: <approve|revise> — <reason>` in the
@@ -504,4 +504,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-06-01

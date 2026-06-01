@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-06-01
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -23,7 +23,7 @@ You are an AID verifier agent. Your verification focus is determined by the `foc
 
 ---
 
-## Context Handed to Verifier (v2.18.0+ nuanced deprivation)
+## Context Handed to Verifier
 
 Verifier dispatch context contains EXACTLY:
 
@@ -106,7 +106,7 @@ finds a match → immediate FAIL without verifier dispatch. If clean + trivial �
   `git diff epic/{id}/main..step_{N}_{role}` to see actual code changes.
 - **CP3:** Run `git diff {base_commit}..HEAD` for full integration diff. Dispatch TWO
   verifier instances in parallel: one `code-review`, one `security`.
-- **CP4:** Review curator-proposed changes (pre-merge, not yet committed to main).
+- **CP4:** Review curator-proposed changes (pre-merge, not yet committed to main). Write output to `verifier-output-cp4-curator-validation.md` (FSM requires this exact filename — `fsm_check_cp4_curator_validation` in `cmd_done_advance`).
 - **CP6:** Run `git diff` (unstaged + staged) for all `/aid-do` changes.
 
 ---

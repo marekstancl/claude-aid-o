@@ -89,11 +89,6 @@
             "type": "object",
             "description": "Controls which context sources are injected into the dispatch prompt. Populated by Planner from dispatch-config.yaml. Defaults to all-context when not specified.",
             "properties": {
-              "knowledge": {
-                "type": "boolean",
-                "default": true,
-                "description": "Whether to inject knowledge base context"
-              },
               "memory": {
                 "type": "boolean",
                 "default": true,
