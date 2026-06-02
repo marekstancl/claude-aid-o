@@ -986,7 +986,7 @@ Options:
 14. **Release:** Call `aid-release.sh` — version bump
     - Standalone/last EPIC: mandatory bump
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
-15. **Branch merge:** `git merge epic/{epic_id} --no-ff -m "feat: complete EPIC {epic_id}"`
+15. **Branch merge:** `git merge task/{epic_id}/main --no-ff -m "feat: complete EPIC {epic_id}"`
     → delete run branch
 16. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
     Metrics stored to Qdrant (`aid-orchestration-log`) or fallback JSONL.

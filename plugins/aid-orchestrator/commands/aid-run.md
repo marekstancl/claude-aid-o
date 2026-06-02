@@ -1,18 +1,18 @@
 ---
 name: aid-run
-description: Execute task pipeline — 6-state FSM with optional autonomous mode
+description: Execute EPIC pipeline — 6-state FSM with optional autonomous mode
 user_invocable: true
 ---
 
-Run the 6-state FSM controller to orchestrate a task through its full lifecycle. Replaces the old `/aid-run-epic` and `/aid-first-aid` commands.
+Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle. Replaces the old `/aid-run-epic` and `/aid-first-aid` commands.
 
 ## Usage
 
 ```
-/aid-run                        # manual mode — start or auto-detect active task
-/aid-run <task-id>              # manual mode — start specific task
+/aid-run                        # manual mode — start or auto-detect active EPIC
+/aid-run <epic-id>              # manual mode — start specific EPIC
 /aid-run --auto                 # autonomous mode — auto-approve S-effort fixes
-/aid-run --auto --task <id>     # autonomous mode for specific task
+/aid-run --auto --epic <id>     # autonomous mode for specific EPIC
 /aid-run --resume               # resume interrupted run from fsm-state.yaml
 ```
 
@@ -23,7 +23,7 @@ Run the 6-state FSM controller to orchestrate a task through its full lifecycle.
 | (none) | Manual mode — asks PM approval at each escalation |
 | `--auto` | Autonomous mode (replaces `/aid-first-aid`) |
 | `--resume` | Resume from last known state in `fsm-state.yaml` |
-| `--task <id>` | Specify task ID (otherwise auto-detect) |
+| `--epic <id>` | Specify EPIC ID (otherwise auto-detect) |
 
 ### Autonomous Mode (`--auto`)
 
@@ -93,7 +93,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
 **Bash pipeline** (using resolved `plugin_path`):
-1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to task file (if running from plan)
+1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to EPIC file (if running from plan)
 2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse DAG → plan.json
 3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
@@ -105,12 +105,12 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
    separate dimension carried only by the `--streamlined` flag.
 
 These are **bash scripts**. No LLM involvement. Exit non-zero → abort with error message.
-PM must fix the underlying issue (missing steps, circular deps, invalid task format).
+PM must fix the underlying issue (missing steps, circular deps, invalid EPIC format).
 
 ```
 PRE-FLIGHT Pipeline
 ====================================
-  [1] aid-plan-to-epic.sh   → task file     ✓
+  [1] aid-plan-to-epic.sh   → EPIC file     ✓
   [2] aid-epic-to-json.sh   → plan.json     ✓
   [3] aid-json-to-run.sh    → fsm-state.yaml    ✓
 
@@ -124,24 +124,19 @@ FSM initialized: READY
              │  READY   │
              └────┬─────┘
                   │ approve
-             ┌────▼─────┐
-        ┌───►│ EXECUTE  │◄───────────────┐
-        │    └────┬─────┘                │
-        │         │ all steps done       │ fix applied
-        │    ┌────▼─────┐          ┌─────┴──────┐
-        │    │  GATES   │─────────►│ ESCALATION │
-        │    └────┬─────┘ retries  └─────┬──────┘
-        │         │ all pass       skip  │
-        │    ┌────▼─────┐    gate  │     │
-        │    │   DONE   │◄─────────┘     │
-        │    └────┬─────┘                │
-        │         │ error                │
-        │    ┌────▼─────┐                │
-        │    │  ERROR   │                │
-        │    └──────────┘                │
-        │                                │
-        └────────────────────────────────┘
-              gate retry (max 2)
+        ┌────────►┌────▼─────┐ ◄── fix applied (ESCALATION→EXECUTE)
+        │ gate    │ EXECUTE  │
+        │ retry   └────┬─────┘
+        │ (max 2)      │ all steps done
+        │         ┌────▼─────┐   all pass    ┌──────────┐
+        └─────────│  GATES   │──────────────►│   DONE   │  (terminal:
+                  └────┬─────┘               └──────────┘   review→release)
+                       │ retries exhausted
+                  ┌────▼───────┐  skip gate
+                  │ ESCALATION │─────────────► GATES
+                  └────────────┘
+
+   ERROR (terminal) ◄── hard failure from any of READY / EXECUTE / GATES / ESCALATION
 ```
 
 ### State: READY
@@ -151,11 +146,11 @@ FSM initialized: READY
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
 2. Load `config/permissions.yaml` (mode, auto-approve rules)
-3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display task summary, do NOT present Options, do NOT wait for PM.
-4. **Manual mode only:** Display task summary to PM:
+3. **AUTO MODE → SKIP TO STEP 5 IMMEDIATELY.** Do NOT display EPIC summary, do NOT present Options, do NOT wait for PM.
+4. **Manual mode only:** Display EPIC summary to PM:
    ```
-   Task: {id} — {title}
-   Steps: {N} ({parallel_groups} parallel groups)
+   EPIC: {id} — {title}
+   Steps: {N}
    Mode: manual
 
    Quality Gates (will run after all steps):
@@ -178,22 +173,19 @@ FSM initialized: READY
 
 **Actions:**
 1. Read `fsm-state.yaml` → find `current_step`
-2. Check dependency graph → dispatch steps with all deps satisfied
-3. For sequential step:
-   - Create branch: `task/{task_id}/step_{N}_{role}`
+2. Check dependency graph → pick the next step with all deps satisfied
+3. Dispatch the step (one agent at a time — `max_parallel: 1`, see rule 15):
+   - Work happens on the single EPIC branch `task/{epic_id}/main` (created by `aid-fsm.sh init`); there is no per-step branch.
    - Build agent prompt (per `pipeline.md §4`)
    - Dispatch agent via Task tool
-   - Collect output → save to `work/evidence/{task_id}/{run_id}/steps/`
-4. For parallel group:
-   - Dispatch all agents in single message (multiple Task calls)
-   - Collect all outputs
-5. Verify outputs: present? scope respected? acceptance criteria met?
-6. **Review Checkpoint CP2** — dispatch verifier (`code-review` focus) with step output + branch diff
+   - Collect output → save to `work/evidence/{epic_id}/{run_id}/steps/`
+4. Verify outputs: present? scope respected? acceptance criteria met?
+5. **Review Checkpoint CP2** — dispatch verifier (`code-review` focus) with step output + branch diff
    - If verifier PASS → continue
    - If verifier FAIL + `fix_loop_eligible` → dispatch gate-fixer with findings → re-dispatch verifier (max 2 iterations)
    - If fix loop exhausts or `fix_loop_eligible: false` → ESCALATION (E7)
    - Skip if `review_checkpoints.cp2_step_review: false` or step is trivial (see `skip_trivial` config)
-7. Log to `timeline.jsonl`
+6. Log to `timeline.jsonl`
 
 **Integration Review (CP3):** When all steps are done, before transitioning to GATES:
 - Dispatch verifier with `code-review` + `security` focuses in parallel (full diff since run start)
@@ -311,7 +303,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 **Sub-phase: `release`** (after `done-advance review release`)
 
 14. Release automation (`aid-release.sh`)
-15. Branch merge: `git merge epic/{id} --no-ff` → delete run branch
+15. Branch merge: `git merge task/{epic_id}/main --no-ff` → delete run branch
 16. Queue pickup + metrics logging
 
 ### State: ERROR
@@ -345,7 +337,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state
 - **`--auto` replaces `/aid-first-aid`** — same autonomous behavior, integrated flag
 - **`--resume` reads fsm-state.yaml** — picks up from last known state after crash/interrupt (legacy `state.yaml` still accepted as fallback)
-- If `$ARGUMENTS` is empty → auto-detect: find single active task or list for selection
+- If `$ARGUMENTS` is empty → auto-detect: find single active EPIC or list for selection
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
 
 ### `--streamlined` mode

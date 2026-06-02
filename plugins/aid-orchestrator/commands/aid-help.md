@@ -51,7 +51,7 @@ Need planning first? /aid-plan
 
 ```
 Queue management:
-  /aid-status queue add .aid-o/tasks/E-001.md   → queue task
+  /aid-status queue add .aid-o/tasks/E-001.md   → queue EPIC
 
 Planning:
   /aid-plan                → brainstorm + write plan (auto-detect)
@@ -79,7 +79,7 @@ Audit: /aid-audit → project health score (0-100) with recommendations
 
 ```
 FSM debugging:
-  /aid-status <task-id>                    → shows fsm-state.yaml FSM state
+  /aid-status <epic-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
 Token monitoring:
@@ -98,7 +98,7 @@ Detailed documentation for specific areas:
 /aid-help do        → /aid-do deep dive (scope detection, escalation triggers)
 /aid-help run       → /aid-run deep dive (6-state FSM, PRE-FLIGHT, --auto mode)
 /aid-help plan      → /aid-plan deep dive (brainstorm, write, epic modes)
-/aid-help status    → /aid-status deep dive (overview, task detail, queue)
+/aid-help status    → /aid-status deep dive (overview, EPIC detail, queue)
 /aid-help gates     → gate types, execution.yaml configuration, retry logic
 /aid-help config    → project.yaml, execution.yaml, permissions.yaml reference
 /aid-help setup     → /aid-setup deep dive (modules, presets, integrations)
@@ -122,10 +122,10 @@ No FSM, no EPIC, no evidence dir — just implement and log.
 ### Topic: run
 
 ```
-/aid-run — Task Pipeline
+/aid-run — EPIC Pipeline
 ====================================
 PRE-FLIGHT (bash, before FSM):
-  1. aid-plan-to-epic.sh → task file
+  1. aid-plan-to-epic.sh → EPIC file
   2. aid-epic-to-json.sh → plan.json
   3. aid-json-to-run.sh  → execution.yaml + fsm-state.yaml
 
@@ -138,7 +138,7 @@ PRE-FLIGHT (bash, before FSM):
 Flags:
   --auto    Autonomous mode (S-effort auto-fix, L-effort always escalates)
   --resume  Resume from fsm-state.yaml after crash
-  --task    Specify task ID
+  --epic    Specify EPIC ID
 ```
 
 ### Topic: gates
@@ -169,7 +169,7 @@ Configuration Files
 config/project.yaml       — project stack, commands (auto-detected by /aid-init)
 config/permissions.yaml   — autonomous mode, auto-commit, auto-push
 config/execution.yaml     — gate definitions (lazy-created on first /aid-run)
-config/queue.yaml         — task queue (lazy-created on first /aid-status queue add)
+config/queue.yaml         — EPIC queue (lazy-created on first /aid-status queue add)
 ```
 
 ### Topic: fsm

@@ -1,18 +1,18 @@
 ---
 name: aid-status
-description: Show task status, queue, and pipeline overview
+description: Show EPIC status, queue, and pipeline overview
 user_invocable: true
 ---
 
-Show pipeline status, task details, and queue management — unified view of everything running, queued, or completed.
+Show pipeline status, EPIC details, and queue management — unified view of everything running, queued, or completed.
 
 ## Usage
 
 ```
-/aid-status                                  # overview: active tasks + queue summary
-/aid-status <task-id>                        # detailed task status (reads fsm-state.yaml)
+/aid-status                                  # overview: active EPICs + queue summary
+/aid-status <epic-id>                        # detailed EPIC status (reads fsm-state.yaml)
 /aid-status queue                            # queue management view
-/aid-status queue add <path> [--priority]    # add task to queue
+/aid-status queue add <path> [--priority]    # add EPIC to queue
 ```
 
 **Priority levels:** `critical` | `high` | `medium` (default) | `low`
@@ -21,7 +21,7 @@ Show pipeline status, task details, and queue management — unified view of eve
 
 ### `/aid-status` — Overview (default)
 
-1. **Scan active tasks:**
+1. **Scan active EPICs:**
    - List files in `.aid-o/tasks/` (not `archive/`)
    - For each, check `.aid-o/work/evidence/{epic_id}/` for run data
 2. **Scan quick logs:**
@@ -36,7 +36,7 @@ Show pipeline status, task details, and queue management — unified view of eve
 AID Status
 ====================================
 
-Active Tasks:
+Active EPICs:
   E-003-1_2 — Add Auth System           [EXECUTE] step 3/7
   E-003-2_2 — Auth Frontend             [queued]  waiting on E-003-1_2
 
@@ -48,7 +48,7 @@ Queue: 2 queued, 1 running | Auto-pickup: active
 Use /aid-status <id> for details, /aid-status queue for queue management.
 ```
 
-### `/aid-status <task-id>` — Detailed Task Status
+### `/aid-status <epic-id>` — Detailed EPIC Status
 
 1. **Find evidence:**
    - Look in `.aid-o/work/evidence/{epic_id}/`
@@ -59,7 +59,7 @@ Use /aid-status <id> for details, /aid-status queue for queue management.
 2. **Display:**
 
 ```
-TASK Status: E-003-1_2 — Add Auth System
+EPIC Status: E-003-1_2 — Add Auth System
 ====================================
 State: EXECUTE          ← from fsm-state.yaml .state
 Step: 3/7               ← current_step / total_steps
@@ -81,7 +81,7 @@ Evidence: .aid-o/work/evidence/E-003-1_2/{run_id}/
 
 **Status when no run started:**
 ```
-TASK: E-003-1_2 — Add Auth System
+EPIC: E-003-1_2 — Add Auth System
 Status: Plan ready, not started
 
 Run /aid-run E-003-1_2 to start execution.
@@ -95,7 +95,7 @@ Run /aid-run E-003-1_2 to start execution.
 3. Display:
 
 ```
-Task Queue
+EPIC Queue
 ====================================
   [READY]    E-015-1_2  (high)   — no dependencies
   [RUN]      E-014-1_2  (high)   — started 2h ago
@@ -116,7 +116,7 @@ Auto-pickup: Active (1 READY, 1 WAITING, 1 BLOCKED)
 
 ### `/aid-status queue add <path> [--priority <level>]`
 
-1. Validate task file exists and has required sections
+1. Validate EPIC file exists and has required sections
 2. Reject if duplicate (already queued or running)
 3. Create `.aid-o/config/queue.yaml` if it doesn't exist (lazy-create)
 4. Add entry with default priority `medium`
@@ -124,18 +124,18 @@ Auto-pickup: Active (1 READY, 1 WAITING, 1 BLOCKED)
 
 ## Edge Cases
 
-**No tasks found:**
+**No EPICs found:**
 ```
-No tasks found.
+No EPICs found.
 
 Get started:
   /aid-do "quick task"     — implement something small
   /aid-plan                — plan something bigger
 ```
 
-**Task exists but no evidence:**
+**EPIC exists but no evidence:**
 ```
-TASK: {id} — {title}
+EPIC: {id} — {title}
 Status: Not started (no evidence directory)
 
 Run /aid-run {id} to start execution.
@@ -147,7 +147,7 @@ Run /aid-run {id} to start execution.
 .aid-o/work/evidence/{epic_id}/{run_id}/   — run evidence root
   fsm-state.yaml                                — FSM state (replaces plan_progress.json)
   timeline.jsonl                            — event log (replaces stage_log.jsonl)
-.aid-o/tasks/                               — task files (replaces 02-epics/)
+.aid-o/tasks/                               — EPIC files (replaces 02-epics/)
 .aid-o/config/queue.yaml                    — queue (replaces 04-engine/epic-queue.yaml)
 ```
 
