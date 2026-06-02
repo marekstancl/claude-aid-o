@@ -82,7 +82,7 @@ die() {
 # All three read $state_file / $evidence_dir / $epic_id from caller scope
 # (matches existing derive_timeline / check_preconditions convention).
 
-# True if state.yaml.created_at predates the current AID deploy threshold.
+# True if fsm-state.yaml.created_at predates the current AID deploy threshold.
 # Threshold sources (first non-empty wins):
 #   1. AID_DEPLOY_DATE env var (set by PM shell rc or per-invocation)
 #   2. ${AID_PLUGIN_PATH}/DEPLOY_DATE file (created in Step 9 release)
@@ -680,7 +680,7 @@ evaluate_compliance_checks() {
   timeline_window_s=$(yq -r '.dispatch.timeline_window_seconds // 60' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null || echo "60")
   [[ -z "$timeline_window_s" || "$timeline_window_s" == "null" ]] && timeline_window_s=60
 
-  # branch_correct: state.yaml.branch matches Session A naming convention
+  # branch_correct: fsm-state.yaml.branch matches Session A naming convention
   # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
   # Session A scope; Sessions B/C may relax the regex.
   local branch_value branch_correct
@@ -1095,7 +1095,7 @@ check_preconditions() {
       # P032 Step 3: enforce that gates_report.json was produced by aid-run-gates.sh.
       # Hand-written reports lack `_generated_by` and are rejected — closes AID-005
       # (99% of pre-Session-A reports were hand-written with no proof of execution).
-      # Pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE) skip this check
+      # Pre-deploy EPICs (fsm-state.yaml.created_at < AID_DEPLOY_DATE) skip this check
       # via fsm_check_grandfather().
       if ! fsm_check_grandfather; then
         local gates_report="${evidence_dir}/gates/gates_report.json"
@@ -1191,7 +1191,7 @@ EOF
       local decision
       decision=$(grep '^escalation_decision:' "$state_file" | awk '{print $2}' || true)
       [[ -n "$decision" ]] || {
-        echo "PRECONDITION FAIL: escalation_decision not set in state.yaml. PM must decide first." >&2
+        echo "PRECONDITION FAIL: escalation_decision not set in fsm-state.yaml. PM must decide first." >&2
         return 1
       }
       ;;
@@ -1374,7 +1374,7 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # C3 (PM-authorized): override caller's branch param ($5) with actual git
   # state. Caller convention is to pass 'main' as a placeholder; what matters
   # downstream is the branch we actually ended up on (after auto-checkout or
-  # in worktree mode). state.yaml.branch reflects post-enforcement reality.
+  # in worktree mode). fsm-state.yaml.branch reflects post-enforcement reality.
   local actual_branch
   actual_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "$branch")
   branch="$actual_branch"
@@ -1592,9 +1592,9 @@ cmd_advance_to_gates() {
   evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
   timeline=$(derive_timeline "$state_file") || true
 
-  # Validate numeric step fields (defensive — malformed state.yaml caught early).
+  # Validate numeric step fields (defensive — malformed fsm-state.yaml caught early).
   if [[ ! "$current_step" =~ ^[0-9]+$ ]] || [[ ! "$total_steps" =~ ^[0-9]+$ ]]; then
-    echo "ERROR: malformed state.yaml — current_step=$current_step total_steps=$total_steps must be integers" >&2
+    echo "ERROR: malformed fsm-state.yaml — current_step=$current_step total_steps=$total_steps must be integers" >&2
     exit 1
   fi
 
@@ -2093,7 +2093,7 @@ EOF
 
   # P032 Step 4 (PM-authorized C4): write compliance.json after sed updates
   # done_phase=release. evaluate_compliance_checks reads post-enforcement
-  # state.yaml.branch (set by Step 2 cmd_init) and the gate runner's
+  # fsm-state.yaml.branch (set by Step 2 cmd_init) and the gate runner's
   # provenance fields (set by Step 3 aid-run-gates.sh). Hook is best-effort
   # — failures inside write_compliance_json log_warn but never abort the
   # release path.

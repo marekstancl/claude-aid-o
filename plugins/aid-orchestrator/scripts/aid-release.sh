@@ -92,7 +92,7 @@ esac
 
 STATE_FILE=""
 if [[ -d "$REPO_ROOT/.aid-o/work/runs/" ]]; then
-  STATE_FILE=$(find "$REPO_ROOT/.aid-o/work/runs/" -name "state.yaml" 2>/dev/null | head -1)
+  STATE_FILE=$(find "$REPO_ROOT/.aid-o/work/runs/" \( -name "fsm-state.yaml" -o -name "state.yaml" \) 2>/dev/null | head -1)
 fi
 # Also check evidence dirs
 if [[ -z "$STATE_FILE" && -d "$REPO_ROOT/.aid-o/work/evidence/" ]]; then

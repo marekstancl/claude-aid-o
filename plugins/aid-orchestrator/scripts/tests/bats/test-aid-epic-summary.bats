@@ -10,8 +10,8 @@ setup() {
   SUMMARY="$AID_PLUGIN_PATH/scripts/aid-epic-summary.sh"
   export SUMMARY
 
-  # Minimal state.yaml required by the generator
-  cat > "$TEST_EVIDENCE_DIR/state.yaml" <<'EOF'
+  # Minimal fsm-state.yaml required by the generator
+  cat > "$TEST_EVIDENCE_DIR/fsm-state.yaml" <<'EOF'
 epic_id: E-test
 run_id: R-test
 state: DONE

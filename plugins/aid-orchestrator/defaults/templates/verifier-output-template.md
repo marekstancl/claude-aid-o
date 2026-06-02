@@ -20,7 +20,7 @@
     CP4 curator-validation .aid-o/work/evidence/{epic_id}/{run_id}/verifier-output-cp4-curator-validation.md
                                                                                             cmd_done_advance review→release → fsm_check_cp4_curator_validation (FSM-ENFORCED, full mode)
 
-  GRANDFATHERING: pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE)
+  GRANDFATHERING: pre-deploy EPICs (fsm-state.yaml.created_at < AID_DEPLOY_DATE)
   skip ALL verifier-output FSM checks via fsm_check_grandfather. Post-deploy
   EPICs are strict.
 

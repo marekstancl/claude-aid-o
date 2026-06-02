@@ -61,7 +61,7 @@ All non-zero exits print a JSON object to stderr:
           v                                                 |
    +------------+     +----------------+     +-------------+|    +---------------+
    | Plan.md    |---->| EPIC.md        |---->| plan.json   ||--->| run.md        |
-   | (.aid-o/   |  1  | (.aid-o/       |  2  | state.yaml  ||  3 | (.aid-o/      |
+   | (.aid-o/   |  1  | (.aid-o/       |  2  |             ||  3 | (.aid-o/      |
    |  plans/)   |     |  tasks/)       |     |             ||    |  work/runs/)  |
    +------------+     +----------------+     +-------------+|    +---------------+
                                                             |
@@ -75,7 +75,7 @@ All non-zero exits print a JSON object to stderr:
 Where the numbered arrows correspond to:
 
 1. `aid-plan-to-epic.sh` — Plan.md to EPIC.md
-2. `aid-epic-to-json.sh` — EPIC.md to plan.json + state.yaml
+2. `aid-epic-to-json.sh` — EPIC.md to plan.json
 3. `aid-json-to-run.sh` — plan.json to run.md
 4. `aid-queue-add.sh` — EPIC to queue.yaml entry
 
@@ -179,9 +179,8 @@ The authoritative format reference is `skills/plan-writing.md` → **Phase Marke
 
 ### 2. aid-epic-to-json.sh
 
-**Purpose:** Parse an EPIC.md file and produce a `plan.json` (execution plan)
-and `state.yaml` (progress tracker), plus initialize an evidence
-directory for the run.
+**Purpose:** Parse an EPIC.md file and produce a `plan.json` (execution plan),
+plus initialize an evidence directory for the run.
 
 #### Arguments
 
@@ -189,7 +188,7 @@ directory for the run.
 |------|----------|-------------|
 | `--epic <path>` | Yes | Path to the EPIC.md file |
 | `--schema <path>` | Yes | Path to plan.schema.json for validation |
-| `--output-dir <path>` | Yes | Directory where plan.json, state.yaml, and evidence/ are written |
+| `--output-dir <path>` | Yes | Directory where plan.json and evidence/ are written |
 | `--plan-source <path>` | No | Path to the source Plan.md (populates `source_plan` in plan.json) |
 
 #### stdin / stdout Contract
@@ -200,7 +199,6 @@ directory for the run.
   ```json
   {
     "plan_json": ".aid-o/work/runs/R-E018-1/plan.json",
-    "progress": ".aid-o/work/runs/R-E018-1/state.yaml",
     "run_id": "R-E018-1",
     "evidence_dir": ".aid-o/work/runs/R-E018-1/evidence"
   }
@@ -219,15 +217,14 @@ directory for the run.
 6. Reads `## DoD Gates` to populate the `gates` array.
 7. Constructs the plan.json object conforming to `plan.schema.json`.
 8. Validates the generated JSON against the schema using `jq`.
-9. Initializes `state.yaml` with all steps set to `pending`.
-10. Creates the evidence directory.
-11. Prints the JSON manifest to stdout.
+9. Creates the evidence directory.
+10. Prints the JSON manifest to stdout.
 
 #### Exit Codes
 
 | Code | Condition |
 |------|-----------|
-| 0 | plan.json and state.yaml generated and validated |
+| 0 | plan.json generated and validated |
 | 1 | EPIC is malformed (missing Steps table, invalid dependencies, cycle detected) |
 | 2 | Missing dependency (bash/jq) |
 | 3 | EPIC file not found, schema file not found, output dir not writable |
@@ -654,7 +651,7 @@ After running the full pipeline, the workspace looks like:
     runs/
       R-E018-1/
         plan.json                           # Execution plan
-        state.yaml                          # Progress tracker
+        fsm-state.yaml                      # FSM state
         2026-02-28-new-feature-*.md         # Run file
         evidence/                           # Evidence directory
       R-E018-2/

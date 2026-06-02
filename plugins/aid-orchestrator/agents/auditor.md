@@ -105,7 +105,7 @@ All paths are relative to `evidence/{epic_id}/{run_id}/`.
 | # | Check | Severity | Deduction | Rule |
 |---|-------|----------|-----------|------|
 | 4 | Timeline log exists and non-empty | High | -10 | `timeline.jsonl` exists and contains >= 1 JSON line |
-| 5 | State is DONE | High | -10 | `state.yaml` exists and `state == "DONE"` |
+| 5 | State is DONE | High | -10 | `fsm-state.yaml` exists and `state == "DONE"` |
 | 6 | Final report exists and non-empty | High | -10 | `final_report.md` exists and file size > 0 bytes |
 | 7 | Plan approval exists | Medium | -5 | `pm_plan_approval.json` exists |
 | 8 | Merge/abort approval exists | Medium | -5 | `pm_merge_approval.json` exists OR `pm_decision.json` exists (for aborted runs) |
@@ -137,7 +137,7 @@ flat evidence structure. This produces structured `evidence_incomplete` findings
 
 **Detection logic (step-by-step):**
 
-1. **Read `state.yaml`** from `evidence/{epic_id}/{run_id}/state.yaml`.
+1. **Read `fsm-state.yaml`** from `evidence/{epic_id}/{run_id}/fsm-state.yaml`.
    Parse the steps array. Each step has a `status` field.
 
 2. **Identify completed steps only.** Filter to steps where `status == "completed"`.
@@ -149,7 +149,7 @@ flat evidence structure. This produces structured `evidence_incomplete` findings
    evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md
    ```
    Where `{N}` is the step number and `{role}` is the step role (e.g., `backend`,
-   `frontend`, `qa`, `devops`), both taken from the step entry in `state.yaml`.
+   `frontend`, `qa`, `devops`), both taken from the step entry in `fsm-state.yaml`.
 
 4. **Check for empty step directories.** If the directory
    `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/` exists but contains **zero files**
@@ -169,7 +169,7 @@ flat evidence structure. This produces structured `evidence_incomplete` findings
    ```
 
 6. **Edge cases:**
-   - If `state.yaml` does not exist, skip this check entirely (F.2 check #5
+   - If `fsm-state.yaml` does not exist, skip this check entirely (F.2 check #5
      will already flag the missing file as a High severity issue).
    - If the `steps/` directory does not exist at all, produce a single
      `evidence_incomplete` finding: "Steps directory missing — no step evidence found."
@@ -277,7 +277,7 @@ Evaluates whether agent token consumption per EPIC run is within acceptable boun
 This audit is **advisory only** — it produces findings and an efficiency score but
 never blocks dispatch or fails the audit.
 
-**Data source:** `state.yaml` → `usage_summary` from the most recent run in
+**Data source:** `fsm-state.yaml` → `usage_summary` from the most recent run in
 `evidence/{epic_id}/{run_id}/`. Falls back to `timeline.jsonl` entries with
 `token_usage` fields if `usage_summary` is absent.
 
@@ -300,7 +300,7 @@ baseline value.
 
 For each role that executed at least one step in the EPIC run:
 
-1. **Read** `state.yaml` → `usage_summary.per_role` (or compute from
+1. **Read** `fsm-state.yaml` → `usage_summary.per_role` (or compute from
    `timeline.jsonl` by summing `token_usage` per role across all step entries).
 2. **Calculate** average tokens per step for each role:
    `role_avg = total_tokens_for_role / steps_executed_by_role`
@@ -337,7 +337,7 @@ to the baseline:
 
 #### H.4) No Usage Data Available
 
-If `state.yaml` does not contain a `usage_summary` section **and**
+If `fsm-state.yaml` does not contain a `usage_summary` section **and**
 `timeline.jsonl` contains no `token_usage` fields (or neither file exists):
 
 - Do **not** produce any alert findings.
@@ -352,7 +352,7 @@ The Token Efficiency section in the audit report includes:
 ```yaml
 token_efficiency:
   score: {0-100}|null
-  data_source: "state.yaml"|"timeline.jsonl"|"none"
+  data_source: "fsm-state.yaml"|"timeline.jsonl"|"none"
   roles:
     - role: "{role_name}"
       steps_executed: {N}

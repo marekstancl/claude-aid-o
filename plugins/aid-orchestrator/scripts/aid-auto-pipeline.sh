@@ -15,7 +15,7 @@
 # Runs the full Plan-to-Queue pipeline for all phases of a plan. This is the
 # single entry point called by the /aid-plan-epic command. For each phase it:
 #   1. aid-plan-to-epic.sh  — Plan.md  -> EPIC.md
-#   2. aid-epic-to-json.sh  — EPIC.md  -> plan.json + state.yaml
+#   2. aid-epic-to-json.sh  — EPIC.md  -> plan.json
 #   3. aid-json-to-run.sh   — plan.json -> run.md
 #   4. aid-queue-add.sh     — EPIC     -> queue.yaml entry
 #

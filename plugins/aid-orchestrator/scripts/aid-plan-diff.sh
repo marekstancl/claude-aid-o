@@ -56,7 +56,7 @@ if [[ -z "$PLAN" || "$PLAN" == "null" ]]; then
   jq -n \
     --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" \
     --arg ga "$GEN_AT" \
-    --arg reason "fast-mode EPIC (plan_path is null in state.yaml; no plan to verify)" \
+    --arg reason "fast-mode EPIC (plan_path is null in fsm-state.yaml; no plan to verify)" \
     '{
       "_generated_by": $gb,
       "_generated_at": $ga,

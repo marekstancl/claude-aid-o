@@ -11,7 +11,7 @@ must do. HOW (bash execution, transitions, file writes) is handled by scripts. T
 implements state transitions — it reads the current state, performs its role, then calls
 the appropriate script.
 
-**State file:** `.aid-o/work/runs/{run_id}/state.yaml` (managed by `aid-fsm.sh`)
+**State file:** `.aid-o/work/runs/{run_id}/fsm-state.yaml` (managed by `aid-fsm.sh`)
 
 ## Controller Quick Reference (step dispatch loop)
 
@@ -126,13 +126,13 @@ ESCALATION → EXECUTE | GATES | ERROR
 **No LLM involvement.** Scripts run sequentially, exit non-zero on failure.
 
 ```bash
-aid-epic-to-json.sh  <epic_file> <run_dir>     # EPIC → plan.json + state.yaml
+aid-epic-to-json.sh  <epic_file> <run_dir>     # EPIC → plan.json
 aid-json-to-run.sh   <run_dir>                  # plan.json → run.md
-aid-fsm.sh init      <epic_id> <run_id> \       # Create state.yaml (state: READY)
+aid-fsm.sh init      <epic_id> <run_id> \       # Create fsm-state.yaml (state: READY)
   <total_steps> <mode> <branch> <base_commit> <state_file>
 ```
 
-**On success:** `state.yaml` exists with `state: READY`, `plan.json` and `run.md` present.
+**On success:** `fsm-state.yaml` exists with `state: READY`, `plan.json` and `run.md` present.
 
 **On failure:** Script exits non-zero with JSON error on stderr. `/aid-run` reports to PM.
 
@@ -141,7 +141,7 @@ calling PRE-FLIGHT.
 
 ### Branch Enforcement
 
-`aid-fsm.sh init` validates the git branch context before writing `state.yaml`. Five
+`aid-fsm.sh init` validates the git branch context before writing `fsm-state.yaml`. Five
 HEAD states are handled:
 
 | HEAD state | Action | Timeline event |
@@ -155,7 +155,7 @@ HEAD states are handled:
 The uncommitted-changes guard runs in all modes — dirty workdir is rejected with
 `git status` / `git stash` suggestion before init proceeds.
 
-`state.yaml.created_at` is stamped at init time (ISO 8601 UTC) and consumed by
+`fsm-state.yaml.created_at` is stamped at init time (ISO 8601 UTC) and consumed by
 `fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
 `AID_DEPLOY_DATE` env var or `${AID_PLUGIN_PATH}/DEPLOY_DATE` file.
 
@@ -608,7 +608,7 @@ GATES only runs deterministic quality checks.
 
 ### EXECUTE→GATES Precondition
 
-For post-deploy EPICs (`state.yaml.created_at >= AID_DEPLOY_DATE`):
+For post-deploy EPICs (`fsm-state.yaml.created_at >= AID_DEPLOY_DATE`):
 
 - `gates_report.json` MUST contain `_generated_by` field (set by `aid-run-gates.sh`).
 - Hand-written reports are rejected with copy-paste remediation in stderr.
@@ -683,7 +683,7 @@ Use `advance-to-gates` for new code; manual flow stays for edge-case operations.
 
 **LLM role:** Present failure to PM with structured options. Execute PM's choice.
 
-**Read:** Current state from `state.yaml`, failure details from `timeline.jsonl`.
+**Read:** Current state from `fsm-state.yaml`, failure details from `timeline.jsonl`.
 
 **Present to PM:**
 ```
@@ -784,7 +784,7 @@ After every successful `done-advance` to `release`, `aid-fsm.sh` writes
 
 | Dimension | Session A status | Source |
 |-----------|------------------|--------|
-| `branch_correct` | measured | `state.yaml.branch` matches `^task/E-` |
+| `branch_correct` | measured | `fsm-state.yaml.branch` matches `^task/E-` |
 | `execution_yaml_present` | measured | file exists at `<project>/.aid-o/config/execution.yaml` |
 | `gates_generated_by` | measured | `gates_report.json._generated_by` field present |
 | `memory_substantive` | `null` | Session B/C territory |
@@ -804,7 +804,7 @@ produces a pre vs post comparison table.
 
 Backfill (one-shot post-deploy): `bash $AID_PLUGIN_PATH/scripts/aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ`
 retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
-AND stamps missing `created_at:` field into `state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
+AND stamps missing `created_at:` field into `fsm-state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
 
 Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produces
 a forensic frequency table (file counts, branch hygiene, gate authenticity, top
@@ -1022,7 +1022,7 @@ Designed for quick tasks that don't warrant a full EPIC.
    Skip per `review-checkpoints.yaml` (`cp6_fast_mode_review`, `skip_trivial`).
 5. Log completion (action: `aid_do_complete`, files_changed, duration_seconds)
 
-**No state.yaml.** No branch. No gates. No Curator. Quick log only.
+**No fsm-state.yaml.** No branch. No gates. No Curator. Quick log only.
 
 If task complexity grows (3+ files, multi-step) → suggest `/aid-plan --epic` instead.
 
@@ -1087,7 +1087,7 @@ IF file missing or unreadable → default to "manual" (fail-safe)
 
 ## §11 Crash Recovery
 
-**Detection:** `state.yaml` exists with `state != DONE` and no active process.
+**Detection:** `fsm-state.yaml` exists with `state != DONE` and no active process.
 
 **Resume protocol:**
 
@@ -1095,13 +1095,13 @@ IF file missing or unreadable → default to "manual" (fail-safe)
 aid-fsm.sh get-state <state_file>   # Returns current state
 ```
 
-1. Read `state.yaml` → `state`, `current_step`, `epic_id`, `run_id`
-2. Read `state.yaml` → verify completed steps match `current_step`
+1. Read `fsm-state.yaml` → `state`, `current_step`, `epic_id`, `run_id`
+2. Read `fsm-state.yaml` → verify completed steps match `current_step`
 3. If stash exists (`git stash list` shows `auto-escalation-*`): `git stash pop`
-4. Resume from current state (LLM continues from the state in `state.yaml`)
+4. Resume from current state (LLM continues from the state in `fsm-state.yaml`)
 
 **What to check before resuming:**
-- `state.yaml` — which steps are `done`
+- `fsm-state.yaml` — which steps are `done`
 - `timeline.jsonl` — last event logged
 - `evidence/steps/` — which step outputs exist
 

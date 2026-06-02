@@ -19,7 +19,7 @@
 #   {plan_path}    — absolute realpath of source plan.md, or literal "null" for Fast Mode EPICs
 #   {epic_id}      — EPIC identifier (e.g., E-037-1_2)
 #   {run_id}       — Run identifier within EPIC (e.g., R-E037-1)
-#   {base_commit}  — git SHA at EPIC start (recorded in state.yaml)
+#   {base_commit}  — git SHA at EPIC start (recorded in fsm-state.yaml)
 #
 # Unknown {token} → fail-loud exit 1 (introduce new tokens via resolve_placeholders).
 
@@ -165,8 +165,8 @@ run_all_gates() {
   local report_path="${report_file:-}"
   [[ -z "$report_path" ]] && report_path=".aid-o/work/evidence/${epic_id}/${run_id}/gates/gates_report.json"
 
-  # Phase 2 (P037) — pull base_commit and plan_path from state.yaml for placeholder resolution.
-  # Falls back to empty/null when state.yaml is absent (e.g., legacy/source-mode invocations).
+  # Phase 2 (P037) — pull base_commit and plan_path from fsm-state.yaml for placeholder resolution.
+  # Falls back to empty/null when fsm-state.yaml is absent (e.g., legacy/source-mode invocations).
   local base_commit_resolved="" plan_path_resolved="null"
   if [[ -n "$state_file" && -f "$state_file" ]]; then
     base_commit_resolved=$(grep '^base_commit:' "$state_file" 2>/dev/null | awk '{print $2}' || echo "")

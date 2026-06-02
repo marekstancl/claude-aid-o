@@ -2,7 +2,7 @@
 # =============================================================================
 # test-epic-to-json.sh — Unit tests for aid-epic-to-json.sh
 #
-# Tests the EPIC.md -> plan.json + state.yaml conversion script.
+# Tests the EPIC.md -> plan.json conversion script.
 # Verifies: file generation, step count, parallel group detection,
 #           cycle detection, and error handling for missing arguments.
 #
@@ -124,9 +124,9 @@ else
 fi
 
 # ===========================================================================
-# TEST 3: Valid EPIC produces plan.json and state.yaml
+# TEST 3: Valid EPIC produces plan.json
 # ===========================================================================
-run_test "Valid EPIC produces plan.json and state.yaml"
+run_test "Valid EPIC produces plan.json"
 
 out_dir="$(make_output_dir "t03")"
 
@@ -140,16 +140,14 @@ manifest="$("$SCRIPT_UNDER_TEST" \
 if [[ "$actual_exit" -ne 0 ]]; then
   fail "valid EPIC exits with code 0" "got exit code $actual_exit"
 else
-  # Extract plan_json and progress paths from the manifest JSON
+  # Extract plan_json path from the manifest JSON
   plan_json_path="$(echo "$manifest" | jq -r '.plan_json // ""' 2>/dev/null)"
-  progress_path="$(echo "$manifest" | jq -r '.progress // ""' 2>/dev/null)"
 
   missing=""
   [[ -z "$plan_json_path" || ! -f "$plan_json_path" ]] && missing="${missing} plan.json"
-  [[ -z "$progress_path" || ! -f "$progress_path" ]] && missing="${missing} state.yaml"
 
   if [[ -z "$missing" ]]; then
-    pass "valid EPIC produces plan.json and state.yaml"
+    pass "valid EPIC produces plan.json"
   else
     fail "valid EPIC produces required output files" "missing:$missing (manifest: $manifest)"
   fi
@@ -157,7 +155,6 @@ fi
 
 # Store for subsequent tests
 PLAN_JSON_PATH="${plan_json_path:-}"
-PROGRESS_PATH="${progress_path:-}"
 
 # ===========================================================================
 # TEST 4: plan.json has correct step count matching EPIC steps table
@@ -196,25 +193,6 @@ if [[ -n "$PLAN_JSON_PATH" && -f "$PLAN_JSON_PATH" ]]; then
   fi
 else
   fail "plan.json required fields check" "skipped — plan.json not available from TEST 3"
-fi
-
-# ===========================================================================
-# TEST 6: state.yaml initializes all steps as 'pending'
-# ===========================================================================
-run_test "state.yaml initializes all steps with status: pending"
-
-if [[ -n "$PROGRESS_PATH" && -f "$PROGRESS_PATH" ]]; then
-  non_pending="$(jq '[.[] | select(.status != "pending")] | length' "$PROGRESS_PATH" 2>/dev/null)"
-  total_entries="$(jq 'length' "$PROGRESS_PATH" 2>/dev/null)"
-
-  if [[ "$total_entries" -gt 0 && "$non_pending" -eq 0 ]]; then
-    pass "state.yaml has $total_entries entries all with status=pending"
-  else
-    fail "state.yaml all steps are pending" \
-      "total=$total_entries non-pending=$non_pending"
-  fi
-else
-  fail "state.yaml status check" "skipped — progress file not available from TEST 3"
 fi
 
 # ===========================================================================
@@ -272,7 +250,7 @@ fi
 # ===========================================================================
 # TEST 9: stdout manifest is valid JSON
 # ===========================================================================
-run_test "stdout manifest from valid EPIC is valid JSON with plan_json, progress, run_id, evidence_dir"
+run_test "stdout manifest from valid EPIC is valid JSON with plan_json, run_id, evidence_dir"
 
 out_dir="$(make_output_dir "t09")"
 
@@ -288,7 +266,6 @@ if [[ "$actual_exit" -ne 0 ]]; then
 else
   missing_manifest_keys=""
   echo "$manifest2" | jq -e '.plan_json' >/dev/null 2>&1 || missing_manifest_keys="${missing_manifest_keys} plan_json"
-  echo "$manifest2" | jq -e '.progress' >/dev/null 2>&1 || missing_manifest_keys="${missing_manifest_keys} progress"
   echo "$manifest2" | jq -e '.run_id' >/dev/null 2>&1 || missing_manifest_keys="${missing_manifest_keys} run_id"
   echo "$manifest2" | jq -e '.evidence_dir' >/dev/null 2>&1 || missing_manifest_keys="${missing_manifest_keys} evidence_dir"
 

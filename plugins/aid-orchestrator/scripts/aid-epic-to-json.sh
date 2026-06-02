@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# aid-epic-to-json.sh — Convert an EPIC.md into plan.json + state.yaml
+# aid-epic-to-json.sh — Convert an EPIC.md into plan.json
 #
 # Usage:
 #   ./aid-epic-to-json.sh \
@@ -9,9 +9,9 @@
 #
 # Parses the EPIC, extracts steps/dependencies/parallel groups, auto-generates
 # analysis groups, builds a plan.json conforming to plan.schema.json, creates
-# state.yaml and an evidence directory.
+# an evidence directory.
 #
-# stdout: JSON manifest { plan_json, progress, run_id, evidence_dir }
+# stdout: JSON manifest { plan_json, run_id, evidence_dir }
 # stderr: JSON error on failure (see Exit Codes in README.md)
 #
 # Exit codes: 0=success, 1=validation, 2=dependency, 3=I/O
@@ -802,13 +802,6 @@ plan_json_path="${evidence_dir}/plan.json"
 echo "$plan_json" > "$plan_json_path" || error_exit "Cannot write plan.json to $plan_json_path" 3
 
 # =============================================================================
-# Step 17: Generate state.yaml
-# =============================================================================
-progress_json="$(echo "$steps_json" | jq '[.[] | {id: .id, status: "pending", started_at: null, completed_at: null, agent_id: null, result: null}]')"
-progress_path="${evidence_dir}/state.yaml"
-echo "$progress_json" > "$progress_path" || error_exit "Cannot write state.yaml to $progress_path" 3
-
-# =============================================================================
 # Step 18: Copy EPIC to evidence as epic_input.md
 # =============================================================================
 cp "$epic" "${evidence_dir}/epic_input.md" 2>/dev/null || error_exit "Cannot copy EPIC to evidence directory" 3
@@ -818,12 +811,10 @@ cp "$epic" "${evidence_dir}/epic_input.md" 2>/dev/null || error_exit "Cannot cop
 # =============================================================================
 jq -n \
   --arg plan_json "$plan_json_path" \
-  --arg progress "$progress_path" \
   --arg run_id "$run_id" \
   --arg evidence_dir "$evidence_dir" \
   '{
     plan_json: $plan_json,
-    progress: $progress,
     run_id: $run_id,
     evidence_dir: $evidence_dir
   }'

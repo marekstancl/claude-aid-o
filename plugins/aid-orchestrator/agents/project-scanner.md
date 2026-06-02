@@ -756,7 +756,7 @@ metadata:
 ### Step 1: Change Detection
 
 ```
-1. READ state.yaml to get base_commit (pre-EPIC commit)
+1. READ fsm-state.yaml to get base_commit (pre-EPIC commit)
 2. RUN: git diff --name-status {base_commit}..HEAD
 3. CLASSIFY each file:
    - A (added) → candidate for CREATE memory entry
@@ -1058,7 +1058,7 @@ Mode C (full scan):
 
 Mode C (incremental scan):
   1. RECEIVE trigger (DONE state §7, post-merge)
-  2. READ state.yaml for base_commit
+  2. READ fsm-state.yaml for base_commit
   3. RUN git diff --name-status to classify changes
   4. GROUP changes by category
   5. FOR EACH changed file group:

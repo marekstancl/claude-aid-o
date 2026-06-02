@@ -27,8 +27,9 @@ cmd_generate() {
   local evidence_dir="$1"
   [[ -d "$evidence_dir" ]] || die "Evidence dir not found: $evidence_dir"
 
-  local state_file="${evidence_dir}/state.yaml"
-  [[ -f "$state_file" ]] || die "state.yaml not found: $state_file"
+  local state_file="${evidence_dir}/fsm-state.yaml"
+  [[ ! -f "$state_file" && -f "${evidence_dir}/state.yaml" ]] && state_file="${evidence_dir}/state.yaml"
+  [[ -f "$state_file" ]] || die "fsm-state.yaml not found: $state_file"
 
   local epic_id run_id
   epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}') || epic_id="unknown"
@@ -150,7 +151,7 @@ emit_warnings() {
     fi
   fi
 
-  # Gate retries from state.yaml
+  # Gate retries from fsm-state.yaml
   local gate_retries
   gate_retries=$(grep '^gate_retries:' "$state_file" | awk '{print $2}' 2>/dev/null) || gate_retries=0
   if (( ${gate_retries:-0} > 1 )); then

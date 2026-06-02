@@ -6,7 +6,7 @@ _AID_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 
 if [[ "$_AID_BRANCH" == task/* || "$_AID_BRANCH" == epic/* ]]; then
 
-  # Extract epic/task ID from branch name for targeted state.yaml lookup
+  # Extract epic/task ID from branch name for targeted fsm-state.yaml lookup
   _AID_BRANCH_ID=$(echo "$_AID_BRANCH" | cut -d'/' -f2)
   _AID_STATE_FILE=""
 

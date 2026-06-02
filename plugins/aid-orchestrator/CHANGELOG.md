@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.27.0] — 2026-06-02
+
+### Changed
+- **FSM state file unified to `fsm-state.yaml`** — retired the parallel `state.yaml` step-array that `aid-epic-to-json.sh` wrote but nothing read; every script, doc, template, and test now refers to the single FSM state file `fsm-state.yaml`, with the legacy `state.yaml` name kept only as a read fallback for in-flight pre-migration runs.
+
+### Fixed
+- **`/aid-stop` + `/aid-run --resume` state handling** — `/aid-stop` dropped the invented `session.*` schema, now reads the real `fsm-state.yaml` fields and logs the stop event through the canonical timeline helper; `--resume` reads `fsm-state.yaml`.
+
+### Removed
+- **Queue `pause` / `resume` / `reorder` subcommands** — removed from `/aid-status` and help; documented but never backed by any script (archived, restorable).
+
 ## [2.26.0] — 2026-06-01
 
 ### Changed

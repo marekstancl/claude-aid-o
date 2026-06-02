@@ -361,7 +361,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 | `.aid-o/04-engine/memory/` | `.aid-o/work/` |
 | `.aid-o/04-engine/evidence/` | `.aid-o/work/evidence/` |
 | `.aid-o/04-engine/epic-queue.yaml` | `.aid-o/config/queue.yaml` |
-| `plan_progress.json` | `state.yaml` |
+| `plan_progress.json` | `fsm-state.yaml` |
 | `stage_log.jsonl` | `timeline.jsonl` |
 
 ### Upgrade Flow
@@ -383,7 +383,7 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 3. On PM approval → execute moves
 4. Rename known v1 files inside moved directories:
    - `config/project-profile.yaml` → `config/project.yaml`
-   - `plan_progress.json` → `state.yaml` (inside each evidence run dir)
+   - `plan_progress.json` → `fsm-state.yaml` (inside each evidence run dir)
    - `stage_log.jsonl` → `timeline.jsonl` (inside each evidence run dir)
 5. Remove empty v1 directories
 6. Run fresh-init logic (idempotent) — create any missing v2 template files:

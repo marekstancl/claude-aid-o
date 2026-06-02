@@ -17,7 +17,7 @@
 
   Six FSM preconditions are checked. Each mandatory section below is annotated
   with the exact regex the FSM applies and the failure_reason string it emits.
-  Grandfathering: pre-deploy EPICs (state.yaml.created_at < AID_DEPLOY_DATE)
+  Grandfathering: pre-deploy EPICs (fsm-state.yaml.created_at < AID_DEPLOY_DATE)
   skip the verifier-output co-file check; ALL six step-verify checks below
   always run regardless of deploy date.
 -->

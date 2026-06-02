@@ -52,7 +52,6 @@ Need planning first? /aid-plan
 ```
 Queue management:
   /aid-status queue add .aid-o/tasks/E-001.md   → queue task
-  /aid-status queue pause | resume               → control auto-pickup
 
 Planning:
   /aid-plan                → brainstorm + write plan (auto-detect)
@@ -80,7 +79,7 @@ Audit: /aid-audit → project health score (0-100) with recommendations
 
 ```
 FSM debugging:
-  /aid-status <task-id>                    → shows state.yaml FSM state
+  /aid-status <task-id>                    → shows fsm-state.yaml FSM state
   cat .aid-o/work/evidence/{id}/*/timeline.jsonl | jq .  → full event log
 
 Token monitoring:
@@ -103,7 +102,7 @@ Detailed documentation for specific areas:
 /aid-help gates     → gate types, execution.yaml configuration, retry logic
 /aid-help config    → project.yaml, execution.yaml, permissions.yaml reference
 /aid-help setup     → /aid-setup deep dive (modules, presets, integrations)
-/aid-help fsm       → 6-state FSM diagram, valid transitions, state.yaml format
+/aid-help fsm       → 6-state FSM diagram, valid transitions, fsm-state.yaml format
 ```
 
 ### Topic: do
@@ -128,7 +127,7 @@ No FSM, no EPIC, no evidence dir — just implement and log.
 PRE-FLIGHT (bash, before FSM):
   1. aid-plan-to-epic.sh → task file
   2. aid-epic-to-json.sh → plan.json
-  3. aid-json-to-run.sh  → execution.yaml + state.yaml
+  3. aid-json-to-run.sh  → execution.yaml + fsm-state.yaml
 
 6-State FSM:
   READY → EXECUTE → GATES → DONE
@@ -138,7 +137,7 @@ PRE-FLIGHT (bash, before FSM):
 
 Flags:
   --auto    Autonomous mode (S-effort auto-fix, L-effort always escalates)
-  --resume  Resume from state.yaml after crash
+  --resume  Resume from fsm-state.yaml after crash
   --task    Specify task ID
 ```
 
@@ -189,7 +188,7 @@ Valid transitions:
   ESCALATION → EXECUTE    (fix applied, resume)
   ESCALATION → GATES      (skip gate)
 
-State file: .aid-o/work/evidence/{id}/{run_id}/state.yaml
+State file: .aid-o/work/evidence/{id}/{run_id}/fsm-state.yaml
 Event log: .aid-o/work/evidence/{id}/{run_id}/timeline.jsonl
 ```
 

@@ -22,7 +22,7 @@ setup() {
   EVIDENCE_DIR="${TMPDIR_TEST}/.aid-o/work/evidence/E-TEST-1/R-TEST-1"
   mkdir -p "$EVIDENCE_DIR"
   PROJECT_ROOT="$TMPDIR_TEST"
-  STATE_FILE="${EVIDENCE_DIR}/state.yaml"
+  STATE_FILE="${EVIDENCE_DIR}/fsm-state.yaml"
   cat > "$STATE_FILE" <<EOF
 epic_id: E-TEST-1
 run_id: R-TEST-1
@@ -52,7 +52,7 @@ teardown() {
 
 # Helper: source aid-fsm.sh safely without triggering its bottom-of-file
 # `exit 1` dispatcher. The dispatcher fires on unknown args; `verify-state`
-# is a valid command that runs cleanly when given a populated state.yaml.
+# is a valid command that runs cleanly when given a populated fsm-state.yaml.
 # Output (a single JSON line) goes to stdout but is discarded — only the
 # function definitions matter for these tests.
 _load_aid_fsm() {

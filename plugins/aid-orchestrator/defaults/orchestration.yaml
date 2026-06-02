@@ -43,7 +43,7 @@ escalation:
 # ─── FSM ─────────────────────────────────────────────────────────────────
 fsm:
   states: [READY, EXECUTE, GATES, ESCALATION, DONE, ERROR]
-  state_file: .aid-o/work/evidence/{epic_id}/{run_id}/state.yaml
+  state_file: .aid-o/work/evidence/{epic_id}/{run_id}/fsm-state.yaml
   timeline_file: .aid-o/work/evidence/{epic_id}/{run_id}/timeline.jsonl
 
 # ─── Release Policy ─────────────────────────────────────────────────────

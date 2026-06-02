@@ -13,7 +13,7 @@ Run the 6-state FSM controller to orchestrate a task through its full lifecycle.
 /aid-run <task-id>              # manual mode — start specific task
 /aid-run --auto                 # autonomous mode — auto-approve S-effort fixes
 /aid-run --auto --task <id>     # autonomous mode for specific task
-/aid-run --resume               # resume interrupted run from state.yaml
+/aid-run --resume               # resume interrupted run from fsm-state.yaml
 ```
 
 ## Flags
@@ -22,7 +22,7 @@ Run the 6-state FSM controller to orchestrate a task through its full lifecycle.
 |------|----------|
 | (none) | Manual mode — asks PM approval at each escalation |
 | `--auto` | Autonomous mode (replaces `/aid-first-aid`) |
-| `--resume` | Resume from last known state in `state.yaml` |
+| `--resume` | Resume from last known state in `fsm-state.yaml` |
 | `--task <id>` | Specify task ID (otherwise auto-detect) |
 
 ### Autonomous Mode (`--auto`)
@@ -50,7 +50,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 4. **PRE-FLIGHT is mandatory:** `READY→EXECUTE` requires `plan.json` to exist in run dir
 5. **Gates are mandatory:** `GATES→DONE` requires `gates_report.json` with `overall: pass`
 6. **Steps must complete:** `EXECUTE→GATES` requires `current_step >= total_steps`
-7. **Do NOT edit state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
+7. **Do NOT edit fsm-state.yaml directly** — all mutations go through `aid-fsm.sh` commands (`transition`, `increment-step`, `set-field`)
 8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
 9. **Multi-layer defense** — `aid-release.sh` and git pre-commit hook independently verify `done_phase` before allowing release/commit on FSM branches
 10. **Step verification evidence** — `increment-step` REFUSES to advance without `step-{N}-verify.md` containing `## Result: PASS` in evidence dir
@@ -65,7 +65,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
-- Do NOT modify `state.yaml` directly to bypass checks
+- Do NOT modify `fsm-state.yaml` directly to bypass checks
 - Present the error to PM and wait for guidance
 - The error message tells you exactly what's missing
 
@@ -95,7 +95,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 **Bash pipeline** (using resolved `plugin_path`):
 1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to task file (if running from plan)
 2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse DAG → plan.json
-3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + state.yaml init.
+3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
    `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
    script forwards it to its Step 18 `aid-fsm.sh init` call, which writes
@@ -112,7 +112,7 @@ PRE-FLIGHT Pipeline
 ====================================
   [1] aid-plan-to-epic.sh   → task file     ✓
   [2] aid-epic-to-json.sh   → plan.json     ✓
-  [3] aid-json-to-run.sh    → state.yaml    ✓
+  [3] aid-json-to-run.sh    → fsm-state.yaml    ✓
 
 FSM initialized: READY
 ```
@@ -146,7 +146,7 @@ FSM initialized: READY
 
 ### State: READY
 
-**Entry:** PRE-FLIGHT completed, `state.yaml` initialized.
+**Entry:** PRE-FLIGHT completed, `fsm-state.yaml` initialized.
 
 **Actions:**
 1. Load `execution.yaml` (gate definitions, step config)
@@ -177,7 +177,7 @@ FSM initialized: READY
 ### State: EXECUTE
 
 **Actions:**
-1. Read `state.yaml` → find `current_step`
+1. Read `fsm-state.yaml` → find `current_step`
 2. Check dependency graph → dispatch steps with all deps satisfied
 3. For sequential step:
    - Create branch: `task/{task_id}/step_{N}_{role}`
@@ -264,7 +264,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 
 **Sub-phase: `review`** (auto-set on GATES→DONE)
 
-1. Update `state.yaml`: `state: DONE`, `done_phase: review` (automatic)
+1. Update `fsm-state.yaml`: `state: DONE`, `done_phase: review` (automatic)
 2. Archive run file → `runs/archive/`
 3. Update `work/active.md`
 4. Generate `final_report.md`
@@ -320,7 +320,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 
 **Actions:**
 1. Log error to `timeline.jsonl`
-2. Update `state.yaml`: `state: ERROR`
+2. Update `fsm-state.yaml`: `state: ERROR`
 3. Preserve all evidence for debugging
 4. Report to PM with error context
 
@@ -344,7 +344,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 - **No v1 states** — no IDLE, PRE_FLIGHT, SCOPE_CHECK, PLAN, CURATOR_RESOLVE, PM_APPROVAL, DEPLOY_CHECK, FINALIZING
 - **PRE-FLIGHT is bash** — runs before FSM starts, not an FSM state
 - **`--auto` replaces `/aid-first-aid`** — same autonomous behavior, integrated flag
-- **`--resume` reads state.yaml** — picks up from last known state after crash/interrupt
+- **`--resume` reads fsm-state.yaml** — picks up from last known state after crash/interrupt (legacy `state.yaml` still accepted as fallback)
 - If `$ARGUMENTS` is empty → auto-detect: find single active task or list for selection
 - Pipeline references: `pipeline.md §4 EXECUTE` for dispatch, `§5 GATES` for gate execution
 

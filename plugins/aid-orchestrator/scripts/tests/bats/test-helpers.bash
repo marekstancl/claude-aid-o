@@ -49,10 +49,10 @@ build_default_init_args() {
   local run_id state_file
   if [[ "$epic_id" == "E-test" ]]; then
     run_id=$(basename "$TEST_EVIDENCE_DIR")
-    state_file="$TEST_EVIDENCE_DIR/state.yaml"
+    state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   else
     run_id="R-${epic_id#E-}-test"
-    state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/state.yaml"
+    state_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/fsm-state.yaml"
     mkdir -p "$(dirname "$state_file")"
   fi
   echo "$epic_id $run_id 3 manual main HEAD $state_file"
@@ -82,7 +82,7 @@ assert_timeline_event() {
 }
 
 # write_post_deploy_state_yaml <state_file> [epic_id] [run_id] [branch]
-#   Convenience: writes a complete READY/EXECUTE-state state.yaml suitable
+#   Convenience: writes a complete READY/EXECUTE-state fsm-state.yaml suitable
 #   for transition tests. branch defaults to task/<epic_id>/main.
 write_post_deploy_state_yaml() {
   local state_file=$1

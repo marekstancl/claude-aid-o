@@ -127,12 +127,12 @@ gates:
     required: true
 YAML
   mkdir -p .aid-o/work/evidence/E-X/R-1/gates
-  cat > .aid-o/work/evidence/E-X/R-1/state.yaml <<'YAML'
+  cat > .aid-o/work/evidence/E-X/R-1/fsm-state.yaml <<'YAML'
 state: GATES
 YAML
 
   "$RUN_GATES" run-all "$TEST_DIR/exec.yaml" "E-X" "R-1" \
-    --state-file "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/state.yaml" \
+    --state-file "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/fsm-state.yaml" \
     --report-file "$TEST_DIR/.aid-o/work/evidence/E-X/R-1/gates/gates_report.json" \
     >/dev/null 2>&1
 

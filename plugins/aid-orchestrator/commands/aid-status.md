@@ -10,12 +10,9 @@ Show pipeline status, task details, and queue management — unified view of eve
 
 ```
 /aid-status                                  # overview: active tasks + queue summary
-/aid-status <task-id>                        # detailed task status (reads state.yaml)
+/aid-status <task-id>                        # detailed task status (reads fsm-state.yaml)
 /aid-status queue                            # queue management view
 /aid-status queue add <path> [--priority]    # add task to queue
-/aid-status queue pause                      # pause auto-pickup
-/aid-status queue resume                     # resume auto-pickup
-/aid-status queue reorder <id> --priority <level>  # change priority
 ```
 
 **Priority levels:** `critical` | `high` | `medium` (default) | `low`
@@ -56,7 +53,7 @@ Use /aid-status <id> for details, /aid-status queue for queue management.
 1. **Find evidence:**
    - Look in `.aid-o/work/evidence/{epic_id}/`
    - Find latest run_id (most recent subdirectory)
-   - Load `state.yaml` (v2 state file)
+   - Load `fsm-state.yaml` (v2 state file)
    - Load `timeline.jsonl` (last 10 entries)
 
 2. **Display:**
@@ -64,10 +61,10 @@ Use /aid-status <id> for details, /aid-status queue for queue management.
 ```
 TASK Status: E-003-1_2 — Add Auth System
 ====================================
-State: EXECUTE          ← from state.yaml .state
+State: EXECUTE          ← from fsm-state.yaml .state
 Step: 3/7               ← current_step / total_steps
-Mode: manual            ← from state.yaml .mode
-Branch: task/E-003-1_2  ← from state.yaml .branch
+Mode: manual            ← from fsm-state.yaml .mode
+Branch: task/E-003-1_2  ← from fsm-state.yaml .branch
 Gate retries: 0/2       ← gate_retries
 Escalations: 1          ← escalation_count
 Started: 2026-03-03T10:00Z
@@ -125,18 +122,6 @@ Auto-pickup: Active (1 READY, 1 WAITING, 1 BLOCKED)
 4. Add entry with default priority `medium`
 5. Confirm: `Added to queue: {epic_id} (priority: {level}), position {N}`
 
-### `/aid-status queue pause`
-
-Pause auto-pickup. Running task continues, no new task starts.
-
-### `/aid-status queue resume`
-
-Resume auto-pickup. Next task starts after current completes (or immediately if idle).
-
-### `/aid-status queue reorder <id> --priority <level>`
-
-Change priority of a queued task. Show new queue order.
-
 ## Edge Cases
 
 **No tasks found:**
@@ -160,7 +145,7 @@ Run /aid-run {id} to start execution.
 
 ```
 .aid-o/work/evidence/{epic_id}/{run_id}/   — run evidence root
-  state.yaml                                — FSM state (replaces plan_progress.json)
+  fsm-state.yaml                                — FSM state (replaces plan_progress.json)
   timeline.jsonl                            — event log (replaces stage_log.jsonl)
 .aid-o/tasks/                               — task files (replaces 02-epics/)
 .aid-o/config/queue.yaml                    — queue (replaces 04-engine/epic-queue.yaml)
@@ -169,15 +154,15 @@ Run /aid-run {id} to start execution.
 ## Reference Files
 
 - `skills/pipeline.md` — FSM states, evidence structure
-- `scripts/aid-fsm.sh` — state.yaml format and transitions
+- `scripts/aid-fsm.sh` — fsm-state.yaml format and transitions
 - `scripts/lib/aid-stage-log.sh` — timeline.jsonl format
 
 ## Important
 
 - **Read-only by default** — `/aid-status` and `/aid-status <id>` never modify files
-- **Queue subcommands modify** — `add`, `pause`, `resume`, `reorder` write to queue.yaml
+- **Queue subcommands modify** — `add` writes to queue.yaml
 - **Lazy queue creation** — `.aid-o/config/queue.yaml` created on first `queue add`
-- **v2 paths only** — reads `state.yaml` (not `plan_progress.json`), `timeline.jsonl` (not `stage_log.jsonl`)
+- **v2 paths only** — reads `fsm-state.yaml` (not `plan_progress.json`), `timeline.jsonl` (not `stage_log.jsonl`)
 - If `$ARGUMENTS` is empty → show overview (default)
 
 

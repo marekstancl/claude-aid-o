@@ -128,7 +128,7 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event \
 ```
 
 `<dispatch-focus>` substitution rule for CP1: `focus="cp1"`, `step_n="null"`.
-If `timeline_file` cannot be resolved (e.g., `state.yaml` not yet created
+If `timeline_file` cannot be resolved (e.g., `fsm-state.yaml` not yet created
 for a brand-new plan), `log_event` is a silent no-op — pipeline continues.
 
 **Codebase grounding pass (mandatory, added v2.17.0).**

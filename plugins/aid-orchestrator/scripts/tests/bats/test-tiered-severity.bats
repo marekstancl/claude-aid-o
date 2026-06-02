@@ -34,7 +34,7 @@ setup() {
   EPIC_ID="E-TEST-038"
   RUN_ID="R-TEST-038-1"
   EVIDENCE_DIR="${PROJECT_ROOT}/.aid-o/work/evidence/${EPIC_ID}/${RUN_ID}"
-  STATE_FILE="${EVIDENCE_DIR}/state.yaml"
+  STATE_FILE="${EVIDENCE_DIR}/fsm-state.yaml"
   CONFIG_DIR="${PROJECT_ROOT}/.aid-o/config"
   SEVERITY_YAML="${CONFIG_DIR}/check-severity.yaml"
   AUDIT_LOG="${PROJECT_ROOT}/.aid-o/work/audit-log.jsonl"
@@ -43,7 +43,7 @@ setup() {
   mkdir -p "${PROJECT_ROOT}/.aid-o/tasks"           # cmd_done_advance does `find .aid-o/tasks/`; missing dir → set -e crash
   mkdir -p "${EVIDENCE_DIR}/gates"
 
-  # Minimal state.yaml in DONE state, done_phase=review, branch matches task/E-* regex
+  # Minimal fsm-state.yaml in DONE state, done_phase=review, branch matches task/E-* regex
   cat > "$STATE_FILE" <<EOF
 epic_id: ${EPIC_ID}
 run_id: ${RUN_ID}

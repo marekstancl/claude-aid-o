@@ -146,7 +146,7 @@ Loop:
 
 ### Run Closure (DONE state)
 
-1. [ ] Write `state.yaml`: `state: DONE`
+1. [ ] Write `fsm-state.yaml`: `state: DONE`
 2. [ ] Append to `timeline.jsonl`: `{"eventType": "fsm_transition", "state": "DONE"}`
 3. [ ] Run Curator agent (post-gate hook)
 4. [ ] Write lessons to `.aid-o/work/backlog.md`

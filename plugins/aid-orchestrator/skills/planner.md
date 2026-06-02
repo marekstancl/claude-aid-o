@@ -30,7 +30,6 @@ aid-epic-to-json.sh <epic_file> <output_dir>
 
 **Writes:**
 - `plan.json` — step list with waves, dependencies, parallel_groups
-- `state.yaml` — execution state tracker (all steps pending)
 - `execution.yaml` — gates configuration derived from `gates.yaml`
 
 **Exits non-zero on:**
@@ -223,7 +222,7 @@ If PM declines: run all steps as a single run.
 ## Reference Files
 
 - `commands/aid-plan.md` — unified command (`/aid-plan --epic`) that invokes this skill
-- `{plugin_path}/scripts/aid-epic-to-json.sh` — script that generates plan.json and state.yaml
+- `{plugin_path}/scripts/aid-epic-to-json.sh` — script that generates plan.json
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — master orchestrator (Plan → EPIC → plan.json → run.md → queue)
 - `defaults/templates/plan.schema.json` — full plan.json JSON schema
 - `skills/pipeline.md` — READY state references this skill (§2)

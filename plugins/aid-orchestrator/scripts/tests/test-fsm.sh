@@ -3,7 +3,7 @@
 
 setup() {
   TEST_DIR=$(mktemp -d)
-  STATE_FILE="$TEST_DIR/state.yaml"
+  STATE_FILE="$TEST_DIR/fsm-state.yaml"
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../../../.." && pwd)"
   FSM="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-fsm.sh"
 
@@ -183,7 +183,7 @@ teardown() { rm -rf "$TEST_DIR"; }
 }
 
 @test "get-state fails when file not found" {
-  run "$FSM" get-state "/nonexistent/state.yaml"
+  run "$FSM" get-state "/nonexistent/fsm-state.yaml"
   [ "$status" -eq 1 ]
 }
 

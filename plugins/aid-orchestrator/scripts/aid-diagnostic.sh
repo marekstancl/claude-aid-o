@@ -31,7 +31,7 @@ Options:
   -h, --help               This help.
 
 Reported sections (markdown mode):
-  - File counts (state.yaml, timeline.jsonl, gates_report.json, compliance.json,
+  - File counts (fsm-state.yaml, timeline.jsonl, gates_report.json, compliance.json,
     curator-report, audit-report, step-N-verify.md)
   - Branch hygiene distribution (task/E-* vs main vs other)
   - Gate authenticity (_generated_by present vs hand-written/missing)
@@ -51,7 +51,8 @@ collect_run() {
   local epic_id run_id state_file timeline gates_report compliance curator audit
   epic_id=$(basename "$(dirname "$run_dir")")
   run_id=$(basename "$run_dir")
-  state_file="${run_dir}/state.yaml"
+  state_file="${run_dir}/fsm-state.yaml"
+  [[ ! -f "$state_file" && -f "${run_dir}/state.yaml" ]] && state_file="${run_dir}/state.yaml"
   timeline="${run_dir}/timeline.jsonl"
   gates_report="${run_dir}/gates/gates_report.json"
   compliance="${run_dir}/compliance.json"

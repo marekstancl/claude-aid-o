@@ -18,7 +18,7 @@ Rule: Keep under 200 lines. Archive entries older than last 3 tasks.
 
 ## Timeline Queries (EPIC MODE)
 To check current task status:
-  bash: cat .aid-o/work/evidence/{epic_id}/{run_id}/state.yaml
+  bash: cat .aid-o/work/evidence/{epic_id}/{run_id}/fsm-state.yaml
   → shows: state, current_step, total_steps, gate_retries
 
 To get recent events:

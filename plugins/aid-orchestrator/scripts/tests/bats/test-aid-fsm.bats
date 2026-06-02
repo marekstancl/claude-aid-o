@@ -72,8 +72,8 @@ teardown() {
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {
-  # Post-deploy state.yaml + hand-written gates_report.json.
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  # Post-deploy fsm-state.yaml + hand-written gates_report.json.
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   echo '{"overall":"pass","gates":{}}' > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
@@ -85,7 +85,7 @@ teardown() {
 }
 
 @test "EXECUTE→GATES: present _generated_by + CP3 outputs → accept" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
@@ -101,7 +101,7 @@ teardown() {
 }
 
 @test "EXECUTE→GATES: pre-deploy grandfather (created_at < deploy_date) → accept regardless" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   # Override created_at to BEFORE AID_DEPLOY_DATE
   write_post_deploy_state_yaml "$state_file"
   sed -i 's/^created_at: .*/created_at: 2026-03-01T00:00:00Z/' "$state_file"
@@ -137,7 +137,7 @@ VERIFY
 }
 
 @test "increment-step: missing verifier-output-step-N.md (post-deploy) → hard fail" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   # No verifier-output-step-3.md → CP2 precondition fails
@@ -148,7 +148,7 @@ VERIFY
 }
 
 @test "increment-step: verifier-output with verdict:pending (verifier not dispatched) → fail" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   # Pre-filter wrote pending; verifier was NOT dispatched
@@ -161,7 +161,7 @@ VERIFY
 }
 
 @test "increment-step: verifier-output with classification:SKIP (docs diff) → accept" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   # SKIP classification is valid without verdict (pre-filter wrote reason field instead)
@@ -175,7 +175,7 @@ VERIFY
 # ─── P033 Step 9: force_override --reason enforcement (2 assertions) ─────────
 
 @test "transition --force without --reason → die with examples" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
 
   run "$FSM" transition EXECUTE GATES "$state_file" --force
@@ -185,7 +185,7 @@ VERIFY
 }
 
 @test "increment-step --force with short reason (< 20 chars) → die" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
 
   run "$FSM" increment-step "$state_file" --force --reason "too short"
@@ -255,7 +255,7 @@ _p040_seed_increment_preconditions() {
 }
 
 @test "increment-step: clean/empty pending-dispatches → step advances" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   # Empty (size 0) pending file = all dispatches completed cleanly → skip.
   : > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
@@ -266,7 +266,7 @@ _p040_seed_increment_preconditions() {
 }
 
 @test "increment-step: orphan start (no complete, past max) → step blocked + audit" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   # Start far in the past, expected_duration_max:60 → orphan.
   printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
@@ -281,7 +281,7 @@ _p040_seed_increment_preconditions() {
 }
 
 @test "increment-step: --force --blocked-checks bypass → advances with waiver audit" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
     > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
@@ -300,7 +300,7 @@ _p040_seed_increment_preconditions() {
 # Before the fix, the waiver was honored independent of --force, so a bare
 # `--blocked-checks dispatch_orphan_complete` bypassed the --reason ≥20 enforcement.
 @test "increment-step: --blocked-checks WITHOUT --force → orphan still blocks (HIGH-2)" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
     > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
@@ -319,7 +319,7 @@ _p040_seed_increment_preconditions() {
 # HIGH-2 corollary: --force ALONE (no dispatch_orphan_complete in --blocked-checks)
 # still runs the orphan check — force does not bypass by itself.
 @test "increment-step: --force alone (no orphan waiver) → orphan still blocks" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   printf '%s\n' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
     > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
@@ -332,7 +332,7 @@ _p040_seed_increment_preconditions() {
 }
 
 @test "increment-step: malformed pending-dispatches → fail loud + audit reason" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   printf '%s\n' 'this is not json {{{' > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
 
@@ -344,7 +344,7 @@ _p040_seed_increment_preconditions() {
 }
 
 @test "increment-step: TZ=UTC orphan detection (tight 100s margin, past deadline) → blocked" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
   # Compute timestamp 100 seconds ago in UTC. Start + 60s deadline = orphan now.
   # This tests that TZ=UTC jq parsing catches the orphan (without TZ=UTC,
@@ -598,14 +598,14 @@ EOF
 @test "streamlined: init --streamlined writes streamlined_mode: true" {
   run "$FSM" init $(build_default_init_args E-test) --streamlined
   [ "$status" -eq 0 ]
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   grep -q '^streamlined_mode: true$' "$state_file"
   # Heredoc shape preserved: unquoted/unindented epic_id parseable by grep parser.
   [ "$(grep '^epic_id:' "$state_file" | awk '{print $2}')" = "E-test" ]
 }
 
 @test "streamlined: skips per-step CP2 (missing verifier-output) → increment-step exit 0" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3, post-deploy
   echo "streamlined_mode: true" >> "$state_file"
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
@@ -617,7 +617,7 @@ EOF
 }
 
 @test "streamlined: compliance.json emits coverage_mode + skipped_dimensions" {
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"
   echo "streamlined_mode: true" >> "$state_file"
   run bash -c '
@@ -722,7 +722,7 @@ EOF
   # build_default_init_args passes total_steps=3.
   run "$FSM" init $(build_default_init_args E-test)
   [ "$status" -eq 0 ]
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   # steps[] array present and correct length.
   [ "$(yq '.steps | length' "$state_file")" = "3" ]
   [ "$(yq '.steps[0].id' "$state_file")" = "1" ]
@@ -738,7 +738,7 @@ EOF
 @test "Component E: cmd_init --streamlined keeps steps[] + streamlined_mode true" {
   run "$FSM" init $(build_default_init_args E-test) --streamlined
   [ "$status" -eq 0 ]
-  local state_file="$TEST_EVIDENCE_DIR/state.yaml"
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   [ "$(yq '.steps | length' "$state_file")" = "3" ]
   [ "$(yq '.streamlined_mode' "$state_file")" = "true" ]
   [ "$(grep '^epic_id:' "$state_file" | awk '{print $2}')" = "E-test" ]

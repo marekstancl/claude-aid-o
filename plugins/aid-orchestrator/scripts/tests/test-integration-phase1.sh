@@ -8,7 +8,7 @@ setup() {
   FSM="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-fsm.sh"
   RUN_GATES="$REPO_ROOT/plugins/aid-orchestrator/scripts/aid-run-gates.sh"
   FIXTURES="$REPO_ROOT/plugins/aid-orchestrator/scripts/tests/fixtures"
-  STATE_FILE="$TEST_DIR/state.yaml"
+  STATE_FILE="$TEST_DIR/fsm-state.yaml"
   TIMELINE="$TEST_DIR/timeline.jsonl"
 
   source "$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-stage-log.sh"
@@ -133,7 +133,7 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 # --- Token counting for context sizing ---
 
-@test "token count works on state.yaml file" {
+@test "token count works on fsm-state.yaml file" {
   "$FSM" init E-TOK R-TOK 5 auto main abc123 "$STATE_FILE" 2>/dev/null
 
   run count_tokens "$STATE_FILE" mixed
