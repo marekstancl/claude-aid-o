@@ -1072,7 +1072,9 @@ IF file missing or unreadable → default to "manual" (fail-safe)
 **Guardrails (DONE review auto-check):** All gates pass + no unresolved CRITICAL issues
 + escalation_count < 3 + auditor trend ≤ 5-point decline.
 
-**Escalation budget:** max 3 escalations per session. On breach → E12 (PM must review).
+**Escalation budget:** max escalations per session = `orchestration.yaml` →
+`escalation.max_per_session` (default 3). On breach → E12 (PM must review). The trigger table above
+is the authoritative source — the YAML config files do not duplicate it.
 
 **Stop:** `/aid-stop` → `mode: manual`, finish current step, pause.
 

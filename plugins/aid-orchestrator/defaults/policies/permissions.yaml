@@ -126,7 +126,12 @@ presets:
       All MCP tools listed explicitly — wildcards not supported by Claude Code.
       Destructive MCP ops (delete_*, drop) are commented out and excluded.
 
-# Role-specific overrides (merged with active_preset)
+# Role-specific overrides — ADVISORY ONLY (NOT enforced; documents intent).
+# /aid-setup does NOT translate role_overrides into .claude/settings.local.json, AND the active
+# preset already grants global `Bash(*)` (above), so these per-role additions are not a real
+# capability boundary. Do NOT rely on this block for security isolation. Real per-role permission
+# enforcement requires REMOVING the global `Bash(*)` permission plus a dedicated dual-write —
+# that is a separate larger design, tracked separately (AID-052).
 role_overrides:
   security:
     additional_permissions:

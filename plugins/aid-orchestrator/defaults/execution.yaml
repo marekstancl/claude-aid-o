@@ -153,22 +153,10 @@ auto_decisions:
     action: "continue execution"
 
 # ─── Escalation Triggers ────────────────────────────────────────────────
-escalation_triggers:
-  - trigger: "gate fails after max_attempts retries"
-    action: "HARD STOP"
-    options: ["fix manually", "skip gate", "abort EPIC"]
-  - trigger: "LLM cost exceeds budget"
-    action: "HARD STOP"
-    options: ["increase budget", "abort EPIC"]
-  - trigger: "agent produces no output or errors out"
-    action: "HARD STOP"
-    options: ["retry with different prompt", "skip step", "abort EPIC"]
-  - trigger: "conflicting outputs from parallel agents"
-    action: "HARD STOP"
-    options: ["choose A", "choose B", "merge manually"]
-  - trigger: "security finding classified as CRITICAL"
-    action: "HARD STOP"
-    options: ["fix before proceeding", "abort EPIC"]
+# Authoritative escalation triggers live in pipeline.md (the "Escalation triggers" table),
+# which is what the orchestrator actually follows. A parallel `escalation_triggers:` list here
+# drifted from that table and was read by nothing, so it was removed 2026-06-03 (AID-052) to
+# single-source it. Add or change triggers in pipeline.md.
 
 # ─── Content Quality ────────────────────────────────────────────────────
 content_quality:

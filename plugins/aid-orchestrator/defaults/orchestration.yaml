@@ -34,11 +34,11 @@ dispatch:
 
 # ─── Escalation ─────────────────────────────────────────────────────────
 escalation:
+  # Session cap (configurable; pipeline.md "Escalation budget" references this value).
+  # The authoritative ESCALATION TRIGGER LIST lives in pipeline.md (the "Escalation triggers"
+  # table) — the orchestrator follows that. A drifting partial `triggers:` copy was removed
+  # here 2026-06-03 (AID-052) to single-source it.
   max_per_session: 3
-  triggers:
-    - gate_retry_exhausted
-    - security_required_fail
-    - scope_violation
 
 # ─── FSM ─────────────────────────────────────────────────────────────────
 fsm:
@@ -97,26 +97,14 @@ release:
 
   commit:
     message_template: "release: v${version} — ${summary}"
-
-  skip_when:
-    no_changelog_version: true
-    versions_current: true
+  # NOTE: a former `skip_when` block (no_changelog_version / versions_current) was removed
+  # 2026-06-03 (AID-052) — it was read by no script and honored by no instruction. Release-skip
+  # safety lives in the release skill's own CHANGELOG-version check, not in this config.
 
 # ─── Skill Conflicts ────────────────────────────────────────────────────
-# Known conflicts between plugins/skills. Used by /aid-setup.
-skill_conflicts:
-  - id: "brainstorming-duplicate"
-    prefer: "aid-orchestrator:aid-plan"
-    deny: "superpowers:brainstorming"
-    reason: "Both provide brainstorming workflow. AID version is integrated with orchestration pipeline."
-    severity: high
-  - id: "writing-plans-duplicate"
-    prefer: "aid-orchestrator:aid-plan"
-    deny: "superpowers:writing-plans"
-    reason: "AID plan-writing skill is integrated with orchestration pipeline."
-    severity: high
-  - id: "executing-plans-duplicate"
-    prefer: "aid-orchestrator:aid-run"
-    deny: "superpowers:executing-plans"
-    reason: "AID /aid-run provides FSM, gates, and evidence tracking."
-    severity: high
+# The authoritative skill-conflict list (Superpowers brainstorming / writing-plans /
+# executing-plans → their AID equivalents) lives in the setup skill — skills/setup/claude-md.md,
+# "Superpowers Conflict Resolution" table — which is what /aid-setup writes into the project
+# CLAUDE.md. A parallel `skill_conflicts:` block here was read by NOTHING (the old "Used by
+# /aid-setup" comment was false) and drifted in structure, so it was removed 2026-06-03 (AID-052)
+# to single-source it. Edit the conflict list in skills/setup/claude-md.md.
