@@ -192,14 +192,23 @@ acceptable_debt:
   - "missing edge case tests (core path tested)"
   - "placeholder error messages (replaced before release)"
 
+# Review-quality guidance honored by curator/auditor. Enforcement routing (AID-052, 2026-06-03):
+#   HARD-GATED in the pre-filter (defaults/pre-filter-rules.yaml, via aid-prefilter.sh):
+#     hardcoded credentials → hardcoded_secret_pattern; disabled security checks →
+#     disabled_security_check; skipped tests → skipped_test; console.log/debugger → debug_leftover
+#     (bare print() intentionally NOT gated — too common in legit code).
+#   SCOPE LAYER: scope-check.sh gate enforces allowed_paths (anything outside fails); the
+#     verifier dispatch context additionally flags writes to a step's forbidden_paths.
+#   ADVISORY ONLY (regex-unreliable, left to reviewer judgment): "TODO/FIXME without issue
+#     reference", "empty catch blocks".
 not_acceptable:
-  - "TODO/FIXME without issue reference"
-  - "hardcoded credentials or API keys"
-  - "disabled security checks"
-  - "skipped tests without documented reason"
-  - "changes to forbidden paths"
-  - "console.log / print() in production code"
-  - "empty catch blocks"
+  - "TODO/FIXME without issue reference"      # advisory
+  - "hardcoded credentials or API keys"       # gated: pre-filter hardcoded_secret_pattern
+  - "disabled security checks"                # gated: pre-filter disabled_security_check
+  - "skipped tests without documented reason" # gated: pre-filter skipped_test
+  - "changes to forbidden paths"              # gated: scope-check.sh (allowed_paths) + verifier (forbidden_paths)
+  - "console.log / print() in production code" # console.log gated (debug_leftover); print() advisory
+  - "empty catch blocks"                      # advisory
 
 # ─── Curator Auto-Resolution ────────────────────────────────────────────
 curator_auto_rules:

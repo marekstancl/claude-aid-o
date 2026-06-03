@@ -71,6 +71,50 @@ make_commit() {
   grep -q 'classification: FAIL' "$TEST_EVIDENCE_DIR/verifier-output-step-1.md"
 }
 
+# ─── FAIL: AID-052 migrated/routed patterns ────────────────────────────────────
+
+@test "classify: debugger leftover (console.log) → FAIL (exit 20)" {
+  make_commit "add ui code" "src/widget.ts" "export const x = () => { console.log('dbg') }"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 20 ]
+  grep -q 'classification: FAIL' "$TEST_EVIDENCE_DIR/verifier-output-step-1.md"
+}
+
+@test "classify: bare print() does NOT trigger debug_leftover → RUN (exit 10)" {
+  # print( is intentionally excluded from debug_leftover (too common in legit Python).
+  make_commit "add py code" "src/calc.py" "def f():"$'\n'"    print('result')"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 10 ]
+}
+
+@test "classify: skipped test (.skip()) → FAIL (exit 20)" {
+  make_commit "skip a test" "src/foo.test.ts" "it.skip('todo', () => {})"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 20 ]
+  grep -q 'classification: FAIL' "$TEST_EVIDENCE_DIR/verifier-output-step-1.md"
+}
+
+@test "classify: disabled security check (verify=False) → FAIL (exit 20)" {
+  make_commit "disable tls" "src/client.py" "r = requests.get(url, verify=False)"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 20 ]
+  grep -q 'classification: FAIL' "$TEST_EVIDENCE_DIR/verifier-output-step-1.md"
+}
+
+@test "classify: unsafe deserialize (pickle.loads) → FAIL (exit 20) — ERE-safe rule fires" {
+  # Regression for the former (?!_safe) lookahead that silently never matched.
+  make_commit "load blob" "src/load.py" "obj = pickle.loads(blob)"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 20 ]
+  grep -q 'classification: FAIL' "$TEST_EVIDENCE_DIR/verifier-output-step-1.md"
+}
+
+@test "classify: yaml.safe_load does NOT trigger deserialize_dangerous → RUN (exit 10)" {
+  make_commit "safe load" "src/cfg.py" "cfg = yaml.safe_load(open('x.yaml'))"
+  run "$PREFILTER" classify 1 "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 10 ]
+}
+
 # ─── Output format ────────────────────────────────────────────────────────────
 
 @test "classify: output file has _generated_by, classification, verdict fields" {

@@ -1,6 +1,6 @@
 version: "1.0"
 description: "Deterministic regex classifier for CP2 pre-filter. Conservative bias: false positive (FAIL) is preferable to false negative (RUN/SKIP missing security issue)."
-last_updated: "2026-05-08"
+last_updated: "2026-06-03"
 
 skip_rules:
   - id: docs_only
@@ -33,13 +33,28 @@ fail_rules:
     pattern: '(SELECT|INSERT|UPDATE|DELETE).*\+\s*[''"]'
   - id: deserialize_dangerous
     description: "Pickle/yaml unsafe load — arbitrary code execution via deserialization"
-    pattern: '(pickle\.loads?|yaml\.load(?!_safe))'
+    # bash ERE has NO lookahead. `yaml\.load\s*\(` matches the dangerous yaml.load( but NOT
+    # yaml.safe_load( (after "yaml." comes "safe", not "load"). Fixes a former (?!_safe) lookahead
+    # that made [[ =~ ]] return status 2 (rule silently never matched). AID-052, 2026-06-03.
+    pattern: 'pickle\.loads?\s*\(|yaml\.load\s*\('
   - id: dynamic_import
     description: "Indirect import to evade exec_keyword regex"
     pattern: '__import__\s*\(|importlib\.import_module'
   - id: regex_bypass_attempts
     description: "Single-char string concat that may obfuscate dangerous keywords"
     pattern: '[''"][a-z][''"][[:space:]]*\+[[:space:]]*[''"][a-z]'
+  # AID-052: patterns migrated/routed from execution.yaml not_acceptable + review-checkpoints
+  # debug_leftover. bash-ERE only (no lookahead / no (?i)). `print(` is intentionally EXCLUDED
+  # from debug_leftover — far too common in legitimate Python to fail-gate on.
+  - id: debug_leftover
+    description: "Debugger / debug-print leftovers (excludes bare print() — too common)"
+    pattern: 'console\.log|debugger|binding\.pry|pdb\.set_trace|import pdb'
+  - id: skipped_test
+    description: "Test deliberately skipped/disabled (xit/skip markers)"
+    pattern: '\.skip\(|xit\(|xdescribe\(|@pytest\.mark\.skip|@unittest\.skip'
+  - id: disabled_security_check
+    description: "Security check disabled inline (nosec / verify=False / TLS verification off)"
+    pattern: '# *nosec|verify *= *False|rejectUnauthorized *: *false|InsecureSkipVerify'
 
 run_rules:
   default: true

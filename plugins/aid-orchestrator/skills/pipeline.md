@@ -1194,7 +1194,9 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 Before dispatching verifier LLM, run deterministic bash checks on `git diff` output
 (new/changed lines only — `scan_target: diff_only`):
 
-1. Regex scan against `review-checkpoints.yaml → pre_filter.fail_patterns[]`
+1. Regex scan via `aid-prefilter.sh`, which reads `defaults/pre-filter-rules.yaml`
+   (`skip_rules` + `fail_rules` — the single source of truth for pre-filter regexes;
+   `review-checkpoints.yaml → pre_filter` only toggles the stage on/off + scan scope)
 2. Decision:
    - **Pattern match found** → immediate FAIL (skip verifier LLM, enter fix loop directly)
    - **Clean + trivial** (≤ threshold) → SKIP (no verifier needed)
@@ -1215,7 +1217,7 @@ When `skip_trivial: true` in config:
 - `agents/verifier.md` — auto-dispatch triggers, context assembly, output format
 - `agents/gate-fixer.md` — accepts `verifier_review` source type
 - `agents/auditor.md` — `blocking_findings` + `recommended_fixes` for CP5/auto-fix
-- `config/policies/review-checkpoints.yaml` — checkpoint toggles, fix-loop config, pre-filter patterns
+- `config/policies/review-checkpoints.yaml` — checkpoint toggles, fix-loop config, pre-filter toggle + scan scope (the pre-filter REGEXES live in `defaults/pre-filter-rules.yaml`)
 
 ---
 

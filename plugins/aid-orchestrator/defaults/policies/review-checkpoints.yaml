@@ -31,16 +31,8 @@ review_checkpoints:
   pre_filter:
     enabled: true
     scan_target: diff_only         # only scan new/changed lines from git diff
-    fail_patterns:
-      - name: hardcoded_secrets
-        pattern: '(?i)(password|secret|api.?key)\s*=\s*["''][^"'']+["'']'
-        severity: critical
-      - name: sql_injection
-        pattern: '(query|execute)\s*\(.*\+.*\)|(\$\{[^}]+\}.*(?:SELECT|INSERT|UPDATE|DELETE))'
-        severity: critical
-      - name: dangerous_eval
-        pattern: '\beval\s*\(|\bexec\s*\(|\bFunction\s*\('
-        severity: high
-      - name: debug_leftover
-        pattern: 'console\.log|debugger|binding\.pry|import pdb|print\('
-        severity: medium
+    # NOTE (AID-052): the pre-filter REGEX RULES are NOT defined here. aid-prefilter.sh reads
+    # `defaults/pre-filter-rules.yaml` (skip_rules + fail_rules) as the single source of truth.
+    # A former `fail_patterns:` list in this block was an UNREAD duplicate that drifted from the
+    # operative file (e.g. it failed on bare `print(`, which the operative file deliberately omits)
+    # — removed 2026-06-03 to single-source it. This block only toggles the pre-filter and its scope.
