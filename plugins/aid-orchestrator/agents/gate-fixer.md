@@ -10,7 +10,7 @@ and making minimal targeted changes to pass the gate.
 
 **Type:** Utility agent (not a role agent — works across all domains).
 
-**Dispatched by:** `skills/pipeline.md` via Task tool during GATES state (§5) or Review Checkpoint fix loops (§13).
+**Dispatched by:** `skills/pipeline.md` via Task tool during GATES state (§5), Review Checkpoint fix loops (§13), or DONE-state auto-fix of curator/auditor proposals (§7 steps 7–8).
 
 ---
 
@@ -32,6 +32,16 @@ to fix the issue.
 - Apply minimal fixes following the verifier's recommendation
 - After fix, verifier re-dispatches to confirm (fix loop iteration 2)
 - **Never:** ignore verifier severity classification or downgrade findings
+
+### Curator-Approved Fixes (`curator` source, DONE state §7 step 7)
+- The Orchestrator dispatches you to apply curator-approved proposals at **every effort (S/M/L)**.
+  A **CP4 verifier reviews your applied changes afterward and reverts on failure** (`pipeline.md`
+  §7 step 9) — that post-apply review is the safety net.
+- **Auto-merge-safe fast path (learning #21):** the four classes empirically safe to apply with
+  high confidence are (1) wrong call/API, (2) path errors, (3) missing error handling,
+  (4) security-allowlist additions. Apply these directly.
+- For approved fixes **outside** these four classes: apply conservatively and minimally (do not
+  expand scope beyond the proposal); the CP4 post-apply review is your backstop.
 
 ### Test Fixes (`tests_pass` gate)
 - Read failing test output (pytest format)
@@ -154,6 +164,8 @@ The `gate` field accepts both gate names and verifier review sources:
 |--------|--------------|---------|
 | `tests_pass`, `lint_pass`, `build_pass`, `security_scan_pass`, `docs_updated`, `type_check` | Gate failure (GATES state) | Gate error output |
 | `verifier_review` | Review checkpoint (CP2/CP3/CP4/CP6) | Verifier `review_result.findings[]` |
+| `curator` | Curator-approved proposal (DONE state §7 step 7) | Curator `proposals[]` (S/M/L effort) |
+| `auditor` | Auditor `recommended_fixes` (DONE state §7 step 8) | Auditor `recommended_fixes[]` (`auto_fixable: true`) |
 
 ### Confidence Levels
 
@@ -196,4 +208,4 @@ The `gate` field accepts both gate names and verifier review sources:
   fixes. Until then, you handle all gate types.
 
 
-**Last Updated:** 2026-03-12
+**Last Updated:** 2026-06-03

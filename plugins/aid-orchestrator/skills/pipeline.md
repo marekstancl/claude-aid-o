@@ -765,7 +765,7 @@ Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
 | `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
 | `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
 | `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
-| `📋 Co dělat dál (PM akce)` | curator L-effort proposals, escalations, force override audit reminder |
+| `📋 Co dělat dál (PM akce)` | curator deferred proposals (always-defer rules: architecture, standards-L), escalations, force override audit reminder |
 | `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
 
 **Trust level heuristics:**
@@ -911,8 +911,14 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 5. **Parallel dispatch:** Curator (`agents/curator.md`) + Auditor (`agents/auditor.md`)
    dispatched simultaneously via two Agent tool calls in a single message
 6. **Wait:** Both agents must complete before continuing
-7. **CP4:** Verifier (`code-review`) on curator-proposed changes only.
-   If FAIL → revert curator changes, log reversion.
+7. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
+   Tier 2 default: S/M/L all approve; only an explicit `always_defer` rule (architecture,
+   standards-L) defers.
+8. **Auditor auto-fix:** Gate-fixer applies S/M/L effort items from auditor
+   `recommended_fixes` (where `auto_fixable: true`).
+9. **CP4:** Verifier (`code-review`) reviews the **applied** curator + auditor changes from
+   steps 7–8 (it runs AFTER the fixes are applied, so it actually reviews them).
+   If FAIL → revert those changes, log reversion.
    Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
 
    **Dispatch protocol (P040, v2.25.0+):** wrap the CP4 verifier `Agent()` call
@@ -933,10 +939,6 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    `verifier-output-cp4-curator-validation.md` when `curator-report.md` exists and
    any commit in `base_commit..HEAD` touched production code; mode-aware skip
    (`cp4_skipped_streamlined_advisory`) when `streamlined_mode` is true.
-8. **Curator auto-fix:** Gate-fixer applies approved S + M effort proposals.
-   Tier 2 default: S=approve, M=approve, L=defer (PM decides in summary).
-9. **Auditor auto-fix:** Gate-fixer applies S + M effort items from auditor
-   `recommended_fixes` (where `auto_fixable: true`).
 10. **CP5:** Check auditor `blocking_findings` flag. If `true` → flag in summary
     (critical findings block MERGE option). Skip per `review-checkpoints.yaml`.
 11. **PM Summary** (always shown, even in FIRST AID mode):
@@ -948,9 +950,9 @@ Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
 Auditor Score: {overall}/100 (trend: {delta} vs previous)
   Code: {score} | Security: {score} | Docs: {score} | Process: {score}
 
-Curator: {applied} fixes applied (S/M), {deferred} deferred (L)
+Curator: {applied} fixes applied (S/M/L), {deferred} deferred
   Applied: {list of applied proposals with IDs}
-  Deferred: {list — PM can approve in backlog}
+  Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
 
 Auto-fixes: {count} applied from auditor recommendations
   {list of fixes with file paths}
@@ -1152,7 +1154,7 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 | CP1 | `/aid-plan` Step 9 | `docs-review` | No (PM decides) | None |
 | CP2 | EXECUTE after step verify | `code-review` | Yes (max 2) | E7 |
 | CP3 | EXECUTE→GATES transition | `code-review` + `security` | Yes (max 2) | E7 |
-| CP4 | DONE after curator (pre-merge) | `code-review` | Yes (revert on fail) | None |
+| CP4 | DONE after curator + auditor auto-fix (pre-merge) | `code-review` | Yes (revert on fail) | None |
 | CP5 | DONE after auditor (pre-merge) | N/A (auditor flag) | N/A | PM ABORT → E8 |
 | CP6 | `/aid-do` post-implementation | `code-review` | Yes (max 2) | Advisory only |
 
@@ -1181,7 +1183,7 @@ Before dispatching verifier LLM, run deterministic bash checks on `git diff` out
    - **Clean + trivial** (≤ threshold) → SKIP (no verifier needed)
    - **Clean + non-trivial** → dispatch verifier (LLM review)
 
-Pre-filter applies to CP2, CP3, and CP6 only. CP1 (docs), CP4 (curator), CP5 (auditor flag)
+Pre-filter applies to CP2, CP3, and CP6 only. CP1 (docs), CP4 (curator+auditor), CP5 (auditor flag)
 are not pre-filtered.
 
 ### Trivial Skip Rule
@@ -1200,7 +1202,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-03
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

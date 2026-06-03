@@ -739,7 +739,7 @@ audit_report:
 
   blocking_findings: true|false    # true if any critical severity findings exist → blocks merge
 
-  recommended_fixes:               # S/M effort findings that gate-fixer can auto-apply (pre-merge)
+  recommended_fixes:               # S/M/L effort findings that gate-fixer can auto-apply (pre-merge)
     - finding_ref: "security:login_endpoint"
       effort: small
       fix_description: "Add parameterized query to prevent SQL injection"

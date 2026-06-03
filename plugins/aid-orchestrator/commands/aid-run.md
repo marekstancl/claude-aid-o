@@ -262,11 +262,13 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 4. Generate `final_report.md`
 5. **Parallel dispatch:** Curator + Auditor agents (two Agent calls in single message)
 6. Wait for both to complete → evidence saved to `evidence/{epic_id}/{run_id}/`
-7. **CP4** — verifier (`code-review`) on curator-proposed changes
-   - If FAIL → revert curator changes, log reversion
+7. **Curator auto-fix** — gate-fixer applies approved proposals at every effort (S/M/L); only an
+   explicit always-defer rule (architecture, standards-L) defers
+8. **Auditor auto-fix** — gate-fixer applies S/M/L `recommended_fixes` (where `auto_fixable: true`)
+9. **CP4** — verifier (`code-review`) reviews the APPLIED curator/auditor changes (runs AFTER the
+   apply, so it actually reviews them)
+   - If FAIL → revert those changes, log reversion
    - Skip if `review_checkpoints.cp4_curator_validation: false`
-8. **Curator auto-fix** — gate-fixer applies approved S + M effort proposals
-9. **Auditor auto-fix** — gate-fixer applies S + M effort `recommended_fixes` (where `auto_fixable: true`)
 10. **CP5** — check auditor `blocking_findings` flag → flag in PM summary
 11. **PM Summary** (see `pipeline.md` §7 for full template):
     ```
@@ -276,7 +278,7 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     Auditor Score: {overall}/100 (trend: {delta})
       Code: {n} | Security: {n} | Docs: {n} | Process: {n}
 
-    Curator: {applied} fixes applied (S/M), {deferred} deferred (L)
+    Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
     Auto-fixes: {count} from auditor recommendations
 
     {if blocking_findings:}
@@ -358,7 +360,7 @@ trigger criteria in `/aid-plan`). When `--streamlined` is passed to `init`:
   all three integration-review files exist in the run's evidence dir:
   `verifier-output-cp3-code-review.md`, `verifier-output-cp3-security.md`, and
   `gates_report.json`. Missing any one hard-fails with `streamlined_integration_review`.
-- **CP4 curator validation is advisory** — when a curator commit touched
+- **CP4 validation is advisory** — when the §7 curator/auditor auto-fix touched
   production code, full mode hard-fails without `verifier-output-cp4-curator-validation.md`;
   streamlined mode emits a `cp4_skipped_streamlined_advisory` audit event and
   proceeds.
@@ -377,4 +379,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-06-03

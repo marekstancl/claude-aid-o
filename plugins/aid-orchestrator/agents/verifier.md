@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-03
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -87,7 +87,7 @@ The verifier is dispatched automatically at 6 pipeline milestones. Configuration
 | CP1 | Plan written (`/aid-plan` Step 9) | `docs-review` | Plan file content | No (PM decides) |
 | CP2 | Step completed (`/aid-run` EXECUTE) | `code-review` | Step output + `git diff` for step branch | Yes |
 | CP3 | All steps done (EXECUTE→GATES) | `code-review` + `security` (parallel) | Full `git diff` since run start | Yes |
-| CP4 | Curator proposals applied (DONE, pre-merge) | `code-review` | Curator-proposed changes only | Yes (revert on fail) |
+| CP4 | After curator + auditor auto-fix (DONE, pre-merge) | `code-review` | The applied curator + auditor changes (§7 steps 7–8) | Yes (revert on fail) |
 | CP5 | N/A — handled by auditor `blocking_findings` flag | — | — | — |
 | CP6 | `/aid-do` post-implementation | `code-review` | `git diff` of all changes | Yes |
 
@@ -106,7 +106,7 @@ finds a match → immediate FAIL without verifier dispatch. If clean + trivial �
   `git diff epic/{id}/main..step_{N}_{role}` to see actual code changes.
 - **CP3:** Run `git diff {base_commit}..HEAD` for full integration diff. Dispatch TWO
   verifier instances in parallel: one `code-review`, one `security`.
-- **CP4:** Review curator-proposed changes (pre-merge, not yet committed to main). Write output to `verifier-output-cp4-curator-validation.md` (FSM requires this exact filename — `fsm_check_cp4_curator_validation` in `cmd_done_advance`).
+- **CP4:** Review the **applied** curator + auditor changes (pipeline `§7` steps 7–8 — they run before CP4, so the changes already exist; revert on failure). Write output to `verifier-output-cp4-curator-validation.md` (FSM requires this exact filename — `fsm_check_cp4_curator_validation` in `cmd_done_advance`).
 - **CP6:** Run `git diff` (unstaged + staged) for all `/aid-do` changes.
 
 ---
