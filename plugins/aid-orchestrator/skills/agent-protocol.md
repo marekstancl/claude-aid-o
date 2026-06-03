@@ -6,7 +6,7 @@ user_invocable: false
 
 # Agent Protocol
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-03
 
 Universal boilerplate for all AID agents. Every agent dispatched by the AID orchestrator
 reads this file. Role-specific behavior is in `skills/role-cards.md`.
@@ -28,7 +28,7 @@ context_files:
   - packages/aid-server/src/routes/epics.ts
 allowed_paths:
   - packages/aid-server/src/
-git_branch: epic/E-003-1_2
+git_branch: task/E-003-1_2/main
 base_commit: abc123f
 context_scope: previous_step | full_epic | none
 plugin_path: "/home/user/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator"
@@ -283,4 +283,4 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-03
