@@ -1822,6 +1822,32 @@ cmd_increment_step() {
       exit 1
     fi
 
+    # Visual Anchoring precondition (E161, AID-052): a frontend step carrying visual_refs
+    # MUST emit a "## Visual Anchoring" section in its output (the frontend role card
+    # requires the layout/colors/typography/components spec BEFORE implementation). We read
+    # the step's id/role/visual_refs from plan.json and use the step's own id for the output
+    # path (no index reconstruction → no off-by-one). Skips silently for non-frontend steps,
+    # steps without visual_refs, or when plan.json/jq are unavailable.
+    local _plan_json="${evidence_dir}/plan.json"
+    if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
+      local _srole _svisrefs _sid
+      _srole=$(jq -r --argjson i "$step" '.steps[$i].role // ""' "$_plan_json" 2>/dev/null || echo "")
+      _svisrefs=$(jq -r --argjson i "$step" '(.steps[$i].visual_refs // []) | length' "$_plan_json" 2>/dev/null || echo "0")
+      if [[ "$_srole" == "frontend" && "${_svisrefs:-0}" -gt 0 ]]; then
+        _sid=$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$_plan_json" 2>/dev/null || echo "")
+        local _fe_output="${evidence_dir}/steps/${_sid}/output.md"
+        if [[ -z "$_sid" ]] || [[ ! -f "$_fe_output" ]] || ! grep -qE '^## Visual Anchoring' "$_fe_output" 2>/dev/null; then
+          echo "PRECONDITION FAIL: frontend step has visual_refs but its output lacks a '## Visual Anchoring' section." >&2
+          echo "Expected '## Visual Anchoring' in: ${_fe_output}" >&2
+          echo "The frontend role card requires the Visual Anchoring spec (layout/colors/typography/components from the mockup) before implementation when visual_refs are set." >&2
+          local timeline
+          timeline=$(derive_timeline "$state_file") || true
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="frontend_missing_visual_anchoring"
+          exit 1
+        fi
+      fi
+    fi
+
     # Session B CP2: verifier-output-step-N.md precondition
     # P040 Component D: streamlined mode skips per-step CP2 (covered by
     # integration-review enforcement at done-advance instead).

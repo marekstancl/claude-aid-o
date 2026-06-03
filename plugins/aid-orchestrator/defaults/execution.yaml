@@ -102,12 +102,10 @@ gates:
 #     language: python
 
 # ─── Retry & Escalation ─────────────────────────────────────────────────
-retry:
-  max_attempts: 3
-  backoff:
-    strategy: fixed
-    delay_seconds: 5
-  on_failure: escalate
+# Retry is PER-GATE only: each gate's own `max_retries` (see gate definitions above)
+# is the single retry knob, read by aid-run-gates.sh. There is no project-wide retry
+# block — a former global `retry.max_attempts` was unread dead config (removed 2026-06-03,
+# AID-052); aid-run-gates.sh defaults `max_retries` to 1 when a gate omits it.
 
 escalation:
   method: inline

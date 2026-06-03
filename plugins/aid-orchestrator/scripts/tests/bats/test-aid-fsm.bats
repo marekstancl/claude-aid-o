@@ -172,6 +172,50 @@ VERIFY
   [ "$status" -eq 0 ]
 }
 
+# ─── AID-052: frontend Visual Anchoring precondition (E161) ──────────────────
+
+# Helper: 4-step plan.json where steps[3] is a frontend step carrying visual_refs.
+write_plan_with_frontend_visual_step() {
+  cat > "$TEST_EVIDENCE_DIR/plan.json" <<'PLAN'
+{"epic_id":"E-test","version":"1.0","steps":[
+  {"id":"step_0_architect","role":"architect","objective":"design contracts"},
+  {"id":"step_1_domain","role":"domain","objective":"domain model"},
+  {"id":"step_2_backend","role":"backend","objective":"implement api"},
+  {"id":"step_3_frontend","role":"frontend","objective":"build ui","visual_refs":["mockups/x.tsx"]}
+],"dependencies":[]}
+PLAN
+}
+
+@test "increment-step: frontend step with visual_refs but no '## Visual Anchoring' → fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  write_plan_with_frontend_visual_step
+  mkdir -p "$TEST_EVIDENCE_DIR/steps/step_3_frontend"
+  printf '# Frontend output\nSome code, but no anchoring section.\n' \
+    > "$TEST_EVIDENCE_DIR/steps/step_3_frontend/output.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "Visual Anchoring" ]]
+}
+
+@test "increment-step: frontend step with visual_refs AND '## Visual Anchoring' → accept" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step: 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  write_plan_with_frontend_visual_step
+  mkdir -p "$TEST_EVIDENCE_DIR/steps/step_3_frontend"
+  printf '## Visual Anchoring\nLayout: 12-col grid\nColors: #fff\n\n# code follows\n' \
+    > "$TEST_EVIDENCE_DIR/steps/step_3_frontend/output.md"
+  # satisfy CP2 verifier-output (SKIP classification, as for a trivial diff)
+  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: SKIP\nreason: trivial\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+}
+
 # ─── P033 Step 9: force_override --reason enforcement (2 assertions) ─────────
 
 @test "transition --force without --reason → die with examples" {

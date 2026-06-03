@@ -139,10 +139,13 @@ Loop:
 
 **Violating this checkpoint = AI error.**
 
-> **EPIC MODE note:** In EPIC MODE, phase-end checkpoints map to the FSM `EXECUTE → GATES`
-> transition. The Controller enforces this boundary automatically — the checkpoint above is
-> the human-facing equivalent. FAST MODE (Q-NNN.md tasks) has no phase checkpoints; the
-> task file is written on completion and the FSM advances directly to GATES.
+> **EPIC MODE note:** In EPIC MODE, phase-end maps to the FSM `EXECUTE → GATES` transition,
+> whose preconditions (per-step verify file, gates report, CP3 reviews) the Controller DOES
+> enforce. The "STOP and wait for PM GO" part above is NOT a hard FSM gate, though — in manual
+> mode it is a convention the orchestrator follows; in `--auto` mode there is no PM-GO gate and
+> the escalation rules govern instead (L-effort / security escalate to PM, S-effort auto-proceeds).
+> FAST MODE (Q-NNN.md tasks) has no phase checkpoints; the task file is written on completion and
+> the FSM advances directly to GATES.
 
 ### Run Closure (DONE state)
 
@@ -274,4 +277,4 @@ For `.aid-o/` workspace layout, see `commands/aid-init.md`.
 
 ---
 
-**Last Updated:** 2026-03-03
+**Last Updated:** 2026-06-03
