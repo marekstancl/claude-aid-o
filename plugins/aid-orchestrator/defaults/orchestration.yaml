@@ -23,13 +23,14 @@ dispatch:
   worktree_base: .claude/worktrees
   # Verifier dispatch configuration (Phase 1 — P037 v2.20.1)
   mode: subagent  # subagent | inline
-                  # subagent: pipeline.md flow dispatches Agent() subagents; _generated_by must
-                  #           cross-reference timeline.jsonl verifier_dispatch_* events within
-                  #           timeline_window_seconds.
+                  # subagent: pipeline.md flow dispatches Agent() subagents; the verifier output's
+                  #           _generated_at must fall within the dispatch start..complete interval
+                  #           for its focus in timeline.jsonl (± timeline_window_seconds tolerance).
                   # inline:   LLM writes verifier-output-*.md directly in main context;
                   #           _generated_by must match inline_signature_format with valid git SHA.
   inline_signature_format: "main-context@<commit-sha>"  # required _generated_by format when mode=inline
-  timeline_window_seconds: 60  # ±N seconds tolerance for subagent timeline cross-reference
+  timeline_window_seconds: 60  # clock-skew tolerance (seconds) added to each side of the
+                               # start..complete dispatch interval — NOT a window around _generated_at
 
 # ─── Escalation ─────────────────────────────────────────────────────────
 escalation:

@@ -470,6 +470,20 @@ Per AID-v3-principles.md §1 — Detector without Enforcement is Decoration — 
 The orchestrator does NOT skip these calls; if it does, `cmd_increment_step` blocks
 the next step transition via the reconciliation backstop (Component B of P040).
 
+> **⛔ Non-negotiable anti-fabrication rule.** For every review checkpoint the
+> orchestrator MUST dispatch a real, independent verifier via `Agent({subagent_type:
+> "aid-orchestrator:verifier", ...})` and let THAT subagent write its own
+> `verifier-output-*.md`. The orchestrator MUST NOT (a) write, edit, or hand-fill a
+> `verifier-output-*.md` itself, (b) reuse a prior run's verifier output, or (c)
+> "review in its head" and record a verdict without dispatching. Self-written verifier
+> output is a correctness violation, not a shortcut — it destroys the per-step
+> independence guarantee that is AID's core value. This instruction is the REAL defense
+> against fabrication: the provenance check (`verify_provenance`, §7) only flags
+> *accidental* breakage (stale / missing / mismatched dispatch records) and returns
+> `unverifiable` — it cannot, by design, detect a deliberately forged timeline, because
+> the orchestrator controls every input. If a genuine dispatch is impossible (tooling
+> failure), STOP and escalate to PM — never synthesize the verdict.
+
 **Before each Agent() dispatch:**
 
 ```bash

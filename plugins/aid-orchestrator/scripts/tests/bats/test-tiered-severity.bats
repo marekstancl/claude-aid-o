@@ -17,8 +17,8 @@
 # Why TZ=UTC: verify_provenance() inside aid-fsm.sh compares jq's
 # fromdateiso8601 (which silently honours local TZ on jq <1.7) against UTC
 # epochs from `date -d`. On CEST hosts this disagrees by 3600s and the
-# ±60s window check fails. See test-anti-fabrication.bats:14-20 for the
-# canonical write-up.
+# interval-bracket provenance check misfires. See test-anti-fabrication.bats:14-20
+# for the canonical write-up.
 #
 # Helpers used: shared `mktemp -d` pattern; no additions to test-helpers.bash
 # (each fixture is self-contained).
@@ -85,7 +85,7 @@ checks:
     promoted_reason: null
 EOF
 
-  # Satisfy non-provenance compliance dimensions so a fabricated provenance
+  # Satisfy non-provenance compliance dimensions so an unverifiable provenance
   # is the ONLY blocking failure in fixture 1 and there are NO blocking
   # failures in fixture 2:
   #   - execution_yaml_present requires .aid-o/config/execution.yaml
@@ -113,14 +113,14 @@ teardown() {
 }
 
 # ─── Fixture 1 ──────────────────────────────────────────────────────────
-# Blocking compliance failure (fabricated verifier provenance) MUST block
+# Blocking compliance failure (unverifiable verifier provenance) MUST block
 # done-advance review→release with exit 2 and a structured error message
 # naming the offending check.
 @test "fixture 1: blocking compliance failure blocks done-advance" {
-  # Manufacture a fabricated provenance: step-1-verify.md present (drives the
+  # Manufacture an unverifiable provenance: step-1-verify.md present (drives the
   # CP2 loop) + verifier-output-step-1.md present (validates the per-step
   # outputs schema check) + EMPTY timeline.jsonl (verify_provenance returns
-  # "fabricated" because no verifier_dispatch_start/_complete events match).
+  # "unverifiable" because no verifier_dispatch_start/_complete events match).
   cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
 classification: RUN
 EOF
@@ -182,7 +182,7 @@ EOF
 # with a structured `blocked_checks` JSON array (not a comma string).
 @test "fixture 3: --force --reason --blocked-checks proceeds and writes audit-log JSON array" {
   # Manufacture a blocking failure so the override has something to override
-  # (same fabricated-provenance setup as fixture 1).
+  # (same unverifiable-provenance setup as fixture 1).
   cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
 classification: RUN
 EOF

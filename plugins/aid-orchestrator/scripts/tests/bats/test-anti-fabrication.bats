@@ -3,7 +3,10 @@
 #
 # Validates the end-to-end anti-fabrication enforcement chain:
 #   Step 1 (timeline dispatch events) → Step 3 (verify_provenance + provenance_aggregate)
-#   → Step 3 (overall=fail when fabricated) → Step 1 dispatcher (PM-added regression).
+#   → Step 3 (overall=fail when unverifiable) → Step 1 dispatcher (PM-added regression).
+# Provenance verdict vocabulary: verified | inline | unverifiable | unknown
+# (AID-046 renamed the old "fabricated" verdict to "unverifiable" — it is an integrity
+# signal, not proof of fraud — and replaced the ±60s window with interval-bracket logic).
 #
 # Sourcing aid-fsm.sh requires a no-op dispatcher arg because the bottom of
 # aid-fsm.sh is a top-level `case` that calls `exit 1` on unknown commands.
@@ -62,7 +65,7 @@ _load_aid_fsm() {
   source "$fsm" >/dev/null
 }
 
-@test "verified subagent: timeline events match _generated_by within 60s window" {
+@test "verified subagent: _generated_at falls within the dispatch start..complete interval" {
   cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
 classification: RUN
 EOF
@@ -104,7 +107,7 @@ EOF
   [ "$overall" = "pass" ]
 }
 
-@test "fabricated detection: verifier outputs without matching timeline events" {
+@test "unverifiable detection: verifier outputs without matching timeline events" {
   cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
 classification: RUN
 EOF
@@ -133,9 +136,51 @@ EOF
 
   local prov_agg overall
   prov_agg=$(jq -r '.checks.verifier_outputs.provenance_aggregate' "${EVIDENCE_DIR}/compliance.json")
-  [ "$prov_agg" = "fabricated" ]
+  [ "$prov_agg" = "unverifiable" ]
   overall=$(jq -r '.overall' "${EVIDENCE_DIR}/compliance.json")
   [ "$overall" = "fail" ]
+}
+
+@test "AID-046 regression: honest long-running subagent (20 min) verifies via interval bracket" {
+  # start at T, complete at T+20min, output generated mid-run at T+10min. The previous
+  # ±60s-around-_generated_at logic flagged this as fabricated because the start event
+  # sits 10 minutes before _generated_at (outside ±60s). Interval-bracket accepts it:
+  # start <= _generated_at <= complete (+ tolerance). This case bit P040's own ship.
+  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
+_generated_by: aid-orchestrator:verifier@cp2-step-1
+_generated_at: 2026-05-12T14:10:00Z
+classification: RUN
+verdict: pass
+EOF
+  cat > "${EVIDENCE_DIR}/timeline.jsonl" <<EOF
+{"ts":"2026-05-12T14:00:00Z","event":"verifier_dispatch_start","focus":"cp2-step-1","step_n":1}
+{"ts":"2026-05-12T14:20:00Z","event":"verifier_dispatch_complete","focus":"cp2-step-1","step_n":1}
+EOF
+
+  _load_aid_fsm
+  run verify_provenance "${EVIDENCE_DIR}/verifier-output-step-1.md" "cp2-step-1" 1 "subagent" "${EVIDENCE_DIR}/timeline.jsonl" 60
+  [ "$status" -eq 0 ]
+  [ "$output" = "verified" ]
+}
+
+@test "AID-046: _generated_at far outside the dispatch interval is unverifiable" {
+  # Output timestamp well before the dispatch even started (beyond tolerance) → cannot
+  # have been produced by that dispatch → unverifiable (catches stale/copied outputs).
+  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
+_generated_by: aid-orchestrator:verifier@cp2-step-1
+_generated_at: 2026-05-12T09:00:00Z
+classification: RUN
+verdict: pass
+EOF
+  cat > "${EVIDENCE_DIR}/timeline.jsonl" <<EOF
+{"ts":"2026-05-12T14:00:00Z","event":"verifier_dispatch_start","focus":"cp2-step-1","step_n":1}
+{"ts":"2026-05-12T14:20:00Z","event":"verifier_dispatch_complete","focus":"cp2-step-1","step_n":1}
+EOF
+
+  _load_aid_fsm
+  run verify_provenance "${EVIDENCE_DIR}/verifier-output-step-1.md" "cp2-step-1" 1 "subagent" "${EVIDENCE_DIR}/timeline.jsonl" 60
+  [ "$status" -eq 0 ]
+  [ "$output" = "unverifiable" ]
 }
 
 @test "inline mode: main-context@<sha> with valid SHA passes" {

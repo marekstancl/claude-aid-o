@@ -205,6 +205,12 @@ remediate blocking failures before reaching DONE rather than relying on PM force
 | `advisory` | Logged in `compliance.json failures[]` but does not block release |
 
 Initial v2.21.0 blocking checks: `verifier_provenance`, `gates_generated_by`, `plan_ac_match`.
+`verifier_provenance` blocks when `provenance_aggregate == unverifiable` — i.e. a verifier
+output could not be matched to a real dispatch interval in `timeline.jsonl` (stale / missing /
+mismatched records). It is an integrity signal, NOT proof of fraud, and it fails closed:
+a missing severity registry (e.g. no `yq`) keeps it blocking, never silently advisory (AID-046).
+The orchestrator's MUST-dispatch / MUST-NOT-self-review rule (`pipeline.md` Dispatch Protocol) is
+the actual anti-fabrication defense; this check only catches accidental provenance breakage.
 Initial advisory checks: `memory_substantive`, `dod_present`, `epic_compliance_coverage_ratio`,
 `ai_mechanics_friction_ratio`, `iteration_density_per_step`.
 

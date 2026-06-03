@@ -505,8 +505,9 @@ fsm_emit_audit_log() {
 #   $2 — severity_yaml (absolute path to .aid-o/config/check-severity.yaml)
 #
 # Behavior:
-#   - When checks_json has a .verifier_outputs.provenance_aggregate == "fabricated"
-#     marker, a synthetic verifier_provenance failure entry is prepended.
+#   - When checks_json has a .verifier_outputs.provenance_aggregate == "unverifiable"
+#     marker, a synthetic verifier_provenance failure entry is prepended (fail-closed
+#     at severity: blocking when the registry can't be read — see below).
 #   - Each boolean-false top-level scalar in checks_json yields one entry.
 #   - severity + promoted_at are enriched from the registry; missing keys
 #     default to {severity: "advisory", promoted_at: null}.
@@ -534,8 +535,14 @@ fsm_build_failures() {
   # Extract provenance_aggregate marker (synthetic verifier_provenance failure trigger).
   prov_agg_value=$(echo "$checks_json" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
 
+  # Fail-closed notice: if provenance is unverifiable AND the registry could not be
+  # read, the synthetic entry below floors at severity: blocking (never advisory).
+  if [[ "$prov_agg_value" == "unverifiable" && "$registry_json" == "{}" ]]; then
+    log_warn "verifier_provenance unverifiable with no readable severity registry — treating as BLOCKING (fail-closed, AID-046)"
+  fi
+
   # Step B: build failures[] from boolean-false top-level checks +
-  # provenance_aggregate fabricated marker; enrich each entry's severity +
+  # provenance_aggregate unverifiable marker; enrich each entry's severity +
   # promoted_at from the registry, defaulting to advisory when absent.
   failures_json=$(echo "$checks_json" | jq -c \
     --argjson reg "$registry_json" \
@@ -555,12 +562,17 @@ fsm_build_failures() {
            evidence: ("\(.key) returned false"),
            promoted_at: null}
         | enrich(.)),
-      (if $prov_agg == "fabricated" then
+      (if $prov_agg == "unverifiable" then
+        # Integrity check — fail-closed. Default severity is "blocking" (NOT advisory)
+        # so an unreadable severity registry (e.g. yq absent → $reg == {}) cannot
+        # silently disarm the provenance block. A PM may keep it blocking via the
+        # registry, but a MISSING registry entry floors at "blocking", never advisory.
         {check: "verifier_provenance",
-         severity: "advisory",
-         evidence: "provenance_aggregate=fabricated (1+ verifier outputs unverifiable)",
+         evidence: "provenance_aggregate=unverifiable (1+ verifier outputs could not be verified against the dispatch timeline; integrity signal, not proof of fraud)",
          promoted_at: null}
-        | enrich(.)
+        | (($reg["verifier_provenance"] // null) as $r
+           | .severity    = (if $r then ($r.severity // "blocking") else "blocking" end)
+           | .promoted_at = (if $r then ($r.promoted_at // null)    else null       end))
        else empty end)
     ]
     ' 2>/dev/null || echo '[]')
@@ -610,7 +622,13 @@ try_telegram_alert() {
 #     the claimed _generated_at timestamp.
 #   - inline mode: _generated_by must match main-context@<sha>, and the SHA
 #     must resolve in the project's git object database.
-# Returns one of: "verified", "inline", "fabricated", "unknown".
+# Returns one of: "verified", "inline", "unverifiable", "unknown".
+# NOTE: "unverifiable" means the output's provenance could not be confirmed against
+# the dispatch timeline (stale / missing / mismatched dispatch records). It is an
+# integrity signal, NOT proof of deliberate fraud — a determined main-context
+# fabricator could forge the timeline too. The real anti-fabrication defenses are the
+# orchestrator's MUST-dispatch / MUST-NOT-self-review instruction (pipeline.md), the
+# independent auditor, and the orphan-dispatch check.
 verify_provenance() {
   # IMP-103 (v2.20.2): $3 (step_n) is intentionally unused — kept in signature for
   # API stability and future per-step forensics (e.g. error-path attribution by
@@ -622,32 +640,44 @@ verify_provenance() {
   generated_by=$(grep '^_generated_by:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
   generated_at=$(grep '^_generated_at:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
 
-  [[ -z "$generated_by" || -z "$generated_at" ]] && { echo "fabricated"; return; }
+  [[ -z "$generated_by" || -z "$generated_at" ]] && { echo "unverifiable"; return; }
 
   case "$dispatch_mode" in
     subagent)
-      # Cross-reference timeline ±window_s
-      [[ ! -f "$timeline_file" ]] && { echo "fabricated"; return; }
+      # Interval-bracket provenance (AID-046). The output must have been generated
+      # DURING a real dispatch interval for this focus — at/after the earliest
+      # verifier_dispatch_start and at/before the latest verifier_dispatch_complete,
+      # with a small clock-skew tolerance (window_s) on each side. This is robust to
+      # the verification DURATION (minutes). The previous logic required BOTH the start
+      # AND the complete event to fall within ±window_s of _generated_at, which flagged
+      # any honest run longer than window_s as unverifiable (the start event sits a full
+      # verification-duration before _generated_at). That false-positive bit P040's own
+      # ship. We now bracket by the real start..complete interval.
+      [[ ! -f "$timeline_file" ]] && { echo "unverifiable"; return; }
       local gen_epoch
       gen_epoch=$(date -d "$generated_at" +%s 2>/dev/null || echo "0")
-      [[ "$gen_epoch" == "0" ]] && { echo "fabricated"; return; }
-      local min_epoch=$((gen_epoch - window_s))
-      local max_epoch=$((gen_epoch + window_s))
+      [[ "$gen_epoch" == "0" ]] && { echo "unverifiable"; return; }
 
       # TZ=UTC required: jq <1.7 fromdateiso8601 silently honors local TZ even with Z
       # suffix, producing 1-3600s offset on non-UTC hosts (CEST/PST/etc). Discovered
-      # during P037 Step 5 bats smoke test (jq 1.6 on CEST host). $min/$max are UTC
-      # epochs from `date -d`; force jq to match.
-      local start_found complete_found
-      start_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
-        [.[] | select(.event == "verifier_dispatch_start" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
-      complete_found=$(TZ=UTC jq -s --arg f "$focus" --argjson min "$min_epoch" --argjson max "$max_epoch" '
-        [.[] | select(.event == "verifier_dispatch_complete" and .focus == $f and ((.ts | fromdateiso8601) | (. >= $min and . <= $max)))] | length' "$timeline_file" 2>/dev/null || echo "0")
+      # during P037 Step 5 bats smoke test (jq 1.6 on CEST host). $gen_epoch is a UTC
+      # epoch from `date -d`; force jq to match.
+      local start_ts complete_ts
+      start_ts=$(TZ=UTC jq -s --arg f "$focus" '
+        [.[] | select(.event == "verifier_dispatch_start" and .focus == $f) | (.ts | fromdateiso8601)] | min // empty' "$timeline_file" 2>/dev/null || echo "")
+      complete_ts=$(TZ=UTC jq -s --arg f "$focus" '
+        [.[] | select(.event == "verifier_dispatch_complete" and .focus == $f) | (.ts | fromdateiso8601)] | max // empty' "$timeline_file" 2>/dev/null || echo "")
 
-      if [[ "$start_found" -ge 1 && "$complete_found" -ge 1 ]]; then
+      # Require a matched start AND complete pair for this focus.
+      if [[ -z "$start_ts" || -z "$complete_ts" ]]; then
+        echo "unverifiable"; return
+      fi
+      local lo=$((start_ts - window_s))
+      local hi=$((complete_ts + window_s))
+      if (( start_ts <= complete_ts && gen_epoch >= lo && gen_epoch <= hi )); then
         echo "verified"
       else
-        echo "fabricated"
+        echo "unverifiable"
       fi
       ;;
     inline)
@@ -657,14 +687,14 @@ verify_provenance() {
         if command -v git >/dev/null 2>&1 && git -C "$project_root" cat-file -e "$sha" 2>/dev/null; then
           echo "inline"
         else
-          echo "fabricated"
+          echo "unverifiable"
         fi
       else
-        echo "fabricated"
+        echo "unverifiable"
       fi
       ;;
     *)
-      echo "fabricated"
+      echo "unverifiable"
       ;;
   esac
 }
@@ -799,24 +829,24 @@ evaluate_compliance_checks() {
   fi
 
   # P037 Step 3: provenance_aggregate — worst-of summary across all dispatches.
-  #   fabricated > mixed > all_inline > all_verified > all_fabricated (impossible if any verified/inline)
-  # Semantics: if any single provenance is "fabricated", aggregate is "fabricated".
+  #   unverifiable > mixed > all_inline > all_verified (unknown if no data at all)
+  # Semantics: if any single provenance is "unverifiable", aggregate is "unverifiable".
   # Else if all non-unknown are "verified" → "all_verified".
   # Else if all non-unknown are "inline" → "all_inline".
   # Else "mixed". If everything is unknown → "unknown".
-  local all_verified=true all_inline=true any_fabricated=false any_known=false
+  local all_verified=true all_inline=true any_unverifiable=false any_known=false
   local p
   for p in "${cp2_provenances[@]}" "$cp3_cr_provenance" "$cp3_sec_provenance"; do
     [[ -z "$p" || "$p" == "unknown" ]] && continue
     any_known=true
-    [[ "$p" == "fabricated" ]] && any_fabricated=true
+    [[ "$p" == "unverifiable" ]] && any_unverifiable=true
     [[ "$p" != "verified" ]] && all_verified=false
     [[ "$p" != "inline" ]] && all_inline=false
   done
 
   local prov_agg
-  if $any_fabricated; then
-    prov_agg='"fabricated"'
+  if $any_unverifiable; then
+    prov_agg='"unverifiable"'
   elif ! $any_known; then
     prov_agg='"unknown"'
   elif $all_verified; then
@@ -971,13 +1001,13 @@ write_compliance_json() {
     | if . then "pass" else "fail" end' 2>/dev/null || echo "fail")
   notes_json='[]'
 
-  # P037 Step 3: provenance_aggregate fabricated override — if any verifier output
-  # has unverifiable _generated_by metadata, force overall=fail with explanation.
+  # P037 Step 3: provenance_aggregate unverifiable override — if any verifier output's
+  # provenance can't be verified against the dispatch timeline, force overall=fail.
   local prov_agg_value
   prov_agg_value=$(echo "$checks" | jq -r '.verifier_outputs.provenance_aggregate // empty' 2>/dev/null || echo "")
-  if [[ "$prov_agg_value" == "fabricated" ]]; then
+  if [[ "$prov_agg_value" == "unverifiable" ]]; then
     overall_pre="fail"
-    notes_json=$(jq -nc --arg n "provenance_aggregate: fabricated — at least one verifier output has unverifiable _generated_by metadata" '[$n]')
+    notes_json=$(jq -nc --arg n "provenance_aggregate: unverifiable — at least one verifier output could not be verified against the dispatch timeline (integrity signal, not proof of fraud)" '[$n]')
   fi
 
   # P038 Step 3: failures[] is built by the shared fsm_build_failures helper
