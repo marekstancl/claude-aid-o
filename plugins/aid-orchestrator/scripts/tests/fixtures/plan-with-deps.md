@@ -120,7 +120,7 @@ Phase 2 wires the integration and validates end-to-end.
 
 **Objective:** Validate the complete integration with end-to-end tests covering the full request path from external client through integration to extension to core, and document the architecture.
 
-**AID Role:** docs
+**AID Role:** docs-writer
 
 **Files:**
 - Create: `tests/e2e/test_integration.py`

@@ -140,10 +140,13 @@ parallel_groups, analysis_groups, gates, budget`.
 
 - **A step object has:** `id, role, objective, inputs, outputs, constraints, allowed_paths,
   forbidden_paths, acceptance_criteria`. It has **no `depends_on`** (dependencies live in the
-  top-level `dependencies[]` as `{before, after, reason}`) and **no `model`** field.
-- **`model` is NOT in plan.json.** The script never reads `role-cards.md` or writes a model.
-  The model is chosen at **dispatch time** (EXECUTE) by the controller from `skills/role-cards.md`
-  per the step's `role` (see `pipeline.md` §4). `dispatch-config.yaml` no longer exists.
+  top-level `dependencies[]` as `{before, after, reason}`). `model` is an **optional** field
+  (see below) that the script does not emit.
+- **The script never writes `model`** and never reads `role-cards.md`. The model is chosen at
+  **dispatch time** (EXECUTE) by the controller from `skills/role-cards.md` per the step's `role`
+  (see `pipeline.md` §4 — single source of truth). A `model` value may be set **manually** in a
+  step as an optional per-step override; when present it wins over the role card.
+  `dispatch-config.yaml` no longer exists.
 - **No `waves[]` field.** Ordering is derived at execution time from `dependencies`;
   parallelism is `parallel_groups`.
 - **`analysis_groups`** are auto-generated read-only review groups (multiple agents review the

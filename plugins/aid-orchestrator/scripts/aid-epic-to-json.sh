@@ -58,7 +58,7 @@ mkdir -p "$output_dir" 2>/dev/null || error_exit "Cannot create output directory
 # =============================================================================
 # Valid roles enum (must match plan.schema.json)
 # =============================================================================
-VALID_ROLES="architect domain backend frontend qa security observability docs release"
+VALID_ROLES="architect domain backend frontend qa security observability docs-writer release e2e"
 
 validate_role() {
   local role="$1"
@@ -720,7 +720,7 @@ plan_json="$(jq -n \
 #   - analysis_groups required fields and patterns
 # =============================================================================
 validation_errors="$(echo "$plan_json" | jq -r '
-  def valid_roles: ["architect","domain","backend","frontend","qa","security","observability","docs","release"];
+  def valid_roles: ["architect","domain","backend","frontend","qa","security","observability","docs-writer","release","e2e"];
   def valid_gates: ["tests_pass","lint_pass","security_scan_pass","docs_updated"];
 
   . as $root |

@@ -90,7 +90,7 @@ operations produce structured audit logs and OpenTelemetry traces.
 - [ ] [qa] Unit test coverage > 80% for backend/app/tasks/
 - [ ] [security] No HIGH/CRITICAL findings in security scan
 - [ ] [observability] OpenTelemetry spans on all API endpoints
-- [ ] [docs] API docs page builds without errors
+- [ ] [docs-writer] API docs page builds without errors
 
 ## Dependencies
 
@@ -110,7 +110,7 @@ operations produce structured audit logs and OpenTelemetry traces.
 | 5 | qa | Write unit + integration tests for backend + frontend | 3, 4 | group-verify |
 | 6 | security | AuthZ review + SAST scan of new endpoints | 3 | group-verify |
 | 7 | observability | Add OTel instrumentation to API endpoints | 3 | group-verify |
-| 8 | docs | Update API docs + CHANGELOG + architecture overview | 3, 4 | -- |
+| 8 | docs-writer | Update API docs + CHANGELOG + architecture overview | 3, 4 | -- |
 | 9 | release | Deployment config + smoke test definition | 5, 6 | -- |
 
 ## Run Breakdown

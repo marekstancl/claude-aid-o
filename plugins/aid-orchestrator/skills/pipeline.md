@@ -225,8 +225,9 @@ was skipped, the transition will be rejected by `aid-fsm.sh`.
 2. Load step definition from `plan.json` → `steps[current_step]`
 3. Load role card from `skills/role-cards.md` for the step's `role`
 4. Assemble dispatch prompt (see Context Assembly below)
-5. Dispatch via Agent tool with `model` from `step.model` or `role_assignments` in
-   `plan.json` step `model` field or `orchestration.yaml` role tiers (default: `opus`)
+5. Dispatch via Agent tool. The model tier comes from the step role's `**Model:**`
+   field in `skills/role-cards.md` (single source of truth); an optional `step.model`
+   in `plan.json` overrides it for that one step (default: `opus` if neither is set)
 6. Save output to `evidence/{epic_id}/{run_id}/steps/step_{N}_{role}/output.md`
 7. Verify output (see Output Verification below)
 

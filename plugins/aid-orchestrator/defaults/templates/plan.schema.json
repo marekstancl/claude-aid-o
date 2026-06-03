@@ -42,7 +42,7 @@
           },
           "role": {
             "type": "string",
-            "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs", "release"],
+            "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs-writer", "release", "e2e"],
             "description": "Agent role to execute this step"
           },
           "objective": {
@@ -83,11 +83,11 @@
           "model": {
             "type": "string",
             "enum": ["haiku", "sonnet", "opus"],
-            "description": "Target Claude model tier for this step. Populated by Planner from dispatch-config.yaml. Defaults to opus when not specified."
+            "description": "Optional per-step override of the model tier. When absent (the normal case) the model is taken from the step role's card in skills/role-cards.md at dispatch time (single source of truth). The Planner script does not populate this field."
           },
           "context_scope": {
             "type": "object",
-            "description": "Controls which context sources are injected into the dispatch prompt. Populated by Planner from dispatch-config.yaml. Defaults to all-context when not specified.",
+            "description": "Controls which context sources are injected into the dispatch prompt. Defaults to all-context when not specified.",
             "properties": {
               "memory": {
                 "type": "boolean",
@@ -195,7 +195,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs", "release"]
+              "enum": ["architect", "domain", "backend", "frontend", "qa", "security", "observability", "docs-writer", "release", "e2e"]
             },
             "minItems": 1,
             "description": "Agent roles performing the analysis — must NOT include the target step's own agent role"

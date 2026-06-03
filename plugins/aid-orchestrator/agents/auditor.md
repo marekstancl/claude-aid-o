@@ -351,7 +351,7 @@ never blocks dispatch or fails the audit.
 | architect  | 65,000                   |
 | backend    | 75,000                   |
 | qa         | 85,000                   |
-| docs       | 50,000                   |
+| docs-writer | 50,000                  |
 | security   | 75,000                   |
 
 Overall average across all roles: ~70,000 tokens per step.

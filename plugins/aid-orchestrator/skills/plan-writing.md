@@ -274,7 +274,7 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 - [ ] {Testable criterion 3 — specific, measurable}
 
 **Effort:** {S / M / L}
-**AID Role:** {architect / domain / backend / frontend / qa / security / observability / docs / release}
+**AID Role:** {architect / domain / backend / frontend / qa / e2e / security / observability / docs-writer / release}
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
 ```
 
@@ -1024,4 +1024,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-05-12
+**Last Updated:** 2026-06-03

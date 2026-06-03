@@ -11,11 +11,10 @@ language:
   conversation_language: auto  # detected from PM input
 
 # ─── Models ──────────────────────────────────────────────────────────────
-# Simplified role→tier mapping. See pipeline.md §4 for dispatch protocol.
-models:
-  opus: [architect, backend, frontend]
-  sonnet: [qa, security, docs-writer, curator, auditor, implementer, verifier]
-  haiku: [gate-fixer]
+# Model tier per role is defined in skills/role-cards.md (single source of truth) —
+# step roles carry a `**Model:**` field; controller agents (auditor/curator/gate-fixer/
+# verifier) carry model in their own agent-file frontmatter. An optional `step.model`
+# in plan.json overrides the card for that one step. See pipeline.md §4 for dispatch.
 
 # ─── Dispatch ────────────────────────────────────────────────────────────
 dispatch:

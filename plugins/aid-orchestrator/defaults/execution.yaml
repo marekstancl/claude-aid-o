@@ -175,7 +175,7 @@ escalation_triggers:
 # ─── Content Quality ────────────────────────────────────────────────────
 content_quality:
   auto_accept_when:
-    - "step role is: docs, config, release"
+    - "step role is: docs-writer, config, release"
     - "step has <= 3 acceptance criteria"
   review_required_when:
     - "step role is: architect, backend, frontend, security"

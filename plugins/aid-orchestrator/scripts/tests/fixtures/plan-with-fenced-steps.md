@@ -50,7 +50,7 @@ And nested example with 4-backtick outer fence:
 
 **Objective:** Produce a syntax reference showing how AID parses step headers.
 
-**AID Role:** docs
+**AID Role:** docs-writer
 
 **Files:**
 - Create: `docs/aid-syntax.md`
@@ -62,7 +62,7 @@ And nested example with 4-backtick outer fence:
 
 **Objective:** Provide a runnable worked example demonstrating the parser.
 
-**AID Role:** docs
+**AID Role:** docs-writer
 
 **Files:**
 - Create: `docs/aid-syntax-example.md`

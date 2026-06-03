@@ -90,7 +90,7 @@ runs_completed: 0      # incremented at each run DONE
 ## Acceptance Criteria
 
 <!-- Specific, testable criteria that define "done" -->
-<!-- Prefix with [role] where applicable: [backend], [frontend], [qa], [security], [docs] -->
+<!-- Prefix with [role] where applicable: [backend], [frontend], [qa], [security], [docs-writer] -->
 - [ ] <!-- e.g. [backend] POST /api/v1/invoices returns 201 with valid payload -->
 - [ ] <!-- e.g. [frontend] Invoice list page renders with pagination -->
 - [ ] <!-- e.g. [qa] Unit test coverage > 80% for new code -->
@@ -121,7 +121,7 @@ depends_on: []
 | 5 | qa | Unit + integration tests | backend | group-2 |
 | 6 | security | AuthZ + SAST review | backend | group-2 |
 | 7 | observability | OTel instrumentation | backend | group-2 |
-| 8 | docs | Update documentation + changelog | backend | group-3 |
+| 8 | docs-writer | Update documentation + changelog | backend | group-3 |
 | 9 | release | Deployment config + smoke tests | qa, security | group-3 |
 
 ## Run Breakdown
