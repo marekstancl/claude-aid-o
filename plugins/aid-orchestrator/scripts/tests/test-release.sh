@@ -98,7 +98,8 @@ teardown() {
   cd "$TEST_DIR"
   "$RELEASE" patch
   run git log --oneline -1
-  [[ "$output" =~ "chore: release v1.7.1" ]]
+  # aid-release.sh commits as "release: vX.Y.Z — <last feat>" (line 376).
+  [[ "$output" =~ "release: v1.7.1" ]]
 }
 
 @test "patch bump creates annotated git tag" {

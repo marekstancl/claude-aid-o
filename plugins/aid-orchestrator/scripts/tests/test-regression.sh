@@ -80,6 +80,15 @@ make_workspace() {
   mkdir -p "$ws/.aid-o/work/evidence"
   mkdir -p "$ws/.aid-o/work/runs"
   printf 'counter: 0\n' > "$ws/.aid-o/config/counter.yaml"
+  # The pipeline's aid-json-to-run.sh Step 18 (P040 Component E, added 2026-05-31)
+  # auto-inits FSM state and records the current git branch + base commit, so it
+  # PRE-FLIGHT-requires a real git working tree on a named branch. A bare mktemp
+  # dir has no git, which trips the "detached HEAD?" guard and aborts the pipeline.
+  # Initialize a minimal repo with one commit so the branch/HEAD checks succeed.
+  ( cd "$ws" \
+      && git init -q \
+      && git config user.email t@t.io && git config user.name T \
+      && git add -A && git commit -q -m initial ) >/dev/null 2>&1
   echo "$ws"
 }
 

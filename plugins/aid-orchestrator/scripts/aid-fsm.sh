@@ -483,9 +483,9 @@ Then retry with --reason."
 # Audit log write failure is best-effort — never aborts primary FSM operation.
 fsm_emit_audit_log() {
   local event_type="$1"; shift
-  local audit_log_file="${project_root}/.aid-o/work/audit-log.jsonl"
-  # project_root may be unset in early init paths — derive from CWD
-  audit_log_file="${project_root:-.}/.aid-o/work/audit-log.jsonl"
+  # project_root may be unset in callers that don't set it (e.g. cmd_transition
+  # --force) — derive from CWD with the :- guard so `set -u` doesn't abort here.
+  local audit_log_file="${project_root:-.}/.aid-o/work/audit-log.jsonl"
   bash "${SCRIPT_DIR}/aid-audit-log.sh" append \
     --epic-id "${epic_id:-unknown}" \
     --run-id  "${run_id:-unknown}" \

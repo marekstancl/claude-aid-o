@@ -18,6 +18,21 @@ setup() {
     "$FSM" init "E-001" "run-001" "5" "auto" "v2/redesign" "abc123" "$STATE_FILE" 2>/dev/null
   }
 
+  # These are state-machine UNIT tests: they exercise transition validity, state
+  # updates, and counters in isolation. The precondition layer that cmd_transition
+  # / increment-step enforce (plan.json, gates evidence, step-verify.md, CP2/CP3
+  # verifier outputs — all added across P032/P040/Session-A+B after these tests were
+  # written) is NOT what these mechanics tests assert; its real block/pass behaviour
+  # is covered separately by the "precondition layer" tests at the END of this file,
+  # which call transition WITHOUT --force. Here we bypass it with --force, which still
+  # runs the transition whitelist + side-effects (escalation_count, done_phase) and
+  # only skips the precondition fixtures. --force requires a 20+ char audit reason.
+  FORCE_REASON="unit test: isolate FSM state-machine mechanics from precondition layer"
+  # Transition with precondition layer bypassed (mechanics under test).
+  fsm_tr() { "$FSM" transition "$1" "$2" "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
+  # Increment step with precondition layer bypassed (counter mechanics under test).
+  fsm_inc() { "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
+
   # Run all tests with TEST_DIR as cwd so PRE-FLIGHT git checks have a repo.
   cd "$TEST_DIR"
 }
@@ -58,7 +73,7 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "transition READY to EXECUTE succeeds" {
   init_state
-  run "$FSM" transition READY EXECUTE "$STATE_FILE"
+  run fsm_tr READY EXECUTE
   [ "$status" -eq 0 ]
   run "$FSM" get-state "$STATE_FILE"
   [ "$output" = "EXECUTE" ]
@@ -66,54 +81,54 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "transition EXECUTE to GATES succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition EXECUTE GATES "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  run fsm_tr EXECUTE GATES
   [ "$status" -eq 0 ]
 }
 
 @test "transition EXECUTE to ESCALATION succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition EXECUTE ESCALATION "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  run fsm_tr EXECUTE ESCALATION
   [ "$status" -eq 0 ]
 }
 
 @test "transition GATES to DONE succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition GATES DONE "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE GATES
+  run fsm_tr GATES DONE
   [ "$status" -eq 0 ]
 }
 
 @test "transition GATES to EXECUTE (retry) succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition GATES EXECUTE "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE GATES
+  run fsm_tr GATES EXECUTE
   [ "$status" -eq 0 ]
 }
 
 @test "transition ESCALATION to EXECUTE succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition ESCALATION EXECUTE "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE ESCALATION
+  run fsm_tr ESCALATION EXECUTE
   [ "$status" -eq 0 ]
 }
 
 @test "transition ESCALATION to GATES (skip gate) succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition ESCALATION GATES "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE ESCALATION
+  run fsm_tr ESCALATION GATES
   [ "$status" -eq 0 ]
 }
 
 @test "EXECUTE to EXECUTE (internal loop) succeeds" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  run "$FSM" transition EXECUTE EXECUTE "$STATE_FILE"
+  fsm_tr READY EXECUTE
+  run fsm_tr EXECUTE EXECUTE
   [ "$status" -eq 0 ]
 }
 
@@ -133,9 +148,11 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "transition DONE to EXECUTE is rejected" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
-  "$FSM" transition GATES DONE "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE GATES
+  fsm_tr GATES DONE
+  # DONE→EXECUTE is not in the whitelist; rejection happens before the
+  # precondition layer, so the assertion uses the real (non-forced) call.
   run "$FSM" transition DONE EXECUTE "$STATE_FILE"
   [ "$status" -eq 1 ]
 }
@@ -158,18 +175,18 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "transition to ESCALATION increments escalation_count" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE ESCALATION
   run grep '^escalation_count: 1' "$STATE_FILE"
   [ "$status" -eq 0 ]
 }
 
 @test "multiple escalations accumulate count" {
   init_state
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
-  "$FSM" transition ESCALATION EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE ESCALATION
+  fsm_tr ESCALATION EXECUTE
+  fsm_tr EXECUTE ESCALATION
   run grep '^escalation_count: 2' "$STATE_FILE"
   [ "$status" -eq 0 ]
 }
@@ -191,7 +208,7 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "increment-step advances counter and outputs new value" {
   init_state
-  run "$FSM" increment-step "$STATE_FILE"
+  run fsm_inc
   [ "$output" = "1" ]
   run "$FSM" get-field current_step "$STATE_FILE"
   [ "$output" = "1" ]
@@ -199,9 +216,9 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "increment-step can be called multiple times" {
   init_state
-  "$FSM" increment-step "$STATE_FILE" >/dev/null
-  "$FSM" increment-step "$STATE_FILE" >/dev/null
-  run "$FSM" increment-step "$STATE_FILE"
+  fsm_inc >/dev/null
+  fsm_inc >/dev/null
+  run fsm_inc
   [ "$output" = "3" ]
 }
 
@@ -217,4 +234,33 @@ teardown() { rm -rf "$TEST_DIR"; }
   init_state
   run "$FSM" get-field total_steps "$STATE_FILE"
   [ "$output" = "5" ]
+}
+
+# --- precondition layer (REAL path — no --force) ---
+# These guard check_preconditions itself: a transition must be BLOCKED when its
+# precondition is unmet and ALLOWED when it is satisfied. Without these, the
+# precondition layer (e.g. the anti-AID-005 gates _generated_by check) could be
+# silently weakened and no test would notice — the "detector without enforcement"
+# failure mode that AID-v3-principles.md #1 warns against. The mechanics tests
+# above use --force precisely so they DON'T overlap this coverage.
+
+@test "precondition BLOCKS READY→EXECUTE when plan.json is missing" {
+  init_state   # total_steps=5, but no plan.json in the run dir (dirname of state file)
+  run "$FSM" transition READY EXECUTE "$STATE_FILE"
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ "plan.json not found" ]]
+  # State must NOT have advanced.
+  run "$FSM" get-state "$STATE_FILE"
+  [ "$output" = "READY" ]
+}
+
+@test "precondition ALLOWS READY→EXECUTE when plan.json is present" {
+  init_state
+  # plan.json lives next to the state file (run dir); presence + total_steps>=1 is
+  # the READY→EXECUTE precondition. No --force: this is the real check_preconditions.
+  echo '{"epic_id":"E-001","steps":[]}' > "$(dirname "$STATE_FILE")/plan.json"
+  run "$FSM" transition READY EXECUTE "$STATE_FILE"
+  [ "$status" -eq 0 ]
+  run "$FSM" get-state "$STATE_FILE"
+  [ "$output" = "EXECUTE" ]
 }

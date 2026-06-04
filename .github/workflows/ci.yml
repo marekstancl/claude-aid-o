@@ -9,8 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq
-        run: sudo apt-get install -y jq
+      - name: Install jq + bats
+        # bats is required for the FSM / release / integration suites; without it
+        # run-all-tests.sh silently SKIPS them (they look green but never run).
+        run: sudo apt-get install -y jq bats
       - name: Run bash test suite
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh

@@ -19,6 +19,17 @@ setup() {
       && git config user.email t@t.io && git config user.name T \
       && echo init > .gitkeep && git add .gitkeep && git commit -q -m initial )
   cd "$TEST_DIR"
+
+  # These integration tests verify how the FSM, logging, gates and token counting
+  # interact — they drive the FSM through its lifecycle to position it for each
+  # assertion (timeline contents, gate-runner behaviour, final state). The
+  # precondition layer (plan.json, gates evidence, step-verify.md, CP2/CP3 verifier
+  # outputs) is not what these tests assert, so transitions/increments are forced
+  # past it. --force still runs the transition whitelist + side-effects and only
+  # skips precondition fixtures; it requires a 20+ char audit reason.
+  FORCE_REASON="integration test: position FSM lifecycle past precondition layer"
+  fsm_tr() { "$FSM" transition "$1" "$2" "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
+  fsm_inc() { "$FSM" increment-step "$STATE_FILE" --force --reason "$FORCE_REASON" 2>/dev/null; }
 }
 
 teardown() { rm -rf "$TEST_DIR"; }
@@ -31,18 +42,18 @@ teardown() { rm -rf "$TEST_DIR"; }
   log_event "$TIMELINE" "initialized" epic_id=E-TEST
 
   # READY → EXECUTE
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
   log_event "$TIMELINE" "state_enter" state=EXECUTE
 
   # Increment step
-  "$FSM" increment-step "$STATE_FILE" >/dev/null
+  fsm_inc >/dev/null
 
   # EXECUTE → GATES
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
+  fsm_tr EXECUTE GATES
   log_event "$TIMELINE" "state_enter" state=GATES
 
   # GATES → DONE
-  "$FSM" transition GATES DONE "$STATE_FILE" 2>/dev/null
+  fsm_tr GATES DONE
   log_event "$TIMELINE" "state_enter" state=DONE
 
   # Verify final state
@@ -57,17 +68,17 @@ teardown() { rm -rf "$TEST_DIR"; }
 @test "FSM with ESCALATION path: EXECUTE → ESCALATION → EXECUTE → GATES → DONE" {
   "$FSM" init E-ESC R-ESC 2 manual main abc123 "$STATE_FILE" 2>/dev/null
 
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
   log_event "$TIMELINE" "state_enter" state=EXECUTE
 
-  "$FSM" transition EXECUTE ESCALATION "$STATE_FILE" 2>/dev/null
+  fsm_tr EXECUTE ESCALATION
   log_event "$TIMELINE" "escalation" reason=test
 
-  "$FSM" transition ESCALATION EXECUTE "$STATE_FILE" 2>/dev/null
+  fsm_tr ESCALATION EXECUTE
   log_event "$TIMELINE" "resume" state=EXECUTE
 
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
-  "$FSM" transition GATES DONE "$STATE_FILE" 2>/dev/null
+  fsm_tr EXECUTE GATES
+  fsm_tr GATES DONE
 
   run "$FSM" get-state "$STATE_FILE"
   [ "$output" = "DONE" ]
@@ -80,30 +91,30 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "gate runner with passing gates allows FSM to proceed to DONE" {
   "$FSM" init E-GATE R-GATE 1 auto main abc123 "$STATE_FILE" 2>/dev/null
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE GATES
 
   # Run gates
   run "$RUN_GATES" run-all "$FIXTURES/execution-test.yaml" "E-GATE" "R-GATE" "$TIMELINE"
   [ "$status" -eq 0 ]
 
   # Gates passed → transition to DONE
-  "$FSM" transition GATES DONE "$STATE_FILE" 2>/dev/null
+  fsm_tr GATES DONE
   run "$FSM" get-state "$STATE_FILE"
   [ "$output" = "DONE" ]
 }
 
 @test "gate runner failure triggers ESCALATION path" {
   "$FSM" init E-FAIL R-FAIL 1 auto main abc123 "$STATE_FILE" 2>/dev/null
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
+  fsm_tr EXECUTE GATES
 
   # Run failing required gates
   run "$RUN_GATES" run-all "$FIXTURES/execution-failing.yaml" "E-FAIL" "R-FAIL" "$TIMELINE"
   [ "$status" -eq 1 ]
 
   # Gate failed → transition to ESCALATION (not DONE)
-  "$FSM" transition GATES ESCALATION "$STATE_FILE" 2>/dev/null
+  fsm_tr GATES ESCALATION
   run "$FSM" get-state "$STATE_FILE"
   [ "$output" = "ESCALATION" ]
 }
@@ -112,13 +123,13 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "timeline has events from both FSM transitions and gate runner" {
   "$FSM" init E-TL R-TL 1 auto main abc123 "$STATE_FILE" 2>/dev/null
-  "$FSM" transition READY EXECUTE "$STATE_FILE" 2>/dev/null
+  fsm_tr READY EXECUTE
   log_event "$TIMELINE" "step_start" step=1
-  "$FSM" transition EXECUTE GATES "$STATE_FILE" 2>/dev/null
+  fsm_tr EXECUTE GATES
 
   "$RUN_GATES" run-all "$FIXTURES/execution-test.yaml" "E-TL" "R-TL" "$TIMELINE" >/dev/null
 
-  "$FSM" transition GATES DONE "$STATE_FILE" 2>/dev/null
+  fsm_tr GATES DONE
   log_event "$TIMELINE" "run_complete" state=DONE
 
   # Timeline has entries from both log_event and run_gates

@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.28.1] — 2026-06-04
+
+### Fixed
+- **FSM force-transition crash** — `aid-fsm.sh transition --force` aborted under `set -u` with "project_root: unbound variable" because `fsm_emit_audit_log` read the variable before its guarded fallback, breaking the manual-override escape hatch
+- **CI bash test coverage** — the FSM, release, and integration test suites were silently skipped in CI (no `bats` installed) and had drifted stale against new preconditions; CI now installs `bats`, the four affected suites are repaired, and the FSM precondition layer gained real red/green coverage so it cannot be weakened unnoticed
+
 ## [2.28.0] — 2026-06-04
 
 ### Added
