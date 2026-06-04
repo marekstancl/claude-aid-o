@@ -6,7 +6,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: All version locations must match
         run: |
           VERSION=$(jq -r .version package.json)
