@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.28.0] — 2026-06-04
+
+### Added
+- **Skill & command authoring standards** — `skill-writing.md` and `command-writing.md` promoted to live skills, with `aid-lint-skill.sh` + `test-skill-lint.sh` enforcing the mechanical subset (pre-existing files grandfathered until revised)
+- **Frontend Visual Anchoring enforcement** — `increment-step` hard-fails a frontend step that has `visual_refs` but whose output lacks a `## Visual Anchoring` section
+
+### Changed
+- **Model single source of truth** — model tier lives only in `role-cards.md`; removed the conflicting `orchestration.yaml` models block and the phantom `role_assignments` reference
+- **role-cards.md holistic unification** — `e2e` is now a real step role with one rich card; `docs` renamed to `docs-writer` everywhere; `qa` gets a full card; structure and footer unified
+- **Curator is propose-only** — curator recommends a disposition, the orchestrator applies fixes at every effort (S/M/L), and CP4 reviews the applied changes (reordered to run after the apply)
+- **auditor.md overhaul** — scorable A–J categories, corrected scoring math, pre-merge timing
+- **planner.md rewrite** — documents the real two-script pipeline (no fictional intelligent planner)
+- **Config-policy single-sourcing** — escalation triggers and `skill_conflicts` deduplicated to one authoritative source; pre-filter regexes single-sourced to `pre-filter-rules.yaml`; `not_acceptable` patterns routed to real enforcement or explicitly marked advisory
+
+### Fixed
+- **Verifier provenance false-positives** — interval-bracket window replaces the ±60s test that flagged honest runs; fails closed when the severity registry can't be read; renamed the verdict to the honest `unverifiable` and added an explicit anti-fabrication instruction to the orchestrator
+- **aid-run.md fiction + task→epic terminology** — removed non-existent state transitions / branch / merge-target claims
+- **role_overrides downgraded to advisory** — the global `Bash(*)` permission made per-role scoping non-enforcing; the false security claim was removed
+- **deserialize_dangerous pre-filter rule** — a `(?!_safe)` lookahead (unsupported by bash ERE) made the rule silently never match; rewritten ERE-safe
+- **Honest phase-end note** — `run-management.md` no longer claims the controller auto-enforces the PM-GO boundary
+
+### Removed
+- **Unread config** — `orchestration.yaml` `models:` block and `release.skip_when`, and the `execution.yaml` global `retry:` block — read by nothing (per-gate `max_retries` is the only retry knob)
+
 ## [2.27.0] — 2026-06-02
 
 ### Changed

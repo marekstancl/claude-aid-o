@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.26.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.28.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.27.0** (current) — P041 cleanup: unified the FSM state file to `fsm-state.yaml` (retired the parallel never-read `state.yaml` step-array across scripts/docs/templates/tests, legacy fallback kept); fixed `/aid-stop` + `/aid-run --resume` to use real FSM state fields; removed the never-backed queue pause/resume/reorder subcommands (archived, restorable)
+- **v2.28.0** (current) — P041 audit Wave 2: model + config-policy single-sourcing (role-cards, escalation, pre-filter), curator propose-only with CP4-after-apply, auditor + planner overhaul, verifier-provenance interval-bracket fix (honest `unverifiable` rename + anti-fabrication instruction), frontend Visual Anchoring enforcement, and promoted skill-writing + command-writing standards with a governance lint guard
+- **v2.27.0** — P041 cleanup: unified the FSM state file to `fsm-state.yaml` (retired the parallel never-read `state.yaml` step-array across scripts/docs/templates/tests, legacy fallback kept); fixed `/aid-stop` + `/aid-run --resume` to use real FSM state fields; removed the never-backed queue pause/resume/reorder subcommands (archived, restorable)
 - **v2.26.0** — P041 audit Wave 1 cleanup: removed the never-wired aid-research command + knowledge/Context7 layer (archived, restorable); fixed aid-help level detection (state.yaml→fsm-state.yaml), CP4 curator-validation filename, aid-init pre-push hook docs, implementer model selection, brainstorming prior-work glob; stripped version-stamped headings + refreshed stale dates across skills/commands
-- **v2.25.0** — dispatch lifecycle enforcement bundle (P040): aid-emit-dispatch.sh wrapper + pending-dispatches ledger, fsm_check_orphan_dispatches reconciliation backstop, CP4 curator-validation range-scan enforcement, first-class --streamlined mode (coverage_mode/skipped_dimensions honest accounting), state file unification (aid-json-to-run.sh auto-init); 4 new blocking checks
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
