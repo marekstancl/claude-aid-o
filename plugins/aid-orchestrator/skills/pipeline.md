@@ -383,6 +383,11 @@ On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 
 **Visual verification protocol (frontend steps with visual_refs):**
 
+0. **`## Visual Anchoring` section (ENFORCED):** the frontend agent's output MUST contain a
+   `## Visual Anchoring` section (layout / colors / typography / spacing / components derived from
+   the mockup — per the frontend role card in `role-cards.md`) BEFORE the implementation code.
+   `aid-fsm.sh increment-step` hard-fails a frontend step that carries `visual_refs` but whose
+   output lacks a `## Visual Anchoring` section (reason `frontend_missing_visual_anchoring`).
 1. **Screenshot capture:** Start dev server if not running → Playwright navigates to
    affected page → screenshot at 1280x720 → save to `evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png`
 2. **Semantic comparison:** Controller reads both images (mockup + screenshot), produces
