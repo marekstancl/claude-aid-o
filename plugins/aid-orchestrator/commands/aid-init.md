@@ -58,9 +58,15 @@ Appended to project root `.gitignore` (or created if missing). Content:
 ```
 
 **Rules:**
-- If project `.gitignore` already contains `.aid-o/` entries, skip (idempotent)
-- Append with `# AID Orchestrator` header for easy identification
-- Never overwrite existing `.gitignore` content
+- Per-line backfill (idempotent): for each line in `defaults/.gitignore`, append it
+  only if that exact line is not already present in the project `.gitignore`.
+  This ensures projects initialized before a given ignore entry existed (e.g.
+  `.aid-o/config/queue.yaml`, added in v2.1.1) get the missing line on upgrade,
+  instead of the old all-or-nothing skip that left them permanently incomplete.
+- Append the `# AID Orchestrator` header only if no AID-managed lines exist yet
+- Source of truth is `defaults/.gitignore` — the block quoted above must stay in
+  sync with it
+- Never overwrite or reorder existing `.gitignore` content
 
 ## Auto-Detection Logic
 

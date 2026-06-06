@@ -376,6 +376,26 @@ parse_step_deps() {
     elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
       result+=("${BASH_REMATCH[1]}")
 
+    # Match "Task" range — plans that use "## Task N:" headers reference deps
+    # the same way (e.g. "Depends on: Tasks 3-5"). Mirror the Steps logic so
+    # Task-style dependency lines are not silently dropped.
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+      local range_start="${BASH_REMATCH[1]}"
+      local range_end="${BASH_REMATCH[2]}"
+
+      if [[ "$range_start" -gt "$range_end" ]]; then
+        echo "WARNING: Reversed range Tasks ${range_start}-${range_end} — skipping" >&2
+        continue
+      fi
+
+      for (( i=range_start; i<=range_end; i++ )); do
+        result+=("$i")
+      done
+
+    # Match "Task N" singular
+    elif [[ "$token" =~ ^[Tt]ask[[:space:]]+([0-9]+) ]]; then
+      result+=("${BASH_REMATCH[1]}")
+
     # Match bare number (possibly left after earlier processing)
     elif [[ "$token" =~ ^([0-9]+) ]]; then
       result+=("${BASH_REMATCH[1]}")
@@ -612,6 +632,10 @@ for sn in "${phase_steps[@]}"; do
     for _dn in "${_dep_nums[@]}"; do
       _dn="$(echo "$_dn" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
       [[ -z "$_dn" ]] && continue
+      # Drop self-references: a range like "Steps 7-9" on step 9 expands to
+      # include 9 itself, which would produce a meaningless self-edge that
+      # downstream cycle detection (aid-epic-to-json.sh) rejects.
+      [[ "$_dn" == "$sn" ]] && continue
       if [[ -n "${global_to_local[$_dn]+_}" ]]; then
         remapped_deps+=("${global_to_local[$_dn]}")
       fi

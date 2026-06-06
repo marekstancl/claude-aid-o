@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.28.3] — 2026-06-06
+
+### Fixed
+- **Self-referential dependencies** — a step whose dependency range covered its own number (e.g. "Steps 4-6" on step 6) produced a meaningless self-edge that downstream cycle detection rejected; self-references are now dropped during dependency remapping
+- **Task-keyword dependencies** — `Depends on: Task N` / `Tasks M-N` lines were silently ignored because the parser only recognized "Step", even though `## Task N:` step headers are accepted; the dependency parser now treats the Task keyword the same as Step
+- **Clean-tree guard vs. runtime queue** — the FSM init clean-tree guard aborted on any tracked change including AID's own `.aid-o/config/queue.yaml`, which the auto-pipeline mutates between phases, breaking multi-phase auto runs in projects where that file is tracked; the guard now excludes the runtime queue file
+- **/aid-init .gitignore backfill** — `.gitignore` setup skipped the entire AID block when any `.aid-o/` entry already existed, so projects initialized before a later ignore entry (e.g. the runtime queue file) never received it; setup now appends individual missing lines on upgrade
+
 ## [2.28.2] — 2026-06-06
 
 ### Fixed

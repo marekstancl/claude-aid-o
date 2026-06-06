@@ -440,13 +440,13 @@ else
   # So Step 4's depends_on should be "---" in the EPIC.
   # We verify range expansion worked by checking step 5 which has "Step 1, Steps 3-5"
   # After cross-phase stripping (valid: 4,5,6): 1 removed, 3 removed, 4 kept, 5 kept.
-  # The surviving global deps {4,5} are then remapped to EPIC-local numbering
-  # (global 4 -> local 1, global 5 -> local 2), so the row shows "1, 2".
+  # Step 5 is its own dependency (the range includes 5), so the self-reference is
+  # dropped, leaving global {4}, remapped to EPIC-local 1. The row shows "1".
   step2_row="$(grep "^| 2 |" "$epic_path_t13" 2>/dev/null || true)"
-  if echo "$step2_row" | grep -qE '\| 1, 2 \|'; then
-    pass "range expansion + cross-phase strip + local remap: global '4, 5' -> local '1, 2'"
+  if echo "$step2_row" | grep -qE '\| 1 \| --- \|$'; then
+    pass "range expansion + cross-phase strip + local remap + self-drop: global '4, 5' (self 5 dropped) -> local '1'"
   else
-    fail "range expansion + cross-phase strip + local remap: global '4, 5' -> local '1, 2'" "row: $step2_row"
+    fail "range expansion + cross-phase strip + local remap + self-drop: -> local '1'" "row: $step2_row"
   fi
 fi
 
@@ -705,6 +705,110 @@ else
   else
     fail "intra-EPIC dep remap" "row1='$row1' row2='$row2' row3='$row3'"
   fi
+fi
+
+# ===========================================================================
+# TEST 22: Self-dependency dropped — a range that includes the step's own
+# number (e.g. step 6 declaring "Depends on: Steps 4-6") must not produce a
+# self-edge, which downstream cycle detection would reject.
+# ===========================================================================
+run_test "Self-dependency: range including own step drops the self-reference"
+
+env_dir="$(make_test_env "t22")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+self_plan="$env_dir/self-plan.md"
+
+cat > "$self_plan" <<'PLANEOF'
+---
+id: P997
+---
+
+# P997 — Self-dependency regression
+
+## Context
+Regression fixture for self-reference dropping.
+
+## Goal
+Ensure a range covering the step itself does not self-depend.
+
+## Implementation Steps
+
+**EPIC 1: Steps 1-3 — Schema**
+
+### Step 1: Define the database schema tables
+**AID Role:** backend
+**Dependencies:**
+- Depends on: ---
+
+### Step 2: Build the ORM model classes
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 1
+
+### Step 3: Generate the database migrations
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 1
+
+**EPIC 2: Steps 4-6 — Exporter**
+
+### Step 4: Implement the data exporter module
+**AID Role:** backend
+**Dependencies:**
+- Depends on: ---
+
+### Step 5: Seed the database with exported data
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 4
+
+### Step 6: Verify the seeded data integrity
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Steps 4-6
+PLANEOF
+
+actual_exit=0
+epic_path_t22="$("$SCRIPT_UNDER_TEST" \
+  --plan "$self_plan" \
+  --phase 2 \
+  --total 2 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "self-dep plan phase 2 exits with code 0" "got exit code $actual_exit"
+else
+  # Global step 6 (verify) -> local 3, deps "Steps 4-6" -> globals 4,5,6;
+  # self (6) dropped, 4->local 1, 5->local 2 ⇒ Depends On = "1, 2" (never "3").
+  row3="$(grep "^| 3 |" "$epic_path_t22" 2>/dev/null || true)"
+  if echo "$row3" | grep -qE '\| 1, 2 \| --- \|$'; then
+    pass "self-dependency dropped: 'Steps 4-6' on local step 3 -> '1, 2' (no self-edge)"
+  else
+    fail "self-dependency dropped" "row3='$row3'"
+  fi
+fi
+
+# ===========================================================================
+# TEST 23: Task-keyword dependencies — "Task N" / "Tasks M-N" in a Depends on
+# line are parsed like "Step N" instead of being silently dropped.
+# ===========================================================================
+run_test "Dependency parser: 'Task 2, Tasks 4-5' parses to '2, 4, 5'"
+
+task_result="$(bash -c '
+  set -euo pipefail
+  source "'"$REPO_ROOT"'/plugins/aid-orchestrator/scripts/lib/common.sh"
+  eval "$(sed -n "/^parse_step_deps()/,/^}/p" "'"$SCRIPT_UNDER_TEST"'")"
+  parse_step_deps "Task 2, Tasks 4-5"
+' 2>/dev/null)"
+
+if [[ "$task_result" == "2, 4, 5" ]]; then
+  pass "Task-keyword deps: 'Task 2, Tasks 4-5' -> '2, 4, 5'"
+else
+  fail "Task-keyword deps: 'Task 2, Tasks 4-5' -> '2, 4, 5'" "got: '$task_result'"
 fi
 
 # ---------------------------------------------------------------------------

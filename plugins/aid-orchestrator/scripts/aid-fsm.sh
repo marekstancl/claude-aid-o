@@ -1395,7 +1395,20 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # Uncommitted changes guard (always runs, even in worktree mode).
   # PRE-FLIGHT must start from clean tree so done-advance merge has a clear
   # diff to attribute to the EPIC.
-  if ! git diff --quiet || ! git diff --cached --quiet; then
+  #
+  # AID's own runtime queue file (.aid-o/config/queue.yaml) is excluded: the
+  # auto-pipeline mutates it between phases, and in projects initialized before
+  # it was gitignored (v2.1.1) it may be tracked, which would otherwise trip
+  # this guard on every multi-phase run. The `^.. ` anchor matches only the
+  # two porcelain status columns + space, so it never hides a real file renamed
+  # into a queue.yaml name (rename lines contain " -> "). --untracked-files=no
+  # preserves the original behaviour of ignoring untracked files; no pathspec is
+  # given so the whole repo is scanned regardless of cwd, matching the original
+  # `git diff` semantics.
+  local _dirty
+  _dirty="$(git status --porcelain --untracked-files=no \
+    | grep -vE '^.. \.aid-o/config/queue\.yaml$' || true)"
+  if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review
        git stash    # or commit"
