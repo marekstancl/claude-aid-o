@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.28.2] — 2026-06-06
+
+### Fixed
+- **EPIC dependency renumbering** — when slicing a multi-EPIC plan into per-EPIC files, the Steps table renumbered each EPIC's steps locally (1..N) but the Depends On column kept the plan's global step numbers, producing dangling references like "step 2 depends on 4" in a 3-step EPIC that crashed dependency validation in `aid-epic-to-json.sh`; intra-EPIC dependencies (and the Goal step list) are now remapped to EPIC-local numbering
+
 ## [2.28.1] — 2026-06-04
 
 ### Fixed

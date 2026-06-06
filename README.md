@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.28.1
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.28.2
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.28.1** (current) — fixed the `aid-fsm.sh transition --force` crash (unbound `project_root` under `set -u`) that broke the manual-override escape hatch; CI now installs `bats` so the FSM/release/integration suites actually run (they were silently skipped), the stale bats + regression suites are repaired, and the FSM precondition layer gained real red/green coverage
+- **v2.28.2** (current) — fixed EPIC dependency renumbering: slicing a multi-EPIC plan into per-EPIC files kept global step numbers in the Depends On column (e.g. "step 2 depends on 4" in a 3-step EPIC), crashing EPIC-to-JSON validation; intra-EPIC dependencies and the Goal step list are now remapped to EPIC-local numbering
+- **v2.28.1** — fixed the `aid-fsm.sh transition --force` crash (unbound `project_root` under `set -u`) that broke the manual-override escape hatch; CI now installs `bats` so the FSM/release/integration suites actually run (they were silently skipped), the stale bats + regression suites are repaired, and the FSM precondition layer gained real red/green coverage
 - **v2.28.0** — P041 audit Wave 2: model + config-policy single-sourcing (role-cards, escalation, pre-filter), curator propose-only with CP4-after-apply, auditor + planner overhaul, verifier-provenance interval-bracket fix (honest `unverifiable` rename + anti-fabrication instruction), frontend Visual Anchoring enforcement, and promoted skill-writing + command-writing standards with a governance lint guard
-- **v2.27.0** — P041 cleanup: unified the FSM state file to `fsm-state.yaml` (retired the parallel never-read `state.yaml` step-array across scripts/docs/templates/tests, legacy fallback kept); fixed `/aid-stop` + `/aid-run --resume` to use real FSM state fields; removed the never-backed queue pause/resume/reorder subcommands (archived, restorable)
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

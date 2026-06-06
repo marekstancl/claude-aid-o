@@ -249,6 +249,20 @@ fi
 
 [[ "${#phase_steps[@]}" -eq 0 ]] && error_exit "No steps found for phase $phase" 1
 
+# Build a global→local step-number map. Each EPIC renumbers its steps 1..N in
+# document order (the # column), but dependency references are parsed as the
+# plan's global step numbers. Without this remap the Depends On column would
+# point at global numbers that do not exist in the renumbered table (e.g.
+# "step 2 depends on 4" in a 3-step EPIC), which fails validation downstream
+# in aid-epic-to-json.sh. phase_steps is already in document order, so its
+# index+1 is the local step number.
+declare -A global_to_local
+_local_idx=0
+for sn in "${phase_steps[@]}"; do
+  _local_idx=$(( _local_idx + 1 ))
+  global_to_local["$sn"]="$_local_idx"
+done
+
 # ---------------------------------------------------------------------------
 # Step 5: Extract data from each phase step
 # ---------------------------------------------------------------------------
@@ -550,8 +564,11 @@ for sn in "${phase_steps[@]}"; do
     all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
   fi
 
-  # Build step objectives list for Goal section
-  step_objectives="${step_objectives}- Step ${sn}: ${objective}"$'\n'
+  # Build step objectives list for Goal section.
+  # Use the EPIC-local step number (step_counter) so the Goal list stays
+  # consistent with the renumbered Steps table; the global number ($sn) only
+  # exists in the source plan.
+  step_objectives="${step_objectives}- Step ${step_counter}: ${objective}"$'\n'
 
   # Extract raw dependency line from step content
   raw_dep_line="$(echo "$step_content" | awk '
@@ -583,6 +600,27 @@ for sn in "${phase_steps[@]}"; do
   # outside the current EPIC's step range
   if [[ -n "$step_deps" ]]; then
     step_deps="$(strip_cross_phase_deps "$step_deps" "${phase_steps[*]}")"
+  fi
+
+  # Remap surviving (intra-EPIC) dependencies from global to local step
+  # numbers so the Depends On column matches the renumbered # column. After
+  # the strip above, every remaining number is in phase_steps and therefore
+  # has a global_to_local entry.
+  if [[ -n "$step_deps" ]]; then
+    remapped_deps=()
+    IFS=',' read -ra _dep_nums <<< "$step_deps"
+    for _dn in "${_dep_nums[@]}"; do
+      _dn="$(echo "$_dn" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -z "$_dn" ]] && continue
+      if [[ -n "${global_to_local[$_dn]+_}" ]]; then
+        remapped_deps+=("${global_to_local[$_dn]}")
+      fi
+    done
+    if [[ "${#remapped_deps[@]}" -gt 0 ]]; then
+      step_deps="$(printf '%s\n' "${remapped_deps[@]}" | sort -n -u | paste -sd ',' - | sed 's/,/, /g')"
+    else
+      step_deps=""
+    fi
   fi
 
   # Build Steps table row

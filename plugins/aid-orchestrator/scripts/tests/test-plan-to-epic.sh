@@ -439,12 +439,14 @@ else
   # After cross-phase stripping, steps 1, 2, 3 are removed (they're in phase 1).
   # So Step 4's depends_on should be "---" in the EPIC.
   # We verify range expansion worked by checking step 5 which has "Step 1, Steps 3-5"
-  # After cross-phase stripping (valid: 4,5,6): 1 removed, 3 removed, 4 kept, 5 kept
+  # After cross-phase stripping (valid: 4,5,6): 1 removed, 3 removed, 4 kept, 5 kept.
+  # The surviving global deps {4,5} are then remapped to EPIC-local numbering
+  # (global 4 -> local 1, global 5 -> local 2), so the row shows "1, 2".
   step2_row="$(grep "^| 2 |" "$epic_path_t13" 2>/dev/null || true)"
-  if echo "$step2_row" | grep -qE '\| 4, 5 \|'; then
-    pass "range expansion + cross-phase strip: Step 5 depends on '4, 5'"
+  if echo "$step2_row" | grep -qE '\| 1, 2 \|'; then
+    pass "range expansion + cross-phase strip + local remap: global '4, 5' -> local '1, 2'"
   else
-    fail "range expansion + cross-phase strip: Step 5 depends on '4, 5'" "row: $step2_row"
+    fail "range expansion + cross-phase strip + local remap: global '4, 5' -> local '1, 2'" "row: $step2_row"
   fi
 fi
 
@@ -606,6 +608,103 @@ if [[ -z "$strip_result" ]]; then
   pass "cross-phase strip: all deps outside valid steps -> empty string"
 else
   fail "cross-phase strip: all deps outside valid steps -> empty string" "got: '$strip_result'"
+fi
+
+# ===========================================================================
+# TEST 21: Intra-EPIC dependency remap — global step numbers in a later EPIC
+# are renumbered to EPIC-local numbering in the Depends On column.
+# Regression for the "step 2 depends on 4" bug: a 3-step EPIC must never
+# reference a step number outside 1..3.
+# ===========================================================================
+run_test "Intra-EPIC dep remap: EPIC 2 (global steps 4-6) renumbers deps to local 1-3"
+
+env_dir="$(make_test_env "t21")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+remap_plan="$env_dir/remap-plan.md"
+
+cat > "$remap_plan" <<'PLANEOF'
+---
+id: P998
+---
+
+# P998 — Intra-EPIC remap regression
+
+## Context
+Regression fixture for global-to-local dependency remapping.
+
+## Goal
+Ensure a later EPIC renumbers its dependency references.
+
+## Implementation Steps
+
+**EPIC 1: Steps 1-3 — Schema**
+
+### Step 1: Define the database schema tables
+**AID Role:** backend
+**Dependencies:**
+- Depends on: ---
+
+### Step 2: Build the ORM model classes
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 1
+
+### Step 3: Generate the database migrations
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 1
+
+**EPIC 2: Steps 4-6 — Exporter**
+
+### Step 4: Implement the data exporter module
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 1
+
+### Step 5: Seed the database with exported data
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 4
+
+### Step 6: Verify the seeded data integrity
+**AID Role:** backend
+**Dependencies:**
+- Depends on: Step 5
+PLANEOF
+
+actual_exit=0
+epic_path_t21="$("$SCRIPT_UNDER_TEST" \
+  --plan "$remap_plan" \
+  --phase 2 \
+  --total 2 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" \
+  --counter-yaml "$counter_yaml" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "remap plan phase 2 exits with code 0" "got exit code $actual_exit"
+else
+  # Global step 4 (exporter) -> local 1, deps on step 1 (schema, cross-phase) -> '---'
+  # Global step 5 (seed)     -> local 2, deps on global 4 -> local 1
+  # Global step 6 (verify)   -> local 3, deps on global 5 -> local 2
+  row1="$(grep "^| 1 |" "$epic_path_t21" 2>/dev/null || true)"
+  row2="$(grep "^| 2 |" "$epic_path_t21" 2>/dev/null || true)"
+  row3="$(grep "^| 3 |" "$epic_path_t21" 2>/dev/null || true)"
+  ok=1
+  echo "$row1" | grep -qE '\| --- \| --- \|$' || ok=0   # local 1: cross-phase dep stripped
+  echo "$row2" | grep -qE '\| 1 \| --- \|$'   || ok=0   # local 2 depends on local 1
+  echo "$row3" | grep -qE '\| 2 \| --- \|$'   || ok=0   # local 3 depends on local 2
+  # And guard: no dependency cell may reference a step number > 3
+  if echo "$epic_path_t21" >/dev/null && grep -qE '^\| [0-9]+ \|.*\| [4-9][0-9]* \|' "$epic_path_t21"; then
+    ok=0
+  fi
+  if [[ "$ok" -eq 1 ]]; then
+    pass "intra-EPIC dep remap: rows show local deps (1->---, 2->1, 3->2), no out-of-range refs"
+  else
+    fail "intra-EPIC dep remap" "row1='$row1' row2='$row2' row3='$row3'"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
