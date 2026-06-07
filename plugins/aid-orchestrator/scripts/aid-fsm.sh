@@ -585,6 +585,64 @@ fsm_build_failures() {
   printf '%s\n' "$failures_json"
 }
 
+# ─── P042: Compliance Recovery Detection ─────────────────────────────────────
+# fsm_check_compliance_recovery — detect a pending blocking-compliance alert
+# that has not yet been paired with a recovery event.
+#
+# A "pending block" means: the timeline contains at least one
+# fsm_done_advance_blocked event, and no fsm_done_advance_recovered event
+# appears AFTER the last blocked event (i.e. the block has not been cleared).
+#
+# Inputs:
+#   $1 — timeline_path (path to timeline.jsonl for this EPIC run)
+#
+# Returns (via exit code):
+#   0 — pending block found; echoes comma-joined blocked_checks from the last
+#       fsm_done_advance_blocked event to stdout.
+#   1 — no pending block (timeline missing / unreadable / no blocked event /
+#       a recovered event already follows the last blocked event) or any
+#       parse error (soft-fail).
+#
+# Soft-fail contract: any jq / file error returns 1 (no-alert, never crashes
+# the done-advance transition). Never writes to stderr on expected conditions.
+fsm_check_compliance_recovery() {
+  local timeline_path="$1"
+
+  [[ -f "$timeline_path" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  # Find the positional index (0-based) of the last fsm_done_advance_blocked
+  # and fsm_done_advance_recovered events; -1 means "not found".
+  local last_blocked_idx last_recovered_idx
+  last_blocked_idx=$(jq -s 'to_entries
+    | map(select(.value.event == "fsm_done_advance_blocked"))
+    | if length == 0 then -1 else last.key end' \
+    "$timeline_path" 2>/dev/null)
+  last_recovered_idx=$(jq -s 'to_entries
+    | map(select(.value.event == "fsm_done_advance_recovered"))
+    | if length == 0 then -1 else last.key end' \
+    "$timeline_path" 2>/dev/null)
+
+  # Soft-fail on parse error (empty output)
+  [[ -z "$last_blocked_idx" || -z "$last_recovered_idx" ]] && return 1
+
+  # No blocked event at all → nothing to recover from
+  [[ "$last_blocked_idx" == "-1" ]] && return 1
+
+  # A recovered event exists AND comes after the last blocked event → already cleared
+  if [[ "$last_recovered_idx" != "-1" && "$last_recovered_idx" -gt "$last_blocked_idx" ]]; then
+    return 1
+  fi
+
+  # Pending block found — echo blocked_checks from the last blocked event
+  local blocked_checks
+  blocked_checks=$(jq -rs --argjson idx "$last_blocked_idx" \
+    '.[$idx].blocked_checks // ""' \
+    "$timeline_path" 2>/dev/null) || blocked_checks=""
+  echo "$blocked_checks"
+  return 0
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
