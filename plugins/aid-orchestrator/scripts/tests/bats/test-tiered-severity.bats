@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
 # test-tiered-severity.bats — P038 Phase 2 tiered severity + merge blocking smoke test.
+# Extended by P042: compliance recovery alert (fixtures 7a-7c).
 #
 # Validates the AID-v3-principles.md §1 enforcement chain:
 #   Step 1 (--blocked-checks audit-log array) →
@@ -300,4 +301,130 @@ EOF
   [[ "$output" == *"memory_substantive"* ]]
   # The candidate row format is fixed-width: `<name>  <epic_count>  <override_count>  <rate>  yes`.
   echo "$output" | grep -E 'memory_substantive +5 +0 +0\.00 +yes'
+}
+
+# ─── Recovery alert fixtures (P042) ─────────────────────────────────────────
+# These fixtures reuse the fixture-2 clean-done-advance harness (verified
+# provenance + no blocking failures). The observable signal is the
+# fsm_done_advance_recovered event in timeline.jsonl — NOT the Telegram alert
+# text (AID_TEST_MODE=1 suppresses try_telegram_alert unconditionally).
+
+# Shared helper: write fixture-2-style verified-provenance files so done-advance
+# exits 0. Caller must cd "$PROJECT_ROOT" first.
+_setup_clean_done_advance() {
+  local GEN_AT="2026-05-13T12:00:00Z"
+  local GEN_AT_MIN30="2026-05-13T11:59:30Z"
+  local GEN_AT_PLUS30="2026-05-13T12:00:30Z"
+
+  cat >> "${EVIDENCE_DIR}/timeline.jsonl" <<EOF
+{"ts":"${GEN_AT_MIN30}","event":"verifier_dispatch_start","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}"}
+{"ts":"${GEN_AT_PLUS30}","event":"verifier_dispatch_complete","focus":"cp2-step-1","agentId":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"${EVIDENCE_DIR}","output_file":"${EVIDENCE_DIR}/verifier-output-step-1.md"}
+EOF
+  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
+classification: RUN
+EOF
+  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
+_generated_by: aid-orchestrator:verifier@cp2-step-1
+_generated_at: ${GEN_AT}
+classification: RUN
+verdict: pass
+EOF
+}
+
+# ─── Fixture 7a ─────────────────────────────────────────────────────────────
+# blocked-then-cleared: prior fsm_done_advance_blocked in timeline + clean run
+# → exactly ONE fsm_done_advance_recovered event written to timeline.
+@test "fixture 7a: recovery: blocked-then-cleared writes exactly one recovered event" {
+  # Seed a prior blocking event (simulates a previous blocked done-advance).
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+
+  _setup_clean_done_advance
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # Timeline must have exactly one fsm_done_advance_recovered event.
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 1 ]
+
+  # recovered_checks field must carry the original blocked check name.
+  local recovered_checks
+  recovered_checks=$(jq -rs '[.[] | select(.event=="fsm_done_advance_recovered")] | last | .recovered_checks' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_checks" = "verifier_provenance" ]
+}
+
+# ─── Fixture 7b ─────────────────────────────────────────────────────────────
+# no-prior-block: clean timeline (no fsm_done_advance_blocked event) + clean run
+# → zero fsm_done_advance_recovered events written.
+@test "fixture 7b: recovery: no prior block writes no recovered event" {
+  # Timeline starts empty (no blocked event — setup() truncates it).
+  _setup_clean_done_advance
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # No fsm_done_advance_recovered event must appear in the timeline.
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 0 ]
+}
+
+# ─── Fixture 7c ─────────────────────────────────────────────────────────────
+# dedup: timeline already has a blocked + recovered pair → second clean run
+# must NOT write an additional fsm_done_advance_recovered event.
+@test "fixture 7c: recovery: dedup — second clean run after recovery writes no new recovered event" {
+  # Seed a blocked event followed immediately by a recovered event (already cleared).
+  printf '{"ts":"2026-05-13T09:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+  printf '{"ts":"2026-05-13T09:30:00Z","event":"fsm_done_advance_recovered","recovered_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+
+  _setup_clean_done_advance
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # Still exactly one fsm_done_advance_recovered event (the seeded one; no new one added).
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 1 ]
+}
+
+# ─── Fixture 7d ─────────────────────────────────────────────────────────────
+# gate-disabled: alert_on_compliance_recovery=false in execution.yaml → alert
+# suppressed, but the fsm_done_advance_recovered event is still written (log_event
+# is unconditional; only try_telegram_alert is gated).
+@test "fixture 7d: recovery: gate disabled suppresses alert but still writes recovered event" {
+  # Seed a prior blocking event.
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+
+  # Disable the alert gate in execution.yaml (4-space indent, under notifications.telegram).
+  cat >> "${CONFIG_DIR}/execution.yaml" <<EOF
+notifications:
+  telegram:
+    enabled: false
+    alert_on_compliance_recovery: false
+EOF
+
+  _setup_clean_done_advance
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # The recovered event MUST still be written (dedup marker is unconditional).
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 1 ]
 }

@@ -585,6 +585,64 @@ fsm_build_failures() {
   printf '%s\n' "$failures_json"
 }
 
+# ─── P042: Compliance Recovery Detection ─────────────────────────────────────
+# fsm_check_compliance_recovery — detect a pending blocking-compliance alert
+# that has not yet been paired with a recovery event.
+#
+# A "pending block" means: the timeline contains at least one
+# fsm_done_advance_blocked event, and no fsm_done_advance_recovered event
+# appears AFTER the last blocked event (i.e. the block has not been cleared).
+#
+# Inputs:
+#   $1 — timeline_path (path to timeline.jsonl for this EPIC run)
+#
+# Returns (via exit code):
+#   0 — pending block found; echoes comma-joined blocked_checks from the last
+#       fsm_done_advance_blocked event to stdout.
+#   1 — no pending block (timeline missing / unreadable / no blocked event /
+#       a recovered event already follows the last blocked event) or any
+#       parse error (soft-fail).
+#
+# Soft-fail contract: any jq / file error returns 1 (no-alert, never crashes
+# the done-advance transition). Never writes to stderr on expected conditions.
+fsm_check_compliance_recovery() {
+  local timeline_path="$1"
+
+  [[ -f "$timeline_path" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  # Find the positional index (0-based) of the last fsm_done_advance_blocked
+  # and fsm_done_advance_recovered events; -1 means "not found".
+  local last_blocked_idx last_recovered_idx
+  last_blocked_idx=$(jq -s 'to_entries
+    | map(select(.value.event == "fsm_done_advance_blocked"))
+    | if length == 0 then -1 else last.key end' \
+    "$timeline_path" 2>/dev/null)
+  last_recovered_idx=$(jq -s 'to_entries
+    | map(select(.value.event == "fsm_done_advance_recovered"))
+    | if length == 0 then -1 else last.key end' \
+    "$timeline_path" 2>/dev/null)
+
+  # Soft-fail on parse error (empty output)
+  [[ -z "$last_blocked_idx" || -z "$last_recovered_idx" ]] && return 1
+
+  # No blocked event at all → nothing to recover from
+  [[ "$last_blocked_idx" == "-1" ]] && return 1
+
+  # A recovered event exists AND comes after the last blocked event → already cleared
+  if [[ "$last_recovered_idx" != "-1" && "$last_recovered_idx" -gt "$last_blocked_idx" ]]; then
+    return 1
+  fi
+
+  # Pending block found — echo blocked_checks from the last blocked event
+  local blocked_checks
+  blocked_checks=$(jq -rs --argjson idx "$last_blocked_idx" \
+    '.[$idx].blocked_checks // ""' \
+    "$timeline_path" 2>/dev/null) || blocked_checks=""
+  echo "$blocked_checks"
+  return 0
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
@@ -2044,6 +2102,7 @@ cmd_done_advance() {
       # See AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
       local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
       local _checks_json _failures_json _blocking_count
+      local _timeline="${evidence_dir}/timeline.jsonl"
       if _checks_json=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null); then
         _failures_json=$(fsm_build_failures "$_checks_json" "$severity_yaml")
         _blocking_count=$(echo "$_failures_json" | jq '[.[] | select(.severity == "blocking")] | length' 2>/dev/null || echo "0")
@@ -2086,14 +2145,30 @@ EOF
 
           try_telegram_alert "🛑 ${epic_id}: ${_blocking_count} blocking compliance failure(s) — release blocked. Checks: ${_blocking_names}"
 
-          local _timeline="${evidence_dir}/timeline.jsonl"
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
 
           exit 2
         fi
+
+        # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
+        # failures. The log_event runs (unless timeline is missing) so the dedup marker is
+        # written even when Telegram transport is unavailable. try_telegram_alert is best-effort.
+        # Config gate alert_on_compliance_recovery is read below from execution.yaml (key added
+        # to the generator in aid-init-execution-yaml.sh; default on when key absent).
+        local _recovery_checks
+        if _recovery_checks=$(fsm_check_compliance_recovery "$_timeline" 2>/dev/null); then
+          local _recovery_gate
+          _recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+            | awk '{print $2}' | tr -d '"'"'"' ') || _recovery_gate=""
+          _recovery_gate="${_recovery_gate:-true}"
+          [[ "$_recovery_gate" == "false" ]] || \
+            try_telegram_alert "✅ ${epic_id}: compliance cleared, release unblocked. Checks: ${_recovery_checks}"
+          [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_recovered" \
+            recovered_checks="$_recovery_checks"
+        fi
       fi
-      # End P038 Step 3 block. Falls through to existing curator/auditor checks.
+      # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
 
       # P040 Component C: CP4 enforcement (must run before existing curator-report check)
       if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then

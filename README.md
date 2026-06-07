@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.28.3
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.29.0
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.28.3** (current) — fixed three EPIC-generation edge cases: a step whose dependency range covered its own number produced a self-edge that crashed cycle detection; `Task N`/`Tasks M-N` dependency lines were silently dropped (parser only knew `Step`); the FSM clean-tree guard aborted multi-phase auto runs by counting AID's own runtime `queue.yaml` as user changes; and `/aid-init` now backfills individual missing `.gitignore` lines instead of skipping the whole block
+- **v2.29.0** (current) — added compliance recovery alert: AID now emits a `✅ compliance cleared, release unblocked` Telegram alert when a previously-blocked EPIC clears all blocking compliance failures, paired with an `fsm_done_advance_recovered` timeline event for dedup and auditability
+- **v2.28.3** — fixed three EPIC-generation edge cases: a step whose dependency range covered its own number produced a self-edge that crashed cycle detection; `Task N`/`Tasks M-N` dependency lines were silently dropped (parser only knew `Step`); the FSM clean-tree guard aborted multi-phase auto runs by counting AID's own runtime `queue.yaml` as user changes; and `/aid-init` now backfills individual missing `.gitignore` lines instead of skipping the whole block
 - **v2.28.2** — fixed EPIC dependency renumbering: slicing a multi-EPIC plan into per-EPIC files kept global step numbers in the Depends On column (e.g. "step 2 depends on 4" in a 3-step EPIC), crashing EPIC-to-JSON validation; intra-EPIC dependencies and the Goal step list are now remapped to EPIC-local numbering
-- **v2.28.1** — fixed the `aid-fsm.sh transition --force` crash (unbound `project_root` under `set -u`) that broke the manual-override escape hatch; CI now installs `bats` so the FSM/release/integration suites actually run (they were silently skipped), the stale bats + regression suites are repaired, and the FSM precondition layer gained real red/green coverage
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
