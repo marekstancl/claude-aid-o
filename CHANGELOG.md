@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.28.4] — 2026-06-07
+## [2.29.0] — 2026-06-07
 
 ### Added
 - **Compliance recovery alert** — when a `done-advance review→release` succeeds with zero blocking failures for an EPIC that previously emitted a `🛑 release blocked` alert, AID now emits a `✅ compliance cleared, release unblocked` Telegram alert and writes an `fsm_done_advance_recovered` timeline event (dedup marker, observable test signal); controlled by `alert_on_compliance_recovery` config gate (default on)
