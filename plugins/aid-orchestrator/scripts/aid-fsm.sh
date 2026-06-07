@@ -2159,7 +2159,7 @@ EOF
         local _recovery_checks
         if _recovery_checks=$(fsm_check_compliance_recovery "$_timeline" 2>/dev/null); then
           local _recovery_gate
-          _recovery_gate=$(grep -E '^  alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+          _recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
             | awk '{print $2}' | tr -d '"'"'"' ') || _recovery_gate=""
           _recovery_gate="${_recovery_gate:-true}"
           [[ "$_recovery_gate" == "false" ]] || \
