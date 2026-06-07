@@ -2102,6 +2102,7 @@ cmd_done_advance() {
       # See AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
       local severity_yaml="${project_root}/.aid-o/config/check-severity.yaml"
       local _checks_json _failures_json _blocking_count
+      local _timeline="${evidence_dir}/timeline.jsonl"
       if _checks_json=$(evaluate_compliance_checks "$epic_id" "$state_file" "$evidence_dir" "$project_root" 2>/dev/null); then
         _failures_json=$(fsm_build_failures "$_checks_json" "$severity_yaml")
         _blocking_count=$(echo "$_failures_json" | jq '[.[] | select(.severity == "blocking")] | length' 2>/dev/null || echo "0")
@@ -2144,14 +2145,29 @@ EOF
 
           try_telegram_alert "🛑 ${epic_id}: ${_blocking_count} blocking compliance failure(s) — release blocked. Checks: ${_blocking_names}"
 
-          local _timeline="${evidence_dir}/timeline.jsonl"
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
 
           exit 2
         fi
+
+        # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
+        # failures. The log_event runs ALWAYS so the dedup marker is written even when the
+        # Telegram transport is unavailable. try_telegram_alert is best-effort (never fatal).
+        # Config gate alert_on_compliance_recovery is read in aid-init-execution-yaml.sh (Step 3).
+        local _recovery_checks
+        if _recovery_checks=$(fsm_check_compliance_recovery "$_timeline" 2>/dev/null); then
+          local _recovery_gate
+          _recovery_gate=$(grep -E '^  alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+            | awk '{print $2}' | tr -d '"'"'"' ') || _recovery_gate=""
+          _recovery_gate="${_recovery_gate:-true}"
+          [[ "$_recovery_gate" == "false" ]] || \
+            try_telegram_alert "✅ ${epic_id}: compliance cleared, release unblocked. Checks: ${_recovery_checks}"
+          [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_recovered" \
+            recovered_checks="$_recovery_checks"
+        fi
       fi
-      # End P038 Step 3 block. Falls through to existing curator/auditor checks.
+      # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
 
       # P040 Component C: CP4 enforcement (must run before existing curator-report check)
       if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then
