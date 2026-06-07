@@ -398,3 +398,33 @@ EOF
     "${EVIDENCE_DIR}/timeline.jsonl")
   [ "$recovered_count" -eq 1 ]
 }
+
+# ─── Fixture 7d ─────────────────────────────────────────────────────────────
+# gate-disabled: alert_on_compliance_recovery=false in execution.yaml → alert
+# suppressed, but the fsm_done_advance_recovered event is still written (log_event
+# is unconditional; only try_telegram_alert is gated).
+@test "fixture 7d: recovery: gate disabled suppresses alert but still writes recovered event" {
+  # Seed a prior blocking event.
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+
+  # Disable the alert gate in execution.yaml (4-space indent, under notifications.telegram).
+  cat >> "${CONFIG_DIR}/execution.yaml" <<EOF
+notifications:
+  telegram:
+    enabled: false
+    alert_on_compliance_recovery: false
+EOF
+
+  _setup_clean_done_advance
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # The recovered event MUST still be written (dedup marker is unconditional).
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 1 ]
+}

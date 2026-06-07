@@ -2152,8 +2152,8 @@ EOF
         fi
 
         # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
-        # failures. The log_event runs ALWAYS so the dedup marker is written even when the
-        # Telegram transport is unavailable. try_telegram_alert is best-effort (never fatal).
+        # failures. The log_event runs (unless timeline is missing) so the dedup marker is
+        # written even when Telegram transport is unavailable. try_telegram_alert is best-effort.
         # Config gate alert_on_compliance_recovery is read below from execution.yaml (key added
         # to the generator in aid-init-execution-yaml.sh; default on when key absent).
         local _recovery_checks
