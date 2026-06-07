@@ -2154,7 +2154,8 @@ EOF
         # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
         # failures. The log_event runs ALWAYS so the dedup marker is written even when the
         # Telegram transport is unavailable. try_telegram_alert is best-effort (never fatal).
-        # Config gate alert_on_compliance_recovery is read in aid-init-execution-yaml.sh (Step 3).
+        # Config gate alert_on_compliance_recovery is read below from execution.yaml (key added
+        # to the generator in aid-init-execution-yaml.sh; default on when key absent).
         local _recovery_checks
         if _recovery_checks=$(fsm_check_compliance_recovery "$_timeline" 2>/dev/null); then
           local _recovery_gate
