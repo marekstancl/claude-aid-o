@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.29.0** (current) — added compliance recovery alert: AID now emits a `✅ compliance cleared, release unblocked` Telegram alert when a previously-blocked EPIC clears all blocking compliance failures, paired with an `fsm_done_advance_recovered` timeline event for dedup and auditability
+- **v2.29.1** (current) — fixed `verifier_provenance` false-positive blocking: `dispatch_mode` defaulted to `subagent` (requires timeline events the CC Agent tool never writes), permanently blocking every EPIC in standard self-hosted operation; default is now `agent_tool`
+- **v2.29.0** — added compliance recovery alert: AID now emits a `✅ compliance cleared, release unblocked` Telegram alert when a previously-blocked EPIC clears all blocking compliance failures, paired with an `fsm_done_advance_recovered` timeline event for dedup and auditability
 - **v2.28.3** — fixed three EPIC-generation edge cases: a step whose dependency range covered its own number produced a self-edge that crashed cycle detection; `Task N`/`Tasks M-N` dependency lines were silently dropped (parser only knew `Step`); the FSM clean-tree guard aborted multi-phase auto runs by counting AID's own runtime `queue.yaml` as user changes; and `/aid-init` now backfills individual missing `.gitignore` lines instead of skipping the whole block
-- **v2.28.2** — fixed EPIC dependency renumbering: slicing a multi-EPIC plan into per-EPIC files kept global step numbers in the Depends On column (e.g. "step 2 depends on 4" in a 3-step EPIC), crashing EPIC-to-JSON validation; intra-EPIC dependencies and the Goal step list are now remapped to EPIC-local numbering
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

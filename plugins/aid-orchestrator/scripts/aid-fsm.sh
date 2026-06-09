@@ -738,6 +738,14 @@ verify_provenance() {
         echo "unverifiable"
       fi
       ;;
+    agent_tool)
+      # CC Agent tool dispatch — timeline events are not written by the Agent tool,
+      # so interval-bracket provenance is structurally unavailable. Return a non-blocking
+      # "agent_tool" signal so provenance_aggregate never escalates to "unverifiable".
+      # The integrity contract is upheld by pipeline.md MUST-dispatch / MUST-NOT-self-review
+      # instructions + the independent auditor + orphan-dispatch check (same as inline).
+      echo "agent_tool"
+      ;;
     inline)
       # Validate main-context@<sha> format + SHA exists in repo
       if [[ "$generated_by" =~ ^main-context@([a-f0-9]{7,40})$ ]]; then
@@ -761,10 +769,12 @@ evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
   # P037 Step 3: dispatch_mode resolution (used by verify_provenance below).
-  # Defaults: subagent + 60s window if yq missing or fields absent.
+  # Defaults: agent_tool (CC Agent tool, no timeline events) + 60s window.
+  # Set dispatch_mode: subagent in .aid-o/config/plugin.yaml to enable strict
+  # interval-bracket provenance when a FSM-aware dispatcher writes timeline events.
   local dispatch_mode timeline_window_s
-  dispatch_mode=$(yq -r '.dispatch_mode // "subagent"' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "subagent")
-  [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]] && dispatch_mode="subagent"
+  dispatch_mode=$(yq -r '.dispatch_mode // "agent_tool"' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "agent_tool")
+  [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]] && dispatch_mode="agent_tool"
   timeline_window_s=$(yq -r '.dispatch.timeline_window_seconds // 60' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null || echo "60")
   [[ -z "$timeline_window_s" || "$timeline_window_s" == "null" ]] && timeline_window_s=60
 

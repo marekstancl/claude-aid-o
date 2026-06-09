@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.29.1] — 2026-06-09
+
+### Fixed
+- **verifier_provenance false-positive blocking** — `dispatch_mode` defaulted to `subagent`, which requires `verifier_dispatch_start/complete` timeline events that the CC Agent tool never writes; every EPIC in standard AID self-hosted operation was therefore permanently blocked on `verifier_provenance`; the default is now `agent_tool` (set `dispatch_mode: subagent` in `.aid-o/config/plugin.yaml` to opt into strict interval-bracket provenance enforcement); a new `verify_provenance` branch returns a non-blocking `"agent_tool"` signal so `provenance_aggregate` never escalates to `"unverifiable"` in this mode
+
 ## [2.29.0] — 2026-06-07
 
 ### Added

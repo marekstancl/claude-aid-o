@@ -44,6 +44,14 @@ setup() {
   mkdir -p "${PROJECT_ROOT}/.aid-o/tasks"           # cmd_done_advance does `find .aid-o/tasks/`; missing dir → set -e crash
   mkdir -p "${EVIDENCE_DIR}/gates"
 
+  # Explicit subagent dispatch_mode so fixtures 1+2 (provenance blocking / verified)
+  # keep testing interval-bracket provenance — not affected by the agent_tool default
+  # change (P043). Fixtures that don't test provenance are unaffected either way.
+  cat > "${CONFIG_DIR}/plugin.yaml" <<EOF
+plugin_path: "${PROJECT_ROOT}"
+dispatch_mode: subagent
+EOF
+
   # Minimal fsm-state.yaml in DONE state, done_phase=review, branch matches task/E-* regex
   cat > "$STATE_FILE" <<EOF
 epic_id: ${EPIC_ID}
@@ -171,6 +179,37 @@ EOF
   [ "$status" -eq 0 ]
 
   # Compliance.json must exist with zero blocking failures.
+  [ -f "${EVIDENCE_DIR}/compliance.json" ]
+  local blocking_count
+  blocking_count=$(jq '.failures | map(select(.severity=="blocking")) | length' "${EVIDENCE_DIR}/compliance.json")
+  [ "$blocking_count" -eq 0 ]
+}
+
+# ─── Fixture 2b ─────────────────────────────────────────────────────────
+# agent_tool dispatch_mode + no timeline events → verifier_provenance must NOT block.
+# (P043: default dispatch_mode changed from subagent to agent_tool so CC Agent tool
+# users are no longer blocked on every EPIC.)
+@test "fixture 2b: agent_tool dispatch_mode skips provenance check (no timeline events)" {
+  # Override setup's explicit subagent to agent_tool
+  sed -i 's/dispatch_mode: subagent/dispatch_mode: agent_tool/' "${CONFIG_DIR}/plugin.yaml"
+
+  # Same unverifiable setup as fixture 1: verifier output present, timeline empty.
+  cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
+classification: RUN
+EOF
+  cat > "${EVIDENCE_DIR}/verifier-output-step-1.md" <<EOF
+_generated_by: aid-orchestrator:verifier@cp2-step-1
+_generated_at: 2025-01-01T00:00:00Z
+classification: RUN
+verdict: pass
+EOF
+  # Timeline remains empty (no dispatch events) — agent_tool must not block.
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+
+  # compliance.json must have zero blocking failures (verifier_provenance not in blocking list)
   [ -f "${EVIDENCE_DIR}/compliance.json" ]
   local blocking_count
   blocking_count=$(jq '.failures | map(select(.severity=="blocking")) | length' "${EVIDENCE_DIR}/compliance.json")
