@@ -414,7 +414,10 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
 
 2. **Verifier dispatch** (only for RUN/FAIL):
 
-   **Before `Agent()` call — emit dispatch start (P040 wrapper):**
+   **In `agent_tool` mode (default):** call `Agent()` directly — no `aid-emit-dispatch.sh` wrappers needed.
+
+   **In `subagent` mode only (`dispatch_mode: subagent` in plugin.yaml):** wrap with start/complete:
+
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
      --focus "cp2-step-<N>" \
@@ -432,7 +435,6 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
    Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
 
-   **After `Agent()` returns — emit dispatch complete (P040 wrapper):**
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
      --focus "cp2-step-<N>" \
@@ -469,7 +471,16 @@ pair (closest to `_generated_at`).
 
 ### Dispatch Protocol
 
-Per AID-v3-principles.md §1 — Detector without Enforcement is Decoration — every
+**`dispatch_mode` determines whether timeline events are required:**
+
+| `dispatch_mode` | Default? | `aid-emit-dispatch.sh` wrappers required? |
+|-----------------|----------|------------------------------------------|
+| `agent_tool` | **Yes (v2.29.1+)** | **No** — CC Agent tool does not write timeline events; FSM bypasses provenance check |
+| `subagent` | No (explicit opt-in in `.aid-o/config/plugin.yaml`) | **Yes** — must wrap every `Agent()` with start/complete pair |
+
+In `agent_tool` mode (default): skip the `aid-emit-dispatch.sh` calls entirely. The provenance check returns `"agent_tool"` (non-blocking) and no orphan events are created.
+
+In `subagent` mode (explicit `dispatch_mode: subagent` in plugin.yaml): every
 `Agent({subagent_type, prompt})` dispatch MUST be wrapped by paired calls to
 `aid-emit-dispatch.sh start` (before) and `aid-emit-dispatch.sh complete` (after).
 The orchestrator does NOT skip these calls; if it does, `cmd_increment_step` blocks
@@ -518,7 +529,9 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
 1. **Parallel dispatch** (single message with two Agent tool calls — leverages Krok 1 isolation finding T6):
 
-   **Before `Agent()` calls — emit both dispatch starts serially (P040 wrapper):**
+   **In `agent_tool` mode (default):** call both `Agent()` calls in parallel directly — no `aid-emit-dispatch.sh` wrappers needed.
+
+   **In `subagent` mode only:** emit starts before, completes after:
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
      --focus "cp3-code-review" \
@@ -538,7 +551,6 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
           prompt: <full diff, plan.json overall>})
    ```
 
-   **After both `Agent()` calls return — emit both dispatch completes serially (P040 wrapper):**
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
      --focus "cp3-code-review" \
@@ -941,9 +953,9 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    If FAIL → revert those changes, log reversion.
    Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
 
-   **Dispatch protocol (P040, v2.25.0+):** wrap the CP4 verifier `Agent()` call
-   with the `aid-emit-dispatch.sh` start/complete pair (`--focus
-   "cp4-curator-validation"`), identical to CP2/CP3:
+   **Dispatch protocol:** in `agent_tool` mode (default), call `Agent()` directly.
+   In `subagent` mode only: wrap with `aid-emit-dispatch.sh` start/complete pair
+   (`--focus "cp4-curator-validation"`), identical to CP2/CP3:
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
      --focus "cp4-curator-validation" \
@@ -1226,7 +1238,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-09
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
