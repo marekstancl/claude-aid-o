@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.29.2] — 2026-06-10
+
+### Changed
+- **Visual Companion — current state mandatory in mockups** — when proposing UI changes to an existing component/page, the companion must always render the current look alongside the proposed changes (side-by-side or inline delta); showing only the new design in isolation is now explicitly prohibited; applies both in the "Read the Code First" refactoring flow and as a general design tip
+
 ## [2.29.1] — 2026-06-09
 
 ### Fixed

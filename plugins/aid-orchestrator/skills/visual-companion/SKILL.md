@@ -80,7 +80,15 @@ forces a full rewrite. Read first, draw second.
    - List anything PM wants to add that **isn't in the data shape today** —
      this needs backend decision before drawing
 4. Get PM confirmation that the inventory matches their mental model
-5. Only THEN start companion mockups
+5. **MANDATORY — show current state first:** Before drawing any proposed changes,
+   render the component/page **as it currently looks** (from the real code/data shapes
+   you read in step 2). This is the baseline. Every subsequent mockup MUST be structured
+   as "current → proposed" — either side-by-side (`.split` layout) or a single mockup
+   that clearly shows the existing UI with the requested changes layered in.
+   **Never show only the new design in isolation.** A mockup that omits the current state
+   gives zero context for what is actually changing and forces the PM to mentally reconstruct
+   the delta. Always: current look + changes applied within it.
+6. Only THEN start companion mockups with the above baseline included
 
 **If PM declines** (e.g. "kresli, je to jen brainstorm"): proceed with
 mockups but explicitly state that data shapes are placeholders and mockups
@@ -324,6 +332,7 @@ If `.events` doesn't exist, the user didn't interact with the browser — use on
 - **2-4 options max** per screen
 - **Use real content when it matters** — for a photography portfolio, use actual images (Unsplash). Placeholder content obscures design issues.
 - **Keep mockups simple** — focus on layout and structure, not pixel-perfect design
+- **Always show current + proposed for existing UI** — if the component/page already exists in the codebase, every mockup MUST include the current state alongside the proposed changes (use `.split` for side-by-side, or render the existing UI with changes applied inline). Never show a new design in isolation — the PM needs to see what's actually changing.
 
 ## File Naming
 
@@ -360,4 +369,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-05-14
+**Last Updated:** 2026-06-10
