@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.29.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v2.29.4
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.29.3** (current) — /simplify hardening wave: pure-bash `yaml_field()` replaces 51 `grep|awk` forks in the FSM, accurate `provenance_aggregate: "agent_tool"` in compliance.json, `dispatch_mode` default single-sourced in `orchestration.yaml`, new check-severity sync guard test, and P042 recovery alert documented in pipeline.md
+- **v2.29.4** (current) — paired ✅ recovery alert with PM `--force` override resolutions (previously only clean re-runs emitted it), and fixed `/aid-init` writing `dispatch_mode: subagent` into project configs, which overrode the `agent_tool` default and reintroduced `verifier_provenance` false-positive blocks
+- **v2.29.3** — /simplify hardening wave: pure-bash `yaml_field()` replaces 51 `grep|awk` forks in the FSM, accurate `provenance_aggregate: "agent_tool"` in compliance.json, `dispatch_mode` default single-sourced in `orchestration.yaml`, new check-severity sync guard test, and P042 recovery alert documented in pipeline.md
 - **v2.29.2** — fixed `verifier_provenance` false-positive blocking: `dispatch_mode` defaulted to `subagent` (requires timeline events the CC Agent tool never writes), permanently blocking every EPIC in standard self-hosted operation; default is now `agent_tool`
-- **v2.29.0** — added compliance recovery alert: AID now emits a `✅ compliance cleared, release unblocked` Telegram alert when a previously-blocked EPIC clears all blocking compliance failures, paired with an `fsm_done_advance_recovered` timeline event for dedup and auditability
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
