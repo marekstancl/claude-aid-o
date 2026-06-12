@@ -10,7 +10,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
-die() { echo "ERROR: $*" >&2; exit 1; }
 
 main() {
   local cmd="${1:-}"

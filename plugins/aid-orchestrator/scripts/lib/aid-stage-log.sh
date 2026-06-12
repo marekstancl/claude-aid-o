@@ -3,6 +3,10 @@
 # Source this file, then call: log_event <timeline_file> <event> [key=value ...]
 # NEVER exits non-zero (logging must not interrupt pipeline)
 
+# Shared fatal-error helper for sourcing scripts (aid-fsm.sh overrides it with
+# its own multi-line variant — that definition comes after the source line).
+die() { echo "ERROR: $*" >&2; exit 1; }
+
 log_event() {
   local timeline_file="$1"
   local event="$2"

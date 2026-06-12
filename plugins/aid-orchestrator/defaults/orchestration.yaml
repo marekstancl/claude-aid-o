@@ -21,9 +21,17 @@ dispatch:
   strategy: sequential          # TEMPORARY: force sequential until Agent SDK migration
   max_parallel: 1               # ONE agent at a time — prevents mega-commits and placeholder verify
   worktree_base: .claude/worktrees
-  # Verifier dispatch configuration (Phase 1 — P037 v2.20.1)
-  mode: subagent  # subagent | inline
-                  # subagent: pipeline.md flow dispatches Agent() subagents; the verifier output's
+  # Verifier dispatch / provenance configuration (P037 v2.20.1, P043 v2.29.1).
+  # Single source of truth for the FSM default — aid-fsm.sh resolution order:
+  #   1. project `.aid-o/config/plugin.yaml` key `dispatch_mode:` (per-project override)
+  #   2. this file, `dispatch.mode`
+  #   3. hard fallback "agent_tool" (when yq or this file is unavailable)
+  mode: agent_tool  # agent_tool | subagent | inline
+                  # agent_tool: orchestrator calls the CC Agent tool directly (default since
+                  #           v2.29.1, P043). The Agent tool writes no timeline events, so the
+                  #           provenance check returns the non-blocking "agent_tool" sentinel.
+                  # subagent: an FSM-aware dispatcher wraps every Agent() with the
+                  #           aid-emit-dispatch.sh start/complete pair; the verifier output's
                   #           _generated_at must fall within the dispatch start..complete interval
                   #           for its focus in timeline.jsonl (± timeline_window_seconds tolerance).
                   # inline:   LLM writes verifier-output-*.md directly in main context;

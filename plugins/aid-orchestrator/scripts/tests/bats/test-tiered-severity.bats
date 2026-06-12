@@ -44,9 +44,10 @@ setup() {
   mkdir -p "${PROJECT_ROOT}/.aid-o/tasks"           # cmd_done_advance does `find .aid-o/tasks/`; missing dir → set -e crash
   mkdir -p "${EVIDENCE_DIR}/gates"
 
-  # Explicit subagent dispatch_mode so fixtures 1+2 (provenance blocking / verified)
-  # keep testing interval-bracket provenance — not affected by the agent_tool default
-  # change (P043). Fixtures that don't test provenance are unaffected either way.
+  # Explicit subagent dispatch_mode so fixtures 1-3 (provenance blocking / verified /
+  # force override) keep testing interval-bracket provenance — not affected by the
+  # agent_tool default change (P043). Fixture 2b removes this file to test the default;
+  # fixtures that don't test provenance are unaffected either way.
   cat > "${CONFIG_DIR}/plugin.yaml" <<EOF
 plugin_path: "${PROJECT_ROOT}"
 dispatch_mode: subagent
@@ -190,8 +191,9 @@ EOF
 # (P043: default dispatch_mode changed from subagent to agent_tool so CC Agent tool
 # users are no longer blocked on every EPIC.)
 @test "fixture 2b: agent_tool dispatch_mode skips provenance check (no timeline events)" {
-  # Override setup's explicit subagent to agent_tool
-  sed -i 's/dispatch_mode: subagent/dispatch_mode: agent_tool/' "${CONFIG_DIR}/plugin.yaml"
+  # Remove setup's plugin.yaml entirely — exercises the true P043 default path
+  # (CC Agent tool user with no dispatch_mode config at all).
+  rm -f "${CONFIG_DIR}/plugin.yaml"
 
   # Same unverifiable setup as fixture 1: verifier output present, timeline empty.
   cat > "${EVIDENCE_DIR}/step-1-verify.md" <<EOF
@@ -214,6 +216,11 @@ EOF
   local blocking_count
   blocking_count=$(jq '.failures | map(select(.severity=="blocking")) | length' "${EVIDENCE_DIR}/compliance.json")
   [ "$blocking_count" -eq 0 ]
+
+  # Aggregate must report the mode-level sentinel, not a misleading "mixed".
+  local prov_agg
+  prov_agg=$(jq -r '.checks.verifier_outputs.provenance_aggregate' "${EVIDENCE_DIR}/compliance.json")
+  [ "$prov_agg" = "agent_tool" ]
 }
 
 # ─── Fixture 3 ──────────────────────────────────────────────────────────

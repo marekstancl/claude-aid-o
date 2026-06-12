@@ -51,12 +51,30 @@ is_valid_transition() {
   return 1
 }
 
+# Read a flat `key: value` scalar from a YAML-ish file (fsm-state.yaml,
+# verifier-output-*.md frontmatter). Pure bash — replaces the grep|awk pattern
+# (2 forks per read) that was previously copy-pasted at every field access.
+# First match wins; prints empty (exit 0) on missing file/key — set -e safe.
+yaml_field() {
+  local file=$1 key=$2 line
+  [[ -f "$file" ]] || return 0
+  while IFS= read -r line; do
+    if [[ "$line" == "${key}:"* ]]; then
+      line=${line#"${key}:"}
+      line=${line#"${line%%[![:space:]]*}"}
+      printf '%s\n' "${line%%[[:space:]]*}"
+      return 0
+    fi
+  done < "$file"
+  return 0
+}
+
 # Derive timeline.jsonl path from state_file fields (best-effort, never fails)
 derive_timeline() {
   local state_file="$1"
   local epic_id run_id
-  epic_id=$(grep '^epic_id:' "$state_file" 2>/dev/null | awk '{print $2}') || true
-  run_id=$(grep '^run_id:' "$state_file" 2>/dev/null | awk '{print $2}') || true
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
   if [[ -n "$epic_id" && -n "$run_id" ]]; then
     echo ".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
   fi
@@ -78,6 +96,18 @@ die() {
   exit 1
 }
 
+# Fail one cmd_increment_step precondition: print message lines to stderr,
+# log fsm_increment_fail with the given reason, exit 1. Reads $state_file and
+# $step from caller scope (file convention, see fsm_count_fails_matching).
+_increment_fail() {
+  local reason=$1; shift
+  printf '%s\n' "$@" >&2
+  local timeline
+  timeline=$(derive_timeline "$state_file") || true
+  [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="$reason"
+  exit 1
+}
+
 # ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
 # All three read $state_file / $evidence_dir / $epic_id from caller scope
 # (matches existing derive_timeline / check_preconditions convention).
@@ -91,7 +121,7 @@ die() {
 # `date -u +%Y-%m-%dT%H:%M:%SZ` format (Step 2 cmd_init / Step 9 release).
 fsm_check_grandfather() {
   local created_at
-  created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  created_at=$(yaml_field "$state_file" created_at)
   [[ -z "$created_at" ]] && return 1
   local deploy_date="${AID_DEPLOY_DATE:-}"
   if [[ -z "$deploy_date" && -n "${AID_PLUGIN_PATH:-}" && -f "${AID_PLUGIN_PATH}/DEPLOY_DATE" ]]; then
@@ -104,37 +134,34 @@ fsm_check_grandfather() {
   [[ "$created_at" < "$deploy_date" ]]
 }
 
-# Count prior fsm_precondition_fail events on this EPIC matching from/to/reason.
-# Returns 0 (and echoes 0) when timeline is missing — first-attempt safe.
-fsm_count_recent_fails() {
-  local from=$1 to=$2 reason=$3
+# Core counter for fsm_precondition_fail events: $1 is a jq filter fragment,
+# remaining args are jq --arg bindings. Echoes 0 when timeline is missing —
+# first-attempt safe. The three wrappers below differ only in their filter.
+fsm_count_fails_matching() {
+  local filter=$1; shift
   local timeline="${evidence_dir}/timeline.jsonl"
   [[ ! -f "$timeline" ]] && { echo 0; return 0; }
-  jq -r --arg f "$from" --arg t "$to" --arg r "$reason" \
-     '[inputs | select(.event=="fsm_precondition_fail" and .from==$f and .to==$t and .reason==$r)] | length' \
+  jq -r "$@" \
+     "[inputs | select(.event==\"fsm_precondition_fail\" and (${filter}))] | length" \
      -n < "$timeline" 2>/dev/null || echo 0
+}
+
+# Count prior fsm_precondition_fail events on this EPIC matching from/to/reason.
+fsm_count_recent_fails() {
+  fsm_count_fails_matching '.from==$f and .to==$t and .reason==$r' \
+    --arg f "$1" --arg t "$2" --arg r "$3"
 }
 
 # Count fsm_precondition_fail events for (same step + same reason) — detects
 # "this step is structurally problematic" pattern (≥ 3 = step-level repeated fail).
 fsm_count_recent_fails_step() {
-  local step=$1 reason=$2
-  local timeline="${evidence_dir}/timeline.jsonl"
-  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
-  jq -r --arg s "$step" --arg r "$reason" \
-     '[inputs | select(.event=="fsm_precondition_fail" and .step==$s and .reason==$r)] | length' \
-     -n < "$timeline" 2>/dev/null || echo 0
+  fsm_count_fails_matching '.step==$s and .reason==$r' --arg s "$1" --arg r "$2"
 }
 
 # Count fsm_precondition_fail events for (same reason, any step) — detects
 # "agent systematically bypasses this check across steps" pattern (≥ 3 = EPIC-level).
 fsm_count_recent_fails_epic() {
-  local reason=$1
-  local timeline="${evidence_dir}/timeline.jsonl"
-  [[ ! -f "$timeline" ]] && { echo 0; return 0; }
-  jq -r --arg r "$reason" \
-     '[inputs | select(.event=="fsm_precondition_fail" and .reason==$r)] | length' \
-     -n < "$timeline" 2>/dev/null || echo 0
+  fsm_count_fails_matching '.reason==$r' --arg r "$1"
 }
 
 # Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
@@ -147,7 +174,7 @@ fsm_check_verifier_output() {
   grep -q '^classification:' "$file" || return 1
 
   local classification
-  classification=$(grep '^classification:' "$file" | awk '{print $2}')
+  classification=$(yaml_field "$file" classification)
   case "$classification" in
     SKIP)
       grep -q '^reason:' "$file" || return 1
@@ -155,7 +182,7 @@ fsm_check_verifier_output() {
     RUN|FAIL|FULL_REVIEW)
       grep -q '^verdict:' "$file" || return 1
       local verdict
-      verdict=$(grep '^verdict:' "$file" | awk '{print $2}')
+      verdict=$(yaml_field "$file" verdict)
       [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
       ;;
     *)
@@ -675,12 +702,14 @@ try_telegram_alert() {
 # ─── P037 Step 3: Provenance Verification Helper ──────────────────────────
 # verify_provenance cross-references a verifier output's _generated_by/_generated_at
 # metadata against the actual dispatch evidence:
+#   - agent_tool mode (default, P043): CC Agent tool writes no timeline events —
+#     returns the non-blocking "agent_tool" sentinel without checking.
 #   - subagent mode: timeline.jsonl must show verifier_dispatch_start +
 #     verifier_dispatch_complete events for this focus within ±window_s of
 #     the claimed _generated_at timestamp.
 #   - inline mode: _generated_by must match main-context@<sha>, and the SHA
 #     must resolve in the project's git object database.
-# Returns one of: "verified", "inline", "unverifiable", "unknown".
+# Returns one of: "verified", "inline", "agent_tool", "unverifiable", "unknown".
 # NOTE: "unverifiable" means the output's provenance could not be confirmed against
 # the dispatch timeline (stale / missing / mismatched dispatch records). It is an
 # integrity signal, NOT proof of deliberate fraud — a determined main-context
@@ -695,8 +724,8 @@ verify_provenance() {
   local verifier_output_file=$1 focus=$2 _step_n=$3 dispatch_mode=$4 timeline_file=$5 window_s=$6
 
   local generated_by generated_at
-  generated_by=$(grep '^_generated_by:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
-  generated_at=$(grep '^_generated_at:' "$verifier_output_file" 2>/dev/null | awk '{print $2}' || echo "")
+  generated_by=$(yaml_field "$verifier_output_file" _generated_by)
+  generated_at=$(yaml_field "$verifier_output_file" _generated_at)
 
   [[ -z "$generated_by" || -z "$generated_at" ]] && { echo "unverifiable"; return; }
 
@@ -739,11 +768,10 @@ verify_provenance() {
       fi
       ;;
     agent_tool)
-      # CC Agent tool dispatch — timeline events are not written by the Agent tool,
-      # so interval-bracket provenance is structurally unavailable. Return a non-blocking
-      # "agent_tool" signal so provenance_aggregate never escalates to "unverifiable".
-      # The integrity contract is upheld by pipeline.md MUST-dispatch / MUST-NOT-self-review
-      # instructions + the independent auditor + orphan-dispatch check (same as inline).
+      # CC Agent tool writes no timeline events → interval-bracket provenance is
+      # structurally unavailable. Non-blocking sentinel; integrity contract is
+      # upheld by pipeline.md dispatch rules + independent auditor (rationale in
+      # evaluate_compliance_checks below).
       echo "agent_tool"
       ;;
     inline)
@@ -768,12 +796,15 @@ verify_provenance() {
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
-  # P037 Step 3: dispatch_mode resolution (used by verify_provenance below).
-  # Defaults: agent_tool (CC Agent tool, no timeline events) + 60s window.
-  # Set dispatch_mode: subagent in .aid-o/config/plugin.yaml to enable strict
-  # interval-bracket provenance when a FSM-aware dispatcher writes timeline events.
+  # P037 Step 3 / P043: dispatch_mode resolution (used by verify_provenance below).
+  # Precedence: project .aid-o/config/plugin.yaml `dispatch_mode:` → plugin
+  # defaults/orchestration.yaml `dispatch.mode` (single source of the default)
+  # → hard fallback "agent_tool" (yq missing / defaults unreadable).
   local dispatch_mode timeline_window_s
-  dispatch_mode=$(yq -r '.dispatch_mode // "agent_tool"' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null || echo "agent_tool")
+  dispatch_mode=$(yq -r '.dispatch_mode' "${project_root}/.aid-o/config/plugin.yaml" 2>/dev/null) || dispatch_mode=""
+  if [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]]; then
+    dispatch_mode=$(yq -r '.dispatch.mode' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null) || dispatch_mode=""
+  fi
   [[ -z "$dispatch_mode" || "$dispatch_mode" == "null" ]] && dispatch_mode="agent_tool"
   timeline_window_s=$(yq -r '.dispatch.timeline_window_seconds // 60' "${SCRIPT_DIR}/../defaults/orchestration.yaml" 2>/dev/null || echo "60")
   [[ -z "$timeline_window_s" || "$timeline_window_s" == "null" ]] && timeline_window_s=60
@@ -782,7 +813,7 @@ evaluate_compliance_checks() {
   # (^task/E-...). Cross-prefix EPICs (B-051, etc.) report false here — out of
   # Session A scope; Sessions B/C may relax the regex.
   local branch_value branch_correct
-  branch_value=$(grep '^branch:' "$state_file" 2>/dev/null | awk '{print $2}')
+  branch_value=$(yaml_field "$state_file" branch)
   if [[ "$branch_value" =~ ^task/E- ]]; then
     branch_correct=true
   else
@@ -828,7 +859,7 @@ evaluate_compliance_checks() {
     if [[ -f "$vo" ]] && grep -q '^_generated_by:' "$vo" 2>/dev/null && grep -q '^classification:' "$vo" 2>/dev/null; then
       cp2_passed=$((cp2_passed + 1))
       local _v_status
-      _v_status=$(grep '^verdict:' "$vo" 2>/dev/null | awk '{print $2}' || true)
+      _v_status=$(yaml_field "$vo" verdict)
       [[ "$_v_status" == "fail" ]] && cp2_failed=$((cp2_failed + 1))
       # P037 Step 3: provenance cross-reference for this verifier output
       local _prov
@@ -851,33 +882,23 @@ evaluate_compliance_checks() {
     cp2_dispatched=false; cp2_verdict=null
   fi
 
-  # CP3 code-review verifier output
-  local cp3_cr_file="${evidence_dir}/verifier-output-cp3-code-review.md"
-  if [[ -f "$cp3_cr_file" ]] && grep -q '^_generated_by:' "$cp3_cr_file" 2>/dev/null; then
-    cp3_cr_d=true
-    local _cp3_cr_v
-    _cp3_cr_v=$(grep '^verdict:' "$cp3_cr_file" 2>/dev/null | awk '{print $2}' || true)
-    cp3_cr_v="\"${_cp3_cr_v:-unknown}\""
-    # P037 Step 3: provenance cross-reference
-    cp3_cr_provenance=$(verify_provenance "$cp3_cr_file" "cp3-code-review" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
-  else
-    cp3_cr_d=false; cp3_cr_v=null
-    cp3_cr_provenance="unknown"
-  fi
-
-  # CP3 security verifier output
-  local cp3_sec_file="${evidence_dir}/verifier-output-cp3-security.md"
-  if [[ -f "$cp3_sec_file" ]] && grep -q '^_generated_by:' "$cp3_sec_file" 2>/dev/null; then
-    cp3_sec_d=true
-    local _cp3_sec_v
-    _cp3_sec_v=$(grep '^verdict:' "$cp3_sec_file" 2>/dev/null | awk '{print $2}' || true)
-    cp3_sec_v="\"${_cp3_sec_v:-unknown}\""
-    # P037 Step 3: provenance cross-reference
-    cp3_sec_provenance=$(verify_provenance "$cp3_sec_file" "cp3-security" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")
-  else
-    cp3_sec_d=false; cp3_sec_v=null
-    cp3_sec_provenance="unknown"
-  fi
+  # CP3 verifier outputs (code-review + security) — identical evaluation, two
+  # focuses. Echoes "dispatched|verdict_json|provenance" (P037 Step 3 provenance
+  # cross-reference included). Reads dispatch_mode/evidence_dir/timeline_window_s
+  # from caller scope (file convention, see fsm_count_fails_matching).
+  _cp3_check() {
+    local file="${evidence_dir}/verifier-output-cp3-${1}.md" focus="cp3-${1}"
+    if [[ -f "$file" ]] && grep -q '^_generated_by:' "$file" 2>/dev/null; then
+      local v
+      v=$(yaml_field "$file" verdict)
+      printf 'true|"%s"|%s\n' "${v:-unknown}" \
+        "$(verify_provenance "$file" "$focus" "null" "$dispatch_mode" "${evidence_dir}/timeline.jsonl" "$timeline_window_s")"
+    else
+      printf 'false|null|unknown\n'
+    fi
+  }
+  IFS='|' read -r cp3_cr_d cp3_cr_v cp3_cr_provenance < <(_cp3_check "code-review")
+  IFS='|' read -r cp3_sec_d cp3_sec_v cp3_sec_provenance < <(_cp3_check "security")
 
   # aggregate: all three dispatched = true; null if CP2 is N/A (0 steps)
   if [[ "$cp2_dispatched" == "true" && "$cp3_cr_d" == "true" && "$cp3_sec_d" == "true" ]]; then
@@ -902,6 +923,9 @@ evaluate_compliance_checks() {
   # Else if all non-unknown are "verified" → "all_verified".
   # Else if all non-unknown are "inline" → "all_inline".
   # Else "mixed". If everything is unknown → "unknown".
+  # agent_tool mode short-circuits to "agent_tool": every per-output value is the
+  # agent_tool sentinel (mode is uniform per run), which would otherwise misreport
+  # as "mixed" (neither all_verified nor all_inline).
   local all_verified=true all_inline=true any_unverifiable=false any_known=false
   local p
   for p in "${cp2_provenances[@]}" "$cp3_cr_provenance" "$cp3_sec_provenance"; do
@@ -913,7 +937,9 @@ evaluate_compliance_checks() {
   done
 
   local prov_agg
-  if $any_unverifiable; then
+  if [[ "$dispatch_mode" == "agent_tool" ]]; then
+    prov_agg='"agent_tool"'
+  elif $any_unverifiable; then
     prov_agg='"unverifiable"'
   elif ! $any_known; then
     prov_agg='"unknown"'
@@ -999,7 +1025,7 @@ write_compliance_json() {
   # far-future fallback until that file is written.
   local deploy_era
   local _created_at _session_a_deploy _session_b_deploy
-  _created_at=$(grep '^created_at:' "$state_file" 2>/dev/null | awk '{print $2}')
+  _created_at=$(yaml_field "$state_file" created_at)
   _session_a_deploy="2026-05-05T16:37:52Z"
   if [[ -f "${SCRIPT_DIR}/../DEPLOY_DATE" ]]; then
     _session_b_deploy=$(cat "${SCRIPT_DIR}/../DEPLOY_DATE" 2>/dev/null || echo "2099-01-01T00:00:00Z")
@@ -1148,8 +1174,8 @@ check_preconditions() {
   local from="$1" to="$2" state_file="$3"
   local run_dir epic_id run_id
   run_dir="$(dirname "$state_file")"
-  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
   local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
 
   case "${from}:${to}" in
@@ -1161,7 +1187,7 @@ check_preconditions() {
         return 1
       }
       local total
-      total=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+      total=$(yaml_field "$state_file" total_steps)
       [[ "$total" -ge 1 ]] || {
         echo "PRECONDITION FAIL: total_steps=${total}, must be >= 1." >&2
         return 1
@@ -1171,8 +1197,8 @@ check_preconditions() {
     EXECUTE:EXECUTE)
       # More steps must remain
       local current total
-      current=$(grep '^current_step:' "$state_file" | awk '{print $2}')
-      total=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+      current=$(yaml_field "$state_file" current_step)
+      total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -lt "$total" ]] || {
         echo "PRECONDITION FAIL: current_step=${current} == total_steps=${total}. All steps done — use EXECUTE→GATES." >&2
         return 1
@@ -1182,8 +1208,8 @@ check_preconditions() {
     EXECUTE:GATES)
       # All steps must be completed
       local current total
-      current=$(grep '^current_step:' "$state_file" | awk '{print $2}')
-      total=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+      current=$(yaml_field "$state_file" current_step)
+      total=$(yaml_field "$state_file" total_steps)
       [[ "$current" -ge "$total" ]] || {
         _PRECONDITION_FAIL_REASON="steps_incomplete"
         echo "PRECONDITION FAIL: current_step=${current} < total_steps=${total}. Not all steps completed." >&2
@@ -1287,7 +1313,7 @@ EOF
     ESCALATION:EXECUTE|ESCALATION:GATES)
       # PM must have recorded a decision
       local decision
-      decision=$(grep '^escalation_decision:' "$state_file" | awk '{print $2}' || true)
+      decision=$(yaml_field "$state_file" escalation_decision)
       [[ -n "$decision" ]] || {
         echo "PRECONDITION FAIL: escalation_decision not set in fsm-state.yaml. PM must decide first." >&2
         return 1
@@ -1371,9 +1397,9 @@ cmd_init() {
     if [[ -n "$current_plan_prefix" ]]; then
       while IFS= read -r prev_state; do
         local prev_epic prev_plan prev_done_phase prev_dir
-        prev_epic=$(grep '^epic_id:' "$prev_state" | awk '{print $2}')
+        prev_epic=$(yaml_field "$prev_state" epic_id)
         prev_plan=$(echo "$prev_epic" | grep -oP '^P\d+' || true)
-        prev_done_phase=$(grep '^done_phase:' "$prev_state" | awk '{print $2}')
+        prev_done_phase=$(yaml_field "$prev_state" done_phase)
         prev_dir=$(dirname "$prev_state")
 
         # Only check EPICs from DIFFERENT completed plans
@@ -1607,8 +1633,8 @@ cmd_transition() {
   local force="false"
   if [[ "${4:-}" == "--force" ]]; then
     local epic_id run_id evidence_dir
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    epic_id=$(yaml_field "$state_file" epic_id)
+    run_id=$(yaml_field "$state_file" run_id)
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     fsm_handle_force_override "$from" "$to" "$state_file" "transition" "${@:5}"
     force="true"
@@ -1617,7 +1643,7 @@ cmd_transition() {
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found: $state_file" >&2; exit 1; }
 
   local current_state
-  current_state=$(grep '^state:' "$state_file" | awk '{print $2}')
+  current_state=$(yaml_field "$state_file" state)
 
   if [[ "$current_state" != "$from" ]]; then
     echo "ERROR: expected state $from but found $current_state" >&2
@@ -1655,7 +1681,7 @@ cmd_transition() {
   # Increment escalation_count when entering ESCALATION
   if [[ "$to" == "ESCALATION" ]]; then
     local count
-    count=$(grep '^escalation_count:' "$state_file" | awk '{print $2}')
+    count=$(yaml_field "$state_file" escalation_count)
     sed -i "s/^escalation_count: .*/escalation_count: $((count + 1))/" "$state_file"
   fi
 
@@ -1695,11 +1721,11 @@ cmd_advance_to_gates() {
   [[ ! -f "$state_file" ]] && { echo "ERROR: state file not found: $state_file" >&2; exit 1; }
 
   local epic_id run_id current_state current_step total_steps evidence_dir timeline
-  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-  current_state=$(grep '^state:' "$state_file" | awk '{print $2}')
-  current_step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
-  total_steps=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
+  current_state=$(yaml_field "$state_file" state)
+  current_step=$(yaml_field "$state_file" current_step)
+  total_steps=$(yaml_field "$state_file" total_steps)
   evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
   timeline=$(derive_timeline "$state_file") || true
 
@@ -1767,7 +1793,7 @@ cmd_advance_to_gates() {
 cmd_get_state() {
   local state_file="$1"
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
-  grep '^state:' "$state_file" | awk '{print $2}'
+  yaml_field "$state_file" state
 }
 
 cmd_verify_state() {
@@ -1775,11 +1801,11 @@ cmd_verify_state() {
   [[ -f "$state_file" ]] || { echo '{"error":"state_file not found"}'; exit 1; }
 
   local state epic_id run_id current_step total_steps
-  state=$(grep '^state:' "$state_file" | awk '{print $2}')
-  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
-  current_step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
-  total_steps=$(grep '^total_steps:' "$state_file" | awk '{print $2}')
+  state=$(yaml_field "$state_file" state)
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
+  current_step=$(yaml_field "$state_file" current_step)
+  total_steps=$(yaml_field "$state_file" total_steps)
 
   # Compute allowed transitions from current state
   local allowed=()
@@ -1793,7 +1819,7 @@ cmd_verify_state() {
   local done_phase_json=""
   if [[ "$state" == "DONE" ]]; then
     local done_phase
-    done_phase=$(grep '^done_phase:' "$state_file" | awk '{print $2}' || echo "unknown")
+    done_phase=$(yaml_field "$state_file" done_phase); done_phase=${done_phase:-unknown}
     done_phase_json=",\"done_phase\":\"${done_phase}\""
   fi
 
@@ -1810,9 +1836,9 @@ cmd_increment_step() {
   # P040 Component B: hoist scope vars to function-top so the reconciliation
   # backstop (and audit logging) can run UNCONDITIONALLY, regardless of --force.
   local step epic_id run_id evidence_dir project_root
-  step=$(grep '^current_step:' "$state_file" | awk '{print $2}')
-  epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-  run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+  step=$(yaml_field "$state_file" current_step)
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
   evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
   project_root="$PWD"
 
@@ -1833,98 +1859,66 @@ cmd_increment_step() {
   done
   blocked_checks="${blocked_checks// /}"; blocked_checks="${blocked_checks#,}"; blocked_checks="${blocked_checks%,}"
 
-  # Precondition: step verification evidence must exist
+  # Precondition: step verification evidence must exist + content checks.
+  # Each failure goes through _increment_fail (message → timeline event → exit 1).
   if [[ "$force" != "true" ]]; then
     local verify_file="${evidence_dir}/step-${step}-verify.md"
-    if [[ ! -f "$verify_file" ]]; then
-      echo "PRECONDITION FAIL: Step verification evidence not found." >&2
-      echo "Expected: ${verify_file}" >&2
-      echo "Write verification (AC checklist + result) before advancing to next step." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="missing_step_verify"
-      exit 1
-    fi
+    [[ -f "$verify_file" ]] || _increment_fail missing_step_verify \
+      "PRECONDITION FAIL: Step verification evidence not found." \
+      "Expected: ${verify_file}" \
+      "Write verification (AC checklist + result) before advancing to next step."
 
-    # Validate content — must contain explicit PASS result
-    if ! grep -q '## Result: PASS' "$verify_file" 2>/dev/null; then
-      echo "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." >&2
-      echo "File: ${verify_file}" >&2
-      echo "Fix failing AC or mark '## Result: PASS' when all criteria met." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="step_verify_not_pass"
-      exit 1
-    fi
+    # Content checks — single file read, bash pattern matches (was 5 grep forks).
+    local _verify_content
+    _verify_content=$(<"$verify_file")
 
-    # Validate content quality — must contain AC checklist and commit reference
-    local ac_count=0 commit_found=0
-    ac_count=$(grep -c '\- \[x\]' "$verify_file" 2>/dev/null) || ac_count=0
-    commit_found=$(grep -cE '[a-f0-9]{7,}' "$verify_file" 2>/dev/null) || commit_found=0
+    [[ "$_verify_content" == *"## Result: PASS"* ]] || _increment_fail step_verify_not_pass \
+      "PRECONDITION FAIL: Step verification does not contain '## Result: PASS'." \
+      "File: ${verify_file}" \
+      "Fix failing AC or mark '## Result: PASS' when all criteria met."
 
-    if [[ "$ac_count" -lt 1 ]]; then
-      echo "PRECONDITION FAIL: Step verification has no acceptance criteria checklist." >&2
-      echo "File: ${verify_file}" >&2
-      echo "Must contain at least one '- [x] ...' item matching plan AC." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_ac_checklist"
-      exit 1
-    fi
+    [[ "$_verify_content" == *"- [x]"* ]] || _increment_fail verify_no_ac_checklist \
+      "PRECONDITION FAIL: Step verification has no acceptance criteria checklist." \
+      "File: ${verify_file}" \
+      "Must contain at least one '- [x] ...' item matching plan AC."
 
-    if [[ "$commit_found" -lt 1 ]]; then
-      echo "PRECONDITION FAIL: Step verification has no commit reference." >&2
-      echo "File: ${verify_file}" >&2
-      echo "Must contain at least one commit hash (7+ hex chars)." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_commit_ref"
-      exit 1
-    fi
+    [[ "$_verify_content" =~ [a-f0-9]{7,} ]] || _increment_fail verify_no_commit_ref \
+      "PRECONDITION FAIL: Step verification has no commit reference." \
+      "File: ${verify_file}" \
+      "Must contain at least one commit hash (7+ hex chars)."
 
-    # Memory sections — must contain ## Memory Used and ## Memory Written
-    if ! grep -qE '^## Memory Used' "$verify_file" 2>/dev/null; then
-      echo "PRECONDITION FAIL: Step verification missing '## Memory Used' section." >&2
-      echo "File: ${verify_file}" >&2
-      echo "List memory entries used (or 'N/A — <reason>' if none applicable)." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_used"
-      exit 1
-    fi
+    # Memory sections — line-anchored (^## ...), hence the prepended newline.
+    [[ $'\n'"$_verify_content" == *$'\n'"## Memory Used"* ]] || _increment_fail verify_no_memory_used \
+      "PRECONDITION FAIL: Step verification missing '## Memory Used' section." \
+      "File: ${verify_file}" \
+      "List memory entries used (or 'N/A — <reason>' if none applicable)."
 
-    if ! grep -qE '^## Memory Written' "$verify_file" 2>/dev/null; then
-      echo "PRECONDITION FAIL: Step verification missing '## Memory Written' section." >&2
-      echo "File: ${verify_file}" >&2
-      echo "List new memory entries proposed (or 'N/A — <reason>' if none applicable)." >&2
-      local timeline
-      timeline=$(derive_timeline "$state_file") || true
-      [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="verify_no_memory_written"
-      exit 1
-    fi
+    [[ $'\n'"$_verify_content" == *$'\n'"## Memory Written"* ]] || _increment_fail verify_no_memory_written \
+      "PRECONDITION FAIL: Step verification missing '## Memory Written' section." \
+      "File: ${verify_file}" \
+      "List new memory entries proposed (or 'N/A — <reason>' if none applicable)."
 
     # Visual Anchoring precondition (E161, AID-052): a frontend step carrying visual_refs
     # MUST emit a "## Visual Anchoring" section in its output (the frontend role card
     # requires the layout/colors/typography/components spec BEFORE implementation). We read
-    # the step's id/role/visual_refs from plan.json and use the step's own id for the output
-    # path (no index reconstruction → no off-by-one). Skips silently for non-frontend steps,
-    # steps without visual_refs, or when plan.json/jq are unavailable.
+    # the step's id/role/visual_refs from plan.json (single jq pass) and use the step's own
+    # id for the output path (no index reconstruction → no off-by-one). Skips silently for
+    # non-frontend steps, steps without visual_refs, or when plan.json/jq are unavailable.
     local _plan_json="${evidence_dir}/plan.json"
     if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
-      local _srole _svisrefs _sid
-      _srole=$(jq -r --argjson i "$step" '.steps[$i].role // ""' "$_plan_json" 2>/dev/null || echo "")
-      _svisrefs=$(jq -r --argjson i "$step" '(.steps[$i].visual_refs // []) | length' "$_plan_json" 2>/dev/null || echo "0")
+      local _srole="" _svisrefs="" _sid=""
+      { read -r _srole; read -r _svisrefs; read -r _sid; } < <(
+        jq -r --argjson i "$step" \
+          '(.steps[$i].role // ""), ((.steps[$i].visual_refs // []) | length), (.steps[$i].id // "")' \
+          "$_plan_json" 2>/dev/null
+      ) || true
       if [[ "$_srole" == "frontend" && "${_svisrefs:-0}" -gt 0 ]]; then
-        _sid=$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$_plan_json" 2>/dev/null || echo "")
         local _fe_output="${evidence_dir}/steps/${_sid}/output.md"
         if [[ -z "$_sid" ]] || [[ ! -f "$_fe_output" ]] || ! grep -qE '^## Visual Anchoring' "$_fe_output" 2>/dev/null; then
-          echo "PRECONDITION FAIL: frontend step has visual_refs but its output lacks a '## Visual Anchoring' section." >&2
-          echo "Expected '## Visual Anchoring' in: ${_fe_output}" >&2
-          echo "The frontend role card requires the Visual Anchoring spec (layout/colors/typography/components from the mockup) before implementation when visual_refs are set." >&2
-          local timeline
-          timeline=$(derive_timeline "$state_file") || true
-          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_increment_fail" step="$step" reason="frontend_missing_visual_anchoring"
-          exit 1
+          _increment_fail frontend_missing_visual_anchoring \
+            "PRECONDITION FAIL: frontend step has visual_refs but its output lacks a '## Visual Anchoring' section." \
+            "Expected '## Visual Anchoring' in: ${_fe_output}" \
+            "The frontend role card requires the Visual Anchoring spec (layout/colors/typography/components from the mockup) before implementation when visual_refs are set."
         fi
       fi
     fi
@@ -1975,7 +1969,7 @@ Fix:
 
     # Session B: mid-EPIC plan.json tampering check (PM Q2 refinement #2)
     local stored_hash current_hash
-    stored_hash=$(grep '^plan_json_hash:' "$state_file" | awk '{print $2}') || true
+    stored_hash=$(yaml_field "$state_file" plan_json_hash) || true
     if [[ -n "$stored_hash" && -f "${evidence_dir}/plan.json" ]]; then
       current_hash=$(sha256sum "${evidence_dir}/plan.json" | awk '{print $1}')
       if [[ "$stored_hash" != "$current_hash" ]]; then
@@ -2055,7 +2049,7 @@ cmd_done_advance() {
 
   # Must be in DONE state
   local current_state
-  current_state=$(grep '^state:' "$state_file" | awk '{print $2}')
+  current_state=$(yaml_field "$state_file" state)
   [[ "$current_state" == "DONE" ]] || {
     echo "ERROR: done-advance requires state DONE, found: $current_state" >&2
     exit 1
@@ -2063,7 +2057,7 @@ cmd_done_advance() {
 
   # Validate current phase matches
   local current_phase
-  current_phase=$(grep '^done_phase:' "$state_file" | awk '{print $2}')
+  current_phase=$(yaml_field "$state_file" done_phase)
   [[ "$current_phase" == "$from_phase" ]] || {
     echo "ERROR: expected done_phase=$from_phase but found $current_phase" >&2
     exit 1
@@ -2079,8 +2073,8 @@ cmd_done_advance() {
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
     local project_root="$PWD"
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    epic_id=$(yaml_field "$state_file" epic_id)
+    run_id=$(yaml_field "$state_file" run_id)
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
@@ -2089,8 +2083,8 @@ cmd_done_advance() {
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
       local epic_id run_id evidence_dir errors=0
       local project_root="$PWD"
-      epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-      run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+      epic_id=$(yaml_field "$state_file" epic_id)
+      run_id=$(yaml_field "$state_file" run_id)
       evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
 
       # P040 Component D: integration-review file existence (streamlined contract)
@@ -2199,7 +2193,7 @@ EOF
 
       # PM decision must be set to merge
       local pm_decision
-      pm_decision=$(grep '^pm_decision:' "$state_file" | awk '{print $2}' || true)
+      pm_decision=$(yaml_field "$state_file" pm_decision)
       [[ "$pm_decision" == "merge" ]] || {
         echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
         errors=$((errors + 1))
@@ -2253,8 +2247,8 @@ EOF
   # release path.
   if [[ "$to_phase" == "release" ]]; then
     local epic_id run_id evidence_dir project_root
-    epic_id=$(grep '^epic_id:' "$state_file" | awk '{print $2}')
-    run_id=$(grep '^run_id:' "$state_file" | awk '{print $2}')
+    epic_id=$(yaml_field "$state_file" epic_id)
+    run_id=$(yaml_field "$state_file" run_id)
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     project_root="$PWD"
     write_compliance_json "$epic_id" "$run_id" "$state_file" "$evidence_dir" "$project_root"

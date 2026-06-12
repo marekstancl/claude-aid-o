@@ -18,7 +18,6 @@ RULES_FILE="${AID_PLUGIN_PATH:-${SCRIPT_DIR}/..}/defaults/pre-filter-rules.yaml"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
-die() { echo "ERROR: $*" >&2; exit 1; }
 
 main() {
   local cmd="${1:-}"

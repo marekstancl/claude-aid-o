@@ -332,7 +332,7 @@ If `.events` doesn't exist, the user didn't interact with the browser — use on
 - **2-4 options max** per screen
 - **Use real content when it matters** — for a photography portfolio, use actual images (Unsplash). Placeholder content obscures design issues.
 - **Keep mockups simple** — focus on layout and structure, not pixel-perfect design
-- **Always show current + proposed for existing UI** — if the component/page already exists in the codebase, every mockup MUST include the current state alongside the proposed changes (use `.split` for side-by-side, or render the existing UI with changes applied inline). Never show a new design in isolation — the PM needs to see what's actually changing.
+- **Always show current + proposed for existing UI** — never a new design in isolation; see the mandatory baseline rule (step 5) in "Refactoring or Redesigning Existing UI" above.
 
 ## File Naming
 
@@ -369,4 +369,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-06-10
+**Last Updated:** 2026-06-12

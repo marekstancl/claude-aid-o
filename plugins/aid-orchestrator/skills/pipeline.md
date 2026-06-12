@@ -435,6 +435,7 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    Verifier reads diff + DoD + step.outputs (nuanced deprivation per `agents/verifier.md`).
    Verifier updates verifier-output-step-N.md with verdict + findings (verdict was `pending` before dispatch).
 
+   After `Agent()` returns (`subagent` mode only):
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
      --focus "cp2-step-<N>" \
@@ -551,6 +552,7 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
           prompt: <full diff, plan.json overall>})
    ```
 
+   After both `Agent()` calls return (`subagent` mode only):
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
      --focus "cp3-code-review" \
@@ -897,6 +899,31 @@ Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
 is Decoration`. P038 (v2.21.0) is the first concrete application of this
 principle in AID.
 
+### Compliance Recovery Alert (P042, v2.29.0+)
+
+Companion to the blocking flow above — the PM gets a signal in both directions:
+
+1. **Block:** when `done-advance review→release` refuses transition on blocking
+   failures, the FSM sends a `🛑 <epic>: N blocking compliance failure(s) —
+   release blocked` Telegram alert and writes a `fsm_done_advance_blocked`
+   timeline event (with the `blocked_checks` list).
+2. **Recovery:** on the next successful `done-advance review→release` (zero
+   blocking failures), if the last `fsm_done_advance_blocked` event has no later
+   `fsm_done_advance_recovered` event, the FSM sends `✅ <epic>: compliance
+   cleared, release unblocked. Checks: <list>` and writes a
+   `fsm_done_advance_recovered` timeline event.
+
+The recovered event doubles as a **dedup marker** — exactly one recovery alert
+per block episode; subsequent clean runs stay silent until a new block occurs.
+
+**Config gate:** `notifications.telegram.alert_on_compliance_recovery` in
+`.aid-o/config/execution.yaml` (default `true`). Setting `false` suppresses the
+Telegram message only — the `fsm_done_advance_recovered` timeline event is
+always written (observable test signal, fixture 7d).
+
+**Soft-fail:** missing timeline.jsonl or `jq` → recovery detection silently
+skips (telemetry over correctness, same posture as compliance.json writes).
+
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
 **Per-EPIC (non-blocking):**
@@ -1238,7 +1265,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-09
+**Last Updated:** 2026-06-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
