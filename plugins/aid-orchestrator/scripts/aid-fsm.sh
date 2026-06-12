@@ -670,6 +670,38 @@ fsm_check_compliance_recovery() {
   return 0
 }
 
+# fsm_emit_compliance_recovery — shared emitter for the P042 recovery alert.
+# Pairs a pending fsm_done_advance_blocked event with a ✅ Telegram alert +
+# fsm_done_advance_recovered timeline event (the dedup marker). Called from
+# BOTH review→release resolution paths of cmd_done_advance: the clean re-run
+# (zero blocking failures) and the PM --force override (P044 — previously the
+# force path skipped recovery entirely, so force-cleared blocks never alerted).
+#
+# Inputs:
+#   $1 — epic_id
+#   $2 — timeline path
+#   $3 — project_root
+#   $4 — alert message prefix ("; Checks: <list>" is appended here)
+#
+# The timeline event is written unconditionally (dedup marker) — only the
+# Telegram alert is gated by execution.yaml alert_on_compliance_recovery
+# (default on when key absent). Always returns 0 (best-effort, never blocks
+# the transition).
+fsm_emit_compliance_recovery() {
+  local epic_id="$1" timeline="$2" project_root="$3" message_prefix="$4"
+  local recovery_checks
+  recovery_checks=$(fsm_check_compliance_recovery "$timeline" 2>/dev/null) || return 0
+  local recovery_gate
+  recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
+    | awk '{print $2}' | tr -d '"'"'"' ') || recovery_gate=""
+  recovery_gate="${recovery_gate:-true}"
+  [[ "$recovery_gate" == "false" ]] || \
+    try_telegram_alert "${message_prefix} Checks: ${recovery_checks}"
+  [[ -f "$timeline" ]] && log_event "$timeline" "fsm_done_advance_recovered" \
+    recovered_checks="$recovery_checks"
+  return 0
+}
+
 # Best-effort Telegram alert via svc-mcp-tg-bot HTTP transport (port 8817 —
 # replaces the legacy svc-mcp-telegram MCP that previously held this port).
 # Never fails — if MCP service is unavailable, log info and continue.
@@ -2078,6 +2110,15 @@ cmd_done_advance() {
     evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
     fsm_handle_force_override "$from_phase" "$to_phase" "$state_file" "done-advance" "${@:5}"
     echo "WARNING: --force used, skipping precondition checks for done-advance $from_phase → $to_phase" >&2
+
+    # P044: pair a pending 🛑 blocked alert with a ✅ resolution even when the
+    # block is cleared via PM force-override — the non-force recovery path in
+    # the else-branch below is skipped entirely on --force, so without this
+    # call a force-cleared block never emits the recovery alert.
+    if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
+      fsm_emit_compliance_recovery "$epic_id" "${evidence_dir}/timeline.jsonl" "$project_root" \
+        "✅ ${epic_id}: compliance block cleared via PM force-override, release unblocked."
+    fi
   else
     # Check preconditions for review → release
     if [[ "$from_phase" == "review" && "$to_phase" == "release" ]]; then
@@ -2156,21 +2197,10 @@ EOF
         fi
 
         # P042: Recovery alert — fires when a previously-blocked EPIC now has zero blocking
-        # failures. The log_event runs (unless timeline is missing) so the dedup marker is
-        # written even when Telegram transport is unavailable. try_telegram_alert is best-effort.
-        # Config gate alert_on_compliance_recovery is read below from execution.yaml (key added
-        # to the generator in aid-init-execution-yaml.sh; default on when key absent).
-        local _recovery_checks
-        if _recovery_checks=$(fsm_check_compliance_recovery "$_timeline" 2>/dev/null); then
-          local _recovery_gate
-          _recovery_gate=$(grep -E '^    alert_on_compliance_recovery:' "${project_root}/.aid-o/config/execution.yaml" 2>/dev/null \
-            | awk '{print $2}' | tr -d '"'"'"' ') || _recovery_gate=""
-          _recovery_gate="${_recovery_gate:-true}"
-          [[ "$_recovery_gate" == "false" ]] || \
-            try_telegram_alert "✅ ${epic_id}: compliance cleared, release unblocked. Checks: ${_recovery_checks}"
-          [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_recovered" \
-            recovered_checks="$_recovery_checks"
-        fi
+        # failures. Shared emitter handles the alert gate + dedup marker (see
+        # fsm_emit_compliance_recovery; the --force path calls it too, P044).
+        fsm_emit_compliance_recovery "$epic_id" "$_timeline" "$project_root" \
+          "✅ ${epic_id}: compliance cleared, release unblocked."
       fi
       # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
 

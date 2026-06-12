@@ -445,6 +445,53 @@ EOF
   [ "$recovered_count" -eq 1 ]
 }
 
+# ─── Fixture 7e ─────────────────────────────────────────────────────────────
+# force-path recovery (P044): a pending fsm_done_advance_blocked cleared via
+# --force override must ALSO write the fsm_done_advance_recovered event —
+# pairing every 🛑 blocked alert with a ✅ resolution regardless of which path
+# cleared the block (clean re-run vs PM force-override).
+@test "fixture 7e: recovery: force override after block writes exactly one recovered event" {
+  # Seed a prior blocking event (simulates a previous blocked done-advance).
+  printf '{"ts":"2026-05-13T10:00:00Z","event":"fsm_done_advance_blocked","blocking_count":1,"blocked_checks":"verifier_provenance"}\n' \
+    >> "${EVIDENCE_DIR}/timeline.jsonl"
+
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE" \
+    --force \
+    --reason "PM approved merge despite provenance gap (fixture 7e)" \
+    --blocked-checks "verifier_provenance"
+  [ "$status" -eq 0 ]
+
+  # Timeline must have exactly one fsm_done_advance_recovered event.
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 1 ]
+
+  # recovered_checks field must carry the original blocked check name.
+  local recovered_checks
+  recovered_checks=$(jq -rs '[.[] | select(.event=="fsm_done_advance_recovered")] | last | .recovered_checks' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_checks" = "verifier_provenance" ]
+}
+
+# ─── Fixture 7f ─────────────────────────────────────────────────────────────
+# force-path no-op (P044): --force with NO pending blocked event must not
+# fabricate a recovered event (nothing to pair).
+@test "fixture 7f: recovery: force override with no prior block writes no recovered event" {
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE" \
+    --force \
+    --reason "PM approved merge with no prior block (fixture 7f)" \
+    --blocked-checks ""
+  [ "$status" -eq 0 ]
+
+  local recovered_count
+  recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
+    "${EVIDENCE_DIR}/timeline.jsonl")
+  [ "$recovered_count" -eq 0 ]
+}
+
 # ─── Fixture 7d ─────────────────────────────────────────────────────────────
 # gate-disabled: alert_on_compliance_recovery=false in execution.yaml → alert
 # suppressed, but the fsm_done_advance_recovered event is still written (log_event

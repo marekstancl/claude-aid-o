@@ -223,7 +223,7 @@ After workspace creation, discover and cache the plugin installation path:
    ```yaml
    plugin_path: "{resolved absolute path}"
    discovered_at: "{ISO 8601}"
-   dispatch_mode: subagent  # subagent | inline — override per project policy
+   dispatch_mode: agent_tool  # agent_tool | subagent | inline — override per project policy
    ```
 4. If glob returns multiple matches → use first, warn PM
 5. If glob returns nothing → warn: "Plugin scripts not found. `/aid-run` may not work."
@@ -234,14 +234,21 @@ This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is a
 
 `.aid-o/config/plugin.yaml` field `dispatch_mode` controls verifier dispatch enforcement:
 
-- `subagent` (default) — pipeline.md dispatches Agent() subagents; compliance check
-  cross-references _generated_by metadata against timeline.jsonl dispatch events.
+- `agent_tool` (default since v2.29.1, P043) — orchestrator dispatches verifiers via the
+  CC Agent tool, which writes no timeline events; the provenance check returns the
+  non-blocking `agent_tool` sentinel. Matches how pipeline.md actually dispatches —
+  writing `subagent` here while dispatching via Agent tool produces guaranteed
+  `verifier_provenance` false-positive blocks (P043/P044 incident class).
+- `subagent` — only for projects with an FSM-aware dispatcher that emits
+  `verifier_dispatch_start`/`verifier_dispatch_complete` timeline events
+  (`aid-emit-dispatch.sh`); compliance check cross-references _generated_by metadata
+  against those events.
 - `inline` — for projects with no-subagent policy (e.g., WAN). LLM writes
   verifier-output-*.md directly in main context with _generated_by format
   `main-context@<git-HEAD-sha>`; compliance check validates format + verifies SHA
   exists in repository.
 
-Default subagent for new projects. WAN-style projects set `inline` manually after init.
+Default agent_tool for new projects. WAN-style projects set `inline` manually after init.
 
 ## Memory Deep Scan (automatic)
 
@@ -415,4 +422,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-12

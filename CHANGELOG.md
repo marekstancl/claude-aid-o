@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.29.4] — 2026-06-12
+
+### Fixed
+- **Force-Path Recovery Alert** — compliance blocks cleared via PM `--force` override never emitted the ✅ resolution alert because the force branch of done-advance skipped the entire P042 recovery block; recovery emission now lives in a shared helper (`fsm_emit_compliance_recovery`) called from both the clean re-run and the force-override paths, so every 🛑 blocked alert is paired with a ✅ regardless of how the block was cleared.
+- **aid-init dispatch_mode Template** — the `/aid-init` plugin-discovery step still wrote `dispatch_mode: subagent` into `config/plugin.yaml` on every run, overriding the P043 `agent_tool` default and reintroducing guaranteed `verifier_provenance` false-positive blocks; the template now writes `agent_tool` and the dispatch-mode docs describe all three modes including the false-positive failure class.
+
 ## [2.29.3] — 2026-06-12
 
 ### Added
