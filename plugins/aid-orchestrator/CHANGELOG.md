@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.29.3] — 2026-06-12
+
+### Added
+- **Check-severity sync guard** — new `test-check-severity-sync.sh` suite fails when a compliance check emitted by the FSM has no entry in `defaults/check-severity.yaml`, closing the trap where an unregistered check silently defaults to advisory and can never block
+- **Compliance recovery alert documentation** — pipeline.md §7 now documents the P042 block/recovery Telegram alert pair, the `fsm_done_advance_recovered` dedup marker, and the `alert_on_compliance_recovery` config gate
+
+### Changed
+- **Accurate provenance aggregate in agent_tool mode** — compliance.json now reports `provenance_aggregate: "agent_tool"` instead of the misleading `"mixed"` when verifier dispatch runs via the CC Agent tool (non-blocking behavior unchanged)
+- **dispatch_mode default single-sourced** — `defaults/orchestration.yaml` `dispatch.mode` is now the single source of the default (`agent_tool`, with all three modes documented); aid-fsm.sh resolves project `plugin.yaml` → plugin `orchestration.yaml` → hard fallback, removing the stale `subagent` doc/code drift
+- **FSM internals simplification** — pure-bash `yaml_field()` reader replaces 51 copy-pasted `grep|awk` field reads (~100 fewer process forks per FSM run); repeated-fail counters, CP3 verifier-output evaluation, and the increment-step precondition fail ritual each consolidated into single helpers; shared `die()` moved to `lib/aid-stage-log.sh`; step-verify content checks read the file once; behavior unchanged (all 18 suites + 115 bats tests pass)
+
 ## [2.29.2] — 2026-06-10
 
 ### Changed
