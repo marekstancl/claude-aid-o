@@ -70,3 +70,7 @@ checks:
     severity: blocking
     promoted_at: "2026-05-31"
     promoted_reason: "P040 — streamlined contract requires verifier-output-cp3-code-review.md + verifier-output-cp3-security.md + gates_report.json; this check enforces all three present at done-advance time"
+  delivery_report_present:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null  # anchor: P045 + AID-v3-principles.md §1

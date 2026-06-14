@@ -12,6 +12,8 @@ review_checkpoints:
   cp4_curator_validation: true     # curator proposal validation (verifier:code-review)
   cp5_critical_gate: true          # auditor critical findings block DONE
   cp6_fast_mode_review: true       # post-/aid-do review (verifier:code-review)
+  simplifier_pass: true            # plan-boundary Simplifier proposal pass (gate-fixer applies S/M)
+  delivery_report: true            # plan-boundary Reporter delivery report generation
 
   # Fix loop settings
   fix_loop:
