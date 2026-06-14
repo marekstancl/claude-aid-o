@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.30.0] — 2026-06-14
+## [2.31.0] — 2026-06-14
 
 ### Added
 - **Simplifier + Reporter at Plan Boundary** — two plan-boundary specialist agents run after a plan's last EPIC: the Simplifier proposes reuse/dedup/clarity refinements over the whole plan diff (S/M auto-applied through the gate-fixer → CP4 revert-on-fail rail, L deferred to the PM summary), and the Reporter tests the delivered functionality and writes a plain-language `.aid-o/reports/{plan_id}-delivery.md` from a fixed 7-section template, condensing the Auditor and Curator verdicts and leaving ≥1 on-disk test artifact as anti-fabrication proof. The new `delivery_report_present` compliance check (advisory, severity-routed) verifies the report's presence and on-disk `_test_evidence` at the plan boundary and rides the existing done-advance gate (`null` before the boundary, so it never false-blocks a non-final EPIC). Both agents are config-toggled and inert until a project re-inits.
