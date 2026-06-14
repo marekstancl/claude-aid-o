@@ -302,6 +302,21 @@ Violating them is the #1 cause of agents ignoring the plan.
    adapts to our data layer, does NOT invent design. Agent MUST write Visual
    Anchoring section before implementation code.
 
+**Plan-boundary specialist dispatch (`reporter` / `simplifier` focus).** The Simplifier
+and Reporter run at the plan boundary (§7), not per step. Wrap their dispatch by mode,
+identically to the CP4 block (§7 step 9): in `agent_tool` mode (default) call `Agent()`
+directly — no wrappers. In `subagent` mode ONLY, bracket the call with
+`aid-emit-dispatch.sh` start/complete using `--focus reporter` (or `--focus simplifier`),
+so the out-of-band provenance ledger records the dispatch:
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start \
+  --focus "reporter" --agent-id "aid-orchestrator:reporter" --evidence-dir "$evidence_dir"
+# Agent({subagent_type: "aid-orchestrator:reporter", ...})
+bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete \
+  --focus "reporter" --output-file ".aid-o/reports/{plan_id}-delivery.md" \
+  --evidence-dir "$evidence_dir"
+```
+
 ### Standards context (item 7)
 
 When `standards.active != 'none'` in `.aid-o/config/project.yaml`:
@@ -936,9 +951,26 @@ skips (telemetry over correctness, same posture as compliance.json writes).
 2. Read all reports, compile findings across all EPICs
 3. Apply ALL fixes — S, M, AND L effort (L findings are often trivial in practice)
 4. CP4 verifier on aggregated fixes
-5. Create `ca-review-complete` marker in each EPIC's evidence dir
-6. PM Summary with MERGE/FIX/ABORT for entire plan
-7. `aid-fsm.sh init` for next plan's EPICs now unblocked
+5. **Simplifier (serial, after C+A fixes).** Dispatch the Simplifier agent
+   (`agents/simplifier.md`) over the plan diff `base_commit..HEAD`; it writes
+   `simplifier-report.md` (propose-only — it never edits code). Then **read its
+   proposals and dispatch the gate-fixer with a `simplifier` proposal source**: apply
+   `recommended_disposition: approve` items at effort **S/M**, and route **L**-effort
+   items to the PM summary (deferred). CP4 re-runs on the applied diff — which now
+   includes the simplifier edits — and reverts on FAIL, the same rail as the per-EPIC
+   `review` sub-phase steps 7–9. Runs serially AFTER the C+A fixes so it simplifies the
+   final shipped code, not a moving target. Toggle: `review_checkpoints.simplifier_pass`.
+6. **Reporter (last, after the Simplifier + CP4).** Dispatch the Reporter agent
+   (`agents/reporter.md`) as the final plan-boundary step. It tests the delivery and
+   writes `.aid-o/reports/{plan_id}-delivery.md` (from
+   `defaults/templates/delivery-report.md`) plus ≥1 evidence artifact under
+   `evidence/{epic_id}/{run_id}/reporter/`. The `delivery_report_present` advisory
+   compliance check is evaluated at this boundary (presence + on-disk `_test_evidence`).
+   `epic-summary.sh` generation is unchanged — the Reporter augments it, does not replace it.
+   Toggle: `review_checkpoints.delivery_report`.
+7. Create `ca-review-complete` marker in each EPIC's evidence dir
+8. PM Summary with MERGE/FIX/ABORT for entire plan
+9. `aid-fsm.sh init` for next plan's EPICs now unblocked
 
 **Enforcement:** `aid-fsm.sh init` blocks cross-plan runs without `ca-review-complete` markers.
 
@@ -1061,6 +1093,9 @@ evidence/{epic_id}/{run_id}/
   final_report.md              # Summary (steps, gates, duration, artifacts)
   audit-report.md              # Auditor output
   curator_resolve_report.json  # Curator proposals + actions
+  simplifier-report.md         # Simplifier proposals (plan boundary)
+  reporter/                    # Reporter test-evidence artifacts (plan boundary)
+.aid-o/reports/{plan_id}-delivery.md   # Reporter delivery report (committed)
 ```
 
 ---
@@ -1265,7 +1300,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-12
+**Last Updated:** 2026-06-14
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
