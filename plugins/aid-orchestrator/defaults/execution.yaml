@@ -231,3 +231,15 @@ curator_auto_rules:
 # Format: pipe-separated regex alternation; matched as left-anchored prefix
 # against `git diff --name-only` output.
 cp4_production_paths: "plugins/|scripts/|src/|lib/|api/"
+
+# ─── Plan-Boundary Specialists (P045) ─────────────────────────────────────
+simplifier:
+  enabled: true
+  model: opus
+  defer_effort: [L]
+
+reporter:
+  enabled: true
+  model: sonnet
+  report_dir: ".aid-o/reports"
+  dispatch_mode_override: null

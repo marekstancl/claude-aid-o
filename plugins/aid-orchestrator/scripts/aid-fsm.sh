@@ -825,6 +825,61 @@ verify_provenance() {
   esac
 }
 
+# ─── P045: delivery_report_present (plan-boundary structural presence check) ──
+# Echoes a JSON literal — null | true | false — for the delivery report at the
+# plan boundary. Surfaced ONLY through the existing _blocking_count severity gate
+# in cmd_done_advance review→release (advisory by default; no die(), no new gate).
+#   null  — plan boundary NOT reached for this EPIC (no ca-review-complete marker),
+#           or yq unavailable (conservative not-applicable; never a failure).
+#   true  — at boundary AND .aid-o/reports/{plan_id}-delivery.md exists AND its
+#           _test_evidence[] references >=1 file present on disk under evidence_dir.
+#   false — at boundary AND report missing, OR no _test_evidence references a file
+#           that exists on disk (advisory failure; release still proceeds).
+# plan_id is derived from epic_id (E-045-1_1 -> P045). The report is one plan-level
+# fact, so every EPIC of the plan resolves it identically once the marker exists.
+fsm_eval_delivery_report_present() {
+  local epic_id="$1" evidence_dir="$2" project_root="$3"
+
+  # Plan-boundary signal: ca-review-complete marker in this EPIC's evidence dir.
+  # Before the boundary the check is not applicable → null (cannot false-fail a
+  # non-final EPIC).
+  [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
+
+  # Frontmatter inspection needs yq; conservative null if absent.
+  command -v yq >/dev/null 2>&1 || { echo null; return 0; }
+
+  # Derive plan_id from epic_id (E-045-1_1 -> P045).
+  local plan_num plan_id
+  plan_num=""
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] && plan_num="${BASH_REMATCH[1]}"
+  [[ -z "$plan_num" ]] && { echo null; return 0; }
+  plan_id="P${plan_num}"
+
+  local report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
+  [[ -f "$report" ]] || { echo false; return 0; }
+
+  # Extract the YAML frontmatter (lines strictly between the 1st and 2nd '---',
+  # tolerating a leading HTML comment block) and read _test_evidence[].
+  local ev_paths
+  ev_paths=$(awk '/^---[[:space:]]*$/{c++; if(c==2) exit; next} c==1{print}' "$report" \
+    | yq -r '._test_evidence[]?' 2>/dev/null || true)
+  [[ -z "$ev_paths" ]] && { echo false; return 0; }
+
+  # >=1 referenced artifact must exist on disk under the run evidence dir.
+  # _test_evidence is author-controlled, so reject path-traversal (`..`) and
+  # absolute paths before the existence test — the check must not be satisfiable
+  # by pointing at an arbitrary host file (matters especially once promoted to
+  # blocking). Only paths that stay under the run evidence dir count.
+  local one_exists=false line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" == /* || "$line" == *..* ]] && continue
+    if [[ -f "${evidence_dir}/${line}" ]]; then one_exists=true; break; fi
+  done <<< "$ev_paths"
+
+  if $one_exists; then echo true; else echo false; fi
+}
+
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
@@ -1008,6 +1063,10 @@ evaluate_compliance_checks() {
     plan_ac_match=null  # plan-diff.json missing — backward compat, treated as skip
   fi
 
+  # P045: delivery_report_present — plan-boundary structural presence (null/true/false).
+  local delivery_report_present
+  delivery_report_present=$(fsm_eval_delivery_report_present "$epic_id" "$evidence_dir" "$project_root")
+
   jq -nc \
     --argjson bc          "$branch_correct" \
     --argjson eyp         "$exec_yaml_present" \
@@ -1024,6 +1083,7 @@ evaluate_compliance_checks() {
     --arg     cp3sec_prov "$cp3_sec_provenance" \
     --argjson agg         "$aggregate" \
     --argjson prov_agg    "$prov_agg" \
+    --argjson drp         "$delivery_report_present" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
@@ -1043,7 +1103,8 @@ evaluate_compliance_checks() {
         aggregate:                  $agg,
         provenance_aggregate:       $prov_agg
       },
-      dod_present: null
+      dod_present: null,
+      delivery_report_present: $drp
     }'
 }
 

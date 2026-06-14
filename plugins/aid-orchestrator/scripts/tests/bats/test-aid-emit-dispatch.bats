@@ -203,3 +203,27 @@ teardown() {
   run jq -e 'select(.event == "start" and .focus == "cp3-security")' "$PENDING"
   [ "$status" -eq 0 ]
 }
+
+# 12. P045: widened focus allowlist accepts the new reporter/simplifier foci
+@test "P045 --focus reporter is accepted (status 0)" {
+  run bash "$SCRIPT" start --focus reporter --agent-id aid-orchestrator:reporter --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+}
+
+@test "P045 --focus simplifier is accepted (status 0)" {
+  run bash "$SCRIPT" start --focus simplifier --agent-id aid-orchestrator:simplifier --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+}
+
+# 13. Existing cp2-step-N focus still validates after the widening
+@test "P045 existing --focus cp2-step-3 still validates (status 0)" {
+  run bash "$SCRIPT" start --focus cp2-step-3 --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+}
+
+# 14. Invalid focus error message advertises the new reporter|simplifier foci
+@test "P045 invalid focus rejected and error lists reporter|simplifier" {
+  run bash "$SCRIPT" start --focus 'bogus$$$' --agent-id aid-orchestrator:verifier --evidence-dir "$EVID"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"reporter|simplifier"* ]]
+}

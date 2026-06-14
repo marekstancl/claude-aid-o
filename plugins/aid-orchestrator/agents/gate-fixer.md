@@ -43,6 +43,17 @@ to fix the issue.
 - For approved fixes **outside** these four classes: apply conservatively and minimally (do not
   expand scope beyond the proposal); the CP4 post-apply review is your backstop.
 
+### Simplifier-Approved Fixes (`simplifier` source, plan boundary §7 step 5)
+- The Orchestrator dispatches you to apply Simplifier proposals with
+  `recommended_disposition: approve` (effort **S/M** only; **L** is deferred to the PM
+  summary, never auto-applied). Treat them exactly like `curator` proposals: apply the
+  concrete `proposed_action` minimally, do not expand scope. Each proposal asserts
+  `preserves_behavior: true` — your edit MUST preserve behavior, signatures, and outputs.
+- The **CP4 verifier reviews your applied changes afterward and reverts on FAIL** — the
+  same post-apply safety net as the curator rail.
+- **Never:** apply an L-effort simplifier proposal; change public behavior; or simplify
+  code outside the proposal's named `area`.
+
 ### Test Fixes (`tests_pass` gate)
 - Read failing test output (pytest format)
 - Identify root cause: wrong assertion, missing fixture, import error, API change
@@ -166,6 +177,7 @@ The `gate` field accepts both gate names and verifier review sources:
 | `verifier_review` | Review checkpoint (CP2/CP3/CP4/CP6) | Verifier `review_result.findings[]` |
 | `curator` | Curator-approved proposal (DONE state §7 step 7) | Curator `proposals[]` (S/M/L effort) |
 | `auditor` | Auditor `recommended_fixes` (DONE state §7 step 8) | Auditor `recommended_fixes[]` (`auto_fixable: true`) |
+| `simplifier` | Simplifier-approved proposal (plan boundary, §7 step 5) | Simplifier `proposals[]` (`recommended_disposition: approve`, S/M effort) |
 
 ### Confidence Levels
 
@@ -208,4 +220,4 @@ The `gate` field accepts both gate names and verifier review sources:
   fixes. Until then, you handle all gate types.
 
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-14

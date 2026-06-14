@@ -280,6 +280,8 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
 
     Curator: {applied} fixes applied (S/M/L), {deferred} deferred (always-defer rules / rejected)
     Auto-fixes: {count} from auditor recommendations
+    Simplifier: {applied} applied, {deferred} L-effort deferred
+    Delivery report: .aid-o/reports/{plan_id}-delivery.md (outcome: {pass|partial|no-runtime})
 
     {if blocking_findings:}
     ⛔ CRITICAL FINDINGS (block merge):

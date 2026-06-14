@@ -76,9 +76,9 @@ cmd_start() {
   # jq's last-key-wins resolved to event="complete" — making fsm_check_orphan_dispatches
   # skip a real expired orphan. The jq -nc construction below already neutralizes
   # injection, but we reject malformed focuses outright so they never enter the ledger.
-  # Allowlist covers: cp1, cp2-step-N, cp3-code-review, cp3-security, cp4-curator-validation.
-  if [[ ! "$focus" =~ ^cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?$ ]]; then
-    echo "ERROR: --focus does not match allowed pattern ^cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?\$ (got: $focus)" >&2
+  # Allowlist covers: cp1, cp2-step-N, cp3-code-review, cp3-security, cp4-curator-validation, reporter, simplifier.
+  if [[ ! "$focus" =~ ^(cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?|reporter|simplifier)$ ]]; then
+    echo "ERROR: --focus does not match allowed pattern ^(cp[1-4](-step-[0-9]+|-[a-z][a-z0-9-]*)?|reporter|simplifier)\$ (got: $focus)" >&2
     exit 1
   fi
 
