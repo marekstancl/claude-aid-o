@@ -19,6 +19,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 LINT="${PLUGIN_DIR}/scripts/aid-lint-skill.sh"
 
+# Scope note: this gate iterates skills/*.md + commands/*.md ONLY. agents/*.md are
+# intentionally OUT of scope — specialist agents (including the P045 additions
+# simplifier.md / reporter.md) follow the minimal specialist-agent frontmatter
+# convention, parity with curator.md / auditor.md, and carry the same two minimal-
+# frontmatter structural findings by design. Linting them here would falsely fail
+# the gate, so the new agents are neither grandfathered nor in scope — the gate's
+# behavior is unchanged by their addition.
+#
 # Files that predate the authoring standards — structural findings are advisory for
 # these until they are substantively revised (>25%). Universal findings still block.
 GRANDFATHERED=$(cat <<'EOF'
