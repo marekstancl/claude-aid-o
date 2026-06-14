@@ -850,7 +850,8 @@ fsm_eval_delivery_report_present() {
 
   # Derive plan_id from epic_id (E-045-1_1 -> P045).
   local plan_num plan_id
-  plan_num=$(printf '%s' "$epic_id" | grep -oP '(?<=^E-)\d+' || true)
+  plan_num=""
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] && plan_num="${BASH_REMATCH[1]}"
   [[ -z "$plan_num" ]] && { echo null; return 0; }
   plan_id="P${plan_num}"
 

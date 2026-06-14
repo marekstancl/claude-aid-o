@@ -124,6 +124,34 @@ EOF
   [ "$output" = "false" ]
 }
 
+@test "true: frontmatter directly at boundary (no leading HTML comment)" {
+  touch "${EVID}/ca-review-complete"
+  # Report starts directly with '---' (no HTML comment block), proving the awk
+  # frontmatter extractor works both with and without leading comments.
+  cat > "${REPORTS_DIR}/P045-delivery.md" <<'EOF'
+---
+_generated_by: aid-orchestrator:reporter@E-045-1_1
+_generated_at: "2026-05-12T14:30:00Z"
+plan_id: "P045"
+epics: ["E-045-1_1"]
+test_outcome: pass
+_test_evidence:
+  - "reporter/direct.txt"
+---
+
+# Delivery Report — P045
+
+Plan P045 delivered.
+EOF
+  mkdir -p "${EVID}/reporter"
+  echo "direct case ok" > "${EVID}/reporter/direct.txt"
+
+  _load_aid_fsm
+  run fsm_eval_delivery_report_present "$EPIC_ID" "$EVID" "$PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "true" ]
+}
+
 @test "false: _test_evidence path-traversal/absolute path is rejected (CP3 security hardening)" {
   touch "${EVID}/ca-review-complete"
   # An author-controlled _test_evidence that points OUTSIDE the evidence dir
