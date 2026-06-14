@@ -5,7 +5,7 @@
   LANGUAGE: render section headings + prose in the project document_language
   (config/language.yaml); preserve structure and order exactly. English shown here
   is the canonical reference.
-  The frontmatter is machine-read by fsm_check_delivery_report_present — do not rename keys.
+  The frontmatter is machine-read by fsm_eval_delivery_report_present — do not rename keys.
 -->
 ---
 _generated_by: aid-orchestrator:reporter@{agent_id}
@@ -15,7 +15,8 @@ epics: ["{epic_id}", ...]
 test_outcome: pass | partial | no-runtime
 _test_evidence:
   # ≥1 path REQUIRED, relative to this run's evidence dir. Each MUST exist on disk —
-  # the FSM precondition rejects the release if a referenced artifact is missing.
+  # the FSM precondition records an advisory failure (blocking once promoted) if a
+  # referenced artifact is missing. Paths must stay under the evidence dir (no `..` / absolute).
   - "reporter/{artifact-file}"
 ---
 

@@ -48,7 +48,8 @@ Read from the run evidence dir and the plan:
 
 You MUST exercise the delivery and drop **at least one evidence file** into
 `{evidence_dir}/reporter/`. The file's existence is the anti-fabrication proof — the FSM
-rejects the release if `_test_evidence` references a file that is not on disk.
+records an advisory compliance failure (blocking once promoted) if `_test_evidence` references
+a file that is not on disk under the evidence dir.
 
 Pick the mode that fits the delivery:
 

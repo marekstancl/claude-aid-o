@@ -865,9 +865,14 @@ fsm_eval_delivery_report_present() {
   [[ -z "$ev_paths" ]] && { echo false; return 0; }
 
   # >=1 referenced artifact must exist on disk under the run evidence dir.
+  # _test_evidence is author-controlled, so reject path-traversal (`..`) and
+  # absolute paths before the existence test — the check must not be satisfiable
+  # by pointing at an arbitrary host file (matters especially once promoted to
+  # blocking). Only paths that stay under the run evidence dir count.
   local one_exists=false line
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
+    [[ "$line" == /* || "$line" == *..* ]] && continue
     if [[ -f "${evidence_dir}/${line}" ]]; then one_exists=true; break; fi
   done <<< "$ev_paths"
 

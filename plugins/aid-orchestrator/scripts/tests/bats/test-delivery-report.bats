@@ -123,3 +123,31 @@ EOF
   [ "$status" -eq 0 ]
   [ "$output" = "false" ]
 }
+
+@test "false: _test_evidence path-traversal/absolute path is rejected (CP3 security hardening)" {
+  touch "${EVID}/ca-review-complete"
+  # An author-controlled _test_evidence that points OUTSIDE the evidence dir
+  # (via `..`) at a real host file must NOT satisfy the check. /etc/hostname
+  # exists on disk, so without the traversal guard the helper would echo `true`.
+  cat > "${REPORTS_DIR}/P045-delivery.md" <<'EOF'
+---
+_generated_by: aid-orchestrator:reporter@E-045-1_1
+_generated_at: "2026-05-12T14:30:00Z"
+plan_id: "P045"
+epics: ["E-045-1_1"]
+test_outcome: pass
+_test_evidence:
+  - "../../../../../../etc/hostname"
+  - "/etc/hostname"
+---
+
+# Delivery Report — P045
+
+Plan P045 delivered.
+EOF
+
+  _load_aid_fsm
+  run fsm_eval_delivery_report_present "$EPIC_ID" "$EVID" "$PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "false" ]
+}
