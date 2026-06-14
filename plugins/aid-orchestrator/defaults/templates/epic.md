@@ -44,6 +44,8 @@ runs_completed: 0      # incremented at each run DONE
   - <!-- backend/app/tasks/models.py -->
   - <!-- backend/app/tasks/routes.py -->
   - <!-- backend/app/tasks/schemas.py -->
+- Plan-boundary delivery reports (default allowed for every EPIC — the Reporter writes here):
+  - .aid-o/reports/
 - <!-- Directories (only when the EPIC owns the entire directory): -->
   - <!-- backend/app/tasks/ -->
 
