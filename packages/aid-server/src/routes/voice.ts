@@ -23,8 +23,11 @@ const upload = multer({
 // Constants
 // ---------------------------------------------------------------------------
 
-const WHISPER_API_URL = 'https://api.openai.com/v1/audio/transcriptions';
-const WHISPER_MODEL = 'whisper-1';
+// LiteLLM proxy (D-082): default přes svc-litellm, ne přímo na OpenAI.
+const WHISPER_API_URL =
+  process.env.WHISPER_API_URL ||
+  'http://svc-litellm:8830/v1/audio/transcriptions';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper';
 const WHISPER_TIMEOUT_MS = 60_000; // 60 seconds
 
 // ---------------------------------------------------------------------------
@@ -41,15 +44,15 @@ export function voiceRoutes(_registry: ProjectRegistry): Router {
     '/transcribe',
     upload.single('file') as unknown as RequestHandler,
     async (req: Request<ProjectParams>, res: Response) => {
-      // 1. Check OPENAI_API_KEY availability
-      const apiKey = process.env.OPENAI_API_KEY;
+      // 1. Check LiteLLM proxy key availability (fallback OPENAI_API_KEY pro BC)
+      const apiKey = process.env.LITELLM_API_KEY || process.env.OPENAI_API_KEY;
       if (!apiKey) {
         return res.status(503).json({
           ok: false,
           error: {
             code: 'SERVICE_UNAVAILABLE',
             message:
-              'Whisper API not configured. Set OPENAI_API_KEY environment variable.',
+              'Whisper API not configured. Set LITELLM_API_KEY (LiteLLM proxy) environment variable.',
           },
         });
       }

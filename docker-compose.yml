@@ -30,11 +30,21 @@ services:
       - AID_HOST=0.0.0.0
       - AID_PROJECT_ROOT=/project
       - AID_CORS_ORIGINS=*
+      # Whisper přes LiteLLM proxy (D-082) — dedikovaný virtual key, ne přímo OpenAI
+      - LITELLM_API_KEY=${AID_LITELLM_KEY:-}
+      - WHISPER_API_URL=http://svc-litellm:8830/v1/audio/transcriptions
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     restart: unless-stopped
+    networks:
+      - default
+      - shared-infra  # dosah na svc-litellm:8830 (D-082)
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3911/api/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 5s
+
+networks:
+  shared-infra:
+    external: true
