@@ -219,16 +219,42 @@ After workspace creation, discover and cache the plugin installation path:
 
 1. Glob: `~/.claude/plugins/**/aid-orchestrator/scripts/aid-fsm.sh`
 2. Extract plugin root: parent of `scripts/` directory
-3. Write to `.aid-o/config/plugin.yaml`:
+3. Determine `dispatch_mode`:
+   - **Re-run with existing `plugin.yaml`:** PRESERVE the current `dispatch_mode` value — it is a
+     deliberate project-policy choice and must never be silently overwritten. Refresh only
+     `plugin_path` + `discovered_at`.
+   - **Fresh init (no `plugin.yaml` yet):** present the Dispatch Mode Selection prompt below.
+4. Write to `.aid-o/config/plugin.yaml`:
    ```yaml
    plugin_path: "{resolved absolute path}"
    discovered_at: "{ISO 8601}"
-   dispatch_mode: agent_tool  # agent_tool | subagent | inline — override per project policy
+   dispatch_mode: {selected or preserved}  # agent_tool | subagent | inline
    ```
-4. If glob returns multiple matches → use first, warn PM
-5. If glob returns nothing → warn: "Plugin scripts not found. `/aid-run` may not work."
+5. If glob returns multiple matches → use first, warn PM
+6. If glob returns nothing → warn: "Plugin scripts not found. `/aid-run` may not work."
 
-This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is always overwritten (not idempotent — path may change after plugin update).
+`plugin_path` + `discovered_at` are refreshed on every `/aid-init` (the path may change after a
+plugin update). `dispatch_mode` is **preserved** across re-runs once set — only the fresh-init
+prompt or a manual edit changes it. (Before v2.33.0 the whole file was overwritten, silently
+resetting a manual `inline`/`subagent` choice back to `agent_tool` on every re-init — the
+misconfiguration class behind P043/P044 provenance false-blocks.)
+
+### Dispatch Mode Selection
+
+On fresh init (no existing `plugin.yaml`), ask the PM:
+
+```
+Dispatch mode — how does the orchestrator run verifiers/implementers?
+  (A) agent_tool — dispatch via the CC Agent tool (subagents). Recommended default.
+  (B) inline     — no subagents; the orchestrator does verification itself in the main
+                   context (provenance = main-context@<git-sha>). For no-subagent projects.
+  (C) subagent   — subagents via an FSM-aware dispatcher emitting timeline events (advanced).
+```
+
+- Default `agent_tool` (option A) if PM does not respond.
+- Store the choice in `plugin.yaml → dispatch_mode`.
+- On re-run: do NOT re-prompt — preserve the existing value (step 3). To change it later, edit
+  `plugin.yaml` directly or delete the `dispatch_mode` line and re-run `/aid-init`.
 
 ### Dispatch Mode Configuration
 
@@ -248,7 +274,7 @@ This step runs on every `/aid-init` (fresh or re-run). `config/plugin.yaml` is a
   `main-context@<git-HEAD-sha>`; compliance check validates format + verifies SHA
   exists in repository.
 
-Default agent_tool for new projects. WAN-style projects set `inline` manually after init.
+Default agent_tool for new projects, chosen via the Dispatch Mode Selection prompt above and preserved across re-runs. No-subagent projects (e.g. WAN) pick `inline`.
 
 ## Memory Deep Scan (automatic)
 

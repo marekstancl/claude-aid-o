@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.32.0** (current) — Visual Companion always renders on a white canvas (OS dark mode ignored) and reproduces existing-frontend element sizes 1:1, so mockups match production; plus a fix for the generated pre-commit hook, which lacked a `#!/usr/bin/env bash` shebang and so ran under dash and blocked every commit
-- **v2.31.0** — Simplifier + Reporter plan-boundary agents: the Simplifier proposes reuse/dedup/clarity fixes over the plan diff (S/M auto-applied via gate-fixer→CP4, L deferred), the Reporter tests the delivery and writes a plain-language `.aid-o/reports/{plan_id}-delivery.md` with on-disk test evidence; new advisory `delivery_report_present` check + `docs/extending-aid.md` contributor guide
-- **v2.29.4** — paired ✅ recovery alert with PM `--force` override resolutions (previously only clean re-runs emitted it), and fixed `/aid-init` writing `dispatch_mode: subagent` into project configs, which overrode the `agent_tool` default and reintroduced `verifier_provenance` false-positive blocks
+- **v2.33.0** (current) — `/aid-init` now asks for the dispatch mode and preserves a manual choice across re-runs (fixing the silent reset behind provenance false-blocks); the done-advance release gate reads the auditor's structured `blocking_findings` verdict instead of grepping report prose, ending false-positive blocks on clean audits
+- **v2.32.0** — Visual Companion always renders on a white canvas (OS dark mode ignored) and reproduces existing-frontend element sizes 1:1, so mockups match production; plus a fix for the generated pre-commit hook, which lacked a `#!/usr/bin/env bash` shebang and so ran under dash and blocked every commit
+- **v2.31.0** — whisper transcription routed through the LiteLLM proxy instead of calling OpenAI directly; removed the orphaned docs-deploy CI workflow
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

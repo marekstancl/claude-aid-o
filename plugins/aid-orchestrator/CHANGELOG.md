@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.33.0] — 2026-06-15
+
+### Added
+- **dispatch_mode selection in /aid-init** — fresh init now asks which dispatch mode to use (agent_tool / inline / subagent) instead of silently writing a default, and re-runs preserve a manually-chosen mode instead of resetting it to `agent_tool` on every run — the silent-reset that caused P043/P044 provenance false-blocks.
+
+### Fixed
+- **done-advance critical-finding precondition** — the release precondition now reads the auditor's structured `blocking_findings` verdict instead of grepping report prose for `critical.*security`; the old grep false-positived on negations ("No Critical … security issue") and even on notes describing the false positive, blocking clean releases and pushing users to edit audit evidence to get through.
+
 ## [2.32.0] — 2026-06-15
 
 ### Added

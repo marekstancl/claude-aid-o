@@ -2299,20 +2299,23 @@ EOF
         errors=$((errors + 1))
       fi
 
-      # Check for P1 security findings in auditor report (blocking)
+      # Block release on critical-severity findings via the auditor's STRUCTURED verdict
+      # field `blocking_findings` (agents/auditor.md: set true when any critical finding
+      # exists). Reading the structured field instead of grepping prose for `critical.*security`
+      # kills false-positives on negations ("No Critical … security issue") and on meta-text —
+      # the old prose grep blocked clean releases and pushed users to edit audit evidence.
       local audit_file=""
       [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
       if [[ -n "$audit_file" ]]; then
-        local p1_count
-        # Use `|| true` to prevent set -euo pipefail from aborting on grep exit 1 (0 matches).
-        # grep -c exits 1 and prints "0" when no lines match; || true ensures compound exits 0.
-        # The ${:-0} guard covers any edge case where grep produces empty output.
-        p1_count=$(grep -ciE 'P1.*security|security.*P1|kritick.*security|critical.*security' "$audit_file" 2>/dev/null || true)
-        p1_count="${p1_count:-0}"
-        if [[ "$p1_count" -gt 0 ]]; then
-          echo "PRECONDITION FAIL: Auditor report contains $p1_count P1/critical security finding(s)." >&2
-          echo "Address security findings before release. See: $audit_file" >&2
+        local blk_count
+        # `|| true` keeps set -euo pipefail happy on grep's exit 1 (0 matches); ${:-0} guards empty.
+        # Match only `blocking_findings: true` or a positive integer; false/0/absent → pass.
+        blk_count=$(grep -ciE 'blocking_findings[^a-zA-Z0-9]+(true|[1-9][0-9]*)' "$audit_file" 2>/dev/null || true)
+        blk_count="${blk_count:-0}"
+        if [[ "$blk_count" -gt 0 ]]; then
+          echo "PRECONDITION FAIL: Auditor declares blocking_findings (critical-severity finding blocks merge)." >&2
+          echo "Address the finding before release. See: $audit_file" >&2
           errors=$((errors + 1))
         fi
       fi
