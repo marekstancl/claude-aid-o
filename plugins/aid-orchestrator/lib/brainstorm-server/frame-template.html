@@ -7,7 +7,8 @@
      * BRAINSTORM COMPANION FRAME TEMPLATE
      *
      * This template provides a consistent frame with:
-     * - OS-aware light/dark theming
+     * - Always-light theme (white background; OS dark mode is intentionally
+     *   ignored so mockups are judged on the same white canvas the target UI uses)
      * - Fixed header and selection indicator bar
      * - Scrollable main content area
      * - CSS helpers for common UI patterns
@@ -18,9 +19,10 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
 
-    /* ===== THEME VARIABLES ===== */
+    /* ===== THEME VARIABLES (always light — see header note) ===== */
     :root {
-      --bg-primary: #f5f5f7;
+      color-scheme: light;
+      --bg-primary: #ffffff;
       --bg-secondary: #ffffff;
       --bg-tertiary: #e5e5e7;
       --border: #d1d1d6;
@@ -34,22 +36,6 @@
       --error: #ff3b30;
       --selected-bg: #e8f4fd;
       --selected-border: #0071e3;
-    }
-
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg-primary: #1d1d1f;
-        --bg-secondary: #2d2d2f;
-        --bg-tertiary: #3d3d3f;
-        --border: #424245;
-        --text-primary: #f5f5f7;
-        --text-secondary: #86868b;
-        --text-tertiary: #636366;
-        --accent: #0a84ff;
-        --accent-hover: #409cff;
-        --selected-bg: rgba(10, 132, 255, 0.15);
-        --selected-border: #0a84ff;
-      }
     }
 
     body {

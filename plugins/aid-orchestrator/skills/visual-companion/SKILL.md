@@ -77,12 +77,19 @@ forces a full rewrite. Read first, draw second.
    - All possible enum values per field
    - Conditional rendering rules (e.g. "X renders only when Y AND status ∈ Z")
    - Visual variants (responsive, size, theme)
+   - **Real dimensions and sizing tokens** — read the actual CSS/Tailwind/utility
+     classes and record concrete values: container max-width, column widths, row
+     heights, font sizes, padding/margin, gap, border-radius, and breakpoints. These
+     are what the mockup must reproduce 1:1 (same px/rem) — never eyeballed sizes.
    - List anything PM wants to add that **isn't in the data shape today** —
      this needs backend decision before drawing
 4. Get PM confirmation that the inventory matches their mental model
 5. **MANDATORY — show current state first:** Before drawing any proposed changes,
    render the component/page **as it currently looks** (from the real code/data shapes
-   you read in step 2). This is the baseline. Every subsequent mockup MUST be structured
+   you read in step 2). Render the baseline **and every proposal at real scale** using the
+   dimensions captured in step 3 (real px/rem widths, heights, font sizes, spacing) — not a
+   shrunken sketch, so what fits on screen in the mockup is what fits in production. This is
+   the baseline. Every subsequent mockup MUST be structured
    as "current → proposed" — either side-by-side (`.split` layout) or a single mockup
    that clearly shows the existing UI with the requested changes layered in.
    **Never show only the new design in isolation.** A mockup that omits the current state
@@ -331,7 +338,8 @@ If `.events` doesn't exist, the user didn't interact with the browser — use on
 - **Iterate before advancing** — if feedback changes current screen, write a new version
 - **2-4 options max** per screen
 - **Use real content when it matters** — for a photography portfolio, use actual images (Unsplash). Placeholder content obscures design issues.
-- **Keep mockups simple** — focus on layout and structure, not pixel-perfect design
+- **Greenfield / new UI** — keep mockups simple; focus on layout and structure, not pixel-perfect design
+- **Building on an existing frontend** — the mockup MUST use the real element sizes (widths, heights, font sizes, spacing) read from the code, at 1:1 scale. A wrong scale misrepresents what fits on screen and produces a design that breaks on implementation. See the step-3 inventory and step-5 baseline rules above.
 - **Always show current + proposed for existing UI** — never a new design in isolation; see the mandatory baseline rule (step 5) in "Refactoring or Redesigning Existing UI" above.
 
 ## File Naming
@@ -369,4 +377,4 @@ Visual Companion output integrates with the P027 Visual Assets Pipeline as the 4
 - Frame template (CSS reference): `{plugin_path}/lib/brainstorm-server/frame-template.html`
 - Helper script (client-side): `{plugin_path}/lib/brainstorm-server/helper.js`
 
-**Last Updated:** 2026-06-12
+**Last Updated:** 2026-06-15

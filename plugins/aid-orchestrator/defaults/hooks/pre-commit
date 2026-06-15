@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # AID-ORCHESTRATOR-HOOK-START (do not edit this block manually)
 # AID Orchestrator — FSM guard pre-commit hook
 # Blocks commits on FSM-managed branches when DONE state review is incomplete.

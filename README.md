@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.31.0** (current) — Simplifier + Reporter plan-boundary agents: the Simplifier proposes reuse/dedup/clarity fixes over the plan diff (S/M auto-applied via gate-fixer→CP4, L deferred), the Reporter tests the delivery and writes a plain-language `.aid-o/reports/{plan_id}-delivery.md` with on-disk test evidence; new advisory `delivery_report_present` check + `docs/extending-aid.md` contributor guide
+- **v2.32.0** (current) — Visual Companion always renders on a white canvas (OS dark mode ignored) and reproduces existing-frontend element sizes 1:1, so mockups match production; plus a fix for the generated pre-commit hook, which lacked a `#!/usr/bin/env bash` shebang and so ran under dash and blocked every commit
+- **v2.31.0** — Simplifier + Reporter plan-boundary agents: the Simplifier proposes reuse/dedup/clarity fixes over the plan diff (S/M auto-applied via gate-fixer→CP4, L deferred), the Reporter tests the delivery and writes a plain-language `.aid-o/reports/{plan_id}-delivery.md` with on-disk test evidence; new advisory `delivery_report_present` check + `docs/extending-aid.md` contributor guide
 - **v2.29.4** — paired ✅ recovery alert with PM `--force` override resolutions (previously only clean re-runs emitted it), and fixed `/aid-init` writing `dispatch_mode: subagent` into project configs, which overrode the `agent_tool` default and reintroduced `verifier_provenance` false-positive blocks
-- **v2.29.3** — /simplify hardening wave: pure-bash `yaml_field()` replaces 51 `grep|awk` forks in the FSM, accurate `provenance_aggregate: "agent_tool"` in compliance.json, `dispatch_mode` default single-sourced in `orchestration.yaml`, new check-severity sync guard test, and P042 recovery alert documented in pipeline.md
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

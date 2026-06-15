@@ -291,6 +291,12 @@ After workspace creation (and on every re-run), install or update both git hooks
    - If target does NOT exist → copy template, `chmod +x`
    - If target exists AND contains `AID-ORCHESTRATOR-HOOK-START` → replace block between START/END markers with new version (upgrade)
    - If target exists WITHOUT marker → append template content to end of file (coexistence)
+   - **Then ensure the shebang (every path):** if line 1 of the target is not `#!`,
+     prepend `#!/usr/bin/env bash` as line 1. The marker block lives *below* the shebang,
+     so the upgrade path above does not restore it on its own — this retrofits hooks
+     installed before the shebang existed. Without it git runs the hook under `/bin/sh`
+     (dash on Debian), which fails on the hook's bash syntax (`[[ ]]`, `< <(find …)`) and
+     blocks every commit, forcing `--no-verify`.
 4. **Skip if** `.git/` directory does not exist (not a git repo)
 
 ```
@@ -422,4 +428,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-06-12
+**Last Updated:** 2026-06-15

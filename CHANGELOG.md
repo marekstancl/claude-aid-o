@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.32.0] — 2026-06-15
+
+### Added
+- **Real-scale Visual Companion mockups** — when building UI on an existing frontend, the companion records the real dimensions (container/column widths, row heights, font sizes, spacing, breakpoints) from the live code and reproduces them 1:1, so a mockup reflects what actually fits on screen instead of an arbitrarily-scaled sketch.
+
+### Changed
+- **Visual Companion canvas always white** — the browser companion frame no longer follows OS dark mode (white page background, `color-scheme: light`, dark-mode media query removed), so mockups are always judged on the same white canvas the target UI uses.
+
+### Fixed
+- **pre-commit hook shebang** — the generated FSM-guard pre-commit hook had no shebang, so git ran it under `/bin/sh` (dash on Debian) where its bash syntax (`[[ ]]`, `< <(find …)`) failed and blocked every commit, forcing `--no-verify`; it now starts with `#!/usr/bin/env bash` and `/aid-init` retrofits the shebang onto hooks installed before the fix.
+
 ## [2.31.0] — 2026-06-14
 
 ### Added
