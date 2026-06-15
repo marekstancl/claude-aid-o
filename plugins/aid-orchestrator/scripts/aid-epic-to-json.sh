@@ -226,7 +226,12 @@ fi
 # =============================================================================
 declare -a step_ids=()
 for i in "${!step_nums[@]}"; do
-  step_ids+=("step_${step_nums[$i]}_${step_roles[$i]}")
+  # Sanitize the role for use in the step ID: the plan.schema step.id pattern
+  # (^step_[a-z0-9_]+$) forbids hyphens, but valid roles like "docs-writer"
+  # contain one. Map hyphens to underscores so the generated ID validates while
+  # the step.role field below keeps its canonical hyphenated value.
+  role_id="${step_roles[$i]//-/_}"
+  step_ids+=("step_${step_nums[$i]}_${role_id}")
 done
 
 # Build lookup: step number -> index for dependency resolution

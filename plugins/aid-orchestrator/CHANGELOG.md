@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.33.1] — 2026-06-15
+
+### Fixed
+- **docs-writer step ID** — EPIC steps with the `docs-writer` role failed `plan.json` conversion because the role's hyphen broke the `step.id` pattern `^step_[a-z0-9_]+$`; the role is now sanitized (hyphen → underscore) when building the step ID, while `step.role` keeps its canonical hyphenated value, so docs-writer steps convert and dispatch correctly.
+
 ## [2.33.0] — 2026-06-15
 
 ### Added

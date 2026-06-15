@@ -294,6 +294,35 @@ else
   fail "step ID pattern check" "skipped — plan.json not available from TEST 3"
 fi
 
+# ===========================================================================
+# TEST 11: hyphenated role docs-writer converts and sanitizes its step ID
+# (regression: P041 docs -> docs-writer vs step.id pattern ^step_[a-z0-9_]+$)
+# ===========================================================================
+run_test "Hyphenated role docs-writer converts; step ID sanitized, role preserved"
+
+DOCS_WRITER_EPIC="$FIXTURES_DIR/E-TEST-004-1_1-docs-writer-role.md"
+out_dir="$(make_output_dir "t11")"
+
+actual_exit=0
+manifest11="$("$SCRIPT_UNDER_TEST" \
+  --epic "$DOCS_WRITER_EPIC" \
+  --schema "$SCHEMA_FILE" \
+  --output-dir "$out_dir" \
+  2>/dev/null)" || actual_exit=$?
+
+if [[ "$actual_exit" -ne 0 ]]; then
+  fail "docs-writer EPIC converts with code 0" "got exit code $actual_exit"
+else
+  dw_plan_json="$(echo "$manifest11" | jq -r '.plan_json')"
+  dw_id="$(jq -r '.steps[] | select(.role == "docs-writer") | .id' "$dw_plan_json" 2>/dev/null)"
+  dw_role="$(jq -r '.steps[] | select(.role == "docs-writer") | .role' "$dw_plan_json" 2>/dev/null)"
+  if [[ "$dw_id" == "step_2_docs_writer" && "$dw_role" == "docs-writer" ]]; then
+    pass "docs-writer step ID sanitized to step_2_docs_writer; role kept as docs-writer"
+  else
+    fail "docs-writer step ID sanitized; role preserved" "id='$dw_id' role='$dw_role'"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
