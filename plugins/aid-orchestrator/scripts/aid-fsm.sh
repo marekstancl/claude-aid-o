@@ -2576,7 +2576,10 @@ cmd_check_promotion_candidates() {
 }
 
 # ─── plan-close ─────────────────────────────────────────────────────────
-# Verify all four required CA reports are present, then write ca-review-complete.
+# Verify all required CA reports are present, then write ca-review-complete.
+# simplifier-report.md is skipped when simplifier.enabled:false in execution.yaml.
+# delivery-report.md  is skipped when reporter.enabled:false  in execution.yaml.
+# Skips are logged to audit-log.jsonl with rationale.
 # Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
 cmd_plan_close() {
   local epic_id="${1:-}"
@@ -2595,19 +2598,55 @@ cmd_plan_close() {
   nnn=$(echo "$stripped" | grep -oP '(?<=^E-)\d+')
   local plan_id="P${nnn}"
 
+  # Read execution.yaml toggles — grep-only, no yq dependency.
+  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  local simplifier_enabled=true
+  local reporter_enabled=true
+  if [[ -f "$exec_yaml" ]]; then
+    grep -qP '^\s{0,4}simplifier:\s*$' "$exec_yaml" && \
+      grep -A5 'simplifier:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && simplifier_enabled=false || true
+    grep -qP '^\s{0,4}reporter:\s*$' "$exec_yaml" && \
+      grep -A5 'reporter:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && reporter_enabled=false || true
+  fi
+
+  local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
+
   local curator_report="${evidence_dir}/curator-report.md"
   local audit_report="${evidence_dir}/audit-report.md"
   local simplifier_report="${evidence_dir}/simplifier-report.md"
   local delivery_report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
 
+  # Always-required reports (no toggle).
   local missing=0
-  for required_file in "$curator_report" "$audit_report" "$simplifier_report" "$delivery_report"; do
+  for required_file in "$curator_report" "$audit_report"; do
     if [[ ! -f "$required_file" ]]; then
       echo "PRECONDITION FAIL: required report not found: ${required_file}" >&2
       echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
       missing=1
     fi
   done
+
+  # simplifier-report: required unless simplifier.enabled:false.
+  if [[ "$simplifier_enabled" == "false" ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="simplifier" rationale="simplifier.enabled:false in execution.yaml"
+  else
+    if [[ ! -f "$simplifier_report" ]]; then
+      echo "PRECONDITION FAIL: required report not found: ${simplifier_report}" >&2
+      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+      missing=1
+    fi
+  fi
+
+  # delivery-report: required unless reporter.enabled:false.
+  if [[ "$reporter_enabled" == "false" ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="reporter" rationale="reporter.enabled:false in execution.yaml"
+  else
+    if [[ ! -f "$delivery_report" ]]; then
+      echo "PRECONDITION FAIL: required report not found: ${delivery_report}" >&2
+      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+      missing=1
+    fi
+  fi
 
   if [[ "$missing" -ne 0 ]]; then
     exit 1
