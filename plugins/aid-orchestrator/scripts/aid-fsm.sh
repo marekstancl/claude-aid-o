@@ -1484,14 +1484,20 @@ cmd_init() {
 
   # Plan-level DONE gate: block cross-plan init if previous plan has unreviewed C+A findings
   if [[ "$force" != "true" && -d ".aid-o/work/evidence" ]]; then
-    local current_plan_prefix
-    current_plan_prefix=$(echo "$epic_id" | grep -oP '^P\d+' || true)
+    local current_plan_num current_plan_prefix
+    current_plan_num=""
+    [[ "$epic_id" =~ ^E-([0-9]+) ]] && current_plan_num="${BASH_REMATCH[1]}"
+    current_plan_prefix=""
+    [[ -n "$current_plan_num" ]] && current_plan_prefix="P${current_plan_num}"
 
     if [[ -n "$current_plan_prefix" ]]; then
       while IFS= read -r prev_state; do
-        local prev_epic prev_plan prev_done_phase prev_dir
+        local prev_epic prev_plan prev_done_phase prev_dir prev_plan_num
         prev_epic=$(yaml_field "$prev_state" epic_id)
-        prev_plan=$(echo "$prev_epic" | grep -oP '^P\d+' || true)
+        prev_plan_num=""
+        [[ "$prev_epic" =~ ^E-([0-9]+) ]] && prev_plan_num="${BASH_REMATCH[1]}"
+        prev_plan=""
+        [[ -n "$prev_plan_num" ]] && prev_plan="P${prev_plan_num}"
         prev_done_phase=$(yaml_field "$prev_state" done_phase)
         prev_dir=$(dirname "$prev_state")
 
