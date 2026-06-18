@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.34.1** (current) — post-audit patch: `yaml_field()` quoted-empty bypass closed, verdict whitelist added, `blocking_findings` fail-closed on any non-false value (8 new regression assertions)
-- **v2.34.0** — enforcement registry shipped in `defaults/`, TTL guard, `_generated_at` required in verifier output, `blocking_findings` canonical field, cross-plan init gate fix, 19 new regression assertions
-- **v2.33.1** — EPIC steps with the `docs-writer` role now convert to `plan.json` correctly; the role's hyphen is sanitized when building the step ID (which forbids hyphens) while the canonical `docs-writer` role value is preserved
+- **v2.34.2** (current) — `plan_diff` gate evidence truthfulness (exit 2 → `skip` not `pass`); `review_result` instruction drift cleaned up in `role-cards.md` + `gate-fixer.md`
+- **v2.34.1** — post-audit patch: `yaml_field()` quoted-empty bypass closed, verdict whitelist, `blocking_findings` fail-closed on non-false values (8 new assertions)
+- **v2.34.0** — enforcement registry in `defaults/`, TTL guard, `_generated_at` required, `blocking_findings` canonical field, cross-plan init gate fix, 19 new assertions
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

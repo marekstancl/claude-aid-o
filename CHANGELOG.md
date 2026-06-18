@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.34.2] — 2026-06-18
+
+### Fixed
+- **`plan_diff` evidence truthfulness** — gate runner recorded `result: "pass"` for exit-2 graceful skips (no AC blocks / legacy plan), making `gates_report.json` claim verification happened when it did not; changed to `result: "skip"` so evidence accurately reflects that the gate skipped rather than passed.
+- **`review_result` instruction drift** — `role-cards.md` and `gate-fixer.md` still referenced the old nested `review_result.findings[]` contract after the Step 2 canonical-output migration; updated to top-level `findings:[]` per `agents/verifier.md`.
+
 ## [2.34.1] — 2026-06-18
 
 ### Fixed
