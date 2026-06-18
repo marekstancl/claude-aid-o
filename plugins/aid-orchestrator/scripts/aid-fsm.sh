@@ -490,12 +490,14 @@ fsm_check_streamlined_abandoned() {
 fsm_handle_force_override() {
   local from="$1" to="$2" state_file="$3" caller_cmd="$4"
   shift 4
-  local reason="" blocked_checks=""
+  local reason="" blocked_checks="" blocking_epic="" blocking_plan=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason) reason="$2"; shift 2 ;;
       --blocked-checks) blocked_checks="$2"; shift 2 ;;
+      --blocking-epic) blocking_epic="$2"; shift 2 ;;
+      --blocking-plan) blocking_plan="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -530,7 +532,8 @@ Then retry with --reason."
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
     from="$from" to="$to" reason="$reason" \
     caller="$caller_cmd" operator="$operator" \
-    blocked_checks="$blocked_checks"
+    blocked_checks="$blocked_checks" \
+    blocking_epic="$blocking_epic" blocking_plan="$blocking_plan"
 
   fsm_emit_audit_log "fsm_force_override" \
     --from "$from" --to "$to" \
@@ -1481,9 +1484,30 @@ cmd_init() {
         streamlined=true
         ;;
       --force)
+        # Pre-scan: find which prior plan's gate would have been blocking,
+        # so the audit record names it (E-046-2_3 Step 3 enrichment).
+        local _bepic="" _bplan=""
+        local _cur_plan_num=""
+        [[ "$epic_id" =~ ^E-([0-9]+) ]] && _cur_plan_num="${BASH_REMATCH[1]}"
+        local _cur_plan_prefix="P${_cur_plan_num}"
+        while IFS= read -r _ps; do
+          local _pe _ppn _pp _pdp _pd
+          _pe=$(yaml_field "$_ps" epic_id)
+          _ppn=""
+          [[ "$_pe" =~ ^E-([0-9]+) ]] && _ppn="${BASH_REMATCH[1]}"
+          _pp="P${_ppn}"
+          _pdp=$(yaml_field "$_ps" done_phase)
+          _pd=$(dirname "$_ps")
+          if [[ -n "$_pp" && "$_pp" != "$_cur_plan_prefix" && "$_pdp" == "review" ]]; then
+            if [[ -f "${_pd}/audit-report.md" && ! -f "${_pd}/ca-review-complete" ]]; then
+              _bepic="$_pe"; _bplan="$_pp"; break
+            fi
+          fi
+        done < <(find .aid-o/work/evidence -name "fsm-state.yaml" 2>/dev/null)
         # Forwards ${@:i+1}; callers must pass --plan before --force when both present
         # (fsm_handle_force_override consumes remaining args as reason payload).
-        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:i+1}"
+        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:$((i+1))}" \
+          ${_bepic:+--blocking-epic "$_bepic"} ${_bplan:+--blocking-plan "$_bplan"}
         force="true"
         ;;
       *)
