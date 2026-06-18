@@ -2575,6 +2575,47 @@ cmd_check_promotion_candidates() {
   echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
 }
 
+# ─── plan-close ─────────────────────────────────────────────────────────
+# Verify all four required CA reports are present, then write ca-review-complete.
+# Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
+cmd_plan_close() {
+  local epic_id="${1:-}"
+  local evidence_dir="${2:-}"
+  local project_root="${3:-}"
+
+  [[ -z "$epic_id" ]]       && echo "Missing: epic_id"       >&2 && exit 1
+  [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
+  [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
+
+  # Derive plan_id: strip trailing _N run suffix, extract first NNN digit block after E-
+  # E-046-2_3 -> stripped=E-046-2 -> nnn=046 -> plan_id=P046
+  # E-013-1   -> stripped=E-013-1 -> nnn=013 -> plan_id=P013
+  local stripped="${epic_id%%_*}"           # remove _N suffix if present
+  local nnn
+  nnn=$(echo "$stripped" | grep -oP '(?<=^E-)\d+')
+  local plan_id="P${nnn}"
+
+  local curator_report="${evidence_dir}/curator-report.md"
+  local audit_report="${evidence_dir}/audit-report.md"
+  local simplifier_report="${evidence_dir}/simplifier-report.md"
+  local delivery_report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
+
+  local missing=0
+  for required_file in "$curator_report" "$audit_report" "$simplifier_report" "$delivery_report"; do
+    if [[ ! -f "$required_file" ]]; then
+      echo "PRECONDITION FAIL: required report not found: ${required_file}" >&2
+      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+      missing=1
+    fi
+  done
+
+  if [[ "$missing" -ne 0 ]]; then
+    exit 1
+  fi
+
+  touch "${evidence_dir}/ca-review-complete"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -2594,8 +2635,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     done-advance)               shift; cmd_done_advance "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
+    plan-close)                 shift; cmd_plan_close "$@" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close> [args...]" >&2
       exit 1 ;;
   esac
 fi
