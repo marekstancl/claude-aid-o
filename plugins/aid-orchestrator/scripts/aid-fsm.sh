@@ -925,8 +925,10 @@ fsm_eval_delivery_report_present() {
 _aid_read_toggle() {
   local exec_yaml="$1" section_name="$2"
   [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default
-  grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
-    grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && return 1 || true
+  if grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
+     grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$'; then
+    return 1
+  fi
   return 0
 }
 
@@ -2682,13 +2684,19 @@ cmd_plan_close() {
   local simplifier_report="${evidence_dir}/simplifier-report.md"
   local delivery_report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
 
+  # Helper: emit standard missing-report error message.
+  local _fail_missing
+  _fail_missing() {
+    echo "PRECONDITION FAIL: required report not found: $1" >&2
+    echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+    missing=1
+  }
+
   # Always-required reports (no toggle).
   local missing=0
   for required_file in "$curator_report" "$audit_report"; do
     if [[ ! -f "$required_file" ]]; then
-      echo "PRECONDITION FAIL: required report not found: ${required_file}" >&2
-      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
-      missing=1
+      _fail_missing "$required_file"
     fi
   done
 
@@ -2697,9 +2705,7 @@ cmd_plan_close() {
     log_event "$audit_log" "plan_close_skip" specialist="simplifier" rationale="simplifier.enabled:false in execution.yaml"
   else
     if [[ ! -f "$simplifier_report" ]]; then
-      echo "PRECONDITION FAIL: required report not found: ${simplifier_report}" >&2
-      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
-      missing=1
+      _fail_missing "$simplifier_report"
     fi
   fi
 
@@ -2708,9 +2714,7 @@ cmd_plan_close() {
     log_event "$audit_log" "plan_close_skip" specialist="reporter" rationale="reporter.enabled:false in execution.yaml"
   else
     if [[ ! -f "$delivery_report" ]]; then
-      echo "PRECONDITION FAIL: required report not found: ${delivery_report}" >&2
-      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
-      missing=1
+      _fail_missing "$delivery_report"
     fi
   fi
 
