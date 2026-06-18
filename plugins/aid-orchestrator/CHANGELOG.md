@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.35.0] — 2026-06-18
+
+### Added
+- **`plan-close` FSM command** — enforces all four required reports (curator, auditor, simplifier, delivery) before writing the `ca-review-complete` marker; raw `touch` is explicitly forbidden and `pipeline.md §7` directs implementers to this command instead.
+- **Toggle-skip for disabled specialists** — `simplifier.enabled:false` / `reporter.enabled:false` in `execution.yaml` exempts the corresponding report from `plan-close`; each skip is audited to `audit-log.jsonl` with specialist name and rationale.
+- **`simplifier_report_present` compliance measurement** — `compliance.json` now carries `simplifier_report_present: null/true/false` (advisory severity); anchored for future enforcement promotion.
+- **Boundary manifest (committed, CI-readable)** — Reporter writes `.aid-o/reports/{plan_id}-boundary.md` after every completed plan; carries provenance for all four required reports and is readable by CI without accessing gitignored evidence directories.
+- **CI floor check** — `defaults/ci/plan-boundary-required-check.yml` (GitHub Actions) verifies that committed boundary manifests are complete; exits 0 gracefully when no manifests are present.
+- **`/aid-audit` CI check residual** — `/aid-audit` verifies whether the boundary CI check is installed and explicitly surfaces the residual when it is not.
+- **`/aid-init` optional CI check installation** — fresh or upgraded workspaces are offered the option to copy `plan-boundary-required-check.yml` to `.github/workflows/`.
+- **Force-override audit enrichment** — `init --force` pre-scans to identify the blocking plan/EPIC and passes `--blocking-epic` / `--blocking-plan` to `fsm_handle_force_override`, writing both to `timeline.jsonl` and `audit-log.jsonl`.
+- **13 new bats assertions** — `test-plan-close.bats` (9 tests: missing reports, toggle-skip, audit entry) and `test-ci-floor.bats` (4 tests: no manifests, valid manifest, incomplete manifest, missing delivery).
+- **`_aid_read_toggle()` helper** — yq-free toggle detection extracted into a shared function, eliminating duplicated grep chains in `cmd_plan_close` and `fsm_eval_simplifier_present`.
+
 ## [2.34.2] — 2026-06-18
 
 ### Fixed
