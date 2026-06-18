@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.34.1] — 2026-06-18
+
+### Fixed
+- **`yaml_field()` quoted-empty bypass** — `_generated_by: ""` and `_generated_by: ''` returned a non-empty string (the literal quote characters), allowing fabricated empty fields to pass `[[ -z ]]` guards; fixed by stripping surrounding YAML quotes after whitespace trimming so quoted-empty collapses to empty and fails correctly.
+- **Verdict whitelist missing** — only `pending` and empty were rejected from verifier output; any other non-standard scalar (e.g. `banana`) passed as a valid completed verdict; fixed by explicit `case` whitelist that accepts only `pass|fail`.
+- **`blocking_findings` fail-closed on non-false values** — only exact scalar `true` was blocked; `maybe`, `"true"` (quoted), comment text, and any other non-empty value passed silently as clean; fixed to accept ONLY scalar `false` (after quote-stripping), treating everything else as blocking.
+- **`cp4_curator_validation` registry anchor** — source line was `scripts/aid-fsm.sh:283`, actual function start is `:292`; corrected.
+- **Enforcement registry seed header** — seed file still claimed "single source of truth / NOT yet promoted"; updated to "SUPERSEDED by E-046-1_3 Step 5" to match reality after promotion.
+
 ## [2.34.0] — 2026-06-18
 
 ### Added
