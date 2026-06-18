@@ -104,9 +104,12 @@ EOF
   printf '{"_generated_by":"aid-run-gates.sh@test-fixture"}\n' > "${EVIDENCE_DIR}/gates/gates_report.json"
 
   # Minimal curator + auditor reports so the remaining cmd_done_advance
-  # preconditions (curator-report, audit-report, P1 grep) all pass.
+  # preconditions (curator-report, audit-report, CP5 blocking_findings) all pass.
+  # blocking_findings: false MUST be at line-start (yaml_field line-start match,
+  # E-046-1_3 Step 3 fail-closed). Plain "fixture auditor report" without this
+  # field now triggers the fail-closed precondition.
   echo "fixture curator report" > "${EVIDENCE_DIR}/curator-report.md"
-  echo "fixture auditor report" > "${EVIDENCE_DIR}/audit-report.md"
+  printf 'blocking_findings: false\nfixture auditor report\n' > "${EVIDENCE_DIR}/audit-report.md"
 
   # Empty timeline + audit-log so fixtures can append controlled events.
   : > "${EVIDENCE_DIR}/timeline.jsonl"
@@ -520,4 +523,50 @@ EOF
   recovered_count=$(jq -s '[.[] | select(.event=="fsm_done_advance_recovered")] | length' \
     "${EVIDENCE_DIR}/timeline.jsonl")
   [ "$recovered_count" -eq 1 ]
+}
+
+# ─── E-046-1_3 Step 3: CP5 blocking_findings four-case matrix ─────────────────
+# Regression for the `grep -ciE` false-positive parser replaced by yaml_field
+# line-start match (fail-closed on absence). All four behaviours must hold.
+
+# Shared helper for CP5 tests: _setup_clean_done_advance already exists for
+# fixture 7 series. We reuse it and then overwrite audit-report.md per-test.
+
+@test "CP5: blocking_findings: true at line-start → done-advance blocked (fail)" {
+  _setup_clean_done_advance
+  printf 'blocking_findings: true\nsome prose body\n' > "${EVIDENCE_DIR}/audit-report.md"
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+}
+
+@test "CP5: blocking_findings: false at line-start → done-advance passes" {
+  _setup_clean_done_advance
+  printf 'blocking_findings: false\nsome prose body\n' > "${EVIDENCE_DIR}/audit-report.md"
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -eq 0 ]
+}
+
+@test "CP5: blocking_findings field absent (no top-level key) → fail-closed (blocked)" {
+  _setup_clean_done_advance
+  # Only body prose, no blocking_findings key at line-start
+  printf '# Audit Report\nNo blocking findings found today.\n' > "${EVIDENCE_DIR}/audit-report.md"
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing canonical top-level"* ]]
+}
+
+@test "CP5: blocking_findings: true only in body (indented) → NOT a block (line-start only)" {
+  # This is the false-positive case the old grep -ciE would have caught.
+  # yaml_field matches only line-start → indented value is invisible → no block.
+  _setup_clean_done_advance
+  printf 'blocking_findings: false\naudit_report:\n  blocking_findings: true\n  prose: body\n' \
+    > "${EVIDENCE_DIR}/audit-report.md"
+  cd "$PROJECT_ROOT"
+  run bash "$AID_FSM_PATH" done-advance review release "$STATE_FILE"
+  # Top-level says false → should pass despite nested true
+  [ "$status" -eq 0 ]
 }

@@ -93,18 +93,18 @@ while IFS= read -r line; do
     local_id="${BASH_REMATCH[1]}"
   fi
 
-  # Extract deadline field
+  # Extract deadline field (handles both quoted and unquoted YYYY-MM-DD values)
   local_deadline=""
-  if [[ "$line" =~ deadline:[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+  if [[ "$line" =~ deadline:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
     local_deadline="${BASH_REMATCH[1]}"
   fi
 
   # No deadline → not subject to TTL guard (opt-in)
   [[ -n "$local_deadline" ]] || continue
 
-  # Extract deferred_until field
+  # Extract deferred_until field (handles both quoted and unquoted)
   local_deferred_until=""
-  if [[ "$line" =~ deferred_until:[[:space:]]*([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+  if [[ "$line" =~ deferred_until:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
     local_deferred_until="${BASH_REMATCH[1]}"
   fi
 
