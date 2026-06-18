@@ -74,3 +74,7 @@ checks:
     severity: advisory
     promoted_at: null
     promoted_reason: null  # anchor: P045 + AID-v3-principles.md §1
+  simplifier_report_present:
+    severity: advisory
+    promoted_at: null
+    promoted_reason: null  # anchor: E-046-2_3 Step 4 — measurement only until enforcement step

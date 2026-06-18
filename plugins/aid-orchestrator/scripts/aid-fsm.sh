@@ -915,6 +915,32 @@ fsm_eval_delivery_report_present() {
   if $one_exists; then echo true; else echo false; fi
 }
 
+# ─── E-046-2_3 Step 4: simplifier_report_present (plan-boundary measurement) ──
+# null  — plan boundary not reached (no ca-review-complete marker), OR
+#         simplifier.enabled:false in execution.yaml (N/A; no report expected).
+# true  — at boundary AND simplifier-report.md present in evidence_dir.
+# false — at boundary AND simplifier-report.md missing (advisory; never blocks).
+# MEASUREMENT ONLY — enforcement in a future step.
+fsm_eval_simplifier_present() {
+  local epic_id="$1" evidence_dir="$2" project_root="$3"
+
+  # Plan-boundary signal: ca-review-complete marker in this EPIC's evidence dir.
+  [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
+
+  # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
+  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  if [[ -f "$exec_yaml" ]]; then
+    grep -qP '^\s{0,4}simplifier:\s*$' "$exec_yaml" && \
+      grep -A5 'simplifier:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && { echo null; return 0; } || true
+  fi
+
+  if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
@@ -1102,6 +1128,10 @@ evaluate_compliance_checks() {
   local delivery_report_present
   delivery_report_present=$(fsm_eval_delivery_report_present "$epic_id" "$evidence_dir" "$project_root")
 
+  # E-046-2_3 Step 4: simplifier_report_present — measurement only (advisory).
+  local simplifier_report_present
+  simplifier_report_present=$(fsm_eval_simplifier_present "$epic_id" "$evidence_dir" "$project_root")
+
   jq -nc \
     --argjson bc          "$branch_correct" \
     --argjson eyp         "$exec_yaml_present" \
@@ -1119,6 +1149,7 @@ evaluate_compliance_checks() {
     --argjson agg         "$aggregate" \
     --argjson prov_agg    "$prov_agg" \
     --argjson drp         "$delivery_report_present" \
+    --argjson srp         "$simplifier_report_present" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
@@ -1139,7 +1170,8 @@ evaluate_compliance_checks() {
         provenance_aggregate:       $prov_agg
       },
       dod_present: null,
-      delivery_report_present: $drp
+      delivery_report_present: $drp,
+      simplifier_report_present: $srp
     }'
 }
 
