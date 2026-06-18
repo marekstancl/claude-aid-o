@@ -3,6 +3,36 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.34.1] — 2026-06-18
+
+### Fixed
+- **`yaml_field()` quoted-empty bypass** — `_generated_by: ""` and `_generated_by: ''` returned a non-empty string (the literal quote characters), allowing fabricated empty fields to pass `[[ -z ]]` guards; fixed by stripping surrounding YAML quotes after whitespace trimming so quoted-empty collapses to empty and fails correctly.
+- **Verdict whitelist missing** — only `pending` and empty were rejected from verifier output; any other non-standard scalar (e.g. `banana`) passed as a valid completed verdict; fixed by explicit `case` whitelist that accepts only `pass|fail`.
+- **`blocking_findings` fail-closed on non-false values** — only exact scalar `true` was blocked; `maybe`, `"true"` (quoted), comment text, and any other non-empty value passed silently as clean; fixed to accept ONLY scalar `false` (after quote-stripping), treating everything else as blocking.
+- **`cp4_curator_validation` registry anchor** — source line was `scripts/aid-fsm.sh:283`, actual function start is `:292`; corrected.
+- **Enforcement registry seed header** — seed file still claimed "single source of truth / NOT yet promoted"; updated to "SUPERSEDED by E-046-1_3 Step 5" to match reality after promotion.
+
+## [2.34.0] — 2026-06-18
+
+### Added
+- **Enforcement registry promoted to `defaults/`** — `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` is now git-tracked and shipped with the plugin; previously it lived only in a gitignored seed file, making it invisible to consumers and untestable in CI.
+- **TTL guard for planned enforcement rows** — `scripts/aid-registry-ttl-guard.sh` exits non-zero when a `status: planned` registry row is past its `deadline` without a valid future `deferred_until` date; enforces the "Detector without Enforcement is Decoration" principle (§1) by making planned-but-never-wired items fail CI instead of silently rotting.
+- **`deadline` / `deferred_until` / `deferred_by` / `deferred_reason` schema** — per-row TTL fields added to the registry schema so each planned enforcement can state when it must be wired and who deferred it if not yet done; P045 planned rows carry `deadline: 2026-09-30`.
+- **`_generated_at` required in verifier output** — `fsm_check_verifier_output` now rejects files missing or empty on `_generated_at`, closing the anti-fabrication gap where a verifier's timestamp could be omitted without FSM consequence; `agents/verifier.md` output spec and the verifier output template updated to match.
+- **`cp4_glob_evaluated` audit event wired** — the event was documented in `skills/agent-protocol.md` but never emitted; now emitted by `fsm_check_cp4_curator_validation` before the production-touch check, resolving the ORPHAN verdict in the enforcement registry.
+- **Regression tests: cross-plan gate, `_generated_at`, CP4 content-validation, CP5 blocking_findings** — 19 new bats assertions in `test-aid-fsm.bats` (cross-plan E-→P gate, `_generated_at` enforcement, CP4 content), `test-tiered-severity.bats` (CP5 four-case matrix), and the new `test-registry-ttl.bats` (6 TTL guard assertions).
+- **`run-all-tests.sh` discovers `bats/test-*.bats`** — the test runner now auto-discovers bats suites in the `bats/` subdirectory in addition to `test-*.sh`, so `test-registry-ttl.bats` and all other bats suites run in CI without manual registration.
+
+### Changed
+- **CP4 curator-validation content-validated** — `fsm_check_cp4_curator_validation` previously accepted any file at the expected path; it now routes through `fsm_check_verifier_output` and rejects files missing valid `_generated_by`, `_generated_at`, or `classification` fields.
+- **`blocking_findings` reads canonical top-level field** — `done-advance review → release` now reads the auditor's `blocking_findings:` key via `yaml_field` (line-start match only) instead of `grep -ciE` on prose; fail-closed on absent field, immune to false-positives from negations or body text; `agents/auditor.md` output template updated to emit `blocking_findings:` as the first top-level key.
+- **Cross-plan init gate fixed for `E-NNN` IDs** — the gate that blocks starting a new EPIC when the previous plan has unreviewed Curator/Auditor findings was silently dead because the plan-prefix derivation used `grep -oP '^P\d+'` which never matched `E-NNN` style IDs; fixed using `BASH_REMATCH[1]` on `E-([0-9]+)`.
+- **Enforcement registry ORPHAN rows resolved** — `dispatch_completed_late` removed (unwireable in scope), `cp4_glob_evaluated` promoted to `status: active`, `cp4_template_stale_name` aligned; verdict distribution: ORPHAN 3 → 0, ALIGNED 71 → 73.
+
+### Fixed
+- **`test-tiered-severity.bats` fixture broken by fail-closed** — six existing tests that used a minimal `audit-report.md` without `blocking_findings:` now fail the Step 3 fail-closed precondition; fixture `setup()` updated to write `blocking_findings: false` at line-start so the tests exercise their intended provenance logic without triggering the new guard.
+- **TTL guard quoted-date regex** — `aid-registry-ttl-guard.sh` regex for `deadline:` and `deferred_until:` now handles `"YYYY-MM-DD"` (quoted) in addition to unquoted values, matching the flow-style YAML format used by the registry.
+
 ## [2.33.1] — 2026-06-15
 
 ### Fixed

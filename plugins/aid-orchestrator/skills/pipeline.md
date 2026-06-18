@@ -465,7 +465,7 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    complete event as authoritative provenance.
 
 3. **FSM precondition** (`aid-fsm.sh increment-step`):
-   - Rejects if verifier-output-step-N.md missing or has no `_generated_by` line (anti-fabrication).
+   - Rejects if verifier-output-step-N.md missing, or has empty/missing `_generated_by` or `_generated_at` (anti-fabrication).
    - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
    - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
 
@@ -586,8 +586,8 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    semantics as CP2 (last pair is authoritative).
 
 2. **Outputs** (each verifier writes its dedicated file):
-   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
-   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
 
 3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
    - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
@@ -1257,7 +1257,7 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 ### Fix Loop Protocol
 
 ```
-1. Verifier dispatched → produces review_result
+1. Verifier dispatched → produces canonical verifier output (top-level `_generated_by`/`_generated_at`/`classification`/`verdict`/`findings`)
 2. If PASS or PASS_WITH_NOTES → continue (notes logged, non-blocking)
 3. If FAIL + fix_loop_eligible:
    a. Dispatch gate-fixer (source: verifier_review) with findings

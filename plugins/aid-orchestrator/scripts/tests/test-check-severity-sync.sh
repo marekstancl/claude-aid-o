@@ -57,9 +57,10 @@ pm_decision: merge
 EOF
 cp "$REGISTRY" "$CFG/check-severity.yaml"
 touch "$CFG/execution.yaml"
-printf '{"_generated_by":"aid-run-gates.sh@sync-test"}\n' > "$EV/gates/gates_report.json"
+printf '{"_generated_by":"aid-run-gates.sh@sync-test","_generated_at":"2026-06-18T00:00:00Z","_command_log":[]}\n' > "$EV/gates/gates_report.json"
 echo "sync-test curator report" > "$EV/curator-report.md"
-echo "sync-test auditor report" > "$EV/audit-report.md"
+# blocking_findings: false must be at line-start (Step 3 fail-closed — E-046-1_3)
+printf 'blocking_findings: false\nsync-test auditor report\n' > "$EV/audit-report.md"
 : > "$EV/timeline.jsonl"
 : > "$TMP/.aid-o/work/audit-log.jsonl"
 ( cd "$TMP" && bash "$AID_FSM" done-advance review release "$EV/fsm-state.yaml" >/dev/null 2>&1 ) || true

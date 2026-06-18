@@ -50,9 +50,14 @@ for f in "$SCRIPT_DIR"/test-*.sh; do
   [[ -f "$f" ]] || continue
   SUITES+=("$f")
 done
+# Also discover bats suites in bats/ subdirectory (E-046-1_3 Step 6)
+for f in "$SCRIPT_DIR"/bats/test-*.bats; do
+  [[ -f "$f" ]] || continue
+  SUITES+=("$f")
+done
 
 if [[ ${#SUITES[@]} -eq 0 ]]; then
-  echo "ERROR: No test-*.sh scripts found in $SCRIPT_DIR" >&2
+  echo "ERROR: No test-*.sh or bats/test-*.bats suites found in $SCRIPT_DIR" >&2
   exit 1
 fi
 
@@ -81,7 +86,8 @@ echo "Discovered ${#SUITES[@]} test suite(s)"
 echo ""
 
 for suite in "${SUITES[@]}"; do
-  suite_name="$(basename "$suite" .sh)"
+  suite_name="$(basename "$suite" .bats)"
+  suite_name="${suite_name%.sh}"   # strip .sh if .bats didn't match
   SUITES_RUN=$(( SUITES_RUN + 1 ))
 
   echo "$SEP"

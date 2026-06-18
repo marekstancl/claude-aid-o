@@ -579,9 +579,10 @@ These constraints are non-negotiable:
 - Critical findings are **ALWAYS** reported — they must never be omitted or downgraded
 
 ### Critical Finding Escalation
-- If ANY finding has severity `critical`, set `blocking_findings: true` in the output
+- If ANY finding has severity `critical`, set `blocking_findings: true`; otherwise `blocking_findings: false`
+- **ALWAYS emit `blocking_findings:` as the FIRST top-level key** (before `audit_report:`) — the FSM reads this canonical field via line-start match; absence is fail-closed (report rejected even if clean)
 - Critical findings block merge — they are surfaced in PM DONE summary with MERGE/FIX/ABORT options
-- The orchestrator reads `blocking_findings` and presents critical findings to PM before merge
+- The orchestrator reads the top-level `blocking_findings` field and presents critical findings to PM before merge
 - This applies to ALL audit categories (security, code quality, etc.)
 
 ### Finding Quality
@@ -693,7 +694,15 @@ EPIC across EPICs.
 
 ### Primary Output: Audit Report (YAML)
 
+The canonical machine-readable `blocking_findings` field MUST appear as a **top-level
+key** (at line start, before the `audit_report:` block). The FSM reads this field via
+`yaml_field()` — a line-start match only. An indented or body-only value is INVISIBLE
+to the FSM. Emit `blocking_findings: false` explicitly when no critical findings exist;
+**never omit the field** (omission is fail-closed on the consumer side).
+
 ```yaml
+blocking_findings: true|false    # CANONICAL — top-level, line-start (FSM reads this)
+
 audit_report:
   epic_id: "{epic_id}"
   timestamp: "{ISO 8601}"
@@ -737,7 +746,7 @@ audit_report:
     findings_persistent: {N}
     trend_direction: "improving|stable|declining"|null
 
-  blocking_findings: true|false    # true if any critical severity findings exist → blocks merge
+  blocking_findings: true|false    # mirror of top-level canonical field (kept for human readability)
 
   recommended_fixes:               # S/M/L effort findings that gate-fixer can auto-apply (pre-merge)
     - finding_ref: "security:login_endpoint"
@@ -826,8 +835,8 @@ Both artifacts are stored in `evidence/{epic_id}/`:
 9. GENERATE audit_report YAML
 10. GENERATE Markdown summary (human-readable)
 11. STORE both in evidence/{epic_id}/
-12. SET blocking_findings = true if any finding has severity "critical"
-13. OUTPUT audit_report to Orchestrator (blocking_findings flag triggers E8 ESCALATION)
+12. SET top-level `blocking_findings: true` if any finding has severity "critical", else `blocking_findings: false` — emit as FIRST line of the YAML file (canonical machine-readable field); repeat as mirror inside `audit_report:`
+13. OUTPUT audit_report to Orchestrator (top-level blocking_findings field triggers E8 ESCALATION; omission is fail-closed)
 ```
 
 ---

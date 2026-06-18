@@ -61,8 +61,15 @@ yaml_field() {
   while IFS= read -r line; do
     if [[ "$line" == "${key}:"* ]]; then
       line=${line#"${key}:"}
-      line=${line#"${line%%[![:space:]]*}"}
-      printf '%s\n' "${line%%[[:space:]]*}"
+      line=${line#"${line%%[![:space:]]*}"}   # strip leading whitespace
+      line="${line%%[[:space:]]*}"             # strip trailing whitespace
+      # Strip surrounding YAML quotes so _generated_by: "" fails [[ -z ]] checks.
+      if [[ ${#line} -ge 2 && "${line:0:1}" == '"' && "${line: -1}" == '"' ]]; then
+        line="${line:1:${#line}-2}"
+      elif [[ ${#line} -ge 2 && "${line:0:1}" == "'" && "${line: -1}" == "'" ]]; then
+        line="${line:1:${#line}-2}"
+      fi
+      printf '%s\n' "$line"
       return 0
     fi
   done < "$file"
@@ -165,15 +172,23 @@ fsm_count_recent_fails_epic() {
 }
 
 # Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
-# Returns 0 (pass) if file exists + has _generated_by + classification fields.
-# For RUN/FAIL classification also requires verdict != "pending" (verifier ran).
+# Returns 0 (pass) if file exists + has non-empty _generated_by + _generated_at
+# + valid classification. For RUN/FAIL/FULL_REVIEW also requires non-empty
+# verdict != "pending" (verifier ran). Aligned with agents/verifier.md canonical
+# output contract (E-046-1_3 Step 2 producer→consumer migration).
 fsm_check_verifier_output() {
   local file=$1
   [[ -f "$file" ]] || return 1
   grep -q '^_generated_by:' "$file" || return 1
+  grep -q '^_generated_at:' "$file" || return 1
   grep -q '^classification:' "$file" || return 1
 
-  local classification
+  local generated_by generated_at classification
+  generated_by=$(yaml_field "$file" _generated_by)
+  [[ -z "$generated_by" ]] && return 1  # non-empty: rejects pre-filter placeholder or blank
+  generated_at=$(yaml_field "$file" _generated_at)
+  [[ -z "$generated_at" ]] && return 1  # non-empty: ensures verifier wrote a real timestamp
+
   classification=$(yaml_field "$file" classification)
   case "$classification" in
     SKIP)
@@ -183,7 +198,11 @@ fsm_check_verifier_output() {
       grep -q '^verdict:' "$file" || return 1
       local verdict
       verdict=$(yaml_field "$file" verdict)
-      [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
+      case "$verdict" in
+        pass|fail) ;;          # only valid completed verdicts
+        pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
+        *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
+      esac
       ;;
     *)
       return 1  # unknown classification
@@ -337,6 +356,13 @@ fsm_check_cp4_curator_validation() {
     die "cp4_glob_invalid"
   fi
 
+  # Telemetry: log which glob and range were evaluated (cp4_glob_evaluated — previously
+  # documented in agent-protocol.md:278 but never emitted; wired in E-046-1_3 Step 4).
+  fsm_emit_audit_log "cp4_glob_evaluated" \
+    --base "$base_commit" \
+    --evidence-dir "$evidence_dir" \
+    --glob "$prod_paths"
+
   # Did ANY commit in base_commit..HEAD touch production paths?
   # `|| true` guards against set -euo pipefail aborting when grep finds no match
   # (exit 1) — the no-touch case is the legitimate skip path, not an error.
@@ -353,9 +379,15 @@ fsm_check_cp4_curator_validation() {
     return 0
   fi
 
-  # Check for CP4 review file
+  # Check for CP4 review file and validate its content via the shared verifier validator.
   local cp4_file="${evidence_dir}/verifier-output-cp4-curator-validation.md"
   if [[ -f "$cp4_file" ]]; then
+    fsm_check_verifier_output "$cp4_file" || {
+      echo "ERROR: verifier-output-cp4-curator-validation.md is present but invalid." >&2
+      echo "  Missing or empty: _generated_by, _generated_at, or classification." >&2
+      echo "  Re-dispatch CP4 verifier and overwrite the file with a valid output." >&2
+      die "cp4_invalid_content"
+    }
     return 0
   fi
 
@@ -1484,14 +1516,20 @@ cmd_init() {
 
   # Plan-level DONE gate: block cross-plan init if previous plan has unreviewed C+A findings
   if [[ "$force" != "true" && -d ".aid-o/work/evidence" ]]; then
-    local current_plan_prefix
-    current_plan_prefix=$(echo "$epic_id" | grep -oP '^P\d+' || true)
+    local current_plan_num current_plan_prefix
+    current_plan_num=""
+    [[ "$epic_id" =~ ^E-([0-9]+) ]] && current_plan_num="${BASH_REMATCH[1]}"
+    current_plan_prefix=""
+    [[ -n "$current_plan_num" ]] && current_plan_prefix="P${current_plan_num}"
 
     if [[ -n "$current_plan_prefix" ]]; then
       while IFS= read -r prev_state; do
-        local prev_epic prev_plan prev_done_phase prev_dir
+        local prev_epic prev_plan prev_done_phase prev_dir prev_plan_num
         prev_epic=$(yaml_field "$prev_state" epic_id)
-        prev_plan=$(echo "$prev_epic" | grep -oP '^P\d+' || true)
+        prev_plan_num=""
+        [[ "$prev_epic" =~ ^E-([0-9]+) ]] && prev_plan_num="${BASH_REMATCH[1]}"
+        prev_plan=""
+        [[ -n "$prev_plan_num" ]] && prev_plan="P${prev_plan_num}"
         prev_done_phase=$(yaml_field "$prev_state" done_phase)
         prev_dir=$(dirname "$prev_state")
 
@@ -2299,25 +2337,30 @@ EOF
         errors=$((errors + 1))
       fi
 
-      # Block release on critical-severity findings via the auditor's STRUCTURED verdict
-      # field `blocking_findings` (agents/auditor.md: set true when any critical finding
-      # exists). Reading the structured field instead of grepping prose for `critical.*security`
-      # kills false-positives on negations ("No Critical … security issue") and on meta-text —
-      # the old prose grep blocked clean releases and pushed users to edit audit evidence.
+      # Block release on critical-severity findings via the auditor's CANONICAL top-level
+      # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
+      # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start
+      # keys — indented/nested values and prose body lines are INVISIBLE, preventing the
+      # old grep-ciE false-positive on negations ("No blocking_findings: true ...").
+      # Fail-closed: absent field → field is indented/missing → cannot confirm clean → block.
       local audit_file=""
       [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
       if [[ -n "$audit_file" ]]; then
-        local blk_count
-        # `|| true` keeps set -euo pipefail happy on grep's exit 1 (0 matches); ${:-0} guards empty.
-        # Match only `blocking_findings: true` or a positive integer; false/0/absent → pass.
-        blk_count=$(grep -ciE 'blocking_findings[^a-zA-Z0-9]+(true|[1-9][0-9]*)' "$audit_file" 2>/dev/null || true)
-        blk_count="${blk_count:-0}"
-        if [[ "$blk_count" -gt 0 ]]; then
-          echo "PRECONDITION FAIL: Auditor declares blocking_findings (critical-severity finding blocks merge)." >&2
-          echo "Address the finding before release. See: $audit_file" >&2
+        local blk
+        blk=$(yaml_field "$audit_file" blocking_findings)
+        if [[ -z "$blk" ]]; then
+          echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
+          echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
+          errors=$((errors + 1))
+        elif [[ "$blk" != "false" ]]; then
+          # Fail-closed on any non-false value: true, maybe, "true", comment, garbage.
+          # Only exact scalar 'false' (after quote-stripping by yaml_field) is clean.
+          echo "PRECONDITION FAIL: blocking_findings value '${blk}' is not 'false' — treating as blocking (fail-closed on any non-false value)." >&2
+          echo "Address the finding or correct the field value. See: $audit_file" >&2
           errors=$((errors + 1))
         fi
+        # blk == "false" → no blocking findings; passes silently.
       fi
 
       if [[ $errors -gt 0 ]]; then

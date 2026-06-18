@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-18
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -70,6 +70,7 @@ Do not infer intent. Report findings.
 
 Output: write to verifier-output-step-N.md (or cp3-{focus}.md) with:
   _generated_by: aid-orchestrator:verifier@<your_agent_id>
+  _generated_at: <ISO 8601 UTC timestamp, e.g. 2026-06-18T14:00:00Z>
   classification: <unchanged from pre-filter, or FULL_REVIEW for CP3>
   verdict: pass | fail
   findings: [list, empty if pass]
@@ -139,20 +140,26 @@ fix_loop:
 
 ## Output Format
 
+Canonical top-level format (FSM-enforced via `fsm_check_verifier_output`):
+
 ```yaml
-review_result:
-  checkpoint: "CP{N}"
-  focus: "{focus_type}"
-  verdict: "PASS|FAIL|PASS_WITH_NOTES"
-  fix_loop_eligible: true|false   # true if findings are auto-fixable by gate-fixer
-  findings:
-    - severity: "critical|high|medium|low"
-      area: "{file_path}:{line}"
-      finding: "{description}"
-      recommendation: "{actionable fix}"
-      auto_fixable: true|false
-  summary: "{1-2 sentence verdict with evidence}"
+_generated_by: aid-orchestrator:verifier@<your_agent_id>
+_generated_at: <ISO 8601 UTC timestamp, e.g. 2026-06-18T14:00:00Z>
+classification: SKIP|RUN|FAIL|FULL_REVIEW
+verdict: pass|fail
+fix_loop_eligible: true|false
+findings:
+  - severity: critical|high|medium|low
+    area: "{file_path}:{line}"
+    finding: "{description}"
+    recommendation: "{actionable fix}"
+    auto_fixable: true|false
+summary: "{1-2 sentence verdict with evidence}"
 ```
+
+All four top-level header fields (`_generated_by`, `_generated_at`, `classification`, `verdict`)
+MUST be at line start (no leading whitespace). The FSM uses `grep -q '^<field>:'` and
+`yaml_field` to validate them — misindented or nested fields are invisible to the check.
 
 `fix_loop_eligible` is `true` when ALL Critical/High findings have `auto_fixable: true`.
 If any Critical/High finding is not auto-fixable (design issue, architecture problem),
