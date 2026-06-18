@@ -61,8 +61,15 @@ yaml_field() {
   while IFS= read -r line; do
     if [[ "$line" == "${key}:"* ]]; then
       line=${line#"${key}:"}
-      line=${line#"${line%%[![:space:]]*}"}
-      printf '%s\n' "${line%%[[:space:]]*}"
+      line=${line#"${line%%[![:space:]]*}"}   # strip leading whitespace
+      line="${line%%[[:space:]]*}"             # strip trailing whitespace
+      # Strip surrounding YAML quotes so _generated_by: "" fails [[ -z ]] checks.
+      if [[ ${#line} -ge 2 && "${line:0:1}" == '"' && "${line: -1}" == '"' ]]; then
+        line="${line:1:${#line}-2}"
+      elif [[ ${#line} -ge 2 && "${line:0:1}" == "'" && "${line: -1}" == "'" ]]; then
+        line="${line:1:${#line}-2}"
+      fi
+      printf '%s\n' "$line"
       return 0
     fi
   done < "$file"
@@ -191,8 +198,11 @@ fsm_check_verifier_output() {
       grep -q '^verdict:' "$file" || return 1
       local verdict
       verdict=$(yaml_field "$file" verdict)
-      [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
-      [[ -z "$verdict" ]] && return 1            # non-empty: rejects blank verdict
+      case "$verdict" in
+        pass|fail) ;;          # only valid completed verdicts
+        pending)   return 1 ;; # pre-filter placeholder: verifier not dispatched
+        *)         return 1 ;; # unknown/garbage verdict (e.g. banana, empty, typo)
+      esac
       ;;
     *)
       return 1  # unknown classification
@@ -2343,9 +2353,11 @@ EOF
           echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
           echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
           errors=$((errors + 1))
-        elif [[ "$blk" == "true" ]]; then
-          echo "PRECONDITION FAIL: Auditor declares blocking_findings (critical-severity finding blocks merge)." >&2
-          echo "Address the finding before release. See: $audit_file" >&2
+        elif [[ "$blk" != "false" ]]; then
+          # Fail-closed on any non-false value: true, maybe, "true", comment, garbage.
+          # Only exact scalar 'false' (after quote-stripping by yaml_field) is clean.
+          echo "PRECONDITION FAIL: blocking_findings value '${blk}' is not 'false' — treating as blocking (fail-closed on any non-false value)." >&2
+          echo "Address the finding or correct the field value. See: $audit_file" >&2
           errors=$((errors + 1))
         fi
         # blk == "false" → no blocking findings; passes silently.

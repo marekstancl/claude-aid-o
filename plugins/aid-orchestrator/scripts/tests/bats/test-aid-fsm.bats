@@ -994,3 +994,94 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"invalid"* ]]
 }
+
+# ─── E-046-1_3 post-audit: yaml_field quote normalization + verdict whitelist ─
+# Regression for auditor finding: _generated_by: "" passed as non-empty (quoted
+# empty is non-empty string before quote-stripping fix), and verdict: banana
+# passed because only "pending" and empty were rejected.
+
+@test "verifier-output: _generated_by: \"\" (quoted empty) → hard fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: ""\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+}
+
+@test "verifier-output: _generated_at: '' (single-quoted empty) → hard fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf "_generated_by: aid-orchestrator:verifier@test\n_generated_at: ''\nclassification: RUN\nverdict: pass\n" \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+}
+
+@test "verifier-output: verdict: banana (invalid scalar) → hard fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  printf '_generated_by: aid-orchestrator:verifier@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: banana\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+}
+
+# ─── E-046-1_3 post-audit: blocking_findings fail-closed on non-false values ──
+# Auditor finding: only exact "true" was blocked; "maybe", "\"true\"", comments
+# all passed silently as clean. Fix: accept ONLY scalar "false", block everything else.
+
+# Helper: seed minimal DONE/review state for done-advance tests that need
+# curator-report + audit-report to vary per test.
+_seed_done_review_state() {
+  local state_file="$1"
+  cat > "$state_file" <<YAML
+epic_id: E-test
+run_id: R-test
+branch: task/E-test/main
+state: DONE
+done_phase: review
+created_at: 2026-06-18T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/tasks" "$TEST_PROJECT_ROOT/.aid-o/work" \
+           "$TEST_PROJECT_ROOT/.aid-o/config"
+  touch "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-06-18T00:00:00Z","_command_log":[]}\n' \
+    > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
+plugin_path: "$AID_PLUGIN_PATH"
+dispatch_mode: subagent
+YAML
+}
+
+@test "CP5: blocking_findings: maybe → fail-closed (non-false treated as blocking)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+  printf 'blocking_findings: maybe\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+}
+
+@test "CP5: blocking_findings: \"true\" (quoted) → fail-closed after yaml_field unquoting" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+  printf 'blocking_findings: "true"\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+}
