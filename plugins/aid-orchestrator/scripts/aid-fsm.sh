@@ -2320,25 +2320,28 @@ EOF
         errors=$((errors + 1))
       fi
 
-      # Block release on critical-severity findings via the auditor's STRUCTURED verdict
-      # field `blocking_findings` (agents/auditor.md: set true when any critical finding
-      # exists). Reading the structured field instead of grepping prose for `critical.*security`
-      # kills false-positives on negations ("No Critical … security issue") and on meta-text —
-      # the old prose grep blocked clean releases and pushed users to edit audit evidence.
+      # Block release on critical-severity findings via the auditor's CANONICAL top-level
+      # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
+      # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start
+      # keys — indented/nested values and prose body lines are INVISIBLE, preventing the
+      # old grep-ciE false-positive on negations ("No blocking_findings: true ...").
+      # Fail-closed: absent field → field is indented/missing → cannot confirm clean → block.
       local audit_file=""
       [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
       if [[ -n "$audit_file" ]]; then
-        local blk_count
-        # `|| true` keeps set -euo pipefail happy on grep's exit 1 (0 matches); ${:-0} guards empty.
-        # Match only `blocking_findings: true` or a positive integer; false/0/absent → pass.
-        blk_count=$(grep -ciE 'blocking_findings[^a-zA-Z0-9]+(true|[1-9][0-9]*)' "$audit_file" 2>/dev/null || true)
-        blk_count="${blk_count:-0}"
-        if [[ "$blk_count" -gt 0 ]]; then
+        local blk
+        blk=$(yaml_field "$audit_file" blocking_findings)
+        if [[ -z "$blk" ]]; then
+          echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
+          echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
+          errors=$((errors + 1))
+        elif [[ "$blk" == "true" ]]; then
           echo "PRECONDITION FAIL: Auditor declares blocking_findings (critical-severity finding blocks merge)." >&2
           echo "Address the finding before release. See: $audit_file" >&2
           errors=$((errors + 1))
         fi
+        # blk == "false" → no blocking findings; passes silently.
       fi
 
       if [[ $errors -gt 0 ]]; then
