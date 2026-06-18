@@ -165,15 +165,23 @@ fsm_count_recent_fails_epic() {
 }
 
 # Validate a verifier-output-step-N.md or verifier-output-cp3-{focus}.md file.
-# Returns 0 (pass) if file exists + has _generated_by + classification fields.
-# For RUN/FAIL classification also requires verdict != "pending" (verifier ran).
+# Returns 0 (pass) if file exists + has non-empty _generated_by + _generated_at
+# + valid classification. For RUN/FAIL/FULL_REVIEW also requires non-empty
+# verdict != "pending" (verifier ran). Aligned with agents/verifier.md canonical
+# output contract (E-046-1_3 Step 2 producer→consumer migration).
 fsm_check_verifier_output() {
   local file=$1
   [[ -f "$file" ]] || return 1
   grep -q '^_generated_by:' "$file" || return 1
+  grep -q '^_generated_at:' "$file" || return 1
   grep -q '^classification:' "$file" || return 1
 
-  local classification
+  local generated_by generated_at classification
+  generated_by=$(yaml_field "$file" _generated_by)
+  [[ -z "$generated_by" ]] && return 1  # non-empty: rejects pre-filter placeholder or blank
+  generated_at=$(yaml_field "$file" _generated_at)
+  [[ -z "$generated_at" ]] && return 1  # non-empty: ensures verifier wrote a real timestamp
+
   classification=$(yaml_field "$file" classification)
   case "$classification" in
     SKIP)
@@ -184,6 +192,7 @@ fsm_check_verifier_output() {
       local verdict
       verdict=$(yaml_field "$file" verdict)
       [[ "$verdict" == "pending" ]] && return 1  # pre-filter wrote pending; verifier not dispatched
+      [[ -z "$verdict" ]] && return 1            # non-empty: rejects blank verdict
       ;;
     *)
       return 1  # unknown classification
@@ -353,9 +362,15 @@ fsm_check_cp4_curator_validation() {
     return 0
   fi
 
-  # Check for CP4 review file
+  # Check for CP4 review file and validate its content via the shared verifier validator.
   local cp4_file="${evidence_dir}/verifier-output-cp4-curator-validation.md"
   if [[ -f "$cp4_file" ]]; then
+    fsm_check_verifier_output "$cp4_file" || {
+      echo "ERROR: verifier-output-cp4-curator-validation.md is present but invalid." >&2
+      echo "  Missing or empty: _generated_by, _generated_at, or classification." >&2
+      echo "  Re-dispatch CP4 verifier and overwrite the file with a valid output." >&2
+      die "cp4_invalid_content"
+    }
     return 0
   fi
 

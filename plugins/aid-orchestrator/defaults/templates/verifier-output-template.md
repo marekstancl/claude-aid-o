@@ -64,9 +64,10 @@ _generated_by: aid-orchestrator:verifier@{dispatch_label}
      the verifier was never dispatched and will be REJECTED by the FSM. -->
 
 _generated_at: {ISO 8601 UTC, e.g. 2026-05-31T14:23:45Z}
-<!-- Pre-filter convention; not directly grep-checked by FSM but used by the
-     compliance evaluator (verifier_provenance check). Format: output of
-     `date -u +%Y-%m-%dT%H:%M:%SZ`. Timezone MUST be `Z` (UTC).
+<!-- ABSOLUTELY REQUIRED — FSM precondition fails (fsm_check_verifier_output,
+     E-046-1_3 Step 2) if missing or empty. The verifier MUST write a real
+     timestamp; a blank or placeholder value is REJECTED.
+     Format: `date -u +%Y-%m-%dT%H:%M:%SZ`. Timezone MUST be `Z` (UTC).
      Local-timezone offsets break lex compare in fsm_check_grandfather. -->
 
 classification: {SKIP|RUN|FAIL|FULL_REVIEW}
