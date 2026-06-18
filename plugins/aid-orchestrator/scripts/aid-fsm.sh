@@ -1594,7 +1594,9 @@ cmd_init() {
           if [[ -f "${prev_dir}/audit-report.md" && ! -f "${prev_dir}/ca-review-complete" ]]; then
             echo "PRECONDITION FAIL: Plan $prev_plan has unreviewed Curator/Auditor findings." >&2
             echo "EPIC $prev_epic: audit-report exists but ca-review-complete marker missing." >&2
-            echo "Review findings, apply S+M+L fixes, then: touch ${prev_dir}/ca-review-complete" >&2
+            echo "Review findings, apply S+M+L fixes, then run:" >&2
+            echo "  aid-fsm.sh plan-close ${prev_epic} ${prev_dir} <project_root>" >&2
+            echo "(Do NOT use touch — plan-close verifies all required reports are present.)" >&2
             local timeline
             timeline=$(derive_timeline "$state_file") || true
             [[ -n "$timeline" ]] && log_event "$timeline" "fsm_init_blocked" reason="unreviewed_ca" blocking_epic="$prev_epic" blocking_plan="$prev_plan"

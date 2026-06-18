@@ -968,11 +968,18 @@ skips (telemetry over correctness, same posture as compliance.json writes).
    compliance check is evaluated at this boundary (presence + on-disk `_test_evidence`).
    `epic-summary.sh` generation is unchanged — the Reporter augments it, does not replace it.
    Toggle: `review_checkpoints.delivery_report`.
-7. Create `ca-review-complete` marker in each EPIC's evidence dir
+7. Create `ca-review-complete` marker via **`aid-fsm.sh plan-close`** (not `touch`):
+   ```bash
+   bash {plugin_path}/scripts/aid-fsm.sh plan-close {epic_id} {evidence_dir} {project_root}
+   ```
+   `plan-close` verifies curator-report, audit-report, simplifier-report, and delivery report
+   are all present (skipping disabled specialists), then writes the marker. Raw `touch` bypasses
+   these checks — use `plan-close` exclusively.
 8. PM Summary with MERGE/FIX/ABORT for entire plan
 9. `aid-fsm.sh init` for next plan's EPICs now unblocked
 
 **Enforcement:** `aid-fsm.sh init` blocks cross-plan runs without `ca-review-complete` markers.
+The marker must be created via `plan-close`, not `touch` — `plan-close` enforces report presence.
 
 ### Plan Boundary: Scanner Memory Scan
 
