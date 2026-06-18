@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 194          # granular registry rows; inventory groups some as ~177 E-ids
+  enforcements: 201          # granular registry rows; inventory groups some as ~177 E-ids
   mapped_with_verdict: 92    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
-  mapping_pending: 102       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
-  verdict_distribution: {ALIGNED: 73, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 102}
+  mapping_pending: 109       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
+  verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 109}
 
 enforcements:
 

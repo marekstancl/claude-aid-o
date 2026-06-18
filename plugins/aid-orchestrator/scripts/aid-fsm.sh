@@ -349,8 +349,8 @@ fsm_check_cp4_curator_validation() {
   # Telemetry: log which glob and range were evaluated (cp4_glob_evaluated — previously
   # documented in agent-protocol.md:278 but never emitted; wired in E-046-1_3 Step 4).
   fsm_emit_audit_log "cp4_glob_evaluated" \
-    --evidence-dir "$evidence_dir" \
     --base "$base_commit" \
+    --evidence-dir "$evidence_dir" \
     --glob "$prod_paths"
 
   # Did ANY commit in base_commit..HEAD touch production paths?

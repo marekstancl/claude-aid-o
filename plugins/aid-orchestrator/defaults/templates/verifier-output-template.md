@@ -98,7 +98,8 @@ verdict: {pass|fail|skip|pending}
                                         verifier MUST overwrite with `pass` or `fail`.
        Variants B, C (FULL_REVIEW):     verifier writes `verdict: pass | fail` directly.
        Variant D (FULL_REVIEW, CP4):    verifier writes `verdict: pass | fail`;
-                                        not FSM-enforced but auditor flags missing field.
+                                        FSM-enforced via fsm_check_cp4_curator_validation
+                                        → fsm_check_verifier_output (wired E-046-1_3 Step 2).
 
      Allowed values: pass | fail | skip. Convention: lowercase. -->
 

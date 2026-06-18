@@ -38,6 +38,10 @@ TODAY=$(date -u +%Y-%m-%d)
 # ── Registry discovery ────────────────────────────────────────────────────────
 
 registry_path="${1:-}"
+# candidate1/candidate2 declared at outer scope so the error handler below can
+# reference them regardless of which branch set registry_path.
+candidate1=""
+candidate2=""
 
 if [[ -z "$registry_path" ]]; then
   # Try distributed defaults/ first, then project .aid-o/config/
@@ -52,7 +56,12 @@ fi
 
 if [[ -z "$registry_path" || ! -f "$registry_path" ]]; then
   echo "ERROR: enforcement-registry.yaml not found." >&2
-  echo "  Searched: ${candidate1:-<not checked>}, ${candidate2:-<not checked>}" >&2
+  if [[ -n "${1:-}" ]]; then
+    # Explicit path was given but the file does not exist.
+    echo "  Explicit path not found: $registry_path" >&2
+  else
+    echo "  Searched: ${candidate1:-<not checked>}, ${candidate2:-<not checked>}" >&2
+  fi
   echo "  Pass the path explicitly: aid-registry-ttl-guard.sh <path>" >&2
   exit 2
 fi
