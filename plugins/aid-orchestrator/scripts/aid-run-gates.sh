@@ -227,15 +227,18 @@ run_all_gates() {
       gate_result=$(run_gate "$gate_name" "$resolved_cmd" "$timeout_s" /dev/null) || gate_exit=$?
       local r
       r=$(echo "$gate_result" | jq -r '.result')
-      # Phase 2 (P037) — exit code 2 counts as pass when gate's pass_criteria mentions "exit 2"
-      # (graceful skip pattern, e.g., aid-plan-diff.sh Fast Mode / legacy plan).
+      # Phase 2 (P037) — exit code 2 is a graceful skip when gate's pass_criteria
+      # mentions "exit 2" (legacy plan / no AC blocks / Fast Mode).
+      # Evidence truthfulness fix: result="skip" (not "pass") so gates_report.json
+      # accurately reflects that the gate did not verify anything, only skipped.
+      # The outer overall="pass" logic treats "skip" same as "pass" for required=false gates.
       local gate_ec
       gate_ec=$(echo "$gate_result" | jq -r '.exit_code')
       if [[ "$r" != "pass" && "$gate_ec" == "2" && "$pass_criteria" == *"exit 2"* ]]; then
-        gate_result=$(echo "$gate_result" | jq '.result = "pass"')
-        r="pass"
+        gate_result=$(echo "$gate_result" | jq '.result = "skip"')
+        r="skip"
       fi
-      [[ "$r" == "pass" ]] && break
+      [[ "$r" == "pass" || "$r" == "skip" ]] && break
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
 

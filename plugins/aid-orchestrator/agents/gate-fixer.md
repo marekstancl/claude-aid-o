@@ -28,7 +28,7 @@ to fix the issue.
 ### Review Finding Fixes (`verifier_review` source)
 - Read verifier findings from review checkpoint dispatch (CP2, CP3, CP4, CP6)
 - Fix code issues identified by verifier: logic errors, security concerns, style violations
-- Input includes `review_result.findings[]` with severity, area (file:line), and recommendation
+- Input includes top-level `findings:[]` with severity, area (file:line), and recommendation (canonical verifier format, `agents/verifier.md`)
 - Apply minimal fixes following the verifier's recommendation
 - After fix, verifier re-dispatches to confirm (fix loop iteration 2)
 - **Never:** ignore verifier severity classification or downgrade findings

@@ -435,9 +435,10 @@ evidence-cited findings. I am the critic; the author (Opus main agent) is the gr
 **Scope:** Read-only review of ONE design section text against the live codebase. No code, no plan
 files, no other sections.
 
-**Output:** The `review_result` YAML block (see `agents/verifier.md` Output Format) returned inline
-in the agent response — no evidence file is written for this focus. `auto_fixable` /
-`fix_loop_eligible` are N/A here (no gate-fixer loop in brainstorming) — set false or omit.
+**Output:** Canonical verifier format (see `agents/verifier.md` — top-level `_generated_by`,
+`_generated_at`, `classification`, `verdict`, `findings:[]`) returned inline in the agent
+response — no evidence file is written for this focus. `auto_fixable` / `fix_loop_eligible`
+are N/A here (no gate-fixer loop in brainstorming) — set false or omit.
 
 **Key checks:**
 - Factual grounding — every file path, line number, helper signature, schema, port, or service the
