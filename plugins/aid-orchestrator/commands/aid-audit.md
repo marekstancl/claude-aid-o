@@ -37,7 +37,7 @@ scale). Two artifacts are written to `.aid-o/work/evidence/{epic_id}/`:
 
 ## Additional Checks (always-run)
 
-- **Plan boundary CI check** — verify `.github/workflows/plan-boundary-required-check.yml` (or equivalent) is installed; if absent or disabled, surface as a finding (blocking if `enforcement.ci_floor: strict`, advisory otherwise)
+- **Plan boundary CI check** — verify `.github/workflows/plan-boundary-required-check.yml` (or equivalent) is installed; if absent or disabled, surface as an advisory finding
 
 When the CI check is NOT installed, surface the residual explicitly (never silently omit):
 

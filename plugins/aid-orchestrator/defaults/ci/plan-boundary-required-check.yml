@@ -12,6 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check plan boundary manifest
         run: |
+          set -eo pipefail
           # Find all *-boundary.md files in .aid-o/reports/
           MANIFESTS=$(find .aid-o/reports -name '*-boundary.md' 2>/dev/null || true)
           if [[ -z "$MANIFESTS" ]]; then

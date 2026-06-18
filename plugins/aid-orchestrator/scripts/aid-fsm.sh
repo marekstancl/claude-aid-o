@@ -12,6 +12,9 @@
 #   aid-fsm.sh get-field <field> <state_file>
 #   aid-fsm.sh set-field <field> <value> <state_file>
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
+#   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
+#   aid-fsm.sh promote-check <check_name> <state_file>
+#   aid-fsm.sh check-promotion-candidates <state_file>
 
 set -euo pipefail
 
@@ -538,7 +541,8 @@ Then retry with --reason."
   fsm_emit_audit_log "fsm_force_override" \
     --from "$from" --to "$to" \
     --reason "$reason" --caller "$caller_cmd" --operator "$operator" \
-    --blocked-checks-array "$blocked_checks"
+    --blocked-checks-array "$blocked_checks" \
+    --blocking-epic "$blocking_epic" --blocking-plan "$blocking_plan"
 }
 
 # Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
@@ -915,6 +919,17 @@ fsm_eval_delivery_report_present() {
   if $one_exists; then echo true; else echo false; fi
 }
 
+# ─── Helper: read toggle status from execution.yaml ──────────────────────────
+# Returns 0 (enabled) or 1 (disabled) based on the specified section in execution.yaml.
+# Usage: _aid_read_toggle "$exec_yaml" "simplifier" && enabled=true || enabled=false
+_aid_read_toggle() {
+  local exec_yaml="$1" section_name="$2"
+  [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default
+  grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
+    grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && return 1 || true
+  return 0
+}
+
 # ─── E-046-2_3 Step 4: simplifier_report_present (plan-boundary measurement) ──
 # null  — plan boundary not reached (no ca-review-complete marker), OR
 #         simplifier.enabled:false in execution.yaml (N/A; no report expected).
@@ -929,10 +944,7 @@ fsm_eval_simplifier_present() {
 
   # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  if [[ -f "$exec_yaml" ]]; then
-    grep -qP '^\s{0,4}simplifier:\s*$' "$exec_yaml" && \
-      grep -A5 'simplifier:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && { echo null; return 0; } || true
-  fi
+  _aid_read_toggle "$exec_yaml" "simplifier" || { echo null; return 0; }
 
   if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
     echo true
@@ -2660,12 +2672,8 @@ cmd_plan_close() {
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local simplifier_enabled=true
   local reporter_enabled=true
-  if [[ -f "$exec_yaml" ]]; then
-    grep -qP '^\s{0,4}simplifier:\s*$' "$exec_yaml" && \
-      grep -A5 'simplifier:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && simplifier_enabled=false || true
-    grep -qP '^\s{0,4}reporter:\s*$' "$exec_yaml" && \
-      grep -A5 'reporter:' "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$' && reporter_enabled=false || true
-  fi
+  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
+  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
 
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 

@@ -117,6 +117,7 @@ YAML
   [ "$status" -eq 0 ]
   [ -f "$TMP/.aid-o/work/audit-log.jsonl" ]
   grep -q "plan_close_skip" "$TMP/.aid-o/work/audit-log.jsonl"
+  grep -q '"specialist":"simplifier"' "$TMP/.aid-o/work/audit-log.jsonl"
 }
 
 # ── Test 9: regression anchor — no required files -> must exit 1 ─────────
