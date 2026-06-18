@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.34.2** (current) — `plan_diff` gate evidence truthfulness (exit 2 → `skip` not `pass`); `review_result` instruction drift cleaned up in `role-cards.md` + `gate-fixer.md`
+- **v2.35.0** (current) — `plan-close` FSM command enforces all 4 boundary reports; toggle-skip for disabled specialists; boundary manifest committed artifact; CI floor check; force-override audit enrichment; 13 new bats assertions
+- **v2.34.2** — `plan_diff` gate evidence truthfulness (exit 2 → `skip` not `pass`); `review_result` instruction drift cleaned up in `role-cards.md` + `gate-fixer.md`
 - **v2.34.1** — post-audit patch: `yaml_field()` quoted-empty bypass closed, verdict whitelist, `blocking_findings` fail-closed on non-false values (8 new assertions)
-- **v2.34.0** — enforcement registry in `defaults/`, TTL guard, `_generated_at` required, `blocking_findings` canonical field, cross-plan init gate fix, 19 new assertions
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

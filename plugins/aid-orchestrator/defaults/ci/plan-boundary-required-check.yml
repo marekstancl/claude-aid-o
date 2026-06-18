@@ -1,0 +1,40 @@
+name: AID Plan Boundary Check
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  plan-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check plan boundary manifest
+        run: |
+          set -eo pipefail
+          # Find all *-boundary.md files in .aid-o/reports/
+          MANIFESTS=$(find .aid-o/reports -name '*-boundary.md' 2>/dev/null || true)
+          if [[ -z "$MANIFESTS" ]]; then
+            echo "No plan boundary manifests found — skipping check (no completed plans)"
+            exit 0
+          fi
+          FAILED=0
+          for manifest in $MANIFESTS; do
+            # Check boundary_complete: true
+            if ! grep -q 'boundary_complete: true' "$manifest"; then
+              echo "FAIL: $manifest — boundary_complete is not true"
+              FAILED=1
+            fi
+            # Check delivery_report referenced exists
+            delivery=$(grep 'delivery_report:' "$manifest" | sed 's/.*delivery_report: //' | tr -d '"' | tr -d "'")
+            if [[ -n "$delivery" && ! -f ".aid-o/reports/$delivery" ]]; then
+              echo "FAIL: $manifest — referenced delivery report .aid-o/reports/$delivery not found"
+              FAILED=1
+            fi
+          done
+          if [[ "$FAILED" -eq 1 ]]; then
+            echo "Plan boundary check failed — see above"
+            exit 1
+          fi
+          echo "All plan boundary manifests valid"

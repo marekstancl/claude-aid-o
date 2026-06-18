@@ -12,6 +12,9 @@
 #   aid-fsm.sh get-field <field> <state_file>
 #   aid-fsm.sh set-field <field> <value> <state_file>
 #   aid-fsm.sh done-advance <from_phase> <to_phase> <state_file>
+#   aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
+#   aid-fsm.sh promote-check <check_name> <state_file>
+#   aid-fsm.sh check-promotion-candidates <state_file>
 
 set -euo pipefail
 
@@ -490,12 +493,14 @@ fsm_check_streamlined_abandoned() {
 fsm_handle_force_override() {
   local from="$1" to="$2" state_file="$3" caller_cmd="$4"
   shift 4
-  local reason="" blocked_checks=""
+  local reason="" blocked_checks="" blocking_epic="" blocking_plan=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --reason) reason="$2"; shift 2 ;;
       --blocked-checks) blocked_checks="$2"; shift 2 ;;
+      --blocking-epic) blocking_epic="$2"; shift 2 ;;
+      --blocking-plan) blocking_plan="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -530,12 +535,14 @@ Then retry with --reason."
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
     from="$from" to="$to" reason="$reason" \
     caller="$caller_cmd" operator="$operator" \
-    blocked_checks="$blocked_checks"
+    blocked_checks="$blocked_checks" \
+    blocking_epic="$blocking_epic" blocking_plan="$blocking_plan"
 
   fsm_emit_audit_log "fsm_force_override" \
     --from "$from" --to "$to" \
     --reason "$reason" --caller "$caller_cmd" --operator "$operator" \
-    --blocked-checks-array "$blocked_checks"
+    --blocked-checks-array "$blocked_checks" \
+    --blocking-epic "$blocking_epic" --blocking-plan "$blocking_plan"
 }
 
 # Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
@@ -912,6 +919,42 @@ fsm_eval_delivery_report_present() {
   if $one_exists; then echo true; else echo false; fi
 }
 
+# ─── Helper: read toggle status from execution.yaml ──────────────────────────
+# Returns 0 (enabled) or 1 (disabled) based on the specified section in execution.yaml.
+# Usage: _aid_read_toggle "$exec_yaml" "simplifier" && enabled=true || enabled=false
+_aid_read_toggle() {
+  local exec_yaml="$1" section_name="$2"
+  [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default
+  if grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
+     grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$'; then
+    return 1
+  fi
+  return 0
+}
+
+# ─── E-046-2_3 Step 4: simplifier_report_present (plan-boundary measurement) ──
+# null  — plan boundary not reached (no ca-review-complete marker), OR
+#         simplifier.enabled:false in execution.yaml (N/A; no report expected).
+# true  — at boundary AND simplifier-report.md present in evidence_dir.
+# false — at boundary AND simplifier-report.md missing (advisory; never blocks).
+# MEASUREMENT ONLY — enforcement in a future step.
+fsm_eval_simplifier_present() {
+  local epic_id="$1" evidence_dir="$2" project_root="$3"
+
+  # Plan-boundary signal: ca-review-complete marker in this EPIC's evidence dir.
+  [[ -f "${evidence_dir}/ca-review-complete" ]] || { echo null; return 0; }
+
+  # Respect simplifier.enabled:false toggle in execution.yaml — N/A when disabled.
+  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  _aid_read_toggle "$exec_yaml" "simplifier" || { echo null; return 0; }
+
+  if [[ -f "${evidence_dir}/simplifier-report.md" ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
 evaluate_compliance_checks() {
   local epic_id=$1 state_file=$2 evidence_dir=$3 project_root=$4
 
@@ -1099,6 +1142,10 @@ evaluate_compliance_checks() {
   local delivery_report_present
   delivery_report_present=$(fsm_eval_delivery_report_present "$epic_id" "$evidence_dir" "$project_root")
 
+  # E-046-2_3 Step 4: simplifier_report_present — measurement only (advisory).
+  local simplifier_report_present
+  simplifier_report_present=$(fsm_eval_simplifier_present "$epic_id" "$evidence_dir" "$project_root")
+
   jq -nc \
     --argjson bc          "$branch_correct" \
     --argjson eyp         "$exec_yaml_present" \
@@ -1116,6 +1163,7 @@ evaluate_compliance_checks() {
     --argjson agg         "$aggregate" \
     --argjson prov_agg    "$prov_agg" \
     --argjson drp         "$delivery_report_present" \
+    --argjson srp         "$simplifier_report_present" \
     '{
       branch_correct:         $bc,
       execution_yaml_present: $eyp,
@@ -1136,7 +1184,8 @@ evaluate_compliance_checks() {
         provenance_aggregate:       $prov_agg
       },
       dod_present: null,
-      delivery_report_present: $drp
+      delivery_report_present: $drp,
+      simplifier_report_present: $srp
     }'
 }
 
@@ -1481,9 +1530,30 @@ cmd_init() {
         streamlined=true
         ;;
       --force)
+        # Pre-scan: find which prior plan's gate would have been blocking,
+        # so the audit record names it (E-046-2_3 Step 3 enrichment).
+        local _bepic="" _bplan=""
+        local _cur_plan_num=""
+        [[ "$epic_id" =~ ^E-([0-9]+) ]] && _cur_plan_num="${BASH_REMATCH[1]}"
+        local _cur_plan_prefix="P${_cur_plan_num}"
+        while IFS= read -r _ps; do
+          local _pe _ppn _pp _pdp _pd
+          _pe=$(yaml_field "$_ps" epic_id)
+          _ppn=""
+          [[ "$_pe" =~ ^E-([0-9]+) ]] && _ppn="${BASH_REMATCH[1]}"
+          _pp="P${_ppn}"
+          _pdp=$(yaml_field "$_ps" done_phase)
+          _pd=$(dirname "$_ps")
+          if [[ -n "$_pp" && "$_pp" != "$_cur_plan_prefix" && "$_pdp" == "review" ]]; then
+            if [[ -f "${_pd}/audit-report.md" && ! -f "${_pd}/ca-review-complete" ]]; then
+              _bepic="$_pe"; _bplan="$_pp"; break
+            fi
+          fi
+        done < <(find .aid-o/work/evidence -name "fsm-state.yaml" 2>/dev/null)
         # Forwards ${@:i+1}; callers must pass --plan before --force when both present
         # (fsm_handle_force_override consumes remaining args as reason payload).
-        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:i+1}"
+        fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:$((i+1))}" \
+          ${_bepic:+--blocking-epic "$_bepic"} ${_bplan:+--blocking-plan "$_bplan"}
         force="true"
         ;;
       *)
@@ -1538,7 +1608,9 @@ cmd_init() {
           if [[ -f "${prev_dir}/audit-report.md" && ! -f "${prev_dir}/ca-review-complete" ]]; then
             echo "PRECONDITION FAIL: Plan $prev_plan has unreviewed Curator/Auditor findings." >&2
             echo "EPIC $prev_epic: audit-report exists but ca-review-complete marker missing." >&2
-            echo "Review findings, apply S+M+L fixes, then: touch ${prev_dir}/ca-review-complete" >&2
+            echo "Review findings, apply S+M+L fixes, then run:" >&2
+            echo "  aid-fsm.sh plan-close ${prev_epic} ${prev_dir} <project_root>" >&2
+            echo "(Do NOT use touch — plan-close verifies all required reports are present.)" >&2
             local timeline
             timeline=$(derive_timeline "$state_file") || true
             [[ -n "$timeline" ]] && log_event "$timeline" "fsm_init_blocked" reason="unreviewed_ca" blocking_epic="$prev_epic" blocking_plan="$prev_plan"
@@ -2575,6 +2647,84 @@ cmd_check_promotion_candidates() {
   echo "To promote: aid-fsm.sh promote-check <name> --reason '<text ≥20 chars>'"
 }
 
+# ─── plan-close ─────────────────────────────────────────────────────────
+# Verify all required CA reports are present, then write ca-review-complete.
+# simplifier-report.md is skipped when simplifier.enabled:false in execution.yaml.
+# delivery-report.md  is skipped when reporter.enabled:false  in execution.yaml.
+# Skips are logged to audit-log.jsonl with rationale.
+# Usage: aid-fsm.sh plan-close <epic_id> <evidence_dir> <project_root>
+cmd_plan_close() {
+  local epic_id="${1:-}"
+  local evidence_dir="${2:-}"
+  local project_root="${3:-}"
+
+  [[ -z "$epic_id" ]]       && echo "Missing: epic_id"       >&2 && exit 1
+  [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
+  [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
+
+  # Derive plan_id: strip trailing _N run suffix, extract first NNN digit block after E-
+  # E-046-2_3 -> stripped=E-046-2 -> nnn=046 -> plan_id=P046
+  # E-013-1   -> stripped=E-013-1 -> nnn=013 -> plan_id=P013
+  local stripped="${epic_id%%_*}"           # remove _N suffix if present
+  local nnn
+  nnn=$(echo "$stripped" | grep -oP '(?<=^E-)\d+')
+  local plan_id="P${nnn}"
+
+  # Read execution.yaml toggles — grep-only, no yq dependency.
+  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  local simplifier_enabled=true
+  local reporter_enabled=true
+  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
+  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
+
+  local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
+
+  local curator_report="${evidence_dir}/curator-report.md"
+  local audit_report="${evidence_dir}/audit-report.md"
+  local simplifier_report="${evidence_dir}/simplifier-report.md"
+  local delivery_report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
+
+  # Helper: emit standard missing-report error message.
+  local _fail_missing
+  _fail_missing() {
+    echo "PRECONDITION FAIL: required report not found: $1" >&2
+    echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+    missing=1
+  }
+
+  # Always-required reports (no toggle).
+  local missing=0
+  for required_file in "$curator_report" "$audit_report"; do
+    if [[ ! -f "$required_file" ]]; then
+      _fail_missing "$required_file"
+    fi
+  done
+
+  # simplifier-report: required unless simplifier.enabled:false.
+  if [[ "$simplifier_enabled" == "false" ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="simplifier" rationale="simplifier.enabled:false in execution.yaml"
+  else
+    if [[ ! -f "$simplifier_report" ]]; then
+      _fail_missing "$simplifier_report"
+    fi
+  fi
+
+  # delivery-report: required unless reporter.enabled:false.
+  if [[ "$reporter_enabled" == "false" ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="reporter" rationale="reporter.enabled:false in execution.yaml"
+  else
+    if [[ ! -f "$delivery_report" ]]; then
+      _fail_missing "$delivery_report"
+    fi
+  fi
+
+  if [[ "$missing" -ne 0 ]]; then
+    exit 1
+  fi
+
+  touch "${evidence_dir}/ca-review-complete"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -2594,8 +2744,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     done-advance)               shift; cmd_done_advance "$@" ;;
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
+    plan-close)                 shift; cmd_plan_close "$@" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close> [args...]" >&2
       exit 1 ;;
   esac
 fi

@@ -363,6 +363,34 @@ Config defaults installation:
 
 **What the registry does:** Maps each compliance check to either `severity: blocking` (cmd_done_advance refuses to advance review→release without `--force`) or `severity: advisory` (logged in `compliance.json failures[]` but does not block). See `skills/pipeline.md` §7 and `docs/plans/AID-v3-principles.md` §1 for the tiered-severity rationale.
 
+### Optional: Plan Boundary CI Check
+
+- **Plan boundary CI check** (optional): Copy `defaults/ci/plan-boundary-required-check.yml` to `.github/workflows/` to enforce the boundary manifest check on PRs. Run `/aid-audit` to verify installation status.
+
+Ask the PM whether to install it:
+
+```
+Plan boundary CI check
+====================================
+Installs .github/workflows/plan-boundary-required-check.yml
+This check verifies committed boundary manifests in .aid-o/reports/ on every PR/merge.
+Required by branch protection to enforce the plan boundary on squash + web merges.
+
+Install now? (Y/N)
+```
+
+- Default: skip (do not install) if PM does not respond
+- If PM says Y: copy `{plugin_path}/defaults/ci/plan-boundary-required-check.yml` to `.github/workflows/plan-boundary-required-check.yml`
+- If `.github/workflows/` does not exist, create it first
+- If the file already exists: **skip** (do not overwrite — PM may have customised it)
+
+```
+CI check installation:
+  [INSTALLED] .github/workflows/plan-boundary-required-check.yml — plan boundary CI check (new)
+  [EXISTS]    .github/workflows/plan-boundary-required-check.yml — keeping existing
+  [SKIPPED]   User declined CI check installation
+```
+
 ## Lazy-Created (NOT at init time)
 
 These files/dirs are created on first use of the feature that needs them:
@@ -454,4 +482,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-06-15
+**Last Updated:** 2026-06-18

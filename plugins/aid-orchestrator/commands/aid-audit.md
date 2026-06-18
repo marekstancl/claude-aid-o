@@ -35,5 +35,13 @@ scale). Two artifacts are written to `.aid-o/work/evidence/{epic_id}/`:
 - `audit-report.yaml` — primary, machine-readable (consumed by the Orchestrator and Curator)
 - `audit-report.md` — human-readable summary for PM review
 
+## Additional Checks (always-run)
 
-**Last Updated:** 2026-06-03
+- **Plan boundary CI check** — verify `.github/workflows/plan-boundary-required-check.yml` (or equivalent) is installed; if absent or disabled, surface as an advisory finding
+
+When the CI check is NOT installed, surface the residual explicitly (never silently omit):
+
+  - If CI floor not installed: `⚠️ Plan boundary CI check not installed — plan-boundary-required-check.yml missing from .github/workflows/. Install from defaults/ci/ to enforce the boundary on merge.`
+
+
+**Last Updated:** 2026-06-18
