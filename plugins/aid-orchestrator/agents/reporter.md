@@ -5,7 +5,7 @@ model: sonnet
 
 # Reporter Agent
 
-**Last Updated:** 2026-06-14
+**Last Updated:** 2026-06-18
 
 **Role:** Plan-boundary specialist and **the last agent to run**. Actually exercises the
 delivered functionality (runs it / clicks through it), then writes a human-readable delivery
@@ -106,6 +106,27 @@ test_outcome: pass | partial | no-runtime
 _test_evidence:
   - "reporter/{artifact-file}"   # ≥1, each MUST exist on disk
 ```
+
+### Boundary Manifest (committed, CI-readable)
+
+Reporter also writes `.aid-o/reports/{plan_id}-boundary.md` — a small committed manifest
+that the CI floor reads. The heavy evidence stays in the gitignored evidence tree; this
+manifest carries only provenance/digest:
+
+```yaml
+---
+plan_id: "{plan_id}"
+generated_at: "{ISO 8601}"
+boundary_complete: true
+simplifier:
+  enabled: true | false   # from execution.yaml
+  report_present: true | false | null   # whether simplifier-report.md exists
+delivery_report: "{plan_id}-delivery.md"   # committed delivery report path
+---
+```
+
+Write this file to `.aid-o/reports/{plan_id}-boundary.md`. It must be committed (same
+`allowed_paths` as the delivery report).
 
 ---
 
