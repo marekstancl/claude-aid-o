@@ -346,6 +346,13 @@ fsm_check_cp4_curator_validation() {
     die "cp4_glob_invalid"
   fi
 
+  # Telemetry: log which glob and range were evaluated (cp4_glob_evaluated — previously
+  # documented in agent-protocol.md:278 but never emitted; wired in E-046-1_3 Step 4).
+  fsm_emit_audit_log "cp4_glob_evaluated" \
+    --evidence-dir "$evidence_dir" \
+    --base "$base_commit" \
+    --glob "$prod_paths"
+
   # Did ANY commit in base_commit..HEAD touch production paths?
   # `|| true` guards against set -euo pipefail aborting when grep finds no match
   # (exit 1) — the no-touch case is the legitimate skip path, not an error.
