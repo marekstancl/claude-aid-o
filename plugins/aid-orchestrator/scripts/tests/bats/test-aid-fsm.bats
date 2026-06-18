@@ -92,10 +92,11 @@ teardown() {
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
   jq -n '{overall:"pass", gates:{}, _generated_by:"aid-run-gates.sh@v2.16.0", _generated_at:"2026-05-04T00:00:00Z", _command_log:[]}' \
     > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
-  # Session B CP3: both verifier-output-cp3-*.md required (file presence check)
-  printf '_generated_by: aid-orchestrator:verifier@abc123\nclassification: FULL_REVIEW\nverdict: pass\n' \
+  # Session B CP3: both verifier-output-cp3-*.md required (file presence check).
+  # _generated_at required since E-046-1_3 Step 2.
+  printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
-  printf '_generated_by: aid-orchestrator:verifier@def456\nclassification: FULL_REVIEW\nverdict: pass\n' \
+  printf '_generated_by: aid-orchestrator:verifier@def456\n_generated_at: 2026-06-18T10:01:00Z\nclassification: FULL_REVIEW\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
 
   run "$FSM" transition EXECUTE GATES "$state_file"
@@ -166,8 +167,9 @@ VERIFY
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  # SKIP classification is valid without verdict (pre-filter wrote reason field instead)
-  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: SKIP\nreason: docs_only\n' \
+  # SKIP classification is valid without verdict (pre-filter wrote reason field instead).
+  # _generated_at required since E-046-1_3 Step 2.
+  printf '_generated_by: aid-pre-filter.sh@v2.18.0\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: docs_only\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
 
   run "$FSM" increment-step "$state_file"
@@ -210,8 +212,9 @@ PLAN
   mkdir -p "$TEST_EVIDENCE_DIR/steps/step_3_frontend"
   printf '## Visual Anchoring\nLayout: 12-col grid\nColors: #fff\n\n# code follows\n' \
     > "$TEST_EVIDENCE_DIR/steps/step_3_frontend/output.md"
-  # satisfy CP2 verifier-output (SKIP classification, as for a trivial diff)
-  printf '_generated_by: aid-pre-filter.sh@v2.18.0\nclassification: SKIP\nreason: trivial\n' \
+  # satisfy CP2 verifier-output (SKIP classification, as for a trivial diff).
+  # _generated_at required since E-046-1_3 Step 2.
+  printf '_generated_by: aid-pre-filter.sh@v2.18.0\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: trivial\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
 
   run "$FSM" increment-step "$state_file"
@@ -296,7 +299,8 @@ _p040_seed_increment_preconditions() {
   local state_file="$1"
   write_post_deploy_state_yaml "$state_file"  # current_step: 3
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
-  printf '_generated_by: aid-orchestrator:verifier@abc123\nclassification: RUN\nverdict: pass\n' \
+  # _generated_at required since E-046-1_3 Step 2.
+  printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
     > "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
 }
 
