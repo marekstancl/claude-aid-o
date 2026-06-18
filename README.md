@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.33.1** (current) — EPIC steps with the `docs-writer` role now convert to `plan.json` correctly; the role's hyphen is sanitized when building the step ID (which forbids hyphens) while the canonical `docs-writer` role value is preserved
+- **v2.34.0** (current) — enforcement registry shipped in `defaults/` (visible to consumers), TTL guard script exits non-zero on stale planned rows, `_generated_at` required in verifier output, `blocking_findings` read from canonical top-level field (fail-closed), cross-plan init gate fixed for E-NNN IDs, 19 new regression assertions
+- **v2.33.1** — EPIC steps with the `docs-writer` role now convert to `plan.json` correctly; the role's hyphen is sanitized when building the step ID (which forbids hyphens) while the canonical `docs-writer` role value is preserved
 - **v2.33.0** — `/aid-init` now asks for the dispatch mode and preserves a manual choice across re-runs (fixing the silent reset behind provenance false-blocks); the done-advance release gate reads the auditor's structured `blocking_findings` verdict instead of grepping report prose, ending false-positive blocks on clean audits
-- **v2.32.0** — Visual Companion always renders on a white canvas (OS dark mode ignored) and reproduces existing-frontend element sizes 1:1, so mockups match production; plus a fix for the generated pre-commit hook, which lacked a `#!/usr/bin/env bash` shebang and so ran under dash and blocked every commit
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
