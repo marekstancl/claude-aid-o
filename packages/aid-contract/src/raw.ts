@@ -1,5 +1,11 @@
-export type AidFsmState = "READY" | "EXECUTE" | "GATES" | "ESCALATION" | "DONE";
+// Raw snake_case contract layer — mirrors v3 disk shapes exactly.
+// Consumers: file parsers, watcher, FSM reader. Never consumed by frontend directly.
+
+export type AidFsmState = "READY" | "EXECUTE" | "GATES" | "ESCALATION" | "DONE" | "ERROR";
+// ^^^ Line 1 mandatory: 6-state union (adds "ERROR" to the existing 5-state union)
+
 export type AidMode = "manual" | "auto";
+
 export type AidGateResult = "pass" | "fail" | "skipped";
 
 export interface AidStateYaml {
@@ -14,6 +20,12 @@ export interface AidStateYaml {
   gate_retries: number;
   escalation_count: number;
   started_at: string; // ISO 8601
+  // §4.1-reliable conditional fields — present only in specific FSM states:
+  done_phase?: string;
+  streamlined_mode?: boolean;
+  plan_path?: string | null;
+  plan_json_hash?: string;
+  pm_decision?: string; // §4.0 finding #2: conditional, present only post-merge
 }
 
 export interface AidTimelineEntry {
