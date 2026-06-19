@@ -9,8 +9,6 @@
 # that runs BEFORE LLM judgment. These tests validate pattern detection only,
 # not the LLM verdict.
 
-FIXTURES_DIR="${BATS_TEST_DIRNAME}/fixtures/plan-writing"
-
 setup() {
   TMPDIR_TEST="$(mktemp -d)"
   mkdir -p "$TMPDIR_TEST"

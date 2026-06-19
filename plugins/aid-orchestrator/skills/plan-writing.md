@@ -750,7 +750,7 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
       Verdict matrix:
         All branches declared                  → PASS
         Some branches declared, some N/A       → PASS
-        Silent omission (no outcome, no N/A)   → REVISE_REQUIRED
+        Silent omission (no outcome, no N/A)   → REVISE_REQUIRED (advisory — see 21c, PM can override)
         LLM uncertain about branch count       → PASS_WITH_NOTES (PM confirmation)
 
       Empirical anchor: P046 CP1 flow trace — request→auth-gate→execution→sink had
