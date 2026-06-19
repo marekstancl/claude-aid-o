@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.36.2] — 2026-06-19
+
+### Fixed
+- **`aid-plan.md` stale CP1 lens names** — CP1-deep section updated from `security/correctness/architectural` to `L1-behavior/L2-feasibility/L3-enforcement`; evidence file table updated with correct filenames and required-field column (producer→consumer drift fix).
+- **`aid-cp1-gate.sh` stale header comment** — file header comment updated to match L1/L2/L3 filenames and content requirements.
+
+### Added
+- **P046 boundary manifest and delivery report committed** — `.aid-o/reports/P046-boundary.md` and `.aid-o/reports/P046-delivery.md` now tracked in git; `.gitignore` glob fix (`.aid-o/*`) makes this possible.
+
 ## [2.36.1] — 2026-06-19
 
 ### Fixed
