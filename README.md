@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.36.0** (current) — behavior-first review contracts; `behavior_trace` structural gate; CP1 risk-scaling + `aid-cp1-gate.sh`; `.gitignore` negation fix; CP1 gate `risk:low` precedence fix; frontmatter parser state machine
+- **v2.36.1** (current) — CP1-deep empty-file bypass closed; L1/L2/L3 lens taxonomy; aid-init gitignore guidance
+- **v2.36.0** — behavior-first review contracts; `behavior_trace` structural gate; CP1 risk-scaling + `aid-cp1-gate.sh`; `.gitignore` negation fix; CP1 gate `risk:low` precedence fix; frontmatter parser state machine
 - **v2.35.0** — `plan-close` FSM command enforces all 4 boundary reports; toggle-skip for disabled specialists; boundary manifest committed artifact; CI floor check; force-override audit enrichment; 13 new bats assertions
 - **v2.34.2** — `plan_diff` gate evidence truthfulness (exit 2 → `skip` not `pass`); `review_result` instruction drift cleaned up in `role-cards.md` + `gate-fixer.md`
 

@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.36.1] — 2026-06-19
+
+### Fixed
+- **CP1-deep empty-file bypass** — `aid-cp1-gate.sh` previously accepted empty evidence files (only checked `-f`); gate now requires non-empty files (`-s`) and the required field at line-start (`stop_rule_blockers:` in lens files, `verdict:` in adjudicator); empty or structurally incomplete files now fail the gate.
+- **CP1-deep lens taxonomy mismatch** — lenses renamed from `security/correctness/architectural` to `L1-behavior/L2-feasibility/L3-enforcement` per plan P046 taxonomy; L3 (enforcement/CI/artifact-visibility) is the class that catches gitignored artifacts and non-executing tests.
+- **`/aid-init` `.gitignore` guidance** — instruction corrected to replace `.aid-o/` with `.aid-o/*` before adding `!.aid-o/reports/`; git cannot un-ignore content inside an ignored directory — the glob form is required.
+
 ## [2.36.0] — 2026-06-19
 
 ### Added
