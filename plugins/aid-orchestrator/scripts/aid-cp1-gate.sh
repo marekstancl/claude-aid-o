@@ -95,6 +95,7 @@ while IFS= read -r line; do
 done < "$plan"
 
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
+[[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]] || error_exit "Plan id '$plan_id' contains invalid characters (path traversal guard)" 1
 
 # ---------------------------------------------------------------------------
 # Step 2: Determine if the plan is high-risk
