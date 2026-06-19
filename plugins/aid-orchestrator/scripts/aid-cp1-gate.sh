@@ -80,8 +80,21 @@ done
 plan_id=""
 risk_fm=""  # risk value from frontmatter (low|medium|high or empty)
 
+# State machine: only read inside the YAML frontmatter block (first --- to closing ---).
+# Plans without a closing --- are treated as having no frontmatter (body is not parsed as FM).
+in_frontmatter=0
+frontmatter_done=0
 while IFS= read -r line; do
   line="${line//$'\r'/}"
+  if [[ "$in_frontmatter" -eq 0 ]]; then
+    [[ "$line" == "---" ]] && in_frontmatter=1
+    continue
+  fi
+  # Inside frontmatter: stop at closing ---
+  if [[ "$line" == "---" ]]; then
+    frontmatter_done=1
+    break
+  fi
   if [[ "$line" =~ ^id:[[:space:]]*(.+)$ ]]; then
     plan_id="${BASH_REMATCH[1]}"
     plan_id="$(echo "$plan_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
@@ -90,9 +103,10 @@ while IFS= read -r line; do
     risk_fm="${BASH_REMATCH[1]}"
     risk_fm="$(echo "$risk_fm" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
   fi
-  # Stop at end of frontmatter block (second ---)
-  [[ "$line" == "---" && -n "$plan_id" ]] && break
 done < "$plan"
+
+# Require a properly closed frontmatter block.
+[[ "$frontmatter_done" -eq 0 ]] && error_exit "Plan file missing closing '---' for frontmatter block." 1
 
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
 [[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]] || error_exit "Plan id '$plan_id' contains invalid characters (path traversal guard)" 1
@@ -123,22 +137,18 @@ HIGH_RISK_PATTERNS=(
 
 is_high_risk=0
 
-# Frontmatter `risk: high` always triggers CP1-deep
+# Always scan body for high-risk patterns — risk: low only exempts when patterns are absent.
+# Contract: high-risk when (pattern match) OR (risk: high). risk: low cannot override a pattern match.
+for pattern in "${HIGH_RISK_PATTERNS[@]}"; do
+  if grep -qE "$pattern" "$plan" 2>/dev/null; then
+    is_high_risk=1
+    break
+  fi
+done
+
+# Frontmatter `risk: high` always triggers CP1-deep (belt-and-suspenders)
 if [[ "$risk_fm" == "high" ]]; then
   is_high_risk=1
-fi
-
-# Frontmatter `risk: low` exempts from pattern scan
-if [[ "$risk_fm" == "low" ]]; then
-  is_high_risk=0
-else
-  # Scan plan body for high-risk patterns
-  for pattern in "${HIGH_RISK_PATTERNS[@]}"; do
-    if grep -qE "$pattern" "$plan" 2>/dev/null; then
-      is_high_risk=1
-      break
-    fi
-  done
 fi
 
 # ---------------------------------------------------------------------------

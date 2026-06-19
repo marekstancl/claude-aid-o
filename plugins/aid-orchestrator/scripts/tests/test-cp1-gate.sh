@@ -11,7 +11,7 @@
 #      (simulated via adjudicator file with accepted_blockers present)
 #   5. trivial low-risk fixture still passes gate unchanged
 #   6. plan with high-risk pattern in body is treated as high-risk even without frontmatter tag
-#   7. plan with risk: low in frontmatter is exempt even if patterns match
+#   7. plan with risk: low but high-risk patterns matched still requires evidence (pattern wins)
 #
 # Exit codes: 0=all passed, 1=one or more tests failed
 # =============================================================================
@@ -314,21 +314,22 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 7: risk: low in frontmatter exempts plan even if body has high-risk patterns
+# TEST 7: risk: low in frontmatter does NOT exempt plan when body has high-risk patterns
+# Pattern match wins — risk: low only exempts when no patterns are found.
 # ---------------------------------------------------------------------------
-run_test "Plan with risk: low is exempt even when body has high-risk patterns"
+run_test "Plan with risk: low still requires CP1-deep when body contains high-risk patterns"
 
 proj7="$(make_project_root "t7")"
 plan7="$TMPDIR_ROOT/t7-plan.md"
-write_plan "$plan7" "P007" "risk: low" "References to authenticate and verify_token appear in docs section only."
+write_plan "$plan7" "P007" "risk: low" "Handler authenticate() and verify_token() added to auth flow."
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan7" --project-root "$proj7" 2>&1)" || gate_exit=$?
 
-if [[ "$gate_exit" -eq 0 ]]; then
-  pass "risk: low plan exempt from CP1-deep even with high-risk body patterns"
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "risk: low plan with high-risk patterns still fails gate (evidence missing)"
 else
-  fail "risk: low plan exempt from CP1-deep even with high-risk body patterns" "got exit=$gate_exit, output: $gate_out"
+  fail "risk: low plan with high-risk patterns should fail gate (pattern wins over risk:low)" "got exit=0, output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------
