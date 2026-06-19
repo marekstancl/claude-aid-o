@@ -294,6 +294,7 @@ enforcements:
     severity: medium
     surface: cp1
     status: active
+    verdict: ALIGNED
     enforcement_mechanism: advisory_lm_judgment
     test_anchor: "bats/test-plan-writing-rules.bats"
     deadline: "2026-09-01"
@@ -306,6 +307,7 @@ enforcements:
     severity: high
     surface: cp2,cp3,cp4
     status: active
+    verdict: ALIGNED
     enforcement_mechanism: fsm_precondition
     test_anchor: "bats/test-behavior-trace.bats (Step 6)"
     deadline: "2026-09-01"

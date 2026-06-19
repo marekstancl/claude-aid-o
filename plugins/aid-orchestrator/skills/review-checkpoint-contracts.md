@@ -72,6 +72,15 @@ Scope: C+A applied diff (or full EPIC range if scope unclear)
 Required fields: all standard verifier fields + `checkpoint: cp4`, `classification: FULL_REVIEW`
 High-risk gate: if C+A applied changes touch high-risk patterns, trace required
 
+## CP5 Contract
+
+Focus: `blocking_findings` check (DONE sub-phase `review`)
+Scope: reads structured `blocking_findings:` field from `audit-report.md` (top-level, not prose)
+Enforcement: `aid-fsm.sh:cmd_done_advance()` — `blocking_findings: true` blocks the MERGE option in the PM summary
+Required fields in audit-report: `blocking_findings: true|false` at line-start (not inside a heading or prose)
+High-risk gate: NOT a diff gate — evaluates the audit report output, not the code diff
+Note: CP5 is not a verifier dispatch. It is a structured field check inside `done-advance`.
+
 ## CP6 Contract (Advisory)
 
 Focus: retrospective quality review
