@@ -73,3 +73,51 @@ Scope: merged diff (advisory — not blocking FSM)
 Required fields: standard verifier fields + `checkpoint: cp6`
 High-risk gate: NOT enforced (advisory only)
 Note: CP6 is never promoted to blocking — it is intentionally light.
+
+## CP1-deep Contract (High-Risk Plans)
+
+Triggered when: plan matches any high-risk pattern OR plan frontmatter has `risk: high`.
+Skip when: plan matches no high-risk patterns AND `risk: low` (or `risk: medium` — default skips CP1-deep unless pattern match).
+
+### 3 Lenses (dispatched in parallel)
+
+| Lens | Focus | Stop-Rule Criteria |
+|------|-------|-------------------|
+| security | auth bypass, injection, data exposure, secret handling | any finding that could allow unauthorized access or data leak |
+| correctness | logic errors, edge cases, invariant violations | any finding that would cause incorrect behavior in prod |
+| architectural | coupling, abstraction leaks, dependency direction, blast radius | any finding that violates existing architectural constraints |
+
+Each lens produces:
+- `findings: []` — all issues (any severity)
+- `stop_rule_blockers: []` — issues that should BLOCK EPIC generation
+- `confidence: high|medium|low`
+
+### Adjudicator Contract
+
+Reviews all 3 lens outputs. Accepts a `stop_rule_blocker` ONLY if it has:
+- Command or artifact reference (e.g., function name, file path, SQL query, config key)
+- File:line evidence OR explicit quote from the plan
+
+Rejects blockers that are: vague ("might have security issues"), hypothetical without plan grounding, or duplicates across lenses.
+
+Produces:
+- `accepted_blockers: []`
+- `rejected_blockers: []` (with rejection_reason per entry)
+- `verdict: pass|revise|fail`
+- `revision_count: N` (cumulative)
+
+### Revision Loop
+
+- `verdict: revise` + `revision_count < 2` → auto-revise plan targeting accepted_blockers → re-run CP1-deep
+- `revision_count >= 2` + accepted_blockers survive → **PM escalation** (not pass, not auto-revise)
+- `accepted_blockers: []` OR `verdict: pass` → EPIC generation proceeds
+
+### Evidence Requirements
+
+Before EPIC generation for a high-risk plan, all 4 files must exist in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
+- `cp1-lens-security.md`
+- `cp1-lens-correctness.md`
+- `cp1-lens-architectural.md`
+- `cp1-adjudicator.md`
+
+Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`.
