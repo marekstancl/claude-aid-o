@@ -57,6 +57,13 @@ Appended to project root `.gitignore` (or created if missing). Content:
 .aid-o/04-engine/
 ```
 
+**Note:** If the project's root `.gitignore` contains a `.aid-o/` blanket exclusion,
+also add the following exception so that boundary manifests and delivery reports are committed:
+
+```gitignore
+!.aid-o/reports/   # boundary manifests + delivery reports — must be committed for CI floor
+```
+
 **Rules:**
 - Per-line backfill (idempotent): for each line in `defaults/.gitignore`, append it
   only if that exact line is not already present in the project `.gitignore`.
