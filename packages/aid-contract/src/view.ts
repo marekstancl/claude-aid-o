@@ -118,6 +118,36 @@ export interface MetricSet {
 export interface QueueEntry { epicId: string; path: string; priority: string; status: string; addedAt: string; }
 export interface BacklogItem { projectId: string; id: string|null; title: string; status: string|null; raw: string; }
 export interface ReportRef { kind: 'audit'|'curator'|'reporter'|'epic-summary'|'final'|'other'; name: string; relPath: string; }
-export interface EpicSpec { /* parseEpicSpec output: epicId,title,context,goal,scope,steps,acceptanceCriteria,dodGates,hints */ }
+export interface AcceptanceCriterion {
+  role: string;
+  text: string;
+  checked: boolean;
+}
+export interface EpicStep {
+  number: number;
+  role: string;
+  objective: string;
+  dependsOn: string[];
+  parallelGroup?: string;
+}
+export interface EpicSpec {
+  epicId: string;
+  status: string;
+  planRef: string;
+  planEpicsTotal: number;
+  runsTotal: number;
+  runsCompleted: number;
+  title: string;
+  context: string;
+  goal: string;
+  scope: { allowedPaths: string[]; forbiddenPaths: string[]; rawMarkdown: string };
+  artifacts?: string;
+  constraints: string;
+  dodGates: string[];
+  acceptanceCriteria: AcceptanceCriterion[];
+  dependencies?: string;
+  steps: EpicStep[];
+  hints?: Record<string, string | number>;
+}
 
 export type MembershipSource = 'plan_path' | 'plan_ref' | 'derived' | 'orphan';

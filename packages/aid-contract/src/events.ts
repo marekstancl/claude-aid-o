@@ -1,39 +1,51 @@
 // Event pipeline contract types — shared between aid-server watcher and aid-gui WebSocket.
-// Salvaged from packages/aid-gui/server/types.ts and adapted per §7.3:
-// broadcast timestamp field standardizes on `ts` (FileChangeEvent.timestamp → ts).
+// Adapted per §7.3: timestamp → ts; topics updated to P047 step-16 vocabulary.
 
 export type EventTopic =
   | 'pipeline'
-  | 'pipeline.stage_log'
+  | 'pipeline.timeline'      // timeline.jsonl entries (was pipeline.stage_log in v1 salvage)
   | 'evidence'
   | 'decisions'
   | 'config'
   | 'queue'
+  | 'queue.schedule'
+  | 'gates'                  // gates_report.json + per-gate outputs
+  | 'checkpoints'            // verifier-output-*.md files
+  | 'epics'                  // EPIC spec files (.aid-o/tasks/*.md)
+  | 'backlog'                // work/backlog.md
   | 'audit'
   | 'usage'
-  | 'queue.schedule'
   | 'system';
 
 export const ALL_EVENT_TOPICS: EventTopic[] = [
   'pipeline',
-  'pipeline.stage_log',
+  'pipeline.timeline',
   'evidence',
   'decisions',
   'config',
   'queue',
+  'queue.schedule',
+  'gates',
+  'checkpoints',
+  'epics',
+  'backlog',
   'audit',
   'usage',
-  'queue.schedule',
   'system',
 ];
 
+// Identifies which run directory a file change belongs to.
+export interface RunRef { epicId: string; runId: string; }
+
 export interface FileChangeEvent {
   type: 'file_change';
+  projectId: string;               // which workspace this change came from
   topic: EventTopic;
   filePath: string;
   changeType: 'add' | 'change' | 'unlink';
+  runRef: RunRef | null;           // set when path is under work/evidence/<epic>/<run>/
   parsedData: unknown;
-  ts: string;                          // §7.3: renamed from `timestamp`; ISO 8601
+  ts: string;                      // §7.3: ISO 8601; field was `timestamp` in the salvage source
 }
 
 /**

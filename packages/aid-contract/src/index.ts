@@ -33,6 +33,8 @@ export type {
   QueueEntry,
   BacklogItem,
   ReportRef,
+  AcceptanceCriterion,
+  EpicStep,
   EpicSpec,
   MembershipSource,
 } from './view.js';
@@ -84,6 +86,7 @@ export type { DictionaryEntry, Explanation } from './explain.js';
 export { ALL_EVENT_TOPICS } from './events.js';
 export type {
   EventTopic,
+  RunRef,
   FileChangeEvent,
   InternalEvent,
   WatcherOptions,
