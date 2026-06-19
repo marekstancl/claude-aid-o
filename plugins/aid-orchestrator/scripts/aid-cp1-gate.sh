@@ -1,0 +1,285 @@
+#!/usr/bin/env bash
+# =============================================================================
+# aid-cp1-gate.sh — CP1-deep evidence gate for high-risk plans
+#
+# Usage:
+#   ./aid-cp1-gate.sh --plan <path> [--project-root <path>]
+#
+# For low-risk plans: exits 0 immediately (no evidence required).
+# For high-risk plans: verifies that all 4 CP1-deep evidence files exist
+# and that the adjudicator verdict has no unresolved accepted blockers.
+#
+# Risk is determined by:
+#   1. Plan frontmatter field `risk: low|medium|high`
+#   2. High-risk pattern grep across plan body (overrides `risk: medium` or absent)
+#
+# High-risk patterns (from skills/review-checkpoint-contracts.md):
+#   - Auth handlers / routes
+#   - Auth logic (authenticate, authorize, verify_token, ...)
+#   - Schema / validation (Schema, Validator, pydantic, BaseModel, ...)
+#   - Migrations (migrate, alembic, revision, upgrade, downgrade)
+#   - FSM / state (fsm-state, cmd_transition, aid-fsm.sh, ...)
+#   - Security sinks (exec(, subprocess, eval(, pickle, yaml.load)
+#   - Payment (stripe, payment, charge, billing, invoice)
+#   - Dependency manifests (requirements.txt, pyproject.toml, package.json, Gemfile)
+#
+# Evidence dir: <project_root>/.aid-o/work/evidence/<plan_id>/cp1-deep/
+# Required files (all 4 must exist, be non-empty, and contain required fields):
+#   cp1-lens-L1-behavior.md     — L1: behavior/user-flow/edge cases; must have stop_rule_blockers:
+#   cp1-lens-L2-feasibility.md  — L2: feasibility/file-contracts/producer→consumer; must have stop_rule_blockers:
+#   cp1-lens-L3-enforcement.md  — L3: enforcement/CI/artifact-visibility/testability; must have stop_rule_blockers:
+#   cp1-adjudicator.md          — adjudicator verdict; must have verdict: at line-start
+#
+# Adjudicator check: reads cp1-adjudicator.md and fails if verdict is fail|revise
+# or if accepted_blockers: is non-empty. Empty accepted_blockers + verdict:pass = pass.
+#
+# stdout: human-readable status lines
+# stderr: JSON error on failure (consistent with other AID scripts)
+# Exit codes: 0=pass or not-applicable, 1=gate failure, 2=usage error, 3=I/O error
+# =============================================================================
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"
+
+# ---------------------------------------------------------------------------
+# Parse CLI arguments
+# ---------------------------------------------------------------------------
+plan=""
+project_root=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --plan)         plan="$2";         shift 2 ;;
+    --project-root) project_root="$2"; shift 2 ;;
+    --help|-h)
+      echo "Usage: $(basename "$0") --plan <path> [--project-root <path>]"
+      echo ""
+      echo "Options:"
+      echo "  --plan <path>          Path to the plan .md file (required)"
+      echo "  --project-root <path>  Project root containing .aid-o/ (default: cwd)"
+      echo "  --help                 Show this help"
+      exit 0
+      ;;
+    *)
+      error_exit "Unknown argument: $1" 2
+      ;;
+  esac
+done
+
+[[ -z "$plan" ]] && error_exit "Missing required argument: --plan" 2
+[[ ! -f "$plan" ]] && error_exit "Plan file not found: $plan" 3
+
+# Default project root to cwd
+[[ -z "$project_root" ]] && project_root="$(pwd)"
+
+# ---------------------------------------------------------------------------
+# Step 1: Extract plan ID from frontmatter
+# ---------------------------------------------------------------------------
+plan_id=""
+risk_fm=""  # risk value from frontmatter (low|medium|high or empty)
+
+# State machine: only read inside the YAML frontmatter block (first --- to closing ---).
+# Plans without a closing --- are treated as having no frontmatter (body is not parsed as FM).
+in_frontmatter=0
+frontmatter_done=0
+while IFS= read -r line; do
+  line="${line//$'\r'/}"
+  if [[ "$in_frontmatter" -eq 0 ]]; then
+    [[ "$line" == "---" ]] && in_frontmatter=1
+    continue
+  fi
+  # Inside frontmatter: stop at closing ---
+  if [[ "$line" == "---" ]]; then
+    frontmatter_done=1
+    break
+  fi
+  if [[ "$line" =~ ^id:[[:space:]]*(.+)$ ]]; then
+    plan_id="${BASH_REMATCH[1]}"
+    plan_id="$(echo "$plan_id" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  fi
+  if [[ "$line" =~ ^risk:[[:space:]]*(.+)$ ]]; then
+    risk_fm="${BASH_REMATCH[1]}"
+    risk_fm="$(echo "$risk_fm" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  fi
+done < "$plan"
+
+# Require a properly closed frontmatter block.
+[[ "$frontmatter_done" -eq 0 ]] && error_exit "Plan file missing closing '---' for frontmatter block." 1
+
+[[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
+[[ "$plan_id" =~ ^[A-Za-z0-9_-]+$ ]] || error_exit "Plan id '$plan_id' contains invalid characters (path traversal guard)" 1
+
+# ---------------------------------------------------------------------------
+# Step 2: Determine if the plan is high-risk
+# ---------------------------------------------------------------------------
+# High-risk patterns (grep -E extended regex, applied to plan body).
+# Each pattern matches one risk category from review-checkpoint-contracts.md.
+HIGH_RISK_PATTERNS=(
+  # routes / auth handlers
+  '@app\.(get|post|put|patch|delete|head|options)\(|@router\.(get|post|put|patch|delete|head|options)\(|add_route\(|def [a-zA-Z_]+\(.*request|async def [a-zA-Z_]+\(.*request'
+  # auth logic
+  'authenticate|authorize|verify_token|check_permission|require_auth'
+  # schema / validation
+  'Schema|Validator|validate\(|marshmallow|pydantic|BaseModel'
+  # migrations
+  'migrate|alembic|revision|upgrade|downgrade'
+  # fsm / state
+  'fsm-state|state_machine|cmd_transition|aid-fsm\.sh'
+  # security sinks
+  'exec\(|subprocess|eval\(|pickle|yaml\.load'
+  # payment
+  'stripe|payment|charge|billing|invoice'
+  # dependency manifests
+  'requirements\.txt|pyproject\.toml|package\.json|Gemfile'
+)
+
+is_high_risk=0
+
+# Always scan body for high-risk patterns — risk: low only exempts when patterns are absent.
+# Contract: high-risk when (pattern match) OR (risk: high). risk: low cannot override a pattern match.
+for pattern in "${HIGH_RISK_PATTERNS[@]}"; do
+  if grep -qE "$pattern" "$plan" 2>/dev/null; then
+    is_high_risk=1
+    break
+  fi
+done
+
+# Frontmatter `risk: high` always triggers CP1-deep (belt-and-suspenders)
+if [[ "$risk_fm" == "high" ]]; then
+  is_high_risk=1
+fi
+
+# ---------------------------------------------------------------------------
+# Step 3: If not high-risk, exit immediately — gate is not applicable
+# ---------------------------------------------------------------------------
+if [[ "$is_high_risk" -eq 0 ]]; then
+  echo "CP1-gate: plan $plan_id is low-risk — CP1-deep not required. Proceeding." >&2
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 3b: If no .aid-o/ workspace exists, gate is not applicable.
+# The gate only enforces within AID-managed projects. Scripts calling
+# aid-plan-to-epic.sh directly (e.g., from test harnesses) without a
+# workspace are not subject to CP1-deep enforcement.
+# ---------------------------------------------------------------------------
+if [[ ! -d "${project_root}/.aid-o" ]]; then
+  echo "CP1-gate: no .aid-o/ workspace found at ${project_root} — gate skipped (not an AID project)." >&2
+  exit 0
+fi
+
+echo "CP1-gate: plan $plan_id is high-risk — checking CP1-deep evidence." >&2
+
+# ---------------------------------------------------------------------------
+# Step 4: Check for evidence dir and required files (existence + content)
+# ---------------------------------------------------------------------------
+evidence_dir="${project_root}/.aid-o/work/evidence/${plan_id}/cp1-deep"
+
+# Lens files follow the plan taxonomy: L1 behavior/user-flow, L2 feasibility/producer→consumer,
+# L3 enforcement/CI/artifact-visibility. Each must be non-empty and contain stop_rule_blockers:.
+LENS_FILES=(
+  "cp1-lens-L1-behavior.md"
+  "cp1-lens-L2-feasibility.md"
+  "cp1-lens-L3-enforcement.md"
+)
+adjudicator_file="${evidence_dir}/cp1-adjudicator.md"
+
+missing_files=()
+for f in "${LENS_FILES[@]}"; do
+  [[ ! -f "${evidence_dir}/${f}" ]] && missing_files+=("$f")
+done
+[[ ! -f "$adjudicator_file" ]] && missing_files+=("cp1-adjudicator.md")
+
+if [[ "${#missing_files[@]}" -gt 0 ]]; then
+  missing_list="$(printf '  - %s\n' "${missing_files[@]}")"
+  cat >&2 <<ERRMSG
+ERROR: High-risk plan requires CP1-deep evidence.
+Missing files in ${evidence_dir}/:
+${missing_list}
+Run /aid-plan --deep to generate CP1-deep evidence before EPIC generation.
+ERRMSG
+  exit 1
+fi
+
+# Content check: each lens file must be non-empty and declare stop_rule_blockers:.
+for f in "${LENS_FILES[@]}"; do
+  fpath="${evidence_dir}/${f}"
+  if [[ ! -s "$fpath" ]]; then
+    error_exit "CP1-deep lens file is empty: ${f}. Substantive evidence required." 1
+  fi
+  if ! grep -q "^stop_rule_blockers:" "$fpath" 2>/dev/null; then
+    error_exit "CP1-deep lens file missing required 'stop_rule_blockers:' field: ${f}" 1
+  fi
+done
+
+# Adjudicator must be non-empty and declare verdict:.
+if [[ ! -s "$adjudicator_file" ]]; then
+  error_exit "CP1-deep adjudicator file is empty. Substantive evidence required." 1
+fi
+if ! grep -q "^verdict:" "$adjudicator_file" 2>/dev/null; then
+  error_exit "CP1-deep adjudicator missing required 'verdict:' field. Gate cannot proceed without explicit verdict." 1
+fi
+
+echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidence_dir}/" >&2
+
+# ---------------------------------------------------------------------------
+# Step 5: Check adjudicator verdict — no unresolved accepted_blockers allowed
+# ---------------------------------------------------------------------------
+
+# verdict field is now guaranteed to exist (checked above).
+verdict_value="$(grep "^verdict:" "$adjudicator_file" | head -1 | sed 's/^verdict:[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+if [[ "$verdict_value" == "fail" || "$verdict_value" == "revise" ]]; then
+  cat >&2 <<ERRMSG
+ERROR: CP1-deep adjudicator has unresolved verdict: ${verdict_value}
+Resolve blockers or escalate to PM before EPIC generation.
+Adjudicator file: ${adjudicator_file}
+ERRMSG
+  exit 1
+fi
+
+# Extract the accepted_blockers value from the adjudicator file.
+# We look for `accepted_blockers:` followed by either:
+#   accepted_blockers: []        → empty list = pass
+#   accepted_blockers: [...]     → non-empty = fail
+#   accepted_blockers:           (block scalar with list items below) → fail
+accepted_blockers_line="$(grep -n "^accepted_blockers:" "$adjudicator_file" 2>/dev/null | head -1 || echo "")"
+
+if [[ -z "$accepted_blockers_line" ]]; then
+  # verdict:pass already confirmed above; no accepted_blockers field = no blockers.
+  echo "CP1-gate: verdict=pass, no accepted_blockers field. PASS." >&2
+  exit 0
+fi
+
+# Extract the value after "accepted_blockers:"
+accepted_value="$(echo "$accepted_blockers_line" | sed 's/^[0-9]*:accepted_blockers:[[:space:]]*//')"
+accepted_value="$(echo "$accepted_value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+if [[ "$accepted_value" == "[]" || -z "$accepted_value" ]]; then
+  # Check if it's a block scalar — look at the line after "accepted_blockers:"
+  line_num="$(echo "$accepted_blockers_line" | cut -d: -f1)"
+  next_line_num=$(( line_num + 1 ))
+  next_line="$(sed -n "${next_line_num}p" "$adjudicator_file" 2>/dev/null || echo "")"
+  next_line="$(echo "$next_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+  if [[ "$next_line" =~ ^-[[:space:]] ]]; then
+    cat >&2 <<ERRMSG
+ERROR: CP1-deep adjudicator has unresolved blockers (block scalar list).
+Resolve blockers or escalate to PM before EPIC generation.
+Adjudicator file: ${adjudicator_file}
+ERRMSG
+    exit 1
+  fi
+
+  echo "CP1-gate: adjudicator accepted_blockers is empty. PASS." >&2
+  exit 0
+else
+  # Non-empty inline list — has accepted blockers
+  cat >&2 <<ERRMSG
+ERROR: CP1-deep adjudicator has unresolved blockers.
+accepted_blockers: ${accepted_value}
+Resolve blockers or escalate to PM before EPIC generation.
+Adjudicator file: ${adjudicator_file}
+ERRMSG
+  exit 1
+fi

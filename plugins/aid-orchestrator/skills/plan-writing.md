@@ -717,12 +717,57 @@ PLAN-AC EXECUTABLE VERIFICATION (added 2026-05 — P037 Phase 2 — addresses
       passed; DONE reached. Without #20-style executable AC check, the substitution
       was invisible to gates.
 
+      CRITICAL-PATH BRANCH COVERAGE (added 2026-06 — E-046-3_3 — addresses undeclared branches
+                                      in handler-adding plans identified in P046 CP1 flow trace):
+  21. Every plan step that introduces a new request handler or branch point must declare
+      an explicit outcome for every branch (success path, error path, edge cases).
+      Undeclared branches → REVISE_REQUIRED.
+
+      Three sub-rules:
+
+      21a. For every handler-pattern match in Implementation Detail, identify the branch
+           structure (success / auth-fail / validation-fail / error). Every branch listed
+           must have a named outcome (return code, response, side-effect, or log entry).
+
+      21b. For every branch: either it has an explicit outcome in the plan, OR the plan
+           explicitly marks it N/A with a one-line justification.
+           Silent omission (no outcome, no N/A) → REVISE_REQUIRED.
+
+      21c. "Undeclared branch" verdict is LLM-judgment — not hard-gated. Frame it
+           honestly: "Possible undeclared branch detected — PM should confirm or add
+           explicit outcome." Do NOT block EPIC generation on #21 alone.
+
+      Pre-screening heuristic (mechanical, before LLM judgment) — auto-activates on
+      handler-adding diffs (same pattern as #19 handler regex):
+        IF Implementation Detail or Artifacts contains any of:
+              - @app\.<method>\(
+              - @router\.<method>\(
+              - add_route(
+              - def \w+\(.*request
+              - async def \w+\(.*request
+        → AUTOMATIC #21 activation regardless of plan type
+
+      Verdict matrix:
+        All branches declared                  → PASS
+        Some branches declared, some N/A       → PASS
+        Silent omission (no outcome, no N/A)   → REVISE_REQUIRED (advisory — see 21c, PM can override)
+        LLM uncertain about branch count       → PASS_WITH_NOTES (PM confirmation)
+
+      Empirical anchor: P046 CP1 flow trace — request→auth-gate→execution→sink had
+      an undeclared auth-fail branch that was caught only post-implementation when
+      missing error handling caused silent data loss on auth-fail path.
+
+      Test fixture (for #21 pre-screen activation test): see
+      `scripts/tests/bats/test-plan-writing-rules.bats` fixture `handler_fixture.md`
+      — a minimal plan with a FastAPI handler that activates the pre-screen.
+
 EVALUATION:
-  COUNT checks passed out of 27 (24 existing + 20a + 20b + 20c).
-  IF all 27 pass → write plan to disk
+  COUNT checks passed out of 28 (24 existing + 20a + 20b + 20c + 21).
+  IF all 28 pass → write plan to disk
   Note: Check #19 activates only for `type: bug-fix` plans or via pre-screening
   heuristic above. For non-applicable plans, mark #19 as N/A (counts as PASS).
   Note: Check #20 skips for legacy plans (no AC section found); not a violation.
+  Note: Check #21 activates only when handler patterns are detected in Implementation Detail or Artifacts. For non-applicable plans, mark #21 as N/A (counts as PASS). LLM-judgment only — verdict is advisory, not hard-gated.
   IF any check fails → fix the failing checks, re-evaluate, repeat until all pass
   DO NOT write a partial or incomplete plan. DO NOT skip failed checks.
   DO NOT tell PM "the plan is mostly complete" — it is complete or it is not.
@@ -1024,4 +1069,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-19

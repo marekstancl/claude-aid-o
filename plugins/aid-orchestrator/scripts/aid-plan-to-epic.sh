@@ -79,6 +79,37 @@ done <<< "$frontmatter"
 
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
 
+# ---------------------------------------------------------------------------
+# Step 1b: CP1-deep evidence gate (high-risk plans only)
+#
+# The gate script exits 0 for low-risk plans (no-op) and exits non-zero for
+# high-risk plans that are missing CP1-deep evidence or have unresolved
+# accepted blockers from the adjudicator. Producer-before-consumer: this
+# check runs after plan_id is known but before any EPIC artifacts are written.
+# ---------------------------------------------------------------------------
+CP1_GATE_SCRIPT="${SCRIPT_DIR}/aid-cp1-gate.sh"
+if [[ -f "$CP1_GATE_SCRIPT" ]]; then
+  # Derive project root: walk up from the plan file until .aid-o/ is found.
+  # If not found, use the plan file's own directory (not cwd) so that an
+  # unrelated .aid-o/ higher in the filesystem (e.g. in the AID plugin repo
+  # when running tests) does not trigger enforcement for unrelated plan files.
+  _project_root=""
+  _search_dir="$(dirname "$(realpath "$plan")")"
+  while [[ "$_search_dir" != "/" ]]; do
+    if [[ -d "${_search_dir}/.aid-o" ]]; then
+      _project_root="$_search_dir"
+      break
+    fi
+    _search_dir="$(dirname "$_search_dir")"
+  done
+  [[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
+
+  if ! bash "$CP1_GATE_SCRIPT" --plan "$plan" --project-root "$_project_root"; then
+    # Gate script already emitted the human-readable error to stderr.
+    exit 1
+  fi
+fi
+
 # Extract plan number (strip leading P)
 plan_num="$(echo "$plan_id" | sed 's/^P//')"
 

@@ -349,12 +349,72 @@ All deterministic operations are bash pipeline scripts — LLM handles only dial
 - `/aid-run --auto` — start autonomous execution
 - Review created files
 
+## CP1 Mode Selection
+
+Risk classification runs automatically during CP1 before EPIC generation. It applies to any plan processed by `/aid-plan`.
+
+### Risk Detection
+
+A plan is **high-risk** if it matches ANY pattern from `skills/review-checkpoint-contracts.md` (auth, routes, schema/validation, migrations, fsm/state, security sinks, payment, dep manifests) OR has `risk: high` in frontmatter.
+
+A plan is **low-risk** if it matches none of those patterns AND either has `risk: low` in frontmatter or is tagged `risk: medium` with no pattern match.
+
+### CP1-light (default for low-risk plans)
+
+Runs the standard `plan-writing.md` completeness checklist (28 checks). If no `REVISE_REQUIRED` findings, proceed to EPIC generation.
+
+### CP1-deep (for high-risk plans)
+
+Extends CP1-light with 3 parallel review lenses and an adjudicator. All 4 evidence files must exist before EPIC generation is allowed.
+
+**Flow:**
+
+```
+Plan input → detect high-risk patterns → CP1-light OR CP1-deep
+
+CP1-light:
+  → run plan-writing.md checklist
+  → if REVISE_REQUIRED: revise, retry
+  → if pass: generate EPIC
+
+CP1-deep:
+  → run plan-writing.md checklist (same as light)
+  → detect high-risk patterns (automatic via review-checkpoint-contracts.md heuristic)
+  → dispatch 3 lenses in parallel (per plan taxonomy — see review-checkpoint-contracts.md §CP1-deep):
+      L1 behavior:    request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
+      L2 feasibility: touched files, output contracts, parser/producer ordering, implementation feasibility
+      L3 enforcement: gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
+  → each lens produces: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
+  → adjudicator reviews all 3 lenses: accepts blocker only if it has command/artifact + file:line evidence
+  → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
+  → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
+  → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
+  → if verdict=pass AND accepted_blockers=[]: generate EPIC
+```
+
+**Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
+
+| File | Produced by | Required field |
+|------|-------------|----------------|
+| `cp1-lens-L1-behavior.md` | L1 behavior lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-lens-L2-feasibility.md` | L2 feasibility lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start |
+
+EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces this: missing files or unresolved accepted blockers cause a non-zero exit.
+
+**Adjudicator acceptance rule:** A `stop_rule_blocker` is accepted ONLY if it has a command/artifact reference (function name, file path, SQL query, config key) AND file:line evidence or an explicit quote from the plan. Vague or hypothetical blockers are rejected with a `rejection_reason`.
+
+**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed.
+
 ## Reference Files
 
 - `skills/brainstorming.md` — brainstorm process rules, principles, and context persistence (interim doc) protocol
 - `skills/plan-writing.md` — plan writing quality gates and format
 - `skills/planner.md` — dependency graph and parallel groups
+- `skills/review-checkpoint-contracts.md` — high-risk pattern definitions and CP1-deep contract
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate (called by aid-plan-to-epic.sh)
 - `defaults/templates/plan.md` — base plan template
 
 ## Important
@@ -388,4 +448,4 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-06-19

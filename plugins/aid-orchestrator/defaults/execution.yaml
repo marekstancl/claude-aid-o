@@ -234,11 +234,13 @@ cp4_production_paths: "plugins/|scripts/|src/|lib/|api/"
 
 # ─── Plan-Boundary Specialists (P045) ─────────────────────────────────────
 simplifier:
+  # Default-on. To disable, set enabled: false + add PM rationale comment explaining why.
   enabled: true
   model: opus
   defer_effort: [L]
 
 reporter:
+  # Default-on. To disable, set enabled: false + add PM rationale comment explaining why.
   enabled: true
   model: sonnet
   report_dir: ".aid-o/reports"

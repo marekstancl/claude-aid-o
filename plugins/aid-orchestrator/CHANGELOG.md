@@ -3,6 +3,41 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.36.2] — 2026-06-19
+
+### Fixed
+- **`aid-plan.md` stale CP1 lens names** — CP1-deep section updated from `security/correctness/architectural` to `L1-behavior/L2-feasibility/L3-enforcement`; evidence file table updated with correct filenames and required-field column (producer→consumer drift fix).
+- **`aid-cp1-gate.sh` stale header comment** — file header comment updated to match L1/L2/L3 filenames and content requirements.
+
+### Added
+- **P046 boundary manifest and delivery report committed** — `.aid-o/reports/P046-boundary.md` and `.aid-o/reports/P046-delivery.md` now tracked in git; `.gitignore` glob fix (`.aid-o/*`) makes this possible.
+
+## [2.36.1] — 2026-06-19
+
+### Fixed
+- **CP1-deep empty-file bypass** — `aid-cp1-gate.sh` previously accepted empty evidence files (only checked `-f`); gate now requires non-empty files (`-s`) and the required field at line-start (`stop_rule_blockers:` in lens files, `verdict:` in adjudicator); empty or structurally incomplete files now fail the gate.
+- **CP1-deep lens taxonomy mismatch** — lenses renamed from `security/correctness/architectural` to `L1-behavior/L2-feasibility/L3-enforcement` per plan P046 taxonomy; L3 (enforcement/CI/artifact-visibility) is the class that catches gitignored artifacts and non-executing tests.
+- **`/aid-init` `.gitignore` guidance** — instruction corrected to replace `.aid-o/` with `.aid-o/*` before adding `!.aid-o/reports/`; git cannot un-ignore content inside an ignored directory — the glob form is required.
+
+## [2.36.0] — 2026-06-19
+
+### Added
+- **Behavior-first review contracts** — `skills/review-checkpoint-contracts.md` defines per-checkpoint diff scope, high-risk pattern table (8 categories: auth, routes, validation, migrations, FSM, security sinks, payment, deps), and structural gate rules for CP2/CP3/CP4/CP5/CP6 and CP1-deep.
+- **`behavior_trace` structural gate** — `aid-fsm.sh:fsm_check_verifier_output()` rejects verifier outputs where `behavior_trace_required: true` but `behavior_trace_count` is 0 or missing; gate is opt-in and fires only when the verifier explicitly sets the flag.
+- **Additive verifier output fields** — `verifier-output-template.md` gains optional top-level fields (`checkpoint`, `focus`, `behavior_trace_count`, `behavior_trace_required`, `behavior_trace`) that extend the output without displacing existing `_generated_by`/`classification`/`verdict` greps.
+- **`aid-prefilter.sh --checkpoint` flag** — caller can now pass `--checkpoint <cp2|cp3|cp4|cp6>` to get checkpoint-specific diff scope; CP2 defaults to `HEAD~1..HEAD`, CP3 reads `base_commit` from `fsm-state.yaml`.
+- **CP1 risk-scaling** — `aid-plan.md` gains a CP1 Mode Selection section defining CP1-light (standard checklist) vs CP1-deep (three-lens: security/correctness/architectural, adjudicator, max two revisions, PM escalation on unresolved stop-rules).
+- **`aid-cp1-gate.sh`** — EPIC generation gate that reads plan frontmatter (`id`, `risk`), scans body for eight high-risk pattern categories, and verifies four evidence files (`cp1-deep/` directory) when risk is high; includes path-traversal guard on plan ID.
+- **Enforcement homes reference** — `docs/extending-aid.md` gains an Enforcement Homes Reference section documenting where each enforcement mechanism lives (plan-close, FSM precondition, behavior_trace gate, CP5 blocking_findings, CI floor).
+- **Two new enforcement registry entries** — `cp1_critical_path_flow_trace` (type lm_judgment_advisory, surface cp1) and `behavior_trace_high_risk_gate` (type fsm_precondition, surface cp2/cp3/cp4); both carry `deadline: 2026-09-01`, `status: active`, `verdict: ALIGNED`.
+- **6 bats tests for behavior_trace gate** — `bats/test-behavior-trace.bats` covers count=0+required=true→fail, count=3+required=true→pass, required=false→pass, field absent→pass, count missing→fail, count=1→pass.
+
+### Fixed
+- **`.gitignore` negation pattern** — replaced `.aid-o/` directory exclude with `.aid-o/*` glob so `!.aid-o/reports/` negation works; git cannot un-ignore content inside an ignored directory.
+- **CP1 gate `risk: low` precedence** — high-risk body pattern match now always triggers CP1-deep regardless of `risk: low` frontmatter; `risk: low` previously overrode the pattern scan (wrong behavior).
+- **Frontmatter parser state machine** — `aid-cp1-gate.sh` parser now uses open/close `---` state machine; stops reading at opening marker, reads to closing marker, rejects plans with unclosed frontmatter instead of silently reading body as frontmatter.
+- **Rule #21 `REVISE_REQUIRED` advisory label** — `plan-writing.md` rule #21 REVISE_REQUIRED outcome labeled "(advisory — see 21c, PM can override)" to match enforcement type; test-plan-writing-rules.bats updated (removed dead `FIXTURES_DIR` variable).
+
 ## [2.35.0] — 2026-06-18
 
 ### Added

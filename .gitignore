@@ -40,7 +40,10 @@ _unzipped/
 docs/plans/
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
-.aid-o/
+# Use .aid-o/* (not .aid-o/) so git can honour negation for reports/ subdirectory.
+.aid-o/*
+!.aid-o/reports/
+!.aid-o/reports/**
 
 # Claude Code local settings + per-project memory file
 # (CLAUDE.md is the project's private context for Claude Code — contains

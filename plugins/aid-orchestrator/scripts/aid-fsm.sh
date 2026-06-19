@@ -179,6 +179,9 @@ fsm_count_recent_fails_epic() {
 # + valid classification. For RUN/FAIL/FULL_REVIEW also requires non-empty
 # verdict != "pending" (verifier ran). Aligned with agents/verifier.md canonical
 # output contract (E-046-1_3 Step 2 producer→consumer migration).
+# Structural gate (v2.35+): behavior_trace_count > 0 when behavior_trace_required: true.
+# Gate is opt-in (only fires when behavior_trace_required is explicitly "true").
+# CP6 is advisory and never reaches this check via the FSM flow.
 fsm_check_verifier_output() {
   local file=$1
   [[ -f "$file" ]] || return 1
@@ -211,6 +214,20 @@ fsm_check_verifier_output() {
       return 1  # unknown classification
       ;;
   esac
+
+  # Structural gate: behavior_trace_count > 0 when required for high-risk diffs (v2.35+).
+  # Only fires when verifier output explicitly sets behavior_trace_required: true.
+  local behavior_trace_required
+  behavior_trace_required=$(yaml_field "$file" behavior_trace_required)
+  if [[ "$behavior_trace_required" == "true" ]]; then
+    local behavior_trace_count
+    behavior_trace_count=$(yaml_field "$file" behavior_trace_count)
+    # Fail if count is missing, empty, zero, negative, or non-numeric
+    if [[ -z "$behavior_trace_count" || ! "$behavior_trace_count" =~ ^[1-9][0-9]*$ ]]; then
+      return 1
+    fi
+  fi
+
   return 0
 }
 

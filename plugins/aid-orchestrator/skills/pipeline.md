@@ -801,143 +801,33 @@ set via `set-field`. The decision is automatically cleared after the transition 
 Sub-phases (`review` → `release`) managed by `done-advance`. The `review` phase is auto-set
 on GATES→DONE transition.
 
-### Epic Summary (auto-generated v2.18.0+)
+### DONE Closure Checklist
 
-After every successful `done-advance review→release`, `aid-fsm.sh` invokes
-`aid-epic-summary.sh generate <evidence_dir>` (best-effort — failure logs a
-warning but never blocks release).
+Ordered sequence — each step has a named gate. `done-advance` and `plan-close` enforce mechanically.
 
-Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
+| Step | Action | Gate (enforced) |
+|------|--------|-----------------|
+| 1 | Archive run file + update `active.md` | run.md `status: completed` |
+| 2 | Generate `final_report.md` | file present in evidence dir |
+| 3 | Dispatch Curator + Auditor (parallel) | both `*-report.md` present |
+| 4 | Curator auto-fix (S/M/L) | gate-fixer applied |
+| 5 | Auditor auto-fix (S/M/L, `auto_fixable: true`) | gate-fixer applied |
+| 6 | CP4 verifier (curator/auditor diff) | `verifier-output-cp4-curator-validation.md` |
+| 6a | CP5: auditor `blocking_findings` check | MERGE option blocked if `blocking_findings: true` |
+| 7 | Simplifier (plan boundary) | `simplifier-report.md` required by `plan-close` |
+| 8 | Reporter (plan boundary) | `delivery.md` required by `plan-close` |
+| 9 | `plan-close` marker | `ca-review-complete` — `plan-close` enforces all of 3-8 |
+| 10 | PM decision | MERGE / FIX / ABORT |
+| 11 | `done-advance review release` | `pm_decision=merge` + reports present |
 
-| Section | Source |
-|---------|--------|
-| `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
-| `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
-| `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
-| `📋 Co dělat dál (PM akce)` | curator deferred proposals (always-defer rules: architecture, standards-L), escalations, force override audit reminder |
-| `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
+### Telemetry Overview
 
-**Trust level heuristics:**
-- `branch_correct=false` + `branch` starts with `feature/` → false alarm (feature branch convention); no trust penalty
-- `force_override_count > 0` → MEDIUM; audit-log.jsonl review required
-- `gate_retries > 0` → MEDIUM
-- `compliance.overall = false` → LOW
-- All green + 0 force + 0 retries → HIGH
+Four telemetry mechanisms fire automatically during DONE state. Detail in [Telemetry Reference](#telemetry-reference) below.
 
-**IMP-089 forward-compat:** if `.aid-o/config/project.yaml` has a `branch_convention:` field, the trust heuristic respects it (even before IMP-089 ships).
-
-### Compliance Telemetry
-
-After every successful `done-advance` to `release`, `aid-fsm.sh` writes
-`evidence/<epic>/<run>/compliance.json` capturing 6 enforcement dimensions:
-
-| Dimension | Session A status | Source |
-|-----------|------------------|--------|
-| `branch_correct` | measured | `fsm-state.yaml.branch` matches `^task/E-` |
-| `execution_yaml_present` | measured | file exists at `<project>/.aid-o/config/execution.yaml` |
-| `gates_generated_by` | measured | `gates_report.json._generated_by` field present |
-| `memory_substantive` | `null` | Session B/C territory |
-| `verifier_outputs` | `null` | Session B territory |
-| `dod_present` | `null` | downstream |
-
-`null` ALWAYS means "feature not yet measured by the deployed Session", NEVER
-"not applicable". When Sessions B/C deploy, currently-null fields become
-`true|false` and the same overall logic remains consistent.
-
-`overall: "pass"` if all checks ∈ {true, null}; else `"fail"`. Plus a
-`compliance_written` timeline event is emitted with `deploy_era`, `overall`,
-`checks_passed`, `checks_failed` payload.
-
-Aggregator: `bash $AID_PLUGIN_PATH/scripts/aid-compliance-report.sh --since YYYY-MM-DD`
-produces a pre vs post comparison table.
-
-Backfill (one-shot post-deploy): `bash $AID_PLUGIN_PATH/scripts/aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ`
-retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
-AND stamps missing `created_at:` field into `fsm-state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
-
-Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produces
-a forensic frequency table (file counts, branch hygiene, gate authenticity, top
-fsm_precondition_fail reasons) — productized version of the Krok 0 analysis.
-
-### Tiered Severity Enforcement
-
-`cmd_done_advance review release` reads `compliance.json failures[]` and refuses
-transition when any failure has `severity: "blocking"`. PM-authorized override
-flow:
-
-```bash
-aid-fsm.sh done-advance review release <state_file> \
-  --force \
-  --reason '<≥20 chars explaining why this is acceptable>' \
-  --blocked-checks 'check_a,check_b'
-```
-
-Override appends an `fsm_force_override` event to `.aid-o/work/audit-log.jsonl`
-with `blocked_checks: ["check_a","check_b"]` JSON array, the reason, the
-operator (`$USER`), and the timestamp.
-
-**Soft-fail design:** if `yq` is not installed on the host OR `check-severity.yaml`
-is missing, `fsm_build_failures` defaults ALL failures to `severity: advisory`.
-Release proceeds; no blocking check fires. Install `yq` to enable per-check
-severity enforcement (`brew install yq` / `snap install yq`).
-
-**Severity registry:** `.aid-o/config/check-severity.yaml` (shipped by /aid-init).
-Initial bootstrap (v2.21.0):
-
-| Check                            | Severity  | Promoted at | Anchor                                                          |
-|----------------------------------|-----------|-------------|-----------------------------------------------------------------|
-| `verifier_provenance`            | blocking  | 2026-05-13  | P037-1 detector + AID-v3-principles.md §1                       |
-| `gates_generated_by`             | blocking  | 2026-05-05  | Session A initial enforcement                                   |
-| `plan_ac_match`                  | blocking  | 2026-05-13  | P037-2 plan-diff gate                                           |
-| `memory_substantive`             | advisory  | —           | Awaiting empirical track record                                 |
-| `dod_present`                    | advisory  | —           | Awaiting empirical track record                                 |
-| `epic_compliance_coverage_ratio` | advisory  | —           | Awaiting empirical track record                                 |
-| `ai_mechanics_friction_ratio`    | advisory  | —           | Awaiting empirical track record                                 |
-| `iteration_density_per_step`     | advisory  | —           | Awaiting empirical track record                                 |
-
-**Promotion ceremony (advisory → blocking):** per AID-v3-principles.md §1
-tiered severity caveat, promotion happens when:
-
-1. **Auto-criterion (empirical):** `force_override_rate[check] < 0.05` across
-   N≥5 consecutive EPICs where the check ran. Surface via:
-   ```bash
-   bash $AID_PLUGIN_PATH/scripts/aid-promote-checks.sh --format markdown
-   ```
-2. **Explicit PM action:**
-   ```bash
-   aid-fsm.sh promote-check <check_name> --reason '<text ≥20 chars>'
-   ```
-   Updates `.aid-o/config/check-severity.yaml` in place and appends a
-   `check_promoted` event to `audit-log.jsonl` (forensic trail).
-
-Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
-is Decoration`. P038 (v2.21.0) is the first concrete application of this
-principle in AID.
-
-### Compliance Recovery Alert (P042, v2.29.0+)
-
-Companion to the blocking flow above — the PM gets a signal in both directions:
-
-1. **Block:** when `done-advance review→release` refuses transition on blocking
-   failures, the FSM sends a `🛑 <epic>: N blocking compliance failure(s) —
-   release blocked` Telegram alert and writes a `fsm_done_advance_blocked`
-   timeline event (with the `blocked_checks` list).
-2. **Recovery:** on the next successful `done-advance review→release` (zero
-   blocking failures), if the last `fsm_done_advance_blocked` event has no later
-   `fsm_done_advance_recovered` event, the FSM sends `✅ <epic>: compliance
-   cleared, release unblocked. Checks: <list>` and writes a
-   `fsm_done_advance_recovered` timeline event.
-
-The recovered event doubles as a **dedup marker** — exactly one recovery alert
-per block episode; subsequent clean runs stay silent until a new block occurs.
-
-**Config gate:** `notifications.telegram.alert_on_compliance_recovery` in
-`.aid-o/config/execution.yaml` (default `true`). Setting `false` suppresses the
-Telegram message only — the `fsm_done_advance_recovered` timeline event is
-always written (observable test signal, fixture 7d).
-
-**Soft-fail:** missing timeline.jsonl or `jq` → recovery detection silently
-skips (telemetry over correctness, same posture as compliance.json writes).
+- **Epic Summary** (v2.18.0+) — after `done-advance review→release`, generates `evidence/<epic>/<run>/epic-summary.md` with delivery summary, warnings, and PM trust level (HIGH/MEDIUM/LOW). Best-effort; never blocks release.
+- **Compliance Telemetry** — writes `compliance.json` with 6 enforcement dimensions; `overall: pass` if all checks ∈ {true, null}. Aggregator: `aid-compliance-report.sh`.
+- **Tiered Severity** — `done-advance review release` refuses transition on `severity: blocking` failures; soft-fail if `yq` missing. Override via `--force --reason`. Severity registry: `.aid-o/config/check-severity.yaml`.
+- **Compliance Recovery Alert** (P042) — Telegram `🛑` on block, `✅` on recovery. Config gate: `notifications.telegram.alert_on_compliance_recovery` (default `true`).
 
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
@@ -1104,6 +994,148 @@ evidence/{epic_id}/{run_id}/
   reporter/                    # Reporter test-evidence artifacts (plan boundary)
 .aid-o/reports/{plan_id}-delivery.md   # Reporter delivery report (committed)
 ```
+
+### Telemetry Reference
+
+Full detail for the four telemetry mechanisms summarised in [Telemetry Overview](#telemetry-overview) above.
+
+#### Epic Summary (auto-generated v2.18.0+)
+
+After every successful `done-advance review→release`, `aid-fsm.sh` invokes
+`aid-epic-summary.sh generate <evidence_dir>` (best-effort — failure logs a
+warning but never blocks release).
+
+Output: `evidence/<epic>/<run>/epic-summary.md` with 5 sections:
+
+| Section | Source |
+|---------|--------|
+| `✅ Co bylo dodáno` | `git log <base_commit>..HEAD --oneline` |
+| `⚠️ Varování a přeskočené kroky` | `timeline.jsonl` — branch events, force_override, gate retries |
+| `❌ Co se nestihlo` | `audit-report.md` blocking/L-effort findings, `curator-report.md` deferred |
+| `📋 Co dělat dál (PM akce)` | curator deferred proposals (always-defer rules: architecture, standards-L), escalations, force override audit reminder |
+| `🔍 Honest signal — PM trust level` | `compliance.json` + heuristics → HIGH / MEDIUM / LOW |
+
+**Trust level heuristics:**
+- `branch_correct=false` + `branch` starts with `feature/` → false alarm (feature branch convention); no trust penalty
+- `force_override_count > 0` → MEDIUM; audit-log.jsonl review required
+- `gate_retries > 0` → MEDIUM
+- `compliance.overall = false` → LOW
+- All green + 0 force + 0 retries → HIGH
+
+**IMP-089 forward-compat:** if `.aid-o/config/project.yaml` has a `branch_convention:` field, the trust heuristic respects it (even before IMP-089 ships).
+
+#### Compliance Telemetry
+
+After every successful `done-advance` to `release`, `aid-fsm.sh` writes
+`evidence/<epic>/<run>/compliance.json` capturing 6 enforcement dimensions:
+
+| Dimension | Session A status | Source |
+|-----------|------------------|--------|
+| `branch_correct` | measured | `fsm-state.yaml.branch` matches `^task/E-` |
+| `execution_yaml_present` | measured | file exists at `<project>/.aid-o/config/execution.yaml` |
+| `gates_generated_by` | measured | `gates_report.json._generated_by` field present |
+| `memory_substantive` | `null` | Session B/C territory |
+| `verifier_outputs` | `null` | Session B territory |
+| `dod_present` | `null` | downstream |
+
+`null` ALWAYS means "feature not yet measured by the deployed Session", NEVER
+"not applicable". When Sessions B/C deploy, currently-null fields become
+`true|false` and the same overall logic remains consistent.
+
+`overall: "pass"` if all checks ∈ {true, null}; else `"fail"`. Plus a
+`compliance_written` timeline event is emitted with `deploy_era`, `overall`,
+`checks_passed`, `checks_failed` payload.
+
+Aggregator: `bash $AID_PLUGIN_PATH/scripts/aid-compliance-report.sh --since YYYY-MM-DD`
+produces a pre vs post comparison table.
+
+Backfill (one-shot post-deploy): `bash $AID_PLUGIN_PATH/scripts/aid-compliance-backfill.sh --deploy-date YYYY-MM-DDTHH:MM:SSZ`
+retroactively generates `compliance.json` for existing EPICs with `deploy_era: pre-session-a`
+AND stamps missing `created_at:` field into `fsm-state.yaml` (CP1 M2 unblock for mid-FSM EPICs).
+
+Diagnostic: `bash $AID_PLUGIN_PATH/scripts/aid-diagnostic.sh --output md` produces
+a forensic frequency table (file counts, branch hygiene, gate authenticity, top
+fsm_precondition_fail reasons) — productized version of the Krok 0 analysis.
+
+#### Tiered Severity Enforcement
+
+`cmd_done_advance review release` reads `compliance.json failures[]` and refuses
+transition when any failure has `severity: "blocking"`. PM-authorized override
+flow:
+
+```bash
+aid-fsm.sh done-advance review release <state_file> \
+  --force \
+  --reason '<≥20 chars explaining why this is acceptable>' \
+  --blocked-checks 'check_a,check_b'
+```
+
+Override appends an `fsm_force_override` event to `.aid-o/work/audit-log.jsonl`
+with `blocked_checks: ["check_a","check_b"]` JSON array, the reason, the
+operator (`$USER`), and the timestamp.
+
+**Soft-fail design:** if `yq` is not installed on the host OR `check-severity.yaml`
+is missing, `fsm_build_failures` defaults ALL failures to `severity: advisory`.
+Release proceeds; no blocking check fires. Install `yq` to enable per-check
+severity enforcement (`brew install yq` / `snap install yq`).
+
+**Severity registry:** `.aid-o/config/check-severity.yaml` (shipped by /aid-init).
+Initial bootstrap (v2.21.0):
+
+| Check                            | Severity  | Promoted at | Anchor                                                          |
+|----------------------------------|-----------|-------------|-----------------------------------------------------------------|
+| `verifier_provenance`            | blocking  | 2026-05-13  | P037-1 detector + AID-v3-principles.md §1                       |
+| `gates_generated_by`             | blocking  | 2026-05-05  | Session A initial enforcement                                   |
+| `plan_ac_match`                  | blocking  | 2026-05-13  | P037-2 plan-diff gate                                           |
+| `memory_substantive`             | advisory  | —           | Awaiting empirical track record                                 |
+| `dod_present`                    | advisory  | —           | Awaiting empirical track record                                 |
+| `epic_compliance_coverage_ratio` | advisory  | —           | Awaiting empirical track record                                 |
+| `ai_mechanics_friction_ratio`    | advisory  | —           | Awaiting empirical track record                                 |
+| `iteration_density_per_step`     | advisory  | —           | Awaiting empirical track record                                 |
+
+**Promotion ceremony (advisory → blocking):** per AID-v3-principles.md §1
+tiered severity caveat, promotion happens when:
+
+1. **Auto-criterion (empirical):** `force_override_rate[check] < 0.05` across
+   N≥5 consecutive EPICs where the check ran. Surface via:
+   ```bash
+   bash $AID_PLUGIN_PATH/scripts/aid-promote-checks.sh --format markdown
+   ```
+2. **Explicit PM action:**
+   ```bash
+   aid-fsm.sh promote-check <check_name> --reason '<text ≥20 chars>'
+   ```
+   Updates `.aid-o/config/check-severity.yaml` in place and appends a
+   `check_promoted` event to `audit-log.jsonl` (forensic trail).
+
+Reference: `docs/plans/AID-v3-principles.md §1 — Detector without Enforcement
+is Decoration`. P038 (v2.21.0) is the first concrete application of this
+principle in AID.
+
+#### Compliance Recovery Alert (P042, v2.29.0+)
+
+Companion to the blocking flow above — the PM gets a signal in both directions:
+
+1. **Block:** when `done-advance review→release` refuses transition on blocking
+   failures, the FSM sends a `🛑 <epic>: N blocking compliance failure(s) —
+   release blocked` Telegram alert and writes a `fsm_done_advance_blocked`
+   timeline event (with the `blocked_checks` list).
+2. **Recovery:** on the next successful `done-advance review→release` (zero
+   blocking failures), if the last `fsm_done_advance_blocked` event has no later
+   `fsm_done_advance_recovered` event, the FSM sends `✅ <epic>: compliance
+   cleared, release unblocked. Checks: <list>` and writes a
+   `fsm_done_advance_recovered` timeline event.
+
+The recovered event doubles as a **dedup marker** — exactly one recovery alert
+per block episode; subsequent clean runs stay silent until a new block occurs.
+
+**Config gate:** `notifications.telegram.alert_on_compliance_recovery` in
+`.aid-o/config/execution.yaml` (default `true`). Setting `false` suppresses the
+Telegram message only — the `fsm_done_advance_recovered` timeline event is
+always written (observable test signal, fixture 7d).
+
+**Soft-fail:** missing timeline.jsonl or `jq` → recovery detection silently
+skips (telemetry over correctness, same posture as compliance.json writes).
 
 ---
 
@@ -1307,7 +1339,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-14
+**Last Updated:** 2026-06-19
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
