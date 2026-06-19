@@ -69,6 +69,15 @@ export type {
   LastSeen,
 } from './managerial.js';
 
+export type {
+  TimeSource,
+  MemoryScope,
+  MemoryType,
+  MemoryQuery,
+  MemoryEntry,
+  MemoryResult,
+} from './seams.js';
+
 export { STATUS } from './status.js';
 export type { StatusKey } from './status.js';
 export type { DictionaryEntry, Explanation } from './explain.js';
