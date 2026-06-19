@@ -1711,7 +1711,7 @@ Screen B (Rev 2: EPIC list + "Zdraví projektu" rail) gains a **tab strip** at t
 
 #### SCREEN-shared PANEL — Audit summary (AuditSummaryCard, used on Plan + EPIC detail)
 
-Replaces "render the audit-report.md markdown" (Rev 2 behaviour where the auditor showed up only as a `ReportRef` opened in the raw drawer). Renders one `AuditSummary` (§13.5, from `RunDetail.audit` on Screen C and the aggregate on the Plan Audit tab). **Structured, not raw markdown** — the raw markdown stays one click away in a "technické detaily" drawer (`audit.rawRelPath` via `/file`). Every number is nullable: `present:false`→"auditor zatím neběžel"; `overallScore:null`→"—" with `warnings` shown; `blockingFindings:null`→"nešlo přečíst".
+Replaces "render the audit-report.md markdown" (Rev 2 behaviour where the auditor showed up only as a `ReportRef` opened in the raw drawer). Renders one `AuditSummary` (§13.5, from `RunDetail.audit` on Screen C and the aggregate on the Plan Audit tab). **Structured, not raw markdown** — the raw markdown stays one click away in a "technické detaily" drawer (`audit.rawRelPath` via `/file`). Every number is nullable: `present:false`→"auditor zatím neběžel"; `overallScore:null`→"—" with `warnings` shown; `blockingFindings:null`→"nezjištěno" (the single canonical label, never "false" - matches §13.5.6 / AC #17).
 
 **DESKTOP (as a card on Screen C, or the aggregate on the Plan Audit tab)**
 ```
@@ -2175,15 +2175,17 @@ Evaluate **top to bottom**; the **first matching tier sets the level** (preceden
 
 #### 13.2.4 Data-coverage rule (the "never fake low" guarantee)
 
-> A missing signal is **never** counted as clean. If fewer than `COVERAGE_MIN_SIGNALS` (2) of the level-relevant signals are *available* (their source artifact exists), the level is **`neurceno`** with reason "Zatím je málo dat na odhad rizika - chybí výsledky bran, compliance nebo timeline." (`signal:"insufficient_coverage"`), `confidence:'low'`. **It is never `nizke` by absence.** This mirrors §5.7's "missing signal must NEVER be counted as 'clean'": a brand-new run with only a `fsm-state.yaml` (no gates, no compliance, no timeline) yields `neurceno`, not a falsely reassuring "nízké".
+> A missing signal is **never** counted as clean. If fewer than `COVERAGE_MIN_SIGNALS` (2) of the **level-relevant signals** are *available* (their source artifact exists), the level is **`neurceno`** with reason "Zatím je málo dat na odhad rizika - chybí výsledky bran, compliance nebo timeline." (`signal:"insufficient_coverage"`), `confidence:'low'`. **It is never `nizke` by absence.** This mirrors §5.7's "missing signal must NEVER be counted as 'clean'".
 
-Concretely: `nizke` requires that **at least the compliance source (S1/S3) OR the gates source (S4)** was actually present and clean — a run we know nothing about cannot earn a green risk badge.
+**"Level-relevant signals" — explicit enumeration (this is the set the `COVERAGE_MIN_SIGNALS` count is taken over):** `S1, S3` (compliance source), `S4` (gates source), `S5, S6` (timeline source), `S8` (audit source). **`S7` (staleRun) and `S2`'s `fsm-state.yaml`-presence are deliberately EXCLUDED from the count** — they are *always* available for any v3 run (S7's availability is literally "the run dir exists", §13.2.1), so counting them would let a thin run trivially reach ≥2 and falsely earn `nizke`. They still *contribute reasons* when they fire; they just don't count toward coverage.
 
-#### 13.2.5 Worked examples (grounded on real disk)
+**The floor is the primary guarantee (not the bare count):** `nizke` requires that **at least the compliance source (S1/S3) OR the gates source (S4)** was actually present and clean — a run we know nothing about cannot earn a green risk badge. So even if some always-on signal were miscounted, the floor still forbids a false green. The count rule and the floor are belt-and-suspenders, and the floor wins on conflict.
+
+#### 13.2.5 Worked examples (first is a named real run; 2-3 are illustrative signal-sets)
 
 - **`E-042-1_1 / R-E042-1`** (real, verified on disk): `compliance.failures = [{check:"verifier_provenance", severity:"blocking"}]`, `force_override_count:1`, `overall:"fail"`. → **T1 `vysoke`** (S1 fires). Reasons: open blocking violation + (accumulated) force-override watch. `confidence:'high'` (compliance present). This is the canonical "release blocked" case the manager must see at a glance.
-- **A DONE+merged run** (`state:DONE`, `done_phase:release`, `pm_decision:merge`, `gate_retries:0`, `escalation_count:0`, clean compliance): no tier fires, coverage satisfied → **T3 `nizke`**, reasons `[no_adverse_signal]`, `confidence:'high'`.
-- **A fresh run with only `fsm-state.yaml`** (no gates/compliance/timeline yet): availability < 2 → **`neurceno`**, `confidence:'low'` — never a fake green.
+- **A DONE+merged run** (illustrative signal-set: `state:DONE`, `done_phase:release`, `pm_decision:merge`, `gate_retries:0`, `escalation_count:0`, clean compliance): no tier fires, coverage satisfied (compliance + gates sources present and clean) → **T3 `nizke`**, reasons `[no_adverse_signal]`, `confidence:'high'`.
+- **A fresh run with only `fsm-state.yaml`** (illustrative signal-set: no gates/compliance/timeline/audit yet): of the level-relevant set (S1,S3,S4,S5,S6,S8) **zero** sources exist, so coverage < 2 **and** the floor (compliance OR gates present and clean) is not met → **`neurceno`**, `confidence:'low'` — never a fake green. (S7/`fsm-state.yaml`-presence don't count toward coverage, §13.2.4.)
 
 ### 13.3 `sinceLastSeen` — "co se změnilo od poslední návštěvy" (localStorage, MVP1)
 
@@ -2285,6 +2287,8 @@ A **Plan** is the group of EPICs sharing a `plan_path` (§5.4 EPIC→plan). The 
 
 - **Membership** = EPICs whose `fsm-state.yaml plan_path` (or `tasks/*.md` frontmatter `plan_ref`) resolves to the same plan file. `plan_path: null` **fast-mode EPICs are NOT members** — they are counted in `PlanDetail.orphanEpicCount` and surfaced (if anywhere) on the project screen, never as plan members (§5.4 — "`orphan_epic`").
 - **planId** = the plan-file stem (e.g. `P003` from `.aid-o/plans/P003-*.md`). When EPICs carry no `plan_ref` at all (e.g. aid-orchestrator's own queue, §4.6 / risk #15), they are grouped by the plan-file name found in `.aid-o/plans/` and a `warnings[]` note records the weaker grouping — **never an empty/broken Plan screen**.
+
+> **aid-orchestrator is the canonical filename-grouping-fallback test fixture (disk reality, verified).** In aid-orchestrator's *own* workspace almost every run has `plan_path:null` (E-035/036/037-1/037-2/041/042/045/046-1/046-2/046-3 all null-or-empty); only E-038 and E-040 carry a real `plan_path`, and both are single-EPIC (P038/P040). So this project has **no multi-EPIC `plan_path`-grouped data** — its Plan screen is driven *entirely* by the filename-grouping fallback. Two consequences the implementer must treat as first-class, not edge cases: **(a)** the flagship `89→95→84` audit-trend example (§13.5.4) and any aid-orchestrator plan trend are *filename-grouped/orphan* trends, not `plan_path`-membership trends; **(b)** AC #19's "project with no `plan_ref` still renders a Plan grouped by filename" is the **primary** validation path for this project, so the Plan screen must be tested against aid-orchestrator's real null-`plan_path` data rather than assuming `plan_path` membership exists.
 
 **`PlanSummary` (list-row / brief-scope)** carries `epicIds`, `epicsTotal`/`epicsDone`, `progressPct` (`done_epics/total_epics*100`, §5.5), `acPct` (`Σpresent/Σac_count`, `null` when not measured), a thin `lessonsPreview[]` list, `auditTrend` (plan scope), `lastActivityAt`. **`PlanDetail` extends it** with the full Plan screen:
 
