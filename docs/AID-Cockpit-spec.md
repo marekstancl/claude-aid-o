@@ -1,5 +1,7 @@
 # AID Cockpit — Implementation Specification (MVP 1)
 
+*Rev 4 (post external-audit round 2): resolves 7 must-fix + 5 should-fix findings against the Rev 3 managerial layer. Single explicit plan-membership precedence (MF1); client-side backlog delta (MF2); structured `ComplianceFailure` end-to-end (MF3); nullable `Checkpoint.provenance` + `provenanceSource` (MF4); `SuccessProbability` envelope keeping the binding MVP1 `value===null && source===null` invariant (MF5); first-class plan-level Reporter delivery + Simplifier proposals (MF6); first-class project-scope audit (MF7); plus depth-1 discovery (SF1), corrected "no new source of truth" wording (SF2), per-signal risk confidence (SF3), the `boundaryAudit` vs `aggregateAudit` disambiguation (SF4), and rewritten Screen B/C wireframes (SF5). All changes are additive to Rev 3 — no Rev 3 decision is re-opened. Change summary: §14.*
+
 *Rev 3 (managerial-cockpit layer): adds the `Brief` read-model (one shape, three scopes — infra / project / plan), the deterministic RISK model (level + reasons, "flag never fake"), Screen G "Co potřebuju vědět" as the non-technical front door, Plan as a first-class entity, and the `/api/brief*` endpoints. Builds on Rev 2 without re-designing it. New material is §13 (model) + §7.5 type additions; the rest of Rev 2 is unchanged.*
 
 *Rev 2 (post external audit): nullable contracts, headline-score thresholds, WS polling fallback, watcher depth fix, per-checkpoint retry sourcing, unified explanation/status model, file-endpoint security, CP6/reporter disambiguation.*
@@ -261,7 +263,7 @@ All durations in **seconds (int)**, id suffix `_sec`, computed as `epoch(end) - 
 |---|---|---|---|---|
 | `run_duration_sec` | wall-clock of active work in one run | **`READY→EXECUTE` `fsm_transition.ts`** (NOT `fsm_init`; falls back to `fsm_init.ts` only if no such transition, then tag `start_source:"init_idle_included"` + warn) | `fsm_done_advance.ts` → else `compliance_written.ts` → else last `fsm_transition` to DONE (**the last fallback is the common case**) | open run: `max(file mtime)`, mark `incomplete:true`. No timeline: `null`, `NOT_COMPUTABLE`. Tag `end_source`. A separate `run_wall_incl_idle_sec` from `fsm_init` may be shown alongside, explicitly labeled "vč. čekání". |
 | `epic_duration_sec` | across all runs of an EPIC | `min(fsm_init.ts)` | `max(terminal.ts)` | single run = `run_duration_sec` |
-| `plan_duration_sec` | first EPIC start → last EPIC end for a plan | `min(fsm_init.ts)` over EPICs whose `plan_path` matches | `max(terminal.ts)` | `plan_path: null` → exclude, flag `orphan_epic` |
+| `plan_duration_sec` | first EPIC start → last EPIC end for a plan | `min(fsm_init.ts)` over the plan's §13.6 member EPICs (tiers 1-3) | `max(terminal.ts)` | only tier-4 orphans excluded (§13.6 / MF1); `null` when no member run has a parseable anchor |
 | `time_in_state_sec` (per state) | seconds in READY/EXECUTE/GATES/DONE/ESCALATION | entering `fsm_transition.ts` (READY = `fsm_init.ts`) | next leaving `fsm_transition.ts` | terminal DONE end = last terminal event; omit states never entered |
 | `step_duration_sec` (per step N) | active work on step N | **PRIMARY: mtime of `step-{N-1}-verify.md` / `verifier-output-step-{N-1}.md`** (start of N ≈ end of N−1; first step starts at `READY→EXECUTE`). **OPTIONAL ENHANCEMENT (only when present):** `verifier_dispatch_start` (`step_n==N`) | **PRIMARY:** mtime of `step-{N}-verify.md` / `verifier-output-step-{N}.md`. **OPTIONAL:** `verifier_dispatch_start` of step N+1; last step = first `fsm_pre_gates.ts` | **On most runs the timeline has no dispatch events — step timing comes from file mtimes, and where even those are missing it is `null`, flag `no_step_timing` (see §5.6, "per-step duration NOT reliably computable").** Streamlined/SKIP steps → `null`, flag `no_dispatch`. Dispatch-gap is corroboration, never the sole source. |
 | `dispatch_duration_sec` | one verifier dispatch | `verifier_dispatch_start` | matching `_complete` (same `focus`) | **self-host artifact ~0; surface `unreliable:true` when <2s** |
@@ -324,7 +326,7 @@ health.value = round(
 ```
 - The 0.50 term's denominator = count of **non-null** checks (must be ≥1; if zero non-null checks, drop the term, `partial:true`).
 - `Project.health.compliancePassRate` = `compliance_checks_pass_rate_pct` (the 0.50 term, also exposed raw); `null` when no non-null checks exist.
-- `Project.health.openViolations` = count of the **latest run's** `failures[]` with `severity:"blocking"` still unresolved. **"Resolved" is defined precisely:** a blocking failure is considered cleared when a **LATER run of the same EPIC** has no matching `failures[].check` (so the resolution source is a newer run, stated explicitly — not an in-place edit).
+- `Project.health.openViolations` = count of the **latest run's** `ComplianceFailure[]` entries (MF3) with `severity === 'blocking'` still unresolved. **"Resolved" is defined precisely:** a blocking failure (matched by its `.check`) is considered cleared when a **LATER run of the same EPIC** has no `ComplianceFailure` with that same `.check` value (the resolution source is a newer run's structured `failures[]`, never an in-place edit). `Project.health.openViolations` stays typed `number`; only its *derivation* keys off the structured `ComplianceFailure` type — `severity === 'blocking'` and match-by-`.check`, neither of which was expressible against the old `string[]`.
 - If a project has zero runs with `compliance.json`, `health.value = null` and the tile shows "bez dat", never 0 %. The infra-tile "aggregate health score" = runs-weighted mean of per-project `health.value` over projects where `health.value != null`.
 
 ### 5.4 Aggregation hierarchy
@@ -334,7 +336,7 @@ step → run → EPIC → plan → project → infra
 ```
 - **step → run:** step list = distinct `step_n` from cp2-step dispatches (or `total_steps`). `Σ step_duration_sec` ≈ EXECUTE time.
 - **run → EPIC:** EPIC value = **latest run** for status/verdict; **sum** for cumulative costs (`gate_retry_count`, `force_override_count`, `verifier_dispatch_count`); `epic_duration_sec` spans first→last across runs.
-- **EPIC → plan:** group by `plan_path`. Fast-mode EPICs (`plan_path: null`) excluded, counted as `orphan_epic_count`.
+- **EPIC → plan:** resolve plan membership by the **four-tier precedence** of §13.6 (`plan_path` → frontmatter `plan_ref` → id-derived `E-{NNN}` → `P{NNN}` → orphan), recording the tier in `membershipSource`. Only genuinely-unplaceable EPICs (no `plan_path`, no `plan_ref`, no matching `P{NNN}` plan file) are excluded and counted as `orphan_epic_count`. An id-derived EPIC is an **official-but-weaker** member (tagged `membershipSource:'derived'` + a warning), **NOT** an orphan and **NOT** "fast-mode excluded". (Rev 3 wrongly excluded every `plan_path:null` EPIC here; that contradicted the filename-grouping fallback and is corrected in §13.6 / Rev 4.)
 - **plan → project:** project = one `.aid-o/` workspace. Rollups: EPICs by state, `avg_run_duration_sec`, `total_force_override_count`, `avg_gate_pass_rate_pct`, `avg_ac_verified_pct`, `total_escalation_count`.
 - **project → infra:** sum/avg across all 6 workspaces; tiles: total runs, active runs (state ∈ {READY,EXECUTE,GATES}), aggregate health score.
 
@@ -604,15 +606,17 @@ Paths relative to `/opt/eco/projects/aid-orchestrator/`. **reuse** = move ~as-is
 
 Replaces `ProjectRegistry`. Pure read, auto-discovery, cached.
 
-**Discovery**
+**Discovery — TOP-LEVEL workspaces ONLY (depth-1, never recursed).** MVP1 monitors **only the top-level** AID workspace of each project — exactly the directories matched by the depth-1 glob `<scanRoot>/*/.aid-o`. It does **not** recurse into a project tree looking for `.aid-o` dirs; nested, empty, and test `.aid-o` dirs are **out of scope** (see the disk-reality note below). This makes the phrase "every AID workspace" precise: one workspace per top-level project dir, not every `.aid-o` directory that happens to exist anywhere under `<scanRoot>`.
 ```
 scanRoot = AID_PROJECTS_ROOT (default /opt/eco/projects)
-glob: <scanRoot>/*/.aid-o   (depth 1, dirs only)
+glob: <scanRoot>/*/.aid-o   (depth 1, dirs only — single path segment between scanRoot and .aid-o; NOT <scanRoot>/**/.aid-o)
 exclude project dirs matching: /\.(broken|bak|old)\b/, /-\d{8}-\d{4}$/, leading-dot, names containing "backup"
   AND any without a config/ AND work/ subdir (sanity check vs layout drift)
 projectId = basename(dirname(.aid-o))   e.g. "acta", "vulcan"
 ```
-A project is **discovered** if `<dir>/.aid-o/` exists; **active** if `work/evidence/` has ≥1 run dir OR `tasks/*.md` exists. Missing `work/`/`tasks/` → still listed, `partial:true`, never throws. **BOTH broken workspaces MUST be filtered:** `vulcan.broken-20260430-0741` **and** `cicero.broken-20260430-0735` — the `\.(broken)\b` + `-\d{8}-\d{4}$` patterns cover both; the regression test (MVP 1 AC #1) asserts both are excluded. Sibling dirs that have **no `.aid-o`** at all (`cicero`, `myinvoice`, `panopticon`, `_refs`) are excluded by the `*/.aid-o` glob itself and must also be asserted absent in AC #1.
+A project is **discovered** if `<scanRoot>/<project>/.aid-o/` exists at depth 1; **active** if `work/evidence/` has ≥1 run dir OR `tasks/*.md` exists. Missing `work/`/`tasks/` → still listed, `partial:true`, never throws. **BOTH broken workspaces MUST be filtered:** `vulcan.broken-20260430-0741` **and** `cicero.broken-20260430-0735` — the `\.(broken)\b` + `-\d{8}-\d{4}$` patterns cover both; the regression test (MVP 1 AC #1) asserts both are excluded. Sibling dirs that have **no `.aid-o`** at all (`cicero`, `myinvoice`, `panopticon`, `_refs`) are excluded by the `*/.aid-o` glob itself and must also be asserted absent in AC #1.
+
+> **Disk reality — nested `.aid-o` dirs exist and are deliberately NOT recursed into (verified `find /opt/eco/projects -maxdepth 5 -type d -name .aid-o`).** Two nested `.aid-o` dirs live *inside* valid top-level projects: `krok/backend/.aid-o` and `vulcan/ui/.aid-o`. Both are **out of scope** for two independent reasons: (1) the depth-1 glob `<scanRoot>/*/.aid-o` never reaches them (they are at depth 2+ — `<scanRoot>/krok/backend/.aid-o`), and (2) even if reached, both contain **only a `work/` subdir** (no `config/`), so the `config/ AND work/` sanity check would reject them anyway. The remaining nested dirs (`vulcan.broken-…/.claude/worktrees/*/.aid-o`, `vulcan.broken-…/ui/.aid-o`) sit under an already-denylisted broken project and are doubly excluded. The single workspace per project is the top-level one (`krok/.aid-o`, `vulcan/.aid-o`), and the cockpit treats `krok` and `vulcan` as one workspace each — the `backend/`/`ui/` sub-workspaces are never surfaced as separate projects nor merged in. (The §7.3 per-`.aid-o` watcher attaches only to these top-level dirs for the same reason, so watcher traversal also never descends into a nested workspace.)
 
 **Build project list (`scan()` → `Project[]`):** per project — (1) `tasks/*.md` (exclude `archive/`) → EPIC list via frontmatter; (2) `work/evidence/*/` → EPIC-run dirs; (3) project rollups (total/active epics, total runs, last activity = max run-dir mtime).
 
@@ -628,7 +632,7 @@ latestRun(epicDir):
 **Per-run classification:** `fsm-state.yaml` with `state` ∈ 6 → **v3** (full detail). Only `state.yaml`/legacy markers → **legacy** (counted, `format:"legacy"`, no CP/timing detail). Only `timeline.jsonl`/empty → **stub** (`format:"stub"`, minimal). Old `.aid-o/01-epics/`, root `plan_progress.json`/`stage_log.jsonl` are never read.
 
 **Performance (277 runs × 6 projects):**
-- **Two-tier cache.** Tier 1: project/EPIC index (dir listing + frontmatter + per-run mtime/state-line), built on boot, sub-second. Tier 2: full `RunDetail` (plan.json, compliance, gates_report, verifier-output md) — **lazy on-demand** per `GET /epics/:id`, memoized in an LRU keyed by `projectId/epicId/runId`.
+- **Two-tier cache.** Tier 1: project/EPIC index (dir listing + frontmatter + per-run mtime/state-line), built on boot, sub-second. **Tier-1 also indexes the managerial-projection source files (Rev 3, SF2):** `plans/*.md`, `work/evidence/*/audit-report.md`, `work/backlog.md`, and `work/lessons-learned.md` — for each, the dir listing + frontmatter (where present) + per-file mtime. This is what lets `PlanSummary`/`AuditSummary`/`AuditTrend`/`BacklogDelta`/`LessonsView` (§13.5-§13.8) be served as projections over the cache: Tier-1 carries the *presence + mtime* so the brief and the "co se změnilo" diff (§13.3) work without a per-request scan; the heavy *body* parse of those files is Tier-2 on-demand. Tier 2: full `RunDetail` (plan.json, compliance, gates_report, verifier-output md) **plus the on-demand body parse of the indexed audit/backlog/lessons/plan files** — **lazy on-demand** per `GET /epics/:id` (and `/plans/*`, `/lessons`, `/backlog`, `/audit-trend/*`), memoized in an LRU keyed by `projectId/epicId/runId` (or `projectId/planId` for plan-scope projections).
 - **Invalidation: watcher events PRIMARY, max-file-mtime backstop.** A change to a nested file (e.g. `gates/gates_report.json`) may **not** bump the run-DIR mtime, so dir mtime alone is insufficient. The **watcher** (already emitting per-file `change` events, §7.3) is the PRIMARY invalidation: a change under a run dir invalidates that `RunDetail` LRU key. As a backstop, each entry stores the **max mtime over the run's read files** (not the dir mtime); if that max moves, the entry is stale. A 10-min TTL safety sweep catches any missed events.
 - **Bounded merged activity:** ring buffer of last 500 timeline events across all projects for `/activity`, refreshed incrementally on `change`.
 - **Concurrency:** cap parallel file reads (`p-limit 16`) so a cold scan can't thundering-herd the FS.
@@ -702,10 +706,12 @@ Envelope: success `{ "ok": true, "data": T, "meta"?: {...} }`; error `{ "ok": fa
 | GET | `/api/brief/:projectId?since=` | `Brief` (scope `project`) — Screen B first tab (§13.4) |
 | GET | `/api/brief/:projectId/:planId?since=` | `Brief` (scope `plan`) — Plan screen first tab (§13.4) |
 | GET | `/api/plans/:projectId` | `PlanSummary[]` — first-class plans for a project (§13.6). (Equivalent to the task's `/api/projects/:projectId/plans`; the flat `/api/plans/*` form is canonical here, matching `/api/compliance/:projectId`.) |
-| GET | `/api/plans/:projectId/:planId` | `PlanDetail` — one plan: brief-ready fields + EPIC members, progress, AC%, `plan_duration_sec`, audit summary, `auditTrend`, `backlogDelta`, full `LessonsView` (§13.6) |
+| GET | `/api/plans/:projectId/:planId` | `PlanDetail` — one plan: brief-ready fields + EPIC members, progress, AC%, `plan_duration_sec`, audit summary, `auditTrend`, current `backlog` rows + counts (the FE computes the `BacklogDelta` client-side, MF2), full `LessonsView` (§13.6) |
 | GET | `/api/lessons?project=&plan=` | `LessonsView` — lessons-per-plan / per-project / cross-infra (scope inferred from params: both → plan, project only → project, neither → infra) (§13.8) |
-| GET | `/api/backlog-delta?project=&plan=&since=` | `BacklogDelta` — open-vs-closed proposal delta vs the client `since` snapshot (§13.3/§13.7); `since` omitted ⇒ absolute counts |
+| ~~GET~~ | ~~`/api/backlog-delta`~~ | **REMOVED from MVP1 (MF2)** — `backlog.md` has no per-row timestamps and the server is stateless, so a server `?since=` field-level delta is not computable. The delta is computed **client-side** from a localStorage `BacklogSnapshot` (§13.7); the server serves current rows via `/api/backlog` (`openCount`/`closedCount` in `meta`). Server-side field-level delta = MVP1.5. |
 | GET | `/api/memory` | `MemoryResult` — **MVP1 STUB**: always returns `{ available:false, reason:"MVP2", entries:[] }`; never queries Qdrant. Wired to the read-only `vulcan-memory` MCP in MVP2 (§13.9) |
+| GET | `/api/audit-summary/:projectId` | `AuditSummary` (project-scope **`aggregateAudit`**, §13.5.7 / MF7) — the median-EPIC summary across the project's audited EPICs; `present:true, overallScore:null` + a warning when no audited EPIC has a score (e.g. sousto-na-miru) |
+| GET | `/api/audit-trend/:projectId` | `AuditTrend` (scope `project`, MF7) — score-over-time across the project's audited EPICs (one point per EPIC's latest audited run, §13.5); powers the Screen B Audit tab |
 | GET | `/api/audit-trend/:projectId/:epicId` | `AuditTrend` (scope `epic`) — score-over-time across the EPIC's runs (§13.5); thin chart-only endpoint, also embedded in `EpicDetail.auditTrend` |
 | GET | `/api/audit-trend/:projectId/plan/:planId` | `AuditTrend` (scope `plan`) — score-over-time across the plan's EPICs (§13.5); also embedded in `PlanSummary.auditTrend` |
 | GET | `/api/projects` | `Project[]` — cross-project tiles |
@@ -716,7 +722,7 @@ Envelope: success `{ "ok": true, "data": T, "meta"?: {...} }`; error `{ "ok": fa
 | GET | `/api/epics/:projectId/:epicId/runs/:runId/file?name=…` | `{ format, content }` — **path-validated + name allow-listed per §7.4.1** |
 | GET | `/api/compliance` | `ComplianceView` — cross-project rollup |
 | GET | `/api/compliance/:projectId` | `ComplianceView` scoped |
-| GET | `/api/backlog?project=` | `BacklogItem[]` (read) |
+| GET | `/api/backlog?project=` | `BacklogItem[]` (current rows, read-only); `meta: { openCount, closedCount, warnings }` carries the absolute counts (§13.7). The FE diffs these rows against its localStorage `BacklogSnapshot` to produce the `BacklogDelta` client-side (MF2). |
 | GET | `/api/activity?project=&topic=&limit=` | `ActivityEvent[]` — merged, time-sorted; WS-replay bootstrap |
 | GET | `/api/queue?project=` | `QueueEntry[]` |
 | GET | `/api/metrics/:projectId/:epicId` | `MetricSet` |
@@ -773,10 +779,14 @@ export interface Project {
 }
 export interface ProjectDetail extends Project {
   epics: EpicSummary[]; queue: QueueEntry[]; recentActivity: ActivityEvent[];
+  aggregateAudit: AuditSummary & { scoredEpicCount: number; medianEpicId: string | null };
+                                                  // MF7/SF4: project-scope aggregate = the MEDIAN-score audited EPIC's AuditSummary (§13.5.7); overallScore = median; scoredEpicCount===0 → present:true, overallScore:null + warning (e.g. sousto-na-miru). Same shape as PlanDetail.aggregateAudit. Also served standalone by GET /api/audit-summary/:projectId.
+  auditTrend: AuditTrend;                         // MF7: project-scope score-over-time, scope:'project', one point per audited EPIC (§13.5.4). Also served by GET /api/audit-trend/:projectId.
 }
 export interface EpicSummary {
   projectId: string; id: string; title: string; status: string;
   planRef: string | null; runsTotal: number; runsCompleted: number;
+  membershipSource?: MembershipSource;            // MF1: how this EPIC was attached to its plan (§13.6); 'derived' (id→Pxxx) is OFFICIAL but weaker (warning), NOT fast-mode-excluded. Optional — only set when the EPIC was resolved into a plan (undefined for a bare cross-project EPIC list).
   latestRun: { runId: string; state: FsmState; format: RunFormat; startedAt: string|null } | null;
   lastActivityAt: string | null;
 }
@@ -808,7 +818,11 @@ export interface RunStep {
 export interface Checkpoint {           // CP1-CP6 are CHECKPOINTS, not agents
   id: CheckpointId; label: string;
   dispatched: boolean; verdict: Verdict;
-  provenance: string | string[];        // "agent_tool"|"unverifiable"|per-step array
+  provenance: string | string[] | null;        // MF4: "agent_tool"|"unverifiable"|per-step array|null.
+                                                //   null = not recorded (CP1 has no provenance field; older/no-compliance runs)
+  provenanceSource: 'compliance' | 'timeline' | null;  // MF4: where provenance came from —
+                                                //   'compliance' = compliance.json verifier_outputs.*_provenance (source of truth);
+                                                //   'timeline' = corroborating dispatch pairs only (rare); null = none recorded
   repeatCount: number | null;           // CP1 from files; CP2/3/4 from timeline or null; gates from attempts
   repeatSource: 'files' | 'timeline' | null;  // how repeatCount was derived; null when unknown ("?")
   outputs: { name: string; relPath: string }[];
@@ -817,17 +831,28 @@ export interface GateResult {
   gate: string; result: 'pass'|'fail'|'skipped';
   exitCode: number; durationMs: number; attempts: number; outputPreview: string;
 }
+// MF3 — structured compliance failure (disk shape, §4.5). Replaces the lossy
+// `failures: string[]`. Risk (S1), health.openViolations, and the §5.7 "resolved
+// blocking failure" rule all need `severity` + `check`, so the structure is
+// preserved end-to-end. `promotedAt` mirrors disk `promoted_at` (severity
+// promotion provenance, §4.5 check-severity); null/absent on un-promoted rows.
+export interface ComplianceFailure {
+  check: string;                                  // the failing check id, e.g. "verifier_provenance"
+  evidence: string;                               // disk `evidence` string (path / short reason)
+  severity: 'blocking' | 'advisory';              // blocking blocks release; advisory only logged (§4.5)
+  promotedAt?: string | null;                     // disk `promoted_at` — when severity was promoted; null/absent if never
+}
 export interface ComplianceRun {
   epicId: string; runId: string; aidVersion: string; deployEra: string; evaluatedAt: string;
   coverageMode: string | null; overall: 'pass'|'fail';
-  checks: Record<string, unknown>; failures: string[];
+  checks: Record<string, unknown>; failures: ComplianceFailure[];   // MF3: structured {check,evidence,severity,promotedAt}, was string[]
   forceOverrideCount: number; forceOverrideReasons: string[]; notes: string[];
 }
 export interface ComplianceView {
   scope: 'all' | string; fsmAdherenceScore: Score; passRate: number;
   totals: { runs: number; passed: number; failed: number; forceOverrides: number };
   violations: { projectId: string; epicId: string; runId: string;
-    overall: 'fail'; failures: string[]; forceOverrideCount: number; evaluatedAt: string; }[];
+    overall: 'fail'; failures: ComplianceFailure[]; forceOverrideCount: number; evaluatedAt: string; }[];  // MF3: structured failures
 }
 export interface ActivityEvent {
   projectId: string; epicId?: string; runId?: string;
@@ -871,10 +896,16 @@ export interface EpicSpec { /* parseEpicSpec output: epicId,title,context,goal,s
 
 // ── Managerial layer (Rev 3, §13) ─────────────────────────────────────────────
 // Plan = first-class entity. One Plan groups EPICs by plan_path (§5.4 EPIC→plan).
+// How an EPIC was placed into its plan (§13.6 four-tier precedence, MF1).
+// 'derived' is an OFFICIAL but WEAKER membership (id E-{NNN} → P{NNN} matched a real plan file),
+// NOT fast-mode-excluded; 'orphan' is the only non-member tier (counted in orphanEpicCount).
+export type MembershipSource = 'plan_path' | 'plan_ref' | 'derived' | 'orphan';
 export interface PlanSummary {
-  projectId: string; planId: string;            // e.g. "P001" — from plan filename / plan_path
+  projectId: string; planId: string;            // e.g. "P046" — from plan filename / plan_path / id-derivation (§13.6)
   title: string; planRef: string;               // path of the plan .md
-  epicIds: string[];                             // EPICs whose plan_path matches
+  epicIds: string[];                             // member EPIC ids (tiers 1-3; orphans excluded — §13.6)
+  epicMembers: { epicId: string; membershipSource: MembershipSource }[]; // per-EPIC resolution tier (MF1); 'derived' rows carry a warning so the weaker grouping is visible
+  membershipMixed: boolean;                      // true when members span >1 source tier (e.g. P046: plan_ref + derived) — drives the "přiřazeno podle čísla EPICu" note
   epicsTotal: number; epicsDone: number;
   progressPct: number;                           // done_epics/total_epics*100 (§5.5)
   acPct: number | null;                          // Σpresent/Σac_count (§5.5); null = not measured
@@ -909,6 +940,17 @@ export interface BriefItem {
   href: string;                                  // deep-link into Screen B/C/Plan (e.g. "/p/wan/e/E-035")
 }
 
+// MF5 — successProbability envelope. Forward-compatible for MVP2 WITHOUT contract
+// churn, while the binding MVP1 invariant keeps "flag, never fake": in MVP1
+// `value` MUST be null AND `source` MUST be null (no model exists to produce a
+// number — D2). MVP2's LLM agent fills `value` with `source:'agent'`. The UI
+// renders "přesnější odhad přijde s agentem (MVP2)" while value===null.
+export interface SuccessProbability {
+  value: number | null;                          // 0-100 probability. MVP1 INVARIANT: MUST be null.
+  source: 'agent' | null;                        // MVP1 INVARIANT: MUST be null. MVP2: 'agent'.
+  confidence?: 'high' | 'low';                   // optional; only meaningful once value is non-null (MVP2)
+}
+
 // THE managerial read-model. ONE shape, THREE scopes (D1). Screen G = infra; Screen B tab 1 = project;
 // Plan screen tab 1 = plan. Answers the seven PM questions (§13.1).
 export interface Brief {
@@ -927,7 +969,8 @@ export interface Brief {
   nextUp: BriefItem[];                            // "co bude následovat" — queue next EPICs, runs in READY/EXECUTE, plan progress
   decisionsNeeded: BriefItem[];                   // "jaká rozhodnutí jsou potřeba" — runs awaiting PM decision/merge, ESCALATION needing a human, blocking audit findings
   risk: Risk;                                     // "odhad rizika" — deterministic level + reasons (§13.2)
-  successProbability: null;                       // "odhad pravděpodobnosti úspěchu" — ALWAYS null in MVP1; UI renders "přesnější odhad přijde s agentem (MVP2)" (D2)
+  successProbability: SuccessProbability;         // MF5 — envelope; binding MVP1 invariant value===null && source===null;
+                                                  //   UI renders "přesnější odhad přijde s agentem (MVP2)" (D2). MVP2 fills value with source:'agent' (no churn)
 }
 
 // ── Structured AUDIT SUMMARY + trend (Rev 3, §13.5) ───────────────────────────
@@ -984,7 +1027,7 @@ export interface AuditTrendPoint {
   blockingFindings: boolean | null;
 }
 export interface AuditTrend {
-  scope: 'epic' | 'plan';
+  scope: 'epic' | 'plan' | 'project';              // 'project' = MF7 project-scope trend (one point per audited EPIC)
   points: AuditTrendPoint[];                       // chronological by startedAt; gaps kept as score:null, not dropped
   scoredPointCount: number;                        // how many points actually have a number (drives "málo dat" UI)
   delta: number | null;                            // last scored − first scored; null when <2 scored points
@@ -993,45 +1036,114 @@ export interface AuditTrend {
 // ── PLAN as a first-class entity (Rev 3, §13.6) ───────────────────────────────
 // PlanSummary (above) = the list-row / brief-scope projection. PlanDetail = the
 // full Plan screen (/p/:project/plans/:planId): brief + phases + EPIC members +
-// audit trend + AC + backlog delta + lessons. Aggregates ONLY over EPICs whose
-// plan_path matches; plan_path:null fast-mode EPICs are excluded (counted as
-// orphanEpicCount, never shown as members — §5.4 EPIC→plan).
+// audit (boundaryAudit + aggregateAudit) + trend + AC + backlog + lessons.
+// Membership = the §13.6 four-tier precedence (plan_path → plan_ref → id-derived
+// E-{NNN}→P{NNN} → orphan, MF1); tiers 1-3 are members (tier 3 = official-but-weaker,
+// 'derived'); ONLY tier-4 orphans are excluded and counted in orphanEpicCount.
 export interface PlanDetail extends PlanSummary {
   description: string | null;                      // first prose block of the plan .md (gray-matter body), null when unparseable
   epics: EpicSummary[];                            // member EPICs, status-weighted sort (same order as Screen B)
-  orphanEpicCount: number;                         // fast-mode (plan_path:null) EPICs NOT counted as members (§5.4)
+  orphanEpicCount: number;                         // tier-4 orphan EPICs only (no plan_path, no plan_ref, no matching P{NNN} file — §13.6); NOT id-derived members
   durationS: number | null;                        // plan_duration_sec (§5.1): min EPIC start → max EPIC end; null = no parseable run
-  audit: AuditSummary;                             // plan-boundary auditor projection (latest audited run of the last EPIC), present=false when none (§13.5)
-  backlogDelta: BacklogDelta;                       // open-vs-closed proposal delta for this plan's EPICs (§13.7)
+  boundaryAudit: AuditSummary;                     // the SINGLE plan-boundary auditor run = latest audited run of the plan's LAST EPIC (§13.5.7); present=false when none
+  aggregateAudit: AuditSummary & { scoredEpicCount: number; medianEpicId: string | null };
+                                                    // cross-EPIC aggregate = the MEDIAN-score member EPIC's AuditSummary (SF4 / §13.5.7); overallScore = median; medianEpicId names the chosen real report; scoredEpicCount drives sparse handling (0 → overallScore:null + warning; 1 → "n=1" warning)
+  deliveryReport: ReporterDelivery;                 // MF6: the plan-boundary Reporter delivery report (§4.3); present=false when no reports/{plan_id}-delivery.md. Rendered on the Plan "Dodávka & zjednodušení" tab.
+  simplifierSummary: SimplifierSummary;             // MF6: the plan-boundary Simplifier proposals (§4.3); present=false when no simplifier-report.md. Rendered alongside deliveryReport on the same tab.
+  backlog: { items: BacklogItem[]; openCount: number; closedCount: number; warnings: string[] };
+                                                    // CURRENT backlog rows + absolute counts for this plan's EPICs (MF2);
+                                                    // the FE computes the BacklogDelta locally from its localStorage snapshot (§13.7) —
+                                                    // the server does NOT field-level diff (no per-row timestamps, stateless). No backlogDelta on the server response.
   lessons: LessonsView;                             // lessons-per-plan (§13.8); the full view. PlanSummary carries only the thin `lessonsPreview[]` (no field clash — distinct names so `extends` type-checks)
   warnings: string[];                              // aggregation degradations (e.g. "no plan_ref on any EPIC — grouped by filename")
 }
 
-// ── BACKLOG DELTA (Rev 3, §13.7) — "co přibylo / ubylo" ───────────────────────
-// A managerial projection over backlog.md (§4.6): counts + the recently-changed
-// items, scoped to a plan/project. "Delta" = added-vs-closed since a baseline.
-// MVP1 baseline = the client-supplied lastSeen snapshot (localStorage, §13.3);
-// server-side multi-device baseline is MVP1.5. With no snapshot, sinceItems=[]
-// and the counts fall back to the absolute open/closed counts (never fabricated).
+// ── REPORTER DELIVERY + SIMPLIFIER (Rev 4, MF6) — plan-boundary role outputs ────
+// First-class projections of the two plan-boundary roles the PM explicitly wants at
+// PLAN level (§4.3): the Reporter delivery report and the Simplifier proposals. Both
+// are best-effort + nullable (many plans have neither yet) and follow flag-never-fake:
+// present:false renders "Reporter/Simplifier zatím neběžel", never a fabricated outcome.
+export type DeliveryOutcome = 'pass' | 'fail' | 'partial' | null; // mapped from the report's Outcome line; null = not stated/unparseable
+export interface ReporterTestEvidence {
+  name: string;                                    // artifact file name (anti-fabrication: MUST exist on disk, §4.3 `_test_evidence[]`)
+  relPath: string;                                 // path served via /file (§7.4.1) for the link/drawer
+  exists: boolean;                                 // verified on disk — false flags a missing/fabricated evidence link (rendered honestly, never silently dropped)
+}
+export interface ReporterDelivery {
+  present: boolean;                                // false = no reports/{plan_id}-delivery.md (render "Reporter zatím neběžel")
+  outcome: DeliveryOutcome;                        // PASS/FAIL/PARTIAL headline of the delivery, null when not stated
+  summaryCs: string | null;                        // a short Czech "co se dodalo" line (from the report's outcome/summary section), null when unparseable
+  generatedBy: string | null;                      // frontmatter `_generated_by` (e.g. "aid-orchestrator:reporter@…"), null when absent
+  generatedAt: string | null;                      // frontmatter `_generated_at` ISO, null when absent
+  testEvidence: ReporterTestEvidence[];            // the `_test_evidence[]` artifacts (each existence-checked); [] when none
+  rawRelPath: string | null;                       // path to the full delivery .md for the drawer (/file); null when present:false
+  warnings: string[];                              // parse degradations (e.g. "outcome unparseable", "1 test-evidence file missing on disk")
+}
+export type SimplifierDisposition = 'approve' | 'reject' | 'defer' | null; // recommended_disposition; null when not stated
+export interface SimplifierProposal {
+  id: string | null;                               // proposal id when present (IMP-/PROP-), null when none
+  area: string | null;                             // file/component the proposal targets
+  proposal: string;                                // the simplification text (1-3 sentences)
+  disposition: SimplifierDisposition;              // recommended_disposition (the Simplifier proposes only — never edits code, §4.3)
+  effort: AuditEffort;                             // S|M|L normalized (reuses the audit effort scale); null when not stated
+}
+export interface SimplifierSummary {
+  present: boolean;                                // false = no simplifier-report.md (render "Simplifier zatím neběžel")
+  proposalCount: number;                           // proposals.length (drives "N návrhů na zjednodušení")
+  proposals: SimplifierProposal[];                 // the propose-only list; [] when present:false
+  headlineCs: string | null;                       // deterministic Czech "co navrhuje zjednodušit" line, null when present:false
+  rawRelPath: string | null;                       // path to the full simplifier-report.md for the drawer (/file); null when present:false
+  warnings: string[];                              // parse degradations
+}
+
+// ── BACKLOG DELTA (Rev 3, §13.7) — "co přibylo / ubylo" — CLIENT-SIDE in MVP1 ──
+// MF2 RESOLUTION: backlog.md has NO per-row timestamps and the server is stateless,
+// so a server `?since=`-diff cannot know added/closed/priority/status changes. In
+// MVP1 the DELTA is computed CLIENT-SIDE: the server serves the current rows
+// (`GET /api/backlog`) and the absolute openCount; the FE stores the full row set
+// (id+status+priority) in localStorage keyed by scopeKey+lastSeen (§13.3) and diffs
+// current-vs-snapshot locally. `BacklogDelta` is therefore a CLIENT-COMPUTED shape
+// (contract type so FE store + components agree), NOT a server response. The
+// server-side field-level `/api/backlog-delta?since=` endpoint is REMOVED from MVP1
+// (server field-level delta = MVP1.5, when a snapshot store exists, §10).
+//
+// BacklogSnapshot is what the FE persists in localStorage per scopeKey; BacklogDelta
+// is the FE-computed diff of the current rows vs the most recent snapshot.
+export interface BacklogSnapshotRow {
+  id: string | null;                              // IMP-{NNN} / PROP-* (null when the row has no parseable id)
+  status: string | null;                          // proposed|pending|approved|rejected|deferred (null when absent)
+  priority: string | null;                        // the Priority cell (null when absent)
+}
+export interface BacklogSnapshot {
+  version: 1;                                     // forward-compatible localStorage migration
+  scopeKey: string;                               // "project:wan" | "plan:wan/P003" — matches the §13.3 lastSeen scope key
+  lastSeen: string;                               // ISO-8601 UTC when this snapshot was taken (the prior-visit marker)
+  rows: BacklogSnapshotRow[];                     // the full set of backlog rows captured at lastSeen
+}
 export interface BacklogDeltaItem {
   id: string | null;                              // IMP-{NNN} / PROP-* (null when the row has no parseable id)
-  title: string;                                  // the Suggestion cell
+  title: string;                                  // the Suggestion cell (from the current GET /api/backlog rows)
   type: string | null;                            // Type cell
   area: string | null;                            // Area cell
   status: string | null;                          // proposed|pending|approved|rejected|deferred (null when absent)
-  changeSince: 'new' | 'closed' | 'unchanged';    // vs the lastSeen baseline; 'unchanged' when no baseline
-  at: string | null;                              // when the row last changed, when derivable (else null)
+  priority: string | null;                        // current Priority cell
+  changeSince: 'added' | 'closed' | 'priorityChanged' | 'statusChanged' | 'unchanged';
+                                                  // vs the localStorage snapshot; 'unchanged' on first visit (no snapshot)
+  prevStatus?: string | null;                     // snapshot status, set on statusChanged/closed
+  prevPriority?: string | null;                   // snapshot priority, set on priorityChanged
 }
-export interface BacklogDelta {
+export interface BacklogDelta {                   // CLIENT-COMPUTED in MVP1 (FE diff of current rows vs localStorage snapshot)
   scope: 'project' | 'plan';
   projectId: string; planId: string | null;       // planId set only for plan scope
-  openCount: number;                              // current "Active proposals: N" (running open count, §4.6)
+  openCount: number;                              // current "Active proposals: N" (running open count, §4.6) — from GET /api/backlog meta
   closedCount: number;                            // created (counter) − open; 0 when not derivable, flagged in warnings
-  since: string | null;                           // the lastSeen baseline the client sent (null = first visit / no baseline)
-  addedSince: number;                             // new proposals since `since` (0 when no baseline)
-  closedSince: number;                            // proposals that moved to a closed status since `since` (0 when no baseline)
-  items: BacklogDeltaItem[];                      // the changed rows (new + closed) when a baseline exists; else the open rows
-  warnings: string[];                             // e.g. "closedCount not derivable (counter stale)", "backlog.md malformed — partial parse"
+  firstVisit: boolean;                            // true when no prior localStorage snapshot exists → no comparison, "vše jako nové"
+  lastSeen: string | null;                        // the snapshot's lastSeen the diff ran against (null on firstVisit)
+  added: BacklogDeltaItem[];                      // rows present now, absent from the snapshot (changeSince:'added')
+  closed: BacklogDeltaItem[];                     // rows that moved to a closed status (approved|rejected|deferred) since snapshot
+  priorityChanged: BacklogDeltaItem[];            // rows whose Priority cell differs from the snapshot
+  statusChanged: BacklogDeltaItem[];              // rows whose status changed but did NOT close (e.g. proposed→pending)
+  warnings: string[];                             // e.g. "closedCount not derivable (counter stale)", "first visit - no snapshot, vše jako nové"
 }
 
 // ── LESSONS-PER-PLAN (Rev 3, §13.8) ───────────────────────────────────────────
@@ -1113,17 +1225,18 @@ export interface MemoryResult {                   // MVP1 stub returns available
 }
 ```
 Grounding notes:
-- `Checkpoint.provenance` is **read from `compliance.json` `checks.verifier_outputs.*_provenance`** (§4.2), NOT re-derived from timeline dispatch pairs; `Checkpoint` presence comes from the `verifier-output-cp*.md` file inventory. `repeatCount`/`repeatSource` follow the **per-checkpoint rules in §MF5/§5.2**: CP1 from the work-root file inventory (`repeatSource:'files'`); CP2/CP3/CP4 from `verifier_dispatch_start` timeline events when present (`repeatSource:'timeline'`, count = dispatches−1) else `repeatCount:null`/`repeatSource:null` (render "?", NEVER 0) because their `verifier-output-*.md` files are overwritten on retry; gates from `gates_report.json gates.{name}.attempts`. CP4 has two naming variants (`cp4-curator-validation`, `cp4-curator`) — normalize. CP1 has no provenance field (verdict + presence only).
+- `Checkpoint.provenance` is **read from `compliance.json` `checks.verifier_outputs.*_provenance`** (§4.2), NOT re-derived from timeline dispatch pairs; `Checkpoint` presence comes from the `verifier-output-cp*.md` file inventory. `repeatCount`/`repeatSource` follow the **per-checkpoint rules in §MF5/§5.2**: CP1 from the work-root file inventory (`repeatSource:'files'`); CP2/CP3/CP4 from `verifier_dispatch_start` timeline events when present (`repeatSource:'timeline'`, count = dispatches−1) else `repeatCount:null`/`repeatSource:null` (render "?", NEVER 0) because their `verifier-output-*.md` files are overwritten on retry; gates from `gates_report.json gates.{name}.attempts`. CP4 has two naming variants (`cp4-curator-validation`, `cp4-curator`) — normalize. **`Checkpoint.provenance` is `string | string[] | null` (MF4):** it is read **only** from `compliance.json` `checks.verifier_outputs.*_provenance` (`provenanceSource:'compliance'`, the source of truth), NOT re-derived from timeline dispatch pairs. When `compliance.json` is absent (older/stub runs) provenance is `null` ("not recorded"), never `"unverifiable"`. **CP1 has no `compliance.json` provenance field** (§4.2/§4.0 finding #1) so its `provenance` is always `null` and `provenanceSource:null` — CP1 surfaces verdict + presence only. The optional timeline "dispatch logged ✓" corroboration, when it exists, may set `provenanceSource:'timeline'`; it is never the source of truth.
 - `ComplianceView.fsmAdherenceScore` (a `Score`) and `Project.health` are computed by the **explicit formulas + data thresholds in §5.7** — `value` may be `null` (with `components`/`warnings` showing a breakdown) when inputs are below threshold, never improvised. `partial:true` and `confidence:'low'` flag thin data per §5.7.
 - `RunDetail.pmDecision` is `null` until the run merges (`pm_decision` is a conditional `fsm-state.yaml` field, §4.0/§4.1).
-- `RunDetail.audit` (`AuditSummary`) is a managerial projection of the auditor's `audit-report.md` (§4.3) — **structured, not raw markdown** (§13.5). The raw markdown stays reachable via `audit.rawRelPath` + the `/file` endpoint (§7.4.1) for the drawer. `overallScore` is **best-effort** (the §4.3 three score shapes, recorded in `scoreSource`) and `null` when none parse; `blockingFindings` is the only reliably-present field and is parsed from **six on-disk forms** (§13.5). `headlineCs` is assembled **deterministically from the structured fields** (no LLM — that is MVP2). `EpicDetail.auditTrend`/`PlanSummary.auditTrend` (`AuditTrend`) carry score-over-time; points with no parseable score are kept as `score:null` (a real gap, never interpolated), ordered by run `startedAt`.
+- `RunDetail.audit` (`AuditSummary`) is a managerial projection of the auditor's `audit-report.md` (§4.3) — **structured, not raw markdown** (§13.5). The raw markdown stays reachable via `audit.rawRelPath` + the `/file` endpoint (§7.4.1) for the drawer. `overallScore` is **best-effort** (the §4.3 three score shapes, recorded in `scoreSource`) and `null` when none parse; `blockingFindings` is the only reliably-present field and is parsed from **six on-disk forms** (§13.5). `headlineCs` is assembled **deterministically from the structured fields** (no LLM — that is MVP2). `EpicDetail.auditTrend`/`PlanSummary.auditTrend` (`AuditTrend`, plus the project-scope `AuditTrend` from `/api/audit-trend/:projectId`, MF7) carry score-over-time; points with no parseable score are kept as `score:null` (a real gap, never interpolated), ordered by run `startedAt`.
 - `MetricSet` is computed from timeline deltas + `fsm-state.yaml` scalars + **verify-file mtimes** + run-dir spans; `stepDurationsS` entries are `null`/`≈` per §5.1 on runs without dispatch events, and `stepTimingSource` records whether timings came from `mtime` or `dispatch` (`null` when no step timing at all). `gateRuns`/`gateRetries`/`runCount` stay non-nullable (reliable from `gates_report.json`/dir counts). `checkpointRepeats` entries are `null` for CP2/3/4 when the timeline lacks dispatch events (§MF5). `partial`/`warnings` flag thin data. The contract nulls un-computable fields so `MetricSet` ships incrementally (§10, SF4 gate fields).
+- `ComplianceRun.failures` and `ComplianceView.violations[].failures` are `ComplianceFailure[]` (MF3) — the disk `failures[]` objects `{check, evidence, severity, promoted_at}` (§4.5) are preserved verbatim, never flattened to strings. `Risk.S1` (open blocking violations, §13.2.1), `Project.health.openViolations` (§5.7), and the §5.7 "resolved blocking failure" rule all key off `failure.severity === 'blocking'` and match-by-`failure.check` across later runs — none of which is expressible against `string[]`. (`promotedAt` mirrors the disk `promoted_at` severity-promotion provenance, §4.5; null/absent on un-promoted rows.)
 - `ComplianceRun.checks` is `Record<string, unknown>` precisely because keys are conditional across run vintages (`dod_present`/`delivery_report_present` absent in older runs, §4.5) — consumers must distinguish "key missing" from "value null".
-- `Brief`, `Risk`, `BriefItem`, `PlanSummary` are the **Rev 3 managerial read-model** (§13). `Brief` is computed entirely from already-inventoried §4/§5 signals — it owns no new data and reads nothing new from disk; it is a server-side **projection** over the same scanner cache that backs `Project`/`EpicDetail`/`ComplianceView`. `Brief.risk` is the §13.2 `Risk`; `Brief.successProbability` is **typed `null`** (not `number|null`) on purpose — MVP1 has no model to produce it, and the type forbids a fabricated number (D2). Every `BriefItem.explanation` is an `Explanation` resolved through `explain()` (§6.4) so the brief speaks the same Czech as the live UI. `PlanSummary` materializes the first-class Plan entity (D1/D4) by grouping EPICs on `plan_path` (§5.4 EPIC→plan), excluding `plan_path:null` fast-mode EPICs (counted as `orphan_epic`, not shown as plan members).
-- `PlanDetail` **extends `PlanSummary`** (it is the full Plan-screen read-model, §13.6): same plan-grouping rule, plus the member EPIC list, `plan_duration_sec` (§5.1, `null` when no parseable run), the plan-boundary `AuditSummary`, a `BacklogDelta`, and a `LessonsView`. `PlanSummary.lessonsPreview[]` stays the **thin list-row** shape (a few entries for the brief/row); `PlanDetail.lessons` is the **full `LessonsView`** — the two carry **distinct field names** (so `PlanDetail extends PlanSummary` type-checks cleanly), intentionally two shapes for two altitudes, both projected from the same `lessons-learned.md` (§4.7). Aggregation degradations land in `PlanDetail.warnings` (e.g. EPICs with no `plan_ref` grouped by plan filename instead).
-- `BacklogDelta` is a projection over `backlog.md` (§4.6) — `openCount` = the `Active proposals: N` running open count, `closedCount` = `created − open` (set `0` + a `warnings[]` note when the counter is stale and it is not derivable, **never a fabricated number**). The **delta** (`addedSince`/`closedSince`/`items`) is computed against the **client-supplied `since`** (the localStorage `LastSeen` snapshot, §13.3) in MVP1 — with **no** `since` it degrades to the absolute open/closed counts with `addedSince=closedSince=0` and `items` = current open rows. Server-side multi-device baselines are MVP1.5. Backlog **writes** stay MVP1.5 (this is a read projection only).
+- `Brief`, `Risk`, `BriefItem`, `PlanSummary` are the **Rev 3 managerial read-model** (§13). `Brief` is computed entirely from already-inventoried §4/§5 signals — it owns no new data and reads nothing new from disk; it is a server-side **projection** over the same scanner cache that backs `Project`/`EpicDetail`/`ComplianceView`. `Brief.risk` is the §13.2 `Risk`; `Brief.successProbability` is a **`SuccessProbability` envelope** (MF5), not a bare `null`. The **binding MVP1 invariant** is `value === null && source === null` — MVP1 has no model to produce a number and the invariant forbids a fabricated one (D2; the UI renders "přesnější odhad přijde s agentem (MVP2)"). MVP2's agent fills `value` with `source:'agent'` — **no contract churn**, the type was forward-compatible from MVP1. Every `BriefItem.explanation` is an `Explanation` resolved through `explain()` (§6.4) so the brief speaks the same Czech as the live UI. `PlanSummary` materializes the first-class Plan entity (D1/D4) by resolving each EPIC's plan via the **four-tier membership precedence** (`plan_path` → `plan_ref` → id-derived `E-{NNN}`→`P{NNN}` → orphan, §13.6 / MF1), recording the tier in `epicMembers[].membershipSource`; only true orphans (tier 4 — no `plan_path`, no `plan_ref`, no matching plan file) are excluded and counted in `orphanEpicCount`. The id-derived tier is an **official-but-weaker** member (carries a warning), **not** fast-mode-excluded — so aid-orchestrator's null-`plan_path` EPICs (e.g. P046 = E-046-1/2/3) are real members, not orphans.
+- `PlanDetail` **extends `PlanSummary`** (it is the full Plan-screen read-model, §13.6): same four-tier plan-grouping rule, plus the member EPIC list, `plan_duration_sec` (§5.1, `null` when no parseable run), **two distinct audit metrics — `boundaryAudit` (the single plan-boundary auditor run on the last EPIC) and `aggregateAudit` (the median-EPIC summary across the plan's audited EPICs, SF4 / §13.5.7)**, the current `backlog` rows (MF2), and a `LessonsView`. `PlanSummary.lessonsPreview[]` stays the **thin list-row** shape (a few entries for the brief/row); `PlanDetail.lessons` is the **full `LessonsView`** — the two carry **distinct field names** (so `PlanDetail extends PlanSummary` type-checks cleanly), intentionally two shapes for two altitudes, both projected from the same `lessons-learned.md` (§4.7). Aggregation degradations land in `PlanDetail.warnings` (e.g. an EPIC placed by the weaker id-derived tier, or `aggregateAudit` computed from a single audited EPIC).
+- `BacklogDelta` is **CLIENT-COMPUTED in MVP1** (MF2): the server serves only the current rows via `GET /api/backlog` (`BacklogItem[]`) plus the absolute `openCount`/`closedCount` in `meta` — `openCount` = the `Active proposals: N` running open count, `closedCount` = `created − open` (set `0` + a `warnings[]` note when the counter is stale and not derivable, **never a fabricated number**). Because `backlog.md` has **no per-row timestamps** and the server holds **no snapshot**, the server cannot compute a `?since=` field-level delta — so the FE stores the full current row set (`BacklogSnapshotRow` = `{id,status,priority}`) in **localStorage** keyed by `scopeKey`+`lastSeen` (§13.3, same mechanism as `Brief.sinceLastSeen`), and on the next load diffs current-vs-snapshot **locally** into `BacklogDelta { added, closed, priorityChanged, statusChanged, firstVisit }`. **The server-side `/api/backlog-delta` endpoint is REMOVED from MVP1** (server field-level delta = MVP1.5, when a snapshot store exists). On the **first visit** (no snapshot) `firstVisit:true`, the four delta lists are empty, and the UI renders "bez porovnání - vše jako nové" — honest, never a fabricated diff. Backlog **writes** stay MVP1.5 (this is a read view only; the FE-side diff is a pure local computation, no write to disk).
 - `LessonsView` is a projection over `work/lessons-learned.md` (§4.7), scoped to a plan (lessons whose `Context(epic_id)` ∈ the plan's EPICs), a project (all), or infra (all projects). `## Known Gotchas` rows carry `kind:'gotcha'`; the main table carries `kind:'lesson'`. Absent/malformed file ⇒ `entries:[]` + a `warnings[]` note, never a throw (the §7.6 never-throw parser rule).
-- `LastSeen` is a **localStorage shape, not a server resource in MVP1** (D-locked: keeps the server read-only/stateless). The client owns it, persists per `scopeKey`, and passes the relevant `since` to `/api/brief?since=` (and `/api/backlog-delta`); the server is the **pure diff function** of `since` vs signal change-times. It is in the contract only so the FE store and the brief/delta endpoints agree on the timestamp's meaning. Server-side, multi-device `lastSeen` becomes a real resource in MVP1.5.
+- `LastSeen` is a **localStorage shape, not a server resource in MVP1** (D-locked: keeps the server read-only/stateless). The client owns it, persists per `scopeKey`, and passes the relevant `since` to `/api/brief?since=`; for `Brief.sinceLastSeen` the server is the **pure diff function** of `since` vs signal change-times (file mtimes/`ts`). The **backlog** delta is the exception: it cannot be a server `since`-diff (no per-row timestamps, stateless server), so the FE keeps a companion `BacklogSnapshot` in localStorage under the same `scopeKey` and computes the row-level delta client-side (§13.7, MF2) — `/api/backlog` serves only current rows. `LastSeen` is in the contract so the FE store and the brief endpoint agree on the timestamp's meaning. Server-side multi-device `lastSeen` + a server-side backlog snapshot store become real resources in MVP1.5.
 - **`TimeSource` is an architecture SEAM, NOT an MVP1 feature** (§13.9). `MetricSet.timeBy` is the slot: MVP1 emits `user`/`dev` with `durationS:null, source:null` ("neměřeno") and may emit `ai`/`controller` with a best-effort `durationS` from the §5.1 timeline numbers (`source:'timeline'`). A future WakaTime import/webhook fills `user`/`dev` with `source:'wakatime'` — **zero contract churn** when it lands. The UI renders "neměřeno" for any `durationS:null`; it never fabricates a per-actor time.
 - **Memory taxonomy (`MemoryQuery`/`MemoryEntry`/`MemoryResult`) is in the contract now; READING is MVP2** (§13.9). MVP1 ships the types + a stub `/api/memory` returning `{ available:false, reason:"MVP2", entries:[] }` — it **never touches Qdrant**. The `scope`/`projectId`/`planId`/`type`/`createdDuringRun` filters are fixed now so MVP2's `routes/memory.ts` (read-only `vulcan-memory` MCP query over `clavi_facts_{tenant}`) and the FE Paměť view build against a stable shape. `createdDuringRun` is the run-scoped facet ("co se naučilo během tohoto běhu").
 
@@ -1154,8 +1267,8 @@ Stack: React 19 + Vite + Tailwind 4 + shadcn + @base-ui/react + @tanstack/react-
 |---|-------|--------|-----------|
 | **G** | **`/`** | **Co potřebuju vědět (Managerial Brief, infra scope)** | **Cross-infra "what needs my attention" — the non-technical front door (D1)** |
 | A | `/prehled` | Přehled (Infra Overview) | Cross-project tiles (also embedded as a section on G) |
-| B | `/p/:project` | Projekt (Project Detail) — **tab 1 = Brief (project scope)** | Per-project drill-down; managerial brief reflows in as the first tab (D1) |
-| Plan | `/p/:project/plans/:planId` | Plán (Plan Detail) — **tab 1 = Brief (plan scope)** | First-class plan entity: brief, phases, EPICs, audit, AC, backlog delta, lessons (D4) |
+| B | `/p/:project` | Projekt (Project Detail) — **tab 1 = Brief (project scope)**; tabs `Brief · EPICy · Plány · Audit · Zdraví` | Per-project drill-down; managerial brief reflows in as the first tab (D1); the **Audit** tab = project-scope `aggregateAudit` + trend (MF7) |
+| Plan | `/p/:project/plans/:planId` | Plán (Plan Detail) — **tab 1 = Brief (plan scope)**; tabs `Brief · Fáze · EPICy · Audit · Dodávka & zjednodušení · AC · Backlog · Lekce` | First-class plan entity: brief, phases, EPICs, audit, **delivery & simplifier (MF6)**, AC, backlog delta, lessons (D4) |
 | C | `/p/:project/e/:epic` | EPIC (Deep View) | Track EVERYTHING + human explanation of every state |
 | D | `/activity` | Dění (Activity Stream) | Live activity stream with human explanations |
 | E | `/compliance` | Compliance | Cross-project violations + force-overrides |
@@ -1229,15 +1342,18 @@ Tile anatomy: project name + status dot, active EPIC id, progress bar (`current_
 └─────────────────────────────┘
 ```
 
-#### SCREEN B — Projekt (Project Detail) · EPIC list + health
+#### SCREEN B — Projekt (Project Detail) · tabbed: Brief · EPICy · Plány · Audit · Zdraví
 
-**DESKTOP**
+**Rev 3/4 form (rewritten in place — SF5; was the Rev 2 single "EPICy + Zdraví" two-pane).** Screen B is now a **tab strip** with **Brief (project scope) as tab 1, the default landing tab** (D1) and a **new "Audit" tab (MF7)** showing the project-level `aggregateAudit`. Tab set: **`[ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]`**. Nothing from Rev 2 is removed — the old EPIC list is the "EPICy" tab and the old health rail is the "Zdraví" tab; the Brief tab is detailed in "Brief-as-first-tab on Screen B" below. The **Audit** tab is project-scope: it renders `aggregateAudit` (the median-EPIC summary across the project's audited EPICs, §13.5.7), **distinct from a single plan-boundary `boundaryAudit`** (§SF4 / §13.5), by **reusing the shared `AuditSummaryCard` + `AuditTrendChart`** at project scope (no new component — same panels as the Plan/EPIC audit, fed `GET /api/audit-summary/:projectId` + `GET /api/audit-trend/:projectId`, MF7).
+
+**DESKTOP (tab = EPICy — the Rev 2 list + health rail, now re-homed under a tab)**
 ```
 ┌────────────┬──────────────────────────────────────────────────────────────────┐
 │ sidebar    │ Přehled › vulcan                                       [⟳ 4s]      │
 │            │ ─────────────────────────────────────────────────────────────────  │
-│            │ vulcan   ● běží · 9 EPICů · 1 aktivní · compliance 94 %             │
-│            │                                                                      │
+│            │ vulcan   ● běží · 9 EPICů · 1 aktivní · compliance 94 % · 2 plány  │
+│            │ [ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]                     │
+│            │           ════════                                                  │
 │            │ ┌─ EPICY ──────────────────────────────┐ ┌─ ZDRAVÍ PROJEKTU ─────┐ │
 │            │ │ [vše][běží][čeká][hotovo][selhalo]    │ │  Compliance trend     │ │
 │            │ │ ──────────────────────────────────── │ │  ▁▃▅▆▇▇▇  94%         │ │
@@ -1248,34 +1364,73 @@ Tile anatomy: project name + status dot, active EPIC id, progress bar (`current_
 │            │ │ ✓ E-041 …                            │ │                       │ │
 │            │ │              ⋮                        │ │  Retry hot-spots      │ │
 │            │ │                                       │ │  CP3 ×4 · gates ×2    │ │
-│            │ └───────────────────────────────────────┘ │  Fronta: 2 čekají     │ │
-│            │                                            └───────────────────────┘ │
+│            │ │                                       │ │  Fronta: 2 čekají     │ │
+│            │ └───────────────────────────────────────┘ └───────────────────────┘ │
 └────────────┴──────────────────────────────────────────────────────────────────┘
 ```
-EPIC row: status dot, id, FSM state, progress, human status word, age, → Screen C. Health rail: compliance trend (area), per-EPIC duration (bar), retry hot-spots (which checkpoint repeats most), queue snippet.
+EPIC row: status dot, id, FSM state, progress, human status word, age, → Screen C. (The "Zdraví" rail — compliance trend area, per-EPIC duration bar, retry hot-spots, queue snippet — is its own "Zdraví" tab; on a wide desktop the EPICy tab MAY keep it as a right rail, as drawn, but on the "Zdraví" tab it is the full-width content.)
 
-**MOBILE**
+**DESKTOP (tab = Audit — NEW, MF7: project-scope `aggregateAudit`)**
 ```
-┌─────────────────────────────┐
-│ ‹ vulcan             [⟳]    │
-│ ● běží · 9 EPICů · 94%      │
-├─────────────────────────────┤
-│ ▸ Zdraví projektu (klepni)  │  ← accordion, collapsed default
-├─────────────────────────────┤
-│ [vše][běží][čeká][hotovo] » │  ← horiz-scroll chips
-│ ┌─────────────────────────┐ │
-│ │ ● E-044-2_6     běží  →  │ │
-│ │   EXECUTE 7/9      12m   │ │
-│ ├─────────────────────────┤ │
-│ │ ◐ E-044-1_6  čeká na PM →│ │
-│ │   GATES            2d    │ │
-│ ├─────────────────────────┤ │
-│ │ ✕ E-042-1_2  selhalo  → │ │
-│ └─────────────────────────┘ │
-├─────────────────────────────┤
-│ Co řešit Přehled Dění ⚠ Více│
-└─────────────────────────────┘
+┌────────────┬──────────────────────────────────────────────────────────────────┐
+│ sidebar    │ Přehled › vulcan                                       [⟳ 4s]      │
+│            │ ─────────────────────────────────────────────────────────────────  │
+│            │ vulcan   ● běží · 9 EPICů · 1 aktivní · compliance 94 % · 2 plány  │
+│            │ [ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]                     │
+│            │                              ═════                                  │
+│            │ ┌─ AUDIT PROJEKTU (AuditSummaryCard + AuditTrendChart) ────────┐    │
+│            │ │  Skóre projektu   87/100   ◀ medián posl. auditů EPIC/plánů  │    │
+│            │ │  ze 6 auditovaných EPIC · 3 bez auditu (mezery)              │    │
+│            │ │  ──────────────────────────────────────────────────────────│    │
+│            │ │  Trend přes EPICy:  89 ▁ 95 ▅ 84 ▂ 88 ▃ 91 ▄ 87 ▃           │    │
+│            │ │   E-041 E-042 E-043 E-044 E-045 E-046  (recharts LineChart) │    │
+│            │ │   (E-040 bez auditu  -  čára se přeruší, neinterpoluje)        │    │
+│            │ │  Δ −2 od prvního auditovaného EPICu                          │    │
+│            │ │  ──────────────────────────────────────────────────────────│    │
+│            │ │  Proč (aggregateAudit.headlineCs, agreg., deterministicky): │    │
+│            │ │   „Napříč projektem medián 87. Nejníž E-043 (84)  -  strženo   │    │
+│            │ │    za dokumentaci; nejlíp E-042 (95). Žádný blokující        │    │
+│            │ │    nález napříč auditovanými EPICy."                          │    │
+│            │ │  ──────────────────────────────────────────────────────────│    │
+│            │ │  Hlavní problémy projektu (top issues  -  agreg. topRisks):    │    │
+│            │ │   ⚠ High · E-043 · dokumentace · „chybí CHANGELOG"      →     │    │
+│            │ │   ⚠ High · E-044 · scanner.ts · „chybí cap na čtení"    →     │    │
+│            │ │  Blokující napříč projektem: ✓ žádný                         │    │
+│            │ │  Nálezy souhrnně: ✕0 krit · ⚠2 vys · 9 stř · 7 níz          │    │
+│            │ │  [ rozpad po EPICech ▾ ]            [ technické detaily ▾ ]   │    │
+│            │ └──────────────────────────────────────────────────────────────┘   │
+└────────────┴──────────────────────────────────────────────────────────────────┘
 ```
+**Audit-tab field map (MF7, `aggregateAudit`, §13.5.7):** the tab reuses the shared `AuditSummaryCard` (rendering the project-scope `aggregateAudit`, an `AuditSummary`) + `AuditTrendChart` (project-scope `AuditTrend`, one point per EPIC's latest audited run) — **no new component**. `overallScore` = the **median-EPIC's real score** across the project's audited EPICs (`aggregateAudit.overallScore`, never a synthesized mean — §13.5.7), with the `medianEpicId` "z EPICu E-xxx" provenance chip + a "ze N auditovaných · M bez auditu" note; `aggregateAudit.headlineCs`/`topReasons`/`topRisks` are that median EPIC's own deterministic fields (never an LLM narrative), with a deep-link to it; `blockingFindings` is the median-EPIC's (null-aware — "nezjištěno" when unparseable, never "false"). **Honesty (flag-never-fake):** `scoredEpicCount===0` → `aggregateAudit.overallScore:null` and the tab shows "V tomhle projektu zatím není auditovaný EPIC se skóre" (verified on sousto-na-miru — 0 audit-report.md); `===1` → an "agregát z jediného auditu (n=1)" note (never 0 % or a fabricated median). "rozpad po EPICech" lists each contributing EPIC's `AuditSummary`; "technické detaily" opens the median EPIC's raw `audit-report.md` via `/file`.
+
+**MOBILE (tab strip horiz-scroll; default tab = Brief, shown in its own section; here tab = EPICy and tab = Audit)**
+```
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│ ‹ vulcan             [⟳]    │    │ ‹ vulcan             [⟳]    │
+│ ● běží · 9 EPICů · 94%      │    │ ● běží · 9 EPICů · 94%      │
+├─────────────────────────────┤    ├─────────────────────────────┤
+│ Brief EPICy Plány Audit »   │    │ Brief EPICy Plány Audit »   │
+│       ═════                 │    │                   ═════     │
+├─────────────────────────────┤    ├─────────────────────────────┤
+│  (tab = EPICy)              │    │  (tab = Audit · agregát)    │
+│ [vše][běží][čeká][hotovo] » │    │ AUDIT PROJEKTU   87/100     │
+│ ┌─────────────────────────┐ │    │ medián · ze 6 EPIC · 3 bez  │
+│ │ ● E-044-2_6     běží  →  │ │    │ Trend ▁▅▂▃▄▃ (sparkline)    │
+│ │   EXECUTE 7/9      12m   │ │    │ Δ −2                        │
+│ ├─────────────────────────┤ │    │ ─────────────────────────── │
+│ │ ◐ E-044-1_6  čeká na PM →│ │    │ Proč: medián 87, nejníž     │
+│ │   GATES            2d    │ │    │ E-043 (84) za dokumentaci.  │
+│ ├─────────────────────────┤ │    │ Blokující: žádný ✓          │
+│ │ ✕ E-042-1_2  selhalo  → │ │    │ Problémy (2):               │
+│ └─────────────────────────┘ │    │ ⚠ E-043 chybí CHANGELOG  →  │
+│ ▸ Zdraví projektu (tab »)   │    │ ⚠ E-044 scanner cap      →  │
+│   (compliance + retry rail) │    │ ✕0 ⚠2 stř9 níz7             │
+│                             │    │ [rozpad ▾] [detaily ▾]      │
+├─────────────────────────────┤    ├─────────────────────────────┤
+│ Co řešit Přehled Dění ⚠ Více│    │ Co řešit Přehled Dění ⚠ Více│
+└─────────────────────────────┘    └─────────────────────────────┘
+```
+Mobile: the tab strip is a horizontal-scroll `Tabs` (`Brief · EPICy · Plány · Audit · Zdraví`, "Zdraví" past »). EPICy = the Rev 2 list with horiz-scroll filter chips + a "Zdraví projektu" link to the Zdraví tab. The **Audit** tab is the shared `AuditSummaryCard` + `AuditTrendChart` mobile variant fed the project `aggregateAudit` (§13.5.7): score number with the `medianEpicId` chip, sparkline (dots tappable → EPIC Audit), the median EPIC's "proč", null-aware blocking line, top issues, severity tally, the two drawers. Brief / Plány / Zdraví tabs are the layouts defined in their own sections.
 
 #### SCREEN C — EPIC (Deep View) · THE rich screen — "track everything AID provides"
 
@@ -1341,7 +1496,7 @@ Notes: **CheckpointStrip** maps CP1=plan, CP2=per-step (N step-dots), CP3=integr
 │ ⓘ Pracuje na kroku 7 z 9,   │
 │   kód si sám kontroluje.    │
 ├─────────────────────────────┤
-│ FSM · CP · Role · Časy · Dění│ ← scrollable section tabs
+│ FSM·CP·Role·Audit·Časy·Dění»│ ← scrollable section tabs (Rev 3: + Audit)
 ├─────────────────────────────┤
 │  (tab = CP)                 │
 │ CP1 ✓ Plán                  │
@@ -1349,13 +1504,13 @@ Notes: **CheckpointStrip** maps CP1=plan, CP2=per-step (N step-dots), CP3=integr
 │ CP3 ✓ Integrace             │
 │ CP4 ○ Curator               │
 │ CP5 ○ Auditor               │
-│ CP6 ○ Reporter              │
+│ CP6 — jen Fast Mode (/aid-do)│  ← Q1: NE reporter; na /aid-run EPICu šedé/skryté
 │ ▸ klepni na řádek = verdikt │  ← row opens bottom sheet w/ .md + Czech
 ├─────────────────────────────┤
 │ Co řešit Přehled Dění ⚠ Více│
 └─────────────────────────────┘
 ```
-Each section tab is one vertically-scrolled list of accordion cards. "FSM" = vertical stepper (READY↓EXECUTE↓GATES↓DONE, current expanded + Czech). "Role" = 4 stacked agent cards. "Časy" = step list with duration bars + retry badges. "Dění" = narrator feed full-screen.
+Each section tab is one vertically-scrolled list of accordion cards. "FSM" = vertical stepper (READY↓EXECUTE↓GATES↓DONE, current expanded + Czech). "Role" = 4 stacked agent cards. "Audit" = the `AuditSummaryCard` mobile variant over `RunDetail.audit` (per-run; score/blocking/headline/findings, "auditor zatím neběžel" when absent — §13.5.5). "Časy" = step list with duration bars + retry badges. "Dění" = narrator feed full-screen.
 
 #### SCREEN D — Dění (Activity Stream) · live merged cross-project timeline
 
@@ -1583,7 +1738,7 @@ The cross-infra brief is the **landing screen**. It renders one `Brief` (scope `
 │            │  └──────────────────────────────────────────────────────────────┘ │
 └────────────┴──────────────────────────────────────────────────────────────────┘
 ```
-Block-to-field map: ROZHODNUTÍ=`decisionsNeeded` · CO BLOKUJE=`blockers` · RIZIKO=`risk` (RiskBadge=`risk.level`, "Proč"=`risk.reasons[]`, probability=`successProbability` always `null`→placeholder) · NA CO POZOR=`watchOuts` · CO SE ZMĚNILO=`sinceLastSeen.items` + header counts=`sinceLastSeen.counts` · CO BUDE DÁL=`nextUp` · PŘEHLED PROJEKTŮ=`/api/projects` tiles. Empty blocks collapse to a single calm line ("Nic nečeká na rozhodnutí ✓") rather than disappearing, so the manager learns the block exists. If `risk.level==='neurceno'` the badge reads "neurčeno" and the "Proč" list shows "málo dat" (§13.2 coverage rule).
+Block-to-field map: ROZHODNUTÍ=`decisionsNeeded` · CO BLOKUJE=`blockers` · RIZIKO=`risk` (RiskBadge=`risk.level`, "Proč"=`risk.reasons[]`, probability=`successProbability.value` always `null` in MVP1→placeholder) · NA CO POZOR=`watchOuts` · CO SE ZMĚNILO=`sinceLastSeen.items` + header counts=`sinceLastSeen.counts` · CO BUDE DÁL=`nextUp` · PŘEHLED PROJEKTŮ=`/api/projects` tiles. Empty blocks collapse to a single calm line ("Nic nečeká na rozhodnutí ✓") rather than disappearing, so the manager learns the block exists. If `risk.level==='neurceno'` the badge reads "neurčeno" and the "Proč" list shows "málo dat" (§13.2 coverage rule).
 
 **MOBILE (~375px)** — same priority order, single column, each block a collapsible card; the summary line + RiskBadge stay pinned near the top. "Co řešit" is the default tab on launch.
 ```
@@ -1619,7 +1774,9 @@ Block-to-field map: ROZHODNUTÍ=`decisionsNeeded` · CO BLOKUJE=`blockers` · RI
 
 #### SCREEN Plan — Plán (Plan Detail) · first-class plan entity (`/p/:project/plans/:planId`)
 
-Renders one `PlanSummary` (`GET /api/plans/:projectId/:planId`) + a plan-scope `Brief` (`GET /api/brief/:projectId/:planId`). **Tabs:** `Brief · Fáze · EPICy · Audit · AC · Backlog · Lekce`. **Tab 1 (default) = Brief** — the *same* `BriefPanel` component as Screen G, just plan-scoped (D1). The other tabs are the plan's managerial detail.
+Renders one `PlanDetail` (`GET /api/plans/:projectId/:planId`) + a plan-scope `Brief` (`GET /api/brief/:projectId/:planId`). **Tabs (Rev 4):** `Brief · Fáze · EPICy · Audit · Dodávka & zjednodušení · AC · Backlog · Lekce`. **Tab 1 (default) = Brief** — the *same* `BriefPanel` component as Screen G, just plan-scoped (D1). The other tabs are the plan's managerial detail; **"Dodávka & zjednodušení" (Rev 4, MF6)** is the new tab carrying the plan-boundary Reporter delivery report + the Simplifier proposals.
+
+> **Tab-count note (MF6, recommended clean set).** Rev 4 adds **one** tab, "Dodávka & zjednodušení", and keeps the auditor on its own "Audit" tab (Audit is a different role than Reporter/Simplifier, so it is not merged in). That is **8 tabs** on desktop — readable on a desktop tab strip, but at the mobile ceiling. To keep the set clean: **on mobile the tab strip is a horizontal-scroll `Tabs`** (the same pattern Rev 3 already uses for `Backlog`/`Lekce` past »); the **primary five** stay left-anchored — `Brief · Fáze · EPICy · Audit · Dodávka` — with `AC · Backlog · Lekce` reachable past ». No tab is dropped or merged: the Reporter/Simplifier outputs are first-class (the PM's explicit ask).
 
 **DESKTOP**
 ```
@@ -1628,8 +1785,8 @@ Renders one `PlanSummary` (`GET /api/plans/:projectId/:planId`) + a plan-scope `
 │            │ ─────────────────────────────────────────────────────────────────  │
 │            │ P003 · „Memory-driven planning"   ● běží · 5 EPICů · 3 hotové · 60%│
 │            │ ███████████░░░░░░░  3/5 EPICů  ·  AC 82 %  ·  poslední změna 12 min │
-│            │ [ Brief ][ Fáze ][ EPICy ][ Audit ][ AC ][ Backlog ][ Lekce ]      │
-│            │ ════════                                                            │
+│            │ [ Brief ][ Fáze ][ EPICy ][ Audit ][ Dodávka&zj. ][ AC ][ Backlog ]│
+│            │ ════════                                          [ Lekce ]         │
 │            │ ┌─ BRIEF (plan scope  -  stejný BriefPanel jako Screen G) ─────────┐ │
 │            │ │  Riziko plánu:  [ NÍZKÉ ]                                       │ │
 │            │ │  ┌ Rozhodnutí ──┐ Nic nečeká ✓                                  │ │
@@ -1647,17 +1804,45 @@ Renders one `PlanSummary` (`GET /api/plans/:projectId/:planId`) + a plan-scope `
 │            │ │    pracuje, dvě čekají ve frontě."                              │ │
 │            │ └──────────────────────────────────────────────────────────────┘ │
 │            │  (tab = Audit)                                                      │
-│            │ ┌─ AUDIT PLÁNU (AuditSummaryCard agreg. + AuditTrendChart) ──────┐ │
-│            │ │  Skóre plánu (medián posl. auditů EPIC): 88/100                │ │
+│            │ ┌─ AUDIT PLÁNU (AuditSummaryCard + AuditTrendChart) ─────────────┐ │
+│            │ │  Audit na konci plánu (boundaryAudit, E-046): 84/100           │ │
+│            │ │  Skóre napříč plánem (aggregateAudit, medián EPIC): 88/100     │ │
 │            │ │  Trend přes EPICy:  89 ▁ 95 ▅ 84 ▂ 88 ▃   (recharts LineChart) │ │
 │            │ │   E-042 E-043 E-044 E-046   (E-045 bez auditu  -  mezera)        │ │
 │            │ │  Δ −1 od prvního auditovaného EPICu                            │ │
 │            │ │  [otevři audit konkrétní EPICy →]                              │ │
 │            │ └──────────────────────────────────────────────────────────────┘ │
+│            │  (tab = Dodávka & zjednodušení  -  MF6: Reporter + Simplifier)      │
+│            │ ┌─ DODÁVKA (ReporterDeliveryPanel) ─────────────────────────────┐ │
+│            │ │  Reporter · dodávka plánu     ✓ PASS    [ celý report ▾ ]     │ │
+│            │ │  ⓘ „Sepsal, co plán dodal, a doložil to testy."               │ │
+│            │ │  „Dodáno 5 EPIC, všechny brány zelené; migrace DB i UI hotové."│ │
+│            │ │  ─────────────────────────────────────────────────────────── │ │
+│            │ │  Doklady (testy, _test_evidence  -  musí být na disku):         │ │
+│            │ │   ✓ e2e-report.html         · evidence/E-044/R…/reporter/   → │ │
+│            │ │   ✓ coverage-summary.txt    · evidence/E-044/R…/reporter/   → │ │
+│            │ │   ⚠ perf-bench.json  -  chybí na disku (flag, nezamlčeno)      → │ │
+│            │ │  reporter@aid-orchestrator · 18.6. 14:31                       │ │
+│            │ └──────────────────────────────────────────────────────────────┘ │
+│            │ ┌─ ZJEDNODUŠENÍ (SimplifierPanel) ──────────────────────────────┐ │
+│            │ │  Simplifier · návrhy na zjednodušení   3 návrhy               │ │
+│            │ │  ⓘ „Navrhuje, co zjednodušit  -  kód nikdy nemění sám."         │ │
+│            │ │  „Doporučuje 2 sloučení a 1 odstranění mrtvého kódu."         │ │
+│            │ │  ─────────────────────────────────────────────────────────── │ │
+│            │ │  ↟ scanner.ts · „sloučit dvě čtecí cesty do jedné"            │ │
+│            │ │       doporučeno: přijmout · oprava: S                      → │ │
+│            │ │  ↟ pathmap.ts · „odstranit nepoužitý helper resolveLegacy()"  │ │
+│            │ │       doporučeno: přijmout · oprava: S                      → │ │
+│            │ │  ↟ build-plan.ts · „zploštit trojitý ternární výraz"          │ │
+│            │ │       doporučeno: odložit · oprava: M                       → │ │
+│            │ │  [ celý simplifier-report ▾ ]                                 │ │
+│            │ └──────────────────────────────────────────────────────────────┘ │
 │            │  (tab = Backlog)  → BacklogDeltaList   (tab = Lekce) → LessonsTable │
 └────────────┴──────────────────────────────────────────────────────────────────┘
 ```
-Tab data map: **Brief**=plan-scope `Brief` (BriefPanel) · **Fáze**=`PlanPhaseTimeline` over `PlanSummary.epicIds` in plan order (each node = an EPIC's latest-run state, links to Screen C) · **EPICy**=an `EpicSummary[]`-style list (the same row component as Screen B, filtered to this plan's members) · **Audit**=`AuditSummaryCard` (aggregate) + `AuditTrendChart` over `PlanSummary.auditTrend` · **AC**=`PlanSummary.acPct` headline + per-EPIC AC bars (null → "neměřeno / fast mode", never 0%) · **Backlog**=`BacklogDeltaList` (added/closed/priority-changed since `lastSeen`, scoped to this plan's EPICs) · **Lekce**=`LessonsTable` over `PlanDetail.lessons` (the full `LessonsView`; `PlanSummary.lessonsPreview[]` is only the thin list-row shape).
+Tab data map: **Brief**=plan-scope `Brief` (BriefPanel) · **Fáze**=`PlanPhaseTimeline` over `PlanSummary.epicIds` in plan order (each node = an EPIC's latest-run state, links to Screen C) · **EPICy**=an `EpicSummary[]`-style list (the same row component as Screen B, filtered to this plan's members) · **Audit**=`AuditSummaryCard` ×2 — `boundaryAudit` ("audit na konci plánu", the last EPIC's run) and `aggregateAudit` ("skóre napříč plánem", median-EPIC, SF4/§13.5.7) — + `AuditTrendChart` over `PlanSummary.auditTrend` · **Dodávka & zjednodušení** (MF6)=`ReporterDeliveryPanel` over `PlanDetail.deliveryReport` + `SimplifierPanel` over `PlanDetail.simplifierSummary` (two stacked panels) · **AC**=`PlanSummary.acPct` headline + per-EPIC AC bars (null → "neměřeno / fast mode", never 0%) · **Backlog**=`BacklogDeltaList` (added/closed/priority-changed/status-changed since the localStorage `BacklogSnapshot`, computed client-side per MF2, scoped to this plan's EPICs; `firstVisit` → "bez porovnání - vše jako nové") · **Lekce**=`LessonsTable` over `PlanDetail.lessons` (the full `LessonsView`; `PlanSummary.lessonsPreview[]` is only the thin list-row shape).
+
+**Tab "Dodávka & zjednodušení" detail (MF6):** two stacked panels. **ReporterDeliveryPanel** (`PlanDetail.deliveryReport`, `ReporterDelivery`) — `outcome` (PASS/FAIL/PARTIAL `StatusBadge`; `null`→"neuvedeno"), `summaryCs` (the one-line "co se dodalo"; `null`→omit), the `testEvidence[]` list where each row deep-links via `/file` and shows `exists` honestly (a missing-on-disk evidence file renders a `pozor` ⚠ "chybí na disku" row, never silently dropped — flag-never-fake / §4.3 anti-fabrication), `generatedBy`+`generatedAt` footer, and a "celý report ▾" drawer rendering the raw delivery `.md` (`rawRelPath` via `/file`). `deliveryReport.present===false` → "Reporter na tomhle plánu zatím neběžel" (never a fabricated outcome). **SimplifierPanel** (`PlanDetail.simplifierSummary`, `SimplifierSummary`) — `proposalCount` headline + `headlineCs`, then `proposals[]` as a list, each row = the proposal text + `disposition` chip (přijmout/odmítnout/odložit, `null`→"bez doporučení") + `effort` (S/M/L) + a deep-link to the area; a "celý simplifier-report ▾" drawer for the raw `.md`. `present===false` → "Simplifier na tomhle plánu zatím neběžel". Both panels are **read-only** in MVP1 (no apply/dismiss action — applying S/M approved simplifications is the gate-fixer's job at run time, §4.3, not the cockpit's).
 
 **MOBILE**
 ```
@@ -1666,7 +1851,7 @@ Tab data map: **Brief**=plan-scope `Brief` (BriefPanel) · **Fáze**=`PlanPhaseT
 │ ● běží · 3/5 EPICů · AC 82% │
 │ ███████████░░░░░             │
 ├─────────────────────────────┤
-│ Brief Fáze EPICy Audit AC » │  ← horiz-scroll tabs (Backlog, Lekce za »)
+│ Brief Fáze EPICy Audit Dod.»│  ← horiz-scroll tabs (Dodávka, AC, Backlog, Lekce za »)
 ├─────────────────────────────┤
 │  (tab = Brief)              │
 │ [ Riziko plánu: NÍZKÉ ]     │
@@ -1681,11 +1866,43 @@ Tab data map: **Brief**=plan-scope `Brief` (BriefPanel) · **Fáze**=`PlanPhaseT
 │ Co řešit Přehled Dění ⚠ Více│
 └─────────────────────────────┘
 ```
-Other tabs reflow: **Fáze** = vertical stepper (E-042↓…↓E-046, current expanded). **Audit** = score number + a small sparkline (`AuditTrendChart` mobile variant, dots tappable). **Backlog/Lekce** = stacked cards.
+Mobile "Dodávka & zjednodušení" tab (stacked panels):
+```
+┌─────────────────────────────┐
+│ ‹ Plán P003          [⟳]    │
+│ ● běží · 3/5 EPICů · AC 82% │
+├─────────────────────────────┤
+│ Brief Fáze EPICy Audit Dod.»│
+│                        ════ │
+├─────────────────────────────┤
+│ DODÁVKA (Reporter)   ✓ PASS │
+│ ⓘ Sepsal co plán dodal +    │
+│   doložil testy.            │
+│ Dodáno 5 EPIC, brány zelené.│
+│ Doklady (testy):            │
+│  ✓ e2e-report.html        → │
+│  ✓ coverage-summary.txt   → │
+│  ⚠ perf-bench.json chybí  → │
+│ [ celý report ▾ ]           │
+│ ─────────────────────────── │
+│ ZJEDNODUŠENÍ      3 návrhy  │
+│ ⓘ Navrhuje, kód nemění sám. │
+│ ↟ scanner sloučit cesty     │
+│   přijmout · S            → │
+│ ↟ pathmap smazat helper     │
+│   přijmout · S            → │
+│ ↟ build-plan zploštit ternár│
+│   odložit · M             → │
+│ [ celý simplifier-report ▾ ]│
+├─────────────────────────────┤
+│ Co řešit Přehled Dění ⚠ Více│
+└─────────────────────────────┘
+```
+Other tabs reflow: **Fáze** = vertical stepper (E-042↓…↓E-046, current expanded). **Audit** = score number + a small sparkline (`AuditTrendChart` mobile variant, dots tappable). **Dodávka & zjednodušení** = the two stacked panels above (ReporterDeliveryPanel + SimplifierPanel; drawers open as bottom sheets). **AC / Backlog / Lekce** = stacked cards.
 
 #### Brief-as-first-tab on Screen B (Project Detail) — reflow
 
-Screen B (Rev 2: EPIC list + "Zdraví projektu" rail) gains a **tab strip** at the top, with **Brief (project scope) as tab 1, default**: `[ Brief ][ EPICy ][ Plány ][ Zdraví ]`. The same `BriefPanel` renders the project-scope `Brief` (`GET /api/brief/:projectId`). The Rev 2 EPIC list moves under the "EPICy" tab and the health rail under "Zdraví" — **nothing from Rev 2 is removed, it is re-tabbed.** New "Plány" tab lists the project's `PlanSummary[]` (each row → Plan screen). On desktop ≥1280px the Brief tab MAY render as a left column with EPICy beside it (two-pane), collapsing to stacked tabs below 1280px; mobile is always one tab at a time.
+Screen B (Rev 2: EPIC list + "Zdraví projektu" rail) gains a **tab strip** at the top, with **Brief (project scope) as tab 1, default**: `[ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]`. The same `BriefPanel` renders the project-scope `Brief` (`GET /api/brief/:projectId`). The Rev 2 EPIC list moves under the "EPICy" tab and the health rail under "Zdraví" — **nothing from Rev 2 is removed, it is re-tabbed.** New "Plány" tab lists the project's `PlanSummary[]` (each row → Plan screen). **New "Audit" tab (Rev 4, MF7) = the project-scope audit panel** — *"Audit projektu: skóre %, trend, vysvětlení, hlavní problémy"*: it reuses the **same `AuditSummaryCard` + `AuditTrendChart`** as the Plan/EPIC audit panels, fed the project-scope **`aggregateAudit`** (`AuditSummary` over all the project's audited EPICs, the median-EPIC pick of §13.5.7 / SF4) and a project-scope `AuditTrend` (`GET /api/audit-trend/:projectId`, one point per audited EPIC). It is **distinct from `boundaryAudit`** (a single plan-boundary auditor run): the project tab is the cross-EPIC quality read, not one report. On desktop ≥1280px the Brief tab MAY render as a left column with EPICy beside it (two-pane), collapsing to stacked tabs below 1280px; mobile is always one tab at a time.
 
 **DESKTOP (tab = Brief, the new default landing tab of Screen B)**
 ```
@@ -1693,7 +1910,7 @@ Screen B (Rev 2: EPIC list + "Zdraví projektu" rail) gains a **tab strip** at t
 │ sidebar    │ Přehled › vulcan                                       [⟳ 4s]      │
 │            │ ─────────────────────────────────────────────────────────────────  │
 │            │ vulcan   ● běží · 9 EPICů · 1 aktivní · compliance 94 % · 2 plány  │
-│            │ [ Brief ][ EPICy ][ Plány ][ Zdraví ]                              │
+│            │ [ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]                     │
 │            │ ════════                                                            │
 │            │ ┌─ BRIEF (project scope  -  stejný BriefPanel) ────────────────────┐ │
 │            │ │  Riziko projektu:  [ STŘEDNÍ ]                                  │ │
@@ -1707,7 +1924,28 @@ Screen B (Rev 2: EPIC list + "Zdraví projektu" rail) gains a **tab strip** at t
 │            │  (přepnutím na „EPICy" se zobrazí Rev 2 seznam + „Zdraví" rail)    │
 └────────────┴──────────────────────────────────────────────────────────────────┘
 ```
-**MOBILE** — Screen B header band stays; under it the tab strip `[Brief][EPICy][Plány][Zdraví]` (horiz-scroll). Brief tab = the stacked-card BriefPanel (identical to Screen G mobile, project-scoped). EPICy/Plány/Zdraví tabs are the Rev 2 mobile layouts re-homed under tabs.
+**MOBILE** — Screen B header band stays; under it the tab strip `[Brief][EPICy][Plány][Audit][Zdraví]` (horiz-scroll). Brief tab = the stacked-card BriefPanel (identical to Screen G mobile, project-scoped). EPICy/Plány/Zdraví tabs are the Rev 2 mobile layouts re-homed under tabs; the **Audit** tab = the `AuditSummaryCard` mobile variant (aggregate score number + sparkline `AuditTrendChart`), project-scoped.
+
+**DESKTOP (tab = Audit, the project-scope audit panel — Rev 4, MF7)**
+```
+┌────────────┬──────────────────────────────────────────────────────────────────┐
+│ sidebar    │ Přehled › aid-orchestrator                             [⟳ 4s]      │
+│            │ [ Brief ][ EPICy ][ Plány ][ Audit ][ Zdraví ]                     │
+│            │                                  ════════                          │
+│            │ ┌─ AUDIT PROJEKTU (AuditSummaryCard agreg. + AuditTrendChart) ───┐ │
+│            │ │  Skóre projektu (medián auditů EPIC): 92/100   ◀ aggregateAudit │ │
+│            │ │   z EPICu E-036 (medián z 5 auditovaných EPIC)                 │ │
+│            │ │  Trend přes EPICy:  92 ▅ 92 ▅ 89 ▃ 95 ▇ 84 ▂  (LineChart)      │ │
+│            │ │   E-036 E-042 E-046-1 E-046-2 E-046-3  (ostatní bez skóre)      │ │
+│            │ │  Proč (headlineCs mediánového EPICu):                          │ │
+│            │ │   „Skóre 92/100 - bez blokujících nálezů, jen drobnosti."       │ │
+│            │ │  Hlavní problémy (topRisks mediánového EPICu): žádné kritické  │ │
+│            │ │  ⚠ agregát z 5 auditovaných EPIC; 9 dalších EPIC bez skóre     │ │
+│            │ │  [otevři audit konkrétní EPICy →]   [audit posledního plánu →] │ │
+│            │ └──────────────────────────────────────────────────────────────┘ │
+└────────────┴──────────────────────────────────────────────────────────────────┘
+```
+The project Audit tab renders **`aggregateAudit`** (§13.5.7) via the **shared `AuditSummaryCard`** (same component as the Plan/EPIC audit panels) plus the project-scope **`AuditTrendChart`** (`GET /api/audit-trend/:projectId`, one point per audited EPIC, gaps kept). The headline number is the **median-EPIC's real `overallScore`** (never a synthesized mean) and the "proč"/topRisks are that EPIC's own deterministic fields, with a deep-link to it. Sparse/empty is honest: `scoredEpicCount===0` → "napříč projektem zatím není auditovaný EPIC se skóre" (e.g. **sousto-na-miru, 0 audit-report.md**); `===1` → a "agregát z jediného auditu (n=1)" note. This is the project-scope twin of the Plan "Audit" tab; the Plan tab additionally shows `boundaryAudit` ("audit na konci plánu"), which has no project-scope equivalent (a project is not a single plan boundary).
 
 #### SCREEN-shared PANEL — Audit summary (AuditSummaryCard, used on Plan + EPIC detail)
 
@@ -1763,7 +2001,7 @@ Field map: `overallScore` + `scoreSource` chip · `categories[]`→horizontal sc
 
 #### SCREEN-shared PANEL — Backlog delta (BacklogDeltaList)
 
-Shows what changed in the backlog **since last visit** (vs localStorage `lastSeen`): added / closed / priority-changed. Used on the Plan "Backlog" tab (scoped to the plan's EPICs) and as a section in the project-scope Brief's "Co se změnilo". Source: `GET /api/backlog?project=` diffed against the `lastSeen` timestamp on the client; each row deep-links to the originating EPIC/proposal. (Read-only in MVP1 — the "Upravit" write mode is MVP1.5, §10.)
+Shows what changed in the backlog **since last visit**: added / closed / priority-changed / status-changed. Used on the Plan "Backlog" tab (scoped to the plan's EPICs) and as a section in the project-scope Brief's "Co se změnilo". **Source (MF2): the current rows from `GET /api/backlog?project=` diffed CLIENT-SIDE against the localStorage `BacklogSnapshot`** (the full `{id,status,priority}[]` captured at the prior visit, keyed by `scopeKey`, §13.3/§13.7) — a bare `lastSeen` timestamp cannot do this because `backlog.md` has no per-row timestamps, so the FE keeps the full row snapshot. `buildBacklogDelta(currentRows, snapshot)` (FE) yields `added`/`closed`/`priorityChanged`/`statusChanged`; each row deep-links to the originating EPIC/proposal. **First visit / cleared storage (no snapshot)** → `firstVisit:true`, no chips, the panel shows the current open rows under "bez porovnání - vše jako nové". (Read-only in MVP1 — the "Upravit" write mode is MVP1.5, §10.)
 
 **DESKTOP**
 ```
@@ -1778,7 +2016,7 @@ Shows what changed in the backlog **since last visit** (vs localStorage `lastSee
 │  Celkem otevřených návrhů: 12   (přidáno 2 − uzavřeno 1 od minule)            │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
-Row anatomy: a delta-kind glyph (`+` added / `✓` closed / `↕` re-prioritized, each its own `StatusBadge` colour — added=`bezi`, closed=`proslo`, reprioritized=`pozor`), `BacklogItem.id`, type, area, suggestion (truncated), priority, link. When nothing changed: "Backlog se od minule nezměnil." The three count chips are the panel header; tapping a chip filters to that delta kind.
+Row anatomy: a delta-kind glyph (`+` added / `✓` closed / `↕` re-prioritized, each its own `StatusBadge` colour — added=`bezi`, closed=`proslo`, reprioritized=`pozor`), `BacklogItem.id`, type, area, suggestion (truncated), priority, link. **Two distinct empty states (honest, MF2):** when a snapshot exists but nothing differs → "Backlog se od minule nezměnil."; on the **first visit** (`firstVisit:true`, no snapshot) → "bez porovnání - vše jako nové" with the current open rows listed plain (no +/✓/↕ glyphs, since there is no baseline to call them "new"). The three count chips are the panel header; tapping a chip filters to that delta kind.
 
 **MOBILE**
 ```
@@ -1854,13 +2092,15 @@ When empty: "Z tohohle plánu se zatím nezaznamenala žádná lekce." `date:nul
 | `BriefPanel` | G (infra), B tab 1 (project), Plan tab 1 (plan) | one `Brief` — all seven blocks | shadcn `Card` per block + base-ui `Collapsible` (mobile) + `ToggleGroup` (block filter); each line **reuses `ExplanationLine` + `StatusDot`** (Rev 2); deep-links via react-router `Link`. ONE component, `scope` prop drives which blocks show. |
 | `RiskBadge` | inside `BriefPanel` (G/B/Plan) | `Risk.level` + a `Popover` of `Risk.reasons[]` | shadcn `Badge` (colour from §6.2 `STATUS`, matching the §13.10 `concept:risk:*` keys exactly: nízké=`proslo`, střední=`pozor`, vysoké=`zablokovano`, neurčeno=`ceka`) + base-ui `Popover` for reasons; reasons rows reuse `StatusDot`. |
 | `DecisionsNeededList` / `ChangedSinceList` | block renderers inside `BriefPanel` | `Brief.decisionsNeeded[]` / `Brief.sinceLastSeen` | thin list wrappers over `ExplanationLine` + `StatusDot`; `ChangedSinceList` also renders the header counts pill (`sinceLastSeen.counts`) and embeds `BacklogDeltaList` for the backlog slice. |
-| `AuditSummaryCard` | C (per-run), Plan "Audit" tab (aggregate) | one `AuditSummary` | shadcn `Card`; category bars via recharts `BarChart` (horizontal) **or** a `DurationBar`-style CSS bar (reuse); `Badge` for score/severity tallies; base-ui `Dialog` (sheet) for "technické detaily" raw-md (`/file`); `Popover` for `rawScore` tooltip. |
-| `AuditTrendChart` | C, EPIC detail; Plan "Audit" tab | `AuditTrend` (`points[]`) | recharts **`LineChart`** with `connectNulls={false}` so `score:null` gaps render as breaks (never interpolated, §13.5); mobile = compact sparkline variant, dots tappable → that run's audit. |
+| `AuditSummaryCard` | C (per-run); Plan "Audit" tab (`boundaryAudit` + `aggregateAudit`, SF4); **Screen B "Audit" tab (project `aggregateAudit`, MF7)** | one `AuditSummary` | shadcn `Card`; category bars via recharts `BarChart` (horizontal) **or** a `DurationBar`-style CSS bar (reuse); `Badge` for score/severity tallies; base-ui `Dialog` (sheet) for "technické detaily" raw-md (`/file`); `Popover` for `rawScore` tooltip. The `aggregateAudit` variant shows `medianEpicId` as a "z EPICu E-xxx" provenance chip and the `scoredEpicCount` "n=N" note (§13.5.7). |
+| `AuditTrendChart` | C, EPIC detail; Plan "Audit" tab; **Screen B "Audit" tab (project scope, MF7)** | `AuditTrend` (`points[]`) | recharts **`LineChart`** with `connectNulls={false}` so `score:null` gaps render as breaks (never interpolated, §13.5); mobile = compact sparkline variant, dots tappable → that run's audit. The project-scope variant plots one point per audited EPIC (`scope:'project'`). |
 | `PlanPhaseTimeline` | Plan "Fáze" tab | `PlanSummary.epicIds` in plan order, each node = latest-run `FsmState` | **adapts `FsmTimeline`** (Rev 2) horizontally for desktop (nodes = EPICs not states), vertical stepper on mobile; node colour from §6.2 `STATUS`; reuses `StatusDot` + `ExplanationLine`. |
-| `BacklogDeltaList` | Plan "Backlog" tab; project-Brief "Co se změnilo" | `BacklogItem[]` diffed vs localStorage `lastSeen` | shadcn `Card` + `ToggleGroup` (the +/✓/↕ count chips as filters); rows reuse `StatusBadge` (added=`bezi`, closed=`proslo`, reprioritized=`pozor`); read-only MVP1 (write toggle = MVP1.5). |
+| `BacklogDeltaList` | Plan "Backlog" tab; project-Brief "Co se změnilo" | current `BacklogItem[]` (`GET /api/backlog`) diffed **client-side** vs the localStorage `BacklogSnapshot` (`{id,status,priority}[]` keyed by `scopeKey`, §13.7, MF2) → `added`/`closed`/`priorityChanged`/`statusChanged`; `firstVisit:true` → "bez porovnání" | shadcn `Card` + `ToggleGroup` (the +/✓/↕ count chips as filters); rows reuse `StatusBadge` (added=`bezi`, closed=`proslo`, reprioritized=`pozor`); read-only MVP1 (write toggle = MVP1.5). |
 | `LessonsTable` | Plan "Lekce" tab | `PlanDetail.lessons` (`LessonsView`) | shadcn `Table` (desktop) / stacked `Card`s (mobile); EPIC chip = `Badge` + `Link`; empty + null-cell handling per the panel spec. |
+| `ReporterDeliveryPanel` (Rev 4, MF6) | Plan "Dodávka & zjednodušení" tab | `PlanDetail.deliveryReport` (`ReporterDelivery`) | shadcn `Card`; `outcome` → `StatusBadge`; `testEvidence[]` rows = `Link` (via `/file`) + an `exists`-driven `StatusDot` (missing-on-disk → `pozor` ⚠, never dropped); base-ui `Dialog` (sheet) for the raw delivery `.md`; `present:false` → "Reporter zatím neběžel". No new primitive. |
+| `SimplifierPanel` (Rev 4, MF6) | Plan "Dodávka & zjednodušení" tab | `PlanDetail.simplifierSummary` (`SimplifierSummary`) | shadcn `Card`; `proposals[]` as a list; `disposition` → `Badge` (přijmout/odmítnout/odložit); `effort` chip; row `Link` to area; base-ui `Dialog` (sheet) for the raw `simplifier-report.md`; read-only (no apply action in MVP1); `present:false` → "Simplifier zatím neběžel". No new primitive. |
 
-These nine components mean Screen G, the Plan screen, and the B/Plan first-tab brief are built **almost entirely from reused Rev 2 primitives** (`ExplanationLine`, `StatusDot`, `StatusBadge`, `DurationBar`, `FsmTimeline`, `Card`, `Tabs`, `Dialog`, `Popover`, `Badge`) plus one new recharts `LineChart` for the audit trend — keeping the managerial layer visually consistent with the monitoring layer and avoiding a parallel component system.
+These eleven components mean Screen G, the Plan screen, the B/Plan first-tab brief, the project/plan audit tabs, and the new Rev-4 plan delivery/simplifier tab are built **almost entirely from reused Rev 2 primitives** (`ExplanationLine`, `StatusDot`, `StatusBadge`, `DurationBar`, `FsmTimeline`, `Card`, `Tabs`, `Dialog`, `Popover`, `Badge`) plus one new recharts `LineChart` for the audit trend — the Rev-4 `ReporterDeliveryPanel`/`SimplifierPanel` (MF6) and the project Audit tab (MF7, which reuses `AuditSummaryCard`/`AuditTrendChart`) add **no** new primitive, they compose the standard `Card`/`Dialog`/`Badge`/`Link`/`StatusDot` set — keeping the managerial layer visually consistent with the monitoring layer and avoiding a parallel component system.
 
 ### 8.4 Human-explanation UX
 
@@ -1990,7 +2230,7 @@ AID writes its own timeline/audit JSONL — the Cockpit reads those directly, no
 > **Scope expectation — deep monitoring is SPARSE on history (consistent with the locked "v3 only" decision).** "Track EVERYTHING AID offers" applies in full only to the ~14 runs (of ~97 dirs cross-project) that have `fsm-state.yaml`, and the *rich* CP/timing/provenance detail only to the even smaller subset (3-11 runs) with rich timeline events. The bulk of historical runs render as `legacy`/`stub` with little detail — **this is expected, not a bug**; the UI must show "starší formát / bez detailu" for them, never a broken deep view. New runs going forward carry the full signal set.
 > **Metric incrementality.** §5 inventories ~40 metric ids. The `MetricSet` contract already nulls un-computable fields, so `MetricSet` ships **incrementally** — a metric returning `null` with a flag is acceptable for MVP 1; computing all 40 is NOT an MVP 1 gate. The MVP 1 gate is the AC list below.
 >
-> **MVP-1 gate fields (which `MetricSet`/`RunDetail` fields MUST be correct & non-null on a v3 run):** FSM `state` + `currentStep`/`totalSteps`; gate `overall` + per-gate pass/fail + `attempts`; compliance `overall` + `failures` + `force_override_count`; CP1-CP5 presence + verdict; `run_duration_sec` (best-effort, with `start_source`/`end_source` tag per §5.1). **Explicitly NOT gating (ship as `null` when unavailable):** per-step durations (`stepDurationsS`), dispatch durations, and CP2/CP3/CP4 retry counts when the timeline lacks dispatch events (`checkpointRepeats` null per §MF5). CP6 is not gated on `/aid-run` EPICs (it is Fast-Mode-only, Q1).
+> **MVP-1 gate fields (which `MetricSet`/`RunDetail` fields MUST be correct & non-null on a v3 run):** FSM `state` + `currentStep`/`totalSteps`; gate `overall` + per-gate pass/fail + `attempts`; compliance `overall` + structured `failures` (`ComplianceFailure[]`, MF3 — `check`+`severity` preserved) + `force_override_count`; CP1-CP5 presence + verdict; `run_duration_sec` (best-effort, with `start_source`/`end_source` tag per §5.1). **Explicitly NOT gating (ship as `null` when unavailable):** per-step durations (`stepDurationsS`), dispatch durations, and CP2/CP3/CP4 retry counts when the timeline lacks dispatch events (`checkpointRepeats` null per §MF5). CP6 is not gated on `/aid-run` EPICs (it is Fast-Mode-only, Q1).
 
 **Backend modules:**
 - `packages/aid-contract` — raw + view types (§7.5), `STATUS` (8-token canonical), `DictionaryEntry` + runtime `Explanation` types, `Score`, `EventTopic`/`ALL_EVENT_TOPICS`, **the Rev 3 managerial types** (`Brief`/`BriefItem`/`Risk`/`RiskReason`, `PlanSummary`/`PlanDetail`, `AuditSummary`/`AuditTrend`/`AuditTrendPoint`, `BacklogDelta`/`BacklogDeltaItem`, `LessonsView`/`LessonEntry`, `LastSeen`), and **the two seam types** (`TimeSource`; `MemoryQuery`/`MemoryEntry`/`MemoryResult`, §13.9).
@@ -2001,20 +2241,20 @@ AID writes its own timeline/audit JSONL — the Cockpit reads those directly, no
   - `watchers/file-watcher.ts` (adapted cross-project, `PATH_RULES`, `projectId`).
   - `ws/websocket.ts` (adapted `AidWebSocket`, project filtering, activity-buffer replay).
   - `explain/{types,explain,dictionary.cs}.ts` (full §6.3 dictionary + the §13.10 `concept:*` keys).
-  - `routes/{health,projects,epics,compliance,backlog,activity,queue,metrics,explanations,file}.ts` (all read-only, §7.4) + **Rev 3 read-only routes** `routes/{brief,plans,lessons,backlog-delta,audit-trend,memory}.ts` + `routes/path-validation.ts` (reused) + `api/middleware.ts` (envelope). `routes/memory.ts` is an **MVP1 STUB** returning `{available:false,reason:"MVP2"}` (§13.9) — no Qdrant/MCP call.
-  - **Rev 3 projection builders (pure over the scanner cache, no new disk reads, no writes):** `brief/build-brief.ts` (`buildBrief(runSet, scope, since)`, §13.4) + `brief/risk.ts` (`computeRisk(signals): Risk`, §13.2); `plan/build-plan.ts` (`buildPlan(planId, scope)`, §13.6); `backlog/build-delta.ts` (`buildBacklogDelta(scope, since)`, §13.7); `audit/build-audit-summary.ts` + `audit/build-audit-trend.ts` (`AuditSummary`/`AuditTrend`, §13.5); `lessons/build-lessons.ts` (`LessonsView`, §13.8).
+  - `routes/{health,projects,epics,compliance,backlog,activity,queue,metrics,explanations,file}.ts` (all read-only, §7.4) + **Rev 3 read-only routes** `routes/{brief,plans,lessons,audit-trend,memory}.ts` + `routes/path-validation.ts` (reused) + `api/middleware.ts` (envelope). **No `routes/backlog-delta.ts`** — the backlog delta is client-side in MVP1 (MF2); `/api/backlog` serves current rows + `meta:{openCount,closedCount}`. `routes/memory.ts` is an **MVP1 STUB** returning `{available:false,reason:"MVP2"}` (§13.9) — no Qdrant/MCP call.
+  - **Rev 3 projection builders (pure over the scanner cache, no new source of truth, no writes — reads confined to existing v3 artifacts the Tier-1 index already covers, SF2):** `brief/build-brief.ts` (`buildBrief(runSet, scope, since)`, §13.4) + `brief/risk.ts` (`computeRisk(signals): Risk`, §13.2) read only already-parsed §4/§5 signals; `plan/build-plan.ts` (`buildPlan(planId, scope)`, §13.6), `audit/build-audit-summary.ts` + `audit/build-audit-trend.ts` (`AuditSummary`/`AuditTrend`, §13.5), and `lessons/build-lessons.ts` (`LessonsView`, §13.8) parse the existing `plans/*.md`/`audit-report.md`/`lessons-learned.md` v3 files (Tier-1 indexed, Tier-2 parsed on demand). The **backlog delta** has **no server builder** in MVP1 (MF2): the server only serves current `backlog.md` rows + counts via `routes/backlog.ts`; the diff is the client `buildBacklogDelta(currentRows, snapshot)` in `packages/aid-gui/src/lib/backlog-delta.ts`. None of these writes.
   - `metrics/compute.ts` (§5 metric ids; emits `MetricSet.timeBy` as the §13.9 `TimeSource` seam — `user`/`dev` `null`/"neměřeno").
   - `config.ts` (adapted, `AID_PROJECTS_ROOT`), `index.ts` (adapted skeleton, no registry/ideas/companion).
 - Drop: `companion/*`, `services/{project-registry,ideas-migration}.ts`, `routes/{companion,voice,ideas}.ts`, `scheduling/*`, all write routes.
 
 **Frontend (`packages/aid-gui`):** Screens A-F (§8.2) **+ Screen G "Co potřebuju vědět" (the `/` front door, §8.1) + the first-class Plan detail screen (`/p/:project/plans/:planId`, §13.6)**; the `Brief` component (one shape, three scopes — Screen G, Screen B tab 1, Plan tab 1, D1); the audit-summary panel + recharts trend (§13.5.5), backlog-delta panel (§13.7), lessons-per-plan panel (§13.8), deterministic risk-level badge with the MVP2 success-probability placeholder (§13.2/D2); the `lastSeen` localStorage store (§13.3); components from §8.3; `lib/explain.ts`; react-query + WS hook; `vite-plugin-pwa` + manifest + icons + `server.proxy`.
 
-**Endpoints (all read-only, §7.4):** the Rev 2 set (`/api/{health,projects,epics,compliance,backlog,activity,queue,metrics,explanations,file}` + `/ws`) **plus the Rev 3 managerial endpoints** `/api/brief`, `/api/brief/:projectId`, `/api/brief/:projectId/:planId`, `/api/plans/:projectId`, `/api/plans/:projectId/:planId`, `/api/lessons`, `/api/backlog-delta`, `/api/audit-trend/:projectId/:epicId`, `/api/audit-trend/:projectId/plan/:planId`, and the **`/api/memory` MVP1 stub** (`{available:false,reason:"MVP2"}`, §13.9).
+**Endpoints (all read-only, §7.4):** the Rev 2 set (`/api/{health,projects,epics,compliance,backlog,activity,queue,metrics,explanations,file}` + `/ws`) **plus the Rev 3 managerial endpoints** `/api/brief`, `/api/brief/:projectId`, `/api/brief/:projectId/:planId`, `/api/plans/:projectId`, `/api/plans/:projectId/:planId`, `/api/lessons`, `/api/audit-summary/:projectId` (project `aggregateAudit`, MF7), `/api/audit-trend/:projectId` (project scope, MF7), `/api/audit-trend/:projectId/:epicId`, `/api/audit-trend/:projectId/plan/:planId`, and the **`/api/memory` MVP1 stub** (`{available:false,reason:"MVP2"}`, §13.9). **No `/api/backlog-delta`** — the backlog delta is computed client-side from a localStorage snapshot (MF2); `/api/backlog` serves the current rows + `meta:{openCount,closedCount}`. (Server-side field-level delta = MVP1.5.)
 
 **Rev 3 managerial surfaces are MVP1** (moved in per the locked decisions): `ProjectBrief`/`PlanBrief` read-models (the one `Brief`, three scopes), Screen G, the Plan detail screen, the audit-summary panel + trend, the backlog-delta panel, the lessons-per-plan panel, `lastSeen` (localStorage), and the deterministic risk level. **Deferred (NOT MVP1):** the user-notes module + server-side multi-device `lastSeen` + backlog writes → **MVP1.5**; the LLM brief narrative + success-probability % + memory read + active agent + WakaTime import → **MVP2**. The `TimeSource` (§13.9) and memory taxonomy (§13.9) are **seams only** in MVP1 (types + stub, no measurement/read).
 
 **Acceptance criteria** (Rev 2 #1-#11 below; the Rev 3 managerial ACs #12-#22 are in §13.11):
-1. Visiting `/` lists exactly the 6 valid workspaces (aid-orchestrator, wan, vulcan, krok, acta, sousto-na-miru). The regression test asserts **both** broken workspaces are excluded (`vulcan.broken-20260430-0741` AND `cicero.broken-20260430-0735`) **and** that sibling dirs with no `.aid-o` (`cicero`, `myinvoice`, `panopticon`, `_refs`) are excluded by the glob.
+1. Visiting `/` lists exactly the 6 valid **top-level** workspaces (aid-orchestrator, wan, vulcan, krok, acta, sousto-na-miru), discovered by the **depth-1** glob `<scanRoot>/*/.aid-o` only. The regression test asserts: (a) **both** broken workspaces are excluded (`vulcan.broken-20260430-0741` AND `cicero.broken-20260430-0735`); (b) sibling dirs with no `.aid-o` (`cicero`, `myinvoice`, `panopticon`, `_refs`) are excluded by the glob; and (c) the **nested** `.aid-o` dirs that exist on disk are NOT discovered as separate projects and NOT recursed into — `krok/backend/.aid-o` and `vulcan/ui/.aid-o` never appear (depth-1 glob can't reach them; they also lack `config/`), and `krok`/`vulcan` each surface as exactly **one** workspace (the top-level one). The count is exactly 6, not 6+nested.
 2. Latest-run selection picks the run with max `started_at`/mtime, never lexicographic (regression test with `R-005-4_4-1` vs `run_20260224_115f`).
 3. Screen C shows, for a v3 run, all of: FSM state + progress, FSM transition walk, CP1-CP6 strip with verdicts + provenance, 4 agent role panels, per-step timings + retry counts, gates with `duration_ms`, compliance checks with severity — each with a Czech explanation line.
 4. The activity stream (Screen D) is built from **per-run** timelines; the root `work/timeline.jsonl` is read **ONLY** to extract `focus:cp1` dispatch-enrichment events (§4.0 finding #1) and for nothing else. Each row carries a Czech translation; a file change on disk appears within ~2s via WS.
@@ -2029,7 +2269,8 @@ AID writes its own timeline/audit JSONL — the Cockpit reads those directly, no
 ### MVP 1.5 — backlog write + user notes + server-side lastSeen
 
 **Modules/screens/endpoints:**
-- New sub-route `/p/:project/backlog` (B tab) with a write-mode toggle ("Upravit"); reuses `EventRow`/`StatusBadge`. (The MVP1 backlog **delta** read view, §13.7, is unchanged — this adds *writes* on top.)
+- New sub-route `/p/:project/backlog` (B tab) with a write-mode toggle ("Upravit"); reuses `EventRow`/`StatusBadge`. (The MVP1 client-side backlog **delta** read view, §13.7/MF2, still works unchanged — this adds *writes* on top.)
+- **Server-side field-level backlog delta** (the MVP1 client-side delta, §13.7/MF2, promoted) — add a server snapshot store so `GET /api/backlog-delta?since=` can compute `added`/`closed`/`priorityChanged`/`statusChanged` server-side and sync the "co se změnilo v backlogu" view across devices (multi-device, like server-side `lastSeen` below). The MVP1 `BacklogDelta` contract shape is forward-compatible — only the *source* of the diff moves from the FE localStorage snapshot to the server store; `routes/backlog-delta.ts` is added here (it does **not** exist in MVP1).
 - **User-notes module** (its own module) — internal notes / CLIENT notes / ideas / risks / tasks / meeting notes / decisions, with an **internal-vs-client separation**; **own store**, never `.aid-o`. Reached as a project sub-tab + a "Více" entry on mobile; isolated route.
 - New top-level nav "Moje" (personal tasks, **own store**, not `.aid-o`) — sidebar item / "Více" entry on mobile; isolated route.
 - **Server-side multi-device `lastSeen`** — promote `LastSeen` (§13.3, MVP1 localStorage-only) to a per-user server resource so "co se změnilo od poslední návštěvy" syncs across devices. The `?since=` param and the `LastSeen` contract type are forward-compatible — the source of `since` swaps from localStorage to the server store with **no endpoint change** (§13.3).
@@ -2042,14 +2283,14 @@ AID writes its own timeline/audit JSONL — the Cockpit reads those directly, no
 
 **Modules/screens/endpoints:**
 - **Wire `/api/memory` from the MVP1 stub to the real read** — read `vulcan-memory`/Qdrant `clavi_facts_{tenant}` via the read-only MCP, honouring the `MemoryQuery` filters (`scope`/`projectId`/`planId`/`type`/`createdDuringRun`, §13.9). New top-level nav "Paměť" — sibling of Compliance; reuses Help-style `<Section>` cards + search. `routes/memory.ts` (read-only MCP/Qdrant query) replaces the stub.
-- **LLM brief narrative + success-probability %** — fill `Brief.successProbability` (typed `null` in MVP1, D2) with the agent's model-derived estimate, and add the smart "what this means" narrative on top of the deterministic §13.2 `Risk` (which stays the permanent fallback + terminology source). The deterministic risk level never disappears; the % and narrative are additive.
+- **LLM brief narrative + success-probability %** — fill the `Brief.successProbability` envelope (MVP1 invariant `value:null, source:null`, D2) by setting `value` with `source:'agent'`, and add the smart "what this means" narrative on top of the deterministic §13.2 `Risk` (which stays the permanent fallback + terminology source). **Zero contract churn** — the envelope was forward-compatible from MVP1. The deterministic risk level never disappears; the % and narrative are additive.
 - **WakaTime time import** — fill `MetricSet.timeBy` `user`/`dev` entries via the §13.9 `TimeSource` seam (`source:'wakatime'`); zero contract churn (the seam is already in `MetricSet`). The "kdo strávil kolik" breakdown appears once the source exists.
 - EPIC Deep View narrator gutter gains a 2nd tab "Návrhy agenta" (mobile: another section tab); `AgentRolePanel` extends to interactive proposal cards.
 - LLM narration: optional `narrative` field on `explain()` entries flagged `llm_eligible:true`, populated by the agent (static layer stays the fallback).
 - Cost deep-links: per-EPIC "View cost in Grafana" link (no inline querying unless `shared-infra` is added).
 - Re-add `shared-infra` network + LiteLLM access for the agent; alerting via `@eco_system_alerts_bot` for stuck FSM/ESCALATION.
 
-**Acceptance criteria:** the memory view reads (never writes) the Qdrant collection and honours the `MemoryQuery` filters; the improvement agent proposes (never auto-applies) changes; `Brief.successProbability` becomes a model-derived number and the LLM narrative is additive while the deterministic risk level + static dictionary still render when the agent is offline; WakaTime fills `timeBy` user/dev time with no contract change; cost deep-links open the correct Grafana dashboard with EPIC/time-range params.
+**Acceptance criteria:** the memory view reads (never writes) the Qdrant collection and honours the `MemoryQuery` filters; the improvement agent proposes (never auto-applies) changes; `Brief.successProbability.value` becomes a model-derived number with `source:'agent'` and the LLM narrative is additive while the deterministic risk level + static dictionary still render when the agent is offline; WakaTime fills `timeBy` user/dev time with no contract change; cost deep-links open the correct Grafana dashboard with EPIC/time-range params.
 
 ## 11. Risks & open questions
 
@@ -2091,17 +2332,17 @@ AID writes its own timeline/audit JSONL — the Cockpit reads those directly, no
 
 **Why this section exists (PM feedback, verbatim intent):** *"MVP1 is currently more 'technical run monitoring' than 'managerial project/plan cockpit'. A non-technical user still ends up studying the timeline, audit reports, and the compliance matrix. MVP1 must have a managerial BRIEF, a first-class PLAN view, a structured AUDIT SUMMARY, a BACKLOG DELTA, and lessons-per-plan — otherwise it's just an observability dashboard for a technician."*
 
-This section adds **one read-model — `Brief`** (the manager's answer surface) and **one deterministic risk model — `Risk`** (the heart of the revision). It introduces **no new disk reads**: every input is a signal already inventoried in §4/§5. The `Brief` is a server-side **projection** over the existing scanner cache, rendered in three places by scope (D1).
+This section adds **one read-model — `Brief`** (the manager's answer surface) and **one deterministic risk model — `Risk`** (the heart of the revision). It introduces **no new SOURCE OF TRUTH and performs no writes — it reads only existing v3 artifacts.** The `Brief`'s `risk`/`blockers`/`watchOuts`/`decisionsNeeded`/`nextUp` dimensions are pure projections over signals already inventoried in §4/§5 (compliance, gates, FSM, queue, timeline) — those add no new file reads at all. The managerial *projections* introduced alongside it (`PlanSummary`/`PlanDetail` §13.6, `AuditSummary`/`AuditTrend` §13.5, `BacklogDelta` §13.7, `LessonsView` §13.8) **do read existing v3 files** — the plan `.md`, `audit-report.md`, `backlog.md`, and `lessons-learned.md` — files that already exist on disk and that the §7.2 scanner **Tier-1 index must include** (dir listing + frontmatter + per-file mtime for `plans/*.md`, `work/evidence/*/audit-report.md`, `work/backlog.md`, `work/lessons-learned.md`), so the projections read parsed/cached data and the on-demand Tier-2 parse never widens the source set. The honest invariant is therefore: **no new source of truth, no writes, reads confined to existing v3 artifacts** — NOT the (false) "no new disk reads", since the audit/backlog/lessons/plan projections necessarily read those files. The `Brief` is a server-side **projection** over the existing scanner cache, rendered in three places by scope (D1).
 
 **Locked decisions this section implements (do not re-litigate):**
 - **D1 — three-tier brief.** One `Brief` shape, three scopes (`infra`/`project`/`plan`), rendered as: NEW **Screen G "Co potřebuju vědět"** (infra = the non-technical front door), the **first tab of Screen B** (project), and the **first tab of the Plan screen** (plan). Same component, different scope.
-- **D2 — risk is a deterministic LEVEL, never a fake probability.** MVP1 computes `Risk.level` ∈ {nízké, střední, vysoké, neurčeno} + concrete reasons from countable signals only. `successProbability` is **always `null`** in MVP1; the UI renders "přesnější odhad přijde s agentem (MVP2)". The smart "what this means" narrative and any % number are MVP2 (the LLM agent).
+- **D2 — risk is a deterministic LEVEL, never a fake probability.** MVP1 computes `Risk.level` ∈ {nízké, střední, vysoké, neurčeno} + concrete reasons from countable signals only. `successProbability` is a `SuccessProbability` **envelope** whose binding MVP1 invariant is **`value === null && source === null`** (MF5); the UI renders "přesnější odhad přijde s agentem (MVP2)". The smart "what this means" narrative and the `value`/`source` fill (`source:'agent'`) are MVP2 (the LLM agent) — no contract churn.
 - **Plan is first-class** (D4) with its own screen `/p/:project/plans/:planId` and `PlanSummary` read-model.
 - **lastSeen is localStorage-only in MVP1** (keeps the server read-only/stateless); server-side multi-device lastSeen is MVP1.5.
 
 ### 13.1 The seven manager questions → `Brief` fields
 
-The `Brief` (§7.5) answers seven questions. Each field is a **`BriefItem[]`** (except `risk`/`successProbability`), and each `BriefItem` carries a resolved `Explanation` (§6.4) so the answer is already in lidská řeč. All inputs are §4/§5 signals — nothing new is read from disk.
+The `Brief` (§7.5) answers seven questions. Each field is a **`BriefItem[]`** (except `risk`/`successProbability`), and each `BriefItem` carries a resolved `Explanation` (§6.4) so the answer is already in lidská řeč. The seven answer dimensions are built from §4/§5 signals that are already parsed/cached (compliance, gates, FSM, queue, timeline) — these add **no new file reads**; the plan/audit/backlog/lessons *projections* the brief surfaces (§13.5-§13.8) read existing v3 artifacts, which the scanner Tier-1 index already covers (§13 intro, SF2). No new source of truth, no writes.
 
 | # | PM question (Czech) | `Brief` field | Source signals (already inventoried) |
 |---|---|---|---|
@@ -2111,7 +2352,7 @@ The `Brief` (§7.5) answers seven questions. Each field is a **`BriefItem[]`** (
 | 4 | **Co bude následovat** | `nextUp` | `queue.yaml` next `status:queued` EPICs by priority (§4.6); runs in `READY`/`EXECUTE` (§4.1); plan progress `done_epics/total_epics` (§5.5) |
 | 5 | **Jaká rozhodnutí jsou potřeba** | `decisionsNeeded` | runs `done_phase==review` awaiting `pm_decision`/merge (§4.0/§4.1); `state==ESCALATION` (needs a human); auditor `blocking_findings:true` (CP5 blocks MERGE §4.2) |
 | 6 | **Odhad rizika** | `risk` | the deterministic §13.2 model (`Risk` level + reasons) |
-| 7 | **Odhad pravděpodobnosti úspěchu** | `successProbability` | **`null` in MVP1** — UI renders "přesnější odhad přijde s agentem (MVP2)" (D2) |
+| 7 | **Odhad pravděpodobnosti úspěchu** | `successProbability` | **`{value:null, source:null}` envelope in MVP1** (MF5 invariant) — UI renders "přesnější odhad přijde s agentem (MVP2)" (D2) |
 
 **Sorting inside each list:** `blocking` severity first, then `warn`, then `info`; within a severity, newest `at` first. `decisionsNeeded` and `blockers` may overlap (e.g. an ESCALATION is both a blocker and a decision) — the **same `BriefItem.id`** is used in both lists so the FE can de-dupe a "this is the same thing" badge; this is intentional, not double counting.
 
@@ -2127,7 +2368,7 @@ Computed over the **scope's run set** (one EPIC's latest run for plan/project ro
 
 | id | signal | source (§ref) | availability source |
 |---|---|---|---|
-| S1 | `openBlockingViolations` | count of latest-run `compliance.failures[]` with `severity:"blocking"` still unresolved (resolution = §5.7 rule: a LATER run of the same EPIC lacks that `failures[].check`) | a `compliance.json` exists |
+| S1 | `openBlockingViolations` | count of latest-run `ComplianceFailure[]` (MF3) with `severity === 'blocking'` still unresolved (resolution = §5.7 rule: a LATER run of the same EPIC lacks a `ComplianceFailure` with that `.check`) | a `compliance.json` exists |
 | S2 | `escalationCount` | `fsm-state.yaml escalation_count` (scalar) **and** any run currently `state==ESCALATION` | a parseable `fsm-state.yaml` exists |
 | S3 | `forceOverrideCount` + `systematic` | `compliance.force_override_count` (+`force_override_reasons`); SYSTEMATIC per §4.5 (`avg>1`, `max>3`, `≥30%` forced, or low-quality reasons) | a `compliance.json` OR non-empty timeline exists |
 | S4 | `gateFirstPassRate` | first-attempt gate pass rate over runs **with a `gates_report.json`** (§5.7 denominator) | ≥1 run has a `gates_report.json` |
@@ -2171,7 +2412,13 @@ Evaluate **top to bottom**; the **first matching tier sets the level** (preceden
 
 **Precedence in one sentence (the spec's required statement):** *any blocker → at least střední; an unresolved blocking compliance failure, a blocking audit finding, a SYSTEMATIC override, or a collapsing gate pass-rate → vysoké; otherwise střední if any caution signal fires; nízké only when nothing fires and there is enough data to say so.*
 
-`confidence` = `'high'` when **all level-relevant signals for the chosen tier are available** (their availability source existed) **and** there are ≥3 runs in scope; else `'low'`. A `'low'` confidence never upgrades or downgrades the level — it only tells the UI to show "(odhad z mála dat)".
+**`confidence` is resolved PER-SIGNAL, by signal class — not by a single ≥3-runs gate (SF3).** The signal that *set the level* (the highest-precedence firing signal, the one whose tier the level came from) decides confidence:
+
+- **Authoritative single-file signals → `'high'` from ONE file.** A blocking signal that is a verdict on disk — `S1 openBlockingViolations > 0` (a present `compliance.json` carries a blocking `failures[]` entry) or `S8 auditBlockingFindings == true` (`audit-report.md` says `blocking_findings:true`), and likewise `S3 systematic` when a `compliance.json` is present — is **high confidence from a single run**, because the file *is* the authority; a second run cannot make "release is blocked" more true. These do **not** require ≥3 runs.
+- **Rate / trend signals → `'high'` only with ≥3 runs.** A signal that is a *rate or aggregate over runs* — `S4 gateFirstPassRate` (first-pass gate rate) — is statistically meaningless on one or two runs, so it is `'high'` only when **≥3 runs with a `gates_report.json`** back it (matching the §13.2.3 tier-table guards "and ≥3 runs with gates" on the S4 rows) and `'low'` otherwise. The same ≥3-runs floor applies to any future adherence/rate signal.
+- **Timeline-pattern signals → `'high'` when the pattern is itself ≥2 occurrences.** `S5 repeatedPreconditionFails` / `S6 stuckOrLoopingFsm` are already defined as "the same (from,to,reason)/(step,reason) ≥2×" (§13.2.2 `REPEAT_FAIL_MIN`/`INCREMENT_FAIL_MIN`), so a firing instance is by construction repeated and is `'high'` from that run's timeline; a single non-repeated fail does not fire them at all. `S2 escalation_active` and `S7 staleRun` are present-state facts → `'high'` when their source is parseable.
+
+A `'low'` confidence **never** upgrades or downgrades the level — it only tells the UI to append "(odhad z mála dat)". When several signals fire across classes, `confidence` follows the **level-setting** signal (above); a low-confidence contributor reason does not drag a high-confidence blocking level down. **This resolves the apparent §13.2.3-vs-§13.2.5 contradiction:** the old blanket "≥3 runs for high" wrongly applied a rate-signal rule to an authoritative single-file blocking signal, so the `E-042-1_1` case (§13.2.5) was both `'high'` and single-run. Under the per-signal rule it is correctly `'high'` — its level was set by S1, an authoritative single-file signal, from its one `compliance.json`.
 
 #### 13.2.4 Data-coverage rule (the "never fake low" guarantee)
 
@@ -2183,22 +2430,24 @@ Evaluate **top to bottom**; the **first matching tier sets the level** (preceden
 
 #### 13.2.5 Worked examples (first is a named real run; 2-3 are illustrative signal-sets)
 
-- **`E-042-1_1 / R-E042-1`** (real, verified on disk): `compliance.failures = [{check:"verifier_provenance", severity:"blocking"}]`, `force_override_count:1`, `overall:"fail"`. → **T1 `vysoke`** (S1 fires). Reasons: open blocking violation + (accumulated) force-override watch. `confidence:'high'` (compliance present). This is the canonical "release blocked" case the manager must see at a glance.
-- **A DONE+merged run** (illustrative signal-set: `state:DONE`, `done_phase:release`, `pm_decision:merge`, `gate_retries:0`, `escalation_count:0`, clean compliance): no tier fires, coverage satisfied (compliance + gates sources present and clean) → **T3 `nizke`**, reasons `[no_adverse_signal]`, `confidence:'high'`.
+- **`E-042-1_1 / R-E042-1`** (real, verified on disk): `compliance.failures = [{check:"verifier_provenance", severity:"blocking"}]`, `force_override_count:1`, `overall:"fail"`. → **T1 `vysoke`** (S1 fires). Reasons: open blocking violation + (accumulated) force-override watch. **`confidence:'high'` from this ONE run** — the level was set by S1, an authoritative single-file signal (the present `compliance.json` is the release verdict), so the per-signal rule (§13.2.3, SF3) makes it high without ≥3 runs; the legacy blanket "≥3 runs for high" would have wrongly flagged it `'low'`. This is the canonical "release blocked" case the manager must see at a glance, and the golden `'high'`-from-one-file confidence fixture.
+- **A DONE+merged run** (illustrative signal-set: `state:DONE`, `done_phase:release`, `pm_decision:merge`, `gate_retries:0`, `escalation_count:0`, present+clean `compliance.json`): no tier fires, coverage satisfied (compliance + gates sources present and clean) → **T3 `nizke`**, reasons `[no_adverse_signal]`. **`confidence:'high'` because the level rests on the authoritative single-file clean-compliance floor** (§13.2.4) — a present `compliance.json` with no blocking failure is a per-run verdict, high from one run. (Were the *only* clean evidence the gate first-pass rate (S4) with <3 runs, the same `nizke` would carry `confidence:'low'` per the rate-signal rule, never a fake-confident green.)
 - **A fresh run with only `fsm-state.yaml`** (illustrative signal-set: no gates/compliance/timeline/audit yet): of the level-relevant set (S1,S3,S4,S5,S6,S8) **zero** sources exist, so coverage < 2 **and** the floor (compliance OR gates present and clean) is not met → **`neurceno`**, `confidence:'low'` — never a fake green. (S7/`fsm-state.yaml`-presence don't count toward coverage, §13.2.4.)
 
 ### 13.3 `sinceLastSeen` — "co se změnilo od poslední návštěvy" (localStorage, MVP1)
 
 The client stores a per-scope `lastSeen` ISO timestamp in **localStorage** (`aid.lastSeen.<scope-key>`, e.g. `aid.lastSeen.infra`, `aid.lastSeen.p:wan`, `aid.lastSeen.p:wan:P003`). It passes it as `?since=`. The server stays **stateless/read-only** (no server-side lastSeen in MVP1 — that is MVP1.5, §10). When `since` is absent (first visit, cleared storage) the server returns `sinceLastSeen.items = []` and `since:null`, and the UI shows "první návštěva - zatím není co porovnat" rather than flooding a first-timer with the whole history.
 
-**What counts as "changed since `since`"** (all from already-read mtimes/`ts`, no new disk reads):
+**What counts as "changed since `since`"** (all from already-read mtimes/`ts`, no new file reads):
 - **new/changed runs** — a run dir whose `max(file mtime) > since`, or a `fsm-state.yaml` whose `state` changed (compare via mtime; MVP1 has no prior-state store, so a run-dir mtime past `since` = "changed");
 - **new gate fails** — a `gates_report.json` with `overall:"fail"` (or any `gates.{name}.result:"fail"`) whose mtime `> since`;
 - **new violations** — a `compliance.json` with a `failures[]` entry whose file mtime `> since`;
 - **new backlog items** — a `backlog.md` row whose source mtime `> since` (coarse: backlog file mtime `> since` ⇒ surface the open-count delta);
 - **state transitions** — `fsm_transition` timeline events with `ts > since`.
 
-`counts` are the per-bucket totals; `items` are the individual `BriefItem`s (capped to the most recent 50 per scope to bound payload, with a `+N dalších` overflow note in `meta`). Because the comparison is mtime/`ts`-based and the server holds no prior snapshot, MVP1's `sinceLastSeen` is a **"touched since you left"** view, not a field-level diff — honest and cheap. Field-level before/after diffs need a server-side snapshot store = MVP1.5.
+`counts` are the per-bucket totals; `items` are the individual `BriefItem`s (capped to the most recent 50 per scope to bound payload, with a `+N dalších` overflow note in `meta`). Because the comparison is mtime/`ts`-based and the server holds no prior snapshot, MVP1's server-side `sinceLastSeen` is a **"touched since you left"** view, not a field-level diff — honest and cheap. Field-level before/after diffs need a server-side snapshot store = MVP1.5.
+
+**Backlog is the one signal with a FINER, client-owned snapshot (MF2).** The coarse "new backlog items" bullet above (server file-mtime ⇒ open-count delta) is all the **server** can honestly say, because `backlog.md` has no per-row timestamps. For the backlog *specifically*, the FE keeps a **second localStorage entry alongside the timestamp** — a full-row `BacklogSnapshot` (`aid.backlog.<scope-key>` → `{version:1, scopeKey, lastSeen, rows:{id,status,priority}[]}`, §7.5) keyed by the **same `scope-key`** as `aid.lastSeen.<scope-key>`. On load the FE diffs the current `GET /api/backlog` rows against that snapshot to get the row-level `added`/`closed`/`priorityChanged`/`statusChanged` (§13.7). The two localStorage families share the scope-key namespace and the `lastSeen` semantics, so "co se změnilo" stays one consistent model: the timestamp drives every *other* signal's "touched since" view; the row snapshot drives the *backlog's* finer field-level delta — both client-side, both MVP1.5-promotable to a server snapshot store with no contract change. On first visit (no `aid.backlog.<scope-key>` snapshot) the backlog delta is `firstVisit:true` → "bez porovnání - vše jako nové" (§13.7), the same honesty as `sinceLastSeen`'s "první návštěva".
 
 ### 13.4 Three scopes — how each `Brief` is computed
 
@@ -2208,13 +2457,13 @@ The same projection runs at three scopes; only the **run set** and **aggregation
 1. Computes a per-project `Risk` (§13.2) and the per-project `BriefItem`s.
 2. **Surfaces top blockers/decisions first, sorted by severity then recency**, across the whole infra — so the very first thing a non-technical user sees is "tyhle 2 věci čekají na tvé rozhodnutí" and "tohle blokuje postup", not a project grid. Each item is tagged with its `projectId` (and EPIC) so one tap deep-links to Screen B/C.
 3. `Brief.risk` at infra scope = the **worst (max) level across projects** that have a determinable risk, with the contributing projects named in `reasons` (e.g. "vysoké kvůli wan (blokující porušení) a aid-orchestrator (systematický override)"); projects whose risk is `neurceno` are listed separately as "u {n} projektů zatím málo dat", and do **not** drag the infra level down to a false green.
-4. `successProbability:null` (D2).
+4. `successProbability:{value:null, source:null}` — the MF5 envelope honoring the MVP1 invariant (D2).
 
 **Project scope (`GET /api/brief/:projectId`) — Screen B first tab.** Same projection over **one project's** active EPICs + queue + that project's plans. Blockers/watch-outs/decisions are project-local; `risk` is the project `Risk`; `nextUp` includes the project's next queued EPICs and plan progress.
 
-**Plan scope (`GET /api/brief/:projectId/:planId`) — Plan screen first tab.** Run set = the EPICs whose `plan_path` matches this plan (§5.4 EPIC→plan; `plan_path:null` fast-mode EPICs excluded). Adds plan-specific framing: `nextUp` = remaining EPICs of the plan + `PlanSummary.progressPct`; the plan's **lessons** (§4.7 lessons-learned filtered by the plan's EPIC ids) are surfaced as `info` `BriefItem`s ("co jsme se na tomhle plánu naučili"). `risk` is computed over the plan's EPIC runs.
+**Plan scope (`GET /api/brief/:projectId/:planId`) — Plan screen first tab.** Run set = the plan's member EPICs per the §13.6 four-tier rule (tiers 1-3: `plan_path` / `plan_ref` / id-derived; tier-4 orphans excluded — so aid-orchestrator's null-`plan_path` P046 members ARE in the set, MF1). Adds plan-specific framing: `nextUp` = remaining EPICs of the plan + `PlanSummary.progressPct`; the plan's **lessons** (§4.7 lessons-learned filtered by the plan's EPIC ids) are surfaced as `info` `BriefItem`s ("co jsme se na tomhle plánu naučili"). `risk` is computed over the plan's EPIC runs.
 
-**One implementation, three callers.** Factor the projection as `buildBrief(runSet, scope, since)` in `packages/aid-server/src/brief/build-brief.ts`; the three routes differ only in how they assemble `runSet` from the scanner cache. `Risk` is a pure function `computeRisk(signals): Risk` in `brief/risk.ts` (unit-testable against the §13.2.5 fixtures — the `E-042-1_1` blocking case is the golden vysoké fixture; a clean merged run is the golden nízké; a `fsm-state.yaml`-only run is the golden neurceno). Both modules are pure projections over already-parsed data — **no new disk reads, no writes** (the §7.6 read-only grep test still passes unchanged).
+**One implementation, three callers.** Factor the projection as `buildBrief(runSet, scope, since)` in `packages/aid-server/src/brief/build-brief.ts`; the three routes differ only in how they assemble `runSet` from the scanner cache. `Risk` is a pure function `computeRisk(signals): Risk` in `brief/risk.ts` (unit-testable against the §13.2.5 fixtures — the `E-042-1_1` blocking case is the golden vysoké fixture; a clean merged run is the golden nízké; a `fsm-state.yaml`-only run is the golden neurceno). Both modules are pure projections over already-parsed §4/§5 signal data — they add **no new file reads and never write** (the §7.6 read-only grep test still passes unchanged). The plan/audit/backlog/lessons projections the brief *surfaces* do read their existing v3 files (§13.5-§13.8, SF2), but those are likewise read-only and Tier-1-indexed.
 
 ### 13.5 Structured AUDIT SUMMARY + score trend
 
@@ -2277,43 +2526,71 @@ A short "proč audit dopadl takhle" sentence built by **string templates over th
 1. **Unparseable score ⇒ no number.** `overallScore: null`, `headlineCs` takes a no-score branch, the UI shows `blockingFindings` + the finding list + `countsBySeverity` — never a fabricated or default score. (Roughly a quarter of real audited runs land here.)
 2. **`blockingFindings` is the floor.** It is parsed from six on-disk forms and is the one field that always drives the CP5/merge surface; `null` only when even prose inference fails, and `null` is rendered as "nezjištěno", never as "false".
 3. **Trend shows only real points.** Score gaps stay `null` (line breaks), ordered by `started_at`; `delta`/headline-suffix are emitted only with ≥2 real scored points.
-4. **Headline is deterministic.** Assembled from structured fields by string templates; the LLM narrative is explicitly MVP2 (`successProbability: null` / `narrative` seam, §13.2/§10), and the static headline remains the permanent fallback and terminology source.
+4. **Headline is deterministic.** Assembled from structured fields by string templates; the LLM narrative is explicitly MVP2 (the `successProbability` envelope's `value:null` seam / `narrative`, §13.2/§10), and the static headline remains the permanent fallback and terminology source.
+
+#### 13.5.7 Two distinct plan/project audit metrics — `boundaryAudit` vs `aggregateAudit` (SF4 / MF7)
+
+A "plan audit" or "project audit" is **ambiguous** unless the spec names *which* number. Rev 4 defines **two distinct metrics**, both `AuditSummary`-shaped (and both honestly nullable), so each place picks the right one:
+
+- **`boundaryAudit`** = the **single plan-boundary auditor run** — the `AuditSummary` (§13.5.2) of the **latest audited run of the plan's last EPIC** (the EPIC that triggered the §4.3 plan-boundary roles). It answers *"how did the auditor judge this plan at its close?"*. It is **one report**, with one `overallScore`/`headlineCs`/`blockingFindings`. `present:false` when the last EPIC has no `audit-report.md` (common: aid-orchestrator's P046 last EPIC `E-046-3_3` → `overall_score: 84`).
+- **`aggregateAudit`** = an **aggregate across the audited member EPICs** (one latest-run score per EPIC, §5.4 run→EPIC = latest-run). It answers *"how good is quality across the whole plan/project, not just at the boundary?"*. **Definition (chosen): the `AuditSummary` of the EPIC whose latest-run score is the MEDIAN of the member EPICs' scored points** (ties → the later EPIC by `started_at`); its `overallScore` is therefore the **median score**, and its `headlineCs`/`topReasons`/`topRisks` are that real EPIC's — never a synthesized blend.
+  - **Why median-EPIC, not arithmetic mean:** the score scale is variable-vintage and ordinal-ish (some reports `/100`, some categories `/25`, a quarter have *no* score at all, §13.5.1); a mean would (a) invent a number that matches no real report and (b) be dragged by a single outlier or a sparse 2-point set. The **median-EPIC** is a real, on-disk report whose `headlineCs`/`topRisks` the UI can show verbatim and link to — it satisfies "flag, never fake" (the displayed `overallScore` is an actual report's score, and the chosen EPIC is named), while still being a robust central tendency. The arithmetic mean of the scored points is carried alongside as `aggregateAudit.warnings`-adjacent context only if ever needed; the headline number is the median EPIC's.
+  - **Honest sparse/empty handling (measured on disk):** `scoredEpicCount` (number of member EPICs with a parseable latest-run score) drives degradation. `0` scored EPICs → `aggregateAudit.present:true, overallScore:null, headlineCs` = "napříč plánem zatím není auditovaný EPIC se skóre" + a `warnings[]` note (the honest empty case — e.g. **sousto-na-miru has 0 audit-report.md across its entire workspace**). `1` scored EPIC → the median *is* that EPIC, but a `warnings[]` note "agregát z jediného auditu (n=1)" is added so the UI shows "1 audit" rather than implying a cross-EPIC read. `≥2` → the median is meaningful.
+  - **Worked numbers (on disk, verified):** aid-orchestrator project scope — latest-run scores per audited EPIC are `E-036=92`, `E-042=92`, `E-046-1=89`, `E-046-2=95`, `E-046-3=84` (other EPICs `null`, kept out of the median) → median of `{84,89,92,92,95}` = **92** (the `E-036`-or-`E-042` summary, ties→later). The aid-orchestrator P046 plan — `{89,95,84}` → median **89** (the `E-046-1_3` summary), `boundaryAudit` = `E-046-3_3` = **84**. krok P013 plan — `{93,90,89,91,86}` → median **90** (`E-013-2_5`), a real five-EPIC plan aggregate.
+
+The `auditTrend` (§13.5.4) is the **time-series companion** to `aggregateAudit` (one point per EPIC, gaps kept) — `aggregateAudit` is the single headline number, the trend is its shape over EPICs. **`boundaryAudit` is used on the Plan "Audit" tab's headline ("audit na konci plánu"); `aggregateAudit` + `auditTrend` are used for the cross-EPIC/-project read** (the project Audit tab, MF7, uses `aggregateAudit`). Both are produced by `audit/build-audit-summary.ts` (per-run) composed by `audit/build-aggregate-audit.ts` (the median-EPIC pick) — pure projections over the already-parsed audit reports, no new source of truth, no writes (SF2).
 
 ### 13.6 PLAN as a first-class entity (`PlanSummary`/`PlanDetail`, D4)
 
 > **Why:** a manager thinks in *plans*, not runs. Rev 2 had no Plan entity — an EPIC's `plan_path`/`plan_ref` was just a string. Rev 3 materializes the Plan as a first-class read-model with its own screen `/p/:project/plans/:planId`, so "kde jsme s plánem P003" is one tap, not a mental rollup over EPIC rows.
 
-A **Plan** is the group of EPICs sharing a `plan_path` (§5.4 EPIC→plan). The grouping rule, stated exactly:
+A **Plan** is the group of EPICs that resolve to the same plan file. **Membership is decided by a single, explicit four-tier precedence (Rev 4 — resolves the Rev 3 self-contradiction where membership both "excludes every `plan_path:null` EPIC" *and* "groups aid-orchestrator's `plan_path:null` EPICs by filename").** For each EPIC, take the **first** tier that resolves, and record which tier fired in `membershipSource`:
 
-- **Membership** = EPICs whose `fsm-state.yaml plan_path` (or `tasks/*.md` frontmatter `plan_ref`) resolves to the same plan file. `plan_path: null` **fast-mode EPICs are NOT members** — they are counted in `PlanDetail.orphanEpicCount` and surfaced (if anywhere) on the project screen, never as plan members (§5.4 — "`orphan_epic`").
-- **planId** = the plan-file stem (e.g. `P003` from `.aid-o/plans/P003-*.md`). When EPICs carry no `plan_ref` at all (e.g. aid-orchestrator's own queue, §4.6 / risk #15), they are grouped by the plan-file name found in `.aid-o/plans/` and a `warnings[]` note records the weaker grouping — **never an empty/broken Plan screen**.
+| # | Tier | Source on disk | `membershipSource` | Strength |
+|---|---|---|---|---|
+| 1 | **`plan_path`** | `fsm-state.yaml plan_path` (the latest run's), when non-null | `'plan_path'` | authoritative |
+| 2 | **`plan_ref`** | the EPIC's `tasks/*.md` frontmatter `plan_ref:` (resolved to its `P{NNN}` stem) | `'plan_ref'` | authoritative |
+| 3 | **id-derived** | the EPIC id's plan number — `E-{NNN}-…` → `P{NNN}` — **matched against an existing `.aid-o/plans/P{NNN}-*.md` file** | `'derived'` | **official but weaker** (+ warning) |
+| 4 | **orphan** | none of the above resolves (no `plan_path`, no `plan_ref`, **and no `P{NNN}` plan file exists**) | `'orphan'` | not a member |
 
-> **aid-orchestrator is the canonical filename-grouping-fallback test fixture (disk reality, verified).** In aid-orchestrator's *own* workspace almost every run has `plan_path:null` (E-035/036/037-1/037-2/041/042/045/046-1/046-2/046-3 all null-or-empty); only E-038 and E-040 carry a real `plan_path`, and both are single-EPIC (P038/P040). So this project has **no multi-EPIC `plan_path`-grouped data** — its Plan screen is driven *entirely* by the filename-grouping fallback. Two consequences the implementer must treat as first-class, not edge cases: **(a)** the flagship `89→95→84` audit-trend example (§13.5.4) and any aid-orchestrator plan trend are *filename-grouped/orphan* trends, not `plan_path`-membership trends; **(b)** AC #19's "project with no `plan_ref` still renders a Plan grouped by filename" is the **primary** validation path for this project, so the Plan screen must be tested against aid-orchestrator's real null-`plan_path` data rather than assuming `plan_path` membership exists.
+- **The id-derived tier (3) is a real, official membership** — it is **NOT** "fast-mode excluded" and the EPIC **IS** listed in `PlanDetail.epics[]` / `PlanSummary.epicIds`. It is only *weaker*: it carries `membershipSource:'derived'` and a `warnings[]` note ("E-046-3_3 přiřazeno k P046 podle čísla EPICu, ne podle plan_path") so the grouping is **transparent, never hidden**. The deterministic Czech surface uses the new `concept:plan_membership_derived` key (§13.10).
+- **Only tier 4 (orphan) is excluded** from membership and counted in `PlanDetail.orphanEpicCount`. The Rev-3 phrase "`plan_path:null` fast-mode EPICs are NOT members" is **wrong as written** and is replaced by this table: a `plan_path:null` EPIC is an orphan **only if it also has no `plan_ref` and no matching `P{NNN}` plan file**.
+- **planId** = the plan-file stem (e.g. `P046` from `.aid-o/plans/P046-*.md`), regardless of which tier resolved it. The plan's `title`/`description` come from that file; if the file is missing for an id-derived candidate, the EPIC degrades to orphan (tier 4), never to a broken Plan screen.
 
-**`PlanSummary` (list-row / brief-scope)** carries `epicIds`, `epicsTotal`/`epicsDone`, `progressPct` (`done_epics/total_epics*100`, §5.5), `acPct` (`Σpresent/Σac_count`, `null` when not measured), a thin `lessonsPreview[]` list, `auditTrend` (plan scope), `lastActivityAt`. **`PlanDetail` extends it** with the full Plan screen:
+> **The id-derivation is verified reliable on disk (Rev 4 grounding).** Across aid-orchestrator and acta, **every** EPIC whose `tasks/*.md` carries a `plan_ref` has the id-derived `P{NNN}` equal to that `plan_ref` stem — `E-019→P019`, `E-020→P020`, `E-021→P021`, `E-039→P039`, `E-042→P042`, `E-046→P046` (aid-orchestrator); `E-001→P001`, `E-003→P003`, `E-007→P007` (acta). The derivation never disagreed with an authoritative `plan_ref` in any sampled EPIC. The lone failure mode is **tier 4 by design**: `E-041` derives `P041` but there is **no `P041-*.md`** on disk (the plan file was never created), so `E-041` correctly resolves to *orphan*, not to a phantom plan.
+
+> **aid-orchestrator is the canonical id-derivation / weaker-membership test fixture (disk reality, verified).** In aid-orchestrator's *own* workspace **`fsm-state.yaml plan_path` is `null` on every E-046 run** (tier 1 never fires). The membership tiers fall out of the **§5.2 scan contract** (`tasks/*.md` **excluding `archive/`** for the EPIC list + `work/evidence/*/` for the run dirs), NOT from frontmatter that the scanner cannot see: only `E-046-3_3` has an **active** `tasks/*.md` file (frontmatter `plan_ref: …/P046-…md`) → **tier 2 (`plan_ref`)** fires for it. `E-046-1_3` and `E-046-2_3` are surfaced into the EPIC list **by their `work/evidence/<epic>/` dirs** (§5.2 step 2); their task files exist **only under `tasks/archive/`** — which §5.2 explicitly excludes — so although those archived files **do** carry `plan_ref: …/P046-…md`, the scanner never reads them, and the two EPICs resolve at **tier 3 (id-derived → P046)**. (Were §5.2 ever to read archived frontmatter, they would resolve at tier 2 instead; the **member set and `planId` are identical either way** — only the `membershipSource` label differs — so the three-member P046 fixture is stable across that scan-rule choice.) Either way P046 is a real three-EPIC plan in the cockpit, exactly the multi-EPIC `89→95→84` trend in §13.5.4. (Only `E-038`/`E-040` carry a real `plan_path`, and both are single-EPIC P038/P040.) Two consequences the implementer must treat as first-class, not edge cases: **(a)** the flagship `89→95→84` audit-trend example (§13.5.4) is a **tier-2+tier-3 (`plan_ref`+id-derived)** plan, *not* a `plan_path`-membership plan — its membership is mixed-source and partly `'derived'` (because the contributing EPICs are evidence-only with archived tasks); **(b)** AC #16/#19's id-derived-membership path is the **primary** validation path for this project, so the Plan screen must be tested against aid-orchestrator's real null-`plan_path` data (P046 = three EPICs via tiers 2+3) rather than assuming `plan_path` membership exists.
+
+**`PlanSummary` (list-row / brief-scope)** carries `epicIds`, `epicMembers[]` (each `{epicId, membershipSource}` per the §13.6 four-tier rule, so the weaker `'derived'` tier is visible at list altitude), `epicsTotal`/`epicsDone`, `progressPct` (`done_epics/total_epics*100`, §5.5), `acPct` (`Σpresent/Σac_count`, `null` when not measured), a thin `lessonsPreview[]` list, `auditTrend` (plan scope), `lastActivityAt`. **`PlanDetail` extends it** with the full Plan screen:
 
 | Tab / panel | Field | Source |
 |---|---|---|
 | **Brief (tab 1)** | rendered from `GET /api/brief/:projectId/:planId` (`scope:'plan'`, §13.4) | the brief projection over plan members |
 | Plán & EPICy | `epics[]` (status-weighted), `progressPct`, `acPct`, `orphanEpicCount`, `durationS` (`plan_duration_sec`, §5.1) | scanner cache |
-| Audit | `audit` (`AuditSummary` of the plan-boundary auditor, §13.5) + `auditTrend` (`scope:'plan'`) | latest audited run of the plan's last EPIC |
-| Backlog delta | `backlogDelta` (`BacklogDelta`, §13.7) | `backlog.md` filtered to plan EPICs |
+| Audit | `boundaryAudit` (`AuditSummary` of the **plan-boundary auditor run** on the plan's last EPIC, §13.5) + `aggregateAudit` (`AuditSummary`-shaped **aggregate across the plan's EPIC audits**, SF4) + `auditTrend` (`scope:'plan'`, one point per EPIC) | `boundaryAudit` = latest audited run of the plan's last EPIC; `aggregateAudit` = median-score-EPIC's summary over all audited member EPICs |
+| Backlog delta | `backlog` (current `BacklogItem[]` + `openCount`/`closedCount`, §13.7); the FE computes the `BacklogDelta` locally from its localStorage snapshot | `backlog.md` filtered to plan EPICs (server serves current rows only — delta is client-side, MF2) |
 | Ponaučení | `lessons` (full `LessonsView`, §13.8) | `lessons-learned.md` filtered to plan EPICs |
 
 `PlanSummary.lessonsPreview[]` (thin) and `PlanDetail.lessons` (full `LessonsView`) are **two altitudes of the same `lessons-learned.md` projection** — distinct field names so `PlanDetail extends PlanSummary` type-checks; the list-row shows a couple, the screen shows all. `plan_duration_sec` is `null` when no member run has a parseable anchor (§5.1). Every aggregation degradation lands in `PlanDetail.warnings`. **One implementation**: `buildPlan(planId, scope)` in `packages/aid-server/src/plan/build-plan.ts`, a pure projection over already-parsed EPIC/run data — no new disk reads, no writes.
 
-### 13.7 BACKLOG DELTA (`BacklogDelta`) — "co přibylo / ubylo"
+### 13.7 BACKLOG DELTA (`BacklogDelta`) — "co přibylo / ubylo" — CLIENT-SIDE in MVP1 (MF2)
 
-> **Why:** the raw backlog table (§4.6) is a technician's view. A manager wants the *delta*: what new improvement proposals appeared, what got closed, since I last looked. This is a read projection over `backlog.md` — **backlog writes stay MVP1.5** (this never mutates anything).
+> **Why:** the raw backlog table (§4.6) is a technician's view. A manager wants the *delta*: what new improvement proposals appeared, what got closed, what changed priority, since I last looked. This is a read view over `backlog.md` — **backlog writes stay MVP1.5** (this never mutates anything).
 
-`BacklogDelta` (§7.5) is computed over `backlog.md` (+ `work/backlog/`, §4.6), scoped to a project or a plan (plan = proposals whose source EPIC ∈ the plan's members):
+**MF2 — the delta cannot be computed from a `since` timestamp alone, so MVP1 computes it CLIENT-SIDE.** `backlog.md` has **no per-row timestamps** (§4.6) and the server is **stateless/read-only** (it holds no prior snapshot), so a server `GET /api/backlog-delta?since=` *cannot* know which rows were added, closed, or re-prioritized — a bare `since` is not enough information. The honest design:
 
-- **`openCount`** = the running `Active proposals: N` header count (§4.6).
-- **`closedCount`** = `created (from counter) − open`. When the counter is stale/absent (§4.0 finding #6: `counter.yaml epic:` is stale) and it is **not derivable**, set `closedCount: 0` and push a `warnings[]` note — **never a fabricated count**.
-- **The delta** (`addedSince`/`closedSince`/`items[]`) is computed against the **client-supplied `since`** (the localStorage `LastSeen` snapshot, §13.3 — the same mechanism as `Brief.sinceLastSeen`): `addedSince` = proposals whose row first appears after `since`; `closedSince` = proposals that moved to a closed status (`approved`/`rejected`/`deferred`) after `since`; `items[]` = those changed rows, each tagged `changeSince: 'new'|'closed'`.
-- **No `since`** (first visit / cleared storage) ⇒ degrade to the **absolute** counts: `addedSince = closedSince = 0`, `items[]` = the current open rows tagged `'unchanged'`. The server holds no snapshot, so MVP1's delta is the same honest "touched-since-you-left" granularity as `sinceLastSeen` (§13.3); a true field-level diff store is MVP1.5.
+- **The server serves CURRENT rows only.** `GET /api/backlog?project=` returns the current `BacklogItem[]` and the absolute `openCount`/`closedCount` in `meta` (no diff, no `since` param). **The server-side `/api/backlog-delta?since=` endpoint is REMOVED from MVP1** — a real server-side field-level delta needs a snapshot store and is **MVP1.5** (§10).
+- **The FE owns the snapshot.** On each visit the FE persists the full current row set as a `BacklogSnapshot` (`{ version:1, scopeKey, lastSeen, rows: {id,status,priority}[] }`, §7.5) in **localStorage**, keyed by `scopeKey` + `lastSeen` — the **same `scopeKey` mechanism as `Brief.sinceLastSeen`** (§13.3: `"project:wan"`, `"plan:wan/P003"`). Each scope keeps its own snapshot.
+- **The FE diffs current-vs-snapshot LOCALLY** into `BacklogDelta` (a client-computed shape, §7.5):
+  - **`added`** = current rows whose `id` is **absent** from the snapshot rows.
+  - **`closed`** = rows whose status moved to a **closed status** (`approved`/`rejected`/`deferred`) when the snapshot had them open (`prevStatus` carries the old value).
+  - **`priorityChanged`** = rows whose `priority` cell differs from the snapshot (`prevPriority` carries the old value).
+  - **`statusChanged`** = rows whose status changed but did **not** close (e.g. `proposed`→`pending`).
+  - Each item is tagged `changeSince: 'added'|'closed'|'priorityChanged'|'statusChanged'`; rows that match the snapshot are `'unchanged'` and not surfaced.
+- **First visit (no snapshot)** ⇒ `firstVisit:true`, all four delta lists empty, `lastSeen:null`, and the UI renders **"bez porovnání - vše jako nové"** (a `warnings[]` note `"first visit - no snapshot, vše jako nové"` records it). Honest: a first-timer is never shown a fabricated diff, and rows are not falsely labelled "new" against an empty baseline — they are simply the current backlog with no comparison. Clearing localStorage returns to `firstVisit:true`.
+- **`openCount`/`closedCount`** are still the **absolute** server counts (from `GET /api/backlog` meta): `openCount` = the `Active proposals: N` header count (§4.6); `closedCount` = `created (from counter) − open`, set `0` + a `warnings[]` note when the counter is stale/absent (§4.0 finding #6) and not derivable — **never a fabricated count**.
 
-Surfaced as the Plan screen "Backlog" panel and the project-scope tile; `addedSince`/`closedSince` also feed `Brief.sinceLastSeen.counts.newBacklog` (§13.1 row 1 / §13.3) so the two stay consistent. Endpoint `GET /api/backlog-delta?project=&plan=&since=`. **One implementation**: `buildBacklogDelta(scope, since)` in `packages/aid-server/src/backlog/build-delta.ts`, pure over the parsed backlog — read-only (the §7.6 grep test passes unchanged).
+Surfaced as the Plan screen "Backlog" panel and the project-scope tile. **Consistency with `Brief.sinceLastSeen.counts.newBacklog` (§13.1 row 1 / §13.3):** the **server** can only emit a *coarse* `newBacklog` (it sees the backlog file mtime moved past `since`, not which rows — the same "touched since" granularity as the rest of `sinceLastSeen`); the **FE** then renders the *precise* counts (`added.length`/`closed.length`) from its row-level `BacklogDelta`. The FE-computed number is the authoritative display value and supersedes the coarse server count when a snapshot exists; on first visit (no snapshot) the FE shows the coarse server count with the "bez porovnání" caveat. Both are driven by the same client `lastSeen`/snapshot model, so the two stay consistent **without** a server snapshot store. **One implementation**: a pure client function `buildBacklogDelta(currentRows, snapshot): BacklogDelta` in `packages/aid-gui/src/lib/backlog-delta.ts` (FE, unit-testable on fixtures) — there is **no** `aid-server/src/backlog/build-delta.ts` server module in MVP1 (the server only serves current rows; the FE computes the diff). The server stays read-only and writes nothing (the §7.6 grep test passes unchanged). Server-side field-level delta + a snapshot store = MVP1.5.
 
 ### 13.8 LESSONS-PER-PLAN (`LessonsView`)
 
@@ -2362,23 +2639,27 @@ concept:stuck_or_looping  → "Běh se točí na jednom místě - dlouho v jedno
 concept:decision_needed   → "Tady je potřeba tvé rozhodnutí (merge, eskalace nebo blokující nález auditu)." / eskalace
 concept:success_probability_mvp2 → "Přesnější odhad pravděpodobnosti úspěchu přijde s agentem (MVP2)." / ceka
 concept:since_first_visit → "První návštěva - zatím není co porovnat." / ceka
+concept:plan_membership_derived → "EPIC přiřazen k plánu podle čísla (E-{nnn} → P{nnn}), ne podle plan_path - slabší, ale oficiální zařazení." / pozor
+concept:aggregate_audit_sparse → "Souhrnný audit z {scoredEpicCount} EPIC - málo auditů na spolehlivý průměr." / ceka
 ```
 
 These follow the §6.1 template/status contract exactly (status drives colour via §6.2), so the brief, Screen G, and Help all render identical Czech.
 
 ### 13.11 MVP1 acceptance criteria — managerial layer (additive to §10)
 
-12. `GET /api/brief` returns a `Brief` with `scope:"infra"`, `successProbability:null`, and blockers/decisions sorted blocking-first across all 6 projects; Screen G renders them as the front door (not a project grid).
+12. `GET /api/brief` returns a `Brief` with `scope:"infra"`, `successProbability:{value:null, source:null}` (MF5 envelope), and blockers/decisions sorted blocking-first across all 6 projects; Screen G renders them as the front door (not a project grid).
 13. `computeRisk` returns **`vysoke`** for the real `E-042-1_1 / R-E042-1` fixture (open blocking `verifier_provenance` violation), **`nizke`** for a clean merged run, and **`neurceno`** (never `nizke`) for a run that has only `fsm-state.yaml` — the data-coverage rule is unit-tested.
-14. `successProbability` is `null` on every scope and the UI renders "přesnější odhad přijde s agentem (MVP2)" — there is no fabricated probability anywhere (D2).
+14. **`successProbability` envelope holds the MVP1 invariant (MF5).** `successProbability.value === null && successProbability.source === null` on every scope, and the UI renders "přesnější odhad přijde s agentem (MVP2)" — there is no fabricated probability anywhere (D2). A unit test asserts the invariant (`value===null && source===null`) on every brief MVP1 produces.
 15. `sinceLastSeen` uses the client `?since=` (localStorage) only; with no `since` the server returns `items:[]`/`since:null` and the UI shows "první návštěva"; the server writes nothing (read-only grep test still passes).
-16. The Plan screen (`/api/plans/:projectId/:planId` + `/api/brief/:projectId/:planId`) shows EPIC members, `progressPct`, `acPct` (or "N/A — fast mode"), lessons-per-plan, and the plan-scoped brief — `plan_path:null` EPICs are excluded from plan membership and counted as orphans.
+16. **Plan membership follows the four-tier precedence (MF1).** The Plan screen (`/api/plans/:projectId/:planId` + `/api/brief/:projectId/:planId`) shows EPIC members, `progressPct`, `acPct` (or "N/A — fast mode"), lessons-per-plan, and the plan-scoped brief. Each member carries a `membershipSource` resolved by §13.6: `plan_path` → `plan_ref` → id-derived (`E-{NNN}`→`P{NNN}` matched to a real `P{NNN}-*.md`) → orphan. **An id-derived EPIC IS a member** (tagged `membershipSource:'derived'` + a warning), **not** an orphan and **not** fast-mode-excluded; **only true orphans** (no `plan_path`, no `plan_ref`, no matching plan file) are excluded and counted in `orphanEpicCount`. Unit-tested on aid-orchestrator real data: **P046 has three members** — `E-046-3_3` resolves at tier-2 `plan_ref` (its **active** `tasks/*.md` carries `plan_ref:` → P046), while `E-046-1_3`/`E-046-2_3` resolve at tier-3 `derived` (surfaced into the EPIC list by their `work/evidence/` dirs; their `plan_ref`-bearing task files live **only under `tasks/archive/`**, which §5.2 excludes from the scan, so the scanner falls to id-derivation) — all three `plan_path:null`; `E-041` (derives `P041`, no `P041-*.md`) resolves to **orphan**.
 17. **Audit summary never fabricates a score.** For a run whose `audit-report.md` has no parseable score, `AuditSummary.overallScore` is `null` (`scoreSource:null`), `headlineCs` takes a no-score branch, and the UI shows `blockingFindings` + the finding list + `countsBySeverity` — never a fabricated or zeroed score. `blockingFindings` is parsed from the six on-disk forms (§13.5.1), and rendered "nezjištěno" (never "false") when `null`. Unit-tested against the three E-046 reports (frontmatter `84`, heading `95`, table `89`) **and** a real no-score report.
-18. **Audit trend keeps real gaps, ordered by `started_at`.** `AuditTrend.points` are chronological by run `started_at` (89 → 95 → 84 on the E-046 trio), score-less runs kept as `score:null` (a line break, not interpolation); `delta` is `null` until ≥2 scored points (then `-5` on the E-046 EPIC).
-19. **Plan screen aggregates correctly.** `GET /api/plans/:projectId/:planId` returns a `PlanDetail` whose `epics[]` are exactly the `plan_path`-matching EPICs, `plan_path:null` fast-mode EPICs are excluded (counted in `orphanEpicCount`), and `progressPct`/`acPct`/`durationS` roll up per §5.4/§5.5 (`acPct:null` → "N/A — fast mode", never 0%); a project with no `plan_ref` still renders a Plan grouped by filename with a `warnings[]` note (not an empty screen).
-20. **Backlog delta works off the localStorage snapshot.** `GET /api/backlog-delta?...&since=` returns `addedSince`/`closedSince`/`items[]` diffed against the client `since`; with **no** `since` it returns the absolute open/closed counts (`addedSince=closedSince=0`); `closedCount` is `0` + a warning (never fabricated) when the counter is stale; the server writes nothing (read-only grep test passes).
+18. **Audit trend keeps real gaps, ordered by `started_at`.** `AuditTrend.points` are chronological by run `started_at` (89 → 95 → 84 on the E-046 trio), score-less runs kept as `score:null` (a line break, not interpolation); `delta` is `null` until ≥2 scored points (then `-5` on the E-046 EPIC). The project-scope trend (`/api/audit-trend/:projectId`, MF7) is one point per audited EPIC, same gap rules.
+19. **Plan screen aggregates correctly under the four-tier rule.** `GET /api/plans/:projectId/:planId` returns a `PlanDetail` whose `epics[]` are exactly the tier-1-to-3 members (tier-4 orphans excluded, counted in `orphanEpicCount`), with `epicMembers[].membershipSource` and `membershipMixed` set; `progressPct`/`acPct`/`durationS` roll up per §5.4/§5.5 (`acPct:null` → "N/A — fast mode", never 0%). A project whose EPICs have no `plan_path`/`plan_ref` but a matching `P{NNN}-*.md` still renders a non-empty Plan via the id-derived tier with a `warnings[]` note (verified on aid-orchestrator P046, three members across `plan_ref`+`derived` tiers) — never an empty screen. `PlanDetail.boundaryAudit` is the last EPIC's auditor run (P046 → `E-046-3_3` = 84) and `aggregateAudit.overallScore` is the median member score (P046 `{89,95,84}` → 89), distinct numbers (SF4).
+20. **Backlog delta is computed CLIENT-SIDE off a localStorage snapshot (MF2).** The server exposes only `GET /api/backlog?project=` (current `BacklogItem[]` + absolute `openCount`/`closedCount`); there is **no** `/api/backlog-delta` endpoint in MVP1. The FE persists a `BacklogSnapshot` (`{id,status,priority}[]` keyed by `scopeKey`+`lastSeen`, §13.3/§7.5) and `buildBacklogDelta(currentRows, snapshot)` diffs current-vs-snapshot into `added`/`closed`/`priorityChanged`/`statusChanged`; unit-tested on fixtures (a row gone-to-`approved` → `closed`; a new id → `added`; a changed Priority cell → `priorityChanged`). With **no** snapshot (first visit / cleared storage) it returns `firstVisit:true`, the four lists empty, and the UI renders "bez porovnání - vše jako nové". `closedCount` is `0` + a warning (never fabricated) when the counter is stale. The server writes nothing (read-only grep test passes).
 21. **Lessons-per-plan filters correctly and never throws.** `GET /api/lessons?project=&plan=` returns only lessons whose `Context(epic_id)` ∈ the plan's EPICs (plan scope), and an absent/malformed `lessons-learned.md` yields `entries:[]` + a warning, not a crash (vitest green on a malformed fixture).
 22. **The two seams ship as seams, not features.** `MetricSet.timeBy` returns `user`/`dev` as `durationS:null, source:null` ("neměřeno") on every MVP1 run (no human/dev time is measured); `GET /api/memory` returns `{ available:false, reason:"MVP2", entries:[] }` and makes **no** Qdrant/MCP call (verified by the read-only invariant test + a unit test asserting the stub response).
+23. **Project-scope audit is first-class (MF7).** Screen B has an `Audit` tab fed by `GET /api/audit-summary/:projectId` (project `aggregateAudit` = the median-EPIC `AuditSummary`, §13.5.7) + `GET /api/audit-trend/:projectId` (one point per audited EPIC). `aggregateAudit.medianEpicId` names a real on-disk report and `overallScore` equals its score (never a synthesized mean); `scoredEpicCount===0` → `overallScore:null` + a warning (verified on **sousto-na-miru: 0 audit-report.md** → empty-but-honest), `===1` → an "n=1" warning. Unit-tested on aid-orchestrator (`{92,92,89,95,84}` → median 92) and that `aggregateAudit` ≠ `boundaryAudit` for P046 (89 vs 84).
+24. **Plan delivery & simplifier are first-class (MF6).** The Plan screen has a "Dodávka & zjednodušení" tab rendering `PlanDetail.deliveryReport` (`ReporterDelivery`) and `simplifierSummary` (`SimplifierSummary`). The Reporter panel shows `outcome` + `summaryCs` + the `testEvidence[]` list, and a test-evidence file that is **missing on disk** renders an honest "chybí na disku" warning row (`exists:false`), never silently dropped (§4.3 anti-fabrication); the Simplifier panel lists `proposals[]` with `disposition`/`effort`. `present:false` on either → "Reporter/Simplifier zatím neběžel" (no fabricated outcome); both panels are read-only in MVP1. Unit-tested: a plan with no `…-delivery.md`/`simplifier-report.md` yields `present:false` on both (vitest green), and a delivery report citing a non-existent `_test_evidence` file flags `exists:false`.
 
 ---
 
@@ -2415,17 +2696,19 @@ Resolution of the external design audit (Rev 2). Each finding → one-line resol
 
 Rev 3 is additive — it does not re-open any Rev 2 audit finding. What it adds:
 
+> **Baseline note.** This table is the **Rev 3** change record and is preserved as history. Where Rev 4 (audit round 2) supersedes a Rev 3 shape — the `successProbability` envelope (MF5), the client-side backlog delta (MF2), and the structured `ComplianceFailure` (MF3) — the **current contract is §14**, not this table. The Rev 3 wording below (e.g. "`successProbability` always `null`", "backlog delta") stays substantively true under Rev 4 (the envelope's `value` IS always `null` in MVP1) but is intentionally not rewritten here.
+
 | Item | What | Sections |
 |---|---|---|
 | **D1 — three-tier `Brief`** | One `Brief` read-model (infra / project / plan scope) answering the 7 PM questions; rendered as new Screen G "Co potřebuju vědět" (front door), Screen B tab 1, Plan screen tab 1. | §13.1, §13.4, §7.5 (`Brief`/`BriefItem`) |
-| **D2 — deterministic RISK** | `Risk` = level (nízké/střední/vysoké/neurčeno) + human reasons + confidence, from countable signals only; explicit rule table with named thresholds; `successProbability` always `null` in MVP1 ("flag, never fake"). | §13.2, §7.5 (`Risk`/`RiskReason`) |
+| **D2 — deterministic RISK** | `Risk` = level (nízké/střední/vysoké/neurčeno) + human reasons + confidence, from countable signals only; explicit rule table with named thresholds; `successProbability` is a `SuccessProbability` envelope with the binding MVP1 invariant `value===null && source===null` (MF5; "flag, never fake"). | §13.2, §7.5 (`Risk`/`RiskReason`/`SuccessProbability`) |
 | **`sinceLastSeen`** | "Co se změnilo od poslední návštěvy" via client localStorage `?since=` only; server stays read-only/stateless; "touched-since" granularity (field-level diff = MVP1.5). | §13.3, §7.5 (`Brief.sinceLastSeen`) |
 | **Plan as first-class (D4)** | `PlanSummary` (list-row) + `PlanDetail` (full Plan screen: brief tab, EPIC members, progress, AC%, `plan_duration_sec`, audit summary + trend, backlog delta, lessons); Plan screen `/p/:project/plans/:planId`. | §13.6, §7.5 (`PlanSummary`/`PlanDetail`), §7.4 |
 | **Audit summary + trend** | Structured `AuditSummary` (best-effort score, always-present `blockingFindings`, per-category scores, top reasons/risks, ranked next steps, auto-fixable count) + `AuditTrend` score-over-time (real points only, ordered by `started_at`) + a deterministic Czech headline — replaces "render the audit-report.md". | §13.5, §7.5 (`AuditSummary`/`AuditTrend`), §7.4 |
-| **Backlog delta** | `BacklogDelta` — open/closed counts + added/closed-since the client `since` snapshot (localStorage, §13.3); read-only (writes = MVP1.5). | §13.7, §7.5 (`BacklogDelta`), §7.4 |
+| **Backlog delta (client-side, MF2)** | Server serves current rows + absolute open/closed counts via `/api/backlog`; the FE computes `BacklogDelta` (`added`/`closed`/`priorityChanged`/`statusChanged`/`firstVisit`) by diffing current rows vs a localStorage `BacklogSnapshot` (§13.3). No `/api/backlog-delta` in MVP1 (server field-level delta = MVP1.5); read-only (writes = MVP1.5). | §13.7, §7.5 (`BacklogDelta`/`BacklogSnapshot`), §7.4 |
 | **Lessons-per-plan** | `LessonsView` — `lessons-learned.md` projected at plan/project/infra scope; full view on the Plan screen, thin list on `PlanSummary`. | §13.8, §7.5 (`LessonsView`), §7.4 |
 | **Seams (types now, deferred behaviour)** | `TimeSource` (`MetricSet.timeBy`, MVP1 "neměřeno", WakaTime fills it MVP2) + Memory taxonomy (`MemoryQuery`/`MemoryEntry`/`MemoryResult`, MVP1 stub `/api/memory` → `{available:false,reason:"MVP2"}`, read wired MVP2). | §13.9, §7.5 (`TimeSource`/`MemoryQuery`), §7.4 |
-| **Endpoints** | `GET /api/brief`, `/api/brief/:projectId`, `/api/brief/:projectId/:planId`, `/api/plans/:projectId`, `/api/plans/:projectId/:planId`, `/api/lessons`, `/api/backlog-delta`, `/api/audit-trend/:p/:e`, `/api/audit-trend/:p/plan/:planId`, `/api/memory` (MVP1 stub) — all read-only. | §7.4 |
+| **Endpoints** | `GET /api/brief`, `/api/brief/:projectId`, `/api/brief/:projectId/:planId`, `/api/plans/:projectId`, `/api/plans/:projectId/:planId`, `/api/lessons`, `/api/audit-trend/:p/:e`, `/api/audit-trend/:p/plan/:planId`, `/api/memory` (MVP1 stub) — all read-only. (`/api/backlog-delta` removed — backlog delta is client-side, MF2; `/api/backlog` serves current rows + counts.) | §7.4 |
 | **Dictionary** | 9 new `kind:"concept"` keys (risk levels, stale/stuck, decision-needed, MVP2-probability, first-visit) — additive, auto-flow into `/help`. | §13.10, §6.3 |
 | **Phasing** | Rev 3 managerial surfaces (brief read-models, Screen G, Plan screen, audit summary + trend, backlog delta, lessons, lastSeen-localStorage, deterministic risk) folded into **MVP1**; user-notes + server-side lastSeen + backlog writes = **MVP1.5**; LLM narrative + success-probability % + memory read + WakaTime = **MVP2**. | §10 |
 | **Acceptance** | AC #12-#22 (§13.11): brief/risk/probability/lastSeen/plan (#12-#16) + audit-summary never fabricates, audit trend gaps, plan aggregation, backlog delta off localStorage, lessons filtering, seams ship as seams (#17-#22). | §13.11, §10 |
@@ -2433,3 +2716,26 @@ Rev 3 is additive — it does not re-open any Rev 2 audit finding. What it adds:
 Deferred by design (locked decisions): memory taxonomy in the contract but **read-only MVP2** (Qdrant via vulcan-memory, §13.9); `TimeSource` adapter = architecture seam only (MVP1 shows "neměřeno", WakaTime fills it MVP2, §13.9); user notes module (internal vs client) = **MVP1.5**; server-side multi-device lastSeen = MVP1.5; the smart probability % + narrative = MVP2 (the LLM agent).
 
 *Spec assembled from 6 domain research reports (signals, timings, explain, backend, ui, ops), all grounded in direct disk inspection of the 6 AID v3 workspaces under `/opt/eco/projects/`. Ready for review → implementation plan.*
+
+---
+
+## 14. Rev 4 changelog - audit round 2
+
+Resolution of the external design audit round 2 (against Rev 3). Each finding → resolution + sections changed. All edits are additive to Rev 3; no Rev 3 decision was re-opened. This section is the **current Rev 4 contract** wherever it supersedes the Rev 3 baseline in §12.5.
+
+| Finding | Resolution | Sections changed |
+|---|---|---|
+| **MF1 — Plan membership self-contradiction** | ONE explicit four-tier precedence: `plan_path` → frontmatter `plan_ref` → id-derived `E-{NNN}`→`P{NNN}` (matched to a real `P{NNN}-*.md`) → orphan, recorded in `membershipSource`. The id-derived tier is an OFFICIAL but weaker member (tagged + warned, `concept:plan_membership_derived`), NOT fast-mode-excluded; only tier-4 orphans are excluded into `orphanEpicCount`. Verified on aid-orchestrator P046 (three members, all `plan_path:null`): `E-046-3_3` resolves at **tier-2 `plan_ref`** (its **active** `tasks/*.md` carries `plan_ref:` → P046), while `E-046-1_3`/`E-046-2_3` resolve at **tier-3 `derived`** — they are surfaced into the EPIC list by their `work/evidence/` dirs (§5.2 step 2), and their `plan_ref`-bearing task files exist **only under `tasks/archive/`**, which §5.2 excludes from the scan, so the scanner falls to id-derivation. (The member set + `planId` are identical whether or not §5.2 ever reads archived frontmatter — only the `membershipSource` label would shift tier-3→tier-2 — so the three-member fixture is stable.) Plus the `E-041`→orphan case (`P041` derived, no `P041-*.md`). | §13.6 (table + both grounding notes), §5.2 (scan rule referenced), §5.4, §5.1 `plan_duration_sec`, §7.5 (`MembershipSource`, `PlanSummary.epicMembers[]`/`membershipMixed`, `EpicSummary.membershipSource`), §13.4 plan scope, AC #16/#19, grounding notes |
+| **MF2 — Backlog delta not computable from `since` alone** | Server is stateless and `backlog.md` has no per-row timestamps, so the delta moved CLIENT-SIDE: `GET /api/backlog` serves current rows + absolute `openCount`/`closedCount`; the FE persists a `BacklogSnapshot` (`{id,status,priority}[]` keyed by `scopeKey`+`lastSeen`) in localStorage and diffs current-vs-snapshot into `added`/`closed`/`priorityChanged`/`statusChanged`. `/api/backlog-delta` REMOVED from MVP1 (server field-level delta = MVP1.5). First visit → `firstVisit:true` "bez porovnání - vše jako nové". | §13.7 (rewritten), §13.3, §7.5 (`BacklogSnapshot`/`BacklogSnapshotRow`/`BacklogDelta`/`BacklogDeltaItem`, `PlanDetail.backlog`), §7.4 (endpoint removed), §10, §12.5, AC #20 |
+| **MF3 — `ComplianceRun.failures` loses structure** | New `interface ComplianceFailure { check; evidence; severity:'blocking'|'advisory'; promotedAt? }` replacing `failures: string[]` in `ComplianceRun.failures` and `ComplianceView.violations[].failures`; rippled to Risk S1, `health.openViolations`, the "resolved blocking failure" rule, and the §10 gate-field list. | §7.5 (new interface + 2 field types + grounding note), §5.7 `openViolations`, §13.2.1 S1, §10 MVP-1 gate fields |
+| **MF4 — `Checkpoint.provenance` not nullable** | `provenance: string | string[] | null` + new `provenanceSource: 'compliance'|'timeline'|null`. CP1 (no compliance provenance) and older/no-compliance runs are `null`, never `"unverifiable"`; read only from `compliance.json` (source of truth), timeline corroboration optional. | §7.5 (`Checkpoint` interface + grounding note), consistent with §4.2 |
+| **MF5 — `successProbability: null` literal blocks the MVP2 plan** | New `interface SuccessProbability { value:number|null; source:'agent'|null; confidence? }` envelope with the binding MVP1 invariant **`value===null && source===null`** (UI renders "přesnější odhad přijde s agentem (MVP2)"). MVP2 fills `value`/`source:'agent'` with no contract churn. "flag, never fake" preserved — MVP1 still renders no number; AC #14 asserts the invariant. | §7.5 (new interface + `Brief.successProbability` + grounding note), §13 D2, §13.1 row 7, §13.4, §13.5.6, §10 MVP2 (+AC), §8.2 Screen G map, §13.11 AC #12/#14 |
+| **MF6 — Plan screen lacks first-class Reporter + Simplifier** | `PlanDetail.deliveryReport` (`ReporterDelivery`) + `simplifierSummary` (`SimplifierSummary`) + supporting types (`ReporterTestEvidence`, `SimplifierProposal`, `DeliveryOutcome`, `SimplifierDisposition`); new Plan tab "Dodávka & zjednodušení" (two panels — Reporter delivery + Simplifier proposals) with desktop+mobile wireframes; `ReporterDeliveryPanel`/`SimplifierPanel` components. Missing `_test_evidence` files render honest `exists:false`. Audit stays its own tab. | §7.5 (types + `PlanDetail` fields), §8.1 route, §8.2 Plan wireframes + tab strips, §8.3 component inventory, §13.6 Plan tab map, AC #24 |
+| **MF7 — Project-level audit not first-class** | New project-scope `Audit` tab on Screen B rendering `aggregateAudit` (the median-EPIC `AuditSummary`, §13.5.7) + project-scope `AuditTrend`, fed `GET /api/audit-summary/:projectId` + `GET /api/audit-trend/:projectId`; reuses the shared `AuditSummaryCard`/`AuditTrendChart` (no new component). `ProjectDetail` gains `aggregateAudit`/`auditTrend`. Honest empty case verified on sousto-na-miru (0 audit reports). | §8.1/§8.2 Screen B, §7.4 (2 endpoints), §7.5 (`ProjectDetail`), §13.5.7, AC #23 |
+| **SF1 — Discovery contract** | MVP1 monitors ONLY top-level workspaces (`<scanRoot>/*/.aid-o`, depth-1) with the denylist; nested/empty/test `.aid-o` (e.g. `krok/backend/.aid-o`, `vulcan/ui/.aid-o`) are NOT recursed into. | §7.2, AC #1 |
+| **SF2 — "no new disk reads" claim false** | Reworded to "no new source of truth, no writes, reads confined to existing v3 artifacts"; scanner Tier-1 index must include `plans/*.md`, `audit-report.md`, `backlog.md`, `lessons-learned.md`. | §13 intro, §13.1, §13.4, §7.2, §10 builders |
+| **SF3 — Risk confidence contradiction** | Per-signal confidence: authoritative single-file signals (S1 blocking compliance, S8 audit blocking, S3 systematic) are HIGH from one file; rate/trend signals (S4 gate first-pass) need ≥3 runs for HIGH; timeline-pattern signals (S5/S6) are HIGH when the pattern is ≥2 occurrences. Resolves the §13.2.3-vs-§13.2.5 contradiction (`E-042-1_1` is correctly HIGH from one file). | §13.2.3, §13.2.5 |
+| **SF4 — Plan audit semantic unclear** | Two distinct metrics: `boundaryAudit` (the single plan-boundary auditor run on the last EPIC) vs `aggregateAudit` (the MEDIAN-score member EPIC's `AuditSummary` — never a synthesized mean). The project Audit tab (MF7) uses `aggregateAudit`. | §13.5.7 (new), §7.5 (`PlanDetail.boundaryAudit`/`aggregateAudit`, `AuditTrend.scope:'project'`), §8.2 Plan/Screen-B Audit tabs |
+| **SF5 — Stale Rev 2 B/C wireframes** | Screen B rewritten in place to the tabbed `Brief · EPICy · Plány · Audit · Zdraví` form (Brief = first tab, new Audit tab); Screen C reconciled (CP6 Fast-Mode-only line, Audit section tab). Rewritten, not appended. | §8.2 Screen B + Screen C |
+
+> **Note — concurrent-edit reconciliation.** MF1/MF2/MF6/MF7/SF1-SF5 were applied directly to the file by four parallel design streams; MF3, MF4, MF5, the Rev 4 title line, the two umbrella type-consistency fields (`EpicSummary.membershipSource`, `ProjectDetail.aggregateAudit`/`auditTrend`), the MF1 grounding correction (the §5.2 archive-exclusion is why `E-046-1_3`/`E-046-2_3` are tier-3 `derived` rather than tier-2 `plan_ref` — the earlier "they have no task file" wording was factually wrong; their `plan_ref`-bearing task files do exist, only under `tasks/archive/`), and this §14 were applied in the final coordinator pass. The MF6 `ReporterDelivery`/`SimplifierSummary` shapes that landed are the UI-stream variants (with `present`/`outcome`/`summaryCs`/`testEvidence[].exists`); the contracts-stream's overlapping leaner proposal is superseded by them.
