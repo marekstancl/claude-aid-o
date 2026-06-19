@@ -116,6 +116,58 @@ matched_rules: ["{rule_id_1}", "{rule_id_2}"]
      RUN/FAIL classification (e.g. `["security_keyword:secret_pattern"]`).
      The verifier should leave it untouched. Not FSM-checked. -->
 
+# Additive Fields (v2.35+) — present only when applicable
+<!-- ADDITIVE ONLY: these fields extend (never replace) the above top-level fields.
+     The existing `_generated_by`/`_generated_at`/`classification`/`verdict` greps
+     at line-start still work because these fields are at top-level, not nested.
+
+     HIGH-RISK GATE (aid-fsm.sh fsm_check_verifier_output):
+       When `behavior_trace_required: true`, the FSM checks `behavior_trace_count > 0`.
+       This is structural/non-emptiness only — trace quality is NOT evaluated by the gate.
+
+     Emit these fields when dispatched with checkpoint context (CP2, CP3, CP4, CP6).
+     For trivial/SKIP diffs, emit `behavior_trace_required: false` + reason instead. -->
+
+checkpoint: {cp2|cp3|cp4|cp6}
+<!-- Which checkpoint this output belongs to. Drives diff scope (see review-checkpoint-contracts.md):
+       cp2 — HEAD~1..HEAD (step diff)
+       cp3 — base_commit..HEAD (full EPIC diff)
+       cp4 — applied curator/auditor diff
+       cp6 — advisory; no FSM enforcement -->
+
+focus: {code-review|security|behavior-trace}
+<!-- Review lens applied. One of the focus types from agents/verifier.md.
+     For CP3: two separate outputs (code-review + security), each with its own focus. -->
+
+behavior_trace_count: 0
+<!-- Number of request paths traced. MUST be > 0 when `behavior_trace_required: true`.
+     Set to 0 only for trivial/SKIP diffs (no handler changes) with
+     `behavior_trace_required: false` + `behavior_trace_skip_reason`. -->
+
+behavior_trace_required: {true|false}
+<!-- true  — diff matched a high-risk pattern; FSM enforces count > 0
+     false — diff is trivial/SKIP; `behavior_trace_skip_reason` MUST be set
+     Omit this field for RUN/SKIP where no high-risk pattern was detected (defaults to false). -->
+
+behavior_trace_skip_reason: "{why no trace needed — REQUIRED when behavior_trace_required: false}"
+<!-- Example: "no handler patterns in diff"
+     Example: "classification SKIP — docs/config only, no executable code changed"
+     REQUIRED only when `behavior_trace_required: false`. -->
+
+behavior_trace:
+<!-- Optional array of traced request paths. Present when checkpoint is cp2 or cp3
+     AND the diff adds/modifies a handler. Each entry traces one request path end-to-end. -->
+  - request: "{HTTP method + path, e.g. POST /api/login}"
+    path: "{handler → service → db/sink, e.g. handler → auth_service.verify() → db.query()}"
+    sink: "{final outcome type, e.g. JWT token returned | auth error raised}"
+    branches:
+      - name: "{branch label, e.g. success}"
+        outcome: "{HTTP status + body summary, e.g. 200 + JWT}"
+      - name: "{branch label, e.g. invalid_password}"
+        outcome: "{HTTP status + body summary, e.g. 401 AuthError}"
+      - name: "{branch label, e.g. user_not_found}"
+        outcome: "{HTTP status + body summary, e.g. 401 AuthError}"
+
 # {Variant Heading}
 <!-- Pick the heading that matches your variant — this is the ONLY place where
      the four variants visibly diverge in body shape. Pre-deploy EPICs that
