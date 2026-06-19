@@ -33,7 +33,7 @@ A diff is "high-risk" if it matches ANY of these patterns:
 
 When the checkpoint's diff matches a high-risk pattern:
 - `behavior_trace_count` MUST be > 0
-- `behavior_trace_required: true` (or omit, default true for high-risk)
+- `behavior_trace_required: true` (must be set explicitly — gate only fires when this field is literally `"true"`; omitting it means no enforcement)
 - Each traced path must name: request, path (handler→service→sink), sink, branches with outcomes
 
 When diff is trivial (no high-risk patterns) or `classification: SKIP`:
