@@ -26,7 +26,7 @@ hádal CLI argumenty a nakonec ručně vyráběl CP1-deep evidence.
 | C7 | **Dokumentace si protiřečí.** `pipeline.md:139` tvrdí „PRE-FLIGHT branch nevytváří", o 11 řádků níž `pipeline.md:150` i kód tvrdí opak. | `skills/pipeline.md:139` vs `:150` + `aid-fsm.sh:1683` | Agent neví, čemu věřit |
 | C8 | **Branch se vytvoří PŘED kontrolou dirty tree.** V `cmd_init` je branch operace dřív než guard nepřevzatých změn. | `scripts/aid-fsm.sh:1669-1707` (branch) před `:1709` (dirty guard) | „Branch dřív než má, pak ho pojistky nepustí" |
 | C9 | **Per-step commit není vynucený.** `increment-step` ověřuje jen, že verify soubor obsahuje řetězec 7+ hex znaků — ne že commit reálně existuje, je na správné branchi nebo je nový. | `scripts/aid-fsm.sh:~2105` | Krok lze „uzavřít" bez skutečného commitu = „chybí commit" |
-| C10 | **Generační pipeline není atomická ani idempotentní.** EPIC/JSON/run/queue se zapisují postupně; selhání uprostřed nechá poloviční stav, další pokus pak opravuje půlku. | `scripts/aid-auto-pipeline.sh` (sekvenční zápisy); důkaz: holé `P033`/`P037`/`P038` vedle plných `P0xx-...md` ve WAN `plans/` | Částečné běhy množí countery, queue entries, stray soubory |
+| C10 | **Generační pipeline není atomická ani idempotentní.** EPIC/JSON/run/queue se zapisují postupně; selhání uprostřed nechá poloviční stav, další pokus pak opravuje půlku. | `scripts/aid-auto-pipeline.sh` (sekvenční zápisy do counter/queue/tasks/runs bez transakce). **Důkazní povinnost:** fault-injection test — selhání ve fázi 2 NESMÍ změnit counter, queue ani publikovat artefakty. (Pozn.: dříve uváděné WAN adresáře `P033`/`P037`/`P038` jsou mockup adresáře, NE trosky pipeline — důkaz byl chybný, mezera je ale reálná podle struktury skriptu.) | Částečné běhy mohou nechat counter/queue/artefakty v nekonzistentním stavu |
 | C11 | **Generace nedělá žádný commit a kontrakt to ani nepožaduje.** | `commands/aid-plan.md:335` (6 obecných bodů, commit nezmíněn) | Artefakty zůstanou necommitnuté, není definováno kdo/kdy je commitne |
 
 > **C9 ≠ C11.** Jsou to DVA různé commity: **generační** (artefakty EPICu — C11)
@@ -59,40 +59,56 @@ Po třech kolech jsou tyto body společné a považujeme je za uzavřené:
 | **Kdy vytvořit branch** | „líně, až s prvním commitem" | „při READY→EXECUTE, před první implementační změnou" | **Codex má pravdu.** Kdyby se čekalo až na commit, agent už upravuje soubory na main. Branch vzniká při přechodu READY→EXECUTE, po kontrole čistého stromu. |
 | **Plugin resolver** | „zkopírovat instrukce z aid-run.md do aid-plan.md" | „nekopírovat — jeden sdílený resolver skript pro oba příkazy" | **Codex má pravdu.** Kopie = další duplicita. Sdílený skript. |
 | **Legacy plány bez evidence (varianta B)** | „když existuje PASS review, vygenerovat z něj 4 stuby" | „odmítnout — starý review ≠ tři nezávislé čočky; stuby jen obcházejí gate" | **Codex má pravdu.** Pro legacy: znovu spustit CP1-deep, NEBO explicitní auditovatelný PM waiver — nikdy falešná evidence. (Claude k tomu sám dospěl ve finále.) |
-| **Priorita atomicity** | P1/P2 (idempotence levně teď, plná atomicita později) | „zásadní mezera" | **Téměř shoda.** Codex ji ve svém pořadí realizace řadí jako krok 6/7 — tj. taky později. Shodneme se: matters, ale až po commit/branch/CP1 opravách. |
-| **Priorita CLI sjednocení** | brzy (levné, vysoká hodnota) | poslední (krok 7) | **Drobnost.** Je to „jen docs", může jet brzy i pozdě. Nezablokuje nic. |
+| **Priorita atomicity** | P1/P2 (idempotence levně teď, plná atomicita později) | „zásadní mezera" | **Vyřešeno.** Atomicita zařazena jako krok #5 — **explicitně PŘED generation commitem** (#6), jinak by commit stál nad částečně mutující pipeline. |
+| **Priorita CLI sjednocení** | brzy (levné, vysoká hodnota) | původně poslední | **Vyřešeno ve prospěch Claude.** CLI + sdílený resolver zařazeny jako krok #1 (levné, odblokují vše ostatní). |
 
 > Žádný z původních rozporů nezůstal otevřený na úrovni faktů. Zbývají jen dvě
 > **rozhodnutí pro PM** (Část 4), kde nejde o správnost, ale o politiku/přísnost.
 
 ---
 
-## Část 4 — Reziduální rozhodnutí pro PM (Marka)
+## Část 4 — Rozhodnutí PM (ROZHODNUTO 2026-06-19)
 
-**R1 — Legacy high-risk backlog (WAN, ~40 plánů bez CP1-deep evidence).**
-- (a) **Přísně:** každý legacy high-risk plán musí znovu projít CP1-deep, než vygeneruje EPIC. Bezpečné, ale pracné.
-- (b) **Pragmaticky:** povolit explicitní, **auditovatelný PM waiver** (zaznamenaný, ne tichý) pro plány, co prokazatelně reviewem prošly (např. P044 = 3 kola + Codex audit).
-- **Společné doporučení:** default tvrdý stop + možnost explicitního waiveru. Nikdy fabrikovaná evidence.
+**R1 — Legacy high-risk backlog — ROZHODNUTO: strict default + explicitní waiver.**
+Default = tvrdý stop (legacy high-risk plán neprojde bez CP1-deep evidence).
+Únikem je **explicitní, auditovatelný PM waiver**, který MUSÍ být navázaný na:
+- konkrétní **hash plánu** (content hash souboru plánu),
+- **review soubor** (cesta k `cp1-review-<plan>.md`),
+- **verdikt PASS**,
+- **důvod**,
+- **čas** (ISO 8601),
+- **PM autorizaci** (identita schvalovatele).
 
-**R2 — Auto-commit generačních artefaktů (kolize s ekosystémovým pravidlem).**
-Codexův elegantní model („jeden generation commit → `/aid-run` z něj odbočí")
-předpokládá automatický commit. Ale globální pravidlo zní *„Commit or push only
-when the user asks."*
-- (a) **Uvolnit pravidlo pro AID bookkeeping** (EPIC/JSON/run jsou orchestrátorové artefakty, ne produkční kód) → auto-commit povolen.
-- (b) **Zachovat pravidlo** → generace nechá artefakty necommitnuté, commit udělá uživatel / `/aid-run`; výstup musí explicitně hlásit `commit: pending`, nikdy „hotovo".
-- **Doporučení:** respektovat default (b) — necommitovat automaticky bez potvrzení.
+**Jakákoliv změna plánu waiver zneplatní** (změní se hash → waiver neplatí → znovu
+stop). Nikdy fabrikovaná evidence ani auto-stuby.
+
+**R2 — Generation commit — ROZHODNUTO: jeden automatický commit, přísně omezený.**
+`/aid-plan --epic` je **dokumentovaně souhlas s jedním přesně omezeným commitem**
+(orchestrátorové artefakty nejsou produkční kód). Pravidla:
+- **právě jeden** generation commit, **nikdy push**;
+- stagovat **pouze cesty z manifestu**, NIKDY `git add -A`;
+- flag **`--no-commit`** pro výjimky (artefakty zůstanou necommitnuté).
+
+**Proč auto-commit, ne „necommitovat":** kdyby generace nechala artefakty
+necommitnuté, `/aid-run` narazí na clean-tree guard a zasekne se. Necommitnutý
+stav tedy aktivně rozbíjí navazující běh — proto je jeden řízený commit správné
+default chování, ne uvolnění pravidla bez důvodu.
 
 ---
 
 ## Část 5 — Sjednocený plán realizace (pořadí)
 
-1. **CP1 varianta A + vyřešit `/aid-plan --deep`** (implementovat reálný režim NEBO smazat + opravit hlášku v `aid-cp1-gate.sh:200`). Legacy → re-review nebo explicitní waiver (R1).
-2. **Oddělit FSM init od EPIC generace** — `aid-json-to-run.sh`/`cmd_init` přestane mutovat git; `fsm-state.yaml` se smí zapsat. Smazat save/restore hack (`aid-json-to-run.sh:663-670`).
-3. **Dirty-tree check před jakoukoli branch operací** (`aid-fsm.sh` — přehodit pořadí; nezávislé na #2).
-4. **Generation commit kontrakt** — jeden commit po úspěšné validaci artefaktů (chování dle R2).
-5. **Reálné FSM commit enforcement** v `increment-step` (kontrakt viz Příloha).
-6. **Atomicita + idempotence** — staging → validace → publish; idempotentní podle `plan_id + phase`.
-7. **Sjednocení dokumentace, CLI (`--epic`), sdílený path resolver, `--help`/`--check` + regresní testy.**
+> **Klíčové pravidlo pořadí:** atomicita (#5) MUSÍ být před generation commitem (#6),
+> jinak commit kontrakt staví nad stále částečně mutující pipeline.
+
+1. **Sdílený resolver + jednotné CLI + `--help` + read-only `--check`** — plugin/project root určí skript; sjednotit syntaxi na `--epic`; přidat nápovědu a suchý běh.
+2. **CP1-deep při plan review + legacy waiver** — cílový stav varianta A; vyřešit `/aid-plan --deep` (implementovat NEBO smazat + opravit hlášku v `aid-cp1-gate.sh:200`); legacy → re-review nebo explicitní waiver (R1).
+3. **Oddělit FSM init od git mutací** — `aid-json-to-run.sh`/`cmd_init` přestane mutovat git; `fsm-state.yaml` se smí zapsat. Smazat save/restore hack (`aid-json-to-run.sh:663-670`).
+4. **Dirty-tree check před branch operací READY→EXECUTE** (`aid-fsm.sh` — přehodit pořadí).
+5. **Atomicita + idempotence** — staging → validace → publish; idempotentní podle `plan_id + phase`. Důkaz fault-injection testem (viz C10).
+6. **Generation commit nad atomickým výsledkem** — jeden commit dle R2 (manifest-only staging, nikdy push, `--no-commit` výjimka).
+7. **Per-step commit enforcement** v `increment-step` (kontrakt viz Příloha).
+8. **Dokumentace a regresní testy.**
 
 ---
 
@@ -103,11 +119,14 @@ when the user asks."*
 2. Deterministicky vyřešit plán, project root, plugin root (sdílený resolver).
 3. Read-only preflight (`--check`).
 4. CP1-deep musí být hotové z plan-review fáze; legacy absence → re-review nebo explicitní waiver.
-5. Atomicky vygenerovat EPICy/JSONy/run/queue (staging → publish).
+5. Atomicky vygenerovat EPICy/JSONy/run/queue (staging → validace → publish).
 6. **Neinicializovat FSM s git mutací, nevytvářet task branch.**
 7. Validovat manifest.
-8. Vytvořit přesně jeden generation commit (dle R2).
-9. Ověřit, že branch zůstala stejná (HEAD se nezměnil).
+8. Vytvořit přesně jeden generation commit (dle R2 — stagovat jen cesty z manifestu, nikdy `git add -A`, nikdy push; `--no-commit` výjimka).
+9. Ověřit invariant větve/HEADu:
+   - **název aktuální branche zůstane stejný** (žádné přepnutí, žádná task branch);
+   - při commitu se **HEAD posune právě o jeden commit**;
+   - s `--no-commit` zůstane **HEAD SHA stejný**.
 
 ### `/aid-run`
 1. Inicializovat READY **bez branch mutace**.

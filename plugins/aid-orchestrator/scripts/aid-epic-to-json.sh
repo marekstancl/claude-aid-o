@@ -690,27 +690,40 @@ if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
   plan_source_arg="$(jq -n --arg s "$plan_source" '$s')"
 fi
 
+# NOTE: large structured pieces (steps especially) are passed to jq via temp
+# files + --slurpfile, NOT via --argjson on the command line. A fully-detailed
+# plan can make $steps_json exceed the per-argument limit (MAX_ARG_STRLEN, 128KB
+# on Linux), which fails with "jq: Argument list too long". --slurpfile reads the
+# file's single JSON value into an array, so we dereference $var[0].
+__pj_tmp="$(mktemp -d)"
+printf '%s' "$steps_json"    > "${__pj_tmp}/steps.json"
+printf '%s' "$deps_json"     > "${__pj_tmp}/deps.json"
+printf '%s' "$parallel_json" > "${__pj_tmp}/parallel.json"
+printf '%s' "$analysis_json" > "${__pj_tmp}/analysis.json"
+printf '%s' "$gates_json"    > "${__pj_tmp}/gates.json"
+printf '%s' "$budget_json"   > "${__pj_tmp}/budget.json"
 plan_json="$(jq -n \
   --arg epic_id "$epic_id" \
   --argjson source_plan "$plan_source_arg" \
-  --argjson steps "$steps_json" \
-  --argjson deps "$deps_json" \
-  --argjson parallel "$parallel_json" \
-  --argjson analysis "$analysis_json" \
-  --argjson gates "$gates_json" \
-  --argjson budget "$budget_json" \
+  --slurpfile steps "${__pj_tmp}/steps.json" \
+  --slurpfile deps "${__pj_tmp}/deps.json" \
+  --slurpfile parallel "${__pj_tmp}/parallel.json" \
+  --slurpfile analysis "${__pj_tmp}/analysis.json" \
+  --slurpfile gates "${__pj_tmp}/gates.json" \
+  --slurpfile budget "${__pj_tmp}/budget.json" \
   '{
     epic_id: $epic_id,
     source_plan: $source_plan,
     version: 1,
     created_at: (now | todate),
-    steps: $steps,
-    dependencies: $deps,
-    parallel_groups: $parallel,
-    analysis_groups: $analysis,
-    gates: $gates,
-    budget: $budget
+    steps: $steps[0],
+    dependencies: $deps[0],
+    parallel_groups: $parallel[0],
+    analysis_groups: $analysis[0],
+    gates: $gates[0],
+    budget: $budget[0]
   }')"
+rm -rf "${__pj_tmp}"
 
 # =============================================================================
 # Step 14: Validate against schema (structural jq-based check)
