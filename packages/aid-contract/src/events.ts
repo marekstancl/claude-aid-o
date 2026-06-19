@@ -38,8 +38,8 @@ export interface FileChangeEvent {
 
 /**
  * MVP1 contract union — contains only FileChangeEvent.
- * aid-server extends this locally with StageLogEvent, HeartbeatEvent, ConnectionEvent
- * (server-internal types that are not part of the shared contract).
+ * Server-local event types (StageLogEvent, HeartbeatEvent, ConnectionEvent)
+ * stay outside this contract; each consumer package extends the union locally.
  * MVP2 may promote additional event types here if they become cross-package.
  */
 export type InternalEvent = FileChangeEvent;
