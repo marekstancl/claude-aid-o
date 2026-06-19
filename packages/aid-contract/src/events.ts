@@ -32,13 +32,16 @@ export interface FileChangeEvent {
   topic: EventTopic;
   filePath: string;
   changeType: 'add' | 'change' | 'unlink';
-  parsedData: unknown | null;
+  parsedData: unknown;
   ts: string;                          // §7.3: renamed from `timestamp`; ISO 8601
 }
 
-// In the contract, InternalEvent covers the one broadcast event type.
-// Server-internal types (StageLogEvent, HeartbeatEvent, ConnectionEvent)
-// stay in aid-server and may extend this union locally.
+/**
+ * MVP1 contract union — contains only FileChangeEvent.
+ * aid-server extends this locally with StageLogEvent, HeartbeatEvent, ConnectionEvent
+ * (server-internal types that are not part of the shared contract).
+ * MVP2 may promote additional event types here if they become cross-package.
+ */
 export type InternalEvent = FileChangeEvent;
 
 export interface WatcherOptions {
