@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 201          # granular registry rows; inventory groups some as ~177 E-ids
+  enforcements: 203          # granular registry rows; inventory groups some as ~177 E-ids
   mapped_with_verdict: 92    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
-  mapping_pending: 109       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
-  verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 109}
+  mapping_pending: 111       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
+  verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 111}
 
 enforcements:
 
@@ -285,3 +285,26 @@ enforcements:
   - {id: reporter_focus_allowlist,      type: 4,  source: "scripts/aid-emit-dispatch.sh:80", instruction: "skills/pipeline.md §4", severity: advisory, surface: internal-guard, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "--focus allowlist accepts reporter|simplifier (subagent-mode dispatch ledger)"}
   - {id: reports_scope_allowed,         type: 9,  source: "defaults/templates/epic.md (Allowed files/paths)", instruction: "skills/pipeline.md §7", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: ".aid-o/reports/ default allowed path so committed delivery reports pass scope-check"}
   - {id: delivery_report_template,      type: 10, source: "defaults/templates/delivery-report.md", instruction: "agents/reporter.md", severity: advisory, surface: llm-facing, status: planned, verdict: unmapped, deadline: "2026-09-30", description: "fixed 7-section delivery-report template + machine-read frontmatter contract"}
+
+  # ── E-046-3_3: CP1/behavior_trace enforcement registration ─────────────────
+  - id: cp1_critical_path_flow_trace
+    type: lm_judgment_advisory
+    source: plan-writing.md
+    instruction: "Rule #21: every plan step introducing a handler must declare explicit outcomes for every branch; undeclared branch → REVISE_REQUIRED (advisory)"
+    severity: medium
+    surface: cp1
+    enforcement_mechanism: advisory_lm_judgment
+    test_anchor: "bats/test-plan-writing-rules.bats"
+    deadline: "2026-09-01"
+    notes: "Pre-screen heuristic (grep regex) activates automatically on handler-adding plans; LLM judgment advisory — does not hard-block EPIC generation (21c)"
+
+  - id: behavior_trace_high_risk_gate
+    type: fsm_precondition
+    source: aid-fsm.sh
+    instruction: "fsm_check_verifier_output: when behavior_trace_required=true, behavior_trace_count must be >0"
+    severity: high
+    surface: cp2,cp3,cp4
+    enforcement_mechanism: fsm_precondition
+    test_anchor: "bats/test-behavior-trace.bats (Step 6)"
+    deadline: "2026-09-01"
+    notes: "Opt-in: only fires when verifier output explicitly sets behavior_trace_required: true. Contracts defined in skills/review-checkpoint-contracts.md" 

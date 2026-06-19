@@ -197,4 +197,31 @@ Reporter was independently dispatched. That hard guarantee needs `subagent` mode
 
 ---
 
-**Last Updated:** 2026-06-14
+## Enforcement Homes Reference
+
+When adding a new detection capability, register it in `defaults/enforcement-registry.yaml` with:
+- `id`: unique snake_case identifier
+- `type`: `fsm_precondition` | `lm_judgment_advisory` | `out_of_band_hard_fail` | `pm_confirmation_gate`
+- `enforcement_mechanism`: the exact mechanism (see AID-v3-principles.md §1)
+- `test_anchor`: path to the bats/sh test that proves it works
+- `deadline`: ISO date after which the TTL guard flags it if not tested
+
+### Plan Boundary Enforcement
+
+- **plan-close gate**: `aid-fsm.sh:cmd_plan_close()` — enforces all 4 required reports (curator-report, audit-report, simplifier-report, delivery-report) before `ca-review-complete` marker. Bypass: toggle-skip pattern with PM rationale.
+- **CI floor**: `defaults/ci/plan-boundary-required-check.yml` — GitHub Actions check for committed boundary manifests in `.aid-o/reports/`. Requires `!.aid-o/reports/` in `.gitignore` (see `commands/aid-init.md`).
+
+### CP5 Contract
+
+- **blocking_findings check**: `aid-fsm.sh:cmd_done_advance()` — reads `blocking_findings` field from `audit-report.md` as a structured top-level field (not prose). `blocking_findings: true` blocks the MERGE option in the PM summary.
+- **Contract location**: `skills/review-checkpoint-contracts.md` §CP4 Contract.
+
+### behavior_trace Enforcement
+
+- **High-risk patterns**: 8 categories in `skills/review-checkpoint-contracts.md` (auth, routes, validation, migrations, fsm, security sinks, payment, dep manifests).
+- **Structural gate**: `aid-fsm.sh:fsm_check_verifier_output()` — fires when `behavior_trace_required: true` explicitly set in verifier output. Returns non-zero if `behavior_trace_count == 0`.
+- **Per-checkpoint diff scope**: `aid-prefilter.sh --checkpoint <cp2|cp3|cp4|cp6>` — CP2=step diff, CP3=base_commit..HEAD, CP4=applied C+A diff.
+
+---
+
+**Last Updated:** 2026-06-19
