@@ -94,18 +94,20 @@ Note: CP6 is never promoted to blocking — it is intentionally light.
 Triggered when: plan matches any high-risk pattern OR plan frontmatter has `risk: high`.
 Skip when: plan matches no high-risk patterns AND `risk: low` (or `risk: medium` — default skips CP1-deep unless pattern match).
 
-### 3 Lenses (dispatched in parallel)
+### 3 Lenses (dispatched in parallel, per plan taxonomy)
 
-| Lens | Focus | Stop-Rule Criteria |
-|------|-------|-------------------|
-| security | auth bypass, injection, data exposure, secret handling | any finding that could allow unauthorized access or data leak |
-| correctness | logic errors, edge cases, invariant violations | any finding that would cause incorrect behavior in prod |
-| architectural | coupling, abstraction leaks, dependency direction, blast radius | any finding that violates existing architectural constraints |
+| Lens | File | Focus | Stop-Rule Criteria |
+|------|------|-------|-------------------|
+| L1 behavior | `cp1-lens-L1-behavior.md` | request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases | any finding showing a handler branch is undeclared or produces an unintended user-visible outcome |
+| L2 feasibility | `cp1-lens-L2-feasibility.md` | touched files, output contracts, parser/producer ordering, implementation feasibility | any finding showing a consumer reads a field before the producer emits it, or a file-contract is violated |
+| L3 enforcement | `cp1-lens-L3-enforcement.md` | gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage | any finding showing an artifact is unreachable in CI, a test does not actually run, or a release gate is broken |
 
-Each lens produces:
+Each lens produces (required fields — gate rejects empty files or files without `stop_rule_blockers:`):
+- `stop_rule_blockers: []` — issues that should BLOCK EPIC generation (required field at line-start)
 - `findings: []` — all issues (any severity)
-- `stop_rule_blockers: []` — issues that should BLOCK EPIC generation
 - `confidence: high|medium|low`
+
+**L3 is the class that caught gitignored CI artifacts and non-executing tests** — it is the enforcement/visibility dimension, distinct from L1 user-flow and L2 contract correctness.
 
 ### Adjudicator Contract
 
@@ -115,24 +117,24 @@ Reviews all 3 lens outputs. Accepts a `stop_rule_blocker` ONLY if it has:
 
 Rejects blockers that are: vague ("might have security issues"), hypothetical without plan grounding, or duplicates across lenses.
 
-Produces:
+Produces (required fields — gate rejects empty files or files without `verdict:`):
+- `verdict: pass|revise|fail` (required field at line-start)
 - `accepted_blockers: []`
 - `rejected_blockers: []` (with rejection_reason per entry)
-- `verdict: pass|revise|fail`
 - `revision_count: N` (cumulative)
 
 ### Revision Loop
 
 - `verdict: revise` + `revision_count < 2` → auto-revise plan targeting accepted_blockers → re-run CP1-deep
 - `revision_count >= 2` + accepted_blockers survive → **PM escalation** (not pass, not auto-revise)
-- `accepted_blockers: []` OR `verdict: pass` → EPIC generation proceeds
+- `accepted_blockers: []` AND `verdict: pass` → EPIC generation proceeds
 
 ### Evidence Requirements
 
-Before EPIC generation for a high-risk plan, all 4 files must exist in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
-- `cp1-lens-security.md`
-- `cp1-lens-correctness.md`
-- `cp1-lens-architectural.md`
-- `cp1-adjudicator.md`
+Before EPIC generation for a high-risk plan, all 4 files must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`:
+- `cp1-lens-L1-behavior.md` — must contain `stop_rule_blockers:` at line-start
+- `cp1-lens-L2-feasibility.md` — must contain `stop_rule_blockers:` at line-start
+- `cp1-lens-L3-enforcement.md` — must contain `stop_rule_blockers:` at line-start
+- `cp1-adjudicator.md` — must contain `verdict:` at line-start
 
 Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`.

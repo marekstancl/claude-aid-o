@@ -173,23 +173,24 @@ fi
 echo "CP1-gate: plan $plan_id is high-risk — checking CP1-deep evidence." >&2
 
 # ---------------------------------------------------------------------------
-# Step 4: Check for evidence dir and required files
+# Step 4: Check for evidence dir and required files (existence + content)
 # ---------------------------------------------------------------------------
 evidence_dir="${project_root}/.aid-o/work/evidence/${plan_id}/cp1-deep"
 
-REQUIRED_FILES=(
-  "cp1-lens-security.md"
-  "cp1-lens-correctness.md"
-  "cp1-lens-architectural.md"
-  "cp1-adjudicator.md"
+# Lens files follow the plan taxonomy: L1 behavior/user-flow, L2 feasibility/producer→consumer,
+# L3 enforcement/CI/artifact-visibility. Each must be non-empty and contain stop_rule_blockers:.
+LENS_FILES=(
+  "cp1-lens-L1-behavior.md"
+  "cp1-lens-L2-feasibility.md"
+  "cp1-lens-L3-enforcement.md"
 )
+adjudicator_file="${evidence_dir}/cp1-adjudicator.md"
 
 missing_files=()
-for f in "${REQUIRED_FILES[@]}"; do
-  if [[ ! -f "${evidence_dir}/${f}" ]]; then
-    missing_files+=("$f")
-  fi
+for f in "${LENS_FILES[@]}"; do
+  [[ ! -f "${evidence_dir}/${f}" ]] && missing_files+=("$f")
 done
+[[ ! -f "$adjudicator_file" ]] && missing_files+=("cp1-adjudicator.md")
 
 if [[ "${#missing_files[@]}" -gt 0 ]]; then
   missing_list="$(printf '  - %s\n' "${missing_files[@]}")"
@@ -202,39 +203,52 @@ ERRMSG
   exit 1
 fi
 
-echo "CP1-gate: all 4 evidence files present in ${evidence_dir}/" >&2
+# Content check: each lens file must be non-empty and declare stop_rule_blockers:.
+for f in "${LENS_FILES[@]}"; do
+  fpath="${evidence_dir}/${f}"
+  if [[ ! -s "$fpath" ]]; then
+    error_exit "CP1-deep lens file is empty: ${f}. Substantive evidence required." 1
+  fi
+  if ! grep -q "^stop_rule_blockers:" "$fpath" 2>/dev/null; then
+    error_exit "CP1-deep lens file missing required 'stop_rule_blockers:' field: ${f}" 1
+  fi
+done
+
+# Adjudicator must be non-empty and declare verdict:.
+if [[ ! -s "$adjudicator_file" ]]; then
+  error_exit "CP1-deep adjudicator file is empty. Substantive evidence required." 1
+fi
+if ! grep -q "^verdict:" "$adjudicator_file" 2>/dev/null; then
+  error_exit "CP1-deep adjudicator missing required 'verdict:' field. Gate cannot proceed without explicit verdict." 1
+fi
+
+echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidence_dir}/" >&2
 
 # ---------------------------------------------------------------------------
 # Step 5: Check adjudicator verdict — no unresolved accepted_blockers allowed
 # ---------------------------------------------------------------------------
-adjudicator_file="${evidence_dir}/cp1-adjudicator.md"
+
+# verdict field is now guaranteed to exist (checked above).
+verdict_value="$(grep "^verdict:" "$adjudicator_file" | head -1 | sed 's/^verdict:[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+if [[ "$verdict_value" == "fail" || "$verdict_value" == "revise" ]]; then
+  cat >&2 <<ERRMSG
+ERROR: CP1-deep adjudicator has unresolved verdict: ${verdict_value}
+Resolve blockers or escalate to PM before EPIC generation.
+Adjudicator file: ${adjudicator_file}
+ERRMSG
+  exit 1
+fi
 
 # Extract the accepted_blockers value from the adjudicator file.
 # We look for `accepted_blockers:` followed by either:
 #   accepted_blockers: []        → empty list = pass
 #   accepted_blockers: [...]     → non-empty = fail
 #   accepted_blockers:           (block scalar with list items below) → fail
-#
-# Strategy: grep for the line, then check if the rest of the line is "[]" or empty.
-# If it's a block scalar (next lines start with "  -"), that's also a fail.
 accepted_blockers_line="$(grep -n "^accepted_blockers:" "$adjudicator_file" 2>/dev/null | head -1 || echo "")"
 
 if [[ -z "$accepted_blockers_line" ]]; then
-  # No accepted_blockers field found — treat as pass (field may not be present
-  # if no blockers were identified at all). Check verdict field instead.
-  verdict_line="$(grep -E "^verdict:" "$adjudicator_file" 2>/dev/null | head -1 || echo "")"
-  if [[ -n "$verdict_line" ]]; then
-    verdict_value="$(echo "$verdict_line" | sed 's/^verdict:[[:space:]]*//' | sed 's/[[:space:]]*$//')"
-    if [[ "$verdict_value" == "fail" || "$verdict_value" == "revise" ]]; then
-      cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has unresolved verdict: ${verdict_value}
-Resolve blockers or escalate to PM before EPIC generation.
-Adjudicator file: ${adjudicator_file}
-ERRMSG
-      exit 1
-    fi
-  fi
-  echo "CP1-gate: adjudicator shows no accepted_blockers field — assuming no blockers. PASS." >&2
+  # verdict:pass already confirmed above; no accepted_blockers field = no blockers.
+  echo "CP1-gate: verdict=pass, no accepted_blockers field. PASS." >&2
   exit 0
 fi
 
@@ -250,9 +264,8 @@ if [[ "$accepted_value" == "[]" || -z "$accepted_value" ]]; then
   next_line="$(echo "$next_line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
   if [[ "$next_line" =~ ^-[[:space:]] ]]; then
-    # Block scalar with at least one list item — there are accepted blockers
     cat >&2 <<ERRMSG
-ERROR: CP1-deep adjudicator has unresolved blockers.
+ERROR: CP1-deep adjudicator has unresolved blockers (block scalar list).
 Resolve blockers or escalate to PM before EPIC generation.
 Adjudicator file: ${adjudicator_file}
 ERRMSG

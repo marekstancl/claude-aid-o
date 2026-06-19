@@ -58,11 +58,19 @@ Appended to project root `.gitignore` (or created if missing). Content:
 ```
 
 **Note:** If the project's root `.gitignore` contains a `.aid-o/` blanket exclusion,
-also add the following exception so that boundary manifests and delivery reports are committed:
+replace it with the following four lines so that boundary manifests and delivery reports
+can be committed (git cannot un-ignore content inside an ignored directory — the glob
+form is required):
 
 ```gitignore
-!.aid-o/reports/   # boundary manifests + delivery reports — must be committed for CI floor
+# Replace: .aid-o/
+.aid-o/*
+!.aid-o/reports/
+!.aid-o/reports/**
 ```
+
+The `.aid-o/` form (directory ignore) silently blocks all negation that follows;
+`.aid-o/*` (glob ignore) allows `!.aid-o/reports/` to work correctly.
 
 **Rules:**
 - Per-line backfill (idempotent): for each line in `defaults/.gitignore`, append it
@@ -489,4 +497,4 @@ When `--upgrade` is passed or v1 structure detected (`.aid-o/04-engine/` exists)
 - **After init** → suggest: "Next step: Run `/aid-setup` to configure permissions, integrations, and generate CLAUDE.md."
 
 
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-19

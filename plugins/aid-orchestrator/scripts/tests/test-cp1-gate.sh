@@ -12,6 +12,12 @@
 #   5. trivial low-risk fixture still passes gate unchanged
 #   6. plan with high-risk pattern in body is treated as high-risk even without frontmatter tag
 #   7. plan with risk: low but high-risk patterns matched still requires evidence (pattern wins)
+#   8. missing plan file returns non-zero
+#   9. missing --plan argument returns exit 2
+#  10. only partial evidence present — gate fails with missing file list
+#  11. empty evidence files — gate rejects even when all 4 files exist
+#  12. lens file with content but missing stop_rule_blockers: field fails gate
+#  13. adjudicator missing verdict: field fails gate
 #
 # Exit codes: 0=all passed, 1=one or more tests failed
 # =============================================================================
@@ -76,17 +82,17 @@ make_evidence_dir() {
 # Write all 4 required evidence files (empty/passing content)
 write_passing_evidence() {
   local ev_dir="$1"
-  cat > "${ev_dir}/cp1-lens-security.md" <<'EOF'
+  cat > "${ev_dir}/cp1-lens-L1-behavior.md" <<'EOF'
 findings: []
 stop_rule_blockers: []
 confidence: high
 EOF
-  cat > "${ev_dir}/cp1-lens-correctness.md" <<'EOF'
+  cat > "${ev_dir}/cp1-lens-L2-feasibility.md" <<'EOF'
 findings: []
 stop_rule_blockers: []
 confidence: high
 EOF
-  cat > "${ev_dir}/cp1-lens-architectural.md" <<'EOF'
+  cat > "${ev_dir}/cp1-lens-L3-enforcement.md" <<'EOF'
 findings: []
 stop_rule_blockers: []
 confidence: high
@@ -371,17 +377,17 @@ write_plan "$plan10" "P010" "risk: high" "Uses stripe for payment processing."
 
 ev10="$(make_evidence_dir "$proj10" "P010")"
 # Only write 2 of 4 required files
-cat > "${ev10}/cp1-lens-security.md" <<'EOF'
+cat > "${ev10}/cp1-lens-L1-behavior.md" <<'EOF'
 findings: []
 stop_rule_blockers: []
 confidence: high
 EOF
-cat > "${ev10}/cp1-lens-correctness.md" <<'EOF'
+cat > "${ev10}/cp1-lens-L2-feasibility.md" <<'EOF'
 findings: []
 stop_rule_blockers: []
 confidence: medium
 EOF
-# Missing: cp1-lens-architectural.md and cp1-adjudicator.md
+# Missing: cp1-lens-L3-enforcement.md and cp1-adjudicator.md
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan10" --project-root "$proj10" 2>&1)" || gate_exit=$?
@@ -392,7 +398,7 @@ else
   fail "partial evidence causes gate failure" "got exit=0"
 fi
 
-if echo "$gate_out" | grep -q "cp1-lens-architectural.md"; then
+if echo "$gate_out" | grep -q "cp1-lens-L3-enforcement.md"; then
   pass "error output names the missing architectural lens file"
 else
   fail "error output names the missing architectural lens file" "output: $gate_out"
@@ -402,6 +408,85 @@ if echo "$gate_out" | grep -q "cp1-adjudicator.md"; then
   pass "error output names the missing adjudicator file"
 else
   fail "error output names the missing adjudicator file" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 11: Empty evidence files — gate must reject even when all 4 files exist
+# ---------------------------------------------------------------------------
+run_test "Empty evidence files cause gate failure even when all 4 are present"
+
+proj11="$(make_project_root "t11")"
+plan11="$TMPDIR_ROOT/t11-plan.md"
+write_plan "$plan11" "P011" "risk: high" "authenticate() handler added to user login flow."
+
+ev11="$(make_evidence_dir "$proj11" "P011")"
+# Create all 4 files but leave them empty
+touch "${ev11}/cp1-lens-L1-behavior.md"
+touch "${ev11}/cp1-lens-L2-feasibility.md"
+touch "${ev11}/cp1-lens-L3-enforcement.md"
+touch "${ev11}/cp1-adjudicator.md"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan11" --project-root "$proj11" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "empty evidence files cause gate failure"
+else
+  fail "empty evidence files cause gate failure" "got exit=0 — gate accepted empty files"
+fi
+
+if echo "$gate_out" | grep -qi "empty\|stop_rule_blockers\|verdict"; then
+  pass "error output explains content requirement"
+else
+  fail "error output explains content requirement" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 12: Lens with content but missing stop_rule_blockers: field fails gate
+# ---------------------------------------------------------------------------
+run_test "Lens file with content but missing stop_rule_blockers: field fails gate"
+
+proj12="$(make_project_root "t12")"
+plan12="$TMPDIR_ROOT/t12-plan.md"
+write_plan "$plan12" "P012" "risk: high" "authenticate() handler added."
+
+ev12="$(make_evidence_dir "$proj12" "P012")"
+# Write lens files without stop_rule_blockers:
+printf "findings: []\nconfidence: high\n" > "${ev12}/cp1-lens-L1-behavior.md"
+printf "findings: []\nstop_rule_blockers: []\nconfidence: high\n" > "${ev12}/cp1-lens-L2-feasibility.md"
+printf "findings: []\nstop_rule_blockers: []\nconfidence: high\n" > "${ev12}/cp1-lens-L3-enforcement.md"
+printf "verdict: pass\naccepted_blockers: []\n" > "${ev12}/cp1-adjudicator.md"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan12" --project-root "$proj12" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "lens missing stop_rule_blockers: field causes gate failure"
+else
+  fail "lens missing stop_rule_blockers: field causes gate failure" "got exit=0"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 13: Adjudicator without verdict: field fails gate
+# ---------------------------------------------------------------------------
+run_test "Adjudicator file missing verdict: field fails gate"
+
+proj13="$(make_project_root "t13")"
+plan13="$TMPDIR_ROOT/t13-plan.md"
+write_plan "$plan13" "P013" "risk: high" "authenticate() handler added."
+
+ev13="$(make_evidence_dir "$proj13" "P013")"
+write_passing_evidence "$ev13"
+# Overwrite adjudicator without verdict: field
+printf "accepted_blockers: []\nrejected_blockers: []\nrevision_count: 0\n" > "${ev13}/cp1-adjudicator.md"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan13" --project-root "$proj13" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "adjudicator missing verdict: field causes gate failure"
+else
+  fail "adjudicator missing verdict: field causes gate failure" "got exit=0"
 fi
 
 # ---------------------------------------------------------------------------
