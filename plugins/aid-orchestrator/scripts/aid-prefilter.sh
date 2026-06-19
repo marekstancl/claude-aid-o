@@ -221,7 +221,7 @@ behavior_trace_skip_reason: \"classification SKIP — ${reason}\""
   cat > "$file" <<EOF
 # Verifier output step ${step_n}
 
-_generated_by: aid-pre-filter.sh@v2.35.0
+_generated_by: aid-pre-filter.sh
 _generated_at: ${now}
 classification: ${classification}
 verdict: ${verdict}

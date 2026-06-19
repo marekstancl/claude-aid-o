@@ -214,7 +214,7 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 ### CP5 Contract
 
 - **blocking_findings check**: `aid-fsm.sh:cmd_done_advance()` — reads `blocking_findings` field from `audit-report.md` as a structured top-level field (not prose). `blocking_findings: true` blocks the MERGE option in the PM summary.
-- **Contract location**: `skills/review-checkpoint-contracts.md` §CP4 Contract.
+- **Contract location**: `skills/review-checkpoint-contracts.md` §CP5 Contract (see CP4 Contract for the adjudicator flow).
 
 ### behavior_trace Enforcement
 

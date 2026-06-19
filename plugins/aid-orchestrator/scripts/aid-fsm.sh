@@ -222,8 +222,10 @@ fsm_check_verifier_output() {
   if [[ "$behavior_trace_required" == "true" ]]; then
     local behavior_trace_count
     behavior_trace_count=$(yaml_field "$file" behavior_trace_count)
-    # Fail if count is missing, empty, or zero
-    [[ -z "$behavior_trace_count" || "$behavior_trace_count" == "0" ]] && return 1
+    # Fail if count is missing, empty, zero, negative, or non-numeric
+    if [[ -z "$behavior_trace_count" || ! "$behavior_trace_count" =~ ^[1-9][0-9]*$ ]]; then
+      return 1
+    fi
   fi
 
   return 0

@@ -1069,4 +1069,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-19
