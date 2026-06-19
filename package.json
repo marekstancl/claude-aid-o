@@ -1,9 +1,11 @@
 {
-  "name": "ai-orchestrator",
-  "version": "2.0.0",
+  "name": "aid-cockpit-workspace",
   "private": true,
+  "version": "0.1.0",
   "workspaces": ["packages/*"],
   "scripts": {
-    "test": "npm run test --workspaces --if-present"
+    "build": "npm run build -w @aid/contract && npm run build -w @aid/server && npm run build -w @aid/gui",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }
