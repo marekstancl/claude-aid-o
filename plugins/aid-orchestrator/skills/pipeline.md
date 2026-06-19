@@ -813,6 +813,7 @@ Ordered sequence — each step has a named gate. `done-advance` and `plan-close`
 | 4 | Curator auto-fix (S/M/L) | gate-fixer applied |
 | 5 | Auditor auto-fix (S/M/L, `auto_fixable: true`) | gate-fixer applied |
 | 6 | CP4 verifier (curator/auditor diff) | `verifier-output-cp4-curator-validation.md` |
+| 6a | CP5: auditor `blocking_findings` check | MERGE option blocked if `blocking_findings: true` |
 | 7 | Simplifier (plan boundary) | `simplifier-report.md` required by `plan-close` |
 | 8 | Reporter (plan boundary) | `delivery.md` required by `plan-close` |
 | 9 | `plan-close` marker | `ca-review-complete` — `plan-close` enforces all of 3-8 |
