@@ -68,3 +68,17 @@ export type {
   LessonsView,
   LastSeen,
 } from './managerial.js';
+
+export { STATUS } from './status.js';
+export type { StatusKey } from './status.js';
+export type { DictionaryEntry, Explanation } from './explain.js';
+export { ALL_EVENT_TOPICS } from './events.js';
+export type {
+  EventTopic,
+  FileChangeEvent,
+  InternalEvent,
+  WatcherOptions,
+  PathClassification,
+  ParseWarning,
+  ParseResult,
+} from './events.js';
