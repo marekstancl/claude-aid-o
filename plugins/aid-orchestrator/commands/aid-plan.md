@@ -380,26 +380,26 @@ CP1-light:
 CP1-deep:
   → run plan-writing.md checklist (same as light)
   → detect high-risk patterns (automatic via review-checkpoint-contracts.md heuristic)
-  → dispatch 3 lenses in parallel:
-      security: auth bypass, injection, data exposure, secret handling
-      correctness: logic errors, edge cases, invariant violations, off-by-one
-      architectural: coupling, abstraction leaks, dependency direction, blast radius
-  → each lens produces: findings[], stop_rule_blockers[], confidence: high|medium|low
+  → dispatch 3 lenses in parallel (per plan taxonomy — see review-checkpoint-contracts.md §CP1-deep):
+      L1 behavior:    request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
+      L2 feasibility: touched files, output contracts, parser/producer ordering, implementation feasibility
+      L3 enforcement: gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
+  → each lens produces: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
   → adjudicator reviews all 3 lenses: accepts blocker only if it has command/artifact + file:line evidence
-  → adjudicator produces: accepted_blockers[], rejected_blockers[] (with rejection reason), verdict: pass|fail|revise
+  → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
   → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
   → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
-  → if verdict=pass OR accepted_blockers=[]: generate EPIC
+  → if verdict=pass AND accepted_blockers=[]: generate EPIC
 ```
 
-**Required evidence files** (must exist in `.aid-o/work/evidence/<plan_id>/cp1-deep/` before EPIC generation):
+**Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
 
-| File | Produced by |
-|------|-------------|
-| `cp1-lens-security.md` | security lens agent |
-| `cp1-lens-correctness.md` | correctness lens agent |
-| `cp1-lens-architectural.md` | architectural lens agent |
-| `cp1-adjudicator.md` | adjudicator agent |
+| File | Produced by | Required field |
+|------|-------------|----------------|
+| `cp1-lens-L1-behavior.md` | L1 behavior lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-lens-L2-feasibility.md` | L2 feasibility lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start |
+| `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start |
 
 EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces this: missing files or unresolved accepted blockers cause a non-zero exit.
 

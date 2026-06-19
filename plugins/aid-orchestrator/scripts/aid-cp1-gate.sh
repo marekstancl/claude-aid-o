@@ -24,15 +24,14 @@
 #   - Dependency manifests (requirements.txt, pyproject.toml, package.json, Gemfile)
 #
 # Evidence dir: <project_root>/.aid-o/work/evidence/<plan_id>/cp1-deep/
-# Required files (all 4 must exist):
-#   cp1-lens-security.md
-#   cp1-lens-correctness.md
-#   cp1-lens-architectural.md
-#   cp1-adjudicator.md
+# Required files (all 4 must exist, be non-empty, and contain required fields):
+#   cp1-lens-L1-behavior.md     — L1: behavior/user-flow/edge cases; must have stop_rule_blockers:
+#   cp1-lens-L2-feasibility.md  — L2: feasibility/file-contracts/producer→consumer; must have stop_rule_blockers:
+#   cp1-lens-L3-enforcement.md  — L3: enforcement/CI/artifact-visibility/testability; must have stop_rule_blockers:
+#   cp1-adjudicator.md          — adjudicator verdict; must have verdict: at line-start
 #
-# Adjudicator check: reads cp1-adjudicator.md and fails if the file
-# contains non-empty `accepted_blockers:` (i.e., unresolved blockers).
-# A YAML value of `accepted_blockers: []` (empty list) is a pass.
+# Adjudicator check: reads cp1-adjudicator.md and fails if verdict is fail|revise
+# or if accepted_blockers: is non-empty. Empty accepted_blockers + verdict:pass = pass.
 #
 # stdout: human-readable status lines
 # stderr: JSON error on failure (consistent with other AID scripts)
