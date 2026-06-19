@@ -44,6 +44,8 @@ docs/plans/
 .aid-o/*
 !.aid-o/reports/
 !.aid-o/reports/**
+# Test suites call aid-fsm.sh init and create nested .aid-o/ workspaces
+**/.aid-o/
 
 # Claude Code local settings + per-project memory file
 # (CLAUDE.md is the project's private context for Claude Code — contains
