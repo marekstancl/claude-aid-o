@@ -1,3 +1,9 @@
+---
+name: review-checkpoint-contracts
+description: Per-checkpoint contracts for AID review agents — high-risk patterns, diff scopes, behavior_trace gate, CP1-deep 3-lens adjudicator
+user_invocable: false
+---
+
 # Review Checkpoint Contracts
 
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
