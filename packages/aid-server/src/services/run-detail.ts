@@ -34,7 +34,7 @@
  *  #10 format: v3 / legacy / stub (reuses the Step 6 classification rule).
  */
 
-import { basename, join, relative } from 'node:path';
+import { basename, join, relative, posix, sep } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import type {
   ActivityEvent,
@@ -85,6 +85,35 @@ const VALID_FSM_STATES: ReadonlySet<string> = new Set<FsmState>([
 ]);
 
 // ===========================================================================
+// Security helpers — path traversal defense (CWE-22)
+// ===========================================================================
+
+/**
+ * Validate that a path segment (projectId/epicId/runId) is safe — does not
+ * contain traversal patterns (`..`), separators (`/`, `\`), or be empty/`.`.
+ * Returns false for any dangerous input; never throws.
+ */
+function isValidPathSegment(segment: string): boolean {
+  if (!segment || segment === '.' || segment === '..') return false;
+  if (segment.includes('/') || segment.includes('\\')) return false;
+  if (segment.includes('..')) return false;
+  return true;
+}
+
+/**
+ * Segment-boundary-aware "is `p` under `root`" check (mirrored from pathmap.ts).
+ * True when `p` equals `root` exactly, or `p` continues with a path separator
+ * immediately after `root` (so `/projects/x` matches but `/projects-backup/x`
+ * does not). Never throws.
+ */
+function isUnderRoot(p: string, root: string): boolean {
+  if (p === root) return true;
+  if (!p.startsWith(root)) return false;
+  const boundary = p[root.length];
+  return boundary === posix.sep || boundary === sep;
+}
+
+// ===========================================================================
 // buildRunDetail — the assembler
 // ===========================================================================
 
@@ -100,7 +129,8 @@ const VALID_FSM_STATES: ReadonlySet<string> = new Set<FsmState>([
  * @param deps        injected {@link RunDetailDeps} (fs + pathMap).
  *
  * Never throws. A broken / partial / empty run degrades to nulls + warnings and
- * a type-valid stub RunDetail.
+ * a type-valid stub RunDetail. Security (CWE-22): inputs are validated for
+ * traversal attempts.
  */
 export async function buildRunDetail(
   projectId: string,
@@ -110,6 +140,12 @@ export async function buildRunDetail(
   deps: RunDetailDeps,
 ): Promise<RunDetail> {
   const { fs, pathMap } = deps;
+
+  // Security defense layer 1: reject traversal in input segments
+  if (!isValidPathSegment(projectId) || !isValidPathSegment(epicId) || !isValidPathSegment(runId)) {
+    // Return a safe empty stub when input is invalid (never throw)
+    return createEmptyRunDetail(projectId, epicId, runId);
+  }
 
   // --- (#9) file list via root-relative recursive walk (NOT listDirRecursive) ---
   const files = await walkRunFiles(runDir, pathMap);
@@ -170,6 +206,59 @@ export async function buildRunDetail(
 }
 
 // ===========================================================================
+// Empty stub for security failures
+// ===========================================================================
+
+/**
+ * Create a type-valid empty RunDetail stub when security checks fail
+ * (traversal attempt detected). Never throws.
+ */
+function createEmptyRunDetail(projectId: string, epicId: string, runId: string): RunDetail {
+  return {
+    projectId,
+    epicId,
+    runId,
+    format: 'stub',
+    state: 'READY',
+    mode: '',
+    branch: '',
+    baseCommit: '',
+    currentStep: 0,
+    totalSteps: 0,
+    gateRetries: 0,
+    escalationCount: 0,
+    startedAt: null,
+    createdAt: null,
+    donePhase: null,
+    pmDecision: null,
+    steps: [],
+    checkpoints: [],
+    gates: [],
+    compliance: null,
+    reports: [],
+    audit: {
+      present: false,
+      overallScore: null,
+      scoreSource: null,
+      blockingFindings: null,
+      blockingFindingsSource: null,
+      categories: [],
+      topReasons: [],
+      topRisks: [],
+      countsBySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+      autoFixableCount: 0,
+      nextSteps: [],
+      headlineCs: '',
+      previousScoreHint: null,
+      rawRelPath: 'audit-report.md',
+      warnings: ['Security check failed: invalid path segments in projectId/epicId/runId'],
+    },
+    timeline: [],
+    files: [],
+  };
+}
+
+// ===========================================================================
 // #9 — root-relative recursive file walk (IMP-128 — NEVER listDirRecursive)
 // ===========================================================================
 
@@ -179,6 +268,11 @@ export async function buildRunDetail(
  * NOT use {@link FsReader.listDirRecursive}, which is BUGGED (IMP-128): it
  * flattens nested paths to basenames (`gates/gates_report.json` →
  * `gates_report.json`), losing the directory and colliding sibling names.
+ *
+ * DOES NOT FOLLOW SYMLINKS — defense against symlink DoS / enumeration of
+ * out-of-tree paths (CWE-22). Symlinks are treated as leaf files and listed,
+ * but their targets are not recursed. This mirrors the `maxFileMtime` pattern
+ * in scanner-cache.ts which uses `Dirent.isDirectory()` (false for symlinks).
  *
  * Embedded absolute HOST paths are not part of this list (they live inside file
  * CONTENTS, resolved by {@link PathMap} when read); the file list is purely the
@@ -191,8 +285,14 @@ export async function buildRunDetail(
  */
 async function walkRunFiles(runDir: string, _pathMap: PathMap): Promise<string[]> {
   const out: string[] = [];
+  const MAX_DEPTH = 32; // Defensive depth cap against unbounded walks
 
-  const walk = async (dir: string): Promise<void> => {
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    // Defense: stop recursion at MAX_DEPTH to prevent pathological walks
+    if (depth > MAX_DEPTH) {
+      return;
+    }
+
     let entries: import('node:fs').Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -201,17 +301,15 @@ async function walkRunFiles(runDir: string, _pathMap: PathMap): Promise<string[]
     }
     for (const ent of entries) {
       const full = join(dir, ent.name);
-      let isDir = ent.isDirectory();
-      // Resolve symlink-as-dir defensively (Dirent may report a symlink).
+      // DO NOT FOLLOW SYMLINKS — treat them as leaf files.
+      // Dirent.isDirectory() returns false for symlinks, which is what we want.
       if (ent.isSymbolicLink()) {
-        try {
-          isDir = (await stat(full)).isDirectory();
-        } catch {
-          continue;
-        }
+        // Symlink is a leaf file; list it but do not recurse into it
+        out.push(relative(runDir, full).split('\\').join('/'));
+        continue;
       }
-      if (isDir) {
-        await walk(full);
+      if (ent.isDirectory()) {
+        await walk(full, depth + 1);
       } else {
         // ROOT-relative path with POSIX separators for stable display.
         out.push(relative(runDir, full).split('\\').join('/'));
@@ -219,7 +317,7 @@ async function walkRunFiles(runDir: string, _pathMap: PathMap): Promise<string[]
     }
   };
 
-  await walk(runDir);
+  await walk(runDir, 0);
   out.sort((a, b) => a.localeCompare(b));
   return out;
 }

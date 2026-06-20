@@ -26,7 +26,7 @@
  *  AC8  buildRunDetail wired as the Step 7 cache loader (cache memoizes it).
  */
 
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -696,5 +696,137 @@ describe('#9 — files via root-relative recursive walk', () => {
     // The bugged listDirRecursive would give 'gates_report.json' (basename only).
     expect(rd.files).toContain('gates/gates_report.json');
     expect(rd.files).not.toContain('gates_report.json');
+  });
+});
+
+// ===========================================================================
+// Security — CWE-22 path traversal defense (buildRunDetail input validation)
+// ===========================================================================
+
+describe('Security — CWE-22 path traversal defense (buildRunDetail)', () => {
+  it('rejects traversal in projectId and returns a safe stub', async () => {
+    const runDir = join(root, 'proj', '.aid-o', 'work', 'evidence', 'E-X', 'R-X');
+    await mkdir(runDir, { recursive: true });
+
+    const rd = await buildRunDetail('../../etc', 'E-X', 'R-X', runDir, deps());
+    expect(rd.format).toBe('stub');
+    expect(rd.projectId).toBe('../../etc');
+    // Should have security warning in audit
+    expect(rd.audit.warnings[0]).toContain('Security check failed');
+  });
+
+  it('rejects traversal in epicId', async () => {
+    const runDir = join(root, 'proj', '.aid-o', 'work', 'evidence', 'E-X', 'R-X');
+    await mkdir(runDir, { recursive: true });
+
+    const rd = await buildRunDetail('proj', '../../../etc', 'R-X', runDir, deps());
+    expect(rd.format).toBe('stub');
+    expect(rd.audit.warnings[0]).toContain('Security check failed');
+  });
+
+  it('rejects traversal in runId', async () => {
+    const runDir = join(root, 'proj', '.aid-o', 'work', 'evidence', 'E-X', 'R-X');
+    await mkdir(runDir, { recursive: true });
+
+    const rd = await buildRunDetail('proj', 'E-X', '../../secret', runDir, deps());
+    expect(rd.format).toBe('stub');
+    expect(rd.audit.warnings[0]).toContain('Security check failed');
+  });
+
+  it('rejects empty segments', async () => {
+    const runDir = join(root, 'proj', '.aid-o', 'work', 'evidence', 'E-X', 'R-X');
+    await mkdir(runDir, { recursive: true });
+
+    const rd = await buildRunDetail('', 'E-X', 'R-X', runDir, deps());
+    expect(rd.format).toBe('stub');
+    expect(rd.audit.warnings[0]).toContain('Security check failed');
+  });
+
+  it('rejects segments with path separators', async () => {
+    const runDir = join(root, 'proj', '.aid-o', 'work', 'evidence', 'E-X', 'R-X');
+    await mkdir(runDir, { recursive: true });
+
+    const rd = await buildRunDetail('proj', 'E-001/../../etc', 'R-X', runDir, deps());
+    expect(rd.format).toBe('stub');
+    expect(rd.audit.warnings[0]).toContain('Security check failed');
+  });
+
+  it('accepts valid segments and builds normally', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-E046-1', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      timeline: timelineNoDispatch(),
+    });
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-E046-1', runDir, deps());
+    expect(rd.format).toBe('v3');
+    expect(rd.state).toBe('DONE');
+    expect(rd.projectId).toBe('proj');
+  });
+});
+
+// ===========================================================================
+// Security — CWE-22 symlink DoS defense (walkRunFiles)
+// ===========================================================================
+
+describe('Security — CWE-22 symlink DoS / enumeration defense', () => {
+  it('does NOT follow symlinks to directories — treats them as leaf files', async () => {
+    const runDir = await makeRun('proj', 'E-test', 'R-test', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      timeline: timelineNoDispatch(),
+    });
+
+    // Create an external directory with files to symlink to
+    const externalDir = join(root, 'external-secret');
+    await mkdir(externalDir, { recursive: true });
+    await writeFile(join(externalDir, 'secret.txt'), 'secret data', 'utf-8');
+
+    // Create a symlink from runDir/link-to-external -> externalDir
+    const symlinkPath = join(runDir, 'link-to-external');
+    await symlink(externalDir, symlinkPath, 'dir');
+
+    // Build runDetail — should NOT recurse into the symlink
+    const rd = await buildRunDetail('proj', 'E-test', 'R-test', runDir, deps());
+
+    // The symlink should be listed as a file, not recursed
+    expect(rd.files).toContain('link-to-external');
+    // Files from the external dir should NOT be listed
+    expect(rd.files).not.toContain('link-to-external/secret.txt');
+    // Real nested files (gates/) should still be listed normally
+    expect(rd.format).toBe('v3');
+  });
+
+  it('lists a symlink-to-file as a file', async () => {
+    const runDir = await makeRun('proj', 'E-test2', 'R-test2', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      timeline: timelineNoDispatch(),
+    });
+
+    // Create a file and symlink to it
+    const targetFile = join(root, 'target-data.txt');
+    await writeFile(targetFile, 'target data', 'utf-8');
+    const symlinkPath2 = join(runDir, 'link-to-data');
+    await symlink(targetFile, symlinkPath2, 'file');
+
+    const rd = await buildRunDetail('proj', 'E-test2', 'R-test2', runDir, deps());
+
+    // The symlink-to-file should be listed (as a leaf)
+    expect(rd.files).toContain('link-to-data');
+    expect(rd.format).toBe('v3');
+  });
+
+  it('still lists real nested directories normally (not regressed)', async () => {
+    const runDir = await makeRun('proj', 'E-test3', 'R-test3', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      gates: gatesReport(),
+      timeline: timelineNoDispatch(),
+    });
+
+    const rd = await buildRunDetail('proj', 'E-test3', 'R-test3', runDir, deps());
+
+    // Real nested gates/gates_report.json should be present
+    expect(rd.files).toContain('gates/gates_report.json');
+    // And it should be a proper v3 run, not degraded
+    expect(rd.format).toBe('v3');
+    expect(rd.gates.length).toBeGreaterThan(0);
   });
 });

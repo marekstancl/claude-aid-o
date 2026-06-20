@@ -448,3 +448,97 @@ describe('TTL sweep', () => {
     expect(cache.ttlMs).toBe(123);
   });
 });
+
+// ===========================================================================
+// Security — CWE-22 path traversal defense
+// ===========================================================================
+
+describe('Security — CWE-22 path traversal defense (resolveRunDir)', () => {
+  it('rejects traversal in projectId (e.g. "../../etc")', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // Attempt traversal: invalid projectId should be rejected
+    const result = await cache.getRunDetail('../../etc', 'E-001', 'R-001');
+    // Should return a stub (safe degradation, never throw)
+    expect(result.format).toBe('stub');
+    expect(result.projectId).toBe('../../etc');
+    // Loader should NOT be called for traversal attempts
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('rejects traversal in epicId', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // Attempt traversal via epicId
+    const result = await cache.getRunDetail('alpha', '../../../etc', 'R-001');
+    expect(result.format).toBe('stub');
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('rejects traversal in runId', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // Attempt traversal via runId
+    const result = await cache.getRunDetail('alpha', 'E-001', '../../secret');
+    expect(result.format).toBe('stub');
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty segments', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // Empty projectId should be rejected
+    const result = await cache.getRunDetail('', 'E-001', 'R-001');
+    expect(result.format).toBe('stub');
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('rejects segments with forward slashes', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // epicId containing / should be rejected
+    const result = await cache.getRunDetail('alpha', 'E-001/../../etc', 'R-001');
+    expect(result.format).toBe('stub');
+    expect(loader).not.toHaveBeenCalled();
+  });
+
+  it('accepts valid segments and loads normally', async () => {
+    const aido = await makeWorkspace('alpha');
+    await makeV3Run(aido, 'E-001', 'R-001', 'DONE', '2026-06-01T10:00:00Z');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    await cache.buildIndex();
+
+    // Valid segments should work
+    const result = await cache.getRunDetail('alpha', 'E-001', 'R-001');
+    expect(result.format).toBe('v3');
+    expect(result.state).toBe('DONE');
+    expect(loader).toHaveBeenCalledTimes(1);
+  });
+});

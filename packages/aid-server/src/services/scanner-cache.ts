@@ -35,13 +35,42 @@
  * reads route through the never-throw `FsReader`.
  */
 
-import { join } from 'node:path';
+import { join, posix, sep, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { LRUCache } from 'lru-cache';
 import type { ActivityEvent, FsmState, RunDetail, RunFormat } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 import { ProjectScanner } from './project-scanner.js';
 import { createRunDetailLoader } from './run-detail.js';
+
+// ===========================================================================
+// Security helpers — path traversal defense (CWE-22)
+// ===========================================================================
+
+/**
+ * Validate that a path segment (projectId/epicId/runId) is safe — does not
+ * contain traversal patterns (`..`), separators (`/`, `\`), or be empty/`.`.
+ * Returns false for any dangerous input; never throws.
+ */
+function isValidPathSegment(segment: string): boolean {
+  if (!segment || segment === '.' || segment === '..') return false;
+  if (segment.includes('/') || segment.includes('\\')) return false;
+  if (segment.includes('..')) return false;
+  return true;
+}
+
+/**
+ * Segment-boundary-aware "is `p` under `root`" check (mirrored from pathmap.ts).
+ * True when `p` equals `root` exactly, or `p` continues with a path separator
+ * immediately after `root` (so `/projects/x` matches but `/projects-backup/x`
+ * does not). Never throws.
+ */
+function isUnderRoot(p: string, root: string): boolean {
+  if (p === root) return true;
+  if (!p.startsWith(root)) return false;
+  const boundary = p[root.length];
+  return boundary === posix.sep || boundary === sep;
+}
 
 // ===========================================================================
 // CircularBuffer — salvaged from packages/aid-gui/server/watchers/
@@ -496,12 +525,69 @@ export class ScannerCache {
    * when it was cached (even when the run-DIR mtime did NOT move), the entry is
    * dropped and the loader re-invoked. On a miss, the injected loader runs and
    * the result is cached with its observed max-file-mtime.
+   *
+   * Security (CWE-22): Rejects traversal attempts early, returning a safe stub.
    */
   async getRunDetail(
     projectId: string,
     epicId: string,
     runId: string,
   ): Promise<RunDetail> {
+    // Security: validate input segments early (defense layer 1)
+    if (
+      !isValidPathSegment(projectId) ||
+      !isValidPathSegment(epicId) ||
+      !isValidPathSegment(runId)
+    ) {
+      // Return a safe stub without calling the loader (never throws)
+      // Use the loader to get the stub signature via calling it with invalid args
+      // Actually, just return the stub directly
+      const stubKey = runKey(projectId, epicId, runId);
+      const stub: RunDetail = {
+        projectId,
+        epicId,
+        runId,
+        format: 'stub',
+        state: 'READY',
+        mode: '',
+        branch: '',
+        baseCommit: '',
+        currentStep: 0,
+        totalSteps: 0,
+        gateRetries: 0,
+        escalationCount: 0,
+        startedAt: null,
+        createdAt: null,
+        donePhase: null,
+        pmDecision: null,
+        steps: [],
+        checkpoints: [],
+        gates: [],
+        compliance: null,
+        reports: [],
+        audit: {
+          present: false,
+          overallScore: null,
+          scoreSource: null,
+          blockingFindings: null,
+          blockingFindingsSource: null,
+          categories: [],
+          topReasons: [],
+          topRisks: [],
+          countsBySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
+          autoFixableCount: 0,
+          nextSteps: [],
+          headlineCs: '',
+          previousScoreHint: null,
+          rawRelPath: 'run-detail.ts',
+          warnings: ['Security check failed: invalid path segments in projectId/epicId/runId'],
+        },
+        timeline: [],
+        files: [],
+      };
+      return stub;
+    }
+
     const key = runKey(projectId, epicId, runId);
     const cached = this.runDetailCache.get(key);
 
@@ -546,20 +632,47 @@ export class ScannerCache {
    * under `<projectsRoot>/<projectId>/.aid-o/work/evidence/<epicId>/<runId>`.
    * Returns null only if the project is not in the index and the convention
    * path cannot be formed.
+   *
+   * Security (CWE-22): Rejects traversal attempts in projectId/epicId/runId
+   * (inputs containing `..`, `/`, `\`, or being empty/`.`) at input validation,
+   * and verifies the resolved path is under projectsRoot at resolution time
+   * (defense in depth).
    */
   private resolveRunDir(
     projectId: string,
     epicId: string,
     runId: string,
   ): string | null {
-    const indexed = this.index?.projects.get(projectId);
-    const fromIndex = indexed?.epics.get(epicId)?.runs.get(runId)?.runDir;
-    if (fromIndex) return fromIndex;
-    if (indexed) {
-      return join(indexed.aidoPath, 'work', 'evidence', epicId, runId);
+    // Defense layer 1: reject inputs containing traversal chars or separators
+    if (
+      !isValidPathSegment(projectId) ||
+      !isValidPathSegment(epicId) ||
+      !isValidPathSegment(runId)
+    ) {
+      return null;
     }
-    // Fall back to the discovery convention.
-    return join(this.projectsRoot, projectId, '.aid-o', 'work', 'evidence', epicId, runId);
+
+    const indexed = this.index?.projects.get(projectId);
+    let resolved: string | null = null;
+
+    if (indexed) {
+      const fromIndex = indexed.epics.get(epicId)?.runs.get(runId)?.runDir;
+      if (fromIndex) {
+        resolved = fromIndex;
+      } else {
+        resolved = join(indexed.aidoPath, 'work', 'evidence', epicId, runId);
+      }
+    } else {
+      // Fall back to the discovery convention.
+      resolved = join(this.projectsRoot, projectId, '.aid-o', 'work', 'evidence', epicId, runId);
+    }
+
+    // Defense layer 2: verify resolved path is under projectsRoot
+    if (resolved && !isUnderRoot(resolved, this.projectsRoot)) {
+      return null;
+    }
+
+    return resolved;
   }
 
   /**
