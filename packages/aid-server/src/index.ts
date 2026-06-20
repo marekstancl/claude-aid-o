@@ -46,6 +46,7 @@ import { send404 } from './api/middleware.js';
 import { healthRoutes } from './routes/health.js';
 import { projectRoutes } from './routes/projects.js';
 import { epicRoutes } from './routes/epics.js';
+import { fileRoutes } from './routes/file.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -69,6 +70,7 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   app.use('/api/health', healthRoutes());
   app.use('/api', projectRoutes(scanner));
   app.use('/api', epicRoutes(scanner));
+  app.use('/api', fileRoutes(scanner)); // §7.4.1 hardened raw-artifact endpoint
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
