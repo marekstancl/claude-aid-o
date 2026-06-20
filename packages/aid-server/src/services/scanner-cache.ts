@@ -51,71 +51,13 @@ import {
 } from './path-guards.js';
 
 // ===========================================================================
-// CircularBuffer — salvaged from packages/aid-gui/server/watchers/
-//   stage-log-stream.ts (lines ~40-140), adapted to NodeNext `.js` (no imports
-//   needed — it is dependency-free). Copied in, NOT imported cross-package
-//   (the parts-bin is a different package and must not be a runtime dependency).
+// CircularBuffer — single source of truth lives in watchers/circular-buffer.ts
+//   (E-047-3_7 Step 1). Re-exported here so existing consumers/tests that
+//   import it from './scanner-cache.js' keep working without a second copy.
 // ===========================================================================
 
-/**
- * Fixed-size circular buffer providing O(1) insertion and O(n) ordered
- * retrieval. When full, the oldest entry is overwritten.
- */
-export class CircularBuffer<T> {
-  private readonly items: (T | undefined)[];
-  private head = 0;
-  private count = 0;
-  private readonly capacity: number;
-
-  constructor(capacity: number) {
-    if (capacity < 1) {
-      throw new Error(`CircularBuffer capacity must be >= 1, got ${capacity}`);
-    }
-    this.capacity = capacity;
-    this.items = new Array<T | undefined>(capacity).fill(undefined);
-  }
-
-  /** Add an item to the buffer. Overwrites the oldest entry when full. */
-  push(item: T): void {
-    this.items[this.head] = item;
-    this.head = (this.head + 1) % this.capacity;
-    if (this.count < this.capacity) {
-      this.count++;
-    }
-  }
-
-  /** Return all buffered items in insertion order (oldest first). */
-  toArray(): T[] {
-    if (this.count === 0) return [];
-
-    const result: T[] = [];
-    // When the buffer is not yet full, items start at index 0. When full, the
-    // oldest item is at `head` (where the next write will go).
-    const start = this.count < this.capacity ? 0 : this.head;
-    for (let i = 0; i < this.count; i++) {
-      const idx = (start + i) % this.capacity;
-      result.push(this.items[idx] as T);
-    }
-    return result;
-  }
-
-  /** Clear all entries from the buffer. */
-  clear(): void {
-    this.items.fill(undefined);
-    this.head = 0;
-    this.count = 0;
-  }
-
-  /** Current number of items in the buffer. */
-  get size(): number {
-    return this.count;
-  }
-
-  /** Configured maximum number of items. */
-  get max(): number {
-    return this.capacity;
-  }
-}
+export { CircularBuffer } from '../watchers/circular-buffer.js';
+import { CircularBuffer } from '../watchers/circular-buffer.js';
 
 // ===========================================================================
 // Tier-1 index types (internal — NOT in the @aid/contract surface)
