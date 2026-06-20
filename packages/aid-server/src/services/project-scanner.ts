@@ -22,6 +22,7 @@ import { readdir, stat } from 'node:fs/promises';
 import pLimit from 'p-limit';
 import type { FsmState, Project, RunFormat } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
+import { VALID_FSM_STATES, stripYamlScalar } from './path-guards.js';
 
 // Step 7 (E-047-2_7): the two-tier cache machinery lives in scanner-cache.ts
 // (kept separable for testability). Re-exported here so consumers can pull the
@@ -51,21 +52,15 @@ export type {
 // Step 8 (E-047-2_7): the RunDetail builder + its loader factory. Re-exported
 // here so consumers pull the scanner, its cache, and the assembler from one
 // module surface. The builder is wired into the cache via createScannerCache.
-export { buildRunDetail, createRunDetailLoader } from './run-detail.js';
+export { buildRunDetail, createRunDetailLoader, createEmptyRunDetail } from './run-detail.js';
 export type { RunDetailDeps } from './run-detail.js';
+
+// Shared security and validation helpers. Re-exported so all modules can import
+// from a single consistent source (consolidation per IMP-134).
+export { VALID_FSM_STATES, isValidPathSegment, isUnderRoot, stripYamlScalar } from './path-guards.js';
 
 /** Concurrency cap for the cold-scan disk reads (spec §7.2). */
 const SCAN_CONCURRENCY = 16;
-
-/** The six valid v3 FSM states (from the raw contract, §4.0 #9). */
-const VALID_FSM_STATES: ReadonlySet<string> = new Set<FsmState>([
-  'READY',
-  'EXECUTE',
-  'GATES',
-  'ESCALATION',
-  'DONE',
-  'ERROR',
-]);
 
 /**
  * Denylist regexes for project directory names (spec §7.2).
@@ -526,13 +521,3 @@ function parseIsoMs(iso: string | null): number | null {
 }
 
 /** Strip surrounding quotes from a YAML scalar value. */
-function stripYamlScalar(raw: string): string {
-  const v = raw.trim();
-  if (
-    (v.startsWith('"') && v.endsWith('"')) ||
-    (v.startsWith("'") && v.endsWith("'"))
-  ) {
-    return v.slice(1, -1);
-  }
-  return v;
-}

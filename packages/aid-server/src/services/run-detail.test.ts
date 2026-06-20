@@ -829,4 +829,81 @@ describe('Security — CWE-22 symlink DoS / enumeration defense', () => {
     expect(rd.format).toBe('v3');
     expect(rd.gates.length).toBeGreaterThan(0);
   });
+
+  // ===========================================================================
+  // Security — CWE-22 defense layer 2 (isUnderRoot in buildRunDetail)
+  // ===========================================================================
+
+  describe('Security — CWE-22 defense layer 2 (isUnderRoot with projectsRoot)', () => {
+    it('rejects runDir outside projectsRoot and returns a safe stub', async () => {
+      // Create a run in an external directory outside root
+      const externalDir = join(tmpdir(), 'aid-external-secret');
+      const externalRunDir = join(externalDir, 'evidence', 'E-X', 'R-X');
+      await mkdir(externalRunDir, { recursive: true });
+      await writeFile(join(externalRunDir, 'fsm-state.yaml'), 'state: READY', 'utf-8');
+
+      try {
+        // Call buildRunDetail with projectsRoot set, but runDir outside it
+        const depsWithRoot = (): RunDetailDeps => ({
+          fs: new FsReader(),
+          pathMap: createPathMap({ projectsRoot: root, hostRoot: root }),
+          projectsRoot: root, // Layer 2 defense enabled
+        });
+
+        const rd = await buildRunDetail('proj', 'E-X', 'R-X', externalRunDir, depsWithRoot());
+
+        // Should return a safe stub
+        expect(rd.format).toBe('stub');
+        expect(rd.audit.warnings[0]).toContain('Security check failed');
+      } finally {
+        await rm(externalDir, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts runDir under projectsRoot when layer 2 is enabled', async () => {
+      const runDir = await makeRun('proj', 'E-test-l2', 'R-test-l2', {
+        fsm: fsmStateDone({ donePhase: 'review' }),
+        timeline: timelineNoDispatch(),
+      });
+
+      const depsWithRoot = (): RunDetailDeps => ({
+        fs: new FsReader(),
+        pathMap: createPathMap({ projectsRoot: root, hostRoot: root }),
+        projectsRoot: root,
+      });
+
+      const rd = await buildRunDetail('proj', 'E-test-l2', 'R-test-l2', runDir, depsWithRoot());
+
+      // Should build normally (layer 2 passes, inputs are valid)
+      expect(rd.format).toBe('v3');
+      expect(rd.state).toBe('DONE');
+    });
+
+    it('normalizes trailing slashes on projectsRoot before comparison', async () => {
+      const runDir = await makeRun('proj', 'E-test-slash', 'R-test-slash', {
+        fsm: fsmStateDone({ donePhase: 'review' }),
+        timeline: timelineNoDispatch(),
+      });
+
+      // Pass projectsRoot with trailing slash (the normalization case per IMP-129)
+      const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
+      const depsWithTrailingSlash = (): RunDetailDeps => ({
+        fs: new FsReader(),
+        pathMap: createPathMap({ projectsRoot: root, hostRoot: root }),
+        projectsRoot: rootWithSlash,
+      });
+
+      const rd = await buildRunDetail(
+        'proj',
+        'E-test-slash',
+        'R-test-slash',
+        runDir,
+        depsWithTrailingSlash(),
+      );
+
+      // Should still work correctly (trailing slash normalized away)
+      expect(rd.format).toBe('v3');
+      expect(rd.state).toBe('DONE');
+    });
+  });
 });

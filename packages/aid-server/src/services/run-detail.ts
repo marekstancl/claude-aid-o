@@ -34,7 +34,7 @@
  *  #10 format: v3 / legacy / stub (reuses the Step 6 classification rule).
  */
 
-import { basename, join, relative, posix, sep } from 'node:path';
+import { basename, join, relative, sep } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import type {
   ActivityEvent,
@@ -53,6 +53,11 @@ import type {
 } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 import { createPathMap, type PathMap } from './pathmap.js';
+import {
+  VALID_FSM_STATES,
+  isValidPathSegment,
+  isUnderRoot,
+} from './path-guards.js';
 
 // ===========================================================================
 // Dependency injection
@@ -72,45 +77,13 @@ export interface RunDetailDeps {
    * file list / display form. Defaults to an identity map.
    */
   pathMap: PathMap;
-}
-
-/** The six valid v3 FSM states (mirrors project-scanner.ts §4.0 #9). */
-const VALID_FSM_STATES: ReadonlySet<string> = new Set<FsmState>([
-  'READY',
-  'EXECUTE',
-  'GATES',
-  'ESCALATION',
-  'DONE',
-  'ERROR',
-]);
-
-// ===========================================================================
-// Security helpers — path traversal defense (CWE-22)
-// ===========================================================================
-
-/**
- * Validate that a path segment (projectId/epicId/runId) is safe — does not
- * contain traversal patterns (`..`), separators (`/`, `\`), or be empty/`.`.
- * Returns false for any dangerous input; never throws.
- */
-function isValidPathSegment(segment: string): boolean {
-  if (!segment || segment === '.' || segment === '..') return false;
-  if (segment.includes('/') || segment.includes('\\')) return false;
-  if (segment.includes('..')) return false;
-  return true;
-}
-
-/**
- * Segment-boundary-aware "is `p` under `root`" check (mirrored from pathmap.ts).
- * True when `p` equals `root` exactly, or `p` continues with a path separator
- * immediately after `root` (so `/projects/x` matches but `/projects-backup/x`
- * does not). Never throws.
- */
-function isUnderRoot(p: string, root: string): boolean {
-  if (p === root) return true;
-  if (!p.startsWith(root)) return false;
-  const boundary = p[root.length];
-  return boundary === posix.sep || boundary === sep;
+  /**
+   * Projects root directory for defense-layer-2 path traversal check.
+   * If provided, buildRunDetail verifies that the resolved runDir is under this root.
+   * (Security CWE-22: prevents escapes even if input validation is bypassed.)
+   * Optional for backward compatibility; always set by the cache loader.
+   */
+  projectsRoot?: string;
 }
 
 // ===========================================================================
@@ -139,12 +112,23 @@ export async function buildRunDetail(
   runDir: string,
   deps: RunDetailDeps,
 ): Promise<RunDetail> {
-  const { fs, pathMap } = deps;
+  const { fs, pathMap, projectsRoot } = deps;
 
   // Security defense layer 1: reject traversal in input segments
   if (!isValidPathSegment(projectId) || !isValidPathSegment(epicId) || !isValidPathSegment(runId)) {
     // Return a safe empty stub when input is invalid (never throw)
     return createEmptyRunDetail(projectId, epicId, runId);
+  }
+
+  // Security defense layer 2: if projectsRoot is provided, verify runDir is under it
+  // (prevents escape even if layer 1 is bypassed; also normalizes trailing slashes per IMP-129)
+  if (projectsRoot !== undefined) {
+    const normalizedRoot = projectsRoot.endsWith(sep) ? projectsRoot.slice(0, -1) : projectsRoot;
+    const normalizedRunDir = runDir.endsWith(sep) ? runDir.slice(0, -1) : runDir;
+    if (!isUnderRoot(normalizedRunDir, normalizedRoot)) {
+      // Traversal attempt detected — return safe empty stub (never throw)
+      return createEmptyRunDetail(projectId, epicId, runId);
+    }
   }
 
   // --- (#9) file list via root-relative recursive walk (NOT listDirRecursive) ---
@@ -157,7 +141,7 @@ export async function buildRunDetail(
   const timeline = await readTimeline(fs, runDir, projectId, epicId, runId);
 
   // --- (#10) format classification (v3 / legacy / stub) ---
-  const format = classifyFormat(fsm.present, fsm.state, timeline.length, files);
+  const format = classifyFormat(fsm.present, fsm.state, files);
 
   // --- (#8) compliance.json (all-optional; failures → ComplianceFailure[]) ---
   const compliance = await readCompliance(fs, runDir, epicId, runId);
@@ -169,10 +153,10 @@ export async function buildRunDetail(
   const audit = await readAudit(fs, runDir, files);
 
   // --- (#2) steps[] derived from timeline + verify-file mtimes ---
-  const steps = await deriveSteps(fs, runDir, files, fsm, timeline);
+  const steps = await deriveSteps(fs, runDir, files, fsm);
 
   // --- (#3, #4) checkpoints: provenance from compliance, repeats from files/timeline ---
-  const checkpoints = buildCheckpoints(compliance, timeline, files, gates, format);
+  const checkpoints = buildCheckpoints(compliance, timeline, files);
 
   // --- reports (audit / curator / reporter / epic-summary / final / other) ---
   const reports = buildReports(files);
@@ -213,7 +197,7 @@ export async function buildRunDetail(
  * Create a type-valid empty RunDetail stub when security checks fail
  * (traversal attempt detected). Never throws.
  */
-function createEmptyRunDetail(projectId: string, epicId: string, runId: string): RunDetail {
+export function createEmptyRunDetail(projectId: string, epicId: string, runId: string): RunDetail {
   return {
     projectId,
     epicId,
@@ -411,18 +395,16 @@ function emptyFsmTop(): FsmTop {
 
 /**
  * Classify the run format (§4.0 #10, mirrors the Step 6 scanner rule):
- * - **v3**: a parseable fsm-state with a valid `state` AND a non-empty timeline.
+ * - **v3**: a parseable fsm-state with a valid `state`.
  * - **legacy**: an fsm-state present (or legacy markers) but not v3-shaped.
  * - **stub**: nothing usable (no fsm-state, minimal files).
  */
 function classifyFormat(
   fsmPresent: boolean,
   state: FsmState | null,
-  timelineLen: number,
   files: string[],
 ): RunFormat {
-  if (fsmPresent && state !== null && timelineLen > 0) return 'v3';
-  if (fsmPresent && state !== null) return 'v3'; // fsm-state alone still v3-shaped
+  if (fsmPresent && state !== null) return 'v3';
   if (
     fsmPresent ||
     files.includes('state.yaml') ||
@@ -885,7 +867,6 @@ async function deriveSteps(
   runDir: string,
   files: string[],
   fsm: FsmTop,
-  timeline: ActivityEvent[],
 ): Promise<RunStep[]> {
   // --- which step indices have a verify / verifier-output file? ---
   // Files use 0-based indices: step-0-verify.md, verifier-output-step-0.md.
@@ -983,8 +964,6 @@ async function deriveSteps(
     });
   }
 
-  // Corroborate roles from timeline dispatch focus when plan.json lacked them.
-  void timeline; // timeline corroboration reserved; presence already drives status
   return steps;
 }
 
@@ -1063,11 +1042,7 @@ function buildCheckpoints(
   compliance: ComplianceRun | null,
   timeline: ActivityEvent[],
   files: string[],
-  gates: GateResult[],
-  format: RunFormat,
 ): Checkpoint[] {
-  void gates; // gates inform CP5 verdict only via compliance; reserved
-  void format;
   const vo = readVerifierOutputs(compliance);
 
   // Group timeline dispatch starts by focus for repeat counts (#4).
@@ -1309,7 +1284,7 @@ export function createRunDetailLoader(opts: {
     const runDir =
       opts.resolveRunDir?.(projectId, epicId, runId) ??
       join(opts.projectsRoot, projectId, '.aid-o', 'work', 'evidence', epicId, runId);
-    return buildRunDetail(projectId, epicId, runId, runDir, { fs, pathMap });
+    return buildRunDetail(projectId, epicId, runId, runDir, { fs, pathMap, projectsRoot: opts.projectsRoot });
   };
 }
 
