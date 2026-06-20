@@ -39,7 +39,7 @@ export interface FileChangeEvent {
   topic: EventTopic;
   filePath?: string;               // relative path from .aid-o root; omitted in abbreviated emits
   changeType: 'add' | 'change' | 'unlink';
-  runRef: RunRef | null;           // set when path is under work/evidence/<epic>/<run>/
+  runRef?: RunRef;                 // present only when path is under work/evidence/<epic>/<run>/
   parsedData: unknown;
   ts: string;                      // §7.3: ISO 8601; field was `timestamp` in the salvage source
 }

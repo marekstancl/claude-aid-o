@@ -22,7 +22,6 @@ export default defineConfig({
           'vendor-motion': ['motion/react'],
           'vendor-recharts': ['recharts'],
           'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-          'vendor-radix': ['@radix-ui/react-tabs', '@radix-ui/react-tooltip', '@radix-ui/react-dropdown-menu'],
         },
       },
     },

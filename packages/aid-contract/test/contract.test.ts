@@ -7,7 +7,7 @@ import type {
   ComplianceRun,
   MembershipSource,
 } from '../src/index.js';
-import { STATUS } from '../src/index.js';
+import { STATUS, ALL_EVENT_TOPICS } from '../src/index.js';
 
 // ── 1. AidFsmState (raw) accepts 'ERROR' ─────────────────────────────────────
 describe('AidFsmState', () => {
@@ -81,7 +81,32 @@ describe('MembershipSource', () => {
   });
 });
 
-// ── 7. Mismatch guard: FsmState has ERROR (regression guard for §4.1) ─────────
+// ── 7. ALL_EVENT_TOPICS — exact P047 §7.3 vocabulary (regression guard) ──────
+describe('ALL_EVENT_TOPICS', () => {
+  const REQUIRED_TOPICS = [
+    'pipeline', 'pipeline.timeline', 'gates', 'compliance',
+    'checkpoints', 'queue', 'decisions', 'audit',
+    'epics', 'backlog', 'config', 'system',
+  ] as const;
+
+  it('contains exactly 12 topics', () => {
+    expect(ALL_EVENT_TOPICS).toHaveLength(12);
+  });
+
+  it('contains all required P047 §7.3 topics', () => {
+    for (const topic of REQUIRED_TOPICS) {
+      expect(ALL_EVENT_TOPICS).toContain(topic);
+    }
+  });
+
+  it('does NOT contain deprecated topics (pipeline.stage_log, evidence, usage)', () => {
+    expect(ALL_EVENT_TOPICS).not.toContain('pipeline.stage_log');
+    expect(ALL_EVENT_TOPICS).not.toContain('evidence');
+    expect(ALL_EVENT_TOPICS).not.toContain('usage');
+  });
+});
+
+// ── 8. Mismatch guard: FsmState has ERROR (regression guard for §4.1) ─────────
 // If someone removes ERROR from FsmState, this type-level check becomes never
 // and the assignment below fails to compile — catching the regression at build time.
 type Legacy5State = 'READY' | 'EXECUTE' | 'GATES' | 'ESCALATION' | 'DONE';

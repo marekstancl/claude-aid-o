@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
 import { isValidPathComponent, type ProjectParams, type EvidenceFileParams } from './types.js';
 
@@ -54,9 +54,9 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
 
     const fullPath = join(fs.aidoPath, 'work', 'evidence', req.params.epicId, req.params.runId, filePath);
 
-    // Security: ensure path doesn't escape evidence dir
+    // Security: ensure path doesn't escape evidence dir (trailing sep prevents /evidence-secret prefix match).
     const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
-    if (!fullPath.startsWith(evidenceBase)) {
+    if (!fullPath.startsWith(evidenceBase + sep)) {
       return res.status(403).json({ ok: false, error: { code: 'FORBIDDEN', message: 'Path traversal not allowed' } });
     }
 
