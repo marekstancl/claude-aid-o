@@ -38,7 +38,7 @@
 import { join, resolve } from 'node:path';
 import { readdir, stat } from 'node:fs/promises';
 import { LRUCache } from 'lru-cache';
-import type { ActivityEvent, FsmState, RunDetail, RunFormat } from '@aid/contract';
+import type { ActivityEvent, FsmState, Project, RunDetail, RunFormat } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 import { ProjectScanner } from './project-scanner.js';
 import { createRunDetailLoader, createEmptyRunDetail } from './run-detail.js';
@@ -266,6 +266,18 @@ export class ScannerCache {
       return this.buildIndex();
     }
     return this.index;
+  }
+
+  /**
+   * Full contract {@link Project} listing (counts + health + activeRun +
+   * lastActivityAt), produced by the wrapped {@link ProjectScanner}. This is the
+   * cross-project read surface the HTTP routes consume — `getProjects()` returns
+   * the INTERNAL Tier-1 entries, whereas this returns the contract shape (denylist
+   * applied, latest-run selection done correctly). Performs NO per-run RunDetail
+   * load (the injected loader is never called here). Never throws.
+   */
+  async listProjects(): Promise<Project[]> {
+    return this.scanner.scan();
   }
 
   /**

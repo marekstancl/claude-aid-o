@@ -44,6 +44,8 @@ import { CrossProjectWatcher } from './watchers/file-watcher.js';
 import { AidWebSocket } from './ws/websocket.js';
 import { send404 } from './api/middleware.js';
 import { healthRoutes } from './routes/health.js';
+import { projectRoutes } from './routes/projects.js';
+import { epicRoutes } from './routes/epics.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -54,17 +56,19 @@ import { healthRoutes } from './routes/health.js';
  * 404 catch-all + the static GUI fallback. No http server, no port — supertest
  * can drive the returned app directly.
  *
- * The `scanner` is accepted so Steps 5-9 can mount cross-project read routes
- * that read from it. In this step only `/api/health` is mounted, so `scanner`
- * is wired but not yet consumed by a route.
+ * The `scanner` is the Phase-2 {@link ScannerCache}; the cross-project read
+ * routes mounted below read from it. Steps 6-9 append further `/api/*` routes
+ * before the catch-all.
  */
-export function createApp(config: ServerConfig, _scanner: ScannerCache): Express {
+export function createApp(config: ServerConfig, scanner: ScannerCache): Express {
   const app = express();
   app.use(cors({ origin: config.corsOrigins }));
   app.use(express.json());
 
-  // --- API routes (this step mounts ONLY health; Steps 5-9 append more) ---
+  // --- API routes (Step 4 health + Step 5 cross-project read routes) ---
   app.use('/api/health', healthRoutes());
+  app.use('/api', projectRoutes(scanner));
+  app.use('/api', epicRoutes(scanner));
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
