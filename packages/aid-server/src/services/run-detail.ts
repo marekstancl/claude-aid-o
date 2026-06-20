@@ -131,6 +131,11 @@ export async function buildRunDetail(
     }
   }
 
+  // --- Derive aidoRoot: the `.aid-o` dir above the run evidence path ---
+  // runDir is typically `.../project/.aid-o/work/evidence/<epicId>/<runId>`.
+  // Walk up from runDir to find the `.aid-o` directory (4 levels up).
+  const aidoRoot = join(runDir, '..', '..', '..', '..');
+
   // --- (#9) file list via root-relative recursive walk (NOT listDirRecursive) ---
   const files = await walkRunFiles(runDir, pathMap);
 
@@ -153,10 +158,18 @@ export async function buildRunDetail(
   const audit = await readAudit(fs, runDir, files);
 
   // --- (#2) steps[] derived from timeline + verify-file mtimes ---
-  const steps = await deriveSteps(fs, runDir, files, fsm);
+  const steps = await deriveSteps(fs, runDir, files, fsm, timeline);
 
   // --- (#3, #4) checkpoints: provenance from compliance, repeats from files/timeline ---
-  const checkpoints = buildCheckpoints(compliance, timeline, files);
+  const checkpoints = await buildCheckpoints(
+    compliance,
+    timeline,
+    files,
+    fs,
+    runDir,
+    fsm.planPath,
+    aidoRoot,
+  );
 
   // --- reports (audit / curator / reporter / epic-summary / final / other) ---
   const reports = buildReports(files);
@@ -497,7 +510,8 @@ async function readCompliance(
   const d = parsed.data;
   if (d === null || typeof d !== 'object') return null;
 
-  const overall = d.overall === 'fail' ? 'fail' : 'pass';
+  // HIGH-3: fail-closed — unknown/missing overall → fail, not pass
+  const overall = d.overall === 'pass' ? 'pass' : 'fail';
   const checks =
     typeof d.checks === 'object' && d.checks !== null
       ? (d.checks as Record<string, unknown>)
@@ -567,7 +581,8 @@ async function readGates(fs: FsReader, runDir: string): Promise<GateResult[]> {
     // inner `gate` field preserves the canonical snake_case name. Prefer it,
     // so the plan_diff sentinel below matches against the real gate name.
     const gateName = asString(g.gate) ?? key;
-    const exitCode = asNumber(g.exitCode) ?? 0;
+    const exitCodeRaw = asNumber(g.exitCode);
+    const exitCode = exitCodeRaw ?? 0; // For output field (always a number)
     const attempts = asNumber(g.attempts) ?? 0;
     const durationMs = asNumber(g.durationMs) ?? 0;
     const outputPreview = previewOutput(asString(g.output) ?? '');
@@ -577,14 +592,18 @@ async function readGates(fs: FsReader, runDir: string): Promise<GateResult[]> {
     // the `skip`/`skipped` synonyms to the contract's `skipped`.
     let result: GateResult['result'];
     const rawResult = asString(g.result);
-    if (gateName === 'plan_diff' && exitCode === 2) {
+    if (gateName === 'plan_diff' && exitCodeRaw === 2) {
       result = 'skipped';
     } else if (rawResult === 'pass' || rawResult === 'fail') {
       result = rawResult;
     } else if (rawResult === 'skipped' || rawResult === 'skip') {
       result = 'skipped';
+    } else if (exitCodeRaw !== null) {
+      // HIGH-3: only infer pass/fail from exitCode if it was ACTUALLY present
+      result = exitCodeRaw === 0 ? 'pass' : 'fail';
     } else {
-      result = exitCode === 0 ? 'pass' : 'fail';
+      // HIGH-3: fail-closed — no result, no exit_code → fail
+      result = 'fail';
     }
 
     out.push({
@@ -867,6 +886,7 @@ async function deriveSteps(
   runDir: string,
   files: string[],
   fsm: FsmTop,
+  timeline: ActivityEvent[],
 ): Promise<RunStep[]> {
   // --- which step indices have a verify / verifier-output file? ---
   // Files use 0-based indices: step-0-verify.md, verifier-output-step-0.md.
@@ -896,6 +916,18 @@ async function deriveSteps(
   const totalFromFsm = fsm.totalSteps ?? 0;
   const total = Math.max(totalFromFsm, maxVerifyIdx + 1, planSteps.length);
   if (total === 0) return [];
+
+  // MED-1: Extract READY→EXECUTE transition timestamp from timeline (real work start, not fsm_init)
+  let readyToExecuteTime: number | null = null;
+  for (const e of timeline) {
+    if (e.event === 'fsm_transition' && e.from === 'READY' && e.to === 'EXECUTE') {
+      const ts = Date.parse(e.ts);
+      if (!isNaN(ts)) {
+        readyToExecuteTime = ts;
+        break; // use the first READY→EXECUTE transition
+      }
+    }
+  }
 
   // mtime boundaries (file-mtime approximation for durationS).
   const mtimeCache = new Map<number, number | null>();
@@ -942,9 +974,14 @@ async function deriveSteps(
 
     // durationS: boundary approximation between this step's verify-file mtime
     // and the previous step's (null when either is missing).
+    // MED-1: For step 0, use the READY→EXECUTE transition time (spec §4.0 / spec:260),
+    // not fsm.startedAt (which is fsm_init, may be hours before actual work started).
     let durationS: number | null = null;
     const thisMtime = await mtimeForIdx(i);
-    const prevMtime = i > 0 ? await mtimeForIdx(i - 1) : (fsm.startedAt ? Date.parse(fsm.startedAt) : null);
+    const prevMtime =
+      i > 0
+        ? await mtimeForIdx(i - 1)
+        : readyToExecuteTime ?? (fsm.startedAt ? Date.parse(fsm.startedAt) : null);
     if (thisMtime !== null && prevMtime !== null && thisMtime >= prevMtime) {
       durationS = Math.round((thisMtime - prevMtime) / 1000);
     }
@@ -1007,6 +1044,194 @@ function firstLine(s: string): string {
   return line.length > 120 ? line.slice(0, 120) : line;
 }
 
+/**
+ * Extract the verdict from a markdown file's LEADING header block (HIGH-2 / §4.0 #4).
+ *
+ * Real file shapes vary:
+ *  1. YAML frontmatter: `---\nverdict: <value>\n---` (synthetic test format, legacy)
+ *  2. Bare `verdict: <value>` in the leading block (no `---` fence at byte 0)
+ *  3. `# Title` / `## Title` heading followed by bare keys
+ *  4. A `---` fence NOT at byte 0 (separator before body, not frontmatter)
+ *  5. `## Result: PASS` or `## Verdict\nPASS` body headings (fallback)
+ *
+ * The leading block is the section before:
+ *  - the first `## ` markdown heading (start of body), OR
+ *  - a `\n---\n` separator line (body boundary), OR
+ *  - end of file
+ *
+ * Tolerates: title lines, blank lines, CRLF, mixed fences. Returns null only
+ * when genuinely no verdict signal exists.
+ */
+async function extractVerdictFromFile(fs: FsReader, filePath: string): Promise<Verdict | null> {
+  const text = await fs.readText(filePath);
+  if (text === null) return null;
+
+  // --- Try legacy YAML frontmatter format first: ---\n...\n--- ---
+  const legacyFrontmatterMatch = text.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (legacyFrontmatterMatch) {
+    const fmText = legacyFrontmatterMatch[1];
+    const verdictMatch = fmText.match(/^\s*verdict\s*:\s*(.+?)\s*$/im);
+    if (verdictMatch) {
+      const value = verdictMatch[1].trim().toLowerCase();
+      if (value === 'pass') return 'pass';
+      if (value === 'fail') return 'fail';
+      if (value === 'skipped') return 'skipped';
+    }
+  }
+
+  // --- Extract the leading header block (before body or ## heading) ---
+  // Match until the first `## ` heading or a `\n---\n` separator (body boundary).
+  const headerMatch = text.match(/^([\s\S]*?)(?:\n##\s|\n---\n|$)/);
+  const headerBlock = headerMatch ? headerMatch[1] : text;
+
+  // --- Try a bare `verdict: <value>` line in the header (case-insensitive value) ---
+  const verdictMatch = headerBlock.match(/^\s*verdict\s*:\s*(.+?)\s*$/im);
+  if (verdictMatch) {
+    const value = verdictMatch[1].trim().toLowerCase();
+    if (value === 'pass') return 'pass';
+    if (value === 'fail') return 'fail';
+    if (value === 'skipped') return 'skipped';
+  }
+
+  // --- Fallback: `## Result: PASS` / `## Verdict\nPASS` in body ---
+  // Try `## Result: PASS` or `## Verdict: PASS` (colon form)
+  const resultHeading = text.match(/^##\s+(?:Result|Verdict)\s*:\s*(\w+)/im);
+  if (resultHeading) {
+    const value = resultHeading[1].trim().toLowerCase();
+    if (value === 'pass') return 'pass';
+    if (value === 'fail') return 'fail';
+    if (value === 'skipped') return 'skipped';
+  }
+
+  // Also try `## Verdict\nPASS.` form (body heading followed by verdict value on next line)
+  const verdictBodyHeading = text.match(/^##\s+Verdict\s*\n\s*(\w+)/im);
+  if (verdictBodyHeading) {
+    const value = verdictBodyHeading[1].trim().toLowerCase();
+    if (value === 'pass') return 'pass';
+    if (value === 'fail') return 'fail';
+    if (value === 'skipped') return 'skipped';
+  }
+
+  // No verdict signal found.
+  return null;
+}
+
+/**
+ * Aggregate verdicts from multiple files using fail-closed logic:
+ * if any file has verdict='fail', return 'fail'; else if any has 'pass', return 'pass';
+ * else return null (no verdict found in any file).
+ */
+async function aggregateVerdicts(
+  fs: FsReader,
+  runDir: string,
+  files: string[],
+): Promise<Verdict | null> {
+  let hasPass = false;
+  for (const filePath of files) {
+    const verdict = await extractVerdictFromFile(fs, join(runDir, filePath));
+    if (verdict === 'fail') return 'fail'; // fail-closed: any fail ends the search
+    if (verdict === 'pass') hasPass = true;
+  }
+  return hasPass ? 'pass' : null;
+}
+
+/**
+ * Derive the plan ID from fsm-state fields (§4.0 #4 CP1 special handling).
+ *
+ * CP1 review files live at the WORK ROOT (not the run dir), keyed by plan ID:
+ * `.aid-o/work/cp1-review-<plan-id>.md`. The plan ID must be extracted from:
+ *   1. `fsm-state.yaml` `plan_path` field (if present) — extract the plan ID from the path
+ *   2. Fallback: list `work/cp1-review-*.md` and pick the one that matches
+ *
+ * Returns null if the plan ID cannot be derived.
+ */
+async function derivePlanId(
+  fs: FsReader,
+  runDir: string,
+  planPath: string | null,
+  aidoRoot: string,
+): Promise<string | null> {
+  // --- 1. Try to extract plan ID from fsm-state planPath ---
+  if (planPath !== null && planPath.length > 0) {
+    // planPath typically looks like `.aid-o/plans/P046-plan-name.md`.
+    const match = planPath.match(/P(\d+)(?:-.*)?(?:\.md)?/);
+    if (match) {
+      return `P${match[1]}`;
+    }
+  }
+
+  // --- 2. plan.json `source_plan` (run dir) — survives a null plan_path ---
+  // Verified real-data source: E-046-3's fsm-state has plan_path: null, but its
+  // plan.json carries `source_plan: ".../P046-...md"`. This is the reliable signal.
+  const planJson = await fs.readJsonParsed<Record<string, unknown>>(join(runDir, 'plan.json'));
+  const sourcePlan = planJson.data
+    ? (planJson.data.source_plan ?? planJson.data.sourcePlan)
+    : null;
+  if (typeof sourcePlan === 'string') {
+    const m = sourcePlan.match(/P(\d+)(?:-.*)?(?:\.md)?/);
+    if (m) return `P${m[1]}`;
+  }
+
+  // --- 3. Convention: epicId E-0NN-… → plan P0NN (extract from the run dir's epic) ---
+  // runDir is `.../work/evidence/<epicId>/<runId>`; the epic dir encodes the number.
+  const epicSeg = basename(join(runDir, '..'));
+  const epicMatch = epicSeg.match(/^E-0*(\d+)/);
+  if (epicMatch) {
+    const candidate = `P${epicMatch[1].padStart(3, '0')}`;
+    if (await fs.exists(join(aidoRoot, 'work', `cp1-review-${candidate}.md`))) {
+      return candidate;
+    }
+  }
+
+  // --- 4. Fallback: scan work root for cp1-review-P*.md; use it only if exactly one ---
+  const workRoot = join(aidoRoot, 'work');
+  let entries: string[] = [];
+  try {
+    const allEntries = await readdir(workRoot);
+    entries = allEntries.filter((f) => /^cp1-review-P\d+\.md$/.test(f));
+  } catch {
+    return null;
+  }
+  if (entries.length === 1) {
+    const m = entries[0].match(/cp1-review-(P\d+)\.md/);
+    if (m) return m[1];
+  }
+
+  return null;
+}
+
+/**
+ * Read the CP1 verdict from the plan-scoped review file (WORK ROOT) or run-dir files.
+ *
+ * CP1 files are primarily at the WORK ROOT: `.aid-o/work/cp1-review-<plan-id>.md`.
+ * Falls back to run-dir CP1 files (for legacy or test fixtures).
+ * Returns null if:
+ *  - No CP1 files found (work-root or run-dir), OR
+ *  - No verdict signal is found in any file.
+ */
+async function readCp1Verdict(
+  fs: FsReader,
+  runDir: string,
+  planPath: string | null,
+  aidoRoot: string,
+  cp1RunFiles: string[],
+): Promise<Verdict | null> {
+  // --- Primary: try work-root cp1-review-<plan-id>.md ---
+  const planId = await derivePlanId(fs, runDir, planPath, aidoRoot);
+  if (planId !== null) {
+    const cp1Path = join(aidoRoot, 'work', `cp1-review-${planId}.md`);
+    const verdict = await extractVerdictFromFile(fs, cp1Path);
+    if (verdict !== null) return verdict;
+  }
+
+  // --- Fallback: run-dir cp1/*.md and cp1-grounding* files (legacy, test fixtures) ---
+  if (cp1RunFiles.length > 0) {
+    return aggregateVerdicts(fs, runDir, cp1RunFiles);
+  }
+
+  return null;
+}
+
 // ===========================================================================
 // #3, #4 — checkpoints (provenance from compliance; repeats from files/timeline)
 // ===========================================================================
@@ -1031,18 +1256,30 @@ const CHECKPOINT_LABELS: Record<CheckpointId, string> = {
  * dispatch events while verifier-output md files exist, so re-deriving would
  * falsely mark everything unverifiable.
  *
+ * **Verdicts (HIGH-2):** Read from the evidence files (frontmatter `verdict:`)
+ * when compliance.json is absent or missing verdicts. Falls back to compliance
+ * data when available, for compatibility.
+ *
  * **repeatCount (#4):**
  *  - CP1 from the file inventory (`repeatSource:'files'`).
  *  - CP2/CP3/CP4 from timeline `verifier_dispatch_start` grouped by focus minus
  *    1 (`repeatSource:'timeline'`); `null` + `repeatSource:null` when there are
  *    no dispatch events (the common case) — NEVER 0.
  *  - CP6 omitted/greyed for /aid-run runs.
+ *
+ * **CP1 special handling:** CP1 review files live at the WORK ROOT
+ * (`.aid-o/work/cp1-review-<plan-id>.md`), not the run dir. The plan ID is
+ * derived from `fsm-state.yaml` `plan_path` or by globbing the work root.
  */
-function buildCheckpoints(
+async function buildCheckpoints(
   compliance: ComplianceRun | null,
   timeline: ActivityEvent[],
   files: string[],
-): Checkpoint[] {
+  fs: FsReader,
+  runDir: string,
+  planPath: string | null,
+  aidoRoot: string,
+): Promise<Checkpoint[]> {
   const vo = readVerifierOutputs(compliance);
 
   // Group timeline dispatch starts by focus for repeat counts (#4).
@@ -1062,44 +1299,52 @@ function buildCheckpoints(
 
   const checkpoints: Checkpoint[] = [];
 
-  // --- CP1: plan grounding — repeat from file inventory (#4) ---
-  const cp1Files = files.filter(
-    (f) => /cp1/i.test(f) || /grounding/i.test(f) || /^plan-diff\.json$/.test(f),
+  // --- CP1: plan grounding — verdict from WORK ROOT cp1-review file (HIGH-2), repeat from run-dir files ---
+  // HIGH-2: Exclude plan-diff.json (it's a gate artifact, not a CP1 output file); only match cp1/grounding
+  const cp1RunFiles = files.filter(
+    (f) => /cp1/i.test(f) || /grounding/i.test(f),
   );
+
+  // Read CP1 verdict from the plan-scoped review file (work root), falling back to run-dir files.
+  const cp1Verdict = await readCp1Verdict(fs, runDir, planPath, aidoRoot, cp1RunFiles);
+
   checkpoints.push({
     id: 'CP1',
     label: CHECKPOINT_LABELS.CP1,
-    dispatched: cp1Files.length > 0 || files.includes('plan.json'),
-    verdict: null,
+    dispatched: cp1RunFiles.length > 0 || files.includes('plan.json'),
+    verdict: cp1Verdict,
     provenance: null,
     provenanceSource: null,
-    repeatCount: cp1Files.length > 0 ? cp1Files.length : null,
-    repeatSource: cp1Files.length > 0 ? 'files' : null,
-    outputs: cp1Files.map((f) => ({ name: basename(f), relPath: f })),
+    repeatCount: cp1RunFiles.length > 0 ? cp1RunFiles.length : null,
+    repeatSource: cp1RunFiles.length > 0 ? 'files' : null,
+    outputs: cp1RunFiles.map((f) => ({ name: basename(f), relPath: f })),
   });
 
-  // --- CP2: per-step verification ---
+  // --- CP2: per-step verification (HIGH-2: read verdict from files, fallback to compliance) ---
+  const cp2Files = files.filter((f) => /^verifier-output-step-\d+\.md$/.test(f));
+  const cp2VerdictFromFiles = cp2Files.length > 0 ? await aggregateVerdicts(fs, runDir, cp2Files) : null;
+  const cp2Verdict = cp2VerdictFromFiles ?? vo.cp2Verdict;
   checkpoints.push({
     id: 'CP2',
     label: CHECKPOINT_LABELS.CP2,
-    dispatched: vo.cp2Dispatched ?? files.some((f) => /^verifier-output-step-\d+\.md$/.test(f)),
-    verdict: vo.cp2Verdict,
+    dispatched: vo.cp2Dispatched ?? cp2Files.length > 0,
+    verdict: cp2Verdict,
     provenance: vo.cp2Provenance,
     provenanceSource: vo.cp2Provenance !== null ? 'compliance' : null,
     repeatCount: cp2Repeat,
     repeatSource: cp2Repeat !== null ? 'timeline' : null,
-    outputs: files
-      .filter((f) => /^verifier-output-step-\d+\.md$/.test(f))
-      .map((f) => ({ name: basename(f), relPath: f })),
+    outputs: cp2Files.map((f) => ({ name: basename(f), relPath: f })),
   });
 
-  // --- CP3: integration review (code-review + security) ---
+  // --- CP3: integration review (code-review + security) (HIGH-2: read verdict from files, fallback to compliance) ---
   const cp3Files = files.filter((f) => /^verifier-output-cp3-/.test(f));
+  const cp3VerdictFromFiles = cp3Files.length > 0 ? await aggregateVerdicts(fs, runDir, cp3Files) : null;
+  const cp3Verdict = cp3VerdictFromFiles ?? vo.cp3Verdict;
   checkpoints.push({
     id: 'CP3',
     label: CHECKPOINT_LABELS.CP3,
     dispatched: vo.cp3Dispatched ?? cp3Files.length > 0,
-    verdict: vo.cp3Verdict,
+    verdict: cp3Verdict,
     provenance: vo.cp3Provenance,
     provenanceSource: vo.cp3Provenance !== null ? 'compliance' : null,
     repeatCount: cp3Repeat,
@@ -1107,13 +1352,14 @@ function buildCheckpoints(
     outputs: cp3Files.map((f) => ({ name: basename(f), relPath: f })),
   });
 
-  // --- CP4: curator validation ---
+  // --- CP4: curator validation (HIGH-2: read verdict from files) ---
   const cp4Files = files.filter((f) => /^verifier-output-cp4-/.test(f));
+  const cp4Verdict = cp4Files.length > 0 ? await aggregateVerdicts(fs, runDir, cp4Files) : null;
   checkpoints.push({
     id: 'CP4',
     label: CHECKPOINT_LABELS.CP4,
     dispatched: cp4Files.length > 0,
-    verdict: null,
+    verdict: cp4Verdict,
     provenance: null,
     provenanceSource: null,
     repeatCount: cp4Repeat,

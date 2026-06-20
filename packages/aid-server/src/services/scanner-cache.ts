@@ -211,6 +211,11 @@ interface CachedRunDetail {
    * observed max moves past this value, the entry is stale (loader re-invoked).
    */
   maxFileMtimeMs: number;
+  /**
+   * MED-3: When this entry was cached (epoch ms). Used by the TTL sweep to drop
+   * stale entries even when their files have not changed.
+   */
+  cachedAtMs: number;
 }
 
 // ===========================================================================
@@ -371,6 +376,9 @@ export class ScannerCache {
     );
     for (const epicDir of evidenceEpicDirs) {
       const absEpicDir = join(evidenceDir, epicDir);
+      // Filter to only directories (HIGH-1: skip .md files like audit-report.md)
+      if (!(await this.fs.isDirectory(absEpicDir))) continue;
+
       // Ensure an EPIC entry exists even when only known via evidence dirs.
       let epicEntry = epics.get(epicDir);
       if (!epicEntry) {
@@ -383,6 +391,9 @@ export class ScannerCache {
       );
       for (const runId of runNames) {
         const runDir = join(absEpicDir, runId);
+        // Filter to only directories (HIGH-1: skip markdown files like plan-diff.json)
+        if (!(await this.fs.isDirectory(runDir))) continue;
+
         const cheap = await this.indexRun(runId, runDir);
         if (cheap) epicEntry.runs.set(runId, cheap);
       }
@@ -528,7 +539,8 @@ export class ScannerCache {
     const detail = await this.loader(projectId, epicId, runId);
     const runDir = this.resolveRunDir(projectId, epicId, runId);
     const maxFileMtimeMs = runDir ? ((await this.maxFileMtime(runDir)) ?? 0) : 0;
-    this.runDetailCache.set(key, { detail, maxFileMtimeMs });
+    // MED-3: Record the insertion time for TTL-based eviction
+    this.runDetailCache.set(key, { detail, maxFileMtimeMs, cachedAtMs: Date.now() });
     return detail;
   }
 
@@ -685,9 +697,10 @@ export class ScannerCache {
    *
    * @returns the number of Tier-2 entries dropped as stale.
    */
-  async sweep(): Promise<number> {
+  async sweep(nowMs?: number): Promise<number> {
     await this.buildIndex();
 
+    const now = nowMs ?? Date.now();
     let dropped = 0;
     // Snapshot keys first — we mutate the cache while iterating.
     for (const key of [...this.runDetailCache.keys()]) {
@@ -696,8 +709,10 @@ export class ScannerCache {
       const [projectId, epicId, runId] = key.split('/');
       const runDir = this.resolveRunDir(projectId, epicId, runId);
       const observedMax = runDir ? await this.maxFileMtime(runDir) : null;
-      // Drop when the dir vanished, or any file is newer than cached.
-      if (observedMax === null || observedMax > cached.maxFileMtimeMs) {
+      // MED-3: Drop when (a) dir vanished, (b) file is newer than cached, or (c) age exceeds TTL.
+      const age = now - cached.cachedAtMs;
+      const exceedsTtl = age > this.config.scanTtlMs;
+      if (observedMax === null || observedMax > cached.maxFileMtimeMs || exceedsTtl) {
         this.runDetailCache.delete(key);
         dropped++;
       }

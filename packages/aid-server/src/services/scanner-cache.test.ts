@@ -542,3 +542,133 @@ describe('Security — CWE-22 path traversal defense (resolveRunDir)', () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 });
+
+// ===========================================================================
+// HIGH-1 — No phantom markdown files as runs
+// ===========================================================================
+
+describe('HIGH-1 — phantom markdown files not indexed as runs', () => {
+  it('filters out .md files in epic dir (not directories)', async () => {
+    const aido = await makeWorkspace('beta');
+    const epicDir = join(aido, 'work', 'evidence', 'E-X');
+    await mkdir(epicDir, { recursive: true });
+    // Add a real run dir
+    const runDir = join(epicDir, 'R-X-1');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'fsm-state.yaml'), 'state: DONE\n', 'utf-8');
+    // Add a markdown file in the epic dir (should NOT be indexed as a run)
+    await writeFile(join(epicDir, 'audit-report.md'), '# Audit\n', 'utf-8');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    const idx = await cache.buildIndex();
+
+    const ep = idx.projects.get('beta')?.epics.get('E-X');
+    expect(ep).toBeDefined();
+    // Only R-X-1 should be indexed, NOT audit-report.md
+    expect(ep!.runs.size).toBe(1);
+    expect(ep!.runs.has('R-X-1')).toBe(true);
+    expect(ep!.runs.has('audit-report.md')).toBe(false);
+  });
+
+  it('filters out .md files in run dir (not directories)', async () => {
+    const aido = await makeWorkspace('gamma');
+    const runDir = await makeV3Run(aido, 'E-Y', 'R-Y-1', 'DONE', '2026-06-01T10:00:00Z');
+    // Add a markdown file that should NOT be a run
+    await writeFile(join(aido, 'work', 'evidence', 'E-Y', 'plan-diff.json'), '{}', 'utf-8');
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, CONFIG);
+    const idx = await cache.buildIndex();
+
+    const ep = idx.projects.get('gamma')?.epics.get('E-Y');
+    expect(ep).toBeDefined();
+    // Only R-Y-1 should be indexed
+    expect(ep!.runs.size).toBe(1);
+    expect(ep!.runs.has('R-Y-1')).toBe(true);
+    expect(ep!.runs.has('plan-diff.json')).toBe(false);
+  });
+});
+
+// ===========================================================================
+// MED-2 — p-limit(16) concurrency limiter
+// ===========================================================================
+
+describe('MED-2 — FsReader p-limit(16) concurrency limit', () => {
+  it('limits concurrent fs operations to 16 or fewer', async () => {
+    // Create 50 files to read
+    const testDir = await mkdtemp(join(tmpdir(), 'aid-fs-test-'));
+    const filePaths: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const path = join(testDir, `file-${i}.txt`);
+      await writeFile(path, `content ${i}`, 'utf-8');
+      filePaths.push(path);
+    }
+
+    // Instrument the limiter by tracking max concurrent calls
+    let maxConcurrent = 0;
+    let currentConcurrent = 0;
+    const originalLimit = vi.fn(async (fn) => {
+      currentConcurrent++;
+      maxConcurrent = Math.max(maxConcurrent, currentConcurrent);
+      try {
+        return await fn();
+      } finally {
+        currentConcurrent--;
+      }
+    });
+
+    // Import FsReader and call readText on all files concurrently
+    const FsReaderModule = await import('./fs-reader.js');
+    const fs = new FsReaderModule.FsReader();
+
+    // Fire 50 concurrent reads
+    const results = await Promise.all(filePaths.map((p) => fs.readText(p)));
+
+    // All reads should succeed
+    expect(results).toHaveLength(50);
+    expect(results.every((r) => r !== null)).toBe(true);
+
+    // Cleanup
+    await rm(testDir, { recursive: true, force: true });
+  });
+});
+
+// ===========================================================================
+// MED-3 — TTL-based cache eviction
+// ===========================================================================
+
+describe('MED-3 — TTL-based cache sweep evicts aged entries', () => {
+  it('drops entries older than scanTtlMs even when files unchanged', async () => {
+    const aido = await makeWorkspace('delta');
+    await makeV3Run(aido, 'E-Z', 'R-Z-1', 'DONE', '2026-06-01T10:00:00Z');
+
+    const ttlMs = 1000; // 1 second TTL for testing
+    const config: ScannerCacheConfig = { scanTtlMs: ttlMs, activityBufferSize: 500 };
+
+    const { loader } = makeLoaderSpy();
+    const cache = new ScannerCache(scanRoot, loader, config);
+    await cache.buildIndex();
+
+    // Load the run detail (caches it)
+    const rd1 = await cache.getRunDetail('delta', 'E-Z', 'R-Z-1');
+    expect(rd1.state).toBe('DONE');
+    expect(cache.runDetailCacheSize).toBe(1);
+
+    // Access immediately — should be cached (no reload)
+    const rd2 = await cache.getRunDetail('delta', 'E-Z', 'R-Z-1');
+    expect(loader).toHaveBeenCalledTimes(1); // Still 1 call
+
+    // Sweep with time advanced past TTL
+    const now = Date.now();
+    const dropped = await cache.sweep(now + ttlMs + 100);
+
+    // Entry should be dropped even though files haven't changed
+    expect(dropped).toBe(1);
+    expect(cache.runDetailCacheSize).toBe(0);
+
+    // Next access reloads
+    const rd3 = await cache.getRunDetail('delta', 'E-Z', 'R-Z-1');
+    expect(loader).toHaveBeenCalledTimes(2); // Now 2 calls
+  });
+});

@@ -10,8 +10,32 @@
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FsReader } from './fs-reader.js';
+
+// MED-2 concurrency probe: a shared, hoisted counter the readFile mock updates.
+// Inactive by default so it does NOT slow the other tests; the MED-2 test flips
+// `active` on. Because FsReader imports `readFile` as a destructured builtin
+// binding, a namespace vi.spyOn cannot intercept it — vi.mock replaces the
+// module binding itself, which is the only thing FsReader actually calls.
+const probe = vi.hoisted(() => ({ inFlight: 0, max: 0, active: false, delayMs: 20 }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      if (!probe.active) return actual.readFile(...args);
+      probe.inFlight++;
+      probe.max = Math.max(probe.max, probe.inFlight);
+      try {
+        await new Promise((r) => setTimeout(r, probe.delayMs));
+        return await actual.readFile(...args);
+      } finally {
+        probe.inFlight--;
+      }
+    },
+  };
+});
 
 // Two independent project workspaces, each with its own .aid-o tree, plus a
 // "missing" path that is never created.
@@ -205,5 +229,48 @@ describe('AC6 — legacy raw reads preserve snake_case keys (backward compat)', 
     expect(raw.length).toBe(2);
     expect(raw[0].step_id).toBe('s1');
     expect((raw[0] as Record<string, unknown>).stepId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MED-2 — concurrency limiter: ≤16 in-flight fs calls (module-level pLimit)
+// ---------------------------------------------------------------------------
+
+describe('MED-2 — concurrency limiting (fsLimit caps in-flight fs calls at 16)', () => {
+  it('never exceeds 16 simultaneous in-flight fs reads under 50 concurrent calls', async () => {
+    // Real instrumentation (P047:547): spy node:fs/promises.readFile with a slow
+    // wrapper that tracks the in-flight count, so reads genuinely OVERLAP and the
+    // max observed concurrency is measurable. If the spy did NOT intercept the
+    // FsReader's calls, maxInFlight would stay 0 and the `> 1` assertion below
+    // fails — so this test CANNOT pass trivially (the prior decorative version,
+    // which only asserted "50 reads succeed", could).
+    const testDir = await mkdtemp(join(tmpdir(), 'aid-concurrency-'));
+    const filePaths: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const path = join(testDir, `file-${String(i).padStart(3, '0')}.txt`);
+      await writeFile(path, `content-${i}`, 'utf-8');
+      filePaths.push(path);
+    }
+
+    probe.inFlight = 0;
+    probe.max = 0;
+    probe.active = true;
+    try {
+      const fs = new FsReader();
+      const results = await Promise.all(filePaths.map((p) => fs.readText(p)));
+
+      // Correctness: all reads still succeed through the limiter.
+      expect(results.length).toBe(50);
+      expect(results.every((r) => r !== null && r.length > 0)).toBe(true);
+
+      // The real assertions (P047:547): the limiter is enforced AND reads overlapped.
+      // If the mock did not intercept FsReader's readFile, probe.max stays 0 and the
+      // first assertion fails — so this test cannot pass trivially.
+      expect(probe.max).toBeGreaterThan(1); // reads genuinely overlapped (mock intercepted)
+      expect(probe.max).toBeLessThanOrEqual(16); // pLimit(16) caps in-flight
+    } finally {
+      probe.active = false;
+      await rm(testDir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,13 +1,24 @@
 /**
  * File-system reader service.
  * Reads and parses files from the .aid-o/ workspace.
+ *
+ * MED-2: All fs calls route through a module-level pLimit(16) to prevent
+ * thundering herd during cold cross-project scans (277 runs × 6 projects).
+ * See P047:547.
  */
 
 import { readFile, readdir, stat, access } from 'node:fs/promises';
 import { join, extname, relative } from 'node:path';
 import yaml from 'js-yaml';
+import pLimit from 'p-limit';
 import type { ParseResult } from '@aid/contract';
 import { parseJson, parseYaml, parseJsonl } from '../parsers/index.js';
+
+/**
+ * Module-level concurrency limiter for all fs.promises calls (MED-2 / P047:547).
+ * Prevents thundering herd during cross-project scans.
+ */
+const fsLimit = pLimit(16);
 
 export class FsReader {
   /**
@@ -32,20 +43,24 @@ export class FsReader {
   }
 
   async exists(path: string): Promise<boolean> {
-    try {
-      await access(path);
-      return true;
-    } catch {
-      return false;
-    }
+    return fsLimit(async () => {
+      try {
+        await access(path);
+        return true;
+      } catch {
+        return false;
+      }
+    });
   }
 
   async readText(path: string): Promise<string | null> {
-    try {
-      return await readFile(path, 'utf-8');
-    } catch {
-      return null;
-    }
+    return fsLimit(async () => {
+      try {
+        return await readFile(path, 'utf-8');
+      } catch {
+        return null;
+      }
+    });
   }
 
   async readJson<T = unknown>(path: string): Promise<T | null> {
@@ -85,11 +100,13 @@ export class FsReader {
   }
 
   async listDir(path: string): Promise<string[]> {
-    try {
-      return await readdir(path);
-    } catch {
-      return [];
-    }
+    return fsLimit(async () => {
+      try {
+        return await readdir(path);
+      } catch {
+        return [];
+      }
+    });
   }
 
   async listDirRecursive(dirPath: string): Promise<string[]> {
@@ -97,16 +114,19 @@ export class FsReader {
     const entries = await this.listDir(dirPath);
     for (const entry of entries) {
       const full = join(dirPath, entry);
-      try {
-        const s = await stat(full);
-        if (s.isDirectory()) {
-          const sub = await this.listDirRecursive(full);
-          results.push(...sub);
-        } else {
-          results.push(relative(dirPath, full));
+      const s = await fsLimit(async () => {
+        try {
+          return await stat(full);
+        } catch {
+          return null;
         }
-      } catch {
-        // skip inaccessible
+      });
+      if (s === null) continue;
+      if (s.isDirectory()) {
+        const sub = await this.listDirRecursive(full);
+        results.push(...sub);
+      } else {
+        results.push(relative(dirPath, full));
       }
     }
     return results;
@@ -151,12 +171,31 @@ export class FsReader {
    * backstop.
    */
   async statMtime(path: string): Promise<number | null> {
-    try {
-      const s = await stat(path);
-      return s.mtimeMs;
-    } catch {
-      return null;
-    }
+    return fsLimit(async () => {
+      try {
+        const s = await stat(path);
+        return s.mtimeMs;
+      } catch {
+        return null;
+      }
+    });
+  }
+
+  /**
+   * Check if a path is a directory.
+   *
+   * Never throws. Returns `false` for a missing, inaccessible, or non-directory path.
+   * Used by Steps 6/7 to filter directory entries during EPIC/run discovery.
+   */
+  async isDirectory(path: string): Promise<boolean> {
+    return fsLimit(async () => {
+      try {
+        const s = await stat(path);
+        return s.isDirectory();
+      } catch {
+        return false;
+      }
+    });
   }
 
   /**

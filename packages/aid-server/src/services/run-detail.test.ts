@@ -26,7 +26,7 @@
  *  AC8  buildRunDetail wired as the Step 7 cache loader (cache memoizes it).
  */
 
-import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, symlink, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -429,7 +429,8 @@ describe('AC3 — provenance read from compliance, not re-derived', () => {
     const cp2 = rd.checkpoints.find((c) => c.id === 'CP2')!;
     expect(cp2.provenance).toBeNull();
     expect(cp2.provenanceSource).toBeNull();
-    expect(cp2.verdict).toBeNull(); // "not recorded", NOT unverifiable
+    // HIGH-2: when compliance is absent but verifier files exist, read verdict from files
+    expect(cp2.verdict).toBe('pass'); // read from verifier-output-step-*.md files
   });
 });
 
@@ -481,8 +482,8 @@ describe('AC4 — repeatCount semantics', () => {
       planJson: PLAN_JSON, // plan.json present → CP1 dispatched
       verifySteps: 3,
     });
-    // add a plan-diff.json so CP1 has a file signal
-    await writeFile(join(runDir, 'plan-diff.json'), '{}', 'utf-8');
+    // HIGH-2: use a real CP1 file (not plan-diff.json, which is a gate artifact)
+    await writeFile(join(runDir, 'cp1-grounding.md'), '# CP1 Grounding\n\nContent', 'utf-8');
     const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-E046-1', runDir, deps());
     const cp1 = rd.checkpoints.find((c) => c.id === 'CP1')!;
     expect(cp1.repeatSource).toBe('files');
@@ -905,5 +906,313 @@ describe('Security — CWE-22 symlink DoS / enumeration defense', () => {
       expect(rd.format).toBe('v3');
       expect(rd.state).toBe('DONE');
     });
+  });
+});
+
+// ===========================================================================
+// HIGH-2 — Checkpoints read verdicts from files, not just compliance
+// ===========================================================================
+
+describe('HIGH-2 — checkpoint verdicts from evidence files', () => {
+  it('CP1 reads verdict from cp1-*.md frontmatter when files present', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 1,
+    });
+    // Create CP1 file with verdict: pass (frontmatter format: --- yaml ---\n\n# Body)
+    await writeFile(
+      join(runDir, 'cp1-grounding-check.md'),
+      '---\nverdict: pass\n---\n\n# CP1 Grounding\n',
+      'utf-8',
+    );
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const cp1 = rd.checkpoints.find((c) => c.id === 'CP1')!;
+    expect(cp1.verdict).toBe('pass'); // Read from file
+  });
+
+  it('CP2 reads verdict from verifier-output-step-*.md when present', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 2,
+    });
+    // Create verifier-output-step-0 and step-1 with pass verdict
+    await writeFile(
+      join(runDir, 'verifier-output-step-0.md'),
+      '---\nverdict: pass\n---\n\n# Step 0\n',
+      'utf-8',
+    );
+    await writeFile(
+      join(runDir, 'verifier-output-step-1.md'),
+      '---\nverdict: fail\n---\n\n# Step 1 (fail to test fail-closed)\n',
+      'utf-8',
+    );
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const cp2 = rd.checkpoints.find((c) => c.id === 'CP2')!;
+    expect(cp2.verdict).toBe('fail'); // fail-closed: any fail → fail
+  });
+
+  it('CP3 reads verdict from verifier-output-cp3-*.md files', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 1,
+    });
+    // Create CP3 code-review and security files
+    await writeFile(
+      join(runDir, 'verifier-output-cp3-code-review.md'),
+      '---\nverdict: pass\n---\n\n# Code Review\n',
+      'utf-8',
+    );
+    await writeFile(
+      join(runDir, 'verifier-output-cp3-security.md'),
+      '---\nverdict: pass\n---\n\n# Security\n',
+      'utf-8',
+    );
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const cp3 = rd.checkpoints.find((c) => c.id === 'CP3')!;
+    expect(cp3.verdict).toBe('pass');
+  });
+
+  it('CP4 reads verdict from verifier-output-cp4-*.md', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 1,
+    });
+    // Create CP4 file
+    await writeFile(
+      join(runDir, 'verifier-output-cp4-curator-validation.md'),
+      '---\nverdict: pass\n---\n\n# Curator Validation\n',
+      'utf-8',
+    );
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const cp4 = rd.checkpoints.find((c) => c.id === 'CP4')!;
+    expect(cp4.verdict).toBe('pass');
+  });
+});
+
+// ===========================================================================
+// HIGH-3 — Corrupt artifacts render fail (not green)
+// ===========================================================================
+
+describe('HIGH-3 — fail-closed on missing/corrupt data', () => {
+  it('compliance with missing overall → fail (not pass)', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 1,
+    });
+    // Create a malformed compliance.json with no overall field
+    await writeFile(join(runDir, 'compliance.json'), JSON.stringify({}), 'utf-8');
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    // CP5 overall should fail (fail-closed) not pass
+    expect(rd.compliance).not.toBeNull();
+    expect(rd.compliance!.overall).toBe('fail');
+  });
+
+  it('gate with no result and no exit_code → fail', async () => {
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      timeline: timelineNoDispatch(),
+      planJson: PLAN_JSON,
+      verifySteps: 1,
+    });
+    // Create gates_report.json with a gate missing both result and exit_code
+    const gatesReport = {
+      gates: {
+        tests_pass: {
+          gate: 'tests_pass',
+          // Missing both result and exit_code
+          durationMs: 1000,
+        },
+      },
+    };
+    await writeFile(join(runDir, 'gates_report.json'), JSON.stringify(gatesReport), 'utf-8');
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const gateResult = rd.gates.find((g) => g.gate === 'tests_pass');
+    expect(gateResult).toBeDefined();
+    expect(gateResult!.result).toBe('fail'); // fail-closed
+  });
+});
+
+// ===========================================================================
+// MED-1 — First step uses READY→EXECUTE anchor, not fsm_init
+// ===========================================================================
+
+describe('MED-1 — first step duration from READY→EXECUTE, not fsm_init', () => {
+  it('first step durationS anchors to READY→EXECUTE transition, not fsm.startedAt', async () => {
+    // Create a timeline where READY→EXECUTE is AFTER fsm_init by ~10 seconds
+    const timeline = [
+      // fsm_init fires at T+0, but...
+      { event: 'fsm_init', ts: '2026-06-01T10:00:00Z' },
+      // ...READY→EXECUTE happens 10 seconds later
+      {
+        event: 'fsm_transition',
+        ts: '2026-06-01T10:00:10Z',
+        from: 'READY',
+        to: 'EXECUTE',
+      },
+      // Step 0 verify fires 5 seconds after READY→EXECUTE
+      { event: 'step_complete', ts: '2026-06-01T10:00:15Z', step: 0 },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join('\n');
+
+    const runDir = await makeRun('proj', 'E-046-1_3', 'R-046-1', {
+      planJson: PLAN_JSON,
+      verifySteps: 2,
+      timeline,
+    });
+
+    // Ensure step-0-verify.md exists so we can compute durationS
+    const mtime0 = new Date('2026-06-01T10:00:15Z').getTime();
+    await writeFile(join(runDir, 'step-0-verify.md'), '# Step 0\n', 'utf-8');
+    await utimes(join(runDir, 'step-0-verify.md'), mtime0 / 1000, mtime0 / 1000);
+
+    const rd = await buildRunDetail('proj', 'E-046-1_3', 'R-046-1', runDir, deps());
+    const step0 = rd.steps[0];
+
+    // durationS should be ~5 seconds (from READY→EXECUTE to step-0 verify),
+    // NOT ~15 seconds (from fsm_init to step-0 verify)
+    expect(step0.durationS).toBeLessThanOrEqual(10); // Allow some slack
+    expect(step0.durationS).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ===========================================================================
+// HIGH-2 real-data test: extract verdict from ACTUAL E-046-3 evidence files
+// ===========================================================================
+
+describe('HIGH-2 — extractVerdictFromFile with real E-046-3 shapes (no synthetic frontmatter)', () => {
+  it('reads verdict from bare header `verdict: pass` (cp3-code-review real shape)', async () => {
+    const fs = new FsReader();
+    const testFile = join(root, 'test-verdict.md');
+
+    // Real E-046-3 shape: bare `verdict:` line, no leading `---` fence
+    const cp3CodeReviewContent = `_generated_by: aid-orchestrator:verifier@cp3-code-review
+_generated_at: 2026-06-19T09:15:00Z
+classification: FULL_REVIEW
+verdict: pass
+fix_loop_eligible: false
+checkpoint: cp3
+focus: code-review
+
+---
+
+## CP3 Integration Review
+
+Some body content`;
+
+    await writeFile(testFile, cp3CodeReviewContent, 'utf-8');
+
+    // Use the (non-exported) extractor by reading the file and parsing directly
+    const { buildRunDetail: _, ...helpers } = await import('./run-detail.js');
+    // We can't call private functions, so instead test via buildCheckpoints
+    // by creating a full run context.
+    const runDir = await makeRun('proj', 'E-046-3_3', 'R-E046-3', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      timeline: timelineNoDispatch(),
+    });
+
+    // Copy the real file into the run dir
+    await writeFile(
+      join(runDir, 'verifier-output-cp3-code-review.md'),
+      cp3CodeReviewContent,
+      'utf-8',
+    );
+
+    const rd = await buildRunDetail('proj', 'E-046-3_3', 'R-E046-3', runDir, deps());
+    const cp3 = rd.checkpoints.find((c) => c.id === 'CP3')!;
+
+    expect(cp3.verdict).toBe('pass');
+  });
+
+  it('reads verdict from step-N-verify with ## Result: PASS heading', async () => {
+    const runDir = await makeRun('proj', 'E-046-3_3', 'R-E046-3', {
+      fsm: fsmStateDone({ donePhase: 'review' }),
+      timeline: timelineNoDispatch(),
+    });
+
+    // Real step-0-verify.md shape: ## Result: PASS heading
+    const stepVerifyContent = `# Verifier output step 0
+
+_generated_by: aid-orchestrator:verifier@cp2-step-0
+_generated_at: 2026-06-19T09:15:00Z
+classification: FULL_REVIEW
+verdict: pass
+
+## Result: PASS
+
+All checks passed`;
+
+    await writeFile(join(runDir, 'verifier-output-step-0.md'), stepVerifyContent, 'utf-8');
+
+    const rd = await buildRunDetail('proj', 'E-046-3_3', 'R-E046-3', runDir, deps());
+    const cp2 = rd.checkpoints.find((c) => c.id === 'CP2')!;
+
+    expect(cp2.verdict).toBe('pass');
+  });
+
+  it('reads CP1 verdict from work-root cp1-review-<planid>.md file (HIGH-2 special case)', async () => {
+    // This test creates a full hierarchy with work-root CP1 file
+    const projectRoot = join(root, 'test-project');
+    const aidoRoot = join(projectRoot, '.aid-o');
+    const workRoot = join(aidoRoot, 'work');
+    const evidenceRoot = join(workRoot, 'evidence', 'E-046-3_3');
+    const runDir = join(evidenceRoot, 'R-E046-3');
+
+    await mkdir(runDir, { recursive: true });
+    await mkdir(workRoot, { recursive: true });
+
+    // Create minimal fsm-state.yaml with plan_path to P046
+    const fsmContent = `epic_id: E-046-3_3
+run_id: R-E046-3
+state: DONE
+current_step: 1
+total_steps: 1
+mode: full
+branch: task/E-046-3_3/main
+base_commit: abc123
+done_phase: review
+plan_path: .aid-o/plans/P046-plan-boundary-enforcement-cp1-flow-trace.md
+`;
+    await writeFile(join(runDir, 'fsm-state.yaml'), fsmContent, 'utf-8');
+
+    // Create timeline (empty for simplicity)
+    await writeFile(join(runDir, 'timeline.jsonl'), '', 'utf-8');
+
+    // Create the CP1 review file at the WORK ROOT (not the run dir)
+    // Real P046 CP1 verdict shape: `## Verdict\nPASS.`
+    const cp1Content = `# CP1 Plan Quality Review — P046 (rev 4 + Step 19 CP1-deep)
+
+Date: 2026-06-18
+Plan: .aid-o/plans/P046-plan-boundary-enforcement-cp1-flow-trace.md
+Mode: /aid-plan --write (formalization pass over an already battle-tested plan)
+
+## Verdict
+
+PASS. Grounding clean (every named function/file/anchor exists or is ABSENT-and-mapped-to-a-Create-step). Structurally complete, internally consistent, no hand-waving. Ready for EPIC generation.
+`;
+    await writeFile(join(workRoot, 'cp1-review-P046.md'), cp1Content, 'utf-8');
+
+    // Now build the RunDetail
+    const depWithRoot = {
+      fs: new FsReader(),
+      pathMap: createPathMap({ projectsRoot: projectRoot, hostRoot: projectRoot }),
+      projectsRoot: projectRoot,
+    };
+
+    const rd = await buildRunDetail('test-project', 'E-046-3_3', 'R-E046-3', runDir, depWithRoot);
+    const cp1 = rd.checkpoints.find((c) => c.id === 'CP1')!;
+
+    // CP1 verdict should be read from work-root cp1-review-P046.md
+    expect(cp1.verdict).toBe('pass');
   });
 });
