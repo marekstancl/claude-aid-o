@@ -35,16 +35,24 @@ export {
   runKey,
   planKey,
   extractFrontmatter,
+  createScannerCache,
 } from './scanner-cache.js';
 export type {
   RunDetailLoader,
   ScannerCacheConfig,
+  ScannerCacheFactoryConfig,
   Tier1Index,
   IndexedProject,
   IndexedEpic,
   IndexedRun,
   IndexedSourceFile,
 } from './scanner-cache.js';
+
+// Step 8 (E-047-2_7): the RunDetail builder + its loader factory. Re-exported
+// here so consumers pull the scanner, its cache, and the assembler from one
+// module surface. The builder is wired into the cache via createScannerCache.
+export { buildRunDetail, createRunDetailLoader } from './run-detail.js';
+export type { RunDetailDeps } from './run-detail.js';
 
 /** Concurrency cap for the cold-scan disk reads (spec §7.2). */
 const SCAN_CONCURRENCY = 16;

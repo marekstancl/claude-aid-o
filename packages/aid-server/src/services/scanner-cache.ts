@@ -41,6 +41,7 @@ import { LRUCache } from 'lru-cache';
 import type { ActivityEvent, FsmState, RunDetail, RunFormat } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 import { ProjectScanner } from './project-scanner.js';
+import { createRunDetailLoader } from './run-detail.js';
 
 // ===========================================================================
 // CircularBuffer — salvaged from packages/aid-gui/server/watchers/
@@ -562,6 +563,16 @@ export class ScannerCache {
   }
 
   /**
+   * PUBLIC index-aware run-dir resolution (Step 8 wiring seam). The injected
+   * {@link RunDetailLoader} uses this so {@link buildRunDetail} reads from the
+   * exact dir the cache discovered (Tier-1 index preferred), not a recomputed
+   * convention path. Returns null only when the dir cannot be formed at all.
+   */
+  runDirFor(projectId: string, epicId: string, runId: string): string | null {
+    return this.resolveRunDir(projectId, epicId, runId);
+  }
+
+  /**
    * Compute the MAX mtime (epoch ms) over all files under a run dir, recursively.
    * This is the backstop: a nested-file change (e.g. `gates/gates_report.json`)
    * that does not bump the run-DIR mtime still moves this value. Returns null if
@@ -662,6 +673,48 @@ export class ScannerCache {
   get ttlMs(): number {
     return this.config.scanTtlMs;
   }
+}
+
+// ===========================================================================
+// Step 7↔8 wiring factory
+// ===========================================================================
+
+/** Roots + tuning the {@link createScannerCache} factory needs. */
+export interface ScannerCacheFactoryConfig extends ScannerCacheConfig {
+  /** Container-view discovery root (children are candidate projects). */
+  projectsRoot: string;
+  /** Host-view equivalent of `projectsRoot` (path-map translation). */
+  hostRoot: string;
+}
+
+/**
+ * Construct a fully-wired {@link ScannerCache} whose Tier-2 loader is the real
+ * Step 8 {@link buildRunDetail} (via {@link createRunDetailLoader}). This is the
+ * single place where the Step 7↔8 dependency is introduced — the cache itself
+ * stays free of any compile-time reference to the builder.
+ *
+ * The loader resolves run dirs through the cache's own index-aware
+ * {@link ScannerCache.runDirFor}, so the builder reads the exact dir the cache
+ * discovered (Tier-1 index preferred, convention fallback).
+ */
+export function createScannerCache(
+  config: ScannerCacheFactoryConfig,
+  fs?: FsReader,
+  scanner?: ProjectScanner,
+): ScannerCache {
+  const reader = fs ?? new FsReader();
+  // Forward-declare the cache so the loader can call back into runDirFor.
+  let cacheRef: ScannerCache | null = null;
+  const loader = createRunDetailLoader({
+    projectsRoot: config.projectsRoot,
+    hostRoot: config.hostRoot,
+    fs: reader,
+    resolveRunDir: (projectId, epicId, runId) =>
+      cacheRef?.runDirFor(projectId, epicId, runId) ??
+      join(config.projectsRoot, projectId, '.aid-o', 'work', 'evidence', epicId, runId),
+  });
+  cacheRef = new ScannerCache(config.projectsRoot, loader, config, reader, scanner);
+  return cacheRef;
 }
 
 // ===========================================================================
