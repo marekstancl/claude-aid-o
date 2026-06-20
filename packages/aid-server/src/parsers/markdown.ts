@@ -282,8 +282,17 @@ function splitSections(body: string): Record<string, string> {
 
 /**
  * Parse the Scope section into allowed paths, forbidden paths, and raw markdown.
+ *
+ * Extracts paths from `### Allowed files/paths` and `### Forbidden zones`
+ * sub-headings (and `**bold**` sub-section markers). Inline `(annotations)` are
+ * stripped from list items. The full section body is preserved verbatim in
+ * `rawMarkdown`. Never throws — an unrecognized section yields empty arrays
+ * plus the raw body (§4.0 reliability posture #4).
+ *
+ * Exported (EPIC E-047-2_7 Step 2) for independent unit testing; also used
+ * internally by {@link parseEpicSpec}.
  */
-function parseScope(sectionBody: string): EpicSpec['scope'] {
+export function parseScope(sectionBody: string): EpicSpec['scope'] {
   const allowedPaths: string[] = [];
   const forbiddenPaths: string[] = [];
 
@@ -392,8 +401,18 @@ function parseAcceptanceCriteria(sectionBody: string): AcceptanceCriterion[] {
  *
  * Expects a pipe-delimited Markdown table with headers:
  *   | # | Role | Objective | Depends On | Parallel Group |
+ *
+ * Cell mapping: `[0]=#`, `[1]=Role`, `[2]=Objective`, `[3]=Depends On`,
+ * `[4]=Parallel Group`. The `parallelGroup` field is set ONLY when the cell is
+ * a real group value — the `—` / `-` / `---` / empty sentinels (the "no group"
+ * convention used by AID EPIC tables) are treated as absent, not as a literal
+ * value. Ragged rows with fewer than 3 cells are skipped without throwing
+ * (§4.0 reliability posture #4 — defensive against hand-edited markdown).
+ *
+ * Exported (EPIC E-047-2_7 Step 2) for independent unit testing; also used
+ * internally by {@link parseEpicSpec}.
  */
-function parseStepsTable(sectionBody: string): EpicStep[] {
+export function parseStepsTable(sectionBody: string): EpicStep[] {
   const steps: EpicStep[] = [];
   const lines = sectionBody.split('\n');
 
