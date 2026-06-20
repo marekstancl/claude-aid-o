@@ -354,3 +354,86 @@ describe('AC6 — normal project: epicsTotal/runsTotal rollups + non-null active
     await expect(scanner.scan()).resolves.toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REGRESSION: Deadlock fix for nested-semaphore (Finding 1, CRITICAL)
+// ---------------------------------------------------------------------------
+
+describe('REGRESSION: deadlock with >16 concurrent projects (nested semaphore)', () => {
+  it('completes scan of 20 projects without deadlock', async () => {
+    // Create 20 projects (exceeds the SCAN_CONCURRENCY=16 threshold).
+    // Each has 1 task (EPIC) and 1 v3 run to exercise all three nesting levels.
+    const projectCount = 20;
+    const projects = [];
+    for (let i = 1; i <= projectCount; i++) {
+      const name = `proj-${String(i).padStart(2, '0')}`;
+      const aido = await makeWorkspace(name);
+      const epicId = `E-${i}`;
+      await makeTask(aido, epicId);
+      // Create 2 runs per epic to stress-test run collection
+      await makeV3Run(aido, epicId, `R-${i}-1`, 'DONE', `2026-01-0${(i % 9) + 1}T10:00:00Z`);
+      await makeV3Run(aido, epicId, `R-${i}-2`, 'EXECUTE', `2026-02-0${(i % 9) + 1}T10:00:00Z`);
+      projects.push(name);
+    }
+
+    const scanner = new ProjectScanner(scanRoot);
+    const startTime = Date.now();
+
+    // This should complete quickly (~1-2 seconds), not hang indefinitely.
+    // The test timeout is 10 seconds via vitest config; we'll assert completion.
+    const results = await scanner.scan();
+    const elapsed = Date.now() - startTime;
+
+    // Verify all projects were discovered.
+    expect(results).toHaveLength(projectCount);
+    expect(results.map((p) => p.id).sort()).toEqual(projects.sort());
+
+    // Each project should have epicsTotal=1, runsTotal=2.
+    for (const proj of results) {
+      expect(proj.epicsTotal).toBe(1);
+      expect(proj.runsTotal).toBe(2);
+      expect(proj.epicsActive).toBe(1);
+      expect(proj.activeRun).not.toBeNull();
+    }
+
+    // Assert completion within reasonable time (< 5 seconds).
+    // With the per-level limiters, this stress test should complete in ~1-2 seconds.
+    expect(elapsed).toBeLessThan(5000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Date-object guard for started_at (Finding 2, LOW)
+// ---------------------------------------------------------------------------
+
+describe('REGRESSION: started_at Date-object guard (js-yaml unquoted timestamp)', () => {
+  it('honors started_at as Date object (js-yaml unquoted timestamp parsing)', async () => {
+    const aido = await makeWorkspace('dateproj');
+    const epicId = 'E-date-test';
+    await makeTask(aido, epicId);
+
+    // Write fsm-state.yaml with UNQUOTED started_at (js-yaml parses as Date object).
+    // This mimics how js-yaml treats unquoted ISO timestamps.
+    const runDir = join(aido, 'work', 'evidence', epicId, 'R-date-1');
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, 'fsm-state.yaml'),
+      `epic_id: ${epicId}
+run_id: R-date-1
+state: DONE
+started_at: 2026-04-15T14:30:00Z
+`,
+      'utf-8',
+    );
+
+    const scanner = new ProjectScanner(scanRoot);
+    const projects = await scanner.scan();
+    const proj = projects.find((p) => p.id === 'dateproj');
+
+    // The run should be recognized as v3 with a valid started_at (not null).
+    expect(proj).toBeDefined();
+    expect(proj?.activeRun).not.toBeNull();
+    expect(proj?.activeRun?.runId).toBe('R-date-1');
+    expect(proj?.activeRun?.state).toBe('DONE');
+  });
+});

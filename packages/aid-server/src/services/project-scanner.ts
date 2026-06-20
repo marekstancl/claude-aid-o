@@ -98,7 +98,12 @@ function placeholderHealth(): Project['health'] {
 
 export class ProjectScanner {
   private readonly fs: FsReader;
-  private readonly limit = pLimit(SCAN_CONCURRENCY);
+  /** Limiter for top-level project scan (buildProject tasks). */
+  private readonly limitProjects = pLimit(SCAN_CONCURRENCY);
+  /** Limiter for EPIC discovery within projects (discoverEpics tasks). */
+  private readonly limitEpics = pLimit(SCAN_CONCURRENCY);
+  /** Limiter for run collection within EPICs (collectRunCandidates tasks). */
+  private readonly limitRuns = pLimit(SCAN_CONCURRENCY);
 
   /**
    * @param projectsRoot - cross-project discovery root (`config.projectsRoot`,
@@ -137,7 +142,7 @@ export class ProjectScanner {
     const candidateNames: string[] = [];
     await Promise.all(
       entries.map((name) =>
-        this.limit(async () => {
+        this.limitProjects(async () => {
           if (isDenylistedName(name)) return;
           const projectDir = join(this.projectsRoot, name);
           if (!(await this.isDir(projectDir))) return;
@@ -149,7 +154,7 @@ export class ProjectScanner {
     const projects: Project[] = [];
     await Promise.all(
       candidateNames.map((name) =>
-        this.limit(async () => {
+        this.limitProjects(async () => {
           const project = await this.buildProject(name);
           if (project) projects.push(project);
         }),
@@ -277,7 +282,7 @@ export class ProjectScanner {
     const ids: string[] = [];
     await Promise.all(
       mdFiles.map((file) =>
-        this.limit(async () => {
+        this.limitEpics(async () => {
           const abs = join(tasksDir, file);
           // Only files (skip a dir named like `something.md`, unlikely).
           if (await this.isDir(abs)) return;
@@ -323,7 +328,7 @@ export class ProjectScanner {
     const candidates: RunCandidate[] = [];
     await Promise.all(
       runNames.map((runId) =>
-        this.limit(async () => {
+        this.limitRuns(async () => {
           const runDir = join(epicDir, runId);
           if (!(await this.isDir(runDir))) return;
           const candidate = await this.classifyRun(runId, runDir);
@@ -354,7 +359,7 @@ export class ProjectScanner {
     if (fsmExists) {
       const parsed = await this.fs.readYamlParsed<{
         state?: string;
-        startedAt?: string;
+        startedAt?: string | Date;
       }>(fsmStatePath);
       const data = parsed.data ?? {};
       const state =
@@ -363,8 +368,12 @@ export class ProjectScanner {
           : null;
 
       if (state !== null) {
-        const startedAtIso =
-          typeof data.startedAt === 'string' ? data.startedAt : null;
+        let startedAtIso: string | null = null;
+        if (typeof data.startedAt === 'string') {
+          startedAtIso = data.startedAt;
+        } else if (data.startedAt instanceof Date) {
+          startedAtIso = data.startedAt.toISOString();
+        }
         const startedAtMs = parseIsoMs(startedAtIso);
         return {
           runId,
