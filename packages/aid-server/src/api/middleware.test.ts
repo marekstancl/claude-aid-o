@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { Response } from "express";
-import { sendOk, sendError, send404, send400 } from "./middleware.js";
+import { sendOk, sendError, send404, send400, isoNow } from "./middleware.js";
 
 interface CapturedResponse {
   res: Response;
@@ -139,6 +139,16 @@ describe("send400", () => {
       ok: false,
       error: { code: "BAD_REQUEST", message: "Invalid epicId" },
     });
+  });
+});
+
+describe("isoNow", () => {
+  it("returns a valid ISO 8601 string", () => {
+    const result = isoNow();
+    const iso8601Regex =
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/;
+    expect(typeof result).toBe("string");
+    expect(iso8601Regex.test(result)).toBe(true);
   });
 });
 

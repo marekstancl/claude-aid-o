@@ -1,9 +1,9 @@
 /**
- * config.ts test suite (EPIC E-047-2_7, Step 5).
+ * config.ts test suite (EPIC E-047-3_7, Phase 3).
  *
- * Covers the Phase 2 additive cross-project surface (projectsRoot, hostRoot,
- * scanTtlMs, activityBufferSize) WITHOUT regressing the legacy single-project
- * `projectRoot` field that index.ts and ws/handler.ts still depend on.
+ * Covers the cross-project surface (projectsRoot, hostRoot,
+ * scanTtlMs, activityBufferSize) after removing the legacy single-project
+ * `projectRoot` field (deleted with ws/handler.ts in IMP-137).
  *
  * Every case that mutates process.env saves and restores the relevant keys so
  * state never leaks across tests.
@@ -21,7 +21,6 @@ import {
 const TOUCHED_ENV_KEYS = [
   'AID_PORT',
   'AID_HOST',
-  'AID_PROJECT_ROOT',
   'AID_PROJECTS_ROOT',
   'AID_HOST_ROOT',
   'AID_CORS_ORIGINS',
@@ -142,23 +141,5 @@ describe('activityBufferSize', () => {
   it('is overridden by AID_ACTIVITY_BUFFER', () => {
     process.env.AID_ACTIVITY_BUFFER = '1000';
     expect(loadConfig().activityBufferSize).toBe(1000);
-  });
-});
-
-// AC6 — backward-compat: projectRoot still present and populated
-describe('AC6 — projectRoot backward-compat', () => {
-  it('is present and non-empty so index.ts / ws-handler keep compiling', () => {
-    const config = loadConfig();
-    expect(typeof config.projectRoot).toBe('string');
-    expect(config.projectRoot.length).toBeGreaterThan(0);
-  });
-
-  it('honors AID_PROJECT_ROOT override', () => {
-    process.env.AID_PROJECT_ROOT = '/tmp/some-project';
-    expect(loadConfig().projectRoot).toBe('/tmp/some-project');
-  });
-
-  it('falls back to process.cwd() when AID_PROJECT_ROOT is unset', () => {
-    expect(loadConfig().projectRoot).toBe(process.cwd());
   });
 });

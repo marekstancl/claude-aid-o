@@ -21,18 +21,3 @@ export interface ProjectParams {
 export interface EpicParams extends ProjectParams {
   epicId: string;
 }
-
-export interface IdeaParams extends ProjectParams {
-  ideaId: string;
-}
-
-export interface EvidenceFileParams extends ProjectParams {
-  epicId: string;
-  runId: string;
-  '0': string; // wildcard path
-}
-
-export interface IdeaLinkBody {
-  linkedPlan?: string;
-  linkedEpic?: string;
-}

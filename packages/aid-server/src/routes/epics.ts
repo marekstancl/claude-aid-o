@@ -17,14 +17,9 @@
 import { Router } from 'express';
 import type { ScannerCache } from '../services/scanner-cache.js';
 import { FsReader } from '../services/fs-reader.js';
-import { sendOk, send404, send400 } from '../api/middleware.js';
+import { sendOk, send404, send400, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import { buildEpicDetail } from '../services/view-assembly.js';
-
-/** Current time as an ISO 8601 string (scan marker for `meta`). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
 
 /**
  * Build the cross-project EPIC/run read router backed by the Phase-2

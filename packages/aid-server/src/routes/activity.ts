@@ -30,18 +30,13 @@
 
 import { Router } from 'express';
 import type { ActivityEvent } from '@aid/contract';
-import { sendOk, send400 } from '../api/middleware.js';
+import { sendOk, send400, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import {
   filterActivity,
   clampLimit,
   DEFAULT_ACTIVITY_LIMIT,
 } from '../activity-filter.js';
-
-/** Current time as an ISO 8601 string (scan marker for `meta`). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
 
 /** Supplier of the current merged-activity snapshot (e.g. `scanner.getActivity`). */
 export type ActivitySupplier = () => ActivityEvent[];

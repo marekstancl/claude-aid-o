@@ -108,3 +108,8 @@ export function send404(res: Response, resource: string): void {
 export function send400(res: Response, message: string): void {
   sendError(res, 400, "BAD_REQUEST", message);
 }
+
+/** Current time as an ISO 8601 string. */
+export function isoNow(): string {
+  return new Date().toISOString();
+}

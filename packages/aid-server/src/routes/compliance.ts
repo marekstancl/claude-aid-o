@@ -21,14 +21,9 @@
 
 import { Router } from 'express';
 import type { ScannerCache } from '../services/scanner-cache.js';
-import { sendOk, send404, send400 } from '../api/middleware.js';
+import { sendOk, send404, send400, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import { buildComplianceView } from '../services/compliance-rollup.js';
-
-/** Current time as an ISO 8601 string (scan marker for `meta`). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
 
 /**
  * Build the compliance read router backed by the Phase-2 {@link ScannerCache}.

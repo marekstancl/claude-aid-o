@@ -12,12 +12,7 @@
  */
 
 import { Router } from 'express';
-import { sendOk } from '../api/middleware.js';
-
-/** Current time as an ISO 8601 string (kept local — no shared helper exists). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
+import { sendOk, isoNow } from '../api/middleware.js';
 
 /** Build the health router. `GET /` → `{ ok, data: { status: 'ok', ts } }`. */
 export function healthRoutes(): Router {

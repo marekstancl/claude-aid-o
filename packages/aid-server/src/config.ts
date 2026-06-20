@@ -21,17 +21,6 @@ export interface ServerConfig {
   port: number;
   host: string;
   /**
-   * Root directory of a SINGLE project (where its `.aid-o/` lives).
-   *
-   * @deprecated Legacy single-project bootstrap field. Read by `index.ts` and
-   * `ws/handler.ts` (e.g. `new FsReader(config.projectRoot)` and
-   * `join(config.projectRoot, '.aid-o')`). It will be removed once the server
-   * bootstrap is rewired to multi-project discovery via ProjectScanner (a later
-   * route-rewiring phase). Use {@link ServerConfig.projectsRoot} for
-   * cross-project discovery.
-   */
-  projectRoot: string;
-  /**
    * Cross-project discovery root — the directory whose immediate children are
    * candidate projects. Host-native dev defaults to `/opt/eco/projects`; the
    * container compose sets `/projects`.
@@ -86,9 +75,6 @@ export function loadConfig(): ServerConfig {
   return {
     port: parseInt(process.env.AID_PORT ?? '3911', 10),
     host: process.env.AID_HOST ?? '127.0.0.1',
-    // Backward-compat single-project field — kept until the multi-project
-    // bootstrap rewire (see ServerConfig.projectRoot @deprecated note).
-    projectRoot: process.env.AID_PROJECT_ROOT ?? process.cwd(),
     projectsRoot: process.env.AID_PROJECTS_ROOT ?? DEFAULT_PROJECTS_ROOT,
     hostRoot: process.env.AID_HOST_ROOT ?? DEFAULT_HOST_ROOT,
     corsOrigins: parseCorsOrigins(process.env.AID_CORS_ORIGINS),

@@ -475,13 +475,6 @@ export function partialProjectIds(projects: Project[]): string[] {
 }
 
 /** Filter merged activity to a single project (used by ProjectDetail). */
-export function activityForProject(
-  events: ActivityEvent[],
-  projectId: string,
-): ActivityEvent[] {
-  return events.filter((e) => e.projectId === projectId);
-}
-
 // ===========================================================================
 // Local coercion (never throw)
 // ===========================================================================

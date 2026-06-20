@@ -24,13 +24,8 @@ import { join } from 'node:path';
 import type { BacklogItem } from '@aid/contract';
 import type { ScannerCache } from '../services/scanner-cache.js';
 import { FsReader } from '../services/fs-reader.js';
-import { sendOk, send400, send404 } from '../api/middleware.js';
+import { sendOk, send400, send404, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
-
-/** Current time as an ISO 8601 string (scan marker for `meta`). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
 
 /** Status values that count as "closed" (case-insensitive). */
 const CLOSED_STATUSES = new Set(['done', 'closed', 'resolved', 'fixed', 'complete', 'completed']);

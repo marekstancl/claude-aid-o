@@ -19,7 +19,7 @@ import { Router } from 'express';
 import type { Project } from '@aid/contract';
 import type { ScannerCache } from '../services/scanner-cache.js';
 import { FsReader } from '../services/fs-reader.js';
-import { sendOk, send404, send400 } from '../api/middleware.js';
+import { sendOk, send404, send400, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import {
   buildProjectDetail,
@@ -27,11 +27,6 @@ import {
   compareProject,
   partialProjectIds,
 } from '../services/view-assembly.js';
-
-/** Current time as an ISO 8601 string (cross-project scan marker for `meta`). */
-function isoNow(): string {
-  return new Date().toISOString();
-}
 
 /**
  * Build the cross-project read router backed by the Phase-2 {@link ScannerCache}.
