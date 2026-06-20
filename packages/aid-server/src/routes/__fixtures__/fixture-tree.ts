@@ -214,6 +214,35 @@ Strong run.
   );
 }
 
+/**
+ * Write a `work/backlog.md` whose DECLARED frontmatter counter DISAGREES with the
+ * actual table rows (Step 7 honesty fixture). There are 3 rows total (2 open, 1
+ * done), but the frontmatter claims `closed_count: 9` / `open_count: 1`. A
+ * truthful reader MUST report the ACTUAL counts (open:2, closed:1) and a warning —
+ * never the fabricated declared numbers. This is a REAL on-disk file so the test
+ * proves the warning is real, not mocked.
+ */
+async function writeStaleBacklog(aido: string): Promise<void> {
+  await mkdir(join(aido, 'work'), { recursive: true });
+  await writeFile(
+    join(aido, 'work', 'backlog.md'),
+    `---
+open_count: 1
+closed_count: 9
+---
+
+# Backlog
+
+| # | Type | Description | Priority | Status |
+|---|------|-------------|----------|--------|
+| IMP-1 | improvement | Add retry on flaky watcher | high | open |
+| BUG-2 | bug | Activity feed drops topic filter | medium | open |
+| DOC-3 | docs | Document the queue read path | low | done |
+`,
+    'utf-8',
+  );
+}
+
 /** A config/queue.yaml with one critical queued EPIC. */
 async function writeQueue(aido: string): Promise<void> {
   await writeFile(
@@ -226,6 +255,52 @@ queue:
     status: queued
     added_at: "2026-06-18T10:00:00Z"
 `,
+    'utf-8',
+  );
+}
+
+/**
+ * Add a FAILING compliance.json run to the vulcan workspace (Step 7 AC1). The
+ * `failures[]` are STRUCTURED objects (check / evidence / severity) — exactly the
+ * shape the cross-project ComplianceView must surface (never raw strings). This
+ * is a REAL on-disk run so the roll-up reads it through the un-mocked cache.
+ *
+ * Must be called AFTER {@link buildFixtureTree} (it appends a new run dir to the
+ * existing vulcan EPIC and re-uses its fsm-state shape).
+ */
+export async function writeComplianceFailRun(root: string): Promise<void> {
+  const aido = join(root, 'vulcan', '.aid-o');
+  const runDir = await makeV3Run(aido, 'E-100-1_1', 'R-E100-FAIL', {
+    state: 'DONE',
+    startedAt: '2026-06-19T20:00:00Z',
+  });
+  await writeFile(
+    join(runDir, 'compliance.json'),
+    JSON.stringify({
+      epic_id: 'E-100-1_1',
+      run_id: 'R-E100-FAIL',
+      aid_version: 'v3',
+      deploy_era: 'post-session-b',
+      evaluated_at: '2026-06-19T21:00:00Z',
+      coverage_mode: 'full',
+      checks: {},
+      failures: [
+        {
+          check: 'verifier_provenance',
+          evidence: 'provenance_aggregate=unverifiable for cp2-step-1',
+          severity: 'blocking',
+        },
+        {
+          check: 'dod_present',
+          evidence: 'no DoD section detected in EPIC spec',
+          severity: 'advisory',
+        },
+      ],
+      force_override_count: 1,
+      force_override_reasons: ['PM override: provenance noise'],
+      overall: 'fail',
+      notes: [],
+    }),
     'utf-8',
   );
 }
@@ -256,6 +331,24 @@ export async function buildFixtureTree(root: string): Promise<void> {
   const cicero = await makeWorkspace(root, 'cicero');
   await writeTask(cicero, 'E-050-1_1', { status: 'draft', title: 'Cicero EPIC', planRef: 'P050' });
   await makeLegacyRun(cicero, 'E-050-1_1', 'run_20260224_115f');
+
+  // --- wan: a stale-counter backlog fixture + a queue (Step 7 AC2/AC4) ---
+  const wan = await makeWorkspace(root, 'wan');
+  await writeTask(wan, 'E-030-1_1', { status: 'active', title: 'WAN EPIC', planRef: 'P030' });
+  await writeQueue(wan); // read-only queue surface (AC4)
+  await writeStaleBacklog(wan); // declared counter disagrees with rows (AC2)
+  await makeV3Run(wan, 'E-030-1_1', 'R-E030-1', {
+    state: 'GATES',
+    startedAt: '2026-06-19T08:00:00Z',
+  });
+
+  // --- acta: an EPIC + run used by the activity-feed test (Step 7 AC3) ---
+  const acta = await makeWorkspace(root, 'acta');
+  await writeTask(acta, 'E-020-1_1', { status: 'active', title: 'ACTA EPIC', planRef: 'P020' });
+  await makeV3Run(acta, 'E-020-1_1', 'R-E020-1', {
+    state: 'EXECUTE',
+    startedAt: '2026-06-19T12:00:00Z',
+  });
 
   // --- denylisted broken workspaces (MUST NOT be discovered) ---
   await makeWorkspace(root, 'vulcan.broken-20260430-0741');

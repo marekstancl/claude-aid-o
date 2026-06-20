@@ -329,7 +329,7 @@ function emptyEpicSpec(epicId: string): EpicSpec {
 }
 
 /** Build cheap {@link RunSummary}[] from the Tier-1 run index (no Tier-2 load). */
-function buildRunSummaries(runs: IndexedRun[]): RunSummary[] {
+export function buildRunSummaries(runs: IndexedRun[]): RunSummary[] {
   const out: RunSummary[] = runs.map((r) => ({
     runId: r.runId,
     format: r.format,
@@ -350,7 +350,7 @@ function buildRunSummaries(runs: IndexedRun[]): RunSummary[] {
  * run summaries. Step timings come from the RunDetail (file-mtime derived);
  * everything unmeasurable stays null with a warning rather than a fake zero.
  */
-function buildMetrics(latest: RunDetail | null, runs: RunSummary[]): MetricSet {
+export function buildMetrics(latest: RunDetail | null, runs: RunSummary[]): MetricSet {
   const warnings: string[] = [];
   const stepDurationsS: (number | null)[] = latest
     ? latest.steps.map((s: RunStep) => s.durationS)

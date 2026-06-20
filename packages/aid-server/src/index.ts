@@ -47,6 +47,11 @@ import { healthRoutes } from './routes/health.js';
 import { projectRoutes } from './routes/projects.js';
 import { epicRoutes } from './routes/epics.js';
 import { fileRoutes } from './routes/file.js';
+import { complianceRoutes } from './routes/compliance.js';
+import { backlogRoutes } from './routes/backlog.js';
+import { activityRoutes } from './routes/activity.js';
+import { queueRoutes } from './routes/queue.js';
+import { metricsRoutes } from './routes/metrics.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -66,11 +71,17 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   app.use(cors({ origin: config.corsOrigins }));
   app.use(express.json());
 
-  // --- API routes (Step 4 health + Step 5 cross-project read routes) ---
+  // --- API routes (Step 4 health + Step 5/7 cross-project read routes) ---
   app.use('/api/health', healthRoutes());
   app.use('/api', projectRoutes(scanner));
   app.use('/api', epicRoutes(scanner));
   app.use('/api', fileRoutes(scanner)); // §7.4.1 hardened raw-artifact endpoint
+  // Step 7: cross-project compliance / backlog / activity / queue / metrics.
+  app.use('/api', complianceRoutes(scanner));
+  app.use('/api', backlogRoutes(scanner));
+  app.use('/api', activityRoutes(() => scanner.getActivity()));
+  app.use('/api', queueRoutes(scanner));
+  app.use('/api', metricsRoutes(scanner));
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
