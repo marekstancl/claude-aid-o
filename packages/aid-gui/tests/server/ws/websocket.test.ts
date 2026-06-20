@@ -30,8 +30,8 @@ function createTestServer(): {
     ws,
     address: () => {
       const addr = server.address();
-      if (!addr || typeof addr === 'string') return 'ws://localhost:0';
-      return `ws://localhost:${addr.port}/ws`;
+      if (!addr || typeof addr === 'string') return 'ws://127.0.0.1:0';
+      return `ws://127.0.0.1:${addr.port}/ws`;
     },
   };
 }

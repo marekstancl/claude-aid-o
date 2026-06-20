@@ -14,7 +14,7 @@
     "@aid/contract": "*",
     "chokidar": "^4",
     "cors": "^2",
-    "express": "^4",
+    "express": "^5",
     "gray-matter": "^4",
     "js-yaml": "^4",
     "lru-cache": "^10",
@@ -23,7 +23,7 @@
   },
   "devDependencies": {
     "@types/cors": "^2",
-    "@types/express": "^5.0.6",
+    "@types/express": "5.0.6",
     "@types/js-yaml": "^4",
     "@types/node": "^22",
     "@types/supertest": "^6",

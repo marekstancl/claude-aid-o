@@ -1,36 +1,32 @@
 // Event pipeline contract types — shared between aid-server watcher and aid-gui WebSocket.
-// Adapted per §7.3: timestamp → ts; topics updated to P047 step-16 vocabulary.
+// Adapted per §7.3: timestamp → ts; topics match P047 §7.3 vocabulary exactly.
 
 export type EventTopic =
   | 'pipeline'
   | 'pipeline.timeline'      // timeline.jsonl entries (was pipeline.stage_log in v1 salvage)
-  | 'evidence'
-  | 'decisions'
-  | 'config'
-  | 'queue'
-  | 'queue.schedule'
   | 'gates'                  // gates_report.json + per-gate outputs
+  | 'compliance'             // compliance.json
   | 'checkpoints'            // verifier-output-*.md files
+  | 'queue'                  // queue.yaml
+  | 'decisions'              // decisions/*.md
+  | 'audit'                  // audit-report.md
   | 'epics'                  // EPIC spec files (.aid-o/tasks/*.md)
   | 'backlog'                // work/backlog.md
-  | 'audit'
-  | 'usage'
-  | 'system';
+  | 'config'                 // .aid-o/config/**
+  | 'system';                // watcher lifecycle events
 
 export const ALL_EVENT_TOPICS: EventTopic[] = [
   'pipeline',
   'pipeline.timeline',
-  'evidence',
-  'decisions',
-  'config',
-  'queue',
-  'queue.schedule',
   'gates',
+  'compliance',
   'checkpoints',
+  'queue',
+  'decisions',
+  'audit',
   'epics',
   'backlog',
-  'audit',
-  'usage',
+  'config',
   'system',
 ];
 
@@ -41,7 +37,7 @@ export interface FileChangeEvent {
   type: 'file_change';
   projectId: string;               // which workspace this change came from
   topic: EventTopic;
-  filePath: string;
+  filePath?: string;               // relative path from .aid-o root; omitted in abbreviated emits
   changeType: 'add' | 'change' | 'unlink';
   runRef: RunRef | null;           // set when path is under work/evidence/<epic>/<run>/
   parsedData: unknown;
