@@ -10,13 +10,17 @@
  * supplier (`() => ActivityEvent[]`) so the route stays decoupled from the cache
  * internals and is trivially testable with a fixed event list.
  *
- * Filtering (all optional, all AND-combined):
+ * Filtering (all optional, all AND-combined) — applied through the SHARED
+ * {@link filterActivity} helper (`src/activity-filter.ts`) so this REST feed and
+ * the WS replay frame can never drift; the REST output is therefore a complete
+ * WS-replay bootstrap source for the 5s polling fallback (§7.3 / AC #9c):
  *  - `project` — exact `projectId` match.
  *  - `topic`   — matches the event's `raw.topic` when present, else its `event`
  *    name; lets a client narrow to e.g. `gates` / `compliance` without the
  *    server fabricating a topic the source event never carried.
- *  - `limit`   — positive integer cap (default 100); applied AFTER sorting so
- *    the newest N events are returned.
+ *  - `limit`   — positive integer cap (default 100, hard ceiling 500); applied
+ *    AFTER sorting so the newest N events are returned. A `limit` above 500 is
+ *    CLAMPED to 500 (HTTP 200, never a 400).
  *
  * Never throws — a malformed query degrades to the unfiltered (still sorted +
  * capped) feed where sensible, and an invalid `project` value yields a 400.
@@ -28,29 +32,29 @@ import { Router } from 'express';
 import type { ActivityEvent } from '@aid/contract';
 import { sendOk, send400 } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
+import {
+  filterActivity,
+  clampLimit,
+  DEFAULT_ACTIVITY_LIMIT,
+} from '../activity-filter.js';
 
 /** Current time as an ISO 8601 string (scan marker for `meta`). */
 function isoNow(): string {
   return new Date().toISOString();
 }
 
-/** Default cap on the number of returned events. */
-const DEFAULT_LIMIT = 100;
-
 /** Supplier of the current merged-activity snapshot (e.g. `scanner.getActivity`). */
 export type ActivitySupplier = () => ActivityEvent[];
 
-/** Parse a positive-integer `limit` query param, falling back to the default. */
+/**
+ * Parse a positive-integer `limit` query param, falling back to the default.
+ * The hard 500 ceiling is enforced downstream by {@link clampLimit} (clamp, not
+ * reject), so an over-large `limit` still returns 200.
+ */
 function parseLimit(raw: unknown): number {
-  if (typeof raw !== 'string') return DEFAULT_LIMIT;
+  if (typeof raw !== 'string') return DEFAULT_ACTIVITY_LIMIT;
   const n = parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LIMIT;
-}
-
-/** True when the event matches the requested topic (raw.topic, else event name). */
-function matchesTopic(event: ActivityEvent, topic: string): boolean {
-  const rawTopic = typeof event.raw.topic === 'string' ? event.raw.topic : null;
-  return rawTopic === topic || event.event === topic;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_ACTIVITY_LIMIT;
 }
 
 /**
@@ -76,13 +80,17 @@ export function activityRoutes(getActivity: ActivitySupplier): Router {
       : null;
     const limit = parseLimit(req.query.limit);
 
-    let events = getActivity();
-    if (project !== null) events = events.filter((e) => e.projectId === project);
-    if (topic !== null) events = events.filter((e) => matchesTopic(e, topic));
+    // Project + topic filtering via the SHARED helper (identical to WS replay).
+    // No limit here: we sort first, then cap, so the newest N survive.
+    const filtered = filterActivity(getActivity(), {
+      projects: project !== null ? [project] : [],
+      topics: topic !== null ? [topic] : [],
+    });
 
     // Time-sorted DESCENDING by ts (newest first); empty/invalid ts sorts last.
-    const sorted = [...events].sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
-    const capped = sorted.slice(0, limit);
+    const sorted = [...filtered].sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
+    // Clamp the limit to the hard ceiling (no 400) and keep the newest N (head).
+    const capped = sorted.slice(0, clampLimit(limit) ?? DEFAULT_ACTIVITY_LIMIT);
 
     sendOk(res, capped, {
       scannedAt: isoNow(),

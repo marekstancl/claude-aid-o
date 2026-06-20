@@ -22,6 +22,7 @@ import type {
   InternalEvent,
 } from '@aid/contract';
 import { ALL_EVENT_TOPICS } from '@aid/contract';
+import { filterActivity } from '../activity-filter.js';
 
 // ---------------------------------------------------------------------------
 // Subscription request shape (client → server)
@@ -453,14 +454,22 @@ export class AidWebSocket {
   /**
    * Send a `type:'replay'` frame with the activity buffer filtered by the new
    * subscription. Skipped when the buffer is empty or no supplier is set.
+   *
+   * Filtering goes through the SHARED {@link filterActivity} helper — the exact
+   * same code path the REST `GET /api/activity` bootstrap uses — so the polling
+   * fallback is payload-shape-equal to this replay frame (§7.3 / AC #9c). The
+   * supplier yields oldest→newest, so empty topics/projects = wildcard and the
+   * topic match (raw.topic or event name) is applied identically in both
+   * channels. No `limit` is applied to replay (the buffer is already bounded).
    */
   private replay(socket: WebSocket, filter: SubscriptionFilter): void {
     if (!this.activityBufferSupplier) return;
 
     const buffer = this.activityBufferSupplier();
-    const filtered = buffer.filter((item) =>
-      this.activityMatches(item, filter),
-    );
+    const filtered = filterActivity(buffer, {
+      projects: filter.projects,
+      topics: filter.topics,
+    });
 
     if (filtered.length > 0) {
       this.send(socket, {
@@ -560,21 +569,6 @@ export class AidWebSocket {
     const projectOk =
       state.projects.size === 0 || state.projects.has(projectId);
     return topicOk && projectOk;
-  }
-
-  /**
-   * Replay filter for an ActivityEvent against a just-applied subscription.
-   * Empty topics/projects in the filter = match all (consistent with live
-   * delivery). ActivityEvent has no `topic` field, so topic filtering applies
-   * only via project scoping plus the supplier's own pre-merge.
-   */
-  private activityMatches(
-    item: ActivityEvent,
-    filter: SubscriptionFilter,
-  ): boolean {
-    const projectOk =
-      filter.projects.length === 0 || filter.projects.includes(item.projectId);
-    return projectOk;
   }
 
   private isValidTopic(topic: string): boolean {

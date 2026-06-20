@@ -228,7 +228,11 @@ function makeActivity(projectId: string): ActivityEvent {
     event: 'state_change',
     from: 'READY',
     to: 'EXECUTE',
-    raw: { source: 'timeline.jsonl' },
+    // `raw.topic` carries the activity-topic vocabulary used by the SHARED
+    // filter (Step 8): replay now applies topic matching identically to the REST
+    // `/activity` bootstrap, so the subscribed topic ('pipeline.timeline') must
+    // be present here for the event to survive the filter.
+    raw: { source: 'timeline.jsonl', topic: 'pipeline.timeline' },
   };
 }
 
