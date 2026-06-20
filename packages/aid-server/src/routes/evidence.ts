@@ -1,5 +1,5 @@
 import { Router, type Request } from 'express';
-import { join, sep } from 'node:path';
+import { join, sep, normalize, isAbsolute, resolve } from 'node:path';
 import type { ProjectRegistry } from '../services/project-registry.js';
 import { isValidPathComponent, type ProjectParams, type EvidenceFileParams } from './types.js';
 
@@ -52,11 +52,20 @@ export function evidenceRoutes(registry: ProjectRegistry): Router {
       return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId or runId' } });
     }
 
-    const fullPath = join(fs.aidoPath, 'work', 'evidence', req.params.epicId, req.params.runId, filePath);
+    // Layer 1: normalize and reject obvious traversal before joining.
+    const normalizedFilePath = normalize(filePath);
+    if (normalizedFilePath.startsWith('..') || isAbsolute(normalizedFilePath)) {
+      return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid file path' } });
+    }
 
-    // Security: ensure path doesn't escape evidence dir (trailing sep prevents /evidence-secret prefix match).
-    const evidenceBase = join(fs.aidoPath, 'work', 'evidence');
-    if (!fullPath.startsWith(evidenceBase + sep)) {
+    // Layer 2: build path scoped to the specific run directory (not just evidenceBase).
+    const runDir = join(fs.aidoPath, 'work', 'evidence', req.params.epicId, req.params.runId);
+    const fullPath = join(runDir, normalizedFilePath);
+
+    // Layer 3: resolve to canonical form and verify containment within run dir (trailing sep prevents prefix collision).
+    const resolvedPath = resolve(fullPath);
+    const resolvedRunDir = resolve(runDir);
+    if (!resolvedPath.startsWith(resolvedRunDir + sep)) {
       return res.status(403).json({ ok: false, error: { code: 'FORBIDDEN', message: 'Path traversal not allowed' } });
     }
 
