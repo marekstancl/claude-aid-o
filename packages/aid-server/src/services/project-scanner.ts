@@ -23,6 +23,29 @@ import pLimit from 'p-limit';
 import type { FsmState, Project, RunFormat } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 
+// Step 7 (E-047-2_7): the two-tier cache machinery lives in scanner-cache.ts
+// (kept separable for testability). Re-exported here so consumers can pull the
+// scanner + its cache from one module. The cache wraps a ProjectScanner for the
+// Tier-1 index build and memoizes Tier-2 RunDetail via an INJECTED loader (the
+// real loader arrives in Step 8). The ProjectScanner class below is UNCHANGED —
+// Step 6 behavior and all its tests are preserved.
+export {
+  ScannerCache,
+  CircularBuffer,
+  runKey,
+  planKey,
+  extractFrontmatter,
+} from './scanner-cache.js';
+export type {
+  RunDetailLoader,
+  ScannerCacheConfig,
+  Tier1Index,
+  IndexedProject,
+  IndexedEpic,
+  IndexedRun,
+  IndexedSourceFile,
+} from './scanner-cache.js';
+
 /** Concurrency cap for the cold-scan disk reads (spec §7.2). */
 const SCAN_CONCURRENCY = 16;
 
