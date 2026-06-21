@@ -219,12 +219,12 @@ describe("parseBlockingFindings — six forms (AC2)", () => {
     });
   });
 
-  it("form 4: backtick-wrapped `` `blocking_findings: false` `` → false / bold", () => {
+  it("form 4: backtick-wrapped `` `blocking_findings: false` `` → false / backtick", () => {
     expect(
       parseBlockingFindings("Text `blocking_findings: false` text\n"),
     ).toEqual({
       blockingFindings: false,
-      blockingFindingsSource: "bold",
+      blockingFindingsSource: "backtick",
     });
   });
 

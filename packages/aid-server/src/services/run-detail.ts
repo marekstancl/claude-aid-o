@@ -53,6 +53,7 @@ import type {
 } from '@aid/contract';
 import { FsReader } from './fs-reader.js';
 import { createPathMap, type PathMap } from './pathmap.js';
+import { buildAuditSummary, type ParsedAuditReport } from '../audit/build-audit-summary.js';
 import {
   VALID_FSM_STATES,
   isValidPathSegment,
@@ -627,32 +628,18 @@ function previewOutput(output: string): string {
 }
 
 // ===========================================================================
-// #5 — audit summary (THREE score shapes)
+// #5 — audit summary (delegated to canonical buildAuditSummary)
 // ===========================================================================
-
-/** Match `## Score: N/100` heading (with optional `s`, e.g. `## Scores:`). */
-const SCORE_HEADING_RE = /^##\s+scores?\s*:\s*(\d{1,3})\s*(?:\/\s*100)?\s*$/im;
-/** Match a `**Total**` table row carrying `N/100`. */
-const SCORE_TOTAL_ROW_RE = /\|\s*\*{0,2}total\*{0,2}\s*\|\s*\*{0,2}\s*(\d{1,3})\s*\/\s*100/i;
-/** Match a leading bare/frontmatter `overall_score: N` line. */
-const OVERALL_SCORE_RE = /^\s*overall_score\s*:\s*(\d{1,3})\s*$/im;
-/** Match a leading bare/frontmatter `blocking_findings: true|false`. */
-const BLOCKING_FM_RE = /^\s*blocking_findings\s*:\s*(true|false)\s*$/im;
 
 /**
  * Build the managerial {@link AuditSummary} from `audit-report.md` (§4.0 #5 /
- * §13.5). The score is parsed in THREE shapes, tried IN ORDER, null if none:
- *   1. frontmatter / leading bare `overall_score: N` → scoreSource 'frontmatter'
- *   2. `## Score: N/100` heading                     → scoreSource 'heading'
- *   3. `**Total** N/100` row in a `## Score(s)` table → scoreSource 'table'
+ * §13.5). Delegates to {@link buildAuditSummary} from build-audit-summary.ts,
+ * which is the canonical parser used by the managerial brief (§13.5). This
+ * ensures RunDetail.audit matches /audit-summary on the same report.
  *
- * `blocking_findings` is the only reliably-present auditor field; parsed from a
- * leading `blocking_findings: true|false` line (the FIELD, not body prose).
- * `_generated_by` / `classification` are CONDITIONAL — their absence is NOT
- * treated as fabrication (unlike verifier outputs). The brief-only projection
- * fields (topReasons / nextSteps / headlineCs / previousScoreHint) are
- * conservative best-effort here (empty / "" / null) — the full §13.5 managerial
- * brief is a later phase; they are kept type-valid.
+ * The canonical parser handles THREE score shapes (frontmatter / heading / table),
+ * SIX blocking_findings forms, and produces fully-shaped AuditSummary with proper
+ * categories / findings / topReasons / nextSteps (no longer best-effort stubs).
  */
 async function readAudit(
   fs: FsReader,
@@ -663,207 +650,21 @@ async function readAudit(
   const present = files.includes(relPath);
 
   if (!present) {
-    return emptyAudit(relPath, false, ['no audit-report.md for this run']);
+    const parsed: ParsedAuditReport = {
+      present: false,
+      rawText: null,
+      rawRelPath: relPath,
+    };
+    return buildAuditSummary(runDir, parsed);
   }
 
   const text = await fs.readText(join(runDir, relPath));
-  if (text === null || text.trim().length === 0) {
-    return emptyAudit(relPath, true, ['audit-report.md unreadable or empty']);
-  }
-
-  const warnings: string[] = [];
-
-  // --- score: three shapes, in order ---
-  let overallScore: number | null = null;
-  let scoreSource: AuditSummary['scoreSource'] = null;
-
-  const fm = OVERALL_SCORE_RE.exec(text);
-  if (fm) {
-    overallScore = clampScore(parseInt(fm[1], 10));
-    scoreSource = 'frontmatter';
-  }
-  if (overallScore === null) {
-    const heading = SCORE_HEADING_RE.exec(text);
-    if (heading) {
-      overallScore = clampScore(parseInt(heading[1], 10));
-      scoreSource = 'heading';
-    }
-  }
-  if (overallScore === null) {
-    const totalRow = SCORE_TOTAL_ROW_RE.exec(text);
-    if (totalRow) {
-      overallScore = clampScore(parseInt(totalRow[1], 10));
-      scoreSource = 'table';
-    }
-  }
-  if (overallScore === null) {
-    warnings.push('score unparseable — none of the three shapes matched');
-  }
-
-  // --- blocking_findings (the one reliable field) ---
-  let blockingFindings: boolean | null = null;
-  let blockingFindingsSource: AuditSummary['blockingFindingsSource'] = null;
-  const bf = BLOCKING_FM_RE.exec(text);
-  if (bf) {
-    blockingFindings = bf[1].toLowerCase() === 'true';
-    blockingFindingsSource = 'frontmatter';
-  } else {
-    warnings.push('blocking_findings field not found');
-  }
-
-  // --- categories from a `## Score(s)` table (best-effort) ---
-  const categories = parseScoreCategories(text);
-
-  // --- findings → topRisks + counts + autoFixableCount (best-effort) ---
-  const { topRisks, countsBySeverity, autoFixableCount } = parseFindings(text);
-
-  return {
+  const parsed: ParsedAuditReport = {
     present: true,
-    overallScore,
-    scoreSource,
-    blockingFindings,
-    blockingFindingsSource,
-    categories,
-    topReasons: [], // brief-only projection — later phase (§13.5)
-    topRisks,
-    countsBySeverity,
-    autoFixableCount,
-    nextSteps: [], // brief-only projection — later phase (§13.5)
-    headlineCs: '', // brief-only projection — later phase (§13.5)
-    previousScoreHint: null, // brief-only projection — later phase (§13.5)
+    rawText: text ?? '',
     rawRelPath: relPath,
-    warnings,
   };
-}
-
-/** A conservative, type-valid empty AuditSummary. */
-function emptyAudit(
-  rawRelPath: string,
-  present: boolean,
-  warnings: string[],
-): AuditSummary {
-  return {
-    present,
-    overallScore: null,
-    scoreSource: null,
-    blockingFindings: null,
-    blockingFindingsSource: null,
-    categories: [],
-    topReasons: [],
-    topRisks: [],
-    countsBySeverity: { Critical: 0, High: 0, Medium: 0, Low: 0 },
-    autoFixableCount: 0,
-    nextSteps: [],
-    headlineCs: '',
-    previousScoreHint: null,
-    rawRelPath,
-    warnings,
-  };
-}
-
-function clampScore(n: number): number | null {
-  if (Number.isNaN(n)) return null;
-  return Math.max(0, Math.min(100, n));
-}
-
-/**
- * Parse a `## Score(s)` table into {@link AuditSummary.categories}. Rows look
- * like `| Code | 22/25 |` or `| Security | 92 |`; the `**Total**` row is the
- * headline (excluded from per-category rows). Best-effort — an unrecognized
- * table yields `[]`.
- */
-function parseScoreCategories(text: string): AuditSummary['categories'] {
-  const out: AuditSummary['categories'] = [];
-  // Isolate the body under a `## Score` / `## Scores` heading: everything from
-  // the heading line up to the next `## ` heading, a `---` rule, or end of text.
-  // NOTE: no `/m` here — a multiline `$` would let the lazy group match zero
-  // chars (it satisfies at the first line end), yielding an empty block.
-  const headingMatch = /^##[ \t]+scores?\b.*$/im.exec(text);
-  if (!headingMatch) return out;
-  const after = text.slice(headingMatch.index + headingMatch[0].length);
-  const stop = after.search(/\n##[ \t]|\n-{3,}/);
-  const block = stop === -1 ? after : after.slice(0, stop);
-  for (const line of block.split('\n')) {
-    const row = line.match(/^\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|/);
-    if (!row) continue;
-    const label = row[1].replace(/\*/g, '').trim();
-    const cell = row[2].replace(/\*/g, '').trim();
-    const lower = label.toLowerCase();
-    if (lower === 'dimension' || lower === '' || /^-+$/.test(label)) continue;
-    if (lower === 'total') continue; // headline, not a category
-    const scoreMatch = cell.match(/^(\d{1,3})(?:\s*\/\s*(\d{1,3}))?/);
-    if (!scoreMatch) continue;
-    const rawNum = parseInt(scoreMatch[1], 10);
-    const denom = scoreMatch[2] ? parseInt(scoreMatch[2], 10) : 100;
-    const max: 25 | 100 = denom === 25 ? 25 : 100;
-    const normalized = max === 25 ? rawNum * 4 : rawNum;
-    out.push({
-      category: label,
-      score: clampScore(normalized) ?? 0,
-      rawScore: cell,
-      max,
-      status: null,
-    });
-  }
-  return out;
-}
-
-/**
- * Parse `### Critical|High|Medium|Low` finding sub-sections into severity counts,
- * top risks (Critical + High), and the auto-fixable count. Best-effort and
- * defensive — an audit report without finding sections yields zero counts.
- */
-function parseFindings(text: string): {
-  topRisks: AuditSummary['topRisks'];
-  countsBySeverity: AuditSummary['countsBySeverity'];
-  autoFixableCount: number;
-} {
-  const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
-  const topRisks: AuditSummary['topRisks'] = [];
-  let autoFixableCount = 0;
-
-  // Split on `###` headings; each block belongs to the nearest severity heading.
-  const sevHeadingRe = /^###\s+(Critical|High|Medium|Low)\b/gim;
-  const headings: { sev: keyof typeof counts; index: number }[] = [];
-  let hm: RegExpExecArray | null;
-  while ((hm = sevHeadingRe.exec(text)) !== null) {
-    const sev = (hm[1][0].toUpperCase() + hm[1].slice(1).toLowerCase()) as keyof typeof counts;
-    headings.push({ sev, index: hm.index });
-  }
-
-  for (let i = 0; i < headings.length; i++) {
-    const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : text.length;
-    const block = text.slice(start, end);
-    const sev = headings[i].sev;
-
-    // Each finding is a `**[ID] title**` bold marker within the block.
-    const findingMarkers = block.match(/^\s*\*\*\[[^\]]+\][^\n]*\*\*/gim) ?? [];
-    const n = findingMarkers.length;
-    counts[sev] += n;
-
-    // auto_fixable: true markers within the block.
-    autoFixableCount += (block.match(/^\s*auto_fixable\s*:\s*true\s*$/gim) ?? []).length;
-
-    if ((sev === 'Critical' || sev === 'High') && n > 0) {
-      for (const marker of findingMarkers) {
-        const finding = marker.replace(/\*/g, '').trim();
-        topRisks.push({
-          severity: sev,
-          area: null,
-          auditType: null,
-          finding,
-          recommendation: null,
-          effort: null,
-          autoFixable: null,
-        });
-      }
-    }
-  }
-
-  // Critical first, then High.
-  topRisks.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'Critical' ? -1 : 1));
-  return { topRisks, countsBySeverity: counts, autoFixableCount };
+  return buildAuditSummary(runDir, parsed);
 }
 
 // ===========================================================================

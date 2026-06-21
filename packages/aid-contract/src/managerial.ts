@@ -134,7 +134,7 @@ export interface AuditSummary {
   overallScore: number | null;                   // best-effort /100; null when no parseable score (§4.3 three shapes)
   scoreSource: 'frontmatter' | 'heading' | 'table' | null;  // which of the 3 shapes matched (provenance)
   blockingFindings: boolean | null;              // the ONLY reliably-present auditor field; null only when even it is unparseable
-  blockingFindingsSource: 'frontmatter' | 'heading' | 'bold' | 'inline' | 'numeric' | null; // §13.5 6-form parse
+  blockingFindingsSource: 'frontmatter' | 'heading' | 'bold' | 'backtick' | 'inline' | 'numeric' | null; // §13.5 6-form parse
   categories: AuditCategoryScore[];             // [] when no score table present
   topReasons: string[];                          // why the score is what it is — derived from largest deductions / highest-severity findings (§13.5)
   topRisks: AuditFinding[];                      // Critical + High findings, severity-desc

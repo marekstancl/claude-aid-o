@@ -33,6 +33,7 @@ import type {
 import { pickLatestIndexedRun, buildEpicSummary } from '../services/view-assembly.js';
 import { parseLessons } from '../lessons/build-lessons.js';
 import { FsReader } from '../services/fs-reader.js';
+import { buildAuditTrend } from '../audit/build-audit-trend.js';
 import {
   buildAggregateAudit,
   pickBoundaryAudit,
@@ -157,10 +158,11 @@ export function planStemForNumber(
 }
 
 /**
- * Resolve a single EPIC's membership tier within a project. Reads the latest
- * run's fsm-state `plan_path` (tier-1) lazily via the cache, the task frontmatter
- * `plan_ref` (tier-2), then id-derivation (tier-3). Returns the tier + plan
- * number (orphan → null number). Never throws.
+ * Resolve a single EPIC's membership tier within a project. Reads the task
+ * frontmatter `plan_ref` (tier-2) and then id-derivation (tier-3). The tier-1
+ * fsm-state `plan_path` source is dead code (RunDetail does not surface it,
+ * and on real disk it is null); this function now uses only tiers 2–3.
+ * Returns the tier + plan number (orphan → null number). Never throws.
  */
 export async function resolveEpicMembership(
   scanner: ScannerCache,
@@ -168,21 +170,9 @@ export async function resolveEpicMembership(
   epic: IndexedEpic,
   planFileExists: (planNumber: string) => boolean,
 ): Promise<{ source: ReturnType<typeof resolveMembership>['source']; planNumber: string | null }> {
-  // Tier-1 source: latest run's fsm-state plan_path (only fetched when needed).
-  const latest = pickLatestIndexedRun([...epic.runs.values()]);
-  let planPath: string | null = null;
-  if (latest !== null) {
-    const detail = await scanner.getRunDetail(indexed.projectId, epic.epicId, latest.runId);
-    // RunDetail does not surface plan_path directly; derive a P{NNN} hint from
-    // the run's reports/plan refs is unreliable, so we only use the frontmatter
-    // plan_ref (tier-2) + id-derivation (tier-3) here. fsm plan_path is `null`
-    // on the P046 fixture anyway (§13.6), so this is faithful to disk.
-    planPath = null;
-    void detail;
-  }
   const planRef = epic.frontmatter?.planRef ?? epic.frontmatter?.planPath ?? null;
 
-  const input: MembershipInput = { epicId: epic.epicId, planPath, planRef };
+  const input: MembershipInput = { epicId: epic.epicId, planPath: null, planRef };
   return resolveMembership(input, planFileExists);
 }
 
@@ -587,7 +577,6 @@ export async function assemblePlanBuildInput(
   const backlog = await buildPlanBacklog(fs, indexed, memberEpicIds);
 
   // plan-scope audit trend: one point per audited member (latest audited run).
-  const { buildAuditTrend } = await import('../audit/build-audit-trend.js');
   const trendCanon = canonicalEpics(indexed);
   const trendPoints = [];
   for (const epicId of memberEpicIds) {

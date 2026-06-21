@@ -149,7 +149,7 @@ export function parseBlockingFindings(text: string): BlockingFindingsResult {
   if (backtick)
     return {
       blockingFindings: toBool(backtick[1]),
-      blockingFindingsSource: "bold",
+      blockingFindingsSource: "backtick",
     };
 
   const heading = BLOCKING_BOOL_HEADING_RE.exec(text);
