@@ -103,6 +103,26 @@ describe('useAidSocket — real-server frame conformance', () => {
     expect(qc.getQueryData(['activity'])).toEqual(buffer);
   });
 
+  it('a real PIPELINE frame invalidates the EPIC-detail key (Screen C live-refresh)', () => {
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    renderHook(() => useAidSocket({ topics: [], projects: [] }), { wrapper });
+    const ws = MockWebSocket.instances[0];
+    act(() => ws.open());
+    act(() => {
+      ws.emit({
+        type: 'event',
+        topic: 'pipeline',
+        data: { type: 'file_change', projectId: 'wan', runRef: { epicId: 'E-001-1_1', runId: 'R-1' }, parsedData: {} },
+        ts: '2026-06-21T00:00:00Z',
+      });
+    });
+    act(() => { vi.advanceTimersByTime(300); });
+    const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
+    // FSM transitions MUST live-refresh Screen C's ['epic-detail',p,e] query.
+    expect(keys).toContain(JSON.stringify(['epic-detail', 'wan', 'E-001-1_1']));
+    expect(keys).toContain(JSON.stringify(['projects']));
+  });
+
   it('a malformed frame never throws and keeps the socket open', () => {
     renderHook(() => useAidSocket({ topics: [], projects: [] }), { wrapper });
     const ws = MockWebSocket.instances[0];

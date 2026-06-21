@@ -104,8 +104,14 @@ function keysForEvent(frame: EventFrame): QueryKey[] {
 
   switch (topic) {
     case 'pipeline':
-      // Pipeline state moved → the active EPIC view + the project list.
-      if (runRef) keys.push(['epic', projectId, runRef.epicId]);
+      // Pipeline state moved (FSM transition) → the EPIC deep view + project list.
+      // Use the EPIC-detail key Screen C actually reads (['epic-detail',p,e]); the
+      // old ['epic',...] key had NO consumer, so FSM transitions never live-refreshed
+      // the deep view. Push both run-scoped + epic-scoped for prefix-match coverage.
+      if (runRef) {
+        keys.push(['epic-detail', projectId, runRef.epicId, runRef.runId]);
+        keys.push(['epic-detail', projectId, runRef.epicId]);
+      }
       keys.push(['projects']);
       break;
     case 'gates':
