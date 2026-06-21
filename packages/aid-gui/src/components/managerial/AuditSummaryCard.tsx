@@ -125,8 +125,8 @@ export function AuditSummaryCard({
 
           {variant === 'aggregate' && aggregate && (
             <span data-audit-provenance className="text-xs text-slate-400">
-              {aggregate.medianEpicId ? `z EPICu ${aggregate.medianEpicId}` : 'agregát'} · n=
-              {aggregate.scoredEpicCount}
+              {aggregate.medianEpicId ? `z EPICu ${aggregate.medianEpicId}` : 'agregát'} · ze{' '}
+              {aggregate.scoredEpicCount} auditovaných
             </span>
           )}
         </div>

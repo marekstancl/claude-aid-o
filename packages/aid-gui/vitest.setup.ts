@@ -17,3 +17,14 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList;
 }
+
+// jsdom ships no `ResizeObserver`. recharts' `ResponsiveContainer` constructs one
+// on mount (Screen B's Audit-trend chart, Screen A/Plan charts). Provide a no-op
+// stub so chart-bearing components render in tests without throwing.
+if (typeof globalThis !== 'undefined' && typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}

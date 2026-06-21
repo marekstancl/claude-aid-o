@@ -15,8 +15,10 @@
 
 import type {
   Project,
+  ProjectDetail,
   Brief,
   EpicDetail,
+  EpicSummary,
   ComplianceView,
   ActivityEvent,
   BacklogItem,
@@ -129,6 +131,16 @@ const seg = (s: string): string => encodeURIComponent(s);
 /** GET /api/projects → all discovered projects. */
 export function getProjects(): Promise<Project[]> {
   return apiGet<Project[]>('/api/projects');
+}
+
+/** GET /api/projects/:projectId → full ProjectDetail (epics + queue + recentActivity + aggregateAudit + auditTrend). */
+export function getProjectDetail(project: string): Promise<ProjectDetail> {
+  return apiGet<ProjectDetail>(`/api/projects/${seg(project)}`);
+}
+
+/** GET /api/projects/:projectId/epics → EpicSummary[] for one project. */
+export function getEpics(project: string): Promise<EpicSummary[]> {
+  return apiGet<EpicSummary[]>(`/api/projects/${seg(project)}/epics`);
 }
 
 /**
