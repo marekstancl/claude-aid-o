@@ -28,3 +28,22 @@ if (typeof globalThis !== 'undefined' && typeof globalThis.ResizeObserver === 'u
     disconnect() {}
   } as unknown as typeof ResizeObserver;
 }
+
+// jsdom ships no `IntersectionObserver`. Screen F's Help scrollspy constructs one
+// over its Section refs. Provide a no-op stub (it never fires in jsdom — the
+// screen's scrollspy is purely a UX nicety and degrades to the first section)
+// so the Help screen renders in tests without throwing.
+if (typeof globalThis !== 'undefined' && typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver = class {
+    readonly root = null;
+    readonly rootMargin = '';
+    readonly thresholds: ReadonlyArray<number> = [];
+    constructor() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  } as unknown as typeof IntersectionObserver;
+}
