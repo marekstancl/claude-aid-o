@@ -41,6 +41,9 @@ export type {
 
 export type {
   PlanSummary,
+  PlanOutcome,
+  PlanOutcomeSummary,
+  PlanOutcomeAnalytics,
   RiskLevel,
   RiskReason,
   Risk,

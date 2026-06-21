@@ -16,6 +16,35 @@ export interface PlanSummary {
   lastActivityAt: string | null;
 }
 
+// ── CROSS-PROJECT PLAN OUTCOMES (Rev 4.1, §13.12) ────────────────────────────
+// Pure scanner-cache projection. Missing proof/retry evidence remains unknown;
+// it MUST NOT be converted to zero, pass, or a successful plan outcome.
+export type PlanOutcome = 'passed' | 'partial' | 'failed' | 'in_progress' | 'unverifiable';
+export interface PlanOutcomeSummary {
+  projectId: string; planId: string; title: string;
+  outcome: PlanOutcome;
+  epicsTotal: number; epicsDone: number; runsTotal: number; failedRuns: number;
+  gateFailures: number; gateRetries: number;
+  checkpointRetries: { knownTotal: number; unknownCheckpoints: number };
+  fsmFailures: { precondition: number; increment: number; doneAdvance: number; other: number };
+  escalations: number; forceOverrides: number;
+  compliance: { passed: number; failed: number; unknown: number };
+  topFailureReasons: { reason: string; count: number }[];
+  firstStartedAt: string | null; lastCompletedAt: string | null; lastActivityAt: string | null;
+  dataPartial: boolean;
+  warnings: string[];
+}
+export interface PlanOutcomeAnalytics {
+  generatedAt: string;
+  plans: PlanOutcomeSummary[];
+  totals: {
+    plans: number; passed: number; partial: number; failed: number;
+    inProgress: number; unverifiable: number; failedRuns: number;
+    gateFailures: number; gateRetries: number; escalations: number; forceOverrides: number;
+  };
+  partialProjects: string[];
+}
+
 // Deterministic RISK (§13.2). Level from countable real signals only; never a fake probability.
 export type RiskLevel = 'nizke' | 'stredni' | 'vysoke' | 'neurceno';
 export interface RiskReason {

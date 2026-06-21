@@ -59,6 +59,8 @@ import { explanationsRoutes } from './routes/explanations.js';
 import { briefRoutes } from './routes/brief.js';
 import { auditTrendRoutes } from './routes/audit-trend.js';
 import { auditSummaryRoutes } from './routes/audit-summary.js';
+import { plansRoutes } from './routes/plans.js';
+import { planAnalyticsRoutes } from './routes/plan-analytics.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -101,6 +103,13 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   // pure projections over the scanner cache, read-only.
   app.use('/api', auditTrendRoutes(scanner));
   app.use('/api', auditSummaryRoutes(scanner));
+  // Step 7 (E-047-4_7): four-tier Plan read-model (§13.6) + reporter/simplifier
+  // (MF6) and cross-project Plan Outcome Analytics (§13.12). The analytics route
+  // is a pure scanner-cache projection — it NEVER execs the shell diagnostic.
+  // The /analytics/plans route is registered BEFORE /plans/:projectId so the
+  // literal `analytics` segment is not captured as a `:projectId`.
+  app.use('/api', planAnalyticsRoutes(scanner));
+  app.use('/api', plansRoutes(scanner));
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
