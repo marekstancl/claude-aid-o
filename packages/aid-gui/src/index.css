@@ -4,29 +4,49 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  /* FSM State Colors */
-  --color-state-idle: #3a3f5c;
-  --color-state-plan-review: #c9943e;
-  --color-state-plan-ready: #4a8f7a;
-  --color-state-executing: #00b4d8;
-  --color-state-phase-check: #7c5cbf;
-  --color-state-phase-retry: #d4663a;
-  --color-state-gates: #2d9a4f;
-  --color-state-gates-retry: #c94040;
-  --color-state-pm-approval: #e8a832;
-  --color-state-curator-resolve: #8b6fc0;
-  --color-state-done: #22c55e;
-  --color-state-error: #ef4444;
+  /* ── §6.2 canonical STATUS colour tokens (8) ──────────────────────────────
+   * ONE table, ONE colour per token. These hex values mirror the
+   * @aid/contract STATUS table verbatim (status.ts). Backend, frontend, Help
+   * and tests all reference these — no status colour is defined anywhere else. */
+  --status-running: #0284c7;   /* bezi        — běh aktivní        */
+  --status-idle: #64748b;      /* ceka        — čeká               */
+  --status-pass: #059669;      /* proslo      — prošlo / DONE       */
+  --status-fail: #dc2626;      /* selhalo     — selhalo / ERROR     */
+  --status-blocked: #d97706;   /* zablokovano — zablokováno         */
+  --status-escalate: #ea580c;  /* eskalace    — eskalace            */
+  --status-warn: #ca8a04;      /* pozor       — pozor               */
+  --status-idle-proj: #475569; /* necinne     — nečinné projekt/běh */
 
-  /* UI Colors */
-  --color-bg-base: #08080f;
-  --color-surface-1: rgba(15, 15, 25, 0.7);
-  --color-surface-2: rgba(20, 20, 35, 0.85);
+  /* ── Salvaged FSM-state vars re-pointed onto the §6.2 tokens (§8.5) ────────
+   * Every --color-state-* MUST resolve to a var(--status-*); there is NO
+   * standalone status colour. DONE maps to proslo; an idle project to necinne. */
+  --color-state-idle: var(--status-idle-proj);
+  --color-state-plan-review: var(--status-idle);
+  --color-state-plan-ready: var(--status-pass);
+  --color-state-executing: var(--status-running);
+  --color-state-phase-check: var(--status-running);
+  --color-state-phase-retry: var(--status-warn);
+  --color-state-gates: var(--status-pass);
+  --color-state-gates-retry: var(--status-fail);
+  --color-state-pm-approval: var(--status-idle);
+  --color-state-curator-resolve: var(--status-escalate);
+  --color-state-done: var(--status-pass);
+  --color-state-error: var(--status-fail);
+
+  /* ── Light theme surfaces (§8.5) ──────────────────────────────────────────*/
+  --color-bg-base: #f8fafc;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f1f5f9;
 }
 
 @layer base {
   body {
     @apply bg-slate-50 text-slate-900 font-sans antialiased;
   }
-}
 
+  /* Metrics/counters use tabular figures so columns line up (§8.5). */
+  .tabular-nums,
+  [data-metric] {
+    font-variant-numeric: tabular-nums;
+  }
+}
