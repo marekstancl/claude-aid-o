@@ -20,6 +20,7 @@ import { FSM_STATUS, FSM_WORD } from '../lib/fsmStatus';
 import { MobileBackHeader } from '../components/shell/MobileBackHeader';
 import { ProjectNotFound } from '../components/shell/ProjectNotFound';
 import { useProjects } from '../components/shell/ProjectsContext';
+import { TabButton } from '../components/common/TabButton';
 import { BriefPanel } from '../components/managerial/BriefPanel';
 import { AuditSummaryCard } from '../components/managerial/AuditSummaryCard';
 import { AuditTrendChart } from '../components/charts/AuditTrendChart';
@@ -87,18 +88,6 @@ export function ScreenB() {
         </Tabs.Panel>
       </Tabs.Root>
     </section>
-  );
-}
-
-/** A single tab trigger styled as an underline tab (active = slate underline). */
-function TabButton({ value, children }: { value: string; children: React.ReactNode }) {
-  return (
-    <Tabs.Tab
-      value={value}
-      className="min-h-[40px] shrink-0 border-b-2 border-transparent px-3 text-sm font-medium text-slate-500 data-[active]:border-slate-900 data-[active]:text-slate-900"
-    >
-      {children}
-    </Tabs.Tab>
   );
 }
 

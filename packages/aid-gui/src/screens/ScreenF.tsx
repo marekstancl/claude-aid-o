@@ -49,6 +49,20 @@ export interface HelpSection {
   dictKeys: string[];
 }
 
+/**
+ * The 13-entry help sections keyed to the dictionary via `dictKeys[]` (§8.2).
+ *
+ * Dict-key prefixes:
+ *   - `concept:*` — abstract concepts (e.g. plan membership, stale runs)
+ *   - `state:*` — FSM states (READY, EXECUTE, GATES, DONE, ESCALATION, ERROR)
+ *   - `cp:*` — checkpoint IDs (CP1 through CP6)
+ *   - `role:*` — agent roles (auditor, curator, reporter, simplifier) and sub-verdicts (clean, proposals, pass)
+ *   - `event:*` — activity event types (gate_complete, prefilter_classification, etc.)
+ *   - `check:*` — compliance check names (plan_ac_match, etc.)
+ *   - `verdict:*` — verification verdicts (pass, fail, pass_with_notes, unverifiable)
+ *   - `severity:*` — compliance severity levels (blocking, advisory)
+ *   - `compliance:*` — compliance outcome states (overall:pass, overall:fail, etc.)
+ */
 export const SECTIONS: HelpSection[] = [
   // ── 10 Rev-2 base ids (the six CP slots are consolidated into one
   //    `kontrolni-body` §8.2 section, freeing slots for `verdikty` + `prefilter`

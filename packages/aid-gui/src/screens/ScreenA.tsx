@@ -3,6 +3,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import type { Project, ActivityEvent, PlanOutcomeAnalytics } from '@aid/contract';
 import { getProjects, getActivity, getPlanOutcomes, getExplanations } from '../lib/api';
 import { explainEvent, type Dictionary } from '../lib/explain';
+import { czechPlural } from '../lib/utils';
 import { ProjectTileGrid } from '../components/ProjectTileGrid';
 import { PlanOutcomeTable } from '../components/managerial/PlanOutcomeTable';
 import { Card } from '../components/managerial/Card';
@@ -255,9 +256,3 @@ function eventKey(event: ActivityEvent, index: number): string {
   return `${event.ts}:${event.event}:${index}`;
 }
 
-/** Czech 1 / 2-4 / 5+ plural picker. */
-function czechPlural(n: number, one: string, few: string, many: string): string {
-  if (n === 1) return one;
-  if (n >= 2 && n <= 4) return few;
-  return many;
-}

@@ -4,6 +4,7 @@ import { Download, X } from 'lucide-react';
 import { getBrief, getProjects } from '../lib/api';
 import { getLastSeen, setLastSeen } from '../lib/lastSeen';
 import { storage } from '../lib/storage';
+import { BeforeInstallPromptEvent } from '../components/common/InstallPwaButton';
 import { BriefPanel } from '../components/managerial/BriefPanel';
 import { ProjectTileGrid } from '../components/ProjectTileGrid';
 import { Card } from '../components/managerial/Card';
@@ -12,16 +13,6 @@ import { Card } from '../components/managerial/Card';
 const INFRA_SCOPE_KEY = 'infra';
 /** localStorage flag for a dismissed PWA install banner. */
 const PWA_DISMISSED_KEY = 'aid.pwa.dismissed';
-
-/**
- * Chromium-only `beforeinstallprompt` event (not in lib.dom — typed locally).
- * Mirrors the local shape in {@link import('../components/common/InstallPwaButton')}.
- */
-interface BeforeInstallPromptEvent extends Event {
-  readonly platforms: string[];
-  readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-  prompt(): Promise<void>;
-}
 
 /**
  * Screen G — the cross-infra managerial brief and the landing route `/` (§8.2).

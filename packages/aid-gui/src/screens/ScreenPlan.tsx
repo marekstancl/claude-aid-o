@@ -6,10 +6,11 @@ import type { EpicSummary, PlanDetail } from '@aid/contract';
 import { getPlanDetail, getBrief, ApiError } from '../lib/api';
 import { getLastSeen } from '../lib/lastSeen';
 import { getBacklogSnapshot, buildBacklogDelta } from '../lib/backlog-delta';
-import { relativeCzech } from '../lib/utils';
+import { relativeCzech, czechPlural } from '../lib/utils';
 import { MobileBackHeader } from '../components/shell/MobileBackHeader';
 import { ProjectNotFound } from '../components/shell/ProjectNotFound';
 import { useProjects } from '../components/shell/ProjectsContext';
+import { TabButton } from '../components/common/TabButton';
 import { BriefPanel } from '../components/managerial/BriefPanel';
 import { PlanPhaseTimeline } from '../components/managerial/PlanPhaseTimeline';
 import { AuditSummaryCard } from '../components/managerial/AuditSummaryCard';
@@ -161,18 +162,6 @@ function PlanBody({ project, planId }: { project: string; planId: string }) {
         </Tabs.Panel>
       </Tabs.Root>
     </>
-  );
-}
-
-/** A single tab trigger styled as an underline tab (active = slate underline). */
-function TabButton({ value, children }: { value: string; children: React.ReactNode }) {
-  return (
-    <Tabs.Tab
-      value={value}
-      className="min-h-[40px] shrink-0 border-b-2 border-transparent px-3 text-sm font-medium text-slate-500 data-[active]:border-slate-900 data-[active]:text-slate-900"
-    >
-      {children}
-    </Tabs.Tab>
   );
 }
 
@@ -351,7 +340,7 @@ function EpicsTab({ project, detail }: { project: string; detail: PlanDetail }) 
       {detail.orphanEpicCount > 0 && (
         <p data-orphan-count className="text-xs text-slate-400">
           Mimo plán zůstává {detail.orphanEpicCount}{' '}
-          {detail.orphanEpicCount === 1 ? 'osiřelý EPIC' : 'osiřelých EPICů'}.
+          {czechPlural(detail.orphanEpicCount, 'osiřelý EPIC', 'osiřelé EPICy', 'osiřelých EPICů')}.
         </p>
       )}
 
@@ -530,12 +519,18 @@ function AcTab({ detail }: { detail: PlanDetail }) {
                   <span className="w-28 shrink-0 truncate tabular-nums text-slate-700">
                     {epic.id}
                   </span>
-                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <span
-                      className="block h-full rounded-full bg-slate-400"
-                      style={{ width: `${pct ?? 0}%` }}
-                    />
-                  </span>
+                  {pct != null ? (
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                      <span
+                        className="block h-full rounded-full bg-slate-400"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </span>
+                  ) : (
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200 text-slate-400">
+                      neměřeno
+                    </span>
+                  )}
                   <span className="w-16 shrink-0 text-right tabular-nums text-slate-500">
                     <MetricBadge value={pct} unit=" %" nullLabel="—" />
                   </span>

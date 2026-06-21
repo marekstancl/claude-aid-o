@@ -25,6 +25,7 @@ import { useAidSocket } from '../hooks/useAidSocket';
 import { MobileBackHeader } from '../components/shell/MobileBackHeader';
 import { ProjectNotFound } from '../components/shell/ProjectNotFound';
 import { useProjects } from '../components/shell/ProjectsContext';
+import { TabButton } from '../components/common/TabButton';
 import { FsmTimeline, type TimelineNode } from '../components/FsmTimeline';
 import { CheckpointStrip } from '../components/CheckpointStrip';
 import { AgentRolePanel, type AgentRole } from '../components/AgentRolePanel';
@@ -312,17 +313,6 @@ function RichRunView({
         />
       </Tabs.Panel>
     </Tabs.Root>
-  );
-}
-
-function TabButton({ value, children }: { value: string; children: React.ReactNode }) {
-  return (
-    <Tabs.Tab
-      value={value}
-      className="min-h-[40px] shrink-0 border-b-2 border-transparent px-3 text-sm font-medium text-slate-500 data-[active]:border-slate-900 data-[active]:text-slate-900"
-    >
-      {children}
-    </Tabs.Tab>
   );
 }
 

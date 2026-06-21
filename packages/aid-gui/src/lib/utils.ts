@@ -18,3 +18,10 @@ export function relativeCzech(iso: string, now: number = Date.now()): string {
   const diffD = Math.round(diffH / 24);
   return `před ${diffD} d`;
 }
+
+/** Czech 1 / 2-4 / 5+ plural picker (one / few / many). */
+export function czechPlural(n: number, one: string, few: string, many: string): string {
+  if (n === 1) return one;
+  if (n >= 2 && n <= 4) return few;
+  return many;
+}

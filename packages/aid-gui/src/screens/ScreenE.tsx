@@ -6,6 +6,7 @@ import { cn } from '../lib/utils';
 import { useAidSocket } from '../hooks/useAidSocket';
 import { useIsMobile } from '../components/shell/useIsMobile';
 import { useProjects } from '../components/shell/ProjectsContext';
+import { SegButton } from '../components/common/SegButton';
 import { Card } from '../components/managerial/Card';
 import { MetricBadge } from '../components/common/MetricBadge';
 import { StatusBadge } from '../components/common/StatusBadge';
@@ -425,30 +426,3 @@ function ViolationsList({ view }: { view: ComplianceView }) {
 // Segmented-control button
 // ---------------------------------------------------------------------------
 
-function SegButton({
-  active,
-  onClick,
-  children,
-  ...rest
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        'min-h-[36px] rounded-lg border px-3 text-xs font-medium',
-        active
-          ? 'border-slate-900 bg-slate-900 text-white'
-          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
-      )}
-      {...rest}
-    >
-      {children}
-    </button>
-  );
-}

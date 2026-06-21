@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
  * The non-standard `beforeinstallprompt` event (Chromium PWA install flow).
  * Not in lib.dom, so it is typed locally.
  */
-interface BeforeInstallPromptEvent extends Event {
+export interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
   readonly userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
   prompt(): Promise<void>;
