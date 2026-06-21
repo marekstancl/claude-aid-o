@@ -171,6 +171,20 @@ export function getCompliance(project: string): Promise<ComplianceView> {
   return apiGet<ComplianceView>(`/api/compliance/${seg(project)}`);
 }
 
+/**
+ * GET /api/compliance → cross-project (`scope:'all'`) ComplianceView.
+ *
+ * The project-scoped {@link getCompliance} ALWAYS builds `/api/compliance/:project`
+ * and so cannot reach the server's cross-project route (the bare `/api/compliance`
+ * that returns `scope:'all'` with per-project `violations[].projectId`). Screen E
+ * (cross-project compliance, §13) needs that ecosystem-wide view, so this thin
+ * sibling helper hits the unscoped route. Same `ComplianceView` shape, same
+ * envelope unwrapping — only the URL differs.
+ */
+export function getComplianceAll(): Promise<ComplianceView> {
+  return apiGet<ComplianceView>('/api/compliance');
+}
+
 /** GET /api/activity?project=&topic=&limit= → merged activity feed (newest first). */
 export function getActivity(params: {
   project?: string;
