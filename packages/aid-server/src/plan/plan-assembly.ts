@@ -31,6 +31,7 @@ import type {
   ScannerCache,
 } from '../services/scanner-cache.js';
 import { pickLatestIndexedRun, buildEpicSummary } from '../services/view-assembly.js';
+import { parseLessons } from '../lessons/build-lessons.js';
 import { FsReader } from '../services/fs-reader.js';
 import {
   buildAggregateAudit,
@@ -316,45 +317,10 @@ export async function readAllLessons(
   return parseLessons(text);
 }
 
-/**
- * Parse `lessons-learned.md` into {@link LessonEntry}[] (§4.7). The main
- * `| Date | Lesson | Context |` table → kind 'lesson'; a `## Known Gotchas`
- * table → kind 'gotcha'. Never throws.
- */
-export function parseLessons(text: string): LessonEntry[] {
-  const out: LessonEntry[] = [];
-  const gotchaIdx = text.search(/^##\s+Known Gotchas/im);
-  const lines = text.split('\n');
-  // Track the char offset to classify each table row by section.
-  let offset = 0;
-  for (const line of lines) {
-    const lineStart = offset;
-    offset += line.length + 1;
-    const cells = line.match(/^\s*\|(.+)\|\s*$/);
-    if (!cells) continue;
-    const parts = cells[1].split('|').map((c) => c.trim());
-    if (parts.length < 2) continue;
-    const c0 = parts[0].toLowerCase();
-    // Skip header + separator rows.
-    if (c0 === 'date' || c0 === '' || /^:?-+:?$/.test(parts[0])) continue;
-    if (parts.every((p) => /^:?-+:?$/.test(p) || p === '')) continue;
-
-    const kind: LessonEntry['kind'] =
-      gotchaIdx >= 0 && lineStart > gotchaIdx ? 'gotcha' : 'lesson';
-    const date = parseLessonDate(parts[0]);
-    const lesson = parts[1] ?? '';
-    const epicId = parts.length >= 3 && parts[2].length > 0 ? parts[2] : null;
-    if (lesson.length === 0) continue;
-    out.push({ date, lesson, epicId, kind });
-  }
-  return out;
-}
-
-function parseLessonDate(cell: string): string | null {
-  if (cell.length === 0) return null;
-  const ms = Date.parse(cell);
-  return Number.isNaN(ms) ? cell : cell; // keep the raw ISO-ish cell verbatim
-}
+// parseLessons is the canonical Step-8 parser, imported from
+// ../lessons/build-lessons.js (single source of truth). The earlier private copy
+// here had drifted (a no-op date ternary `? cell : cell` that never emitted ISO),
+// making PlanDetail.lessons disagree with /api/lessons on the same row.
 
 // ===========================================================================
 // Audits (boundary + aggregate) over plan members

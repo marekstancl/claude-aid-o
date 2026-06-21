@@ -61,6 +61,7 @@ import { auditTrendRoutes } from './routes/audit-trend.js';
 import { auditSummaryRoutes } from './routes/audit-summary.js';
 import { plansRoutes } from './routes/plans.js';
 import { planAnalyticsRoutes } from './routes/plan-analytics.js';
+import { lessonsRoutes } from './routes/lessons.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -110,6 +111,11 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   // literal `analytics` segment is not captured as a `:projectId`.
   app.use('/api', planAnalyticsRoutes(scanner));
   app.use('/api', plansRoutes(scanner));
+  // Step 8 (E-047-4_7): lessons-per-plan projection — GET /api/lessons?project=&plan=
+  // with scope inferred from params (both → plan, project-only → project, neither
+  // → infra, §13.8). Mounted before the /api/* catch-all; pure projection over the
+  // never-throw lessons-learned.md parser, read-only (absent/malformed → 200 + warning).
+  app.use('/api', lessonsRoutes(scanner));
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
