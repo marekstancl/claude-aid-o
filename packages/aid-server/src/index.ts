@@ -33,9 +33,11 @@
 import { fileURLToPath } from 'node:url';
 import { createServer, type Server as HttpServer } from 'node:http';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import express, { type Express } from 'express';
 import cors from 'cors';
+import type { ActivityEvent } from '@aid/contract';
 import { loadConfig, type ServerConfig } from './config.js';
 import { createScannerCache, type ScannerCache } from './services/scanner-cache.js';
 import { ProjectScanner } from './services/project-scanner.js';
@@ -137,6 +139,8 @@ export interface BuiltServer {
   boot: () => Promise<void>;
   /** Graceful teardown: stop ws, close watchers, close the http server. */
   shutdown: () => Promise<void>;
+  /** Manual refresh: re-scan projects and sweep cache (for testing). */
+  refresh: () => Promise<void>;
 }
 
 /**
@@ -174,13 +178,27 @@ export function buildServer(config: ServerConfig): BuiltServer {
     heartbeatIntervalMs: config.wsHeartbeatInterval,
     idleTimeoutMs: config.wsIdleTimeout,
   });
-  watcher.on('event', (event) => ws.broadcast(event));
+  watcher.on('event', (event) => {
+    // Feed live changes to both WS broadcast AND the activity ring.
+    // Convert FileChangeEvent to ActivityEvent for the ring (HIGH-1).
+    const activityEvent: ActivityEvent = {
+      projectId: event.projectId,
+      ts: event.ts,
+      event: event.topic ?? 'file_change',
+      raw: { topic: event.topic },
+      ...(event.runRef ? { epicId: event.runRef.epicId, runId: event.runRef.runId } : {}),
+    };
+    scanner.appendActivity(activityEvent);
+    ws.broadcast(event);
+  });
   watcher.on('error', (err) => {
     console.error('[aid-server] watcher error:', err.message);
   });
   ws.setActivityBufferSupplier(() => scanner.getActivity());
 
   let booted = false;
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
   const boot = async (): Promise<void> => {
     if (booted) return;
     booted = true;
@@ -188,15 +206,77 @@ export function buildServer(config: ServerConfig): BuiltServer {
     // against the discovered project list. Never throws on a broken workspace.
     await scanner.buildIndex();
     await watcher.reconcile(await projectScanner.scan());
+
+    // Seed activity ring from existing per-run timelines (HIGH-1).
+    await seedActivityFromTimelines();
+
+    // Start periodic refresh: re-scan for new projects and refresh activity (HIGH-2).
+    refreshTimer = setInterval(() => {
+      scanner
+        .sweep()
+        .then(async () => {
+          await watcher.reconcile(await projectScanner.scan());
+        })
+        .catch((err: unknown) => {
+          console.error('[aid-server] refresh sweep error:', err);
+        });
+    }, config.scanTtlMs);
   };
 
+  /**
+   * Load existing per-run timelines into the activity ring during boot.
+   * Scans work/evidence/EPIC/RUN/timeline.jsonl across all projects.
+   */
+  async function seedActivityFromTimelines(): Promise<void> {
+    const idx = await scanner.getIndex();
+    const events: ActivityEvent[] = [];
+
+    for (const proj of idx.projects.values()) {
+      for (const epic of proj.epics.values()) {
+        for (const run of epic.runs.values()) {
+          const timelineFile = join(run.runDir, 'timeline.jsonl');
+          const lines = await readFile(timelineFile, 'utf-8').catch(() => '');
+          for (const line of lines.split('\n')) {
+            const trimmed = line.trim();
+            if (trimmed.length === 0) continue;
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (parsed && typeof parsed === 'object' && typeof parsed.ts === 'string') {
+                events.push({
+                  projectId: proj.projectId,
+                  ts: parsed.ts,
+                  event: parsed.event ?? 'timeline_event',
+                  raw: { topic: 'pipeline.timeline' },
+                  epicId: epic.epicId,
+                  runId: run.runId,
+                });
+              }
+            } catch {
+              // skip malformed lines
+            }
+          }
+        }
+      }
+    }
+
+    // Sort by ts ascending, then append to ring (which keeps newest N).
+    events.sort((a, b) => (a.ts ?? '').localeCompare(b.ts ?? ''));
+    scanner.appendActivityBatch(events);
+  }
+
   const shutdown = async (): Promise<void> => {
+    if (refreshTimer !== null) clearInterval(refreshTimer);
     ws.stop();
     await watcher.closeAll();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   };
 
-  return { app, server, scanner, watcher, ws, boot, shutdown };
+  const refresh = async (): Promise<void> => {
+    await scanner.sweep();
+    await watcher.reconcile(await projectScanner.scan());
+  };
+
+  return { app, server, scanner, watcher, ws, boot, shutdown, refresh };
 }
 
 // ---------------------------------------------------------------------------

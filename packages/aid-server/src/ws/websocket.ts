@@ -40,6 +40,8 @@ import { filterActivity } from '../activity-filter.js';
 export interface SubscriptionFilter {
   topics: string[];
   projects: string[];
+  /** Optional cap on the replay frame, applied SERVER-side (AC#28 parity). */
+  limit?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +462,10 @@ export class AidWebSocket {
    * fallback is payload-shape-equal to this replay frame (§7.3 / AC #9c). The
    * supplier yields oldest→newest, so empty topics/projects = wildcard and the
    * topic match (raw.topic or event name) is applied identically in both
-   * channels. No `limit` is applied to replay (the buffer is already bounded).
+   * channels. When the subscription carries a `limit`, it is applied SERVER-side
+   * here (order:'asc' keeps the newest N from the oldest→newest buffer tail), so
+   * a `limit` genuinely caps the WS replay frame — not a client-side trim
+   * (AC#28: "limit caps BOTH channels").
    */
   private replay(socket: WebSocket, filter: SubscriptionFilter): void {
     if (!this.activityBufferSupplier) return;
@@ -469,6 +474,8 @@ export class AidWebSocket {
     const filtered = filterActivity(buffer, {
       projects: filter.projects,
       topics: filter.topics,
+      limit: filter.limit,
+      order: 'asc',
     });
 
     if (filtered.length > 0) {
@@ -505,7 +512,12 @@ export class AidWebSocket {
 
     if (topics === null && projects === null) return null;
 
-    return { topics: topics ?? [], projects: projects ?? [] };
+    const limit =
+      typeof msg.limit === 'number' && Number.isFinite(msg.limit)
+        ? msg.limit
+        : undefined;
+
+    return { topics: topics ?? [], projects: projects ?? [], limit };
   }
 
   // -------------------------------------------------------------------------

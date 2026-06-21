@@ -155,6 +155,41 @@ async function addFullEvidence(runDir: string): Promise<void> {
     'utf-8',
   );
 
+  // NESTED artifact under gates/ — mirrors real runs (the bulk of artifacts live
+  // in gates/, reporter/, steps/, not the run root; readGates prefers the nested
+  // path per §4.4). Full gates object so RunDetail.gates is populated AND the
+  // /file nested-reach test (HIGH-3) + smoke test (MED-4) have a real artifact.
+  await mkdir(join(runDir, 'gates'), { recursive: true });
+  await writeFile(
+    join(runDir, 'gates', 'gates_report.json'),
+    JSON.stringify({
+      epic_id: 'E-100-1_1',
+      run_id: 'R-E100-1',
+      overall: 'pass',
+      completed_at: '2026-06-18T15:22:47Z',
+      gates: {
+        bats_fsm: {
+          gate: 'bats_fsm',
+          result: 'pass',
+          exit_code: 0,
+          duration_ms: 18770,
+          output: '1..58\nok 1',
+          attempts: 1,
+        },
+        plan_diff: {
+          gate: 'plan_diff',
+          result: 'pass',
+          exit_code: 2,
+          duration_ms: 49,
+          output: '',
+          attempts: 1,
+        },
+      },
+      _generated_by: 'aid-run-gates.sh@v2.16.0',
+    }),
+    'utf-8',
+  );
+
   await writeFile(
     join(runDir, 'compliance.json'),
     JSON.stringify({

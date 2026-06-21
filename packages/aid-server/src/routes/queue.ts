@@ -34,13 +34,28 @@ function asString(v: unknown): string | null {
 
 /**
  * Read `config/queue.yaml` into {@link QueueEntry}[] (camelCased). Never throws —
- * a missing/unreadable queue yields `[]`.
+ * a missing/unreadable queue yields `[]`. Uses the tolerant parser so a corrupt
+ * file surfaces a warning but does not present an empty queue as "genuinely empty".
  */
-async function readQueue(fs: FsReader, aidoPath: string): Promise<QueueEntry[]> {
-  const queue = await fs.readYaml<{ queue?: unknown[] }>(
-    join(aidoPath, 'config', 'queue.yaml'),
-  );
-  const rows = Array.isArray(queue?.queue) ? queue.queue : [];
+async function readQueue(
+  fs: FsReader,
+  aidoPath: string,
+): Promise<{ entries: QueueEntry[]; warning?: string }> {
+  const queuePath = join(aidoPath, 'config', 'queue.yaml');
+  const parsed = await fs.readYamlParsed<{ queue?: unknown[] }>(queuePath);
+
+  // Honesty: if the parse failed (warnings with severity 'error'), surface that.
+  const hasError = parsed.warnings?.some((w) => w.severity === 'error');
+  const warning = hasError
+    ? `queue.yaml unparseable: ${parsed.warnings?.find((w) => w.severity === 'error')?.message ?? 'unknown error'}`
+    : undefined;
+
+  // If parsing failed, return empty with warning (not an error, but flagged).
+  if (parsed.data === null) {
+    return { entries: [], warning };
+  }
+
+  const rows = Array.isArray(parsed.data.queue) ? parsed.data.queue : [];
   const out: QueueEntry[] = [];
   for (const r of rows) {
     if (typeof r !== 'object' || r === null) continue;
@@ -53,7 +68,7 @@ async function readQueue(fs: FsReader, aidoPath: string): Promise<QueueEntry[]> 
       addedAt: asString(e.added_at ?? e.addedAt) ?? '',
     });
   }
-  return out;
+  return { entries: out, warning };
 }
 
 /**
@@ -81,11 +96,13 @@ export function queueRoutes(scanner: ScannerCache): Router {
       return;
     }
 
-    const entries = await readQueue(fs, indexed.aidoPath);
+    const { entries, warning } = await readQueue(fs, indexed.aidoPath);
+    const partialProjects = warning ? [projectId] : [];
     sendOk(res, entries, {
       scannedAt: isoNow(),
-      partialProjects: [],
+      partialProjects,
       total: entries.length,
+      ...(warning ? { warnings: [warning] } : {}),
     });
   });
 

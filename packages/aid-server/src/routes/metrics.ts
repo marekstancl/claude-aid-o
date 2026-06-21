@@ -21,20 +21,8 @@ import { Router } from 'express';
 import type { ScannerCache } from '../services/scanner-cache.js';
 import { sendOk, send404, send400, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
-import { buildMetrics, buildRunSummaries } from '../services/view-assembly.js';
-
-/** Pick the run with the most-recent mtime (null-safe). Returns null when empty. */
-function pickLatestRunId(
-  runs: { runId: string; mtimeMs: number | null }[],
-): string | null {
-  let best: { runId: string; mtimeMs: number | null } | null = null;
-  for (const r of runs) {
-    if (best === null || (r.mtimeMs ?? -Infinity) > (best.mtimeMs ?? -Infinity)) {
-      best = r;
-    }
-  }
-  return best?.runId ?? null;
-}
+import { buildMetrics, buildRunSummaries, pickLatestIndexedRun } from '../services/view-assembly.js';
+import type { IndexedRun } from '../services/scanner-cache.js';
 
 /**
  * Build the per-EPIC metrics read router backed by the Phase-2
@@ -60,11 +48,11 @@ export function metricsRoutes(scanner: ScannerCache): Router {
       return;
     }
 
-    const runs = [...epic.runs.values()];
+    const runs = [...epic.runs.values()] as IndexedRun[];
     const runSummaries = buildRunSummaries(runs);
-    const latestRunId = pickLatestRunId(runs);
-    const latest = latestRunId
-      ? await scanner.getRunDetail(projectId, epicId, latestRunId)
+    const latestRun = pickLatestIndexedRun(runs);
+    const latest = latestRun
+      ? await scanner.getRunDetail(projectId, epicId, latestRun.runId)
       : null;
 
     const metrics = buildMetrics(latest, runSummaries);

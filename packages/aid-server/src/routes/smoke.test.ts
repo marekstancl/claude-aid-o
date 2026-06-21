@@ -79,13 +79,26 @@ describe('Smoke test: all 9 routes', () => {
     expect(res.body.data).toBeDefined();
   });
 
-  it('4. GET /api/file/:projectId/:epicId/:runId/files/* returns 200 or 404 (file may not exist)', async () => {
-    const res = await supertest(server.app).get(
-      '/api/file/vulcan/E-100-1_1/R-E100-1/files/fsm-state.yaml'
+  it('4. GET /epics/:p/:e/runs/:r/file?name= serves real root AND nested artifacts (200)', async () => {
+    // The real route is /api/epics/:p/:e/runs/:r/file?name=… (not /api/file/…).
+    // The DONE run (R-E100-1) has both a root fsm-state.yaml and a nested
+    // gates/gates_report.json — BOTH must serve 200 (MED-4: no "200-or-404").
+
+    // Root-level artifact → MUST be 200.
+    const rootRes = await supertest(server.app).get(
+      '/api/epics/vulcan/E-100-1_1/runs/R-E100-1/file?name=fsm-state.yaml',
     );
-    // Either 200 (file found) or 404 (file not found) — both are acceptable.
-    expect([200, 404]).toContain(res.status);
-    expect(res.body.ok !== undefined).toBe(true);
+    expect(rootRes.status).toBe(200);
+    expect(rootRes.body.ok).toBe(true);
+    expect(rootRes.body.data).toBeDefined();
+
+    // Nested artifact (HIGH-3) → MUST be 200, content present.
+    const nestedRes = await supertest(server.app).get(
+      '/api/epics/vulcan/E-100-1_1/runs/R-E100-1/file?name=gates/gates_report.json',
+    );
+    expect(nestedRes.status).toBe(200);
+    expect(nestedRes.body.ok).toBe(true);
+    expect(nestedRes.body.data?.content).toBeDefined();
   });
 
   it('5. GET /api/compliance returns 200', async () => {

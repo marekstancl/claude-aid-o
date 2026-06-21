@@ -34,6 +34,7 @@ import type {
 } from '@aid/contract';
 import type { AuditTrend, AuditTrendPoint } from '@aid/contract';
 import type { IndexedEpic, IndexedProject, IndexedRun, ScannerCache } from './scanner-cache.js';
+import { pickLatestRun } from './scanner-cache.js';
 import { FsReader } from './fs-reader.js';
 import { parseEpicSpec } from '../parsers/index.js';
 
@@ -116,19 +117,20 @@ export function buildEpicSummary(
   };
 }
 
-/** Pick the run with the most-recent mtime (null-safe). Returns null when empty. */
-function pickLatestIndexedRun(runs: IndexedRun[]): IndexedRun | null {
-  let best: IndexedRun | null = null;
-  for (const r of runs) {
-    if (best === null) {
-      best = r;
-      continue;
-    }
-    const rm = r.mtimeMs ?? -Infinity;
-    const bm = best.mtimeMs ?? -Infinity;
-    if (rm > bm) best = r;
-  }
-  return best;
+/**
+ * Pick the latest run using the SAME logic as ProjectScanner:
+ * Sort by startedAt DESC (when available), else by mtime DESC.
+ * This must be THE SINGLE SOURCE OF TRUTH (MED-3).
+ *
+ * Extracted from project-scanner.ts for reuse across all three contexts
+ * (project-scanner, view-assembly, metrics).
+ */
+export function pickLatestIndexedRun(runs: IndexedRun[]): IndexedRun | null {
+  // Delegates to the shared selector (scanner-cache.pickLatestRun): started_at
+  // DESC when parseable, else mtime DESC — matching ProjectScanner exactly.
+  // IndexedRun now carries startedAtMs (parsed in indexRun), so metrics +
+  // view-assembly + scanner all agree (MED-3). NEVER lexicographic.
+  return pickLatestRun(runs);
 }
 
 /** ISO of the most-recent run-dir mtime across the EPIC, or null. */

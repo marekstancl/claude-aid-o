@@ -83,6 +83,10 @@ export interface IndexedRun {
   runDir: string;
   /** Run-DIR mtime (epoch ms), null if unreadable. */
   mtimeMs: number | null;
+  /** `started_at` (epoch ms) from fsm-state.yaml when parseable, else null.
+   *  Lets the shared latest-run selector prefer started_at over mtime (§4.0 #8),
+   *  matching ProjectScanner.pickLatestRun — single source of truth. */
+  startedAtMs: number | null;
   /** v3 / legacy / stub classification (mirrors the scanner). */
   format: RunFormat;
   /** The `state:` line value when v3, else null (the cheap "state-line"). */
@@ -408,6 +412,7 @@ export class ScannerCache {
         runId,
         runDir,
         mtimeMs,
+        startedAtMs: startedAtMsFrom(fsmText),
         format: state !== null ? 'v3' : 'legacy',
         state,
       };
@@ -421,6 +426,7 @@ export class ScannerCache {
       runId,
       runDir,
       mtimeMs,
+      startedAtMs: null,
       format: legacy ? 'legacy' : 'stub',
       state: null,
     };
@@ -767,5 +773,46 @@ function stateLineFrom(text: string): FsmState | null {
   if (!m) return null;
   const v = stripYamlScalar(m[1]);
   return VALID_FSM_STATES.has(v) ? (v as FsmState) : null;
+}
+
+/**
+ * Shared latest-run selector — the SINGLE source of "which run is latest"
+ * (§4.0 #8). Prefers `started_at` (epoch ms) DESC when parseable; a run with a
+ * parseable started_at always outranks one with only an mtime; when neither has
+ * started_at, falls back to mtime DESC. Mirrors ProjectScanner.pickLatestRun so
+ * view-assembly + metrics + scanner all agree. NEVER lexicographic.
+ */
+export function pickLatestRun<
+  T extends { startedAtMs: number | null; mtimeMs: number | null },
+>(runs: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const r of runs) {
+    if (best === null) {
+      best = r;
+      continue;
+    }
+    const rs = r.startedAtMs;
+    const bs = best.startedAtMs;
+    if (rs !== null && bs !== null) {
+      if (rs > bs) best = r;
+    } else if (rs !== null && bs === null) {
+      best = r;
+    } else if (rs === null && bs !== null) {
+      // keep best (parseable started_at outranks mtime-only)
+    } else if ((r.mtimeMs ?? -Infinity) > (best.mtimeMs ?? -Infinity)) {
+      best = r;
+    }
+  }
+  return best;
+}
+
+/** Parse `started_at` from fsm-state.yaml text → epoch ms, or null when absent/unparseable. */
+function startedAtMsFrom(text: string): number | null {
+  const m = text.match(/^\s*started_at\s*:\s*(.+?)\s*$/m);
+  if (!m) return null;
+  const v = stripYamlScalar(m[1]);
+  if (v === '' || v === 'null') return null;
+  const ms = Date.parse(v);
+  return Number.isNaN(ms) ? null : ms;
 }
 

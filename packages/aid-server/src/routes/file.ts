@@ -67,6 +67,8 @@ const ALLOWED_PATTERNS: ReadonlyArray<RegExp> = [
   /^verifier-output-[A-Za-z0-9._-]+\.md$/, // verifier-output-*.md
   /^step-[A-Za-z0-9._-]+-verify\.md$/, // step-*-verify.md
   /^reporter\/[A-Za-z0-9._-]+$/, // reporter/* (single segment)
+  /^gates\/(?!\.\.)[A-Za-z0-9._-]+$/, // gates/* (no .. traversal)
+  /^steps\/(?!\.\.)[A-Za-z0-9._-]+(?:\/(?!\.\.)[A-Za-z0-9._-]+)*$/, // steps/** (no .. at any level)
 ];
 
 /**

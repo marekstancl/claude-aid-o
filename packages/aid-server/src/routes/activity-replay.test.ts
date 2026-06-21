@@ -79,7 +79,7 @@ function ev(
  */
 function captureReplay(
   port: number,
-  filter: { topics?: string[]; projects?: string[] },
+  filter: { topics?: string[]; projects?: string[]; limit?: number },
 ): Promise<ActivityEvent[]> {
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
@@ -95,6 +95,7 @@ function captureReplay(
           type: 'subscribe',
           topics: filter.topics ?? [],
           projects: filter.projects ?? [],
+          ...(filter.limit !== undefined ? { limit: filter.limit } : {}),
         }),
       );
       // Poll for the replay frame; the buffer is non-empty in these tests so a
@@ -211,18 +212,20 @@ describe('REST /activity ⇄ WS replay parity (Step 8)', () => {
       '2026-06-19T10:00:00Z',
     ]);
 
-    // WS replay carries the whole bounded buffer (no per-subscription limit in
-    // the wire protocol), so the client applies the SAME shared cap to the
-    // newest two. Prove the shared helper yields the SAME 2 events both ways.
-    const wsData = await captureReplay(port, { projects: ['acta'] });
-    // WS replay is oldest→newest; newest two are the tail.
-    const wsNewestTwo = wsData.slice(-2).reverse();
-    expect(wsNewestTwo.length).toBe(2);
-    expect(wsNewestTwo.map((e) => e.ts)).toEqual([
-      '2026-06-19T11:00:00Z',
+    // WS replay applies the limit SERVER-side (MED-2 fix): the subscribe carries
+    // `limit:2`, so the server sends exactly 2 events in the replay frame — NOT
+    // the whole buffer trimmed client-side. The server returns oldest→newest.
+    const wsData = await captureReplay(port, { projects: ['acta'], limit: 2 });
+    expect(wsData.length).toBe(2); // server capped — no client slice
+    // Newest two, in the WS asc order (oldest→newest of the kept window).
+    expect(wsData.map((e) => e.ts)).toEqual([
       '2026-06-19T10:00:00Z',
+      '2026-06-19T11:00:00Z',
     ]);
-    expect(restData).toEqual(wsNewestTwo);
+    // Same 2 events both channels (REST desc, WS asc).
+    expect(restData.map((e) => e.ts).sort()).toEqual(
+      wsData.map((e) => e.ts).sort(),
+    );
   });
 
   it('AC3: limit>500 clamps to 500 WITHOUT a 400 (200, <=500 items)', async () => {
