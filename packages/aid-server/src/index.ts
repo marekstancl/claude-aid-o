@@ -54,6 +54,8 @@ import { backlogRoutes } from './routes/backlog.js';
 import { activityRoutes } from './routes/activity.js';
 import { queueRoutes } from './routes/queue.js';
 import { metricsRoutes } from './routes/metrics.js';
+import { memoryRoutes } from './routes/memory.js';
+import { explanationsRoutes } from './routes/explanations.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -84,6 +86,10 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   app.use('/api', activityRoutes(() => scanner.getActivity()));
   app.use('/api', queueRoutes(scanner));
   app.use('/api', metricsRoutes(scanner));
+  // Step 1 (E-047-4_7): MVP1 memory stub + Czech dictionary endpoint. Both are
+  // scanner-free read-only routes; memory makes ZERO network/MCP calls (§13.9).
+  app.use('/api', memoryRoutes());
+  app.use('/api', explanationsRoutes());
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
