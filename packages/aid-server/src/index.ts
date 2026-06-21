@@ -56,6 +56,7 @@ import { queueRoutes } from './routes/queue.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { memoryRoutes } from './routes/memory.js';
 import { explanationsRoutes } from './routes/explanations.js';
+import { briefRoutes } from './routes/brief.js';
 
 // ---------------------------------------------------------------------------
 // App factory — pure Express wiring, no http server, no listen.
@@ -90,6 +91,9 @@ export function createApp(config: ServerConfig, scanner: ScannerCache): Express 
   // scanner-free read-only routes; memory makes ZERO network/MCP calls (§13.9).
   app.use('/api', memoryRoutes());
   app.use('/api', explanationsRoutes());
+  // Step 4 (E-047-4_7): managerial Brief read-model — infra/project/plan scopes
+  // (§13.4). Mounted before the /api/* catch-all; pure projection, read-only.
+  app.use('/api', briefRoutes(scanner));
 
   // --- API catch-all 404 (MUST come before the static GUI fallback) ---
   app.all('/api/*', (_req, res) => {
