@@ -29,7 +29,6 @@ import type {
   ProjectDetail,
   QueueEntry,
   RunDetail,
-  RunStep,
   RunSummary,
 } from '@aid/contract';
 import type { AuditTrend, AuditTrendPoint } from '@aid/contract';
@@ -37,6 +36,7 @@ import type { IndexedEpic, IndexedProject, IndexedRun, ScannerCache } from './sc
 import { pickLatestRun } from './scanner-cache.js';
 import { FsReader } from './fs-reader.js';
 import { parseEpicSpec } from '../parsers/index.js';
+import { computeMetrics } from '../metrics/compute.js';
 
 // ===========================================================================
 // Empty / conservative shapes (never fabricate)
@@ -349,56 +349,15 @@ export function buildRunSummaries(runs: IndexedRun[]): RunSummary[] {
 
 /**
  * Derive a best-effort {@link MetricSet} from the latest full RunDetail plus the
- * run summaries. Step timings come from the RunDetail (file-mtime derived);
- * everything unmeasurable stays null with a warning rather than a fake zero.
+ * run summaries. THIN DELEGATE — the single MetricSet builder lives in
+ * `metrics/compute.ts` (`computeMetrics`); this re-export keeps the historical
+ * call site stable while eliminating the divergent-selector drift (Phase-3
+ * lesson). Step timings come from the RunDetail (file-mtime derived); everything
+ * unmeasurable stays null with a warning rather than a fake zero — see
+ * `computeMetrics`.
  */
 export function buildMetrics(latest: RunDetail | null, runs: RunSummary[]): MetricSet {
-  const warnings: string[] = [];
-  const stepDurationsS: (number | null)[] = latest
-    ? latest.steps.map((s: RunStep) => s.durationS)
-    : [];
-  const measured = stepDurationsS.filter((d): d is number => d !== null);
-  const avgStepDurationS =
-    measured.length > 0
-      ? Math.round(measured.reduce((a, b) => a + b, 0) / measured.length)
-      : null;
-
-  let longestStep: MetricSet['longestStep'] = null;
-  if (latest) {
-    for (const s of latest.steps) {
-      if (s.durationS === null) continue;
-      if (longestStep === null || s.durationS > longestStep.durationS) {
-        longestStep = { id: s.id, durationS: s.durationS };
-      }
-    }
-  }
-
-  const epicWallTimeS =
-    measured.length > 0 ? measured.reduce((a, b) => a + b, 0) : null;
-  if (latest === null) warnings.push('no latest run — metrics unavailable');
-
-  return {
-    epicWallTimeS,
-    runCount: runs.length,
-    stepDurationsS,
-    avgStepDurationS,
-    longestStep,
-    stepTimingSource: latest && measured.length > 0 ? 'mtime' : null,
-    gateRuns: latest ? latest.gates.length : 0,
-    gateRetries: latest ? latest.gateRetries : 0,
-    checkpointRepeats: {
-      CP1: latest?.checkpoints.find((c) => c.id === 'CP1')?.repeatCount ?? null,
-      CP2: latest?.checkpoints.find((c) => c.id === 'CP2')?.repeatCount ?? null,
-      CP3: latest?.checkpoints.find((c) => c.id === 'CP3')?.repeatCount ?? null,
-      CP4: latest?.checkpoints.find((c) => c.id === 'CP4')?.repeatCount ?? null,
-      CP5: latest?.checkpoints.find((c) => c.id === 'CP5')?.repeatCount ?? null,
-      CP6: latest?.checkpoints.find((c) => c.id === 'CP6')?.repeatCount ?? null,
-    },
-    escalations: latest ? latest.escalationCount : 0,
-    timeBy: [],
-    partial: latest === null,
-    warnings,
-  };
+  return computeMetrics(latest, runs);
 }
 
 /**
