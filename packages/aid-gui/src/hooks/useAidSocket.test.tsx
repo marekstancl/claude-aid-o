@@ -88,6 +88,9 @@ describe('useAidSocket — real-server frame conformance', () => {
     act(() => { vi.advanceTimersByTime(300); }); // flush the 250ms debounce
     const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
     expect(keys).toContain(JSON.stringify(['epic-detail', 'wan', 'E-001-1_1', 'R-1']));
+    // ALSO the epic-scoped key (Screen C's 3-element query) — a 4-element filter
+    // would not prefix-match it, so the deep view would miss live updates.
+    expect(keys).toContain(JSON.stringify(['epic-detail', 'wan', 'E-001-1_1']));
     expect(keys).toContain(JSON.stringify(['activity']));
   });
 

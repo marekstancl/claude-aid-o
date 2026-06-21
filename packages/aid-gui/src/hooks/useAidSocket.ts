@@ -111,8 +111,16 @@ function keysForEvent(frame: EventFrame): QueryKey[] {
     case 'gates':
     case 'compliance':
     case 'checkpoints':
-      // Run-level artifacts → the EPIC-detail (per-run) view.
-      if (runRef) keys.push(['epic-detail', projectId, runRef.epicId, runRef.runId]);
+      // Run-level artifacts → the EPIC-detail view. Invalidate BOTH the
+      // run-scoped key AND the epic-scoped key: react-query prefix-matching means
+      // a 4-element filter never matches Screen C's 3-element ['epic-detail',p,e]
+      // query (whose queryFn is getEpic(project,epic) — runId is correctly NOT in
+      // its key). Without the epic-scoped push, the EPIC deep view would not
+      // live-update on these events (only the 4s poll would).
+      if (runRef) {
+        keys.push(['epic-detail', projectId, runRef.epicId, runRef.runId]);
+        keys.push(['epic-detail', projectId, runRef.epicId]);
+      }
       break;
     case 'epics':
     case 'queue':
