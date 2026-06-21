@@ -62,3 +62,4 @@ CLAUDE.MD
 # **/.aid-o/ ignore rule above.
 !packages/aid-server/tests/fixtures/mini/**/.aid-o
 !packages/aid-server/tests/fixtures/mini/**/.aid-o/**
+.playwright-mcp/

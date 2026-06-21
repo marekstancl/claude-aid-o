@@ -1,0 +1,246 @@
+{
+  "package": "AID Orchestrator Production Brand Package",
+  "version": "1.0",
+  "assets": [
+    {
+      "path": "README.md",
+      "bytes": 1568
+    },
+    {
+      "path": "brand/logo/png/aid-logo-black.png",
+      "bytes": 30199
+    },
+    {
+      "path": "brand/logo/png/aid-logo-black@2x.png",
+      "bytes": 65334
+    },
+    {
+      "path": "brand/logo/png/aid-logo-color-on-dark.png",
+      "bytes": 61320
+    },
+    {
+      "path": "brand/logo/png/aid-logo-color-on-dark@2x.png",
+      "bytes": 137325
+    },
+    {
+      "path": "brand/logo/png/aid-logo-color.png",
+      "bytes": 40250
+    },
+    {
+      "path": "brand/logo/png/aid-logo-color@2x.png",
+      "bytes": 91667
+    },
+    {
+      "path": "brand/logo/png/aid-logo-white.png",
+      "bytes": 31397
+    },
+    {
+      "path": "brand/logo/png/aid-logo-white@2x.png",
+      "bytes": 68145
+    },
+    {
+      "path": "brand/logo/svg/aid-logo-black.svg",
+      "bytes": 6293
+    },
+    {
+      "path": "brand/logo/svg/aid-logo-color-on-dark.svg",
+      "bytes": 7308
+    },
+    {
+      "path": "brand/logo/svg/aid-logo-color.svg",
+      "bytes": 6792
+    },
+    {
+      "path": "brand/logo/svg/aid-logo-white.svg",
+      "bytes": 6293
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-black.png",
+      "bytes": 14218
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-black@2x.png",
+      "bytes": 30879
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-color-on-dark.png",
+      "bytes": 31356
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-color-on-dark@2x.png",
+      "bytes": 73105
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-color.png",
+      "bytes": 27094
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-color@2x.png",
+      "bytes": 64845
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-white.png",
+      "bytes": 14596
+    },
+    {
+      "path": "brand/symbol/png/aid-symbol-white@2x.png",
+      "bytes": 31761
+    },
+    {
+      "path": "brand/symbol/svg/aid-symbol-black.svg",
+      "bytes": 677
+    },
+    {
+      "path": "brand/symbol/svg/aid-symbol-color-on-dark.svg",
+      "bytes": 1059
+    },
+    {
+      "path": "brand/symbol/svg/aid-symbol-color.svg",
+      "bytes": 924
+    },
+    {
+      "path": "brand/symbol/svg/aid-symbol-white.svg",
+      "bytes": 677
+    },
+    {
+      "path": "docs/brand-brief.md",
+      "bytes": 522
+    },
+    {
+      "path": "docs/mini-manual.md",
+      "bytes": 646
+    },
+    {
+      "path": "icons/apple/apple-touch-icon-symbol-only.png",
+      "bytes": 8545
+    },
+    {
+      "path": "icons/apple/apple-touch-icon.png",
+      "bytes": 11037
+    },
+    {
+      "path": "icons/favicon/favicon-16x16.png",
+      "bytes": 550
+    },
+    {
+      "path": "icons/favicon/favicon-32x32.png",
+      "bytes": 1252
+    },
+    {
+      "path": "icons/favicon/favicon-48x48.png",
+      "bytes": 1847
+    },
+    {
+      "path": "icons/favicon/favicon.ico",
+      "bytes": 4201
+    },
+    {
+      "path": "icons/favicon/favicon.svg",
+      "bytes": 1232
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-1024-dark.png",
+      "bytes": 84269
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-1024-dark.svg",
+      "bytes": 7347
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-1024-transparent.png",
+      "bytes": 47098
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-1024-transparent.svg",
+      "bytes": 6804
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-180-dark.png",
+      "bytes": 11037
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-180-dark.svg",
+      "bytes": 7345
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-180-transparent.png",
+      "bytes": 7412
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-180-transparent.svg",
+      "bytes": 6802
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-192-dark.png",
+      "bytes": 11759
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-192-dark.svg",
+      "bytes": 7345
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-192-transparent.png",
+      "bytes": 7703
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-192-transparent.svg",
+      "bytes": 6802
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-512-dark.png",
+      "bytes": 36489
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-512-dark.svg",
+      "bytes": 7345
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-512-transparent.png",
+      "bytes": 22150
+    },
+    {
+      "path": "icons/marketplace/aid-marketplace-512-transparent.svg",
+      "bytes": 6802
+    },
+    {
+      "path": "icons/pwa/pwa-192-symbol-only.png",
+      "bytes": 9405
+    },
+    {
+      "path": "icons/pwa/pwa-192.png",
+      "bytes": 11759
+    },
+    {
+      "path": "icons/pwa/pwa-192.svg",
+      "bytes": 7345
+    },
+    {
+      "path": "icons/pwa/pwa-512-symbol-only.png",
+      "bytes": 31557
+    },
+    {
+      "path": "icons/pwa/pwa-512.png",
+      "bytes": 36489
+    },
+    {
+      "path": "icons/pwa/pwa-512.svg",
+      "bytes": 7345
+    },
+    {
+      "path": "manifest.webmanifest",
+      "bytes": 434
+    },
+    {
+      "path": "preview/aid-logo-color-on-dark.png",
+      "bytes": 61320
+    },
+    {
+      "path": "preview/square-logo-icons-overview.png",
+      "bytes": 255963
+    },
+    {
+      "path": "source/aid-logo-master-outlined.svg",
+      "bytes": 7308
+    }
+  ]
+}

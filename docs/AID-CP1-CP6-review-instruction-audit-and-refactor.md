@@ -2,11 +2,11 @@
 
 **Status:** implementation proposal
 
-**Date:** 2026-06-20
+**Date:** 2026-06-20; revalidated 2026-06-21 after E-047-4_7 and E-047-5_7
 
 **Scope:** `plugins/aid-orchestrator` review checkpoints, DONE review, release decision and evidence contracts
 
-**Primary incident:** E-047-1_7 (`@aid/contract` foundation), including two failed remediation rechecks
+**Primary incidents:** E-047-1_7 (`@aid/contract` foundation), its failed remediation rechecks, E-047-4_7 (self-consistent synthetic tests versus real data) and E-047-5_7 (unmounted frontend delivery, WS wire drift and false release closure)
 
 ## 1. Executive decision
 
@@ -22,6 +22,10 @@ The target change is therefore **not** to remove every checkpoint and **not** to
 6. turn CP5 from a boolean reader into a release-policy decision over all required evidence;
 7. make CP6 use the same delivery-readiness rules as CP3 for production changes;
 8. enforce the new contracts structurally in the FSM and test them with negative fixtures.
+9. derive a mandatory review profile from the changed delivery surfaces instead of using one generic checklist for every EPIC;
+10. require one to three integration reviews at meaningful assembly points, so a large EPIC is challenged before all steps are complete;
+11. prove production reachability and runtime boundary compatibility, not merely the existence and unit-test quality of isolated modules;
+12. promote acceptance-evidence, independent-oracle and falsifiability rules from the second-opinion document into the blocking release contract.
 
 ### 1.1 Final disposition by component
 
@@ -83,6 +87,22 @@ The two remediation rounds exposed failure modes that the original incident alon
 8. A syntactically valid path check can remain exploitable. Prefix comparison without a trailing path separator accepted an escaped sibling path such as `evidence-secret`; route/filesystem changes therefore require adversarial fixtures, not visual inspection alone.
 
 These are not arguments for another generic reviewer. They require deterministic coverage, environment and runtime checks plus explicit authority comparison.
+
+### 2.5 What E-047-4_7 and E-047-5_7 added
+
+The later Cockpit phases proved that even the original version of this proposal needed another expansion:
+
+| Escaped defect | Why the previous proposal could still miss it | Added control |
+|---|---|---|
+| analytics dropped real plans while synthetic integration fixtures passed | build/test/consumer compile proved internal consistency, not agreement with reality | `data_reporting` profile, DG-17 independent oracle and no-drop negative control |
+| WS and polling hooks existed and unit tests passed but the application shell never mounted them | public symbols and leaf tests existed; no production entry-point trace was mandatory | IR-1 wiring review and DG-13 production reachability |
+| server emitted event payload under `data`, GUI read fields from the top level | server and GUI had separate local wire types and separate green suites | DG-14 real provider output through real consumer |
+| table links used `/plan/`, router registered `/plans/` | substring test proved the stem was present but never resolved the link | DG-15 producer-to-router conformance |
+| fallback existed only as an isolated hook | a fake timer test proved hook logic but never forced failure through the mounted app | DG-16 mounted failure/fallback/recovery probe |
+| API outage became "Projekt nenalezen" | broad catch was locally graceful but semantically dishonest | CP3 state-semantics lens: error/offline/empty/not-found remain distinct |
+| release completed with pending child rows, active task counters and `compliance.overall:fail` | presence and advisory severity overrode contradictory aggregate state | strengthened DG-07 plus fail-closed CP5 aggregation |
+
+The common failure class is **isolated correctness without assembled delivery**. Test quantity did not help because the missing tests were boundary and reachability tests. This is why the target process uses surface-specific lenses and early integration cuts, not a larger undifferentiated checklist.
 
 ## 3. Design principles for the replacement
 
@@ -147,6 +167,16 @@ Exit code 0 is necessary but not sufficient. Delivery evidence must also record 
 - A wrapper must propagate the real child exit code. Output containing an inner lifecycle/build failure cannot be reported as PASS merely because the outer launcher returned 0.
 - Commands run under the declared runtime/toolchain, not whichever version happens to be active in the review shell.
 
+### 3.6 Normative companion requirements
+
+The following parts of `AID-CP1-CP6-review-instruction-audit-second-opinion.md` are normative amendments to this proposal, not optional commentary:
+
+- sections 4-8: acceptance-evidence contract, test-evidence audit, behavior traces, fault injection and independent fresh-context review;
+- section 9: E-044 semantic regression fixture;
+- sections 11.2-11.7: plan graph, identifier domains, planned-call/model feasibility, reuse compatibility, dependency API grounding and idempotency state matrix.
+
+Implementation MUST merge those rules into the actual CP1/CP2/CP3/Auditor/CP5 instruction files and schemas. Shipping only a link to the companion document is insufficient because runtime agents may not receive documentation context. Where the documents overlap, this revalidated main document controls sequencing, adaptive profiles and release enforcement; the companion controls semantic trace depth.
+
 ## 4. Target execution order
 
 ### 4.1 Full `/aid-run`
@@ -210,6 +240,52 @@ Auditor completes -> audit-report written -> Curator starts -> Curator consumes 
 ```
 
 If latency requires parallel execution, add a mandatory Curator phase 2 after Auditor completion. The release process must not use the phase-1 Curator report as final.
+
+### 4.4 Adaptive review profiles and integration cadence
+
+A fixed prompt is inefficient for a documentation change and insufficient for a cross-package realtime UI. Before implementation, `aid-prefilter` MUST derive a `review-profile.json` from the approved plan, dependency graph and changed paths. The profile selects review lenses and deterministic probes; it does not merely label the EPIC `low|medium|high`.
+
+Required surface classes:
+
+| Surface | Trigger examples | Mandatory additional proof |
+|---|---|---|
+| `docs_only` | Markdown/text only, no executable config | link/authority checks; explicit valid skips for executable probes |
+| `local_logic` | private function/module with no external boundary | focused positive/negative unit tests and caller trace |
+| `public_contract` | exported type/schema/API/CLI/package entry | producer-consumer compile plus full shape/vocabulary comparison |
+| `frontend_shell_routing` | app shell, router, navigation, providers, hooks | production mount trace, generated-link-to-router conformance and browser smoke |
+| `realtime_async` | WS/SSE/events/watchers/queues/retries | real provider-consumer frames, reconnect, malformed-frame and fallback/recovery probes |
+| `api_cross_layer` | route plus client/serializer/middleware | real server response consumed by the real client parser; mocks cannot define both sides |
+| `data_reporting` | scanner, aggregation, migration, analytics | independent oracle/no-drop probe, partial/unknown semantics and representative real-data fixture |
+| `persistence_side_effect` | DB/files/object store/external call | transaction trace, failure injection, compensation, idempotency and read-back proof |
+| `security_boundary` | auth, path, upload, parser, command, secret | adversarial security lens and abuse fixtures |
+| `runtime_infra` | manifests, runtime, Docker, bootstrap, build config | clean runtime/install, startup and representative route/import smoke |
+| `process_release` | FSM, gate, evidence, release metadata | state reconciliation and negative transition fixtures |
+
+Rules:
+
+1. Mixed changes receive the union of all matched lenses. Unknown production surfaces default to `unverifiable`, not `docs_only`.
+2. The detector owns applicability. A reviewer may add a lens but cannot remove a detected lens without a PM waiver.
+3. Each lens defines required artifacts, probes and stop conditions. Generic prose such as "integration reviewed" is invalid evidence.
+4. Review effort scales with topology and blast radius, not lines changed or test count.
+5. The profile and every review artifact are bound to `base_commit`, `head_commit` and the reviewed step range.
+
+Integration-review cadence:
+
+| Profile | Required integration reviews | Timing |
+|---|---:|---|
+| low, single-surface, no public/runtime boundary | 1 | final CP3 |
+| medium or one producer-consumer boundary | 2 | first runnable vertical slice, then final CP3 |
+| high, mixed-surface, multi-package, realtime, persistence or release-process | 3 | first producer-consumer slice, feature-complete candidate, final release candidate |
+
+These are not three repetitions of the same audit:
+
+- **IR-1 Wiring review:** prove that producers, consumers, entry points, routes, providers and background hooks are connected in production code.
+- **IR-2 Behavior review:** execute representative happy, failure, fallback and recovery paths against real boundaries or contract fixtures.
+- **IR-3 Final CP3:** review the complete diff, current Delivery Gate and unresolved findings against the accepted outcome.
+
+IR-1/IR-2 are delta reviews. They reuse prior current evidence, inspect the new range and re-open affected prior traces. A Critical/High finding stops further feature work until fixed and rechecked. An integration review performed before its required assembly point is `not_applicable_yet`, not a consumed PASS.
+
+The target is early defect discovery with at most three semantic integration passes for a large EPIC. CP2 remains step-local and may still run per step; it is not counted as one of these independent integration passes.
 
 ## 5. Delivery Gate specification
 
@@ -345,10 +421,12 @@ Validate:
 
 - required final report exists;
 - FSM state, task status and run counters agree;
+- every FSM step row is completed before the parent state can become `DONE`;
 - all required step outputs exist;
 - plan-diff is either present and evaluated or explicitly inapplicable under policy;
 - gate reports bind to the current HEAD;
-- a skipped required check is not treated as pass.
+- a skipped required check is not treated as pass;
+- an aggregate artifact with `overall:fail` cannot be consumed as release-ready merely because its individual failure was labelled advisory; policy must emit `warn`/`skip` for a genuinely non-blocking result.
 
 #### DG-08 Declared runtime and environment consistency
 
@@ -406,6 +484,64 @@ user decision -> locked specification/ADR -> plan -> EPIC AC -> implementation -
 The gate/reviewer must report contradictory exact values, vocabularies, versions and behavior. A later explicit user decision may supersede an older plan constraint, but the plan, generated EPICs and tests must be updated before release. Satisfying stale AC text does not prove correctness; satisfying implementation intent while leaving contradictory ACs also cannot reach `release_ready:true`.
 
 For closed public vocabularies or schemas, tests compare the complete set/shape against the authoritative source. Selected positive assertions are insufficient.
+
+#### DG-13 Production wiring and reachability
+
+Trigger for frontend shells, dependency-injection/provider registration, routers, hooks, workers, schedulers, plugins, handlers and newly exported runtime features.
+
+Validate a production entry-point trace:
+
+```text
+application entry -> mount/register -> feature owner -> required side effect or visible result
+```
+
+Creating and unit-testing a module is insufficient when no production entry point imports or invokes it. Every required feature must be classified as `reachable`, `intentionally_deferred` with authoritative scope evidence, or `unreachable`. A required `unreachable` feature is a failure. This check must distinguish a future-phase leaf component from a current-phase shell responsibility.
+
+#### DG-14 Runtime provider-consumer contract conformance
+
+Trigger for HTTP clients, WebSocket/SSE frames, queues, events, serializers, middleware error envelopes and cross-language boundaries.
+
+Required proof:
+
+1. capture or construct a frame/response through the real provider implementation;
+2. feed that exact payload to the real consumer parser/handler;
+3. compare required field names, nesting, nullability, vocabulary and ordering against one authoritative contract;
+4. exercise at least one malformed/unknown payload where the consumer promises graceful degradation;
+5. reject tests where provider and consumer mocks independently encode the same unverified assumption.
+
+Compile-time compatibility does not satisfy this check when wire types are duplicated locally or erased to `unknown`. A server frame `{data:{projectId,...}}` and a client expecting top-level `projectId` is a blocking failure even when both packages typecheck and pass their own tests.
+
+#### DG-15 Navigation and dispatch conformance
+
+Trigger for routers, generated links, command dispatch tables, topic maps, plugin registries and event-to-handler maps.
+
+Enumerate producers and consumers of identifiers/paths and verify every generated value resolves to exactly one registered destination. For frontend routing, render/calculate real links and resolve them through the production router; substring assertions are insufficient. Also detect registered destinations with no intended producer and producers targeting no destination.
+
+#### DG-16 Failure, fallback and recovery behavior
+
+Trigger whenever the plan promises polling fallback, offline behavior, retry, reconnect, failover, cache fallback, empty/error distinction or degraded mode.
+
+The probe MUST force the primary path to fail and prove:
+
+- fallback starts within the declared bound;
+- user-visible state accurately identifies degradation;
+- required data continues to refresh or is honestly marked unavailable;
+- duplicate timers/workers/subscriptions do not accumulate;
+- recovery stops fallback and restores the primary path.
+
+A unit-tested fallback hook that is not mounted in production fails DG-13 before this behavior can pass DG-16.
+
+#### DG-17 Independent oracle and data-completeness conformance
+
+Trigger for scanners, analytics, migrations, reports, search/indexing and fleet/cross-project aggregation.
+
+At least one blocking probe must compare production output with an independent source of truth: a separately implemented diagnostic, immutable representative snapshot, direct authoritative query or manually reviewed fixture. Comparing two outputs produced by the same resolver is self-consistency, not correctness. Required negative controls include no-drop/cardinality, known ambiguous identity and missing/partial-data cases.
+
+#### DG-18 Acceptance-evidence structural integrity
+
+Trigger for every production EPIC; depth scales by review profile.
+
+Require current `acceptance-evidence.json` as specified by `AID-CP1-CP6-review-instruction-audit-second-opinion.md` sections 4-8. The structural gate verifies that every authoritative AC has a stable ID, production trace, evidence identity, status and approved deviations. Behavioral truth remains CP3/Auditor responsibility, but missing criteria, changed expectations, unapproved deviations or evidence bound to stale HEAD block release.
 
 ### 5.5 Output contract
 
@@ -585,6 +721,23 @@ Any contradiction that would let two agents implement different valid-looking ou
 is a stop-rule blocker until the authoritative documents and generated ACs agree.
 ```
 
+```markdown
+#### Adaptive review and assembly plan (MANDATORY)
+
+CP1 MUST classify the plan into the section 4.4 surface profiles and declare the exact
+review lenses, deterministic probes and integration assembly points that each profile
+requires. The classification is the union of all changed surfaces, not one dominant label.
+
+For medium/high plans CP1 MUST identify the earliest runnable producer-consumer vertical
+slice for IR-1 and the feature-complete candidate for IR-2. "Run integration review after
+the final step" is invalid when an earlier step already creates a testable boundary.
+
+For each user-visible or runtime feature, CP1 MUST name its production owner and wiring step:
+entry point/provider/router -> mount/register -> implementation -> observable behavior.
+A later step that creates a hook/component without a step that mounts it is an unowned
+delivery surface and blocks plan approval.
+```
+
 **CP1 output additions:**
 
 ```yaml
@@ -604,6 +757,14 @@ migration_atomicity_blockers: []
 authority_matrix:
   runtime: {decision: "Node 24 LTS", consistent: true}
   event_topics: {source: "spec section 7.3", consistent: true}
+review_profile:
+  surfaces: [frontend_shell_routing, realtime_async, api_cross_layer]
+  required_lenses: [production_wiring, wire_contract, fallback_recovery, browser_smoke]
+  integration_reviews: 3
+integration_points:
+  - {id: IR-1, after_step: 3, proof: "server frame reaches mounted client hook"}
+  - {id: IR-2, after_step: 6, proof: "primary failure starts polling and recovery stops it"}
+production_wiring_owners: []
 ```
 
 CP1 adjudication must reject `verdict: pass` when any mandatory array is absent or when accepted blockers remain.
@@ -625,6 +786,11 @@ If the step changes a public/shared contract or dependency manifest, CP2 MUST ad
 3. run the narrowest available consumer compile/test;
 4. mark the step FAIL when the contract is a comment-only/empty placeholder but the plan
    declares concrete downstream use.
+
+If the step is the declared owner of a production wiring or integration point, CP2 MUST
+also prove reachability from the real entry point and execute the profile-specific narrow
+probe. A unit test that imports the leaf directly cannot prove that the application mounts,
+registers or dispatches to it.
 
 CP2 does not replace Delivery Gate or CP3. A CP2 PASS means only that the step is locally
 correct at its reviewed HEAD.
@@ -661,6 +827,9 @@ CP3 receives:
 - complete EPIC AC/DoD;
 - relevant Architecture Context and Implementation Detail from the source plan;
 - producer-consumer table from CP1;
+- detector-owned `review-profile.json` and required lens list;
+- prior IR-1/IR-2 reports and unresolved finding ledger when required by the profile;
+- current `acceptance-evidence.json` reconstructed from the authoritative ACs;
 - next same-plan EPIC imports/contracts when present;
 - current Delivery Gate D0 report and logs for failed/unverifiable checks;
 - project gate configuration;
@@ -693,6 +862,23 @@ with a valid contract.
 11. Build configuration module references resolve from the owning package.
 12. Implementation, tests, EPIC ACs, plan and locked specification agree with the latest
     explicit user decision; selected-field spot checks do not replace full contract comparison.
+13. Every required feature is reachable through its real production entry point; exported,
+    unit-tested but unmounted/unregistered code is incomplete delivery.
+14. Every runtime boundary uses one compatible provider-consumer shape proven with a real
+    frame/response, especially when either side keeps local wire types or `unknown` payloads.
+15. Generated links, route/topic/command producers and dispatch tables resolve through the
+    production router/registry to exactly one intended consumer.
+16. Every promised fallback is tested by forcing primary failure and observing fallback,
+    user-visible degradation and recovery through the mounted production path.
+17. Empty, missing, offline, unauthorized and not-found states remain semantically distinct;
+    broad catches must not convert operational failure into a false business empty state.
+18. Data/reporting output is compared with an independent oracle and includes a negative
+    no-drop mutation or equivalent falsification proof.
+19. Tests are audited as falsifiable claims: mocks may not define both sides of a boundary,
+    substring/count assertions may not replace exact behavior, and at least one critical
+    test must be shown to fail under a representative wrong implementation.
+20. All profile-required IR reports exist at the declared assembly points, bind to their
+    reviewed HEAD/range and have no unresolved Critical/High finding.
 ```
 
 **Required CP3 output:**
@@ -706,6 +892,18 @@ delivery_gate:
   path: "delivery-gate.json"
   head_matches: true
   delivery_ready: true
+review_profile:
+  required_lenses: []
+  completed_lenses: []
+integration_reviews:
+  required: 1|2|3
+  reports: []
+production_reachability: []
+runtime_contract_probes: []
+fallback_recovery_probes: []
+acceptance_evidence:
+  path: "acceptance-evidence.json"
+  acceptance_ready: true
 contract_traces:
   - producer: "packages/aid-contract/src/view.ts:EpicSpec"
     consumers: ["packages/aid-server/src/parsers/markdown.ts"]
@@ -787,6 +985,8 @@ Current CP5 checks only `blocking_findings:` from Auditor. Replace it with aggre
 INPUTS:
   final HEAD
   Delivery Gate D1
+  detector-owned review profile and all required IR reports
+  acceptance-evidence.json
   project gates report
   CP3 integration verdict
   CP3 security verdict or valid skip
@@ -796,12 +996,16 @@ INPUTS:
 
 BLOCK when:
   D1 missing/stale/not ready
+  required adaptive lens or IR report missing/stale/failing
+  acceptance evidence missing/stale/not ready, with unmapped ACs or unapproved deviations
   any required project gate fails
   CP3 fails or is stale
   required security review fails/is missing
   unresolved Auditor Critical/High exists
   CP4 fails or affected checks were not rerun
   final_report/state/task/run metadata is materially inconsistent
+  FSM parent is DONE while any child step is non-complete
+  any consumed aggregate artifact says fail unless policy explicitly classifies it non-blocking before execution
   any required result is unverifiable without approved waiver
 
 PASS only when:
@@ -821,6 +1025,9 @@ Canonical output:
   "release_ready": false,
   "inputs": {
     "delivery_gate": "fail",
+    "review_profile": "pass",
+    "integration_reviews": "fail",
+    "acceptance_evidence": "pass",
     "project_gates": "pass",
     "cp3": "pass",
     "security": "skip",
@@ -878,6 +1085,8 @@ Required inputs:
 - CP3 integration report;
 - full diff;
 - source plan producer-consumer table;
+- detector-owned review profile, required lenses and IR reports;
+- acceptance-evidence artifact and the authoritative AC source;
 - next same-plan EPIC when present.
 
 Checks:
@@ -888,10 +1097,22 @@ K4. Root/workspace validation covers all changed packages.
 K5. Skipped, zero-test and unavailable checks are represented honestly.
 K6. Gate coverage is relevant to the product diff; unrelated green gates are not counted.
 K7. Final evidence/state metadata is consistent enough to trust the result.
+K8. Required runtime features are reachable from production entry points, not only present
+    as tested leaf modules.
+K9. At least one highest-risk provider-consumer, routing/dispatch or fallback trace is
+    independently replayed from repository/runtime evidence rather than prior summaries.
+K10. Acceptance tests can falsify the claimed behavior and do not use mocks, counts or
+     substring assertions as substitutes for the authoritative scenario.
+K11. Operational failure is not misreported as an empty/not-found business state.
 
 The Auditor MAY rerun targeted commands when reports contradict repository state. It MUST
 not rewrite a deterministic failure as PASS. Missing/stale required evidence is a High
 finding and makes the audit blocking.
+
+The Auditor starts from a fresh review context. Prior CP PASS verdicts and implementation
+summaries are untrusted leads. For medium/high profiles it MUST independently replay at
+least one trace not selected by the implementer, prioritizing production wiring, wire
+contracts, fallback/recovery and real-data completeness.
 ```
 
 ### 7.2 Auditor blocking rules
@@ -1054,6 +1275,18 @@ Presence-only enforcement is insufficient. Transition rules must consume verdict
 - `pending` never satisfies a transition;
 - malformed/unknown verdict is fail-closed.
 
+### 9.5 Adaptive-lens and iteration enforcement
+
+`review-profile.json` is detector output and carries `profile_hash`. Every IR/CP3 artifact MUST repeat that hash plus `required_lenses`, `completed_lenses`, reviewed commit range and unresolved finding IDs.
+
+The FSM validates set equality:
+
+```text
+required_lenses - completed_lenses == empty
+```
+
+Unknown completed lenses are allowed as reviewer additions; missing required lenses block. IR reports use stable IDs (`IR-1`, `IR-2`, `IR-3/CP3`) and may satisfy only their declared assembly point. Re-running IR-1 after a fix replaces its verdict only when it references the original finding IDs and a descendant HEAD. Copying a final CP3 report into missing IR-1/IR-2 slots is invalid.
+
 ## 10. Policy configuration changes
 
 Extend `review-checkpoints.yaml` or split delivery policy into its own file. Recommended split keeps responsibilities clearer.
@@ -1063,6 +1296,9 @@ review_checkpoints:
   cp1_plan_review: true
   cp2_step_review: true
   cp3_integration_review: true
+  adaptive_profiles: true
+  max_integration_reviews: 3
+  block_on_missing_detected_lens: true
   cp3_security_mode: risk_based       # always | risk_based | disabled
   cp4_fix_validation: true
   cp5_release_policy: true
@@ -1086,7 +1322,8 @@ Delivery config remains in `delivery-gate.yaml` so command/profile changes do no
 
 | Transition/action | Required condition |
 |---|---|
-| EPIC generation | CP1 pass, producer-consumer table present, delivery evidence plan present |
+| EPIC generation | CP1 pass, producer-consumer table, delivery evidence plan, review profile and integration points present |
+| step at IR-1/IR-2 boundary -> next step | required IR report current/pass; no unresolved Critical/High; affected prior traces rechecked |
 | final EXECUTE step -> CP3 | Delivery Gate D0 exists, current HEAD, ready or explicit fail routed to fix loop |
 | EXECUTE -> GATES | CP3 current and pass; D0 current and ready |
 | apply review fixes -> CP4 | applied-fix range and source finding IDs recorded |
@@ -1169,15 +1406,18 @@ resolution_claimed: false
 | `agents/curator.md` | require current Auditor input, remove EPIC approval vocabulary, escalate blockers |
 | `agents/gate-fixer.md` | prohibit evidence suppression and emit invalidated Delivery Gate checks |
 | `defaults/policies/review-checkpoints.yaml` | add risk modes, Auditor blocker policy and Curator sequencing |
+| `defaults/policies/review-profiles.yaml` | detector-owned surface-to-lens/probe matrix and 1-3 review cadence |
 | `defaults/policies/delivery-gate.yaml` | new command profiles, applicability and unverifiable policy |
 | `defaults/templates/verifier-output-template.md` | add HEAD binding, command, consumer and affected-check fields |
 | `defaults/templates/delivery-gate-template.json` | new canonical Delivery Gate artifact |
+| `defaults/templates/review-profile-template.json` | canonical detected surfaces, required lenses and integration points |
+| `defaults/templates/acceptance-evidence-template.json` | canonical AC identity, production trace, test and deviation evidence |
 | `defaults/enforcement-registry.yaml` | register every new precondition and its instruction home |
 | `scripts/aid-delivery-gate.sh` | new deterministic gate executor |
 | `scripts/aid-prefilter.sh` | emit detector-owned risk/trace requirement; reviewer omission cannot disable it |
 | `scripts/aid-fsm.sh` | enforce D0/CP3/D1/CP5 freshness, verdicts and `release_ready` before MERGE |
 | `scripts/aid-run-gates.sh` | expose gate relevance/covered paths and feed result into release policy |
-| `scripts/tests/test-delivery-gate.sh` | new DG-01 through DG-07 and negative tests |
+| `scripts/tests/test-delivery-gate.sh` | new DG-01 through DG-18 and negative tests |
 | `scripts/tests/bats/test-aid-fsm.bats` | add transition, freshness, verdict, waiver and release-decision tests |
 | `docs/extending-aid.md` | document how projects configure delivery profiles and enforcement homes |
 | plugin/root CHANGELOGs as required by repository policy | document behavior and evidence-contract changes |
@@ -1239,6 +1479,13 @@ Required fixtures:
 18. plan/EPIC expects an obsolete closed vocabulary while the locked spec and implementation use another -> DG-12 fail;
 19. path validation allows a sibling-prefix escape -> security fixture fail;
 20. all leaf suites pass but the root workspace command exits non-zero -> DG-04 fail.
+21. a required hook/component is exported and unit-tested but never mounted from the production entry point -> DG-13 fail;
+22. a real WS provider emits nested `data` while the real consumer reads top-level fields -> DG-14 fail;
+23. a generated `/plan/:id` link has no matching production `/plans/:id` route -> DG-15 fail;
+24. fallback passes in isolation but the mounted app never invokes it -> DG-13/DG-16 fail;
+25. analytics is self-consistent but drops records versus an independent oracle -> DG-17 fail;
+26. acceptance evidence maps a test by name but a mutation removing the asserted behavior still passes -> DG-18/CP3 fail;
+27. `compliance.overall:fail`, active task metadata or pending child steps coexist with parent DONE/release -> DG-07/CP5 fail.
 
 ### 13.2 CP/FSM tests
 
@@ -1254,6 +1501,11 @@ Required fixtures:
 10. CP6 docs-only valid skip -> advisory pass;
 11. release decision stale against HEAD -> MERGE not offered;
 12. forced waiver remains visible and does not rewrite check to PASS.
+13. medium profile missing IR-1 -> final CP3 rejected;
+14. high mixed-surface profile has only one repeated final review -> CP3 rejected;
+15. detector requires `realtime_async`, reviewer omits wire/fallback lens -> schema/adjudication rejected;
+16. IR-1 finds a High wiring defect -> later implementation transition blocked until a current recheck resolves it;
+17. isolated unit suites all pass while production wiring/runtime contract fixtures fail -> CP3 and release remain blocked.
 
 ### 13.3 E-047 regression fixture
 
@@ -1269,12 +1521,19 @@ Create a compact fixture reproducing:
 - bundler configuration references an undeclared module;
 - 1000+ leaf tests pass while the root command fails on a zero-test workspace;
 - plan/EPIC/spec retain contradictory runtime and event-contract requirements.
+- GUI creates WS and polling hooks but never mounts them in the application shell;
+- server emits `{type, topic, data, ts}` while GUI expects top-level event payload fields;
+- a table link producer uses `/plan/` while the router registers `/plans/`;
+- More-sheet install and plan-switcher requirements remain placeholders despite completed leaf components;
+- API outage is converted into a false "project not found" state;
+- 170 isolated tests pass with no real client-server contract or shell E2E test;
+- FSM reaches release while child steps are pending, task counters are open and compliance says fail.
 
 Expected result:
 
 ```text
 CP2 local package: may pass
-Delivery Gate: fail DG-05 + DG-06 + DG-08 through DG-12 as applicable + root build/test
+Delivery Gate: fail DG-05/DG-06/DG-08 through DG-18 as applicable + root build/test
 CP3: fail
 Auditor: blocking_findings true
 CP5: release_ready false
@@ -1310,12 +1569,15 @@ This fixture proves that layered controls can disagree honestly while the final 
 - deploy CP1 producer-consumer/delivery-evidence contract;
 - deploy CP2 public-contract exception;
 - deploy CP3 integration context/output;
+- deploy detector-owned adaptive review profiles and 1-3 IR cadence;
+- add production wiring, runtime contract, route, fallback and oracle lenses;
 - make security risk-based;
 - update templates and tests together.
 
 ### Phase 4: DONE review refactor
 
 - add Auditor delivery/integration category and structured JSON;
+- require fresh-context replay of one detector-selected high-risk trace;
 - sequence Curator after Auditor;
 - restrict Curator verdict vocabulary;
 - update CP4 affected-check reporting.
@@ -1323,6 +1585,7 @@ This fixture proves that layered controls can disagree honestly while the final 
 ### Phase 5: CP5 release policy and CP6 alignment
 
 - generate `release-decision.json`;
+- require current acceptance evidence and all profile-required IR reports;
 - make MERGE conditional on current `release_ready:true`;
 - make CP6 blocking for production/high-risk `/aid-do` changes;
 - retain explicit PM waivers without rewriting evidence.
@@ -1359,6 +1622,11 @@ Track per release:
 - stale/malformed evidence attempts;
 - Curator proposals originating from current Auditor findings;
 - CP6 production changes processed as blocking versus advisory.
+- median time and changed-step count from implementation start to first integration finding;
+- number of IR passes per profile and duplicate-finding rate between IR-1/IR-2/IR-3;
+- detector lens omissions, manual lens additions and waivers by surface class;
+- escaped defects by missing/incorrect review profile;
+- production-reachability, runtime-contract, fallback and independent-oracle failures;
 - static-check coverage ratio and count of vacuous-green checks blocked;
 - declared-runtime matrix drift incidents;
 - startup-smoke failures after framework/runtime changes;
@@ -1375,12 +1643,15 @@ Success is not “more findings”. Success is fewer false-ready releases with a
 - [ ] Approve `unverifiable` as blocking for required checks.
 - [ ] Approve risk-based CP3 security and CP6 modes.
 - [ ] Approve Auditor-before-Curator sequencing.
+- [ ] Approve detector-owned adaptive profiles and 1/2/3 integration-review cadence.
+- [ ] Promote the second-opinion acceptance-evidence contract to normative release input.
 
 ### Delivery Gate
 
 - [ ] Add default/project policy schema.
 - [ ] Implement safe command profile resolution.
 - [ ] Implement DG-01 through DG-12.
+- [ ] Implement DG-13 through DG-18.
 - [ ] Emit HEAD-bound JSON + detailed logs.
 - [ ] Add incremental D0/D1 invalidation.
 - [ ] Add waiver artifact without PASS rewriting.
@@ -1391,6 +1662,8 @@ Success is not “more findings”. Success is fewer false-ready releases with a
 - [ ] Add CP1 authority/runtime matrix review.
 - [ ] Update CP2 public-contract/dependency exception.
 - [ ] Replace CP3 context and output contract.
+- [ ] Add IR-1 wiring, IR-2 behavior and IR-3 final semantics with finding-ledger carry-over.
+- [ ] Add production-reachability, real wire-contract, route/dispatch, fallback and oracle checks.
 - [ ] Make security dispatch risk-based.
 - [ ] Add CP4 affected-check and scope fields.
 - [ ] Replace CP5 boolean check with release policy.
@@ -1409,6 +1682,7 @@ Success is not “more findings”. Success is fewer false-ready releases with a
 - [ ] Make high-risk trace requirement detector-driven.
 - [ ] Consume verifier verdicts, not only file presence.
 - [ ] Add Delivery Gate, FSM, CP5 and E-047 regression tests.
+- [ ] Add the E-047-5 unmounted-hook/wire-drift/false-release regression fixture.
 - [ ] Add static-coverage, clean-runtime, startup, config-resolution and traversal fixtures.
 - [ ] Register every enforcement home.
 - [ ] Update CHANGELOG and extending-AID documentation.
@@ -1435,6 +1709,15 @@ The refactor is complete only when all of the following are demonstrated:
 16. Build-configuration-only module references are included in dependency consistency.
 17. Closed public vocabularies are compared completely against one authoritative source.
 18. Filesystem-serving changes pass adversarial traversal and sibling-prefix tests.
+19. An exported and unit-tested but unmounted required feature cannot reach `release_ready:true`.
+20. Real provider output must be accepted by the real consumer; independently green mocked suites cannot substitute for boundary conformance.
+21. Every generated navigation/dispatch value resolves through the production registry/router.
+22. A promised fallback is proven through forced failure and recovery on the mounted path.
+23. Data/reporting changes pass an independent-oracle no-drop check where applicable.
+24. Medium/high profiles cannot skip their required two/three integration reviews.
+25. The final Auditor independently replays at least one highest-risk trace from fresh context.
+26. Acceptance evidence covers every authoritative AC and detects changed expectations or non-falsifying tests.
+27. Parent DONE/release is impossible while a child step, task/run counter or required aggregate remains failed/incomplete.
 
 ## 19. Non-goals
 
@@ -1448,16 +1731,18 @@ The refactor is complete only when all of the following are demonstrated:
 
 ## 20. Recommended first implementation slice
 
-The smallest high-value delivery is:
+Implement in this order so each slice closes a real false-DONE path:
 
-1. implement `delivery-gate.json` with dependency consistency, root build, root typecheck and root test;
-2. require current D0 PASS before CP3 can pass;
-3. add dependency-removal/import scan;
-4. add public-contract consumer smoke validation;
-5. add Auditor blocking derivation from Delivery Gate and High/Critical findings;
-6. replace CP5 with `release-decision.json` aggregation;
-7. add static coverage integrity and production startup smoke;
-8. add authority/runtime consistency validation;
-9. add the expanded E-047 regression fixture.
+1. define schemas for `review-profile.json`, `delivery-gate.json`, `acceptance-evidence.json`, `audit-report.json` and `release-decision.json` plus HEAD freshness;
+2. harden DG-07 and FSM transitions so failed/incomplete state can never reach release;
+3. implement core deterministic DG-01 through DG-12 and require current D0 before final CP3;
+4. implement detector-owned adaptive profiles in observe mode, then block missing detected lenses after fixture calibration;
+5. implement DG-13 production reachability, DG-14 real provider-consumer conformance and DG-15 route/dispatch conformance;
+6. add the E-047-5 fixture and require IR-1/IR-2 at detector-selected assembly points for medium/high profiles;
+7. implement DG-16 fallback/recovery and DG-17 independent-oracle probes;
+8. promote the second-opinion acceptance-evidence/test-falsifiability rules through DG-18 and CP3;
+9. add fresh-context Auditor replay and mechanically derived blockers;
+10. replace CP5 with complete evidence aggregation and enable MERGE only for current `release_ready:true`;
+11. add E-047-1, E-047-4, E-047-5, E-044 and P045 negative regression fixtures before simplifying any existing review.
 
-This slice closes the observed false-DONE path before broader prompt and sequencing cleanup is attempted.
+Steps 1-6 are the first blocking implementation slice. They close the concrete Cockpit false-DONE path. Steps 7-11 add semantic depth and only then provide enough evidence to remove redundant generic reviews.
