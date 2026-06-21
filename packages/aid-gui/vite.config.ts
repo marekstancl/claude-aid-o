@@ -31,8 +31,11 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/api': { target: 'http://localhost:3911', changeOrigin: true },
-      '/ws': { target: 'ws://localhost:3911', ws: true },
+      // 127.0.0.1, NOT localhost: aid-server binds IPv4 (127.0.0.1) only, while
+      // `localhost` resolves to ::1 (IPv6) first on dual-stack hosts → the dev
+      // proxy would 500 on /api and fail the /ws handshake.
+      '/api': { target: 'http://127.0.0.1:3911', changeOrigin: true },
+      '/ws': { target: 'ws://127.0.0.1:3911', ws: true },
     },
   },
   build: { target: 'es2020', rollupOptions: { output: { manualChunks: { 'vendor-react': ['react','react-dom'], 'vendor-recharts': ['recharts'] } } } },
