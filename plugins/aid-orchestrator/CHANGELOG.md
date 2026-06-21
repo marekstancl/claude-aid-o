@@ -8,6 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Per-step Acceptance Criteria pre-flight** — `aid-epic-to-json.sh` hard-fails a multi-step EPIC that carries fewer acceptance criteria than steps, so every step has a contract the CP chain can verify (root cause of the E-047-4_7 cockpit REOPEN); override deliberately with `AID_ALLOW_SPARSE_AC=1`.
 
+### Fixed
+- **Plan→EPIC acceptance-criteria + role extraction** — `aid-plan-to-epic.sh` now reads acceptance criteria written as plain `-` bullets under `**Acceptance Criteria**` (with or without a colon) and the `**AID Role**` header without a colon; previously it matched only the `**Acceptance Criteria:**` + `- [ ]` + `**AID Role:**` forms, silently dropping every criterion (empty EPIC AC section) and defaulting every step to the `backend` role.
+
 ## [2.36.2] — 2026-06-19
 
 ### Fixed
