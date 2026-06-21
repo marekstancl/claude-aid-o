@@ -80,6 +80,7 @@ function makeDetail(overrides: Partial<RunDetail> = {}): RunDetail {
     createdAt: '2026-06-18T10:00:00.000Z',
     donePhase: null,
     pmDecision: null,
+    planPath: null,
     steps: [],
     checkpoints: [],
     gates: [],

@@ -222,6 +222,34 @@ if [[ "$row_count" -eq 0 ]]; then
 fi
 
 # =============================================================================
+# Step 3b: Per-step Acceptance Criteria pre-flight (E-047-4_7 REOPEN, AID-v3 §1)
+# -----------------------------------------------------------------------------
+# Root cause of the E-047-4_7 REOPEN: an auto-generated multi-step EPIC carried
+# Acceptance Criteria for STEP 1 ONLY, so the CP2/CP3/CP4 chain had no contract
+# to verify steps 2..N against and managerial-read-model bugs shipped. A
+# detector without enforcement is decoration (AID-v3-principles §1) — so this is
+# an OUT-OF-BAND HARD FAIL, not a warning: a multi-step EPIC must carry at least
+# one acceptance criterion per step. Escape hatch for the rare legitimately
+# sparse EPIC: AID_ALLOW_SPARSE_AC=1 (logged, intentional).
+# =============================================================================
+ac_section="$(extract_section "$epic" "Acceptance Criteria")"
+# Count real AC checkboxes: lines like `- [ ]` / `- [x]` that are not the
+# template's `<!-- e.g. ... -->` placeholder comments.
+ac_count=0
+if [[ -n "$ac_section" ]]; then
+  ac_count="$(printf '%s\n' "$ac_section" \
+    | grep -E '^[[:space:]]*-[[:space:]]+\[[ xX]\]' \
+    | grep -cvE '<!--' || true)"
+fi
+if [[ "$row_count" -gt 1 && "$ac_count" -lt "$row_count" ]]; then
+  if [[ "${AID_ALLOW_SPARSE_AC:-0}" == "1" ]]; then
+    echo "WARNING: EPIC has $row_count steps but only $ac_count acceptance criteria — proceeding (AID_ALLOW_SPARSE_AC=1)." >&2
+  else
+    error_exit "EPIC has $row_count steps but only $ac_count acceptance criteria. A multi-step EPIC needs >= 1 testable acceptance criterion per step so every step has a contract the CP chain can verify (AID-v3 §1). Add per-step AC, or set AID_ALLOW_SPARSE_AC=1 to override deliberately." 1
+  fi
+fi
+
+# =============================================================================
 # Step 4: Generate step IDs
 # =============================================================================
 declare -a step_ids=()

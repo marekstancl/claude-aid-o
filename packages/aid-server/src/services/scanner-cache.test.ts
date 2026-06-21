@@ -113,6 +113,7 @@ function stubRunDetail(projectId: string, epicId: string, runId: string): RunDet
     createdAt: null,
     donePhase: null,
     pmDecision: null,
+    planPath: null,
     steps: [],
     checkpoints: [],
     gates: [],

@@ -193,9 +193,9 @@ function p046Input(): PlanBuildInput {
 }
 
 describe('buildPlanSummary / buildPlanDetail (P046 fixture, AC #16/#19)', () => {
-  it('summary: 3 members, mixed source, planId normalized to P046', () => {
+  it('summary: 3 members, mixed source, planId is the STEM (PM #1, stem-primary)', () => {
     const s = buildPlanSummary(p046Input());
-    expect(s.planId).toBe('P046');
+    expect(s.planId).toBe('P046-plan-boundary');
     expect(s.epicMembers).toHaveLength(3);
     expect(s.membershipMixed).toBe(true);
     const byId = Object.fromEntries(s.epicMembers.map((m) => [m.epicId, m.membershipSource]));

@@ -21,7 +21,12 @@ export interface PlanSummary {
 // it MUST NOT be converted to zero, pass, or a successful plan outcome.
 export type PlanOutcome = 'passed' | 'partial' | 'failed' | 'in_progress' | 'unverifiable';
 export interface PlanOutcomeSummary {
-  projectId: string; planId: string; title: string;
+  projectId: string;
+  /** Plan STEM — PRIMARY identity (e.g. "P046-foo"). Colliding numbers stay distinct rows. */
+  planId: string;
+  /** True when planId's plan NUMBER is shared by ≥2 stems (number alias unusable for lookup). */
+  ambiguousNumber: boolean;
+  title: string;
   outcome: PlanOutcome;
   epicsTotal: number; epicsDone: number; runsTotal: number; failedRuns: number;
   gateFailures: number; gateRetries: number;

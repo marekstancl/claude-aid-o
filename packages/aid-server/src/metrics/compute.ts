@@ -296,6 +296,23 @@ export function computeMetrics(latest: RunDetail | null, runs: RunSummary[]): Me
   }
   if (latest === null) warnings.push('no latest run — metrics unavailable');
 
+  // partial:true when latest is null OR there is NO usable data: no wall time,
+  // no step timing, every step duration null, AND every checkpoint repeat null.
+  // (computeCheckpointRepeats returns a Record, never === null — the bug was
+  // comparing the object to null; check its VALUES. Real case: vulcan/E-045-7_8
+  // has a run but all times + CP repeats null → must be partial:true.)
+  const cpRepeats = computeCheckpointRepeats(latest);
+  const allCpNull =
+    cpRepeats === null || Object.values(cpRepeats).every((v) => v === null);
+  const allStepsNull = stepDurationsS.every((d) => d === null);
+  const noUsableData =
+    latest !== null &&
+    epicWallTimeS === null &&
+    stepTimingSource === null &&
+    allStepsNull &&
+    allCpNull;
+  const partial = latest === null || noUsableData;
+
   return {
     epicWallTimeS,
     runCount: runs.length,
@@ -309,7 +326,7 @@ export function computeMetrics(latest: RunDetail | null, runs: RunSummary[]): Me
     checkpointRepeats: computeCheckpointRepeats(latest),
     escalations: latest ? latest.escalationCount : 0,
     timeBy: latest ? buildTimeBy(latest.timeline) : buildTimeBy([]),
-    partial: latest === null,
+    partial,
     warnings,
   };
 }

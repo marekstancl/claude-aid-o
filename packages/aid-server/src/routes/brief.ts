@@ -35,6 +35,7 @@ import {
   type BriefRunMember,
   type BriefRunSet,
 } from '../brief/build-brief.js';
+import { discoverPlans, canonicalEpics } from '../plan/plan-assembly.js';
 
 /** Coerce an unknown to a non-empty string, else null. */
 function asString(v: unknown): string | null {
@@ -141,11 +142,18 @@ export function briefRoutes(scanner: ScannerCache): Router {
       return;
     }
 
-    // Plan membership (MF1): which EPICs belong to this plan (tiers 1-3).
-    const memberEpicIds = resolvePlanMembers(indexed, planId);
+    // Plan membership (MF1): resolve using canonical discoverPlans (tiers 1-3).
+    const discovered = await discoverPlans(scanner, indexed);
+    const plan = discovered.find((p) => p.planNumber === planId || p.planStem === planId) ?? null;
+    if (plan === null) {
+      send404(res, `Plan "${planId}"`);
+      return;
+    }
+
     const members: BriefRunMember[] = [];
-    for (const epicId of memberEpicIds) {
-      const epic = indexed.epics.get(epicId);
+    const canon = canonicalEpics(indexed);
+    for (const epicId of plan.memberEpicIds) {
+      const epic = canon.get(epicId);
       if (!epic) continue;
       const m = await assembleEpicMember(scanner, indexed, epic.epicId, [...epic.runs.values()]);
       if (m) members.push(m);
@@ -154,7 +162,7 @@ export function briefRoutes(scanner: ScannerCache): Router {
     const ctx = await readProjectContext(fs, indexed);
     const partialProjects = ctx.queuePartial ? [projectId] : [];
 
-    const planEpicsTotal = memberEpicIds.length;
+    const planEpicsTotal = plan.memberEpicIds.length;
     const planEpicsDone = members.filter((m) => m.detail.state === 'DONE').length;
 
     const runSet: BriefRunSet = {
@@ -308,60 +316,4 @@ async function readProjectContext(
   }
 
   return { projectId: indexed.projectId, queue, queuePartial: hasError };
-}
-
-/**
- * Resolve a plan's member EPIC ids (§13.6 four-tier rule, MF1). Tiers 1-3 are
- * INCLUDED; tier-4 orphans are excluded. Because the scanner Tier-1 index only
- * carries scalar frontmatter (no `plan_path` body), this MVP1 assembly resolves:
- *   - tier-2 `plan_ref`  — the EPIC's task frontmatter `planRef` === planId;
- *   - tier-3 `derived`   — the EPIC id `E-{NNN}-…` maps to `P{NNN}` === planId
- *                          AND a real `plans/<planId>.md` exists.
- * The member SET is identical whether the label lands at tier-2 or tier-3 (the
- * spec's MF1 note) — only the `membershipSource` tag would shift. P046's three
- * null-`plan_path` members therefore resolve to a NON-EMPTY set (AC #5).
- */
-export function resolvePlanMembers(indexed: IndexedProject, planId: string): string[] {
-  const planExists = indexed.plans.has(planId);
-  const out: string[] = [];
-  for (const epic of indexed.epics.values()) {
-    // Tier-2: frontmatter plan_ref.
-    const planRef = epic.frontmatter?.planRef ?? epic.frontmatter?.planPath ?? null;
-    if (planRef !== null && planRefMatches(planRef, planId)) {
-      out.push(epic.epicId);
-      continue;
-    }
-    // Tier-3: id-derived (E-{NNN} → P{NNN}), only when a real plan file exists.
-    // The route planId is the plan filename stem (e.g. "P046-foo"); compare its
-    // leading plan number (P046) against the EPIC-derived number.
-    const derived = idDerivedPlan(epic.epicId);
-    if (planExists && derived !== null && planNumberPrefix(planId) === derived) {
-      out.push(epic.epicId);
-    }
-  }
-  out.sort((a, b) => a.localeCompare(b));
-  return out;
-}
-
-/** True when a frontmatter plan_ref names this plan (exact or path stem match). */
-function planRefMatches(planRef: string, planId: string): boolean {
-  if (planRef === planId) return true;
-  // plan_ref may be a path like "plans/P046-foo.md" or a stem "P046-foo".
-  const stem = planRef.replace(/^.*\//, '').replace(/\.md$/i, '');
-  if (stem === planId) return true;
-  // Or just the bare plan number "P046".
-  const num = stem.match(/^(P\d+)/);
-  return num !== null && num[1] === planId;
-}
-
-/** Derive the plan number from an EPIC id: `E-046-3_3` → `P046` (id-derived tier). */
-function idDerivedPlan(epicId: string): string | null {
-  const m = epicId.match(/^E-?(\d+)/i);
-  return m ? `P${m[1]}` : null;
-}
-
-/** Extract the leading plan number from a plan id stem: `P046-foo` → `P046`. */
-function planNumberPrefix(planId: string): string | null {
-  const m = planId.match(/^(P\d+)/i);
-  return m ? m[1] : null;
 }

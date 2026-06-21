@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.37.0] — 2026-06-21
+
+### Added
+- **Per-step Acceptance Criteria pre-flight** — `aid-epic-to-json.sh` hard-fails a multi-step EPIC that carries fewer acceptance criteria than steps, so every step has a contract the CP chain can verify (root cause of the E-047-4_7 cockpit REOPEN); override deliberately with `AID_ALLOW_SPARSE_AC=1`.
+
 ## [2.36.2] — 2026-06-19
 
 ### Fixed

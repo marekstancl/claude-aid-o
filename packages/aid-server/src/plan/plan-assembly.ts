@@ -43,6 +43,8 @@ import {
 import {
   resolveMembership,
   planNumberPrefix,
+  planNumberFrom,
+  planStemFrom,
   buildReporterDelivery,
   buildSimplifierSummary,
   type PlanBuildInput,
@@ -120,12 +122,14 @@ export function planNumberOfStem(stem: string): string | null {
   return planNumberPrefix(stem);
 }
 
-/** A discovered plan: its number, the indexed plan-file stem, and member EPIC ids. */
+/** A discovered plan: its stem (PRIMARY identity), optional plan number (alias), and member EPIC ids. */
 export interface DiscoveredPlan {
-  planNumber: string; // P{NNN}
-  planStem: string; // filename stem, e.g. P046-plan-boundary-…
+  planStem: string; // filename stem, PRIMARY identity (e.g. P046-plan-boundary-…, ideas, roadmap)
+  planNumber: string | null; // P{NNN} (alias, null when stem has no parseable number)
+  ambiguousNumber: boolean; // true when planNumber maps to multiple stems (can't look up by number)
   memberEpicIds: string[];
   orphanEpicCount: number;
+  warnings: string[]; // ambiguity warnings, etc.
 }
 
 /**
@@ -158,45 +162,116 @@ export function planStemForNumber(
 }
 
 /**
- * Resolve a single EPIC's membership tier within a project. Reads the task
- * frontmatter `plan_ref` (tier-2) and then id-derivation (tier-3). The tier-1
- * fsm-state `plan_path` source is dead code (RunDetail does not surface it,
- * and on real disk it is null); this function now uses only tiers 2–3.
- * Returns the tier + plan number (orphan → null number). Never throws.
+ * A predicate over a project's plan index: does an EXACT plan STEM file exist
+ * (`plans/P022-b-foo.md`)? Drives stem-primary tier-1/2 resolution (PM #1) so an
+ * explicit `plan_path → P022-b-foo` resolves to that stem, never collapsing to
+ * the number and picking the first colliding stem.
+ */
+export function makeStemFileExists(
+  indexed: IndexedProject,
+): (planStem: string) => boolean {
+  const stems = new Set<string>();
+  for (const stem of indexed.plans.keys()) stems.add(stem.toLowerCase());
+  return (planStem: string) => stems.has(planStem.toLowerCase());
+}
+
+/** How many plan stems share a given plan number (>1 ⇒ ambiguous). */
+export function stemsForNumber(indexed: IndexedProject, planNumber: string): string[] {
+  const out: string[] = [];
+  for (const stem of indexed.plans.keys()) {
+    if (planNumberPrefix(stem)?.toUpperCase() === planNumber.toUpperCase()) out.push(stem);
+  }
+  return out;
+}
+
+/**
+ * Resolve a single EPIC's membership tier within a project. Tier-1 reads the
+ * latest run's fsm-state `plan_path` (authoritative); tier-2 reads frontmatter
+ * `plan_ref`; tier-3 uses id-derivation (`E-{NNN}` → `P{NNN}`); tier-4 orphan.
+ * Returns the firing tier + plan number (orphan → null number) + the resolved stem
+ * (null for orphan or derived ambiguous memberships). Never throws.
  */
 export async function resolveEpicMembership(
   scanner: ScannerCache,
   indexed: IndexedProject,
   epic: IndexedEpic,
   planFileExists: (planNumber: string) => boolean,
-): Promise<{ source: ReturnType<typeof resolveMembership>['source']; planNumber: string | null }> {
+  stemFileExists: (planStem: string) => boolean = makeStemFileExists(indexed),
+): Promise<{
+  source: ReturnType<typeof resolveMembership>['source'];
+  planNumber: string | null;
+  planStem: string | null;
+}> {
+  // Tier-1: latest run's fsm-state plan_path. Validate the target exists at STEM
+  // level first (PM #1), then number level; an unusable plan_path is downgraded.
+  let planPath: string | null = null;
+  const latest = pickLatestIndexedRun([...epic.runs.values()]);
+  if (latest !== null) {
+    const detail = await scanner.getRunDetail(indexed.projectId, epic.epicId, latest.runId);
+    const rawPlanPath = detail.planPath ?? null;
+    if (rawPlanPath !== null) {
+      const stemCand = planStemFrom(rawPlanPath);
+      const numCand = planNumberFrom(rawPlanPath);
+      const stemOk = stemCand !== null && stemFileExists(stemCand);
+      const numOk = numCand !== null && planFileExists(numCand);
+      if (stemOk || numOk) planPath = rawPlanPath;
+    }
+  }
+
   const planRef = epic.frontmatter?.planRef ?? epic.frontmatter?.planPath ?? null;
 
-  const input: MembershipInput = { epicId: epic.epicId, planPath: null, planRef };
-  return resolveMembership(input, planFileExists);
+  const input: MembershipInput = { epicId: epic.epicId, planPath, planRef };
+  const membership = resolveMembership(input, planFileExists, stemFileExists);
+
+  // planStem is the resolver's resolvedStem — set ONLY for explicit stem-bearing
+  // plan_path/plan_ref whose stem exists. Number-only and id-derived → null, so
+  // the caller never collapses them to the first colliding stem.
+  return {
+    source: membership.source,
+    planNumber: membership.planNumber,
+    planStem: membership.resolvedStem,
+  };
 }
 
 /**
- * Group every EPIC in a project by plan number (tiers 1-3) and count tier-4
- * orphans per plan candidate. Returns one {@link DiscoveredPlan} per plan number
- * that has a real plan file AND ≥1 member. Never throws.
+ * Group every EPIC in a project by plan stem (tiers 1-3). Returns one
+ * {@link DiscoveredPlan} per plan STEM (primary identity), even if it has no
+ * parseable P{NNN} number or no members. For ambiguous numbers (multiple stems
+ * mapping to the same P{NNN}), sets `ambiguousNumber:true` and a warning on
+ * each colliding stem. Each plan is emitted exactly once. Never throws.
  */
 export async function discoverPlans(
   scanner: ScannerCache,
   indexed: IndexedProject,
 ): Promise<DiscoveredPlan[]> {
   const planFileExists = makePlanFileExists(indexed);
-  const membersByNumber = new Map<string, string[]>();
-  // Orphans whose id-derived number has NO plan file (counted against that number
-  // for the Plan screen's orphanEpicCount when the number matches a real plan…
-  // but by definition orphans have no real plan, so they count globally per plan
-  // only when the derived number equals an existing plan — which never happens
-  // for true orphans). We still surface a per-plan orphanEpicCount for EPICs that
-  // derive to THIS plan number but were excluded (none, by construction). Kept 0.
+  const stemFileExists = makeStemFileExists(indexed);
 
+  // number → stems (ambiguity detection).
+  const numberToStems = new Map<string, string[]>();
+  for (const stem of indexed.plans.keys()) {
+    const planNumber = planNumberOfStem(stem);
+    if (planNumber !== null) {
+      const list = numberToStems.get(planNumber) ?? [];
+      list.push(stem);
+      numberToStems.set(planNumber, list);
+    }
+  }
+
+  // Two member buckets: by EXPLICIT stem (tier-1/2 with resolvedStem), and by
+  // NUMBER (number-only / id-derived). Number-only members are attached to a
+  // stem ONLY when that number is unambiguous — never fanned out to every
+  // colliding stem (PM #1).
+  const membersByStem = new Map<string, string[]>();
+  const membersByNumber = new Map<string, string[]>();
   for (const epic of canonicalEpics(indexed).values()) {
-    const m = await resolveEpicMembership(scanner, indexed, epic, planFileExists);
-    if (m.planNumber !== null && m.source !== 'orphan') {
+    const m = await resolveEpicMembership(scanner, indexed, epic, planFileExists, stemFileExists);
+    if (m.source === 'orphan') continue;
+    if (m.planStem !== null) {
+      const list = membersByStem.get(m.planStem) ?? [];
+      list.push(epic.epicId);
+      membersByStem.set(m.planStem, list);
+    } else if (m.planNumber !== null) {
       const list = membersByNumber.get(m.planNumber) ?? [];
       list.push(epic.epicId);
       membersByNumber.set(m.planNumber, list);
@@ -204,17 +279,44 @@ export async function discoverPlans(
   }
 
   const out: DiscoveredPlan[] = [];
-  for (const [planNumber, members] of membersByNumber) {
-    const stem = planStemForNumber(indexed, planNumber);
-    if (stem === null) continue; // defensive — should not happen
+  // Emit ALL plans (indexed.plans keys), including those with no P{NNN} number or no members.
+  for (const stem of indexed.plans.keys()) {
+    const planNumber = planNumberOfStem(stem);
+    const warnings: string[] = [];
+
+    let ambiguousNumber = false;
+    if (planNumber !== null) {
+      const collisions = numberToStems.get(planNumber) ?? [];
+      if (collisions.length > 1) {
+        ambiguousNumber = true;
+        warnings.push(
+          `planNumber ${planNumber} is ambiguous (maps to ${collisions.length} stems: ${collisions.join(', ')})`,
+        );
+      }
+    }
+
+    const memberSet = new Set<string>(membersByStem.get(stem) ?? []);
+    if (planNumber !== null) {
+      const numberOnly = membersByNumber.get(planNumber) ?? [];
+      if (!ambiguousNumber) {
+        for (const e of numberOnly) memberSet.add(e);
+      } else if (numberOnly.length > 0) {
+        warnings.push(
+          `${numberOnly.length} number-only member(s) not assigned to a stem — ambiguous number needs an explicit plan_path stem`,
+        );
+      }
+    }
+
     out.push({
-      planNumber,
       planStem: stem,
-      memberEpicIds: members.sort((a, b) => a.localeCompare(b)),
+      planNumber,
+      ambiguousNumber,
+      memberEpicIds: [...memberSet].sort((a, b) => a.localeCompare(b)),
       orphanEpicCount: 0,
+      warnings,
     });
   }
-  out.sort((a, b) => a.planNumber.localeCompare(b.planNumber));
+  out.sort((a, b) => a.planStem.localeCompare(b.planStem));
   return out;
 }
 
@@ -247,7 +349,9 @@ async function readEpicAc(
 function gateFinalOf(gates: { result: 'pass' | 'fail' | 'skipped' }[]): 'pass' | 'fail' | null {
   if (gates.length === 0) return null;
   const considered = gates.filter((g) => g.result !== 'skipped');
-  if (considered.length === 0) return 'pass'; // all skipped → nothing failed
+  // All-skipped is NOT a pass (PM #4): nothing was actually proven, so there is
+  // no gate-proof → null (a member with gateFinal:null is NOT classified passed).
+  if (considered.length === 0) return null;
   return considered.some((g) => g.result === 'fail') ? 'fail' : 'pass';
 }
 
@@ -517,39 +621,65 @@ export async function buildPlanBacklog(
 // ===========================================================================
 
 /**
- * Assemble the full {@link PlanBuildInput} for a plan number in a project. Reads
- * members (with membership tiers), plan body/title, AC, audits, lessons,
- * delivery, simplifier, backlog. Returns null when the plan has no real file /
- * no members (404 at the route). Never throws.
+ * Assemble the full {@link PlanBuildInput} for a plan stem (or plan number) in a
+ * project. Reads members (with membership tiers), plan body/title, AC, audits,
+ * lessons, delivery, simplifier, backlog. Returns null when the plan has no real
+ * file / no members (404 at the route). Never throws.
+ *
+ * Accepts either a plan stem (e.g. "P046-foo", "ideas", "roadmap") or a BARE
+ * plan number (e.g. "P046"). STEM is checked FIRST (PM #1): a stem like
+ * "P22-DA14-foo" also begins with `P{NNN}`, so number-detection must NOT win
+ * over an exact stem match, or it would collapse to the first colliding stem.
+ * A bare number that maps to multiple stems resolves to the first; routes detect
+ * ambiguity and return 409 before calling this.
  */
 export async function assemblePlanBuildInput(
   scanner: ScannerCache,
   fs: FsReader,
   indexed: IndexedProject,
-  planNumber: string,
+  planIdOrNumber: string,
 ): Promise<PlanBuildInput | null> {
   const planFileExists = makePlanFileExists(indexed);
-  if (!planFileExists(planNumber)) return null;
-  const stem = planStemForNumber(indexed, planNumber);
+
+  // STEM-FIRST resolution: an exact stem match wins. Only a BARE number
+  // (`^P\d+$`, no slug suffix) is resolved via planStemForNumber.
+  let stem: string | null = null;
+  if (indexed.plans.has(planIdOrNumber)) {
+    stem = planIdOrNumber; // exact stem (primary identity)
+  } else if (/^P\d+$/i.test(planIdOrNumber)) {
+    stem = planStemForNumber(indexed, planIdOrNumber);
+  }
   if (stem === null) return null;
 
   // Members + their tier (over the canonical merged EPIC view).
+  // Explicit plan_path/plan_ref (tier-1/2) attach via the RESOLVED STEM. Tier-3
+  // (id-derived) / number-only attach via the number — but ONLY when that number
+  // is unambiguous; at a colliding number a number-only member is NOT assigned
+  // (PM #1: never fan the same EPIC out to every colliding stem).
+  const stemFileExists = makeStemFileExists(indexed);
   const members: PlanMemberInput[] = [];
   let orphanEpicCount = 0;
+  const stemNumber = planNumberOfStem(stem);
+  const numberAmbiguous = stemNumber !== null && stemsForNumber(indexed, stemNumber).length > 1;
   for (const epic of canonicalEpics(indexed).values()) {
-    const m = await resolveEpicMembership(scanner, indexed, epic, planFileExists);
-    if (m.source !== 'orphan' && m.planNumber === planNumber) {
-      members.push(await buildPlanMember(scanner, fs, indexed, epic, m.source));
-    } else if (
-      m.source === 'orphan' &&
-      // An orphan whose id-derived number equals THIS plan would be a tier-3
-      // member already (handled above); a true orphan never matches a real plan.
-      false
-    ) {
+    const m = await resolveEpicMembership(scanner, indexed, epic, planFileExists, stemFileExists);
+    if (m.source !== 'orphan') {
+      if (m.planStem !== null) {
+        if (m.planStem === stem) {
+          members.push(await buildPlanMember(scanner, fs, indexed, epic, m.source));
+        }
+      } else if (m.planNumber && stemNumber === m.planNumber && !numberAmbiguous) {
+        members.push(await buildPlanMember(scanner, fs, indexed, epic, m.source));
+      }
+    } else {
       orphanEpicCount++;
     }
   }
-  if (members.length === 0) return null;
+  // A plan whose FILE exists but has zero resolved members is NOT a 404 (PM
+  // decision b): it is a real plan with an unverifiable outcome + dataPartial.
+  // Returning null here would (a) 404 an existing plan detail and (b) DROP it
+  // from the /api/plans list, disagreeing with /api/analytics/plans which keeps
+  // it. We only return null above when the STEM itself doesn't exist.
 
   const memberEpicIds = members.map((m) => m.epicId);
 
@@ -572,7 +702,13 @@ export async function assemblePlanBuildInput(
 
   const allLessons = await readAllLessons(fs, indexed);
   const { boundary, aggregate } = await buildPlanAudits(scanner, indexed, memberEpicIds);
-  const deliveryReport = await buildPlanDelivery(scanner, fs, indexed, planNumber, memberEpicIds);
+  const deliveryReport = await buildPlanDelivery(
+    scanner,
+    fs,
+    indexed,
+    stemNumber ?? stem,
+    memberEpicIds,
+  );
   const simplifierSummary = await buildPlanSimplifier(scanner, fs, indexed, memberEpicIds);
   const backlog = await buildPlanBacklog(fs, indexed, memberEpicIds);
 
@@ -623,7 +759,8 @@ export async function assemblePlanBuildInput(
 /**
  * Assemble the {@link OutcomePlanInput} for one plan number in a project — the
  * aggregate signals the §13.12 classifier needs. Pure projection over scanner
- * objects; NEVER execs the shell diagnostic. Returns null when no members.
+ * objects; NEVER execs the shell diagnostic. Returns input for ALL plans,
+ * including those with zero members (outcome: unverifiable, dataPartial:true).
  */
 export async function assembleOutcomePlanInput(
   scanner: ScannerCache,
@@ -631,7 +768,7 @@ export async function assembleOutcomePlanInput(
   indexed: IndexedProject,
   plan: DiscoveredPlan,
 ): Promise<OutcomePlanInput | null> {
-  if (plan.memberEpicIds.length === 0) return null;
+  // Proceed even with zero members — will emit outcome:unverifiable + dataPartial:true
   const stem = plan.planStem;
   const fm = indexed.plans.get(stem)?.frontmatter ?? null;
   const title = (fm?.title as string | undefined) ?? stem;
@@ -742,7 +879,8 @@ export async function assembleOutcomePlanInput(
   }
 
   // Plan-boundary reporter outcome (rule 1 explicit-fail source).
-  const delivery = await buildPlanDelivery(scanner, fs, indexed, plan.planNumber, plan.memberEpicIds);
+  const planIdForDelivery = plan.planNumber ?? plan.planStem;
+  const delivery = await buildPlanDelivery(scanner, fs, indexed, planIdForDelivery, plan.memberEpicIds);
   const reporterOutcome = delivery.present ? delivery.outcome : null;
 
   const topFailureReasons = [...reasonCounts.entries()]
@@ -752,7 +890,10 @@ export async function assembleOutcomePlanInput(
 
   return {
     projectId: indexed.projectId,
-    planId: plan.planNumber,
+    // STEM is the primary identity (PM #1) — colliding numbers (e.g. six P22-*
+    // plans) must surface as DISTINCT rows, never collapse to one "P22" label.
+    planId: plan.planStem,
+    ambiguousNumber: plan.ambiguousNumber,
     title,
     members: memberRuns,
     epicsTotal: plan.memberEpicIds.length,

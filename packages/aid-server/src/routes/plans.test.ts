@@ -305,7 +305,7 @@ describe('GET /api/plans/:projectId — list', () => {
     const res = await supertest(server.app).get('/api/plans/aid-orchestrator');
     expect(res.status).toBe(200);
     const summaries = res.body.data as PlanSummary[];
-    const p046 = summaries.find((s) => s.planId === 'P046');
+    const p046 = summaries.find((s) => s.planId === 'P046-plan-boundary');
     expect(p046).toBeDefined();
     expect(p046!.epicIds).toHaveLength(3);
     // P041 is not a real plan (no file) → not listed.
@@ -327,14 +327,14 @@ describe('GET /api/analytics/plans — outcome analytics (§13.12, AC #25)', () 
       a.totals.passed + a.totals.partial + a.totals.failed + a.totals.inProgress + a.totals.unverifiable;
     expect(sum).toBe(a.totals.plans);
     // P046 + P010 are the two discoverable plans.
-    expect(a.plans.some((p) => p.planId === 'P046')).toBe(true);
-    expect(a.plans.some((p) => p.planId === 'P010')).toBe(true);
+    expect(a.plans.some((p) => p.planId === 'P046-plan-boundary')).toBe(true);
+    expect(a.plans.some((p) => p.planId === 'P010-stub')).toBe(true);
   });
 
   it('P046 is unverifiable (fast-mode AC + unknown CP repeats) — unknowns NOT zeroed', async () => {
     const res = await supertest(server.app).get('/api/analytics/plans?project=aid-orchestrator');
     const a = res.body.data as PlanOutcomeAnalytics;
-    const p046 = a.plans.find((p) => p.planId === 'P046')!;
+    const p046 = a.plans.find((p) => p.planId === 'P046-plan-boundary')!;
     expect(p046.outcome).toBe('unverifiable'); // missing proof never passes
     expect(p046.dataPartial).toBe(true);
     expect(p046.checkpointRetries.unknownCheckpoints).toBeGreaterThan(0); // never folded to 0
@@ -343,7 +343,7 @@ describe('GET /api/analytics/plans — outcome analytics (§13.12, AC #25)', () 
   it('a stub-only plan is unverifiable, never passed', async () => {
     const res = await supertest(server.app).get('/api/analytics/plans?project=stubproj');
     const a = res.body.data as PlanOutcomeAnalytics;
-    const p010 = a.plans.find((p) => p.planId === 'P010')!;
+    const p010 = a.plans.find((p) => p.planId === 'P010-stub')!;
     expect(p010.outcome).toBe('unverifiable');
   });
 

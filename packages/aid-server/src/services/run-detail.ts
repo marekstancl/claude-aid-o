@@ -192,6 +192,7 @@ export async function buildRunDetail(
     createdAt: fsm.createdAt ?? null,
     donePhase: fsm.donePhase ?? null,
     pmDecision: fsm.pmDecision ?? null, // §4.0 #2: null when the field is absent (pre-merge)
+    planPath: fsm.planPath ?? null, // tier-1 membership resolution source (§13.6)
     steps,
     checkpoints,
     gates,
@@ -229,6 +230,7 @@ export function createEmptyRunDetail(projectId: string, epicId: string, runId: s
     createdAt: null,
     donePhase: null,
     pmDecision: null,
+    planPath: null,
     steps: [],
     checkpoints: [],
     gates: [],

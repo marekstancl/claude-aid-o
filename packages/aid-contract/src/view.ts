@@ -56,6 +56,7 @@ export interface RunDetail {
   state: FsmState; mode: string; branch: string; baseCommit: string;
   currentStep: number; totalSteps: number; gateRetries: number; escalationCount: number;
   startedAt: string|null; createdAt: string|null; donePhase: string|null; pmDecision: string|null;
+  planPath: string|null; // fsm-state.yaml plan_path (tier-1 membership resolution, §13.6)
   steps: RunStep[]; checkpoints: Checkpoint[]; gates: GateResult[];
   compliance: ComplianceRun | null; reports: ReportRef[];
   audit: AuditSummary;

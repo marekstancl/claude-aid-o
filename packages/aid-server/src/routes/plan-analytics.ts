@@ -96,7 +96,7 @@ export function planAnalyticsRoutes(scanner: ScannerCache): Router {
       const discovered = await discoverPlans(scanner, indexed);
       for (const plan of discovered) {
         const input = await assembleOutcomePlanInput(scanner, fs, indexed, plan);
-        if (input) inputs.push(input);
+        if (input) inputs.push(input); // null shouldn't happen, but defensive
       }
     }
 

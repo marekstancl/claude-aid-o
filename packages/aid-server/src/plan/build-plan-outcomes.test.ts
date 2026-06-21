@@ -104,6 +104,16 @@ describe('classifyPlanOutcome — five branches (§13.12)', () => {
     expect(r.outcome).not.toBe('passed');
   });
 
+  it('PM #2: latest run clean + HISTORICAL failures (cumulative failedRuns>0) → passed, NOT failed', () => {
+    // Every member's LATEST run is a clean DONE pass; failedRuns:3 represents
+    // earlier failed runs that have since been fixed. Current outcome must be
+    // passed — the cumulative count must not override the latest-run verdict.
+    const r = classifyPlanOutcome(
+      plan({ members: [member()], failedRuns: 3, runsTotal: 4 }),
+    );
+    expect(r.outcome).toBe('passed');
+  });
+
   it('branch 2 honesty: AC measured but < 100% → not passed', () => {
     const r = classifyPlanOutcome(plan({ members: [member({ ac: { present: 3, total: 5 } })] }));
     expect(r.outcome).not.toBe('passed');
@@ -163,19 +173,20 @@ describe('honesty — unknown checkpoints never zeroed (AC #25)', () => {
     expect(summary.checkpointRetries.unknownCheckpoints).not.toBe(0);
   });
 
-  it('unknown CP repeats force dataPartial:true and block a passed verdict', () => {
+  it('unknown CP repeats set dataPartial:true but do NOT block passed (unknown CP is not required proof)', () => {
     const r = classifyPlanOutcome(
-      plan({ checkpointRetries: { knownTotal: 0, unknownCheckpoints: 2 } }),
+      plan({ members: [member()], checkpointRetries: { knownTotal: 0, unknownCheckpoints: 2 } }),
     );
     expect(r.dataPartial).toBe(true);
-    expect(r.outcome).not.toBe('passed');
+    expect(r.outcome).toBe('passed'); // Unknown CP does not block passed (§13.12 rule 2)
   });
 
-  it('an all-pass plan with unknown CPs degrades to unverifiable (not passed)', () => {
+  it('an all-pass plan with unknown CPs is passed with dataPartial:true', () => {
     const r = classifyPlanOutcome(
       plan({ members: [member()], checkpointRetries: { knownTotal: 0, unknownCheckpoints: 1 } }),
     );
-    expect(r.outcome).toBe('unverifiable');
+    expect(r.outcome).toBe('passed'); // Unknown CP does not block passed
+    expect(r.dataPartial).toBe(true);
   });
 });
 

@@ -56,3 +56,9 @@ docs/plans/
 .claude/
 CLAUDE.md
 CLAUDE.MD
+
+# Committed minimal conformance fixture (E-047-4_7 REOPEN): a hand-authored,
+# SANITIZED .aid-o tree for the blocking conformance test. Re-include past the
+# **/.aid-o/ ignore rule above.
+!packages/aid-server/tests/fixtures/mini/**/.aid-o
+!packages/aid-server/tests/fixtures/mini/**/.aid-o/**

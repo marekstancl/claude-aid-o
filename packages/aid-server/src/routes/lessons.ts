@@ -105,7 +105,7 @@ export function lessonsRoutes(scanner: ScannerCache): Router {
 
     const plans = await discoverPlans(scanner, indexed);
     const plan = plans.find(
-      (p) => p.planNumber.toUpperCase() === planNumber.toUpperCase(),
+      (p) => p.planNumber && p.planNumber.toUpperCase() === planNumber.toUpperCase(),
     );
     if (plan === undefined) {
       send404(res, `Plan "${planNumber}" in project "${indexed.projectId}"`);
@@ -114,7 +114,7 @@ export function lessonsRoutes(scanner: ScannerCache): Router {
 
     const view: LessonsView = buildLessons(lessons, 'plan', plan.memberEpicIds, {
       projectId: indexed.projectId,
-      planId: plan.planNumber,
+      planId: plan.planNumber ?? plan.planStem,
     });
     sendOk(res, view, { scannedAt: isoNow(), partialProjects: [] });
   });

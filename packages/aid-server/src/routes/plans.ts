@@ -23,12 +23,13 @@ import { Router } from 'express';
 import type { PlanSummary } from '@aid/contract';
 import type { ScannerCache } from '../services/scanner-cache.js';
 import { FsReader } from '../services/fs-reader.js';
-import { sendOk, send404, send400, isoNow } from '../api/middleware.js';
+import { sendOk, send404, send400, sendError, isoNow } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import { planNumberPrefix, buildPlanSummary, buildPlanDetail } from '../plan/build-plan.js';
 import {
   discoverPlans,
   assemblePlanBuildInput,
+  stemsForNumber,
 } from '../plan/plan-assembly.js';
 
 /**
@@ -58,7 +59,9 @@ export function plansRoutes(scanner: ScannerCache): Router {
     const discovered = await discoverPlans(scanner, indexed);
     const summaries: PlanSummary[] = [];
     for (const plan of discovered) {
-      const input = await assemblePlanBuildInput(scanner, fs, indexed, plan.planNumber);
+      // STEM is the primary identity — always look the plan up by its stem, never
+      // by number (PM #1: a number key collapses colliding stems to the first).
+      const input = await assemblePlanBuildInput(scanner, fs, indexed, plan.planStem);
       if (input) summaries.push(buildPlanSummary(input));
     }
 
@@ -82,15 +85,40 @@ export function plansRoutes(scanner: ScannerCache): Router {
       return;
     }
 
-    const planNumber = planNumberPrefix(planId);
-    if (planNumber === null) {
-      send404(res, `Plan "${planId}"`);
-      return;
+    // STEM-PRIMARY lookup (PM #1):
+    //  1. exact stem (`P022-b-foo`, or number-less stems like `ideas`) → use it.
+    //  2. bare number (`P022`): resolve the stems sharing it —
+    //       0 → 404, 1 → that stem, >1 → 409 AMBIGUOUS (never pick one at random).
+    let lookupKey: string | null = null;
+    if (indexed.plans.has(planId)) {
+      lookupKey = planId; // exact stem
+    } else {
+      const planNumber = planNumberPrefix(planId);
+      if (planNumber === null) {
+        send404(res, `Plan "${planId}"`);
+        return;
+      }
+      const candidates = stemsForNumber(indexed, planNumber);
+      if (candidates.length === 0) {
+        send404(res, `Plan "${planNumber}" in project "${projectId}"`);
+        return;
+      }
+      if (candidates.length > 1) {
+        sendError(
+          res,
+          409,
+          'AMBIGUOUS_PLAN_NUMBER',
+          `Plan number "${planNumber}" is ambiguous in project "${projectId}" — ${candidates.length} plans share it. Request one by its exact stem.`,
+          { candidates: candidates.slice().sort((a, b) => a.localeCompare(b)) },
+        );
+        return;
+      }
+      lookupKey = candidates[0];
     }
 
-    const input = await assemblePlanBuildInput(scanner, fs, indexed, planNumber);
+    const input = await assemblePlanBuildInput(scanner, fs, indexed, lookupKey);
     if (input === null) {
-      send404(res, `Plan "${planNumber}" in project "${projectId}"`);
+      send404(res, `Plan "${planId}" in project "${projectId}"`);
       return;
     }
 

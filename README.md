@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.36.2** (current) — stale aid-plan.md CP1 lenses synced; boundary manifest committed
+- **v2.37.0** (current) — per-step Acceptance Criteria pre-flight in aid-epic-to-json.sh (multi-step EPIC needs >=1 AC per step)
+- **v2.36.2** — stale aid-plan.md CP1 lenses synced; boundary manifest committed
 - **v2.36.1** — CP1-deep empty-file bypass closed; L1/L2/L3 lens taxonomy; aid-init gitignore guidance
 - **v2.36.0** — behavior-first review contracts; `behavior_trace` structural gate; CP1 risk-scaling + `aid-cp1-gate.sh`; `.gitignore` negation fix; CP1 gate `risk:low` precedence fix; frontmatter parser state machine
 - **v2.35.0** — `plan-close` FSM command enforces all 4 boundary reports; toggle-skip for disabled specialists; boundary manifest committed artifact; CI floor check; force-override audit enrichment; 13 new bats assertions

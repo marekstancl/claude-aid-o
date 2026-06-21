@@ -62,6 +62,14 @@ export interface MembershipResult {
   source: MembershipSource;
   /** The plan NUMBER (`P{NNN}`) the EPIC resolves to, or null when orphan. */
   planNumber: string | null;
+  /**
+   * The SPECIFIC plan STEM this EPIC resolves to (e.g. `P022-b-foo`) when the
+   * firing source was a stem-bearing plan_path/plan_ref whose stem exists.
+   * null for number-only refs and id-derived membership — the caller MUST NOT
+   * assign those to a stem when the number is ambiguous (PM #1: stem identity is
+   * preserved, never collapsed to number→first-stem).
+   */
+  resolvedStem: string | null;
 }
 
 /**
@@ -95,30 +103,59 @@ export interface MembershipInput {
 export function resolveMembership(
   input: MembershipInput,
   planFileExists: (planNumber: string) => boolean,
+  stemFileExists: (planStem: string) => boolean = () => false,
 ): MembershipResult {
-  // Tier-1: fsm-state plan_path → P{NNN}.
+  // Tier-1: fsm-state plan_path. PREFER the explicit STEM when the ref carries
+  // one and that stem exists on disk (PM #1: `plan_path → P022-b` must resolve
+  // to P022-b, never collapse to P022 → first stem). Fall back to number-level
+  // when the ref is number-only or the stem is unknown.
+  const pathStem = planStemFrom(input.planPath);
+  if (pathStem !== null && stemFileExists(pathStem)) {
+    return { source: 'plan_path', planNumber: planNumberPrefix(pathStem), resolvedStem: pathStem };
+  }
   const fromPlanPath = planNumberFrom(input.planPath);
   if (fromPlanPath !== null && planFileExists(fromPlanPath)) {
-    return { source: 'plan_path', planNumber: fromPlanPath };
+    return { source: 'plan_path', planNumber: fromPlanPath, resolvedStem: null };
   }
 
-  // Tier-2: frontmatter plan_ref → P{NNN}.
+  // Tier-2: frontmatter plan_ref → stem-first, then number.
+  const refStem = planStemFrom(input.planRef);
+  if (refStem !== null && stemFileExists(refStem)) {
+    return { source: 'plan_ref', planNumber: planNumberPrefix(refStem), resolvedStem: refStem };
+  }
   const fromPlanRef = planNumberFrom(input.planRef);
   if (fromPlanRef !== null && planFileExists(fromPlanRef)) {
-    return { source: 'plan_ref', planNumber: fromPlanRef };
+    return { source: 'plan_ref', planNumber: fromPlanRef, resolvedStem: null };
   }
 
   // Tier-3: id-derived E-{NNN} → P{NNN}, only when a real plan file exists.
+  // Number-only by construction → resolvedStem null (caller must NOT assign to a
+  // stem when the number is ambiguous).
   const derived = idDerivedPlanNumber(input.epicId);
   if (derived !== null && planFileExists(derived)) {
-    return { source: 'derived', planNumber: derived };
+    return { source: 'derived', planNumber: derived, resolvedStem: null };
   }
 
   // Tier-4: orphan (no plan_path, no plan_ref, no matching P{NNN} file). Note:
   // a plan_ref/derived that points at a NON-EXISTENT plan file (e.g. E-041 →
   // P041 with no P041-*.md) lands here, NOT at tier-2/3 — §13.6 "degrades to
   // orphan, never to a broken Plan screen".
-  return { source: 'orphan', planNumber: null };
+  return { source: 'orphan', planNumber: null, resolvedStem: null };
+}
+
+/**
+ * Extract the full plan STEM from a plan_path / plan_ref string, when one is
+ * present. `.aid-o/plans/P022-b-foo.md` → `P022-b-foo`; bare stem `P022-b-foo`
+ * → `P022-b-foo`. Returns null for a number-only ref (`P022` / `P022.md`) — a
+ * bare number carries no stem identity, so the caller resolves it via the number
+ * (and treats it as ambiguous when several stems share that number).
+ */
+export function planStemFrom(ref: string | null): string | null {
+  if (ref === null) return null;
+  // Take the basename (drop any directory + .md extension), then require it to
+  // be a real stem: P{digits} followed by a `-` and at least one more char.
+  const base = ref.split('/').pop()!.replace(/\.md$/i, '');
+  return /^P\d+-.+/i.test(base) ? base : null;
 }
 
 /**
@@ -225,7 +262,6 @@ export function buildPlanSummary(input: PlanBuildInput): PlanSummary {
   const membershipMixed =
     new Set(epicMembers.map((m) => m.membershipSource)).size > 1;
 
-  const planNumber = planNumberPrefix(input.planId) ?? input.planId;
   const lessons = filterLessons(input.allLessons, input.members);
   const lessonsPreview = lessons
     .slice(0, LESSONS_PREVIEW_MAX)
@@ -233,7 +269,8 @@ export function buildPlanSummary(input: PlanBuildInput): PlanSummary {
 
   return {
     projectId: input.projectId,
-    planId: planNumber,
+    // STEM is the primary identity (PM #1); input.planId is already the stem.
+    planId: input.planId,
     title: input.title,
     planRef: input.planRef,
     epicIds: epicMembers.map((m) => m.epicId),
@@ -559,7 +596,7 @@ export function buildLessonsView(input: PlanBuildInput): LessonsView {
   return {
     scope: 'plan',
     projectId: input.projectId,
-    planId: planNumberPrefix(input.planId) ?? input.planId,
+    planId: input.planId, // stem-primary (PM #1)
     entries,
     total: entries.length,
     warnings: [],

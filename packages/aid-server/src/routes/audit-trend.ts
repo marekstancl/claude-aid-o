@@ -36,7 +36,7 @@ import { pickLatestIndexedRun } from '../services/view-assembly.js';
 import { sendOk, send404, send400 } from '../api/middleware.js';
 import { isValidPathComponent } from './path-validation.js';
 import { buildAuditTrend } from '../audit/build-audit-trend.js';
-import { resolvePlanMembers } from './brief.js';
+import { discoverPlans, canonicalEpics } from '../plan/plan-assembly.js';
 
 /**
  * Build one trend point from a run's `RunDetail`. The score is taken from the
@@ -124,10 +124,17 @@ export function auditTrendRoutes(scanner: ScannerCache): Router {
       return;
     }
 
-    const memberEpicIds = resolvePlanMembers(indexed, planId);
+    const discovered = await discoverPlans(scanner, indexed);
+    const plan = discovered.find((p) => p.planNumber === planId || p.planStem === planId) ?? null;
+    if (plan === null) {
+      send404(res, `Plan "${planId}"`);
+      return;
+    }
+
     const points: AuditTrendPoint[] = [];
-    for (const epicId of memberEpicIds) {
-      const epic = indexed.epics.get(epicId);
+    const canon = canonicalEpics(indexed);
+    for (const epicId of plan.memberEpicIds) {
+      const epic = canon.get(epicId);
       if (!epic) continue;
       const p = await latestAuditedEpicPoint(scanner, indexed, epic);
       if (p) points.push(p);

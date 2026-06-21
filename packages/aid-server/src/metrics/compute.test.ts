@@ -66,6 +66,7 @@ function makeRun(over: Partial<RunDetail> = {}): RunDetail {
     createdAt: null,
     donePhase: null,
     pmDecision: null,
+    planPath: null,
     steps: [],
     checkpoints: [],
     gates: [],

@@ -8,10 +8,15 @@
  * script is a regression oracle for overlapping fixture fields only, never the
  * backend implementation (§13.12 "Source and ownership").
  *
- * Binding honesty contract (§13.12):
- *  - Missing proof can NEVER classify `passed` (rule 2). Unknowns (legacy/stub/
- *    missing artifacts, unknown CP repeats) → `unverifiable` + `dataPartial`,
+ * Binding honesty contract (§13.12, PM-corrected):
+ *  - Missing REQUIRED proof (state/AC/gates/compliance) can NEVER classify
+ *    `passed` (rule 2); legacy/stub members → `unverifiable` + `dataPartial`,
  *    NEVER folded to zero, NEVER green.
+ *  - Unknown CP repeats are NOT required proof: a fully-proven plan with unknown
+ *    CP still classifies `passed`, only with `dataPartial:true` (PM #4). CP is
+ *    not among the passed-proof set.
+ *  - All-gates-skipped is NOT a pass (gateFinal:null); classification is over
+ *    each member's LATEST run — historical failures feed statistics only.
  *  - An id-derived ('derived') membership is official-but-weaker (a warning),
  *    not an orphan — orphans are excluded upstream (this builder only sees tiers
  *    1-3 members).
@@ -58,8 +63,10 @@ export interface OutcomeMemberRun {
 /** Aggregate signals across ALL runs of ALL member EPICs of one plan. */
 export interface OutcomePlanInput {
   projectId: string;
-  /** The plan number `P{NNN}` (tier-resolved member set). */
+  /** The plan STEM (PRIMARY identity, e.g. `P046-foo`, `ideas`). */
   planId: string;
+  /** True when this stem's plan NUMBER is shared by multiple stems (alias is unusable). */
+  ambiguousNumber?: boolean;
   title: string;
   /** Latest run per member EPIC (the classification basis). */
   members: OutcomeMemberRun[];
@@ -129,9 +136,14 @@ export function classifyPlanOutcome(input: OutcomePlanInput): {
     );
   }
 
-  // --- Rule 1: failed — explicit terminal evidence on any member's latest run.
+  // --- Rule 1: failed — explicit terminal evidence on any member's LATEST run.
+  // PM #2: a plan's CURRENT outcome is classified from each member's latest run
+  // only. `input.failedRuns` is CUMULATIVE (counts historical ERROR runs across
+  // every run of every member) — it must NOT drive the current outcome, or a
+  // member whose latest run is a clean DONE would be marked failed forever
+  // because of one historical failure. Cumulative failedRuns stays available for
+  // ANALYTICS/statistics; it is deliberately absent from this latest-run gate.
   const anyFailed =
-    input.failedRuns > 0 ||
     input.reporterOutcome === 'fail' ||
     input.members.some(
       (m) =>
@@ -173,10 +185,12 @@ export function classifyPlanOutcome(input: OutcomePlanInput): {
     return { outcome: 'in_progress', dataPartial: hasLegacyOrStub || unknownCps, warnings };
   }
 
-  // --- Rule 2: passed — EVERY member passed (full proof). Missing proof can
-  // never reach here. Unknown CP repeats / legacy members fail this gate.
-  if (allPassed && !hasLegacyOrStub && !unknownCps) {
-    return { outcome: 'passed', dataPartial: false, warnings };
+  // --- Rule 2: passed — EVERY member passed (full proof). Missing required
+  // proof (state/AC/gates/compliance) blocks passed. Unknown CP repeats are NOT
+  // required proof — they set dataPartial:true but don't block passed. Legacy/stub
+  // members block passed (unverifiable proof format).
+  if (allPassed && !hasLegacyOrStub) {
+    return { outcome: 'passed', dataPartial: unknownCps, warnings };
   }
 
   // --- Rule 4: partial — no active/failed run, ≥1 member passed, another known
@@ -209,6 +223,7 @@ export function buildPlanOutcomeSummary(input: OutcomePlanInput): PlanOutcomeSum
   return {
     projectId: input.projectId,
     planId: input.planId,
+    ambiguousNumber: input.ambiguousNumber ?? false,
     title: input.title,
     outcome,
     epicsTotal: input.epicsTotal,
