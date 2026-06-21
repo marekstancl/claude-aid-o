@@ -12,12 +12,17 @@ interface ProjectsContextValue {
   /** True once a fetch has completed (success or failure), so callers can
    *  distinguish "still loading" from "loaded, project genuinely missing". */
   loaded: boolean;
+  /** True when the project-list fetch FAILED (offline / server down). Callers
+   *  MUST check this BEFORE concluding a project is missing — an API outage is
+   *  NOT the same as "Projekt nenalezen" (it would mislabel every deep-link). */
+  error: boolean;
 }
 
 const ProjectsContext = createContext<ProjectsContextValue>({
   projects: [],
   loading: true,
   loaded: false,
+  error: false,
 });
 
 /**
@@ -30,6 +35,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,9 +43,14 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
       .then((list) => {
         if (cancelled) return;
         setProjects(list as ProjectSummary[]);
+        setError(false);
       })
       .catch(() => {
-        /* offline / server down — ApiError is caught, treat as empty state */
+        // offline / server down — record it as an ERROR, NOT an empty success.
+        // A consumer must show "nepodařilo se načíst projekty", never conclude a
+        // deep-linked project is "nenalezen" just because the list fetch failed.
+        if (cancelled) return;
+        setError(true);
       })
       .finally(() => {
         if (cancelled) return;
@@ -52,7 +63,7 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ProjectsContext.Provider value={{ projects, loading, loaded }}>
+    <ProjectsContext.Provider value={{ projects, loading, loaded, error }}>
       {children}
     </ProjectsContext.Provider>
   );

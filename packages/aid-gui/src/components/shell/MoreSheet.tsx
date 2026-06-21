@@ -1,7 +1,10 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { useNavigate } from 'react-router-dom';
-import { X, FolderOpen, HelpCircle, RefreshCw, Download } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { X, FolderOpen, HelpCircle, RefreshCw } from 'lucide-react';
 import { useProjects } from './ProjectsContext';
+import { InstallPwaButton } from '../common/InstallPwaButton';
+import { getPlans } from '../../lib/api';
 
 interface MoreSheetProps {
   open: boolean;
@@ -10,13 +13,20 @@ interface MoreSheetProps {
 
 /**
  * Mobile "Více" sheet (base-ui Dialog, bottom-sheet variant). Holds the project
- * switcher, plan switcher (placeholder until plan data lands), the Nápověda
- * link, an Install-PWA placeholder (real button in Step 38) and a refresh
- * button. Light-theme surfaces only.
+ * switcher, a plan switcher (plans of the currently-viewed project), the
+ * Nápověda link, the real Install-PWA button (renders only when installable) and
+ * a refresh button. Light-theme surfaces only.
  */
 export function MoreSheet({ open, onOpenChange }: MoreSheetProps) {
   const navigate = useNavigate();
   const { projects } = useProjects();
+  // Plan switcher = plans of the project currently in the route (if any).
+  const { project: currentProject } = useParams();
+  const { data: plans } = useQuery({
+    queryKey: ['plans', currentProject],
+    queryFn: () => getPlans(currentProject!),
+    enabled: open && !!currentProject,
+  });
 
   const go = (path: string) => {
     onOpenChange(false);
@@ -63,7 +73,25 @@ export function MoreSheet({ open, onOpenChange }: MoreSheetProps) {
 
           <div className="border-t border-slate-200 px-4 py-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Plán</h3>
-            <p className="text-sm text-slate-500">Vyber projekt pro seznam plánů.</p>
+            {!currentProject ? (
+              <p className="text-sm text-slate-500">Otevři projekt pro seznam plánů.</p>
+            ) : !plans || plans.length === 0 ? (
+              <p className="text-sm text-slate-500">Žádné plány</p>
+            ) : (
+              <ul className="space-y-1">
+                {plans.map((pl) => (
+                  <li key={pl.planId}>
+                    <button
+                      type="button"
+                      onClick={() => go(`/p/${currentProject}/plans/${encodeURIComponent(pl.planId)}`)}
+                      className="flex min-h-[44px] w-full items-center rounded-lg px-3 text-left text-sm text-slate-700 hover:bg-slate-100"
+                    >
+                      {pl.title ?? pl.planId}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <div className="space-y-1 border-t border-slate-200 px-2 py-3">
@@ -74,14 +102,9 @@ export function MoreSheet({ open, onOpenChange }: MoreSheetProps) {
             >
               <HelpCircle className="h-5 w-5 text-slate-400" /> Nápověda
             </button>
-            {/* Placeholder for InstallPwaButton (Step 38). */}
-            <button
-              type="button"
-              disabled
-              className="flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-400"
-            >
-              <Download className="h-5 w-5" /> Instalovat aplikaci
-            </button>
+            {/* Real install affordance — renders only when the browser fired a
+                beforeinstallprompt (returns null otherwise), per §8.1/§9.3. */}
+            <InstallPwaButton className="flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-slate-700 hover:bg-slate-100" />
             <button
               type="button"
               onClick={() => window.location.reload()}

@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
-import type { EventTopic, RunRef } from '@aid/contract';
+import type { EventTopic, RunRef, InternalEvent } from '@aid/contract';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -50,18 +50,21 @@ interface SubscribeFrame {
   projects: string[];
 }
 
+// Wire shapes MUST match the deployed aid-server (`ws/websocket.ts`), which is
+// the producer of record. The server nests the event payload under `data`
+// (the InternalEvent) and the replay frame carries NO topic — earlier this
+// consumer was written to the spec §7.3 FLAT shape and silently never matched a
+// real frame (live monitoring was dead). Aligned to the server here.
 interface ReplayFrame {
   type: 'replay';
-  topic: 'pipeline.timeline';
-  data: unknown;
+  data: unknown[]; // merged activity ring buffer (ActivityEvent[])
+  ts: string;
 }
 
 interface EventFrame {
   type: 'event';
   topic: EventTopic;
-  projectId: string;
-  runRef?: RunRef;
-  parsed: unknown;
+  data: InternalEvent; // { projectId, runRef?, parsedData, ... }
   ts: string;
 }
 
@@ -93,7 +96,10 @@ function keyId(key: QueryKey): string {
 
 /** react-query keys that should be invalidated for a given inbound event. */
 function keysForEvent(frame: EventFrame): QueryKey[] {
-  const { topic, projectId, runRef } = frame;
+  const { topic } = frame;
+  // projectId/runRef live INSIDE the InternalEvent payload (server wire shape).
+  const projectId = frame.data.projectId;
+  const runRef: RunRef | undefined = frame.data.runRef;
   const keys: QueryKey[] = [];
 
   switch (topic) {
@@ -204,29 +210,27 @@ export function useAidSocket(opts: UseAidSocketOptions): { status: AidSocketStat
 
       switch (frame.type) {
         case 'replay': {
+          // Server replay frame has NO topic — it is the merged activity ring
+          // buffer sent once on subscribe. Seed the ['activity'] cache.
           const replay = frame as ReplayFrame;
-          if (replay.topic === 'pipeline.timeline') {
+          if (Array.isArray(replay.data)) {
             queryClient.setQueryData(['activity'], replay.data);
           }
           break;
         }
         case 'event': {
           const ev = frame as EventFrame;
-          // pipeline.timeline → append parsed onto the ['activity'] cache.
-          if (ev.topic === 'pipeline.timeline') {
-            queryClient.setQueryData<unknown[]>(['activity'], (prev) => {
-              const list = prev ?? [];
-              return [...list, ev.parsed];
-            });
-            break;
-          }
+          // Keep the live activity feed fresh on every event (debounced refetch
+          // of /api/activity — the REST item shape == the replay item shape).
+          debouncedInvalidate(queryClient, ['activity']);
+          // Invalidate the per-topic read-model keys (projectId/runRef from data).
           for (const key of keysForEvent(ev)) {
             debouncedInvalidate(queryClient, key);
           }
           break;
         }
         default:
-          // ignore other server frames (heartbeat/pong/etc.) — forward-compatible
+          // ignore other server frames (connected/subscribed/heartbeat) — forward-compatible
           break;
       }
     };

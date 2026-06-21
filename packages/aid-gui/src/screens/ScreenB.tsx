@@ -7,9 +7,10 @@ import { useProjects } from '../components/shell/ProjectsContext';
 /** Projekt detail (tabbed). Filled in Phase 6. */
 export function ScreenB() {
   const { project = '' } = useParams();
-  const { projects, loaded } = useProjects();
+  const { projects, loaded, error } = useProjects();
   const known = projects.some((p) => p.id === project);
 
+  if (loaded && error) return <ProjectNotFound projectId={project} loadError />;
   if (loaded && !known) return <ProjectNotFound projectId={project} />;
 
   return (

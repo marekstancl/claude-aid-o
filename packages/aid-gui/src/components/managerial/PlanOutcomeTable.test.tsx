@@ -308,5 +308,8 @@ describe('PlanOutcomeTable — STEM-primary identity', () => {
     // The href carries the full stem (URL-encoded), not the bare "P046".
     expect(link.getAttribute('href')).toContain('P046-foo');
     expect(link.getAttribute('href')).not.toMatch(/\/plan\/P046$/);
+    // It MUST target the real router route `/p/:project/plans/:planId` (plural).
+    // The earlier singular `/p/:project/plan/:stem` 404'd — this pins the prefix.
+    expect(link.getAttribute('href')).toMatch(/^\/p\/wan\/plans\//);
   });
 });

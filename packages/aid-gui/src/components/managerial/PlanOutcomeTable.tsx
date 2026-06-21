@@ -42,7 +42,7 @@ interface PlanOutcomeTableProps {
   /**
    * Deep-link builder for a plan row. MUST receive the plan STEM (never the bare
    * number — the API answers a bare number with HTTP 409 AMBIGUOUS_PLAN_NUMBER).
-   * Defaults to `/p/:project/plan/:stem`.
+   * Defaults to `/p/:project/plans/:stem` (matches the router).
    */
   planHref?: (projectId: string, planStem: string) => string;
   className?: string;
@@ -66,7 +66,7 @@ interface PlanOutcomeTableProps {
  */
 export function PlanOutcomeTable({
   analytics,
-  planHref = (projectId, planStem) => `/p/${projectId}/plan/${encodeURIComponent(planStem)}`,
+  planHref = (projectId, planStem) => `/p/${projectId}/plans/${encodeURIComponent(planStem)}`,
   className,
 }: PlanOutcomeTableProps) {
   const isMobile = useIsMobile();
