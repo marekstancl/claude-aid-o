@@ -1,16 +1,6 @@
 import { STATUS, type StatusKey } from '@aid/contract';
 import { cn } from '../../lib/utils';
-import { STATUS_ICON } from './StatusBadge';
-
-/** §6.2 fallback when an unexpected value slips past the type system. */
-const FALLBACK: StatusKey = 'necinne';
-
-function safeStatus(status: StatusKey): StatusKey {
-  if (status in STATUS) return status;
-  // eslint-disable-next-line no-console
-  console.warn(`StatusDot: unknown status "${String(status)}", defaulting to "${FALLBACK}".`);
-  return FALLBACK;
-}
+import { STATUS_ICON, safeStatus } from './StatusBadge';
 
 interface StatusDotProps {
   status: StatusKey;

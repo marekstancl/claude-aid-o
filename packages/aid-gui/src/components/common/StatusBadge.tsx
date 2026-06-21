@@ -33,7 +33,7 @@ const FALLBACK: StatusKey = 'necinne';
  * Coerce an (untyped at runtime) status to a known §6.2 key, defaulting to
  * `necinne` (grey) with a console.warn — colour is NEVER undefined.
  */
-function safeStatus(status: StatusKey): StatusKey {
+export function safeStatus(status: StatusKey): StatusKey {
   if (status in STATUS) return status;
   // eslint-disable-next-line no-console
   console.warn(`StatusBadge: unknown status "${String(status)}", defaulting to "${FALLBACK}".`);

@@ -1,44 +1,11 @@
 import { Link } from 'react-router-dom';
-import type { Explanation, FsmState, Project, RunDetail, StatusKey } from '@aid/contract';
-import { cn } from '../lib/utils';
+import type { Explanation, Project, RunDetail } from '@aid/contract';
+import { cn, relativeCzech } from '../lib/utils';
+import { FSM_STATUS, FSM_WORD } from '../lib/fsmStatus';
 import { StatusDot } from './common/StatusDot';
 import { MetricBadge } from './common/MetricBadge';
 import { ExplanationLine } from './common/ExplanationLine';
 import { CheckpointStrip } from './CheckpointStrip';
-
-/** §6.2 token for an FSM state (drives the header dot colour). */
-const FSM_STATUS: Record<FsmState, StatusKey> = {
-  READY: 'ceka',
-  EXECUTE: 'bezi',
-  GATES: 'bezi',
-  ESCALATION: 'eskalace',
-  DONE: 'proslo',
-  ERROR: 'selhalo',
-};
-
-/** Czech word per FSM state (fallback when no dictionary explanation is supplied). */
-const FSM_WORD: Record<FsmState, string> = {
-  READY: 'připraveno',
-  EXECUTE: 'běží krok',
-  GATES: 'kontroly',
-  ESCALATION: 'eskalace',
-  DONE: 'hotovo',
-  ERROR: 'chyba',
-};
-
-/** Short Czech relative phrase for an ISO timestamp (e.g. "před 3 h"). */
-function relativeCzech(iso: string, now: number = Date.now()): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const diffS = Math.max(0, Math.round((now - then) / 1000));
-  if (diffS < 60) return 'právě teď';
-  const diffMin = Math.round(diffS / 60);
-  if (diffMin < 60) return `před ${diffMin} min`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `před ${diffH} h`;
-  const diffD = Math.round(diffH / 24);
-  return `před ${diffD} d`;
-}
 
 /** Elapsed seconds since an ISO start, or null when unparseable/absent. */
 function elapsedS(iso: string | null | undefined, now: number = Date.now()): number | null {
@@ -86,6 +53,7 @@ export function ProjectTile({ project, activeRunDetail, fsmExplanation, classNam
         'flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-4 no-underline transition hover:border-slate-300 hover:shadow-sm',
         className,
       )}
+      aria-live="polite"
     >
       {/* Header: name + status dot + (optional) violation badge. */}
       <div className="flex items-start justify-between gap-2">

@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import type { Project } from '@aid/contract';
+import { getProjects } from '../../lib/api';
 
-export interface ProjectSummary {
-  id: string;
-  name?: string;
-  [key: string]: unknown;
+export interface ProjectSummary extends Project {
+  // ProjectSummary shape matches the Project contract from api.getProjects()
 }
 
 interface ProjectsContextValue {
@@ -21,10 +21,10 @@ const ProjectsContext = createContext<ProjectsContextValue>({
 });
 
 /**
- * Fetches the project list from /api/projects once and exposes it to the shell.
+ * Fetches the project list via getProjects() and exposes it to the shell.
  * The breadcrumb and the B/Plan/C detail screens use it to render a
  * "Projekt nenalezen" empty state for an unknown :project param instead of
- * crashing. The API returns a { ok, data } envelope (legacy: bare array).
+ * crashing. Uses the api.ts envelope unwrapping and error handling.
  */
 export function ProjectsProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -33,15 +33,13 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/projects')
-      .then((res) => res.json())
-      .then((result) => {
+    getProjects()
+      .then((list) => {
         if (cancelled) return;
-        const list = result && result.ok ? result.data : result;
-        if (Array.isArray(list)) setProjects(list as ProjectSummary[]);
+        setProjects(list as ProjectSummary[]);
       })
       .catch(() => {
-        /* offline / server down — treat as empty, screens show empty state */
+        /* offline / server down — ApiError is caught, treat as empty state */
       })
       .finally(() => {
         if (cancelled) return;

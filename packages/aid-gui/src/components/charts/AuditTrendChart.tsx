@@ -93,7 +93,7 @@ export function AuditTrendChart({ trend, compact = false, onPointClick, classNam
   if (compact) {
     // Mobile sparkline: just the broken line, no chrome.
     return (
-      <div data-audit-trend data-compact className={cn(className)}>
+      <div data-audit-trend data-compact className={cn(className)} aria-label="Vývoj skóre auditu">
         <ResponsiveContainer width="100%" height={64}>
           <LineChart data={data} margin={{ top: 4, right: 4, bottom: 4, left: 4 }}>
             <YAxis domain={[0, 100]} hide />
@@ -114,7 +114,7 @@ export function AuditTrendChart({ trend, compact = false, onPointClick, classNam
   }
 
   return (
-    <div data-audit-trend className={cn(className)}>
+    <div data-audit-trend className={cn(className)} aria-label="Vývoj skóre auditu">
       <ResponsiveContainer width="100%" height={180}>
         <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
           <CartesianGrid {...chartTheme.grid} />

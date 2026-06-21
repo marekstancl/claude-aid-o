@@ -19,6 +19,7 @@
  */
 
 import type { LastSeen } from '@aid/contract';
+import { storage } from './storage';
 
 /** Per-scope localStorage key prefix. */
 const KEY_PREFIX = 'aid.lastSeen.';
@@ -28,16 +29,6 @@ const CONTAINER_KEY = 'aid.lastSeen';
 /** Build the per-scope storage key for a scopeKey (`infra`, `p:wan`, `p:wan:P003`). */
 export function lastSeenKey(scopeKey: string): string {
   return KEY_PREFIX + scopeKey;
-}
-
-/** Return the global localStorage, or null when it is unavailable (SSR/private mode). */
-function storage(): Storage | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    // Some browsers throw on the very access of `localStorage` in private mode.
-    return null;
-  }
 }
 
 /**

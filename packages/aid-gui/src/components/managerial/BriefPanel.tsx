@@ -52,7 +52,7 @@ export function BriefPanel({
   className,
 }: BriefPanelProps) {
   return (
-    <div data-brief-panel data-scope={scope} className={cn('space-y-4', className)}>
+    <div data-brief-panel data-scope={scope} className={cn('space-y-4', className)} aria-live="polite">
       {/* 1. Rozhodnutí. */}
       <Card title="Rozhodnutí" collapsibleOnMobile>
         <DecisionsNeededList items={brief.decisionsNeeded} embedded />

@@ -28,6 +28,7 @@ import type {
   BacklogSnapshot,
   BacklogSnapshotRow,
 } from '@aid/contract';
+import { storage } from './storage';
 
 /** Per-scope snapshot key prefix in localStorage. */
 const SNAPSHOT_PREFIX = 'aid.backlog.';
@@ -54,14 +55,6 @@ export interface BacklogMeta {
 /** Build the per-scope snapshot storage key. */
 export function backlogSnapshotKey(scopeKey: string): string {
   return SNAPSHOT_PREFIX + scopeKey;
-}
-
-function storage(): Storage | null {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null;
-  }
 }
 
 function isClosed(status: string | null | undefined): boolean {

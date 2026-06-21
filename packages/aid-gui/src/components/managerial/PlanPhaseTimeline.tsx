@@ -1,25 +1,6 @@
-import type { EpicSummary, FsmState, StatusKey, Explanation } from '@aid/contract';
+import type { EpicSummary, Explanation, StatusKey } from '@aid/contract';
 import { FsmTimeline, type TimelineNode } from '../FsmTimeline';
-
-/** §6.2 token for an EPIC's latest-run FSM state (same mapping as ProjectTile). */
-const FSM_STATUS: Record<FsmState, StatusKey> = {
-  READY: 'ceka',
-  EXECUTE: 'bezi',
-  GATES: 'bezi',
-  ESCALATION: 'eskalace',
-  DONE: 'proslo',
-  ERROR: 'selhalo',
-};
-
-/** Czech phase word per FSM state, shown as the node's gloss. */
-const FSM_WORD: Record<FsmState, string> = {
-  READY: 'připraveno',
-  EXECUTE: 'běží',
-  GATES: 'kontroly',
-  ESCALATION: 'eskalace',
-  DONE: 'hotovo',
-  ERROR: 'chyba',
-};
+import { FSM_STATUS, FSM_WORD } from '../../lib/fsmStatus';
 
 interface PlanPhaseTimelineProps {
   /** Member EPICs in plan order (the caller supplies the order; §13.6). */

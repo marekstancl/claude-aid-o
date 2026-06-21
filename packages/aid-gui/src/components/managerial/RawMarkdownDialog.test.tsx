@@ -155,7 +155,7 @@ describe('RawMarkdownDialog', () => {
 
   it('shows loading state while fetching', async () => {
     const mockGetRunFile = vi.mocked(api.getRunFile);
-    let resolveAsync: (value: any) => void = () => {};
+    let resolveAsync: (value: unknown) => void = () => {};
     mockGetRunFile.mockImplementation(
       () =>
         new Promise((resolve) => {
