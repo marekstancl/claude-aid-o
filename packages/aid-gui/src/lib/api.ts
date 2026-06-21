@@ -240,3 +240,26 @@ export function getAuditTrend(
 export function getExplanations(lang = 'cs'): Promise<Record<string, DictionaryEntry>> {
   return apiGet<Record<string, DictionaryEntry>>(`/api/explanations${qs({ lang })}`);
 }
+
+/**
+ * GET /api/epics/:projectId/:epicId/runs/:runId/file?name=<name> → parsed artifact content.
+ *
+ * Fetches a run-scoped artifact (audit report, evidence file, etc.) from the hardened
+ * file endpoint. The `name` must be an allow-listed artifact name per §7.4.1.
+ *
+ * @param projectId — the project ID (will be encoded)
+ * @param epicId — the EPIC ID (will be encoded)
+ * @param runId — the run ID (will be encoded)
+ * @param name — the allow-listed artifact name (e.g. 'audit-report.md', 'reporter/foo.txt')
+ * @returns Promise resolving to `{ format, content }` where `content` is the parsed file
+ * @throws ApiError if the name is not allow-listed, not found, or fetch fails
+ */
+export function getRunFile(
+  projectId: string,
+  epicId: string,
+  runId: string,
+  name: string,
+): Promise<{ format: string; content: string }> {
+  const path = `/api/epics/${seg(projectId)}/${seg(epicId)}/runs/${seg(runId)}/file${qs({ name })}`;
+  return apiGet<{ format: string; content: string }>(path);
+}
