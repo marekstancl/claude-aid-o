@@ -7,7 +7,10 @@
     "node": ">=24"
   },
   "overrides": {
-    "@types/express": "4.17.25"
+    "@types/express": "4.17.25",
+    "@rollup/plugin-terser": {
+      "serialize-javascript": "6.0.2"
+    }
   },
   "scripts": {
     "build": "npm run build -w @aid/contract && npm run build -w @aid/server && npm run build -w @aid/gui",
