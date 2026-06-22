@@ -205,11 +205,11 @@ const DEMO_FSM_NODES: TimelineNode[] = [
 /** CP1–CP6 demo dots for the CheckpointStrip Demo. */
 const DEMO_CHECKPOINTS: Checkpoint[] = [
   cp('CP1', 'kontrola plánu', 'pass'),
-  cp('CP2', 'kontrola EPICy', 'pass'),
-  cp('CP3', 'kontrola kroku', 'pass'),
-  cp('CP4', 'brány', 'pass'),
+  cp('CP2', 'kontrola kroku', 'pass'),
+  cp('CP3', 'integrační kontrola (code-review + security)', 'pass'),
+  cp('CP4', 'validace kurátora', 'pass'),
   cp('CP5', 'audit', 'unverifiable'),
-  cp('CP6', 'dokončení', null),
+  cp('CP6', 'jen Fast Mode (/aid-do)', null),
 ];
 
 function cp(id: Checkpoint['id'], label: string, verdict: Checkpoint['verdict']): Checkpoint {

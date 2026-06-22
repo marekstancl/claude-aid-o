@@ -1,11 +1,11 @@
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { Tabs } from '@base-ui/react/tabs';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { EpicSummary, PlanDetail } from '@aid/contract';
 import { getPlanDetail, getBrief, ApiError } from '../lib/api';
-import { getLastSeen } from '../lib/lastSeen';
-import { getBacklogSnapshot, buildBacklogDelta } from '../lib/backlog-delta';
+import { getLastSeen, setLastSeen } from '../lib/lastSeen';
+import { getBacklogSnapshot, buildBacklogDelta, saveBacklogSnapshot } from '../lib/backlog-delta';
 import { relativeCzech, czechPlural } from '../lib/utils';
 import { MobileBackHeader } from '../components/shell/MobileBackHeader';
 import { ProjectNotFound } from '../components/shell/ProjectNotFound';
@@ -234,7 +234,23 @@ function boundaryRunCoords(
   project: string,
   epics: EpicSummary[],
 ): { projectId: string; epicId?: string; runId?: string } {
-  const boundary = epics.length > 0 ? epics[epics.length - 1] : null;
+  // The plan-boundary EPIC is the LAST one in plan SEQUENCE (highest step), NOT
+  // the last element of the server's STATUS-weighted array. Parse the step from
+  // the id `E-{plan}-{step}_{total}` and pick the max step (then max total). For
+  // P047 this correctly selects E-047-7_7, not whatever the status sort tails.
+  const stepOf = (id: string): [number, number] => {
+    const m = id.match(/^E-?\d+-(\d+)_(\d+)/i);
+    return m ? [parseInt(m[1], 10), parseInt(m[2], 10)] : [-1, -1];
+  };
+  let boundary: EpicSummary | null = null;
+  let best: [number, number] = [-1, -1];
+  for (const e of epics) {
+    const s = stepOf(e.id);
+    if (s[0] > best[0] || (s[0] === best[0] && s[1] > best[1])) {
+      best = s;
+      boundary = e;
+    }
+  }
   return {
     projectId: project,
     epicId: boundary?.id,
@@ -247,6 +263,7 @@ function boundaryRunCoords(
 // ---------------------------------------------------------------------------
 
 function BriefTab({ project, planId }: { project: string; planId: string }) {
+  const queryClient = useQueryClient();
   // Plan-scope lastSeen key (spec §13.3: `plan:<project>:<planId>`).
   const since = getLastSeen(`plan:${project}:${planId}`);
   const briefQuery = useQuery({
@@ -257,6 +274,13 @@ function BriefTab({ project, planId }: { project: string; planId: string }) {
   });
 
   const brief = briefQuery.data;
+
+  // Persist plan-scope lastSeen so "Od poslední návštěvy" advances (REOPEN H1 —
+  // previously the key was only ever read, never written → forever first-visit).
+  const markAsRead = () => {
+    setLastSeen(`plan:${project}:${planId}`, new Date().toISOString());
+    void queryClient.invalidateQueries({ queryKey: ['brief', 'plan', project, planId] });
+  };
 
   if (!brief) {
     if (briefQuery.isError) {
@@ -273,7 +297,21 @@ function BriefTab({ project, planId }: { project: string; planId: string }) {
     );
   }
 
-  return <BriefPanel scope="plan" brief={brief} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-mark-read
+          onClick={markAsRead}
+          className="inline-flex min-h-[36px] items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-100"
+        >
+          Označit jako přečtené
+        </button>
+      </div>
+      <BriefPanel scope="plan" brief={brief} />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -559,20 +597,43 @@ function BacklogTab({
 }) {
   // Compute the delta CLIENT-SIDE (§13.7): current rows vs the persisted snapshot
   // under `aid.backlog.plan:<project>:<planId>`. firstVisit (no snapshot) →
-  // BacklogDeltaList renders "bez porovnání - vše jako nové". Read-only — we never
-  // mutate the backlog or persist a snapshot here.
+  // BacklogDeltaList renders "bez porovnání - vše jako nové". The snapshot is
+  // never mutated as a side effect of rendering — it is written only when the PM
+  // explicitly acknowledges via "Označit jako přečtené" below. `savedBump` forces
+  // the memo to recompute against the freshly-written snapshot. REOPEN H1:
+  // previously saveBacklogSnapshot was never called in production → forever
+  // first-visit; the delta could never show "since you last looked".
+  const scopeKey = `plan:${project}:${planId}`;
+  const [savedBump, setSavedBump] = useState(0);
   const delta = useMemo(() => {
-    const snapshot = getBacklogSnapshot(`plan:${project}:${planId}`);
+    const snapshot = getBacklogSnapshot(scopeKey);
     return buildBacklogDelta(detail.backlog.items, snapshot, {
       scope: 'plan',
       projectId: project,
       planId,
       closedCount: detail.backlog.closedCount,
     });
-  }, [detail.backlog.items, detail.backlog.closedCount, project, planId]);
+    // savedBump intentionally re-triggers after a snapshot write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.backlog.items, detail.backlog.closedCount, project, planId, scopeKey, savedBump]);
+
+  const markAsRead = () => {
+    saveBacklogSnapshot(scopeKey, detail.backlog.items, new Date().toISOString());
+    setSavedBump((n) => n + 1);
+  };
 
   return (
-    <div data-plan-backlog-tab>
+    <div data-plan-backlog-tab className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-backlog-mark-read
+          onClick={markAsRead}
+          className="inline-flex min-h-[36px] items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-100"
+        >
+          Označit jako přečtené
+        </button>
+      </div>
       <BacklogDeltaList delta={delta} />
     </div>
   );

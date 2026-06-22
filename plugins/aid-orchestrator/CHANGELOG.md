@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - **Plan→EPIC acceptance-criteria + role extraction** — `aid-plan-to-epic.sh` now reads acceptance criteria written as plain `-` bullets under `**Acceptance Criteria**` (with or without a colon) and the `**AID Role**` header without a colon; previously it matched only the `**Acceptance Criteria:**` + `- [ ]` + `**AID Role:**` forms, silently dropping every criterion (empty EPIC AC section) and defaulting every step to the `backend` role.
+- **Compliance `overall` is severity-aware** — `write_compliance_json` now derives `overall` from blocking failures only (advisory-severity failures are recorded in `failures[]` for visibility but no longer flip it to `fail`), matching the `cmd_done_advance` release gate; previously a single advisory check such as `branch_correct:false` on a PM-controlled shared feature branch produced `overall:fail` even though the FSM correctly released, a self-contradictory record. The provenance-unverifiable integrity signal stays blocking.
 
 ## [2.36.2] — 2026-06-19
 

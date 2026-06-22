@@ -14,6 +14,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/). Version: semver from `0
 
 ### Fixed
 
+- **"Od poslední návštěvy" + backlog delta now persist** — the project (ScreenB) and plan (ScreenPlan) brief tabs gained an "Označit jako přečtené" writer that calls `setLastSeen`, and the plan backlog tab now calls `saveBacklogSnapshot` on acknowledge; previously both scopes only ever READ `lastSeen`/the snapshot and never wrote them, so the brief and backlog delta were stuck forever in first-visit mode.
+- **Dění pause truly freezes the list** — pausing now snapshots the event source so new poll/WS events buffer (with an "N nových během pauzy" indicator) instead of prepending into the visible feed; the old impl only capped scroll height while newest-first rows kept appearing at the top.
+- **Activity row deep-link anchors in Screen C** — Screen C now reads the `?ts=` query param a Dění row links to, opens directly on the Dění tab, scrolls to that event and highlights it; the param was emitted but never consumed, so the link always landed on the default FSM tab.
+- **Node engine matches the runtime** — root `package.json` `engines.node` and `.nvmrc` corrected from `24` to `18`, matching the eco-dev host (Node 18.20.4), the plan §7.6 pin, and every build/verification this project actually runs on.
+- **Mobile horizontal overflow** — the main content flex column gained `min-w-0` (+ `overflow-x-auto` on `<main>`) so wide tables/ids scroll internally instead of pushing the layout past a 390px viewport.
+- **Plan-boundary EPIC selection** — `boundaryRunCoords` now picks the highest-step EPIC parsed from the id (`E-…-{step}_{total}`) rather than the last element of the server's status-weighted array, so P047 resolves to E-047-7_7, not whichever status sorts last.
+- **File tree hides non-servable artifacts** — Screen C's raw-artifact tree now filters to the server's `/file` allow-list (mirrored client-side), so on-disk-but-not-allow-listed files (e.g. `epic_input.md`) are no longer offered as links that 404.
+- **Help checkpoint labels corrected** — the Nápověda CheckpointStrip demo now labels CP2 as per-step, CP3 as integration (code-review + security), CP4 as curator validation, and CP6 as Fast-Mode-only, matching the real checkpoint roles.
 - **Node-18 PWA build** — `npm run build` failed on Node 18.20.4 because `workbox-build@7.4.1` pulls `serialize-javascript@7` (Node-20-only, references a global `crypto`); pinned via root `overrides` to `serialize-javascript@6.0.2` (`require('crypto')`, no engine restriction). `vite-plugin-pwa` kept at `0.21.2` (latest 0.21.x resolving Vite 6 only). The npm optional-dependencies bug (npm 9.2.0) can omit `@tailwindcss/oxide-linux-x64-gnu`; if the build errors with "Cannot find native binding", run `npm i @tailwindcss/oxide-linux-x64-gnu --no-save` to restore it.
 
 ## [0.1.0] — 2026-06-19

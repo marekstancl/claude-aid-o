@@ -210,24 +210,23 @@ describe('ScreenD — merged live activity stream', () => {
     expect(container.querySelector('[data-event-feed]')).toHaveTextContent('Brána selhala.');
   });
 
-  it('pause freezes auto-scroll (overflow-hidden) while events keep buffering', async () => {
+  it('pause FREEZES the visible list — new poll results buffer but do NOT render until unpause', async () => {
     const { container } = renderScreen();
     await waitFor(() => expect(container.querySelector('[data-event-feed]')).toBeInTheDocument());
+    // Baseline: the initial feed has 3 rows.
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-activity-row]')).toHaveLength(3),
+    );
 
     const toggle = container.querySelector('[data-pause-toggle]') as HTMLElement;
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
-
     fireEvent.click(toggle);
     await waitFor(() =>
       expect(container.querySelector('[data-event-feed]')).toHaveAttribute('data-paused', 'true'),
     );
-    // Auto-scroll frozen: the feed container becomes a capped, overflow-hidden box.
-    const feed = container.querySelector('[data-event-feed]') as HTMLElement;
-    expect(feed.className).toContain('overflow-hidden');
     expect(container.querySelector('[data-paused-note]')).toBeInTheDocument();
 
-    // Events keep buffering: a new poll result still lands in the query cache and
-    // is rendered (pause stops scrolling, NOT data flow).
+    // A new poll result lands in the query cache WHILE paused…
     getActivity.mockResolvedValue([
       ...makeFeed(),
       ev({
@@ -239,11 +238,20 @@ describe('ScreenD — merged live activity stream', () => {
         to: 'GATES',
       }),
     ]);
-    // The 2s refetchInterval re-runs; rows grow even while paused.
+    // …the 2s refetch fires, the cache grows to 4, but the FROZEN list stays at 3
+    // and the buffered-count indicator surfaces the held-back event.
     await waitFor(
-      () => expect(container.querySelectorAll('[data-activity-row]').length).toBeGreaterThanOrEqual(4),
+      () => expect(container.querySelector('[data-buffered-count]')).toHaveTextContent('1'),
       { timeout: 4000 },
     );
+    expect(container.querySelectorAll('[data-activity-row]')).toHaveLength(3);
+
+    // Unpausing releases the buffer: the new event now renders (4 rows).
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-activity-row]')).toHaveLength(4),
+    );
+    expect(container.querySelector('[data-paused-note]')).not.toBeInTheDocument();
   });
 
   it('a row click navigates to /p/:project/e/:epic anchored at ?ts=', async () => {

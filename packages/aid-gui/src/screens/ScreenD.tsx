@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import type { ActivityEvent } from '@aid/contract';
 import { getActivity, getProjects, getExplanations } from '../lib/api';
 import { explainEvent, type Dictionary } from '../lib/explain';
-import { cn } from '../lib/utils';
+import { cn, czechPlural } from '../lib/utils';
 import { useAidSocket } from '../hooks/useAidSocket';
 import { useProjects } from '../components/shell/ProjectsContext';
 import { FilterChip } from '../components/common/FilterChip';
@@ -110,6 +110,18 @@ export function ScreenD() {
   const [kindFilter, setKindFilter] = useState<EventKind | null>(null);
   const [importantOnly, setImportantOnly] = useState(false);
   const [paused, setPaused] = useState(false);
+  // When paused we FREEZE the raw event source captured at pause-time so new
+  // events buffer in the react-query cache but do NOT enter the rendered list
+  // (REOPEN H2: the old impl only capped scroll height — newest-first events
+  // still prepended at the top, so pause visibly did not freeze). Filters still
+  // apply to the frozen set; un-pausing returns to the live source.
+  const [frozenEvents, setFrozenEvents] = useState<ActivityEvent[] | null>(null);
+  const togglePause = () =>
+    setPaused((p) => {
+      const next = !p;
+      setFrozenEvents(next ? allEvents : null);
+      return next;
+    });
 
   // Project options: prefer the shell list, fall back to the local query, and
   // union in any projectId actually seen in the feed (so a project with activity
@@ -122,12 +134,12 @@ export function ScreenD() {
     return [...ids].sort();
   }, [shellProjects, projectsQuery.data, allEvents]);
 
-  // Apply filters + newest-first ordering. The PAUSE toggle does NOT drop the
-  // tail: when paused we render the buffer as-of the LAST render's order, but
-  // because react-query keeps fetching, un-pausing simply re-derives the full
-  // (now larger) list — events keep buffering in the cache the whole time.
+  // Source = the frozen snapshot while paused, else the live cache. Filters +
+  // newest-first ordering apply to whichever source is active, so pausing truly
+  // freezes the visible rows while new events keep accumulating behind it.
+  const source = paused && frozenEvents ? frozenEvents : allEvents;
   const visible = useMemo(() => {
-    const filtered = allEvents.filter((ev) => {
+    const filtered = source.filter((ev) => {
       if (projectFilter && ev.projectId !== projectFilter) return false;
       if (kindFilter && eventKind(ev) !== kindFilter) return false;
       if (importantOnly && !isImportant(ev)) return false;
@@ -135,7 +147,11 @@ export function ScreenD() {
     });
     // Newest-first (the REST endpoint is already newest-first, but sort defensively).
     return filtered.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
-  }, [allEvents, projectFilter, kindFilter, importantOnly]);
+  }, [source, projectFilter, kindFilter, importantOnly]);
+
+  // How many events arrived (and are buffered) since the pause began.
+  const bufferedCount =
+    paused && frozenEvents ? Math.max(0, allEvents.length - frozenEvents.length) : 0;
 
   const hasError = activityQuery.isError && allEvents.length === 0;
 
@@ -143,7 +159,7 @@ export function ScreenD() {
     <section className="space-y-4 p-4 sm:p-6" aria-label="Dění">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-semibold text-slate-900">Dění</h1>
-        <PauseToggle paused={paused} onToggle={() => setPaused((p) => !p)} />
+        <PauseToggle paused={paused} onToggle={togglePause} />
       </header>
 
       <p className="text-sm text-slate-500">
@@ -200,8 +216,15 @@ export function ScreenD() {
       <Card title={paused ? 'Co se děje (pozastaveno)' : 'Co se děje'}>
         {paused && (
           <p data-paused-note className="mb-2 text-xs text-amber-700">
-            Tok je pozastavený — nové události se dál ukládají, jen neposouvají seznam. Zrušením pauzy
-            se zobrazí.
+            Tok je pozastavený — nové události se dál ukládají, jen neposouvají seznam.
+            {bufferedCount > 0 && (
+              <span data-buffered-count>
+                {' '}
+                {bufferedCount}{' '}
+                {czechPlural(bufferedCount, 'nová', 'nové', 'nových')} během pauzy.
+              </span>
+            )}{' '}
+            Zrušením pauzy se zobrazí.
           </p>
         )}
         {hasError ? (

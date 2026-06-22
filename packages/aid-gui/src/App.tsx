@@ -60,12 +60,16 @@ export default function App() {
 
           <div
             className={cn(
-              'flex flex-1 flex-col transition-all duration-300',
+              // min-w-0: a flex child defaults to min-width:auto, which lets wide
+              // content (tables, long ids) push the column past the viewport on
+              // mobile. min-w-0 lets it shrink; main clips/scrolls overflow-x
+              // internally instead of overflowing the page (390px no horiz scroll).
+              'flex min-w-0 flex-1 flex-col transition-all duration-300',
               isMobile ? 'ml-0 pb-14' : isSidebarCollapsed ? 'ml-16' : 'ml-60',
             )}
           >
             {!isMobile && <Breadcrumb />}
-            <main className="flex-1 overflow-y-auto">
+            <main className="min-w-0 flex-1 overflow-x-auto overflow-y-auto">
               <Outlet />
             </main>
           </div>

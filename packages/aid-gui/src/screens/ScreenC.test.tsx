@@ -494,6 +494,47 @@ describe('ScreenC — EPIC deep view (v3 run)', () => {
     expect(getRunFile).toHaveBeenCalledWith(PROJECT, EPIC, 'R-3', expect.any(String));
   });
 
+  it('?ts= deep-link opens directly on the Dění tab and highlights the matching event (REOPEN H2)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[`/p/${PROJECT}/e/${EPIC}?ts=2026-06-20T09:30:00.000Z`]}>
+          <Routes>
+            <Route path="/p/:project/e/:epic" element={<ScreenC />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // Without any tab click, the Dění feed is already rendered (controlled tab).
+    await waitFor(() => expect(container.querySelector('[data-event-feed]')).toBeInTheDocument());
+    // The anchored row is marked + highlighted.
+    const anchored = container.querySelector('[data-event-ts="2026-06-20T09:30:00.000Z"]') as HTMLElement;
+    expect(anchored).toBeInTheDocument();
+    await waitFor(() => expect(anchored).toHaveAttribute('data-anchored', 'true'));
+    expect(anchored.className).toContain('bg-amber-50');
+  });
+
+  it('file tree hides artifacts off the /file allow-list — no 404 links (REOPEN M3)', async () => {
+    getEpic.mockResolvedValue(
+      makeEpicDetail({
+        latest: makeRun({
+          // epic_input.md + plan.md are on disk but NOT allow-listed by /file.
+          files: ['audit-report.md', 'epic_input.md', 'plan.md', 'reporter/summary.md'],
+        }),
+      }),
+    );
+    const { container } = renderScreen();
+    await waitFor(() => expect(container.querySelector('[data-screen-c-tabs]')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: 'Dění' }));
+    const tree = await waitFor(() => container.querySelector('[data-file-tree]') as HTMLElement);
+    // Allow-listed ones show…
+    expect(tree).toHaveTextContent('audit-report.md');
+    expect(tree).toHaveTextContent('reporter/summary.md');
+    // …off-list ones are filtered out (would have 404'd).
+    expect(tree).not.toHaveTextContent('epic_input.md');
+    expect(tree).not.toHaveTextContent('plan.md');
+  });
+
   it('compliance:null → "N/A" + warning, never 0%/fail', async () => {
     getEpic.mockResolvedValue(makeEpicDetail({ latest: makeRun({ compliance: null }) }));
     const { container } = renderScreen();

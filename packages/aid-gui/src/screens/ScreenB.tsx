@@ -1,4 +1,4 @@
-import { useQuery, keepPreviousData } from '@tanstack/react-query';
+import { useQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { Tabs } from '@base-ui/react/tabs';
 import { ToggleGroup } from '@base-ui/react/toggle-group';
@@ -14,7 +14,7 @@ import {
   getProjectDetail,
   getCompliance,
 } from '../lib/api';
-import { getLastSeen } from '../lib/lastSeen';
+import { getLastSeen, setLastSeen } from '../lib/lastSeen';
 import { relativeCzech } from '../lib/utils';
 import { FSM_STATUS, FSM_WORD } from '../lib/fsmStatus';
 import { MobileBackHeader } from '../components/shell/MobileBackHeader';
@@ -147,6 +147,7 @@ function ProjectHeaderBand({ project, summary }: { project: string; summary: Pro
 // ---------------------------------------------------------------------------
 
 function BriefTab({ project }: { project: string }) {
+  const queryClient = useQueryClient();
   const since = getLastSeen(`p:${project}`);
   const briefQuery = useQuery({
     queryKey: ['brief', 'project', project, since],
@@ -156,6 +157,14 @@ function BriefTab({ project }: { project: string }) {
   });
 
   const brief = briefQuery.data;
+
+  // Persist lastSeen for the project scope so "Od poslední návštěvy" actually
+  // advances — without a writer the scope key never exists and the brief is
+  // forever in first-visit mode (REOPEN H1). Mirrors Screen G's infra mark-read.
+  const markAsRead = () => {
+    setLastSeen(`p:${project}`, new Date().toISOString());
+    void queryClient.invalidateQueries({ queryKey: ['brief', 'project', project] });
+  };
 
   if (!brief) {
     if (briefQuery.isError) {
@@ -172,7 +181,21 @@ function BriefTab({ project }: { project: string }) {
     );
   }
 
-  return <BriefPanel scope="project" brief={brief} />;
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          data-mark-read
+          onClick={markAsRead}
+          className="inline-flex min-h-[36px] items-center rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-100"
+        >
+          Označit jako přečtené
+        </button>
+      </div>
+      <BriefPanel scope="project" brief={brief} />
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Tabs } from '@base-ui/react/tabs';
 import { Dialog } from '@base-ui/react/dialog';
 import { X } from 'lucide-react';
@@ -40,6 +40,30 @@ import { DurationBar } from '../components/common/DurationBar';
 import { EventRow } from '../components/common/EventRow';
 
 /**
+ * Client-side mirror of the aid-server `/file` §7.4.1 allow-list
+ * (packages/aid-server/src/routes/file.ts). Used to FILTER the raw-artifact file
+ * tree so it only offers links the server will actually serve — anything off the
+ * allow-list (e.g. `epic_input.md`) would 404, so it is hidden rather than shown
+ * as a dead link. Kept in sync with the server's ALLOWED_EXACT + patterns.
+ */
+const FILE_ALLOWED_EXACT = new Set([
+  'fsm-state.yaml', 'compliance.json', 'gates_report.json', 'plan.json',
+  'plan-diff.json', 'timeline.jsonl', 'epic-summary.md', 'final_report.md',
+  'audit-report.md', 'curator-report.md', 'simplifier-report.md',
+]);
+const FILE_ALLOWED_PATTERNS: RegExp[] = [
+  /^verifier-output-[A-Za-z0-9._-]+\.md$/,
+  /^step-[A-Za-z0-9._-]+-verify\.md$/,
+  /^reporter\/[A-Za-z0-9._-]+$/,
+  /^gates\/(?!\.\.)[A-Za-z0-9._-]+$/,
+  /^steps\/(?!\.\.)[A-Za-z0-9._-]+(?:\/(?!\.\.)[A-Za-z0-9._-]+)*$/,
+];
+function isAllowedArtifact(name: string): boolean {
+  if (FILE_ALLOWED_EXACT.has(name)) return true;
+  return FILE_ALLOWED_PATTERNS.some((re) => re.test(name));
+}
+
+/**
  * Screen C — the rich EPIC deep view (§9) at `/p/:project/e/:epic`.
  *
  * Replaces the Phase-5 STUB while KEEPING its {@link ProjectNotFound} guard. A
@@ -72,6 +96,12 @@ export function ScreenC() {
 }
 
 function EpicDeepView({ project, epic }: { project: string; epic: string }) {
+  // §9.x deep-link anchor: Screen D rows link here as `?ts=<event ts>`. When
+  // present we open on the Dění tab and scroll to that event (REOPEN H2 — the
+  // param was emitted but never read, so the link always landed on the FSM tab).
+  const [searchParams] = useSearchParams();
+  const anchorTs = searchParams.get('ts');
+
   // Live freshness for this run. The app shell already subscribes to ALL topics
   // across ALL projects; this scoped subscription is belt-and-suspenders and the
   // 4s refetchInterval below is the deterministic floor (the hook invalidates on
@@ -153,6 +183,7 @@ function EpicDeepView({ project, epic }: { project: string; epic: string }) {
           detail={detail}
           latest={latest as RunDetail}
           dictionary={dictionary}
+          anchorTs={anchorTs}
         />
       )}
     </section>
@@ -263,15 +294,20 @@ function RichRunView({
   detail,
   latest,
   dictionary,
+  anchorTs,
 }: {
   project: string;
   epic: string;
   detail: EpicDetail;
   latest: RunDetail;
   dictionary: Dictionary;
+  anchorTs?: string | null;
 }) {
+  // Controlled tab so a `?ts=` deep-link opens directly on Dění. State is seeded
+  // once from anchorTs; the PM can switch tabs afterwards without it snapping back.
+  const [tab, setTab] = useState<string>(anchorTs ? 'events' : 'fsm');
   return (
-    <Tabs.Root defaultValue="fsm">
+    <Tabs.Root value={tab} onValueChange={(v) => setTab(v as string)}>
       <Tabs.List
         data-screen-c-tabs
         className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-slate-200"
@@ -310,6 +346,7 @@ function RichRunView({
           epic={epic}
           latest={latest}
           dictionary={dictionary}
+          anchorTs={anchorTs}
         />
       </Tabs.Panel>
     </Tabs.Root>
@@ -897,23 +934,43 @@ function EventsSection({
   epic,
   latest,
   dictionary,
+  anchorTs,
 }: {
   project: string;
   epic: string;
   latest: RunDetail;
   dictionary: Dictionary;
+  anchorTs?: string | null;
 }) {
+  // Scroll the `?ts=`-anchored event into view + highlight it once the rows are
+  // mounted. Matched by exact ts; falls back silently if the event is not in the
+  // run's timeline (e.g. cross-run deep link).
+  const feedRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!anchorTs || !feedRef.current) return;
+    const el = feedRef.current.querySelector<HTMLElement>(
+      `[data-event-ts="${CSS.escape(anchorTs)}"]`,
+    );
+    if (el) {
+      el.setAttribute('data-anchored', 'true');
+      // scrollIntoView is a no-op/undefined in jsdom — guard so tests + SSR are safe.
+      el.scrollIntoView?.({ block: 'center' });
+    }
+  }, [anchorTs, latest.runId]);
+
   // Newest-first narrated timeline.
   const events = useMemo(
     () => [...latest.timeline].sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0)),
     [latest.timeline],
   );
 
-  // Raw-md file tree: run files + report artifacts, de-duplicated by path.
+  // Raw-md file tree: run files + report artifacts, de-duplicated by path —
+  // FILTERED to the server's /file §7.4.1 allow-list so the tree never offers a
+  // link that 404s (e.g. epic_input.md is on disk but not allow-listed).
   const files = useMemo(() => {
     const map = new Map<string, string>(); // relPath → display name
-    for (const r of latest.reports) map.set(r.relPath, r.name);
-    for (const f of latest.files) if (!map.has(f)) map.set(f, f);
+    for (const r of latest.reports) if (isAllowedArtifact(r.relPath)) map.set(r.relPath, r.name);
+    for (const f of latest.files) if (!map.has(f) && isAllowedArtifact(f)) map.set(f, f);
     return [...map.entries()].map(([relPath, name]) => ({ relPath, name }));
   }, [latest.reports, latest.files]);
 
@@ -925,14 +982,22 @@ function EventsSection({
             Zatím se nic nestalo.
           </p>
         ) : (
-          <div data-event-feed className="divide-y divide-slate-100">
+          <div data-event-feed ref={feedRef} className="divide-y divide-slate-100">
             {events.map((event, i) => (
-              <EventRow
+              <div
                 key={`${event.ts}:${event.event}:${i}`}
-                event={event}
-                explanation={explainEvent(event, dictionary)}
-                at={event.ts}
-              />
+                data-event-ts={event.ts}
+                className={cn(
+                  'scroll-mt-20 rounded-lg transition-colors',
+                  anchorTs && event.ts === anchorTs ? 'bg-amber-50 ring-1 ring-amber-200' : '',
+                )}
+              >
+                <EventRow
+                  event={event}
+                  explanation={explainEvent(event, dictionary)}
+                  at={event.ts}
+                />
+              </div>
             ))}
           </div>
         )}

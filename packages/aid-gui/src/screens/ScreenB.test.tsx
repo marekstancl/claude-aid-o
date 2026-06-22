@@ -33,7 +33,7 @@ vi.mock('../lib/api', () => ({
   getProjectDetail: vi.fn(),
   getCompliance: vi.fn(),
 }));
-vi.mock('../lib/lastSeen', () => ({ getLastSeen: vi.fn() }));
+vi.mock('../lib/lastSeen', () => ({ getLastSeen: vi.fn(), setLastSeen: vi.fn() }));
 vi.mock('../components/shell/ProjectsContext', () => ({ useProjects: vi.fn() }));
 
 const getBrief = vi.mocked(api.getBrief);
@@ -215,6 +215,20 @@ describe('ScreenB — project detail tab strip', () => {
     // The Brief tab is the active tab (data-active per base-ui Tabs).
     const briefTab = screen.getByRole('tab', { name: 'Brief' });
     expect(briefTab).toHaveAttribute('data-active');
+  });
+
+  it('"Označit jako přečtené" persists project-scope lastSeen (REOPEN H1)', async () => {
+    const setLastSeen = vi.mocked(lastSeen.setLastSeen);
+    const { container } = renderScreen();
+    await waitFor(() =>
+      expect(container.querySelector('[data-brief-panel][data-scope="project"]')).toBeInTheDocument(),
+    );
+    const btn = container.querySelector('[data-mark-read]') as HTMLElement;
+    expect(btn).toBeInTheDocument();
+    fireEvent.click(btn);
+    // The writer fires for the project scope key — without it the brief is forever
+    // in first-visit mode (the bug: lastSeen was only ever read, never written).
+    expect(setLastSeen).toHaveBeenCalledWith(`p:${PROJECT}`, expect.any(String));
   });
 
   it('Audit tab renders the aggregate median score + "ze N auditovaných" provenance chip + a connectNulls={false} broken trend', async () => {
