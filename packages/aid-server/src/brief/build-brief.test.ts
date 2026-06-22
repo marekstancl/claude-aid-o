@@ -23,14 +23,10 @@ import type {
 } from '@aid/contract';
 import {
   buildBrief,
-  assembleBlockers,
-  assembleWatchOuts,
-  assembleNextUp,
-  assembleDecisionsNeeded,
+  collectFacts,
   buildSinceLastSeen,
   extractRiskSignals,
   infraRisk,
-  sortBriefItems,
   type BriefRunMember,
   type BriefRunSet,
 } from './build-brief.js';
@@ -144,14 +140,18 @@ function runSetOf(members: BriefRunMember[], projectId: string | null = null): B
   };
 }
 
-// A blocking-compliance member (drives vysoke risk + a blocker item).
+// A blocking-compliance member (drives vysoke risk + a blocker item). archiveStatus
+// 'active' so the §A3 lifecycle classifies it as a CURRENT blocker (the route
+// derives 'active' for a live/decision-pending EPIC; without evidence it would be
+// 'unknown' → needsTriage, never a confident current blocker).
 function blockingMember(projectId: string, epicId: string): BriefRunMember {
   return member({
+    archiveStatus: 'active',
     detail: makeDetail({
       projectId,
       epicId,
       runId: `R-${epicId}`,
-      state: 'DONE',
+      state: 'GATES',
       compliance: cleanCompliance({
         epicId,
         runId: `R-${epicId}`,
@@ -234,13 +234,53 @@ describe('AC1 — infra brief shape + sorting', () => {
     expect(weights).toEqual([...weights].sort((a, b) => a - b));
   });
 
-  it('sortBriefItems orders blocking→warn→info then newest at first', () => {
-    const items = sortBriefItems([
-      { id: 'c', projectId: 'p', title: 'i', explanation: {} as never, severity: 'info', signal: 's', at: '2026-01-01', href: '/' },
-      { id: 'a', projectId: 'p', title: 'b', explanation: {} as never, severity: 'blocking', signal: 's', at: '2026-01-01', href: '/' },
-      { id: 'b', projectId: 'p', title: 'w', explanation: {} as never, severity: 'warn', signal: 's', at: '2026-02-01', href: '/' },
-    ]);
-    expect(items.map((i) => i.severity)).toEqual(['blocking', 'warn', 'info']);
+  it('blocker items carry a human title (NEVER raw snake_case) + managerial fields', () => {
+    const rs = runSetOf([blockingMember('zeta', 'E-099-1_1')]);
+    const brief = buildBrief(rs, 'infra', null, GENERATED_AT);
+    const item = brief.blockers[0];
+    expect(item).toBeDefined();
+    // humanTitle is human Czech, not the signal id.
+    expect(item.humanTitle).not.toMatch(/^[a-z_]+$/);
+    expect(item.humanTitle.length).toBeGreaterThan(0);
+    expect(item.whyItMatters.length).toBeGreaterThan(0);
+    expect(item.rootCauseKey).toContain('verifier_provenance'); // concrete check, not just the signal
+    expect(item.lifecycle).toBe('active');
+    expect(item.occurrenceCount).toBe(1);
+  });
+
+  it('an archive-UNKNOWN blocking signal goes to needsTriage, never to blockers (§A3)', () => {
+    // No archiveStatus → 'unknown' → not a confident current blocker.
+    const unknownMember = member({
+      detail: makeDetail({
+        projectId: 'wan',
+        epicId: 'E-044-2_3',
+        runId: 'R-E044-2',
+        state: 'DONE',
+        compliance: cleanCompliance({
+          epicId: 'E-044-2_3',
+          runId: 'R-E044-2',
+          overall: 'fail',
+          failures: [{ check: 'verifier_provenance', evidence: 'x', severity: 'blocking' }],
+        }),
+      }),
+    });
+    const brief = buildBrief(runSetOf([unknownMember]), 'infra', null, GENERATED_AT);
+    expect(brief.blockers).toHaveLength(0);
+    expect(brief.needsTriage.length).toBeGreaterThan(0);
+    expect(brief.needsTriage[0].inconsistencyFlags).toContain('archive_status_unknown');
+  });
+
+  it('decision > blocker precedence — an item never appears in BOTH lists', () => {
+    const rs = runSetOf([blockingMember('zeta', 'E-099-1_1')]);
+    const brief = buildBrief(rs, 'infra', null, GENERATED_AT);
+    const ids = new Set(brief.decisionsNeeded.map((i) => i.id));
+    for (const b of brief.blockers) expect(ids.has(b.id)).toBe(false);
+  });
+
+  it('ecosystemLine is a non-empty human one-liner', () => {
+    const rs = runSetOf([blockingMember('zeta', 'E-099-1_1')]);
+    const brief = buildBrief(rs, 'infra', null, GENERATED_AT);
+    expect(brief.ecosystemLine).toMatch(/projekt|riziko/);
   });
 });
 
@@ -346,13 +386,13 @@ describe('AC4 — infra worst-level rule (neurceno never lowers)', () => {
 // ---------------------------------------------------------------------------
 
 describe('AC6 — explanations resolve via explain() (never the unknown fallback)', () => {
-  it('blocker / watchOut / decision / nextUp items carry resolved Czech explanations', () => {
+  it('every managerial item carries a resolved Czech explanation (no unknown-id fallback)', () => {
     const rs: BriefRunSet = {
       projectId: 'wan',
       planId: null,
       members: [
-        // ESCALATION (blocker + decision), audit recommended (watchOut), advisory.
         member({
+          archiveStatus: 'active',
           detail: makeDetail({
             state: 'ESCALATION',
             escalationCount: 1,
@@ -376,27 +416,27 @@ describe('AC6 — explanations resolve via explain() (never the unknown fallback
       partialProjects: [],
     };
 
+    const brief = buildBrief(rs, 'project', null, GENERATED_AT);
     const allItems = [
-      ...assembleBlockers(rs),
-      ...assembleWatchOuts(rs, Date.parse(GENERATED_AT)),
-      ...assembleNextUp(rs),
-      ...assembleDecisionsNeeded(rs),
+      ...brief.blockers,
+      ...brief.watchOuts,
+      ...brief.nextUp,
+      ...brief.decisionsNeeded,
+      ...brief.needsTriage,
     ];
-
     expect(allItems.length).toBeGreaterThan(0);
     for (const item of allItems) {
-      expect(item.explanation).toBeDefined();
-      expect(typeof item.explanation.headline).toBe('string');
       expect(item.explanation.headline.length).toBeGreaterThan(0);
-      // The unknown-id fallback headline starts with "Neznámá událost" — assert
-      // NONE of our items hit it (every key is a real dictionary key).
       expect(item.explanation.headline).not.toMatch(/^Neznámá událost/);
+      // humanTitle is the user-facing label — NEVER a raw snake_case signal.
+      expect(item.humanTitle).not.toBe(item.signal);
     }
 
-    // ESCALATION present in BOTH blockers and decisionsNeeded with the SAME id.
-    const escBlock = assembleBlockers(rs).find((i) => i.signal === 'escalation_active');
-    const escDec = assembleDecisionsNeeded(rs).find((i) => i.signal === 'escalation_active');
-    expect(escBlock?.id).toBe(escDec?.id);
+    // ESCALATION is a DECISION only (decision > blocker precedence) — not duplicated.
+    const inDecisions = brief.decisionsNeeded.some((i) => i.signal === 'escalation_active');
+    const inBlockers = brief.blockers.some((i) => i.signal === 'escalation_active');
+    expect(inDecisions).toBe(true);
+    expect(inBlockers).toBe(false);
   });
 });
 

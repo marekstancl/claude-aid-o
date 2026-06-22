@@ -228,14 +228,35 @@ async function assembleEpicMember(
   const resolved = applyResolution(detail, runs, indexed, scanner);
 
   const touchedAtMs = latest.mtimeMs;
+  const resolvedDetail = await resolved;
   return {
     projectId: indexed.projectId,
     epicId,
     runId: latest.runId,
-    detail: await resolved,
+    detail: resolvedDetail,
     touchedAt: touchedAtMs !== null ? new Date(touchedAtMs).toISOString() : null,
     touchedAtMs,
+    archiveStatus: deriveArchiveStatus(resolvedDetail),
   };
+}
+
+/**
+ * F1 evidence-based archive status (E-047-6 REOPEN §A′). NEVER "absent from the
+ * active set": a live FSM state or a pending merge decision is demonstrable
+ * `active`; everything else is `unknown` (NOT historical) until F2 wires explicit
+ * archive evidence (tasks/archive, runs/archive, task status). `unknown` items
+ * surface in `needsTriage`, never as confident current blockers.
+ */
+function deriveArchiveStatus(detail: RunDetail): 'archived' | 'active' | 'unknown' {
+  const s = detail.state;
+  if (s === 'READY' || s === 'EXECUTE' || s === 'GATES' || s === 'ESCALATION') return 'active';
+  // DONE awaiting a PM merge decision is genuinely active (needs action).
+  if (detail.donePhase === 'review' && (detail.pmDecision === null || detail.pmDecision === '')) {
+    return 'active';
+  }
+  // DONE/released or otherwise terminal WITHOUT archive evidence → unknown (triage),
+  // never silently historical (F2 adds tasks/archive + runs/archive evidence).
+  return 'unknown';
 }
 
 /**

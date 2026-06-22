@@ -45,6 +45,12 @@ import type {
 } from '@aid/contract';
 import { explain } from '../explain/index.js';
 import { computeRisk, RISK, type RiskSignals } from './risk.js';
+import {
+  buildEcosystemLine,
+  buildManagerialItems,
+  projectViews,
+  type RawSignalFact,
+} from './managerial-model.js';
 
 // ===========================================================================
 // Input shape — the assembled run set (pure projection input, no disk)
@@ -78,6 +84,14 @@ export interface BriefRunMember {
   /** Run-dir max-file mtime as epoch ms (drives the §13.2 S7 staleRun signal). */
   touchedAtMs: number | null;
   membershipSource?: 'plan_path' | 'plan_ref' | 'derived' | 'orphan';
+  /**
+   * EVIDENCE-BASED archive status (E-047-6 REOPEN §A′). The route resolves this
+   * from authoritative artifacts (live FSM state / pending decision → 'active';
+   * tasks/archive or runs/archive evidence → 'archived'; otherwise 'unknown').
+   * Defaults to 'unknown' when the route does not set it (never silently
+   * historical). Feeds the §A3 lifecycle classification.
+   */
+  archiveStatus?: 'archived' | 'active' | 'unknown';
 }
 
 /** Per-project context the brief needs beyond its run members. */
@@ -186,24 +200,34 @@ export function buildBrief(
   const nowMs = Date.parse(generatedAt);
   const refNowMs = Number.isNaN(nowMs) ? null : nowMs;
 
-  // The seven answer dimensions (§13.1), each a sorted BriefItem[].
-  const blockers = sortBriefItems(assembleBlockers(runSet));
-  const watchOuts = sortBriefItems(assembleWatchOuts(runSet, refNowMs));
-  const nextUp = sortBriefItems(assembleNextUp(runSet));
-  const decisionsNeeded = sortBriefItems(assembleDecisionsNeeded(runSet));
-  const sinceLastSeen = buildSinceLastSeen(runSet, since);
+  // E-047-6 REOPEN productization: detect raw signal FACTS, then hand them to the
+  // managerial model (root-cause grouping → evidence-based lifecycle → dedup
+  // projection). The four views are projections of ONE deduplicated item set, so
+  // a problem never appears twice (decision > blocker precedence).
+  const facts = collectFacts(runSet, refNowMs);
+  const items = buildManagerialItems(facts);
+  const projection = projectViews(items);
   const risk = buildScopeRisk(runSet, scope, refNowMs);
+  const ecosystemLine = buildEcosystemLine(
+    projection,
+    runSet.projects.length || (runSet.projectId ? 1 : 0),
+    risk.level,
+  );
+
+  const sinceLastSeen = buildSinceLastSeen(runSet, since);
 
   return {
     scope,
     projectId: runSet.projectId,
     planId: runSet.planId,
     generatedAt,
+    ecosystemLine,
     sinceLastSeen,
-    blockers,
-    watchOuts,
-    nextUp,
-    decisionsNeeded,
+    blockers: projection.blockers,
+    watchOuts: projection.watchOuts,
+    nextUp: projection.nextUp,
+    decisionsNeeded: projection.decisionsNeeded,
+    needsTriage: projection.needsTriage,
     risk,
     // MVP1 INVARIANT (MF5, AC #14): value AND source are ALWAYS null on EVERY
     // scope — no model exists to produce a number (D2). Cloned so a caller can
@@ -213,305 +237,151 @@ export function buildBrief(
 }
 
 // ===========================================================================
-// §13.1 row 2 — blockers ("co blokuje postup")
+// Fact collection — detect raw signal FACTS from each run (no item construction)
 // ===========================================================================
 
-/**
- * "Co blokuje postup": open blocking compliance failures (§4.5), runs in
- * ESCALATION (§4.1), repeated precondition fails, stuck/stale runs (§13.2
- * S5/S7), and a run in `done_phase==review` with no `pm_decision` (merge stuck).
- * Each item carries an `explanation` resolved via `explain()` over a real key.
- */
-export function assembleBlockers(runSet: BriefRunSet): BriefItem[] {
-  const items: BriefItem[] = [];
-
-  for (const m of runSet.members) {
-    const d = m.detail;
-
-    // Open blocking compliance violations (§5.7-resolved upstream by the route).
-    for (const f of openBlockingFailures(d.compliance)) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/${f.check}`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: f.check,
-        explanation: explain({ kind: 'severity', id: 'blocking' }),
-        severity: 'blocking',
-        signal: 'open_blocking_violation',
-        at: d.compliance?.evaluatedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
-    }
-
-    // ESCALATION — a human is the blocker (also a decision; same id de-dupes).
-    if (d.state === 'ESCALATION') {
-      items.push(escalationItem(m));
-    }
-
-    // Repeated precondition fails (§13.2 S5) — pattern ≥2 by construction. This
-    // is a hard blocker: the same transition keeps being refused.
-    if (repeatedPreconditionFails(d)) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/repeated_precondition_fail`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'repeated_precondition_fail',
-        explanation: explain({ kind: 'concept', id: 'stuck_or_looping' }),
-        severity: 'blocking',
-        signal: 'repeated_precondition_fail',
-        at: m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
-    }
-
-    // done_phase==review with no pm_decision while a merge gate is unmet.
-    if (mergeStuck(d)) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/merge_pending`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'merge_pending',
-        explanation: explain({ kind: 'concept', id: 'decision_needed' }),
-        severity: 'blocking',
-        signal: 'merge_pending',
-        at: d.startedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
-    }
-  }
-
-  return items;
+/** Archive status of a member, defaulting to 'unknown' (never silently historical). */
+function archiveStatusOf(m: BriefRunMember): 'archived' | 'active' | 'unknown' {
+  return m.archiveStatus ?? 'unknown';
 }
 
-// ===========================================================================
-// §13.1 row 3 — watchOuts ("na co si dát pozor")
-// ===========================================================================
-
 /**
- * "Na co si dát pozor": advisory violations, force-overrides (+SYSTEMATIC),
- * retry hot-spots (≥3, only when the count is KNOWN, §5.2), stale runs, and
- * auditor NON-blocking findings (best-effort score / recommendations §4.3).
+ * Detect every raw signal FACT across the run set. Reuses the §13.2 detectors;
+ * each fact carries the lifecycle inputs (archiveStatus, latest state, stale) the
+ * managerial model needs. `concreteKey` makes the rootCauseKey specific (the exact
+ * check / gate / reason), so distinct causes never collapse into one group.
  */
-export function assembleWatchOuts(runSet: BriefRunSet, refNowMs: number | null): BriefItem[] {
-  const items: BriefItem[] = [];
+export function collectFacts(runSet: BriefRunSet, refNowMs: number | null): RawSignalFact[] {
+  const facts: RawSignalFact[] = [];
+
+  const baseOf = (m: BriefRunMember, signal: string, concreteKey: string, at: string | null,
+    context?: Record<string, unknown>): RawSignalFact => ({
+    projectId: m.projectId,
+    epicId: m.epicId,
+    runId: m.runId,
+    signal,
+    concreteKey,
+    at,
+    href: hrefFor(m.projectId, m.epicId),
+    context,
+    archiveStatus: archiveStatusOf(m),
+    latestRunState: m.detail.state,
+    stale: staleDaysFor(m, refNowMs) !== null,
+    resolvedEvidence: false, // F1: never resolved without evidence (F2 supersession sets this)
+  });
 
   for (const m of runSet.members) {
+    // Skip scanner artifacts that are not real EPICs (e.g. `work`, plan-id dirs
+    // like `P039`) — they must never appear in the managerial view (§B noise).
+    if (!/^E-\d/.test(m.epicId)) continue;
     const d = m.detail;
 
-    // Stale active run (§13.2 S7 / §13.1 row 3) — idle ≥ STALE_DAYS → warn.
-    const stale = staleDaysFor(m, refNowMs);
-    if (stale !== null) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/stale_run`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'stale_run',
-        explanation: explain({
-          kind: 'concept',
-          id: 'stale_run',
-          context: { staleDays: stale },
-        }),
-        severity: 'warn',
-        signal: 'stale_run',
-        at: m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
+    // Open blocking compliance violations (one fact per check → concreteKey=check).
+    for (const f of openBlockingFailures(d.compliance)) {
+      facts.push(baseOf(m, 'open_blocking_violation', f.check, d.compliance?.evaluatedAt ?? m.touchedAt,
+        { checkLabel: f.check, concreteKey: f.check }));
     }
-
     // Advisory compliance failures.
     for (const f of advisoryFailures(d.compliance)) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/advisory/${f.check}`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: f.check,
-        explanation: explain({ kind: 'severity', id: 'advisory' }),
-        severity: 'warn',
-        signal: 'advisory_violation',
-        at: d.compliance?.evaluatedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
+      facts.push(baseOf(m, 'advisory_violation', f.check, d.compliance?.evaluatedAt ?? m.touchedAt,
+        { checkLabel: f.check, concreteKey: f.check }));
     }
-
-    // Force overrides (§4.5) — any bypass is a watch-out.
+    // ESCALATION — needs a human (decision + blocker; one home via precedence).
+    if (d.state === 'ESCALATION') {
+      facts.push(baseOf(m, 'escalation_active', '', d.startedAt ?? m.touchedAt));
+    }
+    // Repeated precondition fails (§13.2 S5).
+    if (repeatedPreconditionFails(d)) {
+      facts.push(baseOf(m, 'repeated_precondition_fail', repeatedPreconditionReason(d), m.touchedAt,
+        { reason: repeatedPreconditionReason(d) }));
+    }
+    // Merge stuck (done_phase==review, no pm_decision).
+    if (mergeStuck(d)) {
+      facts.push(baseOf(m, 'merge_pending', '', d.startedAt ?? m.touchedAt));
+    }
+    // Auditor blocking findings (CP5 blocks merge).
+    if (d.audit.blockingFindings === true) {
+      facts.push(baseOf(m, 'audit_blocking_findings', '', m.touchedAt));
+    }
+    // Auditor NON-blocking recommendations.
+    if (d.audit.present && d.audit.blockingFindings !== true &&
+        (d.audit.topRisks.length > 0 || d.audit.nextSteps.length > 0 || d.audit.autoFixableCount > 0)) {
+      facts.push(baseOf(m, 'audit_recommended', '', m.touchedAt,
+        { count: d.audit.nextSteps.length || d.audit.autoFixableCount }));
+    }
+    // Force overrides.
     const foc = d.compliance?.forceOverrideCount ?? 0;
     if (foc > 0) {
-      const reasons = d.compliance?.forceOverrideReasons ?? [];
-      items.push({
-        id: `${m.projectId}/${m.epicId}/force_override`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'force_override',
-        explanation: explain({
-          kind: 'event',
-          id: 'fsm_force_override',
-          context: {
-            blocked_checks: blockedChecksLabel(d.compliance),
-            reason: reasons[0] ?? null,
-          },
-        }),
-        severity: 'warn',
-        signal: 'force_override',
-        at: d.compliance?.evaluatedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
+      facts.push(baseOf(m, 'force_override', '', d.compliance?.evaluatedAt ?? m.touchedAt,
+        { blocked_checks: blockedChecksLabel(d.compliance), reason: d.compliance?.forceOverrideReasons[0] ?? null }));
     }
-
-    // Retry hot-spot (§13.1 row 3) — gate retries known and ≥3.
+    // Retry hot-spot (gate retries ≥3, known).
     if (d.gateRetries >= RETRY_HOTSPOT_MIN) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/retry_hotspot`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'retry_hotspot',
-        explanation: explain({ kind: 'concept', id: 'stuck_or_looping' }),
-        severity: 'warn',
-        signal: 'retry_hotspot',
-        at: m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
+      facts.push(baseOf(m, 'retry_hotspot', '', m.touchedAt, { retries: d.gateRetries }));
     }
-
-    // Auditor NON-blocking findings (best-effort recommendations §4.3).
-    const auditWatch = auditWatchItem(m);
-    if (auditWatch) items.push(auditWatch);
+    // Stale active run (idle ≥ STALE_DAYS) — a standalone watch-out.
+    const stale = staleDaysFor(m, refNowMs);
+    if (stale !== null) {
+      facts.push(baseOf(m, 'stale_run', '', m.touchedAt, { staleDays: stale }));
+    }
+    // Runs in READY / EXECUTE (work in flight).
+    if (d.state === 'READY' || d.state === 'EXECUTE') {
+      facts.push(baseOf(m, 'run_in_flight', d.state, d.startedAt ?? m.touchedAt, { state: d.state }));
+    }
   }
 
-  return items;
-}
-
-// ===========================================================================
-// §13.1 row 4 — nextUp ("co bude následovat")
-// ===========================================================================
-
-/**
- * "Co bude následovat": next `status:queued` EPICs by priority (§4.6), runs in
- * READY/EXECUTE (§4.1), and (plan scope) the plan progress. A malformed
- * queue.yaml for one project yields NO nextUp queue items for that project —
- * never a 500 (the route flags it in `partialProjects`, §13.4 honesty).
- */
-export function assembleNextUp(runSet: BriefRunSet): BriefItem[] {
-  const items: BriefItem[] = [];
-
-  // Queued EPICs by priority, across the scope's projects.
+  // Queued EPICs by priority (nextUp).
   for (const proj of runSet.projects) {
     const queued = proj.queue
       .filter((q) => q.status === 'queued')
       .sort((a, b) => priorityWeight(a.priority) - priorityWeight(b.priority));
     for (const q of queued) {
-      items.push({
-        id: `${proj.projectId}/${q.epicId}/queued`,
+      facts.push({
         projectId: proj.projectId,
         epicId: q.epicId,
-        title: q.epicId,
-        explanation: explain({ kind: 'state', id: 'READY' }),
-        severity: 'info',
         signal: 'queued_next',
+        concreteKey: q.epicId,
         at: q.addedAt,
         href: hrefFor(proj.projectId, q.epicId),
-      });
-    }
-  }
-
-  // Runs in READY / EXECUTE (work in flight).
-  for (const m of runSet.members) {
-    if (m.detail.state === 'READY' || m.detail.state === 'EXECUTE') {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/in_flight`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: m.detail.state,
-        explanation: explain({ kind: 'state', id: m.detail.state }),
-        severity: 'info',
-        signal: 'run_in_flight',
-        at: m.detail.startedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
+        context: { epicId: q.epicId },
+        archiveStatus: 'active',
+        latestRunState: null,
+        stale: false,
+        resolvedEvidence: false,
       });
     }
   }
 
   // Plan progress (plan scope only).
-  if (runSet.plan) {
+  if (runSet.plan && runSet.projectId) {
     const p = runSet.plan;
-    items.push({
-      id: `${runSet.projectId}/${p.planId}/progress`,
-      projectId: runSet.projectId ?? '',
+    facts.push({
+      projectId: runSet.projectId,
       planId: p.planId,
-      title: 'plan_progress',
-      explanation: explain({ kind: 'state', id: 'EXECUTE' }),
-      severity: 'info',
       signal: 'plan_progress',
+      concreteKey: p.planId,
       at: null,
       href: `/p/${runSet.projectId}/plans/${p.planId}`,
+      context: { progressPct: p.progressPct },
+      archiveStatus: 'active',
+      latestRunState: null,
+      stale: false,
+      resolvedEvidence: false,
     });
   }
 
-  return items;
+  return facts;
 }
 
-// ===========================================================================
-// §13.1 row 5 — decisionsNeeded ("jaká rozhodnutí jsou potřeba")
-// ===========================================================================
-
-/**
- * "Jaká rozhodnutí jsou potřeba": runs awaiting `pm_decision`/merge (§4.0/§4.1),
- * ESCALATION (needs a human), and auditor `blocking_findings:true` (CP5 blocks
- * MERGE §4.2). ESCALATION items reuse the SAME `BriefItem.id` they carry in
- * `blockers` so the FE can de-dupe (§13.1) — intentional, not double counting.
- */
-export function assembleDecisionsNeeded(runSet: BriefRunSet): BriefItem[] {
-  const items: BriefItem[] = [];
-
-  for (const m of runSet.members) {
-    const d = m.detail;
-
-    // Run awaiting a PM merge decision (done_phase==review, no pm_decision).
-    if (mergeStuck(d)) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/merge_pending`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'merge_pending',
-        explanation: explain({ kind: 'concept', id: 'decision_needed' }),
-        severity: 'blocking',
-        signal: 'merge_pending',
-        at: d.startedAt ?? m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
-    }
-
-    // ESCALATION — same id as the blockers list (de-dupe, §13.1).
-    if (d.state === 'ESCALATION') {
-      items.push(escalationItem(m));
-    }
-
-    // Auditor blocking findings — CP5 blocks merge (§4.2).
-    if (d.audit.blockingFindings === true) {
-      items.push({
-        id: `${m.projectId}/${m.epicId}/audit_blocking`,
-        projectId: m.projectId,
-        epicId: m.epicId,
-        runId: m.runId,
-        title: 'audit_blocking_findings',
-        explanation: explain({ kind: 'role', id: 'auditor', context: { outcome: 'blocking' } }),
-        severity: 'blocking',
-        signal: 'audit_blocking_findings',
-        at: m.touchedAt,
-        href: hrefFor(m.projectId, m.epicId),
-      });
+/** The dominant repeated-precondition reason (concreteKey for grouping). */
+function repeatedPreconditionReason(d: RunDetail): string {
+  for (const e of d.timeline) {
+    if (e.event === 'fsm_precondition_fail') {
+      const r = asRawString(e.raw, 'reason');
+      if (r) return r;
     }
   }
-
-  return items;
+  return 'precondition';
 }
 
 // ===========================================================================
@@ -558,17 +428,32 @@ export function buildSinceLastSeen(
 
     // The run dir was touched since last visit → a changed run.
     counts.newRuns += 1;
+    const expl = explain({ kind: 'state', id: m.detail.state });
     items.push({
       id: `${m.projectId}/${m.epicId}/${m.runId}/touched`,
       projectId: m.projectId,
       epicId: m.epicId,
       runId: m.runId,
-      title: m.detail.state,
-      explanation: explain({ kind: 'state', id: m.detail.state }),
+      humanTitle: `${m.epicId}: ${expl.headline}`,
+      explanation: expl,
+      whatHappened: expl.detail,
+      whyItMatters: 'Změnilo se od tvé poslední návštěvy.',
+      whatBlocks: null,
+      recommendedAction: null,
+      nextActor: 'aid',
       severity: 'info',
       signal: 'run_touched',
-      at: m.touchedAt,
-      href: hrefFor(m.projectId, m.epicId),
+      rootCauseKey: `${m.projectId}:run_touched:${m.epicId}`,
+      lifecycle: 'active',
+      occurrenceCount: 1,
+      affectedEpics: [m.epicId],
+      firstSeen: m.touchedAt,
+      lastSeen: m.touchedAt,
+      requiresDecision: false,
+      isBlocker: false,
+      relatedIds: [],
+      evidenceRefs: [{ label: `EPIC ${m.epicId}`, href: hrefFor(m.projectId, m.epicId), kind: 'epic' }],
+      inconsistencyFlags: [],
     });
 
     // New gate fails on a touched run.
@@ -579,8 +464,8 @@ export function buildSinceLastSeen(
     counts.stateTransitions += countTransitionsSince(m.detail, sinceMs);
   }
 
-  // Cap to the most recent N (newest `at` first) to bound the payload (§13.3).
-  items.sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''));
+  // Cap to the most recent N (newest first) to bound the payload (§13.3).
+  items.sort((a, b) => (b.lastSeen ?? '').localeCompare(a.lastSeen ?? ''));
   const capped = items.slice(0, SINCE_ITEM_CAP);
 
   return { since, items: capped, counts };
@@ -807,53 +692,6 @@ export function extractRiskSignals(
 }
 
 // ===========================================================================
-// Shared item builders
-// ===========================================================================
-
-/** The ESCALATION BriefItem — shared between blockers and decisionsNeeded. */
-function escalationItem(m: BriefRunMember): BriefItem {
-  return {
-    id: `${m.projectId}/${m.epicId}/escalation`,
-    projectId: m.projectId,
-    epicId: m.epicId,
-    runId: m.runId,
-    title: 'ESCALATION',
-    explanation: explain({ kind: 'state', id: 'ESCALATION' }),
-    severity: 'blocking',
-    signal: 'escalation_active',
-    at: m.detail.startedAt ?? m.touchedAt,
-    href: hrefFor(m.projectId, m.epicId),
-  };
-}
-
-/**
- * Auditor non-blocking watch-out (§13.1 row 3) — present audit, NOT blocking,
- * with at least one risk/recommendation. null when there is nothing to surface.
- */
-function auditWatchItem(m: BriefRunMember): BriefItem | null {
-  const a = m.detail.audit;
-  if (!a.present || a.blockingFindings === true) return null;
-  const hasFindings = a.topRisks.length > 0 || a.nextSteps.length > 0 || a.autoFixableCount > 0;
-  if (!hasFindings) return null;
-  return {
-    id: `${m.projectId}/${m.epicId}/audit_recommended`,
-    projectId: m.projectId,
-    epicId: m.epicId,
-    runId: m.runId,
-    title: 'audit_recommended',
-    explanation: explain({
-      kind: 'role',
-      id: 'auditor',
-      context: { outcome: 'recommended', count: a.nextSteps.length || a.autoFixableCount },
-    }),
-    severity: 'warn',
-    signal: 'audit_recommended',
-    at: m.touchedAt,
-    href: hrefFor(m.projectId, m.epicId),
-  };
-}
-
-// ===========================================================================
 // Pure signal helpers (all over already-parsed RunDetail — no disk)
 // ===========================================================================
 
@@ -992,20 +830,6 @@ function countTransitionsSince(d: RunDetail, sinceMs: number): number {
 // ===========================================================================
 // Sorting / formatting helpers
 // ===========================================================================
-
-/**
- * Sort a BriefItem list (§13.1): blocking → warn → info, then newest `at` first.
- * Stable tie-break on `id` so the order is fully deterministic.
- */
-export function sortBriefItems(items: BriefItem[]): BriefItem[] {
-  return [...items].sort((a, b) => {
-    const sw = SEVERITY_WEIGHT[a.severity] - SEVERITY_WEIGHT[b.severity];
-    if (sw !== 0) return sw;
-    const at = (b.at ?? '').localeCompare(a.at ?? '');
-    if (at !== 0) return at;
-    return a.id.localeCompare(b.id);
-  });
-}
 
 /** Deep-link to an EPIC's Screen B/C view (§13.1). */
 function hrefFor(projectId: string, epicId: string): string {

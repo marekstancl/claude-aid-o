@@ -64,16 +64,59 @@ export interface Risk {
   confidence: 'high' | 'low';                   // 'low' when key signals are missing/thin
 }
 
-// One BriefItem = one thing the manager should see, already explained (reuses §6 dictionary).
+// ── UNIFIED MANAGERIAL ITEM (E-047-6 REOPEN — productization) ─────────────────
+// ONE managerial model. BriefItem is the single human-facing managerial type;
+// technical screens consume ActivityEvent / ComplianceFailure / view contracts —
+// there is no parallel "ManagedProblem". Every field is human-first; raw signals
+// live only in `signal` / `rootCauseKey` for the expandable technical detail.
+
+/**
+ * Evidence-based lifecycle (§A3).
+ *  - `active`     — newest authoritative evidence still requires action.
+ *  - `stale`      — still active, unchanged >7d → STAYS current, raised attention.
+ *  - `resolved`   — newer authoritative evidence closed THIS root cause (F2, per-signal closure rule).
+ *  - `historical` — EPIC archived WITH EVIDENCE (tasks/archive, task status, authoritative artifact) + no open action.
+ *  - `unknown`    — archive status unprovable AND not demonstrably active: NEVER silently filed as historical,
+ *                   NEVER posed as a confident current blocker — surfaced flagged for triage.
+ */
+export type ItemLifecycle = 'active' | 'resolved' | 'historical' | 'stale' | 'unknown';
+
+/** Who/what is expected to act next. */
+export type NextActor = 'pm' | 'aid' | 'agent' | 'none';
+
+/** A clickable piece of evidence behind an item (replaces a single href). */
+export interface EvidenceRef {
+  label: string;                                 // human Czech label, e.g. "Audit report", "EPIC detail"
+  href: string;                                  // deep-link (Screen B/C/Plan) or run-scoped /file path
+  kind: 'epic' | 'plan' | 'file' | 'run';
+}
+
+// One BriefItem = one thing the manager should see, grouped by ROOT CAUSE and
+// already explained in plain language. The same problem NEVER appears twice:
+// it has one home (decision > blocker precedence), cross-links via `relatedIds`.
 export interface BriefItem {
-  id: string;                                    // stable key, e.g. "wan/E-035/plan_ac_match"
+  id: string;                                    // stable key = rootCauseKey
   projectId: string; epicId?: string; planId?: string; runId?: string;
-  title: string;                                 // short technical label (e.g. "plan_ac_match")
+  humanTitle: string;                            // human Czech name — NEVER snake_case (e.g. "Čeká na rozhodnutí o mergi")
   explanation: Explanation;                      // {headline, detail, status, color} resolved via explain() (§6.4)
+  whatHappened: string;                          // plain-language what occurred
+  whyItMatters: string;                          // impact — why the user should care
+  whatBlocks: string | null;                     // what it blocks; null = blocks nothing
+  recommendedAction: string | null;             // what the user should do; null = nothing actionable yet
+  nextActor: NextActor;                          // expected next actor
   severity: 'blocking' | 'warn' | 'info';        // routing/sort key (blocking first)
-  signal: string;                                // machine id, e.g. "open_blocking_violation"
-  at: string | null;                             // when the underlying signal last changed (for sorting / lastSeen)
-  href: string;                                  // deep-link into Screen B/C/Plan (e.g. "/p/wan/e/E-035")
+  signal: string;                                // machine id, e.g. "open_blocking_violation" (technical detail)
+  rootCauseKey: string;                          // "projectId:signal:concreteKey" — concreteKey is the specific check/gate/reason
+  lifecycle: ItemLifecycle;                      // §A3 evidence-based lifecycle
+  occurrenceCount: number;                       // count of distinct RUNS currently exhibiting this root cause
+  affectedEpics: string[];                       // the EPIC ids those runs belong to (EPIC count derivable)
+  firstSeen: string | null;                      // first occurrence of this root cause
+  lastSeen: string | null;                       // most recent occurrence (sort / lastSeen key) — was `at`
+  requiresDecision: boolean;                     // routing flag → decisionsNeeded view
+  isBlocker: boolean;                            // routing flag → blockers view
+  relatedIds: string[];                          // explicit links to related items (no silent duplication)
+  evidenceRefs: EvidenceRef[];                   // clickable evidence (replaces single href)
+  inconsistencyFlags: string[];                  // e.g. "archived_unclosed_evidence"
 }
 
 // MF5 — successProbability envelope. Forward-compatible for MVP2 WITHOUT contract
@@ -94,6 +137,7 @@ export interface Brief {
   projectId: string | null;                      // null for infra scope
   planId: string | null;                         // set only for plan scope
   generatedAt: string;                           // server scan time (ISO-8601 UTC)
+  ecosystemLine: string;                         // ONE-LINE Czech state summary (E-047-6 REOPEN — landing lead)
   sinceLastSeen: {                               // "co se změnilo od poslední návštěvy" — vs client lastSeen (§13.3)
     since: string | null;                        // the lastSeen timestamp the client sent (null = first visit)
     items: BriefItem[];                          // new/changed runs, new gate fails, new violations, new backlog, transitions since `since`
@@ -104,6 +148,7 @@ export interface Brief {
   watchOuts: BriefItem[];                        // "na co si dát pozor" — advisory violations, force-overrides, retry hot-spots, branch mismatch, stale, non-blocking audit findings
   nextUp: BriefItem[];                           // "co bude následovat" — queue next EPICs, runs in READY/EXECUTE, plan progress
   decisionsNeeded: BriefItem[];                  // "jaká rozhodnutí jsou potřeba" — runs awaiting PM decision/merge, ESCALATION needing a human, blocking audit findings
+  needsTriage: BriefItem[];                      // §A3 `unknown` lifecycle — archive unprovable, not demonstrably active; flagged, never a confident current blocker
   risk: Risk;                                    // "odhad rizika" — deterministic level + reasons (§13.2)
   successProbability: SuccessProbability;        // MF5 — envelope; binding MVP1 invariant value===null && source===null
 }

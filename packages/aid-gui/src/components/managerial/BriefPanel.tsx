@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Brief, Project, RunDetail, Explanation, BacklogDelta } from '@aid/contract';
 import { cn } from '../../lib/utils';
 import { Card } from './Card';
@@ -53,6 +54,13 @@ export function BriefPanel({
 }: BriefPanelProps) {
   return (
     <div data-brief-panel data-scope={scope} className={cn('space-y-4', className)} aria-live="polite">
+      {/* 0. Ecosystem one-liner — the lead state summary (E-047-6 productization). */}
+      {brief.ecosystemLine && (
+        <p data-ecosystem-line className="text-base font-medium text-slate-700">
+          {brief.ecosystemLine}
+        </p>
+      )}
+
       {/* 1. Rozhodnutí. */}
       <Card title="Rozhodnutí" collapsibleOnMobile>
         <DecisionsNeededList items={brief.decisionsNeeded} embedded />
@@ -88,6 +96,18 @@ export function BriefPanel({
       {/* 6. Co bude dál. */}
       <BriefBlock title="Co bude dál" emptyLabel="Ve frontě nic nečeká" items={brief.nextUp} block="nextUp" />
 
+      {/* 7. Stav nejasný (needsTriage) — §A3 unknown: archive unprovable, not
+          demonstrably active. Surfaced for triage, NEVER as a current blocker.
+          Only rendered when non-empty (no noise on a clean ecosystem). */}
+      {brief.needsTriage.length > 0 && (
+        <BriefBlock
+          title="Stav nejasný (k prověření)"
+          emptyLabel=""
+          items={brief.needsTriage}
+          block="needsTriage"
+        />
+      )}
+
       {/* 7. Přehled projektů — infra scope ONLY. */}
       {scope === 'infra' && (
         <Card title="Přehled projektů" collapsibleOnMobile>
@@ -115,6 +135,10 @@ function BriefBlock({
   block: string;
 }) {
   const sorted = sortBriefItems(items);
+  const [showAll, setShowAll] = useState(false);
+  const CAP = 5;
+  const visible = showAll ? sorted : sorted.slice(0, CAP);
+  const hidden = sorted.length - visible.length;
   return (
     <Card
       title={title}
@@ -122,17 +146,40 @@ function BriefBlock({
       action={<span className="text-xs tabular-nums text-slate-400">{items.length}</span>}
     >
       {sorted.length === 0 ? (
-        <p data-block-empty className="text-sm text-slate-400">
-          {emptyLabel}
-        </p>
+        emptyLabel ? (
+          <p data-block-empty className="text-sm text-slate-400">
+            {emptyLabel}
+          </p>
+        ) : null
       ) : (
-        <ul className="space-y-0.5" data-block-list={block}>
-          {sorted.map((item) => (
-            <li key={item.id}>
-              <BriefItemRow item={item} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="space-y-1.5" data-block-list={block}>
+            {visible.map((item) => (
+              <li key={item.id}>
+                <BriefItemRow item={item} />
+              </li>
+            ))}
+          </ul>
+          {hidden > 0 && (
+            <button
+              type="button"
+              data-show-all={block}
+              onClick={() => setShowAll(true)}
+              className="mt-2 text-xs font-medium text-sky-600 hover:underline"
+            >
+              Zobrazit vše ({sorted.length})
+            </button>
+          )}
+          {showAll && sorted.length > CAP && (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              className="mt-2 ml-3 text-xs text-slate-400 hover:underline"
+            >
+              Sbalit
+            </button>
+          )}
+        </>
       )}
     </Card>
   );

@@ -61,10 +61,12 @@ function makeBrief(): Brief {
       items: [],
       counts: { newRuns: 0, newGateFails: 0, newViolations: 0, newBacklog: 0, stateTransitions: 0 },
     },
+    ecosystemLine: 'plán v pořádku',
     blockers: [],
     watchOuts: [],
     nextUp: [],
     decisionsNeeded: [],
+    needsTriage: [],
     risk: { level: 'nizke', reasons: [], confidence: 'high' },
     successProbability: { value: null, source: null },
   };
