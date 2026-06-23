@@ -224,4 +224,51 @@ When adding a new detection capability, register it in `defaults/enforcement-reg
 
 ---
 
-**Last Updated:** 2026-06-19
+## AID Control System v2 Protocol (enforced vs reference)
+
+AID Control System v2 introduces a shared protocol v2 envelope that all control mechanism artifacts (C0-C4) will carry. The definitions live in `defaults/schemas/`.
+
+### Schema files
+- `defaults/schemas/aid-protocol-v2.schema.json` — canonical envelope schema (JSON Schema draft 2020-12); every field annotated `$comment: enforced` or `$comment: reference`
+- `defaults/schemas/README.md` — enforced-vs-reference table with `aid-protocol-validate.sh`'s exact enforcement scope
+- 14 type-specific schemas: `plan-review.schema.json`, `plan-graph.schema.json`, `contract-manifest.schema.json`, `review-profile.schema.json`, `delivery-gate.schema.json`, `ui-fidelity.schema.json`, `semantic-review.schema.json`, `acceptance-evidence.schema.json`, `audit-report.schema.json`, `audit-input-manifest.schema.json`, `release-decision.schema.json`, `pm-decision-brief.schema.json`, `curator.schema.json`, `delivery-report.schema.json`
+- `defaults/schemas/run-control-protocol.schema.json` — per-run protocol lock (E2+ wiring)
+
+### Validator: `aid-protocol-validate.sh`
+
+**This is the authoritative source of truth for E1 enforcement.** The JSON Schema files are canonical references; the bash validator enforces a named subset of invariants.
+
+**This does NOT claim full JSON Schema validation.** Full JSON Schema validation (with `$ref` resolution, `if/then`, deep `allOf`) is NOT implemented in E1 and will be a separate C1 extension if needed.
+
+```
+aid-protocol-validate.sh <artifact.json> [--current-head <sha>] [--check-fingerprint]
+```
+
+Exit codes:
+- `0` — all blocking invariants pass
+- `2` — invalid JSON
+- `3` — missing required envelope field
+- `4` — bad schema_version (must be `aid-2.0`)
+- `5` — bad artifact_type (not in 14-value enum)
+- `6` — bad created_at format (not ISO-8601 UTC)
+- `7` — bad subject_hash format (must be `sha256:<64-hex>`)
+- `8` — bad status or verdict.kind enum value
+- `9` — bad provenance (unknown dispatch_mode or empty generated_by_tool)
+- `10` — critical/high severity finding without action_owner
+- `11` — head_sha mismatch with `--current-head` (stale artifact)
+- `12` — missing type-specific minimal payload key
+- `13` — finding fingerprint doesn't match recomputed hash (`--check-fingerprint`)
+
+Legacy artifacts (`control_protocol: "legacy"`) → exit 0 with `legacy_skipped`; no other checks run.
+
+### Finding fingerprint
+`scripts/lib/aid-finding-fingerprint.sh fingerprint <project_id> <artifact_type> <check_id> <target_path> <finding_class>` returns `sha256:<64-hex>` — deterministic (same inputs → same hash). Used to track finding lifecycle across runs.
+
+### Extension points
+- The validator is **standalone in E1** — not wired into any FSM precondition. Wiring is E2+.
+- New artifact types add a type-specific schema in `defaults/schemas/` and a case in the validator's type-payload map (step 12).
+- See `defaults/schemas/README.md` for the complete enforced-vs-reference table.
+
+---
+
+**Last Updated:** 2026-06-23

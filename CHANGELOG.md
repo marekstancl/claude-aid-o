@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 - **`/aid-verify-plan` + `/aid-verify-implementation`** — two manual, PM-invoked commands that dispatch an independent fresh-context agent to adversarially review a plan before execution and an implementation after it claims DONE; each carries its full review protocol (false-green risks, producer-consumer contracts, runtime-not-statics, real-data oracle) and returns a severity-ranked verdict plus a Czech PM summary. Standalone tools outside the FSM (like `/aid-do`) — no `fsm-state.yaml`, no evidence dir, no pending-dispatches ledger.
+- **AID Control System v2 protocol** — shared protocol v2 envelope (`aid-protocol-v2.schema.json`), 14 type-specific schemas, deterministic finding fingerprint helper (`aid-finding-fingerprint.sh`), and authoritative bash+jq validator (`aid-protocol-validate.sh`) with 11 blocking invariants (exit codes 2-13); schemas + validator + fixtures only — no runtime wiring (E2+).
 
 ## [2.37.0] — 2026-06-21
 
