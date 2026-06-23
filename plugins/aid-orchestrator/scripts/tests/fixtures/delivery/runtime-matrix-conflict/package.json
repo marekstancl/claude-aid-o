@@ -1,0 +1,7 @@
+{
+  "name": "test-runtime-conflict",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=18 <20"
+  }
+}

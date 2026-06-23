@@ -1,0 +1,130 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "delivery_gate",
+  "producer": "aid-delivery-gate@2.0",
+  "created_at": "2026-06-23T10:00:00Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "aid-orchestrator",
+    "epic_id": "E-050-1_1",
+    "run_id": "R-E050-1"
+  },
+  "subject": {
+    "subject_hash": "sha256:905a672226ecd53c7690cb2cfdc254a8d5fb15079580f4418d52421436c698f4"
+  },
+  "revision": {
+    "head_sha": "3585ba43847e117a10e53590b7d6a044ad43dbf8",
+    "base_sha": "3585ba43847e117a10e53590b7d6a044ad43dbf8",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "fail",
+  "verdict": {
+    "kind": "delivery_ready",
+    "value": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-delivery-gate"
+  },
+  "delivery_gate": {
+    "phase": "D0",
+    "profile": "plugin-bash",
+    "freshness": "fresh",
+    "delivery_ready": false,
+    "checks": [
+      {
+        "id": "dg01",
+        "name": "dependency-consistency",
+        "status": "skip",
+        "skip_reason": "legacy_no_child_rows",
+        "output_preview": ""
+      },
+      {
+        "id": "dg02",
+        "name": "build",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg03",
+        "name": "typecheck",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg04",
+        "name": "test",
+        "status": "fail",
+        "skip_reason": "",
+        "output_preview": "dg04: running test command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh\ndg04: fail — test command exited 1"
+      },
+      {
+        "id": "dg05",
+        "name": "consumer-compile",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg06",
+        "name": "removed-dep",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg07",
+        "name": "state-consistency",
+        "status": "unverifiable",
+        "skip_reason": "check_exit_2",
+        "output_preview": "dg07: unverifiable — AID_EPIC_ID or AID_RUN_ID not set"
+      },
+      {
+        "id": "dg08",
+        "name": "runtime-env",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg09",
+        "name": "static-coverage",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg10",
+        "name": "startup-smoke",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg11",
+        "name": "build-config",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": ""
+      },
+      {
+        "id": "dg12",
+        "name": "authority",
+        "status": "skip",
+        "skip_reason": "no_authority_surface",
+        "output_preview": ""
+      }
+    ],
+    "summary": {
+      "total": 12,
+      "pass": 0,
+      "fail": 1,
+      "skip": 10,
+      "unverifiable": 1,
+      "would_block": true
+    }
+  }
+}

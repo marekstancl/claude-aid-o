@@ -1,0 +1,7 @@
+{
+  "name": "test-zero-tests",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "bash ./run-tests.sh"
+  }
+}

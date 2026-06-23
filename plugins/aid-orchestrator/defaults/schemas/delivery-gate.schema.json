@@ -10,20 +10,277 @@
       "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
     }
   ],
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "producer",
+    "created_at",
+    "control_protocol",
+    "identity",
+    "subject",
+    "revision",
+    "status",
+    "verdict",
+    "provenance",
+    "delivery_gate"
+  ],
   "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "aid-2.0",
+      "$comment": "enforced by aid-protocol-validate.sh step 4"
+    },
     "artifact_type": {
+      "type": "string",
       "const": "delivery_gate",
       "$comment": "enforced — must equal this type"
     },
+    "producer": {
+      "type": "string",
+      "description": "Tool identifier that produced this artifact, e.g. 'aid-delivery-gate@2.0'"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "ISO-8601 UTC timestamp of artifact creation"
+    },
+    "control_protocol": {
+      "type": "string",
+      "const": "aid-2.0",
+      "$comment": "enforced by aid-protocol-validate.sh step 8"
+    },
+    "identity": {
+      "type": "object",
+      "required": ["project_id", "epic_id", "run_id"],
+      "properties": {
+        "project_id": { "type": "string" },
+        "epic_id": { "type": "string" },
+        "run_id": { "type": "string" }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "required": ["subject_hash"],
+      "properties": {
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 hash of the delivery_gate payload object (deterministic content hash)"
+        }
+      }
+    },
+    "revision": {
+      "type": "object",
+      "required": ["head_sha", "base_sha", "head_is_current", "freshness"],
+      "properties": {
+        "head_sha": {
+          "type": "string",
+          "description": "Git HEAD SHA at time of artifact creation"
+        },
+        "base_sha": {
+          "type": "string",
+          "description": "Base commit SHA provided via --base (run start reference)"
+        },
+        "head_is_current": {
+          "type": "boolean",
+          "description": "Protocol-level staleness: true if this artifact reflects the current HEAD"
+        },
+        "freshness": {
+          "type": "string",
+          "enum": ["current", "stale"],
+          "description": "Protocol-level freshness (current = head_sha matches current HEAD)"
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail", "skip", "unverifiable", "pending", "blocked"],
+      "description": "Overall artifact status — pass if delivery_ready, fail otherwise"
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "delivery_ready",
+          "description": "Verdict kind for delivery gate artifacts"
+        },
+        "value": {
+          "type": "boolean",
+          "description": "true if all applicable checks passed and freshness is fresh"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["dispatch_mode", "generated_by_tool"],
+      "properties": {
+        "dispatch_mode": {
+          "type": "string",
+          "enum": ["deterministic", "agent_tool", "subagent"],
+          "description": "How this artifact was produced; delivery gate uses 'deterministic'"
+        },
+        "generated_by_tool": {
+          "type": "string",
+          "description": "Tool name that generated this artifact, e.g. 'aid-delivery-gate'"
+        }
+      }
+    },
     "delivery_gate": {
       "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "$comment": "Full delivery gate payload — all fields are enforced",
+      "required": [
+        "phase",
+        "profile",
+        "freshness",
+        "delivery_ready",
+        "checks",
+        "summary"
+      ],
       "properties": {
+        "phase": {
+          "type": "string",
+          "enum": ["D0", "D1"],
+          "description": "Gate phase: D0=post-execute observe, D1=pre-release blocking (future)"
+        },
+        "profile": {
+          "type": "string",
+          "description": "Ecosystem profile resolved at runtime (e.g. 'plugin-bash', 'npm-workspaces', 'unverifiable')"
+        },
+        "freshness": {
+          "type": "string",
+          "enum": ["fresh", "stale"],
+          "description": "Delivery-level freshness: fresh if HEAD==base_sha, stale if commits landed after run start"
+        },
+        "delivery_ready": {
+          "type": "boolean",
+          "description": "true only if all applicable checks passed, freshness=fresh, no unverifiable (when block_on_unverifiable=true)"
+        },
         "checks": {
-          "type": "array"
+          "type": "array",
+          "description": "Per-check results for all 12 delivery gate checks (dg01..dg12)",
+          "items": {
+            "$ref": "#/$defs/check_result"
+          },
+          "minItems": 0
+        },
+        "summary": {
+          "$ref": "#/$defs/summary"
         }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "description": "Optional per-finding list following protocol-v2 finding schema",
+      "items": {
+        "$ref": "#/$defs/finding"
       }
     }
   },
-  "required": ["delivery_gate"]
+  "$defs": {
+    "check_status": {
+      "type": "string",
+      "enum": ["pass", "fail", "skip", "unverifiable"],
+      "description": "Result of a single delivery gate check"
+    },
+    "check_result": {
+      "type": "object",
+      "required": ["id", "name", "status", "skip_reason", "output_preview"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^dg(0[1-9]|1[0-2])$",
+          "description": "Check identifier, e.g. 'dg01'"
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable check name matching the check script name (e.g. 'dependency-consistency')"
+        },
+        "status": {
+          "$ref": "#/$defs/check_status"
+        },
+        "skip_reason": {
+          "type": "string",
+          "description": "Reason for skip/unverifiable; empty string for pass/fail results. Must be in skip_reason_allowlist when status=skip."
+        },
+        "output_preview": {
+          "type": "string",
+          "description": "First N lines of check script stdout+stderr (N controlled by output_preview_lines in policy)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "description": "Aggregate counts and block decision across all checks",
+      "required": ["total", "pass", "fail", "skip", "unverifiable", "would_block"],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of checks evaluated"
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of checks that passed"
+        },
+        "fail": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of checks that failed (exit 1)"
+        },
+        "skip": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of checks skipped (not applicable or policy-overridden)"
+        },
+        "unverifiable": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of checks that could not be verified (missing tooling, no command, timeout)"
+        },
+        "would_block": {
+          "type": "boolean",
+          "description": "In observe mode: reflects whether delivery_ready=false (what would happen if enforcement were active)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": ["fingerprint", "occurrence_id", "severity"],
+      "properties": {
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "occurrence_id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low", "info"]
+        },
+        "check_id": {
+          "type": "string"
+        },
+        "target_path": {
+          "type": "string"
+        },
+        "finding_class": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "action_owner": {
+          "type": "string",
+          "enum": ["implementer", "reviewer", "pm", "gate-fixer"]
+        }
+      }
+    }
+  }
 }
