@@ -208,6 +208,11 @@
         "output_preview": {
           "type": "string",
           "description": "First N lines of check script stdout+stderr (N controlled by output_preview_lines in policy)"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Wall-clock time in milliseconds for this check script invocation"
         }
       },
       "additionalProperties": false

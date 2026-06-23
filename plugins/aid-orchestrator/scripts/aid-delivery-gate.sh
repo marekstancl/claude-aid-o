@@ -450,7 +450,7 @@ _run_check() {
     CHECKS_JSON="$(echo "$CHECKS_JSON" | jq \
       --arg id "$check_id" \
       --arg name "$check_name" \
-      '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "unverifiable_profile", "output_preview": ""}]')"
+      '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "unverifiable_profile", "output_preview": "", "duration_ms": 0}]')"
     return
   fi
 
@@ -472,7 +472,7 @@ _run_check() {
       --arg id "$check_id" \
       --arg name "$check_name" \
       --arg reason "$skip_reason" \
-      '. + [{"id": $id, "name": $name, "status": "skip", "skip_reason": $reason, "output_preview": ""}]')"
+      '. + [{"id": $id, "name": $name, "status": "skip", "skip_reason": $reason, "output_preview": "", "duration_ms": 0}]')"
     return
   fi
 
@@ -497,7 +497,7 @@ _run_check() {
         --arg id "$check_id" \
         --arg name "$check_name" \
         --arg reason "$policy_skip_reason" \
-        '. + [{"id": $id, "name": $name, "status": "skip", "skip_reason": $reason, "output_preview": ""}]')"
+        '. + [{"id": $id, "name": $name, "status": "skip", "skip_reason": $reason, "output_preview": "", "duration_ms": 0}]')"
     else
       # skip_reason not in allowlist → unverifiable (observe mode: log warn, count as unverifiable)
       echo "WARN: check ${check_id} skip_reason '${policy_skip_reason}' not in allowlist — counting as unverifiable" >&2
@@ -506,7 +506,7 @@ _run_check() {
         --arg id "$check_id" \
         --arg name "$check_name" \
         --arg reason "invalid_skip_reason:${policy_skip_reason}" \
-        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": $reason, "output_preview": ""}]')"
+        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": $reason, "output_preview": "", "duration_ms": 0}]')"
     fi
     return
   fi
@@ -522,7 +522,7 @@ _run_check() {
     CHECKS_JSON="$(echo "$CHECKS_JSON" | jq \
       --arg id "$check_id" \
       --arg name "$check_name" \
-      '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "check_script_missing", "output_preview": ""}]')"
+      '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "check_script_missing", "output_preview": "", "duration_ms": 0}]')"
     return
   fi
 
@@ -541,6 +541,8 @@ _run_check() {
   # Use timeout for safety (default 120s)
   local timeout_seconds=120
 
+  local _t_start _t_end duration_ms
+  _t_start=$(date +%s%3N 2>/dev/null || date +%s)
   check_output="$(AID_PROJECT_ROOT="$PROJECT_ROOT" \
     AID_EPIC_ID="$EPIC_ID" \
     AID_RUN_ID="$RUN_ID" \
@@ -548,6 +550,8 @@ _run_check() {
     AID_CHANGED_PATHS="${CHANGED_PATHS_FILE:-}" \
     timeout "$timeout_seconds" \
     "$check_script" "${check_argv[@]}" 2>&1)" || check_exit=$?
+  _t_end=$(date +%s%3N 2>/dev/null || date +%s)
+  duration_ms=$(( _t_end - _t_start ))
 
   # Truncate output_preview to OUTPUT_PREVIEW_LINES lines
   local output_preview
@@ -561,7 +565,8 @@ _run_check() {
         --arg id "$check_id" \
         --arg name "$check_name" \
         --arg preview "$output_preview" \
-        '. + [{"id": $id, "name": $name, "status": "pass", "skip_reason": "", "output_preview": $preview}]')"
+        --argjson dur "$duration_ms" \
+        '. + [{"id": $id, "name": $name, "status": "pass", "skip_reason": "", "output_preview": $preview, "duration_ms": $dur}]')"
       ;;
     1)
       COUNT_FAIL=$(( COUNT_FAIL + 1 ))
@@ -570,7 +575,8 @@ _run_check() {
         --arg id "$check_id" \
         --arg name "$check_name" \
         --arg preview "$output_preview" \
-        '. + [{"id": $id, "name": $name, "status": "fail", "skip_reason": "", "output_preview": $preview}]')"
+        --argjson dur "$duration_ms" \
+        '. + [{"id": $id, "name": $name, "status": "fail", "skip_reason": "", "output_preview": $preview, "duration_ms": $dur}]')"
       ;;
     124)
       # timeout
@@ -579,7 +585,8 @@ _run_check() {
         --arg id "$check_id" \
         --arg name "$check_name" \
         --arg preview "check timed out after ${timeout_seconds}s" \
-        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "check_timeout", "output_preview": $preview}]')"
+        --argjson dur "$duration_ms" \
+        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": "check_timeout", "output_preview": $preview, "duration_ms": $dur}]')"
       ;;
     *)
       # exit 2 or other → unverifiable
@@ -590,7 +597,8 @@ _run_check() {
         --arg name "$check_name" \
         --arg reason "$skip_reason_exit" \
         --arg preview "$output_preview" \
-        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": $reason, "output_preview": $preview}]')"
+        --argjson dur "$duration_ms" \
+        '. + [{"id": $id, "name": $name, "status": "unverifiable", "skip_reason": $reason, "output_preview": $preview, "duration_ms": $dur}]')"
       ;;
   esac
 }
