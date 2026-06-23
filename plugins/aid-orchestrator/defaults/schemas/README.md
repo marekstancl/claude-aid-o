@@ -89,4 +89,22 @@ Artifacts with `.control_protocol: "legacy"` are skipped by the validator (exit 
 
 ## Freshness (head_sha / subject_hash)
 
-_Populated by Step 5. Wiring to FSM is E2+._
+An artifact is considered **stale** if either condition is true:
+
+1. **HEAD mismatch** (`enforced`): `.revision.head_sha` ≠ the current git HEAD at validation time.
+   - `aid-protocol-validate.sh --current-head <sha>` checks this.
+   - Mismatch → exit 11 (`stale_or_head_mismatch`).
+   - `.revision.head_is_current` and `.revision.freshness` must be consistent with the comparison result.
+
+2. **Subject hash change** (`reference`): `.subject.subject_hash` has changed since the artifact was produced, indicating the referenced plan/contract was modified without committing.
+   - This is a `reference` invariant in E1 — the validator checks the _format_ of `subject_hash` (exit 7), not the _content match_.
+   - Content-mismatch detection is enforced by the owning phase (E4/C0), not E1.
+
+### Per-run `control_protocol` lock
+
+Each run sets `control_protocol: "aid-2.0" | "legacy"` at init. All artifacts produced in that run inherit this value. The validator (Step 2) checks this via exit code 2 (legacy → skip all enforced checks):
+
+- `control_protocol: "legacy"` → validator exits 0 with `legacy_skipped` (no other enforced checks run)
+- `control_protocol: "aid-2.0"` → all 13 blocking invariants are checked
+
+**FSM wiring is E2+**: the per-run lock is defined here as schema (`run-control-protocol.schema.json`), but is not written to `fsm-state.yaml` by any E1 code. E2 will wire this into `aid-fsm.sh init`.
