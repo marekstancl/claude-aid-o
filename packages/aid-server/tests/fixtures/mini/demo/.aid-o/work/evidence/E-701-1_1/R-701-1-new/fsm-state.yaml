@@ -1,0 +1,14 @@
+epic_id: E-701-1_1
+run_id: R-701-1-new
+state: DONE
+current_step: 2
+total_steps: 2
+mode: full
+branch: task/E-701-1_1/main
+base_commit: abc1234
+gate_retries: 0
+escalation_count: 0
+streamlined_mode: false
+started_at: "2026-06-18T10:00:00Z"
+created_at: "2026-06-18T10:00:00Z"
+plan_path: .aid-o/plans/P701-alpha.md

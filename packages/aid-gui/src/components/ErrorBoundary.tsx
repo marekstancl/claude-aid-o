@@ -13,22 +13,7 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// ErrorBoundary must be a class component because React does not provide
-// a hook-based equivalent of getDerivedStateFromError / componentDidCatch.
-// We declare props/state/setState explicitly because the project does not
-// ship @types/react, so React.Component generics are untyped.
-export class ErrorBoundary extends (React.Component as new (
-  props: ErrorBoundaryProps
-) => React.Component & {
-  props: Readonly<ErrorBoundaryProps>;
-  state: ErrorBoundaryState;
-  setState: (s: Partial<ErrorBoundaryState>) => void;
-  render: () => React.ReactNode;
-}) {
-  declare props: Readonly<ErrorBoundaryProps>;
-  declare state: ErrorBoundaryState;
-  declare setState: (s: Partial<ErrorBoundaryState>) => void;
-
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };

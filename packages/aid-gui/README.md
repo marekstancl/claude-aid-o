@@ -1,14 +1,13 @@
-# AID Dashboard GUI
+# AID Cockpit GUI
 
-The `aid-gui` package is the web-based dashboard for the AID — AI Development Orchestrator. It provides a visual interface for monitoring EPIC pipelines, managing the execution queue, reviewing evidence, and interacting with the AI Companion.
+The `aid-gui` package is the web-based read-only monitoring PWA for the AID Cockpit — the managerial dashboard for the AID orchestrator. It provides a visual interface for monitoring project pipelines, plan execution, audit trends, compliance status, and backlog changes.
 
 ## What This Is
 
-- **Command Center** — Kanban-style view of active EPICs, pipeline states, and step progress
-- **AI Companion** — Chat interface backed by the aid-server companion API (multi-session, voice input)
-- **Pipeline Theater** — SVG timeline visualization of orchestration state transitions
-- **Evidence Vault** — Full-text search over step outputs, gate results, and audit logs
-- **Decision Hub** — Notification center for PM approval checkpoints
+- **Pipeline Overview (Screen G)** — Infra-level view of all projects with active run status, health metrics, and high-level risk signals
+- **Project Dashboard (Screen B)** — Project-scoped Brief, compliance matrix, activity timeline, and plan hierarchy
+- **Plan Details (Screen C)** — Plan-scoped outcome, phase timeline, lessons learned, and audit trends
+- **Managerial Brief** — Seven-block decision-focused summary: decisions needed, blockers, risk, watch-outs, what changed, what's next, and project overview (infra scope)
 
 ## Prerequisites
 

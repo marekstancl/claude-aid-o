@@ -1,154 +1,108 @@
-import { Router, type Request } from 'express';
+/**
+ * Cross-project queue read route (EPIC E-047-3_7, Step 7).
+ *
+ * Scanner-backed, READ-ONLY (GET only). Mounted under `/api` by the bootstrap:
+ *   - `GET /api/queue?project=<id>` → `QueueEntry[]` (read straight from
+ *     `config/queue.yaml`, camelCased).
+ *
+ * This is the rewritten MVP1 Phase 3 surface. The old single-project queue route
+ * exposed MUTATIONS (`PUT /:epicId`, `PUT /schedule`, `POST /launch`) — those are
+ * DELIBERATELY DROPPED here: the cross-project cockpit is read-only, so this file
+ * defines ONLY `router.get`. There is no write path, no scheduler config, and no
+ * launch trigger.
+ *
+ * Every response uses the standard envelope. A missing `project` query param or a
+ * traversal value yields 400; an unknown project yields 404 — both through the
+ * envelope. A project with no `queue.yaml` yields `[]` (truthful empty, never an
+ * error).
+ *
+ * Module: src/routes/queue.ts
+ */
+
+import { Router } from 'express';
 import { join } from 'node:path';
-import { writeFile } from 'node:fs/promises';
-import yaml from 'js-yaml';
-import type { ProjectRegistry } from '../services/project-registry.js';
-import { isValidPathComponent, type ProjectParams, type EpicParams } from './types.js';
+import type { QueueEntry } from '@aid/contract';
+import type { ScannerCache } from '../services/scanner-cache.js';
+import { FsReader } from '../services/fs-reader.js';
+import { sendOk, send400, send404, isoNow } from '../api/middleware.js';
+import { isValidPathComponent } from './path-validation.js';
 
-export function queueRoutes(registry: ProjectRegistry): Router {
-  const router = Router({ mergeParams: true });
+/** Coerce an unknown to a non-empty string, else null. */
+function asString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
 
-  // GET /api/p/:projectId/queue
-  router.get('/', async (req: Request<ProjectParams>, res) => {
-    const fs = registry.getFsReader(req.params.projectId);
-    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+/**
+ * Read `config/queue.yaml` into {@link QueueEntry}[] (camelCased). Never throws —
+ * a missing/unreadable queue yields `[]`. Uses the tolerant parser so a corrupt
+ * file surfaces a warning but does not present an empty queue as "genuinely empty".
+ */
+async function readQueue(
+  fs: FsReader,
+  aidoPath: string,
+): Promise<{ entries: QueueEntry[]; warning?: string }> {
+  const queuePath = join(aidoPath, 'config', 'queue.yaml');
+  const parsed = await fs.readYamlParsed<{ queue?: unknown[] }>(queuePath);
 
-    const queue = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'queue.yaml'));
+  // Honesty: if the parse failed (warnings with severity 'error'), surface that.
+  const hasError = parsed.warnings?.some((w) => w.severity === 'error');
+  const warning = hasError
+    ? `queue.yaml unparseable: ${parsed.warnings?.find((w) => w.severity === 'error')?.message ?? 'unknown error'}`
+    : undefined;
 
-    const entries = (queue?.queue ?? []).map((e: any) => ({
-      epicId: e.epic_id,
-      path: e.path,
-      priority: e.priority ?? 'medium',
-      status: e.status ?? 'queued',
-      addedAt: e.added_at ?? null,
-      startedAt: e.started_at ?? null,
-      completedAt: e.completed_at ?? null,
-    }));
+  // If parsing failed, return empty with warning (not an error, but flagged).
+  if (parsed.data === null) {
+    return { entries: [], warning };
+  }
 
-    res.json({
-      ok: true,
-      data: { paused: queue?.paused ?? false, queue: entries },
+  const rows = Array.isArray(parsed.data.queue) ? parsed.data.queue : [];
+  const out: QueueEntry[] = [];
+  for (const r of rows) {
+    if (typeof r !== 'object' || r === null) continue;
+    const e = r as Record<string, unknown>;
+    out.push({
+      epicId: asString(e.epic_id ?? e.epicId) ?? '',
+      path: asString(e.path) ?? '',
+      priority: asString(e.priority) ?? 'medium',
+      status: asString(e.status) ?? 'queued',
+      addedAt: asString(e.added_at ?? e.addedAt) ?? '',
     });
-  });
+  }
+  return { entries: out, warning };
+}
 
-  // GET /api/p/:projectId/queue/schedule
-  router.get('/schedule', async (req: Request<ProjectParams>, res) => {
-    const fs = registry.getFsReader(req.params.projectId);
-    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
+/**
+ * Build the READ-ONLY queue router backed by the Phase-2 {@link ScannerCache}.
+ * GET only — no mutation endpoints exist on this surface.
+ */
+export function queueRoutes(scanner: ScannerCache): Router {
+  const router = Router();
+  const fs = new FsReader();
 
-    const config = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'schedule.yaml'));
+  // -------------------------------------------------------------------------
+  // GET /queue?project=<id> — read-only QueueEntry[].
+  // -------------------------------------------------------------------------
+  router.get('/queue', async (req, res) => {
+    const projectId = typeof req.query.project === 'string' ? req.query.project : '';
+    if (projectId === '' || !isValidPathComponent(projectId)) {
+      send400(res, 'Query param "project" is required and must be a valid path component');
+      return;
+    }
 
-    res.json({
-      ok: true,
-      data: {
-        enabled: config?.enabled ?? false,
-        cooldownSeconds: config?.cooldown_seconds ?? 60,
-        maxConcurrent: config?.max_concurrent ?? 1,
-        delayedStartAt: config?.delayed_start_at ?? null,
-        autoPauseAtCcLimit: config?.auto_pause_at_cc_limit ?? false,
-        ccLimitThreshold: config?.cc_limit_threshold ?? 80000,
-        lastRunCompletedAt: config?.last_run_completed_at ?? null,
-      },
-    });
-  });
+    const idx = await scanner.getIndex();
+    const indexed = idx.projects.get(projectId) ?? null;
+    if (indexed === null) {
+      send404(res, `Project "${projectId}"`);
+      return;
+    }
 
-  // PUT /api/p/:projectId/queue/schedule
-  router.put('/schedule', async (req: Request<ProjectParams>, res) => {
-    const fs = registry.getFsReader(req.params.projectId);
-    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
-
-    const schedulePath = join(fs.aidoPath, 'config', 'schedule.yaml');
-    const existing = (await fs.readYaml<any>(schedulePath)) ?? {};
-    const body = req.body;
-
-    const updated = {
-      ...existing,
-      ...(body.enabled !== undefined && { enabled: body.enabled }),
-      ...(body.cooldownSeconds !== undefined && { cooldown_seconds: body.cooldownSeconds }),
-      ...(body.maxConcurrent !== undefined && { max_concurrent: body.maxConcurrent }),
-      ...(body.delayedStartAt !== undefined && { delayed_start_at: body.delayedStartAt }),
-      ...(body.autoPauseAtCcLimit !== undefined && { auto_pause_at_cc_limit: body.autoPauseAtCcLimit }),
-      ...(body.ccLimitThreshold !== undefined && { cc_limit_threshold: body.ccLimitThreshold }),
-    };
-
-    await writeFile(schedulePath, yaml.dump(updated), 'utf-8');
-    res.json({
-      ok: true,
-      data: {
-        enabled: updated.enabled ?? false,
-        cooldownSeconds: updated.cooldown_seconds ?? 60,
-        maxConcurrent: updated.max_concurrent ?? 1,
-        delayedStartAt: updated.delayed_start_at ?? null,
-        autoPauseAtCcLimit: updated.auto_pause_at_cc_limit ?? false,
-        ccLimitThreshold: updated.cc_limit_threshold ?? 80000,
-        lastRunCompletedAt: updated.last_run_completed_at ?? null,
-      },
-    });
-  });
-
-  // GET /api/p/:projectId/queue/schedule/status
-  router.get('/schedule/status', async (req: Request<ProjectParams>, res) => {
-    const fs = registry.getFsReader(req.params.projectId);
-    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
-
-    const config = await fs.readYaml<any>(join(fs.aidoPath, 'config', 'schedule.yaml'));
-
-    res.json({
-      ok: true,
-      data: {
-        state: config?.enabled ? 'idle' : 'paused',
-        remainingSeconds: null,
-        config: {
-          enabled: config?.enabled ?? false,
-          cooldownSeconds: config?.cooldown_seconds ?? 60,
-          maxConcurrent: config?.max_concurrent ?? 1,
-          delayedStartAt: config?.delayed_start_at ?? null,
-          autoPauseAtCcLimit: config?.auto_pause_at_cc_limit ?? false,
-          ccLimitThreshold: config?.cc_limit_threshold ?? 80000,
-          lastRunCompletedAt: config?.last_run_completed_at ?? null,
-        },
-        timestamp: new Date().toISOString(),
-      },
-    });
-  });
-
-  // PUT /api/p/:projectId/queue/:epicId
-  router.put('/:epicId', async (req: Request<EpicParams>, res) => {
-    const fs = registry.getFsReader(req.params.projectId);
-    if (!fs) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Project not found' } });
-    if (!isValidPathComponent(req.params.epicId)) return res.status(400).json({ ok: false, error: { code: 'BAD_REQUEST', message: 'Invalid epicId' } });
-
-    const queuePath = join(fs.aidoPath, 'config', 'queue.yaml');
-    const queue = await fs.readYaml<any>(queuePath);
-    if (!queue?.queue) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Queue not found' } });
-
-    const entry = queue.queue.find((e: any) => e.epic_id === req.params.epicId);
-    if (!entry) return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'EPIC not found in queue' } });
-
-    if (req.body.status) entry.status = req.body.status;
-    if (req.body.priority) entry.priority = req.body.priority;
-
-    await writeFile(queuePath, yaml.dump(queue), 'utf-8');
-
-    res.json({
-      ok: true,
-      data: {
-        epicId: entry.epic_id,
-        path: entry.path,
-        priority: entry.priority,
-        status: entry.status,
-        addedAt: entry.added_at,
-        startedAt: entry.started_at,
-        completedAt: entry.completed_at,
-      },
-    });
-  });
-
-  // POST /api/p/:projectId/queue/launch
-  router.post('/launch', async (_req: Request<ProjectParams>, res) => {
-    res.json({
-      ok: true,
-      data: { launched: false, message: 'Queue launch via GUI not yet implemented. Use /aid-first-aid from CLI.' },
+    const { entries, warning } = await readQueue(fs, indexed.aidoPath);
+    const partialProjects = warning ? [projectId] : [];
+    sendOk(res, entries, {
+      scannedAt: isoNow(),
+      partialProjects,
+      total: entries.length,
+      ...(warning ? { warnings: [warning] } : {}),
     });
   });
 

@@ -45,7 +45,7 @@ import * as path from 'node:path';
 const SRC_DIR = path.resolve(__dirname, '../../src/components');
 
 const ERROR_BOUNDARY_PATH = path.join(SRC_DIR, 'ErrorBoundary.tsx');
-const TOAST_PATH = path.join(SRC_DIR, 'Toast.tsx');
+const TOAST_PATH = path.join(SRC_DIR, 'shell', 'Toast.tsx');
 
 function readComponent(filePath: string): string {
   if (!fs.existsSync(filePath)) {
@@ -335,10 +335,12 @@ describe('Toast — toast() function behaviour', () => {
     expect(source).toMatch(/toast-.*toastCounter|toastCounter.*toast-/);
   });
 
-  it('toast stores the type, message, and duration fields', () => {
+  it('toast item stores id, type, and message; duration drives the timer', () => {
     const source = readComponent(TOAST_PATH);
-    // All three fields must be present in the toast object
-    expect(source).toMatch(/id\s*,.*type\s*,.*message\s*,.*duration/s);
+    // The stored ToastItem holds id/type/message; `duration` is the auto-dismiss
+    // timer parameter (not a stored field) in the shell reimplementation.
+    expect(source).toMatch(/id\s*,\s*type\s*,\s*message/s);
+    expect(source).toMatch(/duration/);
   });
 
   it('default duration is 5000ms', () => {
@@ -350,8 +352,8 @@ describe('Toast — toast() function behaviour', () => {
   it('auto-dismiss uses setTimeout with the toast duration', () => {
     const source = readComponent(TOAST_PATH);
     expect(source).toMatch(/setTimeout/);
-    // dismiss must be called inside setTimeout
-    expect(source).toMatch(/setTimeout\s*\(\s*\(\)\s*=>\s*\{[\s\S]*?dismiss\s*\(id\)/);
+    // dismiss must be called from the setTimeout callback (arrow body or block)
+    expect(source).toMatch(/setTimeout\s*\(\s*\(\)\s*=>\s*(\{[\s\S]*?)?dismiss\s*\(id\)/);
   });
 
   it('duration > 0 triggers the auto-dismiss timer', () => {
@@ -408,10 +410,10 @@ describe('Toast — toast types and styling', () => {
 
   it('each toast type has distinct border and icon colour styles', () => {
     const source = readComponent(TOAST_PATH);
-    // Emerald for success, red for error, blue for info, amber for warning
+    // Emerald for success, red for error, sky (light-theme blue) for info, amber for warning
     expect(source).toContain('emerald');
     expect(source).toContain('red');
-    expect(source).toContain('blue');
+    expect(source).toContain('sky');
     expect(source).toContain('amber');
   });
 });
@@ -423,9 +425,10 @@ describe('Toast — dismiss button', () => {
     expect(source).toMatch(/onClick\s*=\s*\{\s*\(\s*\)\s*=>\s*dismiss\s*\(\s*t\.id\s*\)/);
   });
 
-  it('dismiss button has an accessible aria-label', () => {
+  it('dismiss button has an accessible (Czech) aria-label', () => {
     const source = readComponent(TOAST_PATH);
-    expect(source).toMatch(/aria-label\s*=\s*["']Dismiss notification["']/);
+    // UI strings are Czech per the spec — the dismiss control is "Zavřít oznámení".
+    expect(source).toMatch(/aria-label\s*=\s*["']Zavřít oznámení["']/);
   });
 });
 
