@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/semantic-review.schema.json",
+  "title": "AID Protocol v2 — SemanticReview",
+  "$comment": "producer: C2, consumers: [C4, C3]",
+  "description": "Artifact emitted by C2 (semantic reviewer) after running lens-based semantic analysis across one or more review modes.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "semantic_review",
+      "$comment": "enforced — must equal this type"
+    },
+    "semantic_review": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["local", "wiring", "behavior", "final"]
+        },
+        "findings": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["semantic_review"]
+}

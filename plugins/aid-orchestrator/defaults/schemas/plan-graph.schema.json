@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/plan-graph.schema.json",
+  "title": "AID Protocol v2 — PlanGraph",
+  "$comment": "producer: C0, consumers: [C0, C4]",
+  "description": "Artifact emitted by C0 containing the dependency graph of the plan, including topological ordering and cycle detection results.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "plan_graph",
+      "$comment": "enforced — must equal this type"
+    },
+    "plan_graph": {
+      "type": "object",
+      "$comment": "enforced — presence of plan_graph required; sub-fields edges/topological_order/cycles defined in owning phase",
+      "properties": {
+        "edges": {
+          "type": "array"
+        },
+        "topological_order": {
+          "type": "array"
+        },
+        "cycles": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["plan_graph"]
+}

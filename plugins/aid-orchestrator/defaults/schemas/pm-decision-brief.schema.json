@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/pm-decision-brief.schema.json",
+  "title": "AID Protocol v2 — PMDecisionBrief",
+  "$comment": "producer: pm_brief generator, consumers: [PM, GUI]",
+  "description": "Artifact emitted by the PM brief generator summarising pipeline results in human-readable form for PM review. verdict.kind must be 'none' — decision authority belongs to the PM, not this artifact.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "pm_decision_brief",
+      "$comment": "enforced — must equal this type"
+    },
+    "pm_decision_brief": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; verdict.kind must be 'none' (PM holds decision authority, not this artifact); full schema defined in owning phase",
+      "properties": {
+        "communication_status": {
+          "type": "string"
+        },
+        "blockers": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["pm_decision_brief"]
+}

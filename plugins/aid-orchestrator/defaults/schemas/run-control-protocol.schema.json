@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/run-control-protocol.schema.json",
+  "title": "AID Run Control Protocol Lock",
+  "description": "Per-run protocol version lock. Set at run init; all artifacts produced in this run inherit the control_protocol value. Wiring into fsm-state.yaml is E2+ (not implemented in E1).",
+  "$comment": "reference only — describes the run-level lock object; not wired into FSM in E1",
+  "type": "object",
+  "properties": {
+    "control_protocol": {
+      "type": "string",
+      "enum": ["aid-2.0", "legacy"],
+      "$comment": "enforced (format) — locked at run init; all artifacts in this run carry this value",
+      "description": "Protocol version for this run. Once set, cannot change within the run."
+    },
+    "policy_version": {
+      "type": "string",
+      "$comment": "reference — semantic version of the policy snapshot used for this run",
+      "description": "Policy version snapshot at run start (e.g., '2.38.0')."
+    },
+    "locked_at": {
+      "type": "string",
+      "format": "date-time",
+      "$comment": "reference — ISO-8601 UTC timestamp when control_protocol was locked",
+      "description": "When the run control protocol was locked. ISO-8601 UTC."
+    }
+  },
+  "required": ["control_protocol"]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/ui-fidelity.schema.json",
+  "title": "AID Protocol v2 — UIFidelity",
+  "$comment": "producer: C1 (P048 plugin), consumers: [C1, C4]",
+  "description": "Artifact emitted by the P048 UI fidelity plugin (invoked from C1) reporting visual diff results between implementation and design spec. verdict.kind must be 'none' — this is sub-evidence, not a release authority.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "ui_fidelity",
+      "$comment": "enforced — must equal this type"
+    },
+    "ui_fidelity": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; verdict.kind must be 'none' (sub-evidence, not release authority); full schema defined in owning phase",
+      "properties": {
+        "verdict": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "none"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["ui_fidelity"]
+}

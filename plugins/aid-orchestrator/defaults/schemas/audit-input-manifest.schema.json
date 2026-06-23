@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/audit-input-manifest.schema.json",
+  "title": "AID Protocol v2 — AuditInputManifest",
+  "$comment": "producer: Orchestrator (before C3), consumers: [C3]",
+  "description": "Artifact emitted by the orchestrator before dispatching C3, listing all artifact inputs C3 is permitted to consume and a hash of the input set for integrity verification.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "audit_input_manifest",
+      "$comment": "enforced — must equal this type"
+    },
+    "audit_input_manifest": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "allowlist": {
+          "type": "array"
+        },
+        "input_hash": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "required": ["audit_input_manifest"]
+}
