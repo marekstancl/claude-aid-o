@@ -26,7 +26,7 @@ This directory does NOT claim full JSON Schema validation. The JSON Schema files
 | `.artifact_type` | enum 14 types | **enforced** (presence + enum member) |
 | `.producer` | string `"<tool>@<ver>"` non-empty | **enforced** (presence + non-empty) |
 | `.created_at` | string ISO-8601 UTC `Z` | **enforced** (presence + regex `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`) |
-| `.control_protocol` | enum `aid-2.0 \| legacy` | **enforced** (presence + enum) |
+| `.control_protocol` | enum `aid-2.0 \| legacy` | **enforced** (presence — exit 3); enum: reference (E2+ will enforce) |
 | `.identity.project_id` | string non-empty | **enforced** (presence) |
 | `.identity.{plan_id,epic_id,run_id,step_id}` | string \| null | reference |
 | `.subject.subject_hash` | string `sha256:<hex>` | **enforced** (presence + format `^sha256:[0-9a-f]{64}$`) |
@@ -37,7 +37,7 @@ This directory does NOT claim full JSON Schema validation. The JSON Schema files
 | `.revision.freshness` | enum `current \| stale` | **enforced** (consistency with head_is_current) |
 | `.status` | enum `pass \| fail \| skip \| unverifiable \| pending \| blocked` | **enforced** (presence + enum) |
 | `.verdict.kind` | enum `none \| delivery_ready \| release_ready` | **enforced** (presence + enum) |
-| `.verdict.ready` | bool | reference (presence; bool — E2+ will enforce) |
+| `.verdict.ready` | bool | reference |
 | `.provenance.dispatch_mode` | enum `deterministic \| agent_tool \| subagent` | **enforced** (presence + enum) |
 | `.provenance.generated_by_tool` | string non-empty | **enforced** (presence) |
 | `.findings[]` | array | **enforced** (if present: per-finding invariants below) |
