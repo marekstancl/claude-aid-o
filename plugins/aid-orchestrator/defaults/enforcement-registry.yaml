@@ -329,3 +329,59 @@ enforcements:
   - {id: proto_v2_type_payload,         type: 6, source: "scripts/aid-protocol-validate.sh", instruction: "defaults/schemas/README.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "exit 12: artifact_type minimal payload root key present; validator standalone E1, not FSM-wired", test: "scripts/tests/test-protocol-validate.sh"}
   - {id: proto_v2_fingerprint_determinism, type: 6, source: "scripts/aid-protocol-validate.sh", instruction: "defaults/schemas/README.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "exit 13: finding fingerprint recomputes to same sha256 from 5 canonical inputs (--check-fingerprint); validator standalone E1, not FSM-wired", test: "scripts/tests/test-protocol-validate.sh"}
   - {id: proto_v2_control_protocol_enum, type: 6, source: "scripts/aid-protocol-validate.sh:228", instruction: "defaults/schemas/README.md", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "exit 8: after legacy skip, control_protocol must equal 'aid-2.0' — bad_enum:control_protocol → exit 8; standalone E1, not FSM-wired", test: "scripts/tests/test-protocol-validate.sh"}
+
+  # ── E2 C1 Delivery Engine — observe mode, blocking promotion E10 ────────────
+  - id: DG-07-fsm-hook
+    type: fsm_precondition
+    source: scripts/aid-fsm.sh
+    instruction: cmd_done_advance inserts DG-07 check before P038 Step 3
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "observe-only; delivery_gate_would_block telemetry only; blocking promotion E10"
+
+  - id: DG-01-dependency-consistency
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg01-dependency-consistency.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "package manifest vs lockfile consistency; observe mode E2"
+
+  - id: DG-04-test
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg04-test.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "test suite execution; vacuous shim detection; observe mode E2"
+
+  - id: DG-07-state-consistency
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg07-state-consistency.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh; also embedded in FSM hook
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "parent DONE with pending child steps; observe mode E2"
+
+  - id: DG-12-authority
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg12-authority.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "authority/acceptance consistency; observe mode E2"

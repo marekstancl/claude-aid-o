@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.39.0] — 2026-06-23
+
+### Added
+- **C1 Delivery Engine** — `aid-delivery-gate.sh` + 12 DG check plugins (DG-01..12) producing protocol-v2 `delivery-gate.json`; observe mode (E2): writes `delivery_gate_would_block` telemetry, never blocks FSM transitions; blocking promotion deferred to E10.
+- **Delivery Gate Policy** — `defaults/policies/delivery-gate.yaml` with profile detection (plugin-bash, npm-workspaces, unverifiable) and per-profile check commands; `skip_reason_allowlist` enforces closed vocabulary.
+- **Profile Resolver** — `scripts/lib/aid-delivery-profile.sh`: `resolve_profile` + `select_commands` for deterministic argv-array dispatch (no eval).
+- **DG-07 FSM Hook** — observe-mode hook in `cmd_done_advance` writes `delivery_gate_would_block` event to timeline; blocking branch is live code tested by `test-fsm-dg07-observe.bats`.
+- **Full Delivery Gate Schema** — `defaults/schemas/delivery-gate.schema.json` expanded to full protocol-v2 payload covering `delivery_gate.{phase,profile,freshness,delivery_ready,checks[],summary}`.
+- **QA Fixtures + Harness** — 10 per-DG fail/unverifiable fixtures, golden sample, 44-assertion `test-delivery-gate.sh`; every DG-01..12 check has at least one fixture proving it is not an untested decoration.
+- **Gate Coverage Fields** — `aid-run-gates.sh` now emits `covered_paths`, `changed_paths_covered`, and `relevance` (direct|partial|none|unknown) in `gates_report.json`.
+- **Enforcement Registry** — DG-07 FSM hook + DG-01/04/07/12 registered in `defaults/enforcement-registry.yaml` as observe-mode (status: planned, deadline: E10).
+
 ## [2.38.0] — 2026-06-23
 
 ### Added

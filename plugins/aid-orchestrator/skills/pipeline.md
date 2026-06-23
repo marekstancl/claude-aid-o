@@ -603,6 +603,28 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    step_n=`null`). Iteration 2 appends 4 additional events to
    `timeline.jsonl`; provenance binding uses the last pair per focus.
 
+### D0 Gate Point — Post-Execute Observe (E2)
+
+After the last EXECUTE step completes (before transitioning to GATES), the C1 Delivery Engine
+runs in observe mode:
+
+```bash
+bash {plugin_path}/scripts/aid-delivery-gate.sh \
+  --epic {epic_id} --run {run_id} --base {base_sha} --phase D0
+```
+
+Output: `.aid-o/work/evidence/{epic_id}/{run_id}/delivery-gate.json`
+
+**E2 observe mode:** The engine writes `delivery_gate_would_block` telemetry to `timeline.jsonl`
+but never blocks FSM transitions. The `delivery_ready` field in the output JSON reflects what
+would happen if enforcement were active. Blocking promotion is deferred to E10.
+
+**Reading the output:**
+- `delivery_gate.delivery_ready: false` → issues found (would have blocked in E10)
+- `delivery_gate.summary.would_block: true` → same, written to timeline as telemetry
+- `delivery_gate.checks[]` → per-check status (pass/fail/skip/unverifiable)
+- Full protocol-v2 envelope validated by `aid-protocol-validate.sh`
+
 If more steps remain: `aid-fsm.sh transition EXECUTE EXECUTE <state_file>`
 If all steps done + CP3 pass: `aid-fsm.sh transition EXECUTE GATES <state_file>`
 On unrecoverable error: `aid-fsm.sh transition EXECUTE ESCALATION <state_file>`
