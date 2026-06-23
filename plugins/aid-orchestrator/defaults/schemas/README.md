@@ -13,8 +13,8 @@ This directory does NOT claim full JSON Schema validation. The JSON Schema files
 | File | Purpose |
 |------|---------|
 | `aid-protocol-v2.schema.json` | Canonical shared envelope schema (JSON Schema draft 2020-12) |
-
-Type-specific schemas extend this envelope — Step 4 will add them.
+| `*.schema.json` (14 files) | Type-specific schemas extending the envelope (one per artifact type) |
+| `run-control-protocol.schema.json` | Per-run control protocol lock (legacy vs aid-2.0) |
 
 ---
 
@@ -37,7 +37,7 @@ Type-specific schemas extend this envelope — Step 4 will add them.
 | `.revision.freshness` | enum `current \| stale` | **enforced** (consistency with head_is_current) |
 | `.status` | enum `pass \| fail \| skip \| unverifiable \| pending \| blocked` | **enforced** (presence + enum) |
 | `.verdict.kind` | enum `none \| delivery_ready \| release_ready` | **enforced** (presence + enum) |
-| `.verdict.ready` | bool | **enforced** (presence; bool) |
+| `.verdict.ready` | bool | reference (presence; bool — E2+ will enforce) |
 | `.provenance.dispatch_mode` | enum `deterministic \| agent_tool \| subagent` | **enforced** (presence + enum) |
 | `.provenance.generated_by_tool` | string non-empty | **enforced** (presence) |
 | `.findings[]` | array | **enforced** (if present: per-finding invariants below) |
@@ -105,6 +105,6 @@ An artifact is considered **stale** if either condition is true:
 Each run sets `control_protocol: "aid-2.0" | "legacy"` at init. All artifacts produced in that run inherit this value. The validator (Step 2) checks this via exit code 2 (legacy → skip all enforced checks):
 
 - `control_protocol: "legacy"` → validator exits 0 with `legacy_skipped` (no other enforced checks run)
-- `control_protocol: "aid-2.0"` → all 13 blocking invariants are checked
+- `control_protocol: "aid-2.0"` → all 11 blocking protocol invariants are checked (exit codes 3–13)
 
 **FSM wiring is E2+**: the per-run lock is defined here as schema (`run-control-protocol.schema.json`), but is not written to `fsm-state.yaml` by any E1 code. E2 will wire this into `aid-fsm.sh init`.

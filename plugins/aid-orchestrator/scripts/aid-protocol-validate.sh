@@ -2,7 +2,7 @@
 # Authoritative AID protocol v2 validator.
 # Usage: aid-protocol-validate.sh <artifact.json> [--current-head <sha>] [--check-fingerprint]
 #
-# Validates an artifact JSON against the 13 blocking invariants of the AID protocol v2.
+# Validates an artifact JSON against the 11 blocking protocol invariants of the AID protocol v2.
 # First violation wins. Returns non-zero on any violation.
 #
 # Exit codes:
