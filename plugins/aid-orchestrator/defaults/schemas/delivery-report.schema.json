@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/delivery-report.schema.json",
+  "title": "AID Protocol v2 — DeliveryReport",
+  "$comment": "producer: Reporter (utility, plan boundary), consumers: [PM brief, GUI]",
+  "description": "Artifact emitted by the Reporter utility at plan boundary, summarising overall delivery outcome including test results and linked evidence for the completed plan.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "delivery_report",
+      "$comment": "enforced — must equal this type"
+    },
+    "delivery_report": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "test_outcome": {
+          "type": "string"
+        },
+        "test_evidence": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["delivery_report"]
+}

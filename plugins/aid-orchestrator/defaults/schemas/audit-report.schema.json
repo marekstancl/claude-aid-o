@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/audit-report.schema.json",
+  "title": "AID Protocol v2 — AuditReport",
+  "$comment": "producer: C3, consumers: [C4]",
+  "description": "Artifact emitted by C3 (auditor) summarising all findings from the pipeline, separated into blocking and non-blocking categories.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "audit_report",
+      "$comment": "enforced — must equal this type"
+    },
+    "audit_report": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "blocking_findings": {
+          "type": "array"
+        },
+        "findings": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["audit_report"]
+}

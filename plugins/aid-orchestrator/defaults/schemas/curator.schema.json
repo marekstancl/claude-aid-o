@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/curator.schema.json",
+  "title": "AID Protocol v2 — Curator",
+  "$comment": "producer: Curator (utility, after C3), consumers: [C4, GUI]",
+  "description": "Artifact emitted by the Curator utility (run after C3) containing remediation proposals for findings that cannot be auto-resolved, with status tracking per proposal.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "curator",
+      "$comment": "enforced — must equal this type"
+    },
+    "curator": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "proposal_status": {
+          "type": "string"
+        },
+        "proposals": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["curator"]
+}

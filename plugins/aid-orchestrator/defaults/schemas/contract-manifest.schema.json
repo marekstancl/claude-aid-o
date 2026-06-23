@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/contract-manifest.schema.json",
+  "title": "AID Protocol v2 — ContractManifest",
+  "$comment": "producer: C0 + C2 validation, consumers: [C2, C3]",
+  "description": "Artifact emitted by C0 (with C2 validation pass) listing all inter-step contracts — producer/consumer pairs, interface shapes, and boundary obligations.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "contract_manifest",
+      "$comment": "enforced — must equal this type"
+    },
+    "contract_manifest": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "items": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["contract_manifest"]
+}

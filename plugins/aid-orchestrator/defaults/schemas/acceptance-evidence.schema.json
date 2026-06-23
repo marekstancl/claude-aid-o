@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/acceptance-evidence.schema.json",
+  "title": "AID Protocol v2 — AcceptanceEvidence",
+  "$comment": "producer: C2, consumers: [C3, C4]",
+  "description": "Artifact emitted by C2 recording evidence that each acceptance criterion has been evaluated and the outcome of that evaluation.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "acceptance_evidence",
+      "$comment": "enforced — must equal this type"
+    },
+    "acceptance_evidence": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "criteria": {
+          "type": "array"
+        }
+      }
+    }
+  },
+  "required": ["acceptance_evidence"]
+}
