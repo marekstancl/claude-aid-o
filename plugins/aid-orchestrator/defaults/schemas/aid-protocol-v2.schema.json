@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/aid-protocol-v2.schema.json",
+  "title": "AID Protocol v2 Envelope",
+  "description": "Canonical JSON Schema for the shared AID protocol v2 envelope. Fields marked '$comment: enforced' are validated by aid-protocol-validate.sh; fields marked '$comment: reference' are documented here but not enforced in E1.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "producer",
+    "created_at",
+    "control_protocol",
+    "identity",
+    "subject",
+    "revision",
+    "status",
+    "verdict",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "aid-2.0",
+      "$comment": "enforced"
+    },
+    "artifact_type": {
+      "enum": [
+        "plan_review",
+        "plan_graph",
+        "contract_manifest",
+        "review_profile",
+        "delivery_gate",
+        "ui_fidelity",
+        "semantic_review",
+        "acceptance_evidence",
+        "audit_report",
+        "audit_input_manifest",
+        "release_decision",
+        "pm_decision_brief",
+        "curator",
+        "delivery_report"
+      ],
+      "$comment": "enforced"
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Producer identifier in format '<tool>@<ver>', e.g. 'aid-fsm@2.0'.",
+      "$comment": "enforced"
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "ISO-8601 UTC timestamp with Z suffix.",
+      "$comment": "enforced"
+    },
+    "control_protocol": {
+      "enum": ["aid-2.0", "legacy"],
+      "description": "Artifacts with 'legacy' value are skipped by the validator (exit 0 with legacy_skipped note).",
+      "$comment": "enforced"
+    },
+    "identity": {
+      "type": "object",
+      "required": ["project_id"],
+      "properties": {
+        "project_id": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "enforced"
+        },
+        "plan_id": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        },
+        "epic_id": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        },
+        "run_id": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        },
+        "step_id": {
+          "type": ["string", "null"],
+          "description": "Null is valid for artifacts produced outside a specific step context.",
+          "$comment": "reference"
+        }
+      },
+      "additionalProperties": false
+    },
+    "subject": {
+      "type": "object",
+      "required": ["subject_hash"],
+      "properties": {
+        "subject_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 hash of the primary subject artifact, format 'sha256:<64 hex chars>'.",
+          "$comment": "enforced"
+        },
+        "plan_sha256": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        },
+        "contract_bundle_sha256": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        }
+      },
+      "additionalProperties": false
+    },
+    "revision": {
+      "type": "object",
+      "required": ["head_sha", "head_is_current", "freshness"],
+      "properties": {
+        "base_sha": {
+          "type": ["string", "null"],
+          "$comment": "reference"
+        },
+        "head_sha": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git commit SHA of HEAD at time of artifact production. Validator compares against --current-head argument.",
+          "$comment": "enforced"
+        },
+        "head_is_current": {
+          "type": "boolean",
+          "description": "Must match the result of comparing head_sha against --current-head. Enforced by validator.",
+          "$comment": "enforced"
+        },
+        "freshness": {
+          "enum": ["current", "stale"],
+          "description": "Must be consistent with head_is_current: 'current' iff head_is_current is true.",
+          "$comment": "enforced"
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "enum": ["pass", "fail", "skip", "unverifiable", "pending", "blocked"],
+      "$comment": "enforced"
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["kind", "ready"],
+      "properties": {
+        "kind": {
+          "enum": ["none", "delivery_ready", "release_ready"],
+          "$comment": "enforced"
+        },
+        "ready": {
+          "type": "boolean",
+          "$comment": "enforced"
+        }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["dispatch_mode", "generated_by_tool"],
+      "properties": {
+        "dispatch_mode": {
+          "enum": ["deterministic", "agent_tool", "subagent"],
+          "$comment": "enforced"
+        },
+        "generated_by_tool": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "enforced"
+        }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "description": "May be absent or empty. If present, each item must satisfy per-finding invariants.",
+      "$comment": "enforced",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "occurrence_id", "severity"],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "Deterministic SHA-256 fingerprint of this finding, produced via the fingerprint helper.",
+            "$comment": "enforced"
+          },
+          "occurrence_id": {
+            "type": "string",
+            "minLength": 1,
+            "$comment": "enforced"
+          },
+          "severity": {
+            "enum": ["critical", "high", "medium", "low", "info"],
+            "$comment": "enforced"
+          },
+          "action_owner": {
+            "enum": ["implementer", "reviewer", "pm", "gate-fixer"],
+            "description": "Required when severity is 'critical' or 'high' (blocker). Optional for other severities.",
+            "$comment": "enforced only when severity is critical or high"
+          },
+          "title": {
+            "type": "string",
+            "$comment": "reference"
+          },
+          "human_summary": {
+            "type": "string",
+            "$comment": "reference"
+          },
+          "recommended_remediation": {
+            "type": "string",
+            "$comment": "reference"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "$comment": "reference"
+          },
+          "log_refs": {
+            "type": "array",
+            "$comment": "reference"
+          }
+        }
+      }
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "description": "Summarised list of critical/high findings that block promotion. Reference only.",
+      "$comment": "reference",
+      "items": {
+        "type": "object",
+        "properties": {
+          "finding_occurrence_id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "description": "Lens coverage metadata. Reference only.",
+      "$comment": "reference",
+      "properties": {
+        "required_lenses": {
+          "type": "array"
+        },
+        "completed_lenses": {
+          "type": "array"
+        },
+        "coverage": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
