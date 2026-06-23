@@ -333,13 +333,14 @@ enforcements:
   # ── E2 C1 Delivery Engine — observe mode, blocking promotion E10 ────────────
   - id: DG-07-fsm-hook
     type: fsm_precondition
-    source: scripts/aid-fsm.sh
+    source: "scripts/aid-fsm.sh (cmd_done_advance dg07 hook, calls scripts/lib/delivery-checks/dg07-state-consistency.sh)"
     instruction: cmd_done_advance inserts DG-07 check before P038 Step 3
     severity: fail
     surface: internal-guard
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "observe-only; delivery_gate_would_block telemetry only; blocking promotion E10"
 
   - id: DG-01-dependency-consistency
@@ -351,6 +352,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "package manifest vs lockfile consistency; observe mode E2"
 
   - id: DG-04-test
@@ -362,6 +364,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "test suite execution; vacuous shim detection; observe mode E2"
 
   - id: DG-07-state-consistency
@@ -373,6 +376,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "parent DONE with pending child steps; observe mode E2"
 
   - id: DG-12-authority
@@ -384,6 +388,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "authority/acceptance consistency; observe mode E2"
 
   - id: DG-02-build
@@ -395,6 +400,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "build command execution; observe mode E2"
 
   - id: DG-03-typecheck
@@ -406,6 +412,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "type checking command execution; observe mode E2"
 
   - id: DG-05-consumer-compile
@@ -417,6 +424,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "consumer-side compilation of changed paths; observe mode E2"
 
   - id: DG-06-removed-dep
@@ -428,6 +436,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "removed dependency detection across versions; observe mode E2"
 
   - id: DG-08-runtime-env
@@ -439,6 +448,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "runtime environment variable validation; observe mode E2"
 
   - id: DG-09-static-coverage
@@ -450,6 +460,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "static code coverage requirements; observe mode E2"
 
   - id: DG-10-startup-smoke
@@ -461,6 +472,7 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "startup smoke test execution; observe mode E2"
 
   - id: DG-11-build-config
@@ -472,4 +484,5 @@ enforcements:
     enforcement: observe
     status: planned
     deadline: E10
+    deferred_until: "2026-12-31"
     description: "build configuration validation; observe mode E2"

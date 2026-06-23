@@ -2009,6 +2009,31 @@ cmd_advance_to_gates() {
     # check_preconditions re-validates _generated_by, CP3 outputs, grandfather logic.
     # The runner just wrote gates_report.json with _generated_by, so the check passes.
     if cmd_transition EXECUTE GATES "$state_file"; then
+      # D0 gate point — observe-mode delivery gate (E2, E-050).
+      # Runs after last EXECUTE step and successful EXECUTE→GATES transition.
+      # Non-blocking: never fails the transition regardless of exit code or findings.
+      local _d0_script="${SCRIPT_DIR}/aid-delivery-gate.sh"
+      local _d0_policy="${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml"
+      if [[ -f "$_d0_script" ]]; then
+        local _d0_base_sha _d0_output _d0_exit=0
+        _d0_base_sha=$(yaml_field "$state_file" base_commit)
+        local _d0_project_root="${AID_PROJECT_ROOT:-$(pwd)}"
+        _d0_output=$(
+          DELIVERY_GATE_POLICY="$_d0_policy" \
+          AID_EVIDENCE_BASE="${_d0_project_root}/.aid-o/work/evidence" \
+          AID_PROJECT_ROOT="$_d0_project_root" \
+          timeout 300 bash "$_d0_script" \
+            --epic "$epic_id" --run "$run_id" \
+            --base "${_d0_base_sha:-HEAD~1}" \
+            --phase D0 2>&1
+        ) || _d0_exit=$?
+        [[ -n "$timeline" ]] && log_event "$timeline" "d0_delivery_gate" \
+          exit_code="${_d0_exit}" \
+          observe="true" \
+          epic="${epic_id}" \
+          run="${run_id}"
+      fi
+      # D0 is observe-only — never fail the transition
       echo "advance-to-gates: SUCCESS — gates passed, state=GATES"
       return 0
     else

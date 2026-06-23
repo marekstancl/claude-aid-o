@@ -47,6 +47,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---------------------------------------------------------------------------
 # shellcheck source=lib/aid-delivery-profile.sh
 source "${SCRIPT_DIR}/lib/aid-delivery-profile.sh"
+# shellcheck source=lib/aid-finding-fingerprint.sh
+source "${SCRIPT_DIR}/lib/aid-finding-fingerprint.sh"
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -635,6 +637,63 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Build findings[] array from fail/unverifiable checks
+#
+# jq has no sha256 builtin, so fingerprints are computed per-entry in bash.
+# Strategy: extract [id, status, name] tuples from CHECKS_JSON (one JSON array
+# per line), iterate in a bash while loop, compute sha256 fingerprint, and
+# accumulate a findings JSON array.
+# ---------------------------------------------------------------------------
+FINDINGS_JSON="[]"
+while IFS= read -r tuple; do
+  [[ -z "$tuple" ]] && continue
+
+  _f_id="$(echo "$tuple" | jq -r '.[0]')"
+  _f_status="$(echo "$tuple" | jq -r '.[1]')"
+  _f_name="$(echo "$tuple" | jq -r '.[2]')"
+
+  _fingerprint="$(printf '%s' "${_f_id}:${_f_status}:${EPIC_ID}:${RUN_ID}" | sha256sum | awk '{print "sha256:" $1}')"
+
+  if [[ "$_f_status" == "fail" ]]; then
+    _severity="high"
+    _finding_class="delivery_gate_fail"
+    _action_owner="gate-fixer"
+  else
+    _severity="medium"
+    _finding_class="delivery_gate_unverifiable"
+    _action_owner="reviewer"
+  fi
+
+  _entry="$(jq -n \
+    --arg fingerprint "$_fingerprint" \
+    --arg occurrence_id "${_f_id}-${EPIC_ID}-${RUN_ID}" \
+    --arg severity "$_severity" \
+    --arg check_id "$_f_id" \
+    --arg finding_class "$_finding_class" \
+    --arg description "${_f_id} ${_f_name}: status=${_f_status}" \
+    --arg action_owner "$_action_owner" \
+    '{
+      "fingerprint": $fingerprint,
+      "occurrence_id": $occurrence_id,
+      "severity": $severity,
+      "check_id": $check_id,
+      "target_path": "",
+      "finding_class": $finding_class,
+      "description": $description,
+      "action_owner": $action_owner
+    }')"
+
+  FINDINGS_JSON="$(echo "$FINDINGS_JSON" | jq --argjson entry "$_entry" '. + [$entry]')"
+done < <(echo "$CHECKS_JSON" | jq -c \
+  '.[] | select(.status == "fail" or .status == "unverifiable") | [.id, .status, .name]' \
+  2>/dev/null)
+
+# Fallback: ensure valid JSON array
+if ! echo "$FINDINGS_JSON" | jq -e '. | arrays' >/dev/null 2>&1; then
+  FINDINGS_JSON="[]"
+fi
+
+# ---------------------------------------------------------------------------
 # Build JSON without subject_hash first (for hashing)
 # ---------------------------------------------------------------------------
 CREATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -696,6 +755,7 @@ FINAL_JSON="$(jq -n \
   --argjson delivery_ready "$DELIVERY_READY" \
   --arg generated_by_tool "aid-delivery-gate" \
   --argjson delivery_gate_payload "$DG_PAYLOAD_FOR_HASH" \
+  --argjson findings "$FINDINGS_JSON" \
   '{
     "schema_version": $schema_version,
     "artifact_type": $artifact_type,
@@ -725,6 +785,7 @@ FINAL_JSON="$(jq -n \
       "dispatch_mode": "deterministic",
       "generated_by_tool": $generated_by_tool
     },
+    "findings": $findings,
     "delivery_gate": $delivery_gate_payload
   }')"
 
