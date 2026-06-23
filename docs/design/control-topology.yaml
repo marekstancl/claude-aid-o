@@ -1,0 +1,291 @@
+# AID Control System v2 - Control Topology (E0 accepted)
+# Status: PM accepted 2026-06-22. Žádný runtime dopad.
+# Zdroj: docs/AID-control-system-v2-unified-refactor-PLAN.md §3.0 + E0
+# Doprovod: failure-mode-control-matrix.json, AID-control-system-v2-control-topology.md
+
+protocol: aid-2.0
+topology_version: e0-accepted-2026-06-22
+runtime_impact: none
+
+# ---------------------------------------------------------------------------
+# Pět mechanismů - jediné rozhodovací autority systému
+# ---------------------------------------------------------------------------
+mechanisms:
+
+  C0:
+    name: Plan Contract Gate
+    unique_failure_class: "Neproveditelný/nejednoznačný/neúplný plán (FC-01..08)"
+    kind: [deterministic_structural, semantic_plan_review]
+    trigger: before_epic_generation
+    fsm_precondition: true
+    blocking: true
+    authority: gate            # blokuje EPIC generaci
+    release_authority: false
+    modes:
+      structural:              # deterministické, bez LLM
+        checks: [plan_graph_topo, identifier_domain, schema_completeness, producer_consumer_order, contract_manifest_hash]
+      semantic:                # LLM plan review (CP1 deep lenses)
+        lenses: [behavior_L1, feasibility_L2, enforcement_L3, reuse_compat, planned_call_feasibility, dep_api_grounding, idempotency_matrix, authority_runtime_matrix]
+    outputs: [plan-review.json, plan-graph.json, contract-manifest.json, review-profile.json]
+    stop_condition: "any stop-rule blocker -> EPIC generation blocked"
+    compat_alias: [cp1]
+
+  C1:
+    name: Delivery Engine
+    unique_failure_class: "Revize nejde sestavit/spustit/mechanicky prokázat, oracle odhalí data drop nebo candidate profil neodpovídá diffu (FC-10..23, FC-29, FC-33, FC-34, FC-40, FC-41)"
+    kind: [deterministic_engine]
+    trigger: [d0_after_last_step, d1_after_fix]
+    blocking: true
+    authority: gate
+    release_authority: false
+    llm_dispatch: false        # deterministický, žádný agent dispatch
+    plugin_catalog:            # pluginy/lenses - počet checků smí být vysoký, dispatch ne
+      - {id: build, required_when: production_or_manifest_changed}
+      - {id: typecheck, required_when: typed_source_changed}
+      - {id: test, required_when: production_or_test_changed}
+      - {id: dependency_consistency, required_when: package_manifest_changed}
+      - {id: removed_dependency_import, required_when: dependency_removed}
+      - {id: public_contract_consumer_compile, required_when: public_contract_changed}
+      - {id: runtime_startup_smoke, required_when: bootstrap_or_framework_changed}
+      - {id: route_resolve, required_when: router_or_links_changed}
+      - {id: build_config_resolve, required_when: build_config_changed}
+      - {id: production_reachability, required_when: feature_or_provider_added}    # DG-13
+      - {id: wire_shape_deterministic, required_when: cross_layer_boundary_changed} # DG-14 deterministic part
+      - {id: fallback_forced_failure, required_when: fallback_retry_or_reconnect_changed} # DG-16
+      - {id: independent_oracle_nodrop, required_when: scanner_or_analytics_changed} # DG-17
+      - {id: acceptance_struct, required_when: production_epic}                      # DG-18 structural
+      - {id: state_consistency, required_when: always}                              # DG-07 false-DONE
+      - {id: security_boundary_fixture, required_when: filesystem_path_or_serving_changed} # W-4 fix: FC-19 path traversal (deterministic adversarial fixture suite)
+      - {id: frontend_visual_fidelity, required_when: existing_ui_frontend_changed} # P048 plugin
+      - {id: project_gates, required_when: project_policy}                          # convert_to_plugin
+      - {id: dependency_vuln_audit, required_when: dependency_manifest_changed}     # CP3-security deterministic split
+      - {id: candidate_profile_union, required_when: always}                        # FC-41 plan profile UNION actual diff surfaces
+    outputs: [delivery-gate.json, "delivery-gate/{check}.log", "ui/verdict.json"]
+    stop_condition: "any required check fail|unverifiable -> delivery_ready:false"
+    block_on_unverifiable: true        # R2 schváleno
+    compat_alias: [delivery_gate]
+
+  C2:
+    name: Semantic Review Engine
+    unique_failure_class: "Spotřeba kontraktu nebo chování odporuje schválenému outcome napříč hranicemi (FC-09, FC-24..28, FC-30..32, FC-35)"
+    kind: [llm_reviewer_single_engine]
+    one_schema: semantic-review.json
+    one_finding_model: true
+    # Strop rozhodovacích kol a provozní resource budget jsou dvě různé veličiny.
+    # Každé dílčí LLM volání ve fan-outu se měří; findings se slučují deterministicky a bezztrátově.
+    dispatch_rule: "jeden mode = jedna rozhodovací autorita a jedno schema; fan-out model calls se účtují samostatně; required lens se nesmí tiše vypustit"
+    lens_fanout_allowed: true            # dílčí evaluace jedné autority, ne nové dispatche s vlastní autoritou
+    no_mega_prompt: true                 # zákaz: 20+ lenses + fault injection v jednom promptu
+    finding_merge: "deterministic lossless union by stable finding_id; severity=max; conflicts remain unresolved; no LLM downgrade/drop"
+    modes:
+      local:    {compat_alias: cp2,  assembly_point: per_step,  diff_range: "HEAD~1..HEAD", gated_by: profile_or_contract}
+      wiring:   {compat_alias: ir-1, assembly_point: first_runnable_slice, diff_range: "slice",
+                 blocks_subsequent_steps: true,    # BREAK-3 fix: nevyřešený Critical/High blokuje increment dalších kroků
+                 fsm_precondition: "increment-step pro následující kroky vyžaduje current wiring report bez unresolved Critical/High"}
+      behavior: {compat_alias: ir-2, assembly_point: feature_complete_candidate, diff_range: "candidate"}
+      final:    {compat_alias: cp3,  assembly_point: integration_candidate, diff_range: "base..HEAD"}
+    lenses:      # sdílené napříč módy, aktivované review profilem
+      - behavior_trace
+      - transaction_boundary
+      - field_lineage
+      - negative_case
+      - operation_order_resource_bound
+      - requirement_test_drift
+      - ui_lifecycle
+      - ac_to_test_identity
+      - false_empty_distinction
+      - fallback_semantics
+      - frontend_user_outcome          # P048 lens - existing_ui|greenfield|redesign
+      - security_threat_model          # CP3-security semantic split (risk-based)
+    outputs: ["semantic-review-{mode}.json", "acceptance-evidence.json"]
+    stop_condition: "Critical/High finding -> block + fix loop"
+    block_severities: [critical, high]   # R1 schváleno
+    compat_alias: [cp2, cp3, ir-1, ir-2]
+
+  C3:
+    name: Independent Audit
+    unique_failure_class: "Korelovaný PASS u rizikové dodávky - nikdo nezávisle nezkusil claim vyvrátit (FC-37)"
+    kind: [llm_adversarial_isolated]
+    trigger: risk_gated            # NE always-on
+    risk_profiles: [high, mixed, security, data_loss, release_process]
+    independence:
+      fresh_context: true          # oddělený kontext + hash-bound manifest; agent_tool samo o sobě nezávislost ani korelaci nedokazuje
+      input_manifest: audit-input-manifest.json   # hashed allowlist, prior PASS shrnutí untrusted/vynechané
+      provenance_required: true
+      provider_adapter: provider_neutral
+      levels: [context_only, cross_model, cross_provider]
+      report_fields: [provider, model, process_id, input_manifest_hash, independence_level]
+      preferred_for_high: cross_provider
+      required_level: profile_defined
+      unavailable_required_level: unverifiable
+      codex_cli_reference:
+        command: codex exec
+        maturity: reference_backend
+        capability_detection: [command_exists, exec_help_or_sanity_run, auth_available, output_schema_supported]
+        launch_flags: [--ephemeral, --sandbox read-only, --ask-for-approval never]
+        forbidden_detection: "model self-introspection / IDE-vs-CLI guess"
+        unavailable_result: unverifiable
+    replay: ">=1 detector-selected highest-risk trace (ne implementátorem vybraný)"
+    outputs: [audit-report.json]
+    stop_condition: "independently-confirmed Critical/High -> block"
+    block_severities: [critical, high]   # R1 schváleno
+    compat_alias: [auditor]
+
+  C4:
+    name: Release Policy
+    unique_failure_class: "Release přes neúplnou/stale evidence, blocker nebo neúplný PM handoff (FC-36, FC-38, FC-39, FC-42, FC-43, FC-44)"
+    kind: [deterministic_aggregator]
+    llm_dispatch: false
+    trigger: before_merge_offer
+    authority: release_eligibility   # JEDINÁ release autorita
+    release_authority: true
+    inputs: [review-profile.json, plan-review.json, delivery-gate.json, semantic-review-final.json, acceptance-evidence.json, gates_report.json, invalidation-map.json, profile-required-semantic-reviews, profile-required-audit-report]
+    aggregation: "all profile-required current evidence present AND no unresolved blocker AND HEAD-bound"
+    outputs: [release-decision.json]
+    # Dvě sekvenční precondition bez cyklu: brief vzniká AŽ z release decision.
+    pm_handoff_sequence:
+      - "C4 computes release-decision.json from profile-required evidence"
+      - "pm_brief generator consumes release-decision.json + the same evidence"
+      - "FSM merge offer requires release_ready:true AND aid-pm-brief.sh --validate success"
+    pm_brief_is_release_input: false
+    stop_condition: "missing/stale required evidence OR any blocker -> release_ready:false"
+    force_policy: "--force nevyrobí release_ready:true; zapíše auditovaný waiver separátně (R2/R43)"
+    compat_alias: [cp5]
+
+# ---------------------------------------------------------------------------
+# Podpůrné funkce - NEJSOU kontroly (žádná correctness/release autorita)
+# ---------------------------------------------------------------------------
+support_functions:
+  brainstorm_writer_visual_companion: {role: contract_producer, feeds: C0, authority: none}
+  implementer:                        {role: worker, authority: none}
+  curator:                            {role: proposals_backlog_lessons, authority: none, sequencing: after_C3_if_required_else_C2_final}
+  reporter:                           {role: communication_plus_runtime_smoke, authority: none, runtime_runner: aid-reporter-run.sh, feeds: C1_input}
+  simplifier:                         {role: plan_boundary_maintenance, authority: none, optional: true}
+  pm_brief:                           {role: deterministic_evidence_projection, authority: none, output: [pm-decision-brief.json, pm-summary.md]}
+  profile_resolver:                   {role: deterministic_plan_and_candidate_surface_union, authority: none, plan_time_feeds: C0, candidate_time_enforced_by: C1, freshness_verified_by: C4}
+
+# ---------------------------------------------------------------------------
+# Risk profily a budget (tvrdé stropy - T1)
+# Topology cap = rozhodovací kola. Resource budget = skutečná model calls/tokens/wall time.
+# ---------------------------------------------------------------------------
+risk_profiles:
+  docs_trivial:
+    mandatory: [C0_structural, C1_minimal, C4]
+    c2_authorities_max: 0       # skip s důvodem, pokud detektor nenajde behaviorální dopad
+    c3: false
+    llm_authorities_total_max: 0
+  low:
+    mandatory: [C0, C1, C2_final, C4]
+    c2_authorities_max: 1
+    c3: false
+    llm_authorities_total_max: 2
+  medium:
+    mandatory: [C0, C1, C2_wiring, C2_final, C4]
+    c2_authorities_max: 2
+    c3: false                   # T2: medium bez C3
+    llm_authorities_total_max: 3
+  high:                         # + mixed, security, data_loss, release_process
+    mandatory: [C0, C1_continuous, C2_wiring, C2_behavior, C2_final, C3, C4]
+    c2_authorities_max: 3
+    c3: true
+    llm_authorities_total_max: 5
+
+dispatch_budget_enforcement:
+  topology_hard_cap: true       # strop rozhodovacích kol, ne tvrzení o ceně
+  topology_unit: decision_authority_round
+  lens_fanout_within_authority: allowed
+  override: pm_waiver_only
+  rationale: "bez stropu se 'ještě jeden reviewer pro jistotu' plíživě vrátí"
+  cost_time_status: unvalidated # p50/p95 jsou odhad; měří se až v E10 (aid-control-metrics.sh)
+  resource_accounting:
+    mandatory_metrics: [model_calls, input_tokens, output_tokens, wall_time_ms]
+    includes_lens_fanout: true
+    required_lens_omission: forbidden
+    finding_merge: deterministic_lossless_union
+    numeric_caps: calibration_required_in_E10_before_cutover
+    on_budget_exceeded: block_pending_pm_waiver
+
+# ---------------------------------------------------------------------------
+# Defense-in-depth - vědomé dvojice primární+sekundární (T3)
+# Ne duplicita: jiný vstup/úhel téže failure class
+# ---------------------------------------------------------------------------
+defense_in_depth:
+  - {failure_class: FC-20, primary: C1.production_reachability, secondary: C2.frontend_user_outcome, why: "C1 chytí not-mounted, C2 chytí mounted-but-no-value"}
+  - {failure_class: FC-33, primary: C1.fallback_forced_failure,  secondary: C2.behavior_trace, why: "C1 chytí nespuštěný fallback, C2 chytí nečestný stav"}
+  - {failure_class: FC-34, primary: C1.independent_oracle_nodrop, secondary: C2.frontend_user_outcome, why: "C1 chytí kardinalitu, C2 chytí význam nad reálnými daty"}
+  - {failure_class: FC-36, primary: C4.mechanical_block_derivation, secondary: C3.independent_finding, why: "C4 vynutí, C3 nezávisle potvrdí"}
+
+# ---------------------------------------------------------------------------
+# Compatibility aliasy (T4) - read-only, žádná vlastní autorita
+# ---------------------------------------------------------------------------
+compatibility_aliases:
+  cp1:  {maps_to: C0, authority: none, note: "read-only alias"}
+  cp2:  {maps_to: "C2.mode=local", authority: none}
+  cp3:  {maps_to: "C2.mode=final", authority: none}
+  ir-1: {maps_to: "C2.mode=wiring", authority: none}
+  ir-2: {maps_to: "C2.mode=behavior", authority: none}
+  cp4:  {maps_to: "invalidate_rerun(C1,C2)", authority: none, note: "ne nový reviewer"}
+  cp5:  {maps_to: C4, authority: none, note: "agregace, ne LLM review"}
+  cp6:  {maps_to: "fast_profile(C1,C2,C4)", authority: none}
+  legacy_evidence: {protocol_version: legacy, read_only: true, establishes_v2_authority: false}
+
+# ---------------------------------------------------------------------------
+# Dispozice dnešních kontrol (E0 rozhodnutí)
+# ---------------------------------------------------------------------------
+disposition:
+  cp1:               keep_as_mechanism      # -> C0
+  cp1_deep_lenses:   merge_as_mode          # -> C0 semantic lenses
+  cp2:               merge_as_mode          # -> C2 mode=local
+  cp3_code_review:   merge_as_mode          # -> C2 mode=final
+  cp3_security:      [merge_as_mode, convert_to_plugin]  # T5: C2 lens + C1 dep-audit
+  ir_1:              merge_as_mode          # -> C2 mode=wiring
+  ir_2:              merge_as_mode          # -> C2 mode=behavior
+  cp4:               convert_to_plugin      # invalidate+rerun, žádný nový reviewer
+  cp5:               keep_as_mechanism      # -> C4 (alias)
+  cp6:               merge_as_mode          # fast profil
+  auditor:           keep_as_mechanism      # -> C3 (risk-gated)
+  curator:           utility_only
+  reporter:          utility_only
+  simplifier:        utility_only
+  project_gates:     convert_to_plugin      # -> C1 pluginy
+  delivery_gate:     keep_as_mechanism      # -> C1
+  p048_mechanical:   convert_to_plugin      # -> C1 frontend_visual_fidelity + C2 frontend_user_outcome lens
+
+# ---------------------------------------------------------------------------
+# Control Necessity Test - výsledek per mechanismus (všechny PASS)
+# ---------------------------------------------------------------------------
+necessity_test:
+  C0: {unique_class: true, cheaper_elsewhere: false, trigger_defined: true, neg_fixture: P045, pos_control: clean_plan, independent: true, verdict: PASS}
+  C1: {unique_class: true, cheaper_elsewhere: false, trigger_defined: true, neg_fixture: multer_FC11, pos_control: docs_only, independent: true, verdict: PASS}
+  C2: {unique_class: true, cheaper_elsewhere: false, trigger_defined: true, neg_fixture: E-044, pos_control: internal_refactor, independent: partial, verdict: PASS}
+  C3: {unique_class: true, cheaper_elsewhere: false, trigger_defined: true, neg_fixture: all_C0C2_pass_but_drop, pos_control: low_risk_no_c3, independent: true, verdict: PASS}
+  C4: {unique_class: true, cheaper_elsewhere: false, trigger_defined: true, neg_fixture: pending_child_DONE, pos_control: clean_evidence, independent: true, verdict: PASS}
+
+# ---------------------------------------------------------------------------
+# Negativní design fixtures - tyto návrhy MUSÍ být odmítnuty
+# ---------------------------------------------------------------------------
+rejected_designs:
+  - {name: cp3_5_security_rereview, reason: "no unique failure class, no independent input - opakuje C2 premisu", necessity_fail: [1, 7]}
+  - {name: second_auditor, reason: "korelovaný, sdílí manifest i premisu s C3", necessity_fail: [7]}
+  - {name: always_cp2_per_step, reason: "C2 final levněji; per-step bez kontraktu nemá unique nález", necessity_fail: [2]}
+  - {name: p048_independent_fsm_release_authority, reason: "druhá release autorita; failure class už vlastní C1", necessity_fail: [1]}
+  - {name: llm_delivery_reviewer, reason: "deterministicky levnější v C1; LLM nad exit kódem je duplikace", necessity_fail: [2]}
+
+# Profilové negative fixtures (W-1, W-3 fix) - profil sám nesmí být self-certifying hole
+profile_negative_fixtures:
+  - {name: docs_trivial_hides_behavior, profile: docs_trivial,
+     scenario: "změna označená docs/trivial ve skutečnosti mění behaviorální surface (např. upraví handler skrytě)",
+     expected: "candidate-time profil (FC-41 union) povýší profil a VYNUTÍ C2 dispatch; c2_authorities_max:0 platí jen když detektor nenajde behaviorální dopad",
+     why: "bez tohoto je nejlevnější profil díra, kterou stačí špatně oklasifikovat"}
+  - {name: e044_must_classify_high, profile: high,
+     scenario: "E-044 styl: db mutation + object store + cross-layer response shape + persistence",
+     expected: "profil = high (data + cross-boundary + persistence triggery) -> dostane C3 nezávislý audit",
+     why: "W-3 fix: kdyby E-044 spadlo do medium, ztratilo by jediný nezávislý sémantický check; proto data-loss/persistence/cross-boundary = high"}
+
+open_pm_decisions:
+  - T1_authority_round_cap   # topology stropy; ne skutečný resource cost
+  - T2_c3_risk_gate          # C3 jen high+
+  - T3_defense_in_depth      # 4 doložené dvojice; FC-29 demoted
+  - T4_compat_aliases        # read-only
+  - T5_cp3_security_split    # C2 lens + C1 dep-audit
+  - T6_dual_budget_accounting   # authority rounds + skutečné model calls/tokens/time
