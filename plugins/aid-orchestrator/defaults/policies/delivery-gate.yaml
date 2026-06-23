@@ -5,7 +5,7 @@
 #
 # skip_reason_allowlist: ONLY these values are accepted as valid skip reasons.
 # Any skip reason NOT in this list counts as blocking in the algorithm —
-# preventing benighn skip from masking a false-green.
+# preventing benign skip from masking a false-green.
 #
 # block_on_unverifiable: if any check result is unverifiable (no command,
 # unknown ecosystem, or empty argv after profile resolution), delivery_ready = false.
