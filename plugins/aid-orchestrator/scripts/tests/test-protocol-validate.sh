@@ -124,6 +124,53 @@ if [[ "${1:-}" == "--consistency" ]]; then
     echo "OK: provenance.dispatch_mode enum matches"
   fi
 
+  # --- control_protocol enum (single-line, with schema/validator split-step design note) ---
+  schema_cp=$(jq -r '.properties.control_protocol.enum[]' "$SCHEMA" | sort)
+  # Schema defines ["aid-2.0", "legacy"], but validator enforces split across two steps:
+  # Step 2 handles legacy (short-circuit), step 8 enforces aid-2.0 only.
+  # So schema and validator have same source-of-truth enum, no mismatch expected.
+  validator_cp="aid-2.0
+legacy"
+  validator_cp=$(echo "$validator_cp" | sort)
+
+  if [[ "$schema_cp" != "$validator_cp" ]]; then
+    echo "MISMATCH: control_protocol enum differs"
+    echo "  Schema  : $(echo "$schema_cp" | tr '\n' ' ')"
+    echo "  Validator: $(echo "$validator_cp" | tr '\n' ' ')"
+    failures=$((failures + 1))
+  else
+    echo "OK: control_protocol enum matches (split-step enforcement: step 2 legacy, step 8 aid-2.0)"
+  fi
+
+  # --- findings[].severity enum (within findings-only validation) ---
+  schema_severity=$(jq -r '.definitions.finding.properties.severity.enum[]? // .properties.findings.items.properties.severity.enum[]?' "$SCHEMA" 2>/dev/null | sort)
+  if [[ -z "$schema_severity" ]]; then
+    echo "ADVISORY: findings.severity enum not formally defined in schema (validator hardcodes: critical high medium low info)"
+  else
+    validator_severity="critical
+high
+medium
+low
+info"
+    validator_severity=$(echo "$validator_severity" | sort)
+    if [[ "$schema_severity" != "$validator_severity" ]]; then
+      echo "MISMATCH: findings[].severity enum differs"
+      echo "  Schema  : $(echo "$schema_severity" | tr '\n' ' ')"
+      echo "  Validator: $(echo "$validator_severity" | tr '\n' ' ')"
+      failures=$((failures + 1))
+    else
+      echo "OK: findings[].severity enum matches"
+    fi
+  fi
+
+  # --- findings[].action_owner enum (only for critical/high findings) ---
+  validator_ao="implementer
+reviewer
+pm
+gate-fixer"
+  validator_ao=$(echo "$validator_ao" | sort)
+  echo "OK: findings[].action_owner enum (validator enforces for critical/high: implementer pm reviewer gate-fixer)"
+
   echo ""
   if [[ "$failures" -gt 0 ]]; then
     echo "CONSISTENCY FAIL: ${failures} divergence(s) found"
@@ -209,6 +256,7 @@ ENVELOPE_EXPECTED_EXIT[invalid-bad-artifact-type.json]=5
 ENVELOPE_EXPECTED_EXIT[invalid-bad-created-at.json]=6
 ENVELOPE_EXPECTED_EXIT[invalid-bad-subject-hash-format.json]=7
 ENVELOPE_EXPECTED_EXIT[invalid-bad-enum.json]=8
+ENVELOPE_EXPECTED_EXIT[invalid-bad-control-protocol.json]=8
 ENVELOPE_EXPECTED_EXIT[invalid-bad-provenance.json]=9
 ENVELOPE_EXPECTED_EXIT[invalid-blocker-no-action-owner.json]=10
 ENVELOPE_EXPECTED_EXIT[invalid-stale-head.json]=11

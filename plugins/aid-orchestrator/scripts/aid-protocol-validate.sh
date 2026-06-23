@@ -14,7 +14,7 @@
 #   5  — bad artifact_type
 #   6  — bad created_at format
 #   7  — bad subject_hash format
-#   8  — bad status or verdict.kind enum
+#   8  — bad status or verdict.kind or control_protocol enum
 #   9  — bad provenance
 #  10  — per-finding invariant violation
 #  11  — head freshness mismatch
@@ -224,6 +224,13 @@ for v in "${VALID_VERDICT_KIND[@]}"; do
 done
 if [[ "$verdict_valid" -eq 0 ]]; then
   echo "bad_enum:verdict.kind" >&2
+  exit 8
+fi
+
+# control_protocol must be "aid-2.0" (legacy already handled in step 2)
+cp_val=$(jq -r '.control_protocol' "$ARTIFACT_FILE")
+if [[ "$cp_val" != "aid-2.0" ]]; then
+  echo "bad_enum:control_protocol" >&2
   exit 8
 fi
 

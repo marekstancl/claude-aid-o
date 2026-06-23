@@ -56,7 +56,7 @@
     "control_protocol": {
       "enum": ["aid-2.0", "legacy"],
       "description": "Artifacts with 'legacy' value are skipped by the validator (exit 0 with legacy_skipped note).",
-      "$comment": "enforced (presence, exit 3); enum reference (E2+ will enforce)"
+      "$comment": "enforced (presence — exit 3; enum — exit 8)"
     },
     "identity": {
       "type": "object",

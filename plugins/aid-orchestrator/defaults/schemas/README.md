@@ -26,7 +26,7 @@ This directory does NOT claim full JSON Schema validation. The JSON Schema files
 | `.artifact_type` | enum 14 types | **enforced** (presence + enum member) |
 | `.producer` | string `"<tool>@<ver>"` non-empty | **enforced** (presence + non-empty) |
 | `.created_at` | string ISO-8601 UTC `Z` | **enforced** (presence + regex `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`) |
-| `.control_protocol` | enum `aid-2.0 \| legacy` | **enforced** (presence — exit 3); enum: reference (E2+ will enforce) |
+| `.control_protocol` | enum `aid-2.0 \| legacy` | **enforced** (presence — exit 3; enum — exit 8) |
 | `.identity.project_id` | string non-empty | **enforced** (presence) |
 | `.identity.{plan_id,epic_id,run_id,step_id}` | string \| null | reference |
 | `.subject.subject_hash` | string `sha256:<hex>` | **enforced** (presence + format `^sha256:[0-9a-f]{64}$`) |
@@ -102,7 +102,7 @@ An artifact is considered **stale** if either condition is true:
 
 ### Per-run `control_protocol` lock
 
-Each run sets `control_protocol: "aid-2.0" | "legacy"` at init. All artifacts produced in that run inherit this value. The validator (Step 2) checks this via exit code 2 (legacy → skip all enforced checks):
+Each run sets `control_protocol: "aid-2.0" | "legacy"` at init. All artifacts produced in that run inherit this value. The validator (Step 2) checks this via step 2 (legacy → skip all enforced checks):
 
 - `control_protocol: "legacy"` → validator exits 0 with `legacy_skipped` (no other enforced checks run)
 - `control_protocol: "aid-2.0"` → all 11 blocking protocol invariants are checked (exit codes 3–13)
