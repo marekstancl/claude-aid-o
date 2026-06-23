@@ -2342,6 +2342,50 @@ cmd_done_advance() {
         return 1
       fi
 
+      # E2 DG-07 hook: state-consistency delivery check (observe mode by default)
+      # Reads enforcement from delivery-gate.yaml policy:
+      #   observe  → write delivery_gate_would_block telemetry only (no block)
+      #   blocking → block done-advance if DG-07 fails (E10 promotion path)
+      # Fail-safe: if policy is missing or unreadable, default to observe (never block).
+      local _dg07_enforcement _dg07_policy _dg07_script _dg07_exit _dg07_output
+      local _dg07_timeline="${evidence_dir}/timeline.jsonl"
+      # DELIVERY_GATE_POLICY env var allows test/CI override of the policy path.
+      _dg07_policy="${DELIVERY_GATE_POLICY:-${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml}"
+      _dg07_enforcement="observe"   # fail-safe default
+      if [[ -f "$_dg07_policy" ]] && command -v yq >/dev/null 2>&1; then
+        local _pol_enforcement
+        _pol_enforcement=$(yq e '.enforcement // "observe"' "$_dg07_policy" 2>/dev/null || echo "observe")
+        [[ "$_pol_enforcement" == "blocking" ]] && _dg07_enforcement="blocking"
+      fi
+
+      _dg07_script="${SCRIPT_DIR}/lib/delivery-checks/dg07-state-consistency.sh"
+      if [[ -f "$_dg07_script" ]]; then
+        _dg07_exit=0
+        _dg07_output=$(AID_PROJECT_ROOT="$project_root" \
+                       AID_EPIC_ID="$epic_id" \
+                       AID_RUN_ID="$run_id" \
+                       bash "$_dg07_script" 2>&1) || _dg07_exit=$?
+
+        if [[ "$_dg07_exit" -eq 1 ]]; then
+          # DG-07 detected an inconsistency
+          log_event "$_dg07_timeline" "delivery_gate_would_block" \
+            check="dg07" enforcement="$_dg07_enforcement" output="$_dg07_output"
+
+          if [[ "$_dg07_enforcement" == "blocking" ]]; then
+            echo "ERROR: DG-07 state-consistency check failed (enforcement=blocking):" >&2
+            echo "$_dg07_output" >&2
+            echo "" >&2
+            echo "Run with --force to override (PM-authorized, audited)." >&2
+            log_event "$_dg07_timeline" "fsm_done_advance_fail" check="dg07" reason="state_inconsistency"
+            exit 2
+          else
+            log_warn "DG-07 state-consistency would_block (enforcement=observe, delivery_ready will be false)"
+          fi
+        fi
+        # exit 2 (unverifiable) or 0 (pass): no block, no event
+      fi
+      # End DG-07 E2 hook
+
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
       # Evaluates compliance checks inline (no file write), filters severity:blocking
