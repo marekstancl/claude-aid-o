@@ -811,6 +811,63 @@ else
   fail "Task-keyword deps: 'Task 2, Tasks 4-5' -> '2, 4, 5'" "got: '$task_result'"
 fi
 
+# ===========================================================================
+# TEST: plain-bullet AC + colon-less '**AID Role**' are carried into the EPIC
+# (E-047-4_7 REOPEN root cause: the generator only matched '**Acceptance
+#  Criteria:**' + '- [ ]' + '**AID Role:**', silently dropping plain-bullet AC
+#  and defaulting the role to backend.)
+# ===========================================================================
+run_test "Plain-bullet AC + colon-less AID Role are carried into the EPIC"
+
+env_dir="$(make_test_env "ac_role_extract")"
+output_dir="$env_dir/output"
+counter_yaml="$env_dir/epic-counter.yaml"
+plan_file="$env_dir/P700-plain.md"
+cat > "$plan_file" <<'EOF'
+---
+id: P700
+title: Plain bullet plan
+---
+## Implementation Steps
+
+### Step 1: First frontend thing
+Body text.
+
+**Acceptance Criteria**
+- npm run build exits 0 and emits dist
+- the manifest has the three icons
+
+**Effort** M
+**AID Role** frontend
+
+### Step 2: Second frontend thing
+Body text.
+
+**Acceptance Criteria**
+- the component renders null as "N/A", never 0
+- a keyboard user can reach every control
+
+**Effort** M
+**AID Role** frontend
+EOF
+
+gen_epic="$("$SCRIPT_UNDER_TEST" \
+  --plan "$plan_file" --phase 1 --total 1 \
+  --epic-template "$TEMPLATES_DIR/epic.md" \
+  --output-dir "$output_dir" --counter-yaml "$counter_yaml" 2>/dev/null)"
+
+if [[ -z "$gen_epic" || ! -f "$gen_epic" ]]; then
+  fail "plain-bullet AC + role extraction" "no EPIC generated"
+else
+  ac_count="$(awk '/## Acceptance Criteria/{x=1;next}/^## /{if(x)x=0}x' "$gen_epic" | grep -cE '^- \[')"
+  role_rows="$(grep -cE '^\|[[:space:]]*[0-9]+[[:space:]]*\|[[:space:]]*frontend[[:space:]]*\|' "$gen_epic")"
+  if [[ "$ac_count" -ge 4 && "$role_rows" -ge 2 ]]; then
+    pass "plain-bullet AC carried ($ac_count items) + role=frontend ($role_rows rows)"
+  else
+    fail "plain-bullet AC + role extraction" "ac_count=$ac_count (want >=4), frontend rows=$role_rows (want >=2)"
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

@@ -222,6 +222,34 @@ if [[ "$row_count" -eq 0 ]]; then
 fi
 
 # =============================================================================
+# Step 3b: Per-step Acceptance Criteria pre-flight (E-047-4_7 REOPEN, AID-v3 §1)
+# -----------------------------------------------------------------------------
+# Root cause of the E-047-4_7 REOPEN: an auto-generated multi-step EPIC carried
+# Acceptance Criteria for STEP 1 ONLY, so the CP2/CP3/CP4 chain had no contract
+# to verify steps 2..N against and managerial-read-model bugs shipped. A
+# detector without enforcement is decoration (AID-v3-principles §1) — so this is
+# an OUT-OF-BAND HARD FAIL, not a warning: a multi-step EPIC must carry at least
+# one acceptance criterion per step. Escape hatch for the rare legitimately
+# sparse EPIC: AID_ALLOW_SPARSE_AC=1 (logged, intentional).
+# =============================================================================
+ac_section="$(extract_section "$epic" "Acceptance Criteria")"
+# Count real AC checkboxes: lines like `- [ ]` / `- [x]` that are not the
+# template's `<!-- e.g. ... -->` placeholder comments.
+ac_count=0
+if [[ -n "$ac_section" ]]; then
+  ac_count="$(printf '%s\n' "$ac_section" \
+    | grep -E '^[[:space:]]*-[[:space:]]+\[[ xX]\]' \
+    | grep -cvE '<!--' || true)"
+fi
+if [[ "$row_count" -gt 1 && "$ac_count" -lt "$row_count" ]]; then
+  if [[ "${AID_ALLOW_SPARSE_AC:-0}" == "1" ]]; then
+    echo "WARNING: EPIC has $row_count steps but only $ac_count acceptance criteria — proceeding (AID_ALLOW_SPARSE_AC=1)." >&2
+  else
+    error_exit "EPIC has $row_count steps but only $ac_count acceptance criteria. A multi-step EPIC needs >= 1 testable acceptance criterion per step so every step has a contract the CP chain can verify (AID-v3 §1). Add per-step AC, or set AID_ALLOW_SPARSE_AC=1 to override deliberately." 1
+  fi
+fi
+
+# =============================================================================
 # Step 4: Generate step IDs
 # =============================================================================
 declare -a step_ids=()
@@ -690,27 +718,40 @@ if [[ -n "$plan_source" && "$plan_source" != "null" ]]; then
   plan_source_arg="$(jq -n --arg s "$plan_source" '$s')"
 fi
 
+# NOTE: large structured pieces (steps especially) are passed to jq via temp
+# files + --slurpfile, NOT via --argjson on the command line. A fully-detailed
+# plan can make $steps_json exceed the per-argument limit (MAX_ARG_STRLEN, 128KB
+# on Linux), which fails with "jq: Argument list too long". --slurpfile reads the
+# file's single JSON value into an array, so we dereference $var[0].
+__pj_tmp="$(mktemp -d)"
+printf '%s' "$steps_json"    > "${__pj_tmp}/steps.json"
+printf '%s' "$deps_json"     > "${__pj_tmp}/deps.json"
+printf '%s' "$parallel_json" > "${__pj_tmp}/parallel.json"
+printf '%s' "$analysis_json" > "${__pj_tmp}/analysis.json"
+printf '%s' "$gates_json"    > "${__pj_tmp}/gates.json"
+printf '%s' "$budget_json"   > "${__pj_tmp}/budget.json"
 plan_json="$(jq -n \
   --arg epic_id "$epic_id" \
   --argjson source_plan "$plan_source_arg" \
-  --argjson steps "$steps_json" \
-  --argjson deps "$deps_json" \
-  --argjson parallel "$parallel_json" \
-  --argjson analysis "$analysis_json" \
-  --argjson gates "$gates_json" \
-  --argjson budget "$budget_json" \
+  --slurpfile steps "${__pj_tmp}/steps.json" \
+  --slurpfile deps "${__pj_tmp}/deps.json" \
+  --slurpfile parallel "${__pj_tmp}/parallel.json" \
+  --slurpfile analysis "${__pj_tmp}/analysis.json" \
+  --slurpfile gates "${__pj_tmp}/gates.json" \
+  --slurpfile budget "${__pj_tmp}/budget.json" \
   '{
     epic_id: $epic_id,
     source_plan: $source_plan,
     version: 1,
     created_at: (now | todate),
-    steps: $steps,
-    dependencies: $deps,
-    parallel_groups: $parallel,
-    analysis_groups: $analysis,
-    gates: $gates,
-    budget: $budget
+    steps: $steps[0],
+    dependencies: $deps[0],
+    parallel_groups: $parallel[0],
+    analysis_groups: $analysis[0],
+    gates: $gates[0],
+    budget: $budget[0]
   }')"
+rm -rf "${__pj_tmp}"
 
 # =============================================================================
 # Step 14: Validate against schema (structural jq-based check)

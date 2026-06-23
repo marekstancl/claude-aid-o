@@ -1303,6 +1303,23 @@ write_compliance_json() {
   local failures_json
   failures_json=$(fsm_build_failures "$checks" "$severity_yaml")
 
+  # Severity-aware overall (E-047-6 REOPEN #8): `overall` MUST agree with the
+  # release gate, which blocks on BLOCKING failures only (cmd_done_advance). A
+  # failure recorded at severity "advisory" (e.g. branch_correct on a
+  # PM-controlled shared feature branch) is surfaced in failures[] for visibility
+  # but MUST NOT flip overall to "fail" — otherwise the record reads overall:fail
+  # while the FSM correctly released, a self-contradiction. A detector at advisory
+  # severity must not behave like a blocking gate (AID-v3-principles §1). The
+  # provenance-unverifiable integrity signal stays blocking (it already forced
+  # overall_pre=fail + a note above and is re-asserted here).
+  local _blocking_failures
+  _blocking_failures=$(echo "$failures_json" | jq '[.[] | select(.severity != "advisory")] | length' 2>/dev/null || echo 0)
+  if [[ "${_blocking_failures:-0}" -gt 0 || "$prov_agg_value" == "unverifiable" ]]; then
+    overall_pre="fail"
+  else
+    overall_pre="pass"
+  fi
+
   # P040 Component D: emit coverage_mode + skipped_dimensions so the aggregator
   # can distinguish streamlined runs (which legitimately skip per-step CP2 and
   # CP4 curator validation) from full runs that are missing that evidence.

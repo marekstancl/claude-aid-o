@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.38.0] — 2026-06-23
+
+### Added
+- **`/aid-verify-plan` + `/aid-verify-implementation`** — two manual, PM-invoked commands that dispatch an independent fresh-context agent to adversarially review a plan before execution and an implementation after it claims DONE; each carries its full review protocol (false-green risks, producer-consumer contracts, runtime-not-statics, real-data oracle) and returns a severity-ranked verdict plus a Czech PM summary. Standalone tools outside the FSM (like `/aid-do`) — no `fsm-state.yaml`, no evidence dir, no pending-dispatches ledger.
+
+## [2.37.0] — 2026-06-21
+
+### Added
+- **Per-step Acceptance Criteria pre-flight** — `aid-epic-to-json.sh` hard-fails a multi-step EPIC that carries fewer acceptance criteria than steps, so every step has a contract the CP chain can verify (root cause of the E-047-4_7 cockpit REOPEN); override deliberately with `AID_ALLOW_SPARSE_AC=1`.
+
+### Fixed
+- **Plan→EPIC acceptance-criteria + role extraction** — `aid-plan-to-epic.sh` now reads acceptance criteria written as plain `-` bullets under `**Acceptance Criteria**` (with or without a colon) and the `**AID Role**` header without a colon; previously it matched only the `**Acceptance Criteria:**` + `- [ ]` + `**AID Role:**` forms, silently dropping every criterion (empty EPIC AC section) and defaulting every step to the `backend` role.
+- **Compliance `overall` is severity-aware** — `write_compliance_json` now derives `overall` from blocking failures only (advisory-severity failures are recorded in `failures[]` for visibility but no longer flip it to `fail`), matching the `cmd_done_advance` release gate; previously a single advisory check such as `branch_correct:false` on a PM-controlled shared feature branch produced `overall:fail` even though the FSM correctly released, a self-contradictory record. The provenance-unverifiable integrity signal stays blocking.
+
 ## [2.36.2] — 2026-06-19
 
 ### Fixed

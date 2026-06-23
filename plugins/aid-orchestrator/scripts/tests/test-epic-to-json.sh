@@ -324,6 +324,71 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Per-step Acceptance Criteria pre-flight (E-047-4_7 REOPEN, AID-v3 §1)
+# ---------------------------------------------------------------------------
+run_test "Multi-step EPIC with fewer AC than steps exits 1 (per-step AC pre-flight)"
+SPARSE_EPIC="$TMPDIR_ROOT/E-901-1_1-sparse.md"
+cat > "$SPARSE_EPIC" <<'EOF'
+---
+epic_id: E-901-1_1
+title: Sparse AC
+---
+## Acceptance Criteria
+
+- [ ] [backend] only one criterion for a three-step epic
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | do the first thing properly | - | - |
+| 2 | backend | do the second thing properly | 1 | - |
+| 3 | qa | verify everything works fine | 2 | - |
+EOF
+sparse_out="$(make_output_dir sparse_ac)"
+if bash "$SCRIPT_UNDER_TEST" --epic "$SPARSE_EPIC" --schema "$SCHEMA_FILE" --output-dir "$sparse_out" >/dev/null 2>&1; then
+  fail "sparse-AC multi-step EPIC exits 1" "it exited 0 (no enforcement)"
+else
+  pass "sparse-AC multi-step EPIC exits 1"
+fi
+
+run_test "AID_ALLOW_SPARSE_AC=1 overrides the per-step AC pre-flight"
+override_out="$(make_output_dir override_ac)"
+if AID_ALLOW_SPARSE_AC=1 bash "$SCRIPT_UNDER_TEST" --epic "$SPARSE_EPIC" --schema "$SCHEMA_FILE" --output-dir "$override_out" >/dev/null 2>&1; then
+  pass "override proceeds past sparse-AC pre-flight"
+else
+  fail "override proceeds past sparse-AC pre-flight" "still exited non-zero"
+fi
+
+run_test "Multi-step EPIC with >= 1 AC per step passes the pre-flight"
+ENOUGH_EPIC="$TMPDIR_ROOT/E-902-1_1-enough.md"
+cat > "$ENOUGH_EPIC" <<'EOF'
+---
+epic_id: E-902-1_1
+title: Enough AC
+---
+## Acceptance Criteria
+
+- [ ] [backend] step one deliverable verified
+- [ ] [backend] step two deliverable verified
+- [ ] [qa] step three behaviour verified
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | do the first thing properly | - | - |
+| 2 | backend | do the second thing properly | 1 | - |
+| 3 | qa | verify everything works fine | 2 | - |
+EOF
+enough_out="$(make_output_dir enough_ac)"
+if bash "$SCRIPT_UNDER_TEST" --epic "$ENOUGH_EPIC" --schema "$SCHEMA_FILE" --output-dir "$enough_out" >/dev/null 2>&1; then
+  pass "per-step-AC EPIC passes the pre-flight"
+else
+  fail "per-step-AC EPIC passes the pre-flight" "it exited non-zero"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

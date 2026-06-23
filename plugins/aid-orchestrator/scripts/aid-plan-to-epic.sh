@@ -538,10 +538,12 @@ for sn in "${phase_steps[@]}"; do
     objective="$(echo "$step_content" | awk 'NF { print; exit }')"
   fi
 
-  # Extract AID Role
+  # Extract AID Role. Accept the header WITH or WITHOUT a colon — plans author it
+  # both as `**AID Role:** frontend` and `**AID Role** frontend`. (Matching only
+  # the colon form silently defaulted every step to `backend`.)
   role="$(echo "$step_content" | awk '
-    /^\*\*AID Role:\*\*/ {
-      sub(/^\*\*AID Role:\*\*[[:space:]]*/, "")
+    /^\*\*AID Role:?\*\*/ {
+      sub(/^\*\*AID Role:?\*\*[[:space:]]*/, "")
       gsub(/[[:space:]]+$/, "")
       print tolower($0)
       exit
@@ -549,21 +551,26 @@ for sn in "${phase_steps[@]}"; do
   ')"
   [[ -z "$role" ]] && role="backend"
 
-  # Extract acceptance criteria (lines starting with - [ ])
+  # Extract acceptance criteria. Accept the header WITH or WITHOUT a colon, and
+  # items as either `- [ ] ...` checkboxes OR plain `- ...` bullets — plans author
+  # AC as plain bullets under `**Acceptance Criteria**`, and matching only the
+  # `**Acceptance Criteria:**` + `- [ ]` form silently dropped EVERY criterion,
+  # leaving the EPIC's AC section empty (root cause of the E-047-4_7 REOPEN and the
+  # per-step-AC pre-flight block in aid-epic-to-json.sh).
   step_ac="$(echo "$step_content" | awk -v role="$role" '
     BEGIN { in_ac = 0 }
     {
       gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Acceptance Criteria:\*\*/) { in_ac = 1; next }
+      if ($0 ~ /^\*\*Acceptance Criteria:?\*\*/) { in_ac = 1; next }
       if (in_ac && $0 ~ /^\*\*/) { in_ac = 0 }
-      if (in_ac && $0 ~ /^- \[/) {
-        # Check if it already has a [role] prefix
-        if ($0 ~ /\[.+\].*\[/) {
-          print
+      if (in_ac && $0 ~ /^-[[:space:]]/) {
+        line = $0
+        sub(/^-[[:space:]]+/, "", line)            # drop the bullet
+        sub(/^\[[ xX]\][[:space:]]*/, "", line)    # drop a checkbox if present
+        if (line ~ /^\[[^][]+\]/) {                # already carries a [role] prefix
+          printf "- [ ] %s\n", line
         } else {
-          # Add [role] prefix after checkbox
-          sub(/^- \[ \][[:space:]]*/, "", $0)
-          printf "- [ ] [%s] %s\n", role, $0
+          printf "- [ ] [%s] %s\n", role, line
         }
       }
     }
