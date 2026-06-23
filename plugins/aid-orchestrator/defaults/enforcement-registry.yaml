@@ -385,3 +385,91 @@ enforcements:
     status: planned
     deadline: E10
     description: "authority/acceptance consistency; observe mode E2"
+
+  - id: DG-02-build
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg02-build.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "build command execution; observe mode E2"
+
+  - id: DG-03-typecheck
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg03-typecheck.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "type checking command execution; observe mode E2"
+
+  - id: DG-05-consumer-compile
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg05-consumer-compile.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0; reads AID_CHANGED_PATHS
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "consumer-side compilation of changed paths; observe mode E2"
+
+  - id: DG-06-removed-dep
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg06-removed-dep.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0; reads AID_BASE_SHA
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "removed dependency detection across versions; observe mode E2"
+
+  - id: DG-08-runtime-env
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg08-runtime-env.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "runtime environment variable validation; observe mode E2"
+
+  - id: DG-09-static-coverage
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg09-static-coverage.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "static code coverage requirements; observe mode E2"
+
+  - id: DG-10-startup-smoke
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg10-startup-smoke.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "startup smoke test execution; observe mode E2"
+
+  - id: DG-11-build-config
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg11-build-config.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: E10
+    description: "build configuration validation; observe mode E2"

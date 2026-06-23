@@ -539,7 +539,12 @@ _run_check() {
   # Use timeout for safety (default 120s)
   local timeout_seconds=120
 
-  check_output="$(timeout "$timeout_seconds" \
+  check_output="$(AID_PROJECT_ROOT="$PROJECT_ROOT" \
+    AID_EPIC_ID="$EPIC_ID" \
+    AID_RUN_ID="$RUN_ID" \
+    AID_BASE_SHA="$BASE_SHA" \
+    AID_CHANGED_PATHS="${CHANGED_PATHS_FILE:-}" \
+    timeout "$timeout_seconds" \
     "$check_script" "${check_argv[@]}" 2>&1)" || check_exit=$?
 
   # Truncate output_preview to OUTPUT_PREVIEW_LINES lines
