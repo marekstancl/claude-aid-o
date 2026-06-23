@@ -652,8 +652,6 @@ while IFS= read -r tuple; do
   _f_status="$(echo "$tuple" | jq -r '.[1]')"
   _f_name="$(echo "$tuple" | jq -r '.[2]')"
 
-  _fingerprint="$(printf '%s' "${_f_id}:${_f_status}:${EPIC_ID}:${RUN_ID}" | sha256sum | awk '{print "sha256:" $1}')"
-
   if [[ "$_f_status" == "fail" ]]; then
     _severity="high"
     _finding_class="delivery_gate_fail"
@@ -664,9 +662,17 @@ while IFS= read -r tuple; do
     _action_owner="reviewer"
   fi
 
+  # Canonical fingerprint: sha256(project_id \x1f artifact_type \x1f check_id \x1f target_path \x1f finding_class)
+  # Must match lib/aid-finding-fingerprint.sh fingerprint() so --check-fingerprint validates
+  _fp_hex="$(printf '%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+    "$PROJECT_ID" "delivery_gate" "$_f_id" "" "$_finding_class" \
+    | sha256sum | cut -d' ' -f1 | cut -c1-64)"
+  _fingerprint="sha256:${_fp_hex}"
+  _occurrence_id="$(printf '%s:%s:%s' "$RUN_ID" "$_f_id" "${_fp_hex:0:12}")"
+
   _entry="$(jq -n \
     --arg fingerprint "$_fingerprint" \
-    --arg occurrence_id "${_f_id}-${EPIC_ID}-${RUN_ID}" \
+    --arg occurrence_id "$_occurrence_id" \
     --arg severity "$_severity" \
     --arg check_id "$_f_id" \
     --arg finding_class "$_finding_class" \

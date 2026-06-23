@@ -59,7 +59,7 @@
         "name": "test",
         "status": "fail",
         "skip_reason": "",
-        "output_preview": "dg04: running test command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh\ndg04: fail — test command exited 1"
+        "output_preview": "dg04: running test command: bash plugins/aid-orchestrator/scripts/tests/run-all-tests.sh\ndg04: fail \u2014 test command exited 1"
       },
       {
         "id": "dg05",
@@ -80,7 +80,7 @@
         "name": "state-consistency",
         "status": "unverifiable",
         "skip_reason": "check_exit_2",
-        "output_preview": "dg07: unverifiable — AID_EPIC_ID or AID_RUN_ID not set"
+        "output_preview": "dg07: unverifiable \u2014 AID_EPIC_ID or AID_RUN_ID not set"
       },
       {
         "id": "dg08",
@@ -126,5 +126,27 @@
       "unverifiable": 1,
       "would_block": true
     }
-  }
+  },
+  "findings": [
+    {
+      "fingerprint": "sha256:8ef3d6759fbc20fd4b691cbe0f0ea2e5438c52a931e12542d94ba25ad7894bc8",
+      "occurrence_id": "R-E050-1:dg04:8ef3d6759fbc",
+      "severity": "high",
+      "check_id": "dg04",
+      "target_path": "",
+      "finding_class": "delivery_gate_fail",
+      "description": "dg04 test: status=fail",
+      "action_owner": "gate-fixer"
+    },
+    {
+      "fingerprint": "sha256:393d966f7ab6d744d1440a01ba65076adae4c4c3c31987e686b585370a093b3b",
+      "occurrence_id": "R-E050-1:dg07:393d966f7ab6",
+      "severity": "medium",
+      "check_id": "dg07",
+      "target_path": "",
+      "finding_class": "delivery_gate_unverifiable",
+      "description": "dg07 state-consistency: status=unverifiable",
+      "action_owner": "reviewer"
+    }
+  ]
 }
