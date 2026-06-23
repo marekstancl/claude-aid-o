@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.37.0** (current) — per-step Acceptance Criteria pre-flight in aid-epic-to-json.sh (multi-step EPIC needs >=1 AC per step)
+- **v2.38.0** (current) — `/aid-verify-plan` + `/aid-verify-implementation` manual PM commands: independent adversarial review of a plan (pre-execution) and an implementation (DONE), dispatched to a fresh-context agent
+- **v2.37.0** — per-step Acceptance Criteria pre-flight in aid-epic-to-json.sh (multi-step EPIC needs >=1 AC per step)
 - **v2.36.2** — stale aid-plan.md CP1 lenses synced; boundary manifest committed
 - **v2.36.1** — CP1-deep empty-file bypass closed; L1/L2/L3 lens taxonomy; aid-init gitignore guidance
 - **v2.36.0** — behavior-first review contracts; `behavior_trace` structural gate; CP1 risk-scaling + `aid-cp1-gate.sh`; `.gitignore` negation fix; CP1 gate `risk:low` precedence fix; frontmatter parser state machine

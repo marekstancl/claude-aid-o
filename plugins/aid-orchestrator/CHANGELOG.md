@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.38.0] — 2026-06-23
+
+### Added
+- **`/aid-verify-plan` + `/aid-verify-implementation`** — two manual, PM-invoked commands that dispatch an independent fresh-context agent to adversarially review a plan before execution and an implementation after it claims DONE; each carries its full review protocol (false-green risks, producer-consumer contracts, runtime-not-statics, real-data oracle) and returns a severity-ranked verdict plus a Czech PM summary. Standalone tools outside the FSM (like `/aid-do`) — no `fsm-state.yaml`, no evidence dir, no pending-dispatches ledger.
+
 ## [2.37.0] — 2026-06-21
 
 ### Added

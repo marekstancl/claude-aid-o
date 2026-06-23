@@ -100,6 +100,15 @@ terminál) - **musí výborně fungovat v dark mode**, vývojáři v něm žijí
 - **16px legibilita:** symbol v 16px musí zůstat čitelný - pokud detail v malém
   zaniká, dodat zjednodušený glyph pro nejmenší velikosti.
 
+### 🆕 Kombinované logo pro PWA a mobil (nápis + symbol v jednom)
+- **Samostatná sada ikon, kde je symbol I název ("AID") v jednom obrázku**
+  (lockup) - pro instalaci PWA, splash screen a domovskou obrazovku mobilu, kde
+  má být značka i jméno pohromadě.
+- Dodat jako **PNG** ve velikostech 192, 512 a 1024, + **SVG** master.
+- Optimalizovat kompozici, ať je název čitelný i v menším (cca od 192 px výš);
+  pro úplně malé ikony (16-48) zůstává symbol-only varianta výše.
+- Varianta na **světlém i tmavém** podkladu.
+
 ### Struktura balíčku (doporučená)
 
 ```
@@ -110,6 +119,7 @@ icons/
   pwa-192.png, pwa-512.png
   transparent/      aid-icon-{16,32,48,180,192,512}-transparent.svg (+ PNG)
   dark-background/  aid-icon-{16,32,48,180,192,512}-dark.svg (+ PNG)
+lockup/      aid-lockup-{192,512,1024}.png + aid-lockup.svg   (symbol + nápis v jednom)
 source/      aid-logo-master-outlined.svg  (editovatelný master)
 README.md, brand-brief.md
 ```
