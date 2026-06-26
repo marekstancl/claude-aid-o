@@ -73,3 +73,64 @@ EOF
   [ "$status" -eq 2 ]
   [[ "$output" == *"not found"* ]]
 }
+
+@test "TTL guard: block-style planned + past deadline → exit 1 (stale)" {
+  cat > "$REGISTRY" <<'EOF'
+version: 1
+enforcements:
+  - id: DG-BLOCK-STALE
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg01-dependency-consistency.sh
+    instruction: test
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: "2020-01-01"
+    description: block-style stale entry
+EOF
+  run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"stale planned row"* ]]
+}
+
+@test "TTL guard: block-style planned + future deferred_until → exit 0" {
+  cat > "$REGISTRY" <<'EOF'
+version: 1
+enforcements:
+  - id: DG-BLOCK-DEFERRED
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg01-dependency-consistency.sh
+    instruction: test
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: "2020-01-01"
+    deferred_until: "2099-12-31"
+    deferred_by: E050
+    deferred_reason: blocking promotion deferred to E10
+    description: block-style deferred entry
+EOF
+  run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 0 ]
+}
+
+@test "TTL guard: block-style planned + non-ISO deadline (promotion_phase field only) → exit 0 (no ISO deadline = opt-out)" {
+  cat > "$REGISTRY" <<'EOF'
+version: 1
+enforcements:
+  - id: DG-BLOCK-NOISODEADLINE
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg01-dependency-consistency.sh
+    instruction: test
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    promotion_phase: E10
+    description: no ISO deadline field - guard must skip this row
+EOF
+  run bash "$TTL_GUARD" "$REGISTRY"
+  [ "$status" -eq 0 ]
+}

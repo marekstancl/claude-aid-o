@@ -339,7 +339,8 @@ enforcements:
     surface: internal-guard
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "observe-only; delivery_gate_would_block telemetry only; blocking promotion E10"
 
@@ -351,7 +352,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "package manifest vs lockfile consistency; observe mode E2"
 
@@ -363,7 +365,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "test suite execution; vacuous shim detection; observe mode E2"
 
@@ -375,7 +378,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "parent DONE with pending child steps; observe mode E2"
 
@@ -387,7 +391,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "authority/acceptance consistency; observe mode E2"
 
@@ -399,7 +404,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "build command execution; observe mode E2"
 
@@ -411,7 +417,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "type checking command execution; observe mode E2"
 
@@ -423,7 +430,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "consumer-side compilation of changed paths; observe mode E2"
 
@@ -435,7 +443,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "removed dependency detection across versions; observe mode E2"
 
@@ -447,7 +456,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "runtime environment variable validation; observe mode E2"
 
@@ -459,7 +469,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "static code coverage requirements; observe mode E2"
 
@@ -471,7 +482,8 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "startup smoke test execution; observe mode E2"
 
@@ -483,6 +495,7 @@ enforcements:
     surface: delivery-gate
     enforcement: observe
     status: planned
-    deadline: E10
+    deadline: "2026-12-31"
+    promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "build configuration validation; observe mode E2"
