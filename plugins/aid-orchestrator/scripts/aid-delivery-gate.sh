@@ -161,6 +161,7 @@ fi
 
 OUTPUT_DIR="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
 OUTPUT_FILE="${OUTPUT_DIR}/delivery-gate.json"
+PROJECT_ID="$(basename "$PROJECT_ROOT")"  # must be set before findings[] loop at line ~648
 
 mkdir -p "$OUTPUT_DIR" || {
   echo "ERROR: cannot create output directory: ${OUTPUT_DIR}" >&2
@@ -711,9 +712,6 @@ fi
 # Build JSON without subject_hash first (for hashing)
 # ---------------------------------------------------------------------------
 CREATED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
-# project_id = dirname of project root
-PROJECT_ID="$(basename "$PROJECT_ROOT")"
 
 # Build the delivery_gate payload object for hashing
 DG_PAYLOAD_FOR_HASH="$(jq -n \
