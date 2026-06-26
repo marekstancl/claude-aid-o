@@ -252,6 +252,9 @@ Každý blok zkopíruj do nového Claude Code okna, až přijde řada na danou f
 
 ## Testing Strategy
 
+- Operativni review flow pro kazdy dalsi plan/EPIC v serii je popsany v
+  `docs/AID-control-system-v2-verification-operating-note.md`. Po E-050
+  je povinne rozlisit plan-time, EPIC-time, fix-loop a release-time kontrolu.
 - Každá fáze má vlastní negative fixture a positive control; fixture ověřuje i `observe` a simulovaný `blocking` režim.
 - E2-E9 sbírají baseline v observe/dual-run. E7B je jediná před-E10 výjimka a smí blokovat až po E7-CAL.
 - E10 spouští kompozitní historické případy E-047-1/4/5, E-044 a P045, měří false blocks i skutečné LLM náklady a rozhoduje o promotion.
@@ -277,6 +280,7 @@ V2 artefakty jsou forward-only a legacy evidence zůstává read-only. Nové pre
 2. Začít stavět **E1** přes jeho Session Prompt (`/aid-plan write` → executable plán jen pro E1) → `/aid-run`.
 3. Postupovat fázi po fázi dle pořadí závislostí; každou fázi generovat až těsně před stavbou.
 4. E10 je rozhodující systémový milník; do té doby jsou obecné v2 kontroly observe/dual-run. Pouze P048 smí po samostatné E7-CAL zapnout schválený step-local block.
+5. Po kazdem executable planu a po kazdem EPICu pouzit interaktivni verification loop z operativni poznamky; release nepovolit bez kanonicke evidence proti aktualnimu HEAD.
 
 ---
 

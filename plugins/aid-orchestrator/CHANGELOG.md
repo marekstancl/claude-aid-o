@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.39.0] — 2026-06-23
+## [2.40.0] — 2026-06-26
 
 ### Added
 - **C1 Delivery Engine** — `aid-delivery-gate.sh` + 12 DG check plugins (DG-01..12) producing protocol-v2 `delivery-gate.json`; observe mode (E2): writes `delivery_gate_would_block` telemetry, never blocks FSM transitions; blocking promotion deferred to E10.
