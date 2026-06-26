@@ -1,9 +1,20 @@
 {
-  "name": "ai-orchestrator",
-  "version": "2.0.0",
+  "name": "aid-cockpit-workspace",
   "private": true,
+  "version": "0.1.0",
   "workspaces": ["packages/*"],
+  "engines": {
+    "node": ">=18"
+  },
+  "overrides": {
+    "@types/express": "4.17.25",
+    "@rollup/plugin-terser": {
+      "serialize-javascript": "6.0.2"
+    }
+  },
   "scripts": {
-    "test": "npm run test --workspaces --if-present"
+    "build": "npm run build -w @aid/contract && npm run build -w @aid/server && npm run build -w @aid/gui",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
   }
 }

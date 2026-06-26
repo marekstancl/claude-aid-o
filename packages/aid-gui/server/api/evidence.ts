@@ -288,14 +288,16 @@ router.get('/:epicId/:runId', async (req: Request, res: Response): Promise<void>
 // ---------------------------------------------------------------------------
 
 router.get(
-  '/:epicId/:runId/files/*',
+  '/:epicId/:runId/files/*filePath',
   async (req: Request, res: Response): Promise<void> => {
     const aidoPath = req.aidoPath;
     const { epicId, runId } = req.params;
 
-    // The wildcard portion is the file path after "files/".
-    // Express stores it in req.params[0] for a /* wildcard.
-    const relativePath = req.params[0];
+    // path-to-regexp v8 returns wildcard segments as string[]; join with '/'.
+    const rawFilePath = req.params.filePath;
+    const relativePath = Array.isArray(rawFilePath)
+      ? rawFilePath.join('/')
+      : (rawFilePath as string | undefined);
     if (!relativePath) {
       send404(res, 'File path');
       return;

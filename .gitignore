@@ -37,7 +37,9 @@ workspace/
 _unzipped/
 
 # Development plans (internal design documents)
-docs/plans/
+docs/plans/*
+!docs/plans/AID-control-system-v2-roadmap.md
+!docs/plans/AID-control-system-v2-session-prompts.md
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 # Use .aid-o/* (not .aid-o/) so git can honour negation for reports/ subdirectory.
@@ -56,3 +58,10 @@ docs/plans/
 .claude/
 CLAUDE.md
 CLAUDE.MD
+
+# Committed minimal conformance fixture (E-047-4_7 REOPEN): a hand-authored,
+# SANITIZED .aid-o tree for the blocking conformance test. Re-include past the
+# **/.aid-o/ ignore rule above.
+!packages/aid-server/tests/fixtures/mini/**/.aid-o
+!packages/aid-server/tests/fixtures/mini/**/.aid-o/**
+.playwright-mcp/

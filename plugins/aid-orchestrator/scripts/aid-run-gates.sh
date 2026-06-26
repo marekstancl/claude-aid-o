@@ -289,10 +289,39 @@ run_all_gates() {
   local generated_at
   generated_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+  # ─── coverage/relevance fields (E2 C1 Delivery Engine) ────────────────────
+  # Read $AID_CHANGED_PATHS (env var pointing to a file with one path per line).
+  # Produces: covered_paths[], changed_paths_covered, relevance.
+  local covered_paths_json="[]"
+  local changed_paths_covered="false"
+  local relevance="unknown"
+
+  if [[ -n "${AID_CHANGED_PATHS:-}" && -f "${AID_CHANGED_PATHS}" ]]; then
+    local matched_paths=()
+    while IFS= read -r changed_path; do
+      [[ -z "$changed_path" ]] && continue
+      # If the changed path exists on disk, consider it matched
+      if [[ -e "$changed_path" ]]; then
+        matched_paths+=("$changed_path")
+      fi
+    done < "${AID_CHANGED_PATHS}"
+
+    if (( ${#matched_paths[@]} > 0 )); then
+      covered_paths_json=$(printf '%s\n' "${matched_paths[@]}" | jq -R . | jq -s '.')
+      changed_paths_covered="true"
+      relevance="direct"
+    else
+      relevance="none"
+    fi
+  fi
+
   report=$(jq --arg gen "$generated_by" \
               --arg ts  "$generated_at" \
               --argjson cl "$command_log_array" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl}' \
+              --argjson cp "$covered_paths_json" \
+              --argjson ccov "$changed_paths_covered" \
+              --arg rel "$relevance" \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel}' \
               <<< "$report")
 
   echo "$report"

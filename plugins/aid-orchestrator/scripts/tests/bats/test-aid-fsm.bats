@@ -1085,3 +1085,41 @@ YAML
   [ "$status" -ne 0 ]
   [[ "$output" == *"blocking_findings"* ]]
 }
+
+@test "D0 gate point: advance-to-gates logs d0_delivery_gate event (observe, non-blocking)" {
+  local td; td="$(mktemp -d)"
+  mkdir -p "$td/.aid-o/work/evidence/E-D0/R-D0T/gates"
+  cat > "$td/.aid-o/work/evidence/E-D0/R-D0T/fsm-state.yaml" <<'EOF'
+epic_id: E-D0
+run_id: R-D0T
+state: EXECUTE
+current_step: 1
+total_steps: 1
+base_commit: HEAD
+branch: integration/gui-control-v2
+streamlined_mode: false
+EOF
+  cat > "$td/.aid-o/work/evidence/E-D0/R-D0T/timeline.jsonl" <<'EOF'
+{"ts":"2026-06-23T00:00:00Z","event":"run_started"}
+EOF
+  mkdir -p "$td/.aid-o/config"
+  cat > "$td/.aid-o/config/execution.yaml" <<'EOF'
+version: '1.0'
+gates:
+  smoke:
+    command: "echo 'smoke'"
+    required: true
+    timeout_seconds: 10
+    max_retries: 0
+EOF
+  # Also need CP3 verifier outputs for EXECUTE→GATES precondition
+  local ev="$td/.aid-o/work/evidence/E-D0/R-D0T"
+  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-code-review.md"
+  printf '_generated_by: aid-orchestrator:verifier\n_generated_at: 2026-01-01T00:00:00Z\nclassification: RUN\nverdict: pass\n' > "$ev/verifier-output-cp3-security.md"
+
+  # cmd_transition reads evidence_dir as relative ".aid-o/..." so CWD must be $td
+  AID_PROJECT_ROOT="$td" run bash -c "cd '$td' && bash '$FSM' advance-to-gates '$ev/fsm-state.yaml'"
+  [ "$status" -eq 0 ]
+  grep -q "d0_delivery_gate" "$ev/timeline.jsonl"
+  rm -rf "$td"
+}

@@ -75,60 +75,85 @@ date_compare() {
 }
 
 # ── Parse the registry ────────────────────────────────────────────────────────
-# We need to find blocks of lines that form a single entry (flow style on one
-# line or block style). The registry uses flow-style entries:
-#   - {id: foo, status: planned, deadline: 2026-09-01, ...}
-# We scan line by line, extract status + deadline + deferred_until per entry.
+# Supports two YAML styles used in the registry:
+#
+# Flow-style (one line):
+#   - {id: foo, status: planned, deadline: "2026-09-01", ...}
+#
+# Block-style (multi-line):
+#   - id: foo
+#     status: planned
+#     deadline: "2026-09-01"
+#     deferred_until: "2026-12-31"
+#
+# Strategy:
+# - Flow-style: all fields on one line → extract inline.
+# - Block-style: accumulate fields per entry; an entry starts at "  - id:" or
+#   "- id:" and ends when the next entry starts or EOF.
 
 stale_count=0
 stale_rows=()
 
-while IFS= read -r line; do
-  # Only process lines that look like registry entries (start with optional spaces + "- {")
-  [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\{ ]] || continue
-
-  # Extract status field
-  local_status=""
-  if [[ "$line" =~ status:[[:space:]]*([a-z_]+) ]]; then
-    local_status="${BASH_REMATCH[1]}"
-  fi
-
-  # Only check planned rows
-  [[ "$local_status" == "planned" ]] || continue
-
-  # Extract id for error messages
-  local_id=""
-  if [[ "$line" =~ id:[[:space:]]*([^,}[:space:]]+) ]]; then
-    local_id="${BASH_REMATCH[1]}"
-  fi
-
-  # Extract deadline field (handles both quoted and unquoted YYYY-MM-DD values)
-  local_deadline=""
-  if [[ "$line" =~ deadline:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
-    local_deadline="${BASH_REMATCH[1]}"
-  fi
-
-  # No deadline → not subject to TTL guard (opt-in)
-  [[ -n "$local_deadline" ]] || continue
-
-  # Extract deferred_until field (handles both quoted and unquoted)
-  local_deferred_until=""
-  if [[ "$line" =~ deferred_until:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
-    local_deferred_until="${BASH_REMATCH[1]}"
-  fi
-
-  # Check: if deadline is past (today >= deadline)
-  if date_compare "$TODAY" "$local_deadline"; then
-    # Stale — check for valid deferral
-    if [[ -n "$local_deferred_until" ]] && ! date_compare "$TODAY" "$local_deferred_until"; then
-      # Has a future deferred_until — not stale
-      continue
+# Helper: evaluate one complete entry's worth of extracted fields.
+_eval_entry() {
+  local eid="$1" estatus="$2" edeadline="$3" edeferred="$4"
+  [[ "$estatus" == "planned" ]] || return 0
+  [[ -n "$edeadline" ]] || return 0          # opt-in: no deadline → skip
+  if date_compare "$TODAY" "$edeadline"; then
+    if [[ -n "$edeferred" ]] && ! date_compare "$TODAY" "$edeferred"; then
+      return 0  # valid future deferral
     fi
-    # Stale with no valid deferral
     stale_count=$((stale_count + 1))
-    stale_rows+=("  id=$local_id deadline=$local_deadline deferred_until=${local_deferred_until:-<none>}")
+    stale_rows+=("  id=${eid:-<unknown>} deadline=$edeadline deferred_until=${edeferred:-<none>}")
+  fi
+}
+
+# State for block-style accumulation
+blk_id="" blk_status="" blk_deadline="" blk_deferred="" blk_active=false
+
+_flush_block() {
+  if $blk_active; then
+    _eval_entry "$blk_id" "$blk_status" "$blk_deadline" "$blk_deferred"
+  fi
+  blk_id="" blk_status="" blk_deadline="" blk_deferred="" blk_active=false
+}
+
+while IFS= read -r line; do
+  # ── Flow-style: entire entry on one line ─────────────────────────────────
+  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\{ ]]; then
+    _flush_block  # close any open block entry
+    local_status="" local_id="" local_deadline="" local_deferred=""
+    [[ "$line" =~ status:[[:space:]]*([a-z_]+) ]]               && local_status="${BASH_REMATCH[1]}"
+    [[ "$line" =~ id:[[:space:]]*([^,}[:space:]]+) ]]           && local_id="${BASH_REMATCH[1]}"
+    [[ "$line" =~ deadline:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]] \
+                                                                  && local_deadline="${BASH_REMATCH[1]}"
+    [[ "$line" =~ deferred_until:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]] \
+                                                                  && local_deferred="${BASH_REMATCH[1]}"
+    _eval_entry "$local_id" "$local_status" "$local_deadline" "$local_deferred"
+    continue
+  fi
+
+  # ── Block-style: entry starts with "  - id: <value>" ────────────────────
+  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]id:[[:space:]]*(.+) ]]; then
+    _flush_block  # close previous block entry
+    blk_id="${BASH_REMATCH[1]}"
+    blk_active=true
+    continue
+  fi
+
+  # ── Block-style: continuation lines (indented key: value) ────────────────
+  if $blk_active; then
+    if [[ "$line" =~ ^[[:space:]]+status:[[:space:]]*([a-z_]+) ]]; then
+      blk_status="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^[[:space:]]+deadline:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
+      blk_deadline="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^[[:space:]]+deferred_until:[[:space:]]*\"?([0-9]{4}-[0-9]{2}-[0-9]{2})\"? ]]; then
+      blk_deferred="${BASH_REMATCH[1]}"
+    fi
   fi
 done < "$registry_path"
+
+_flush_block  # handle last entry
 
 # ── Report ────────────────────────────────────────────────────────────────────
 

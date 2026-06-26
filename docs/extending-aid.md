@@ -271,4 +271,70 @@ Legacy artifacts (`control_protocol: "legacy"`) → exit 0 with `legacy_skipped`
 
 ---
 
+## C1 Delivery Engine (E2)
+
+The C1 Delivery Engine (`aid-delivery-gate.sh`) is a deterministic (no-LLM) gate
+that runs after every EXECUTE phase in observe mode. It produces a protocol-v2
+`delivery-gate.json` artifact.
+
+### Profiles
+
+The engine auto-detects the project profile from `defaults/policies/delivery-gate.yaml`:
+
+| Profile | Detected by |
+|---------|-------------|
+| `plugin-bash` | `.claude-plugin/plugin.json` present |
+| `npm-workspaces` | `package.json` with `"workspaces"` |
+| `npm-workspaces+plugin-bash` | Both above (union) |
+| `unverifiable` | Neither detected |
+
+The profile determines which check commands to run for each DG check (DG-01..12).
+
+### Checks (DG-01..12)
+
+| ID | Name | Applicability |
+|----|------|---------------|
+| DG-01 | dependency-consistency | lockfile present |
+| DG-02 | build | build command declared |
+| DG-03 | typecheck | `.ts` files present |
+| DG-04 | test | always |
+| DG-05 | consumer-compile | public exports changed |
+| DG-06 | removed-dep | deps removed from manifest |
+| DG-07 | state-consistency | always |
+| DG-08 | runtime-env | `.nvmrc` or `engines` present |
+| DG-09 | static-coverage | typecheck/lint command declared |
+| DG-10 | startup-smoke | built entry point present |
+| DG-11 | build-config | bundler config present |
+| DG-12 | authority | authority policy files present |
+
+### Observe -> Blocking Promotion
+
+E2 is **observe mode only**. The engine writes telemetry but never blocks FSM transitions.
+
+To promote to blocking (E10):
+1. Set `enforcement: blocking` in `defaults/policies/delivery-gate.yaml`
+2. All DG checks must have green baselines on your codebase first
+3. Update enforcement-registry entries from `status: planned` to `status: active`
+
+### Reading delivery-gate.json
+
+```json
+{
+  "delivery_gate": {
+    "delivery_ready": false,
+    "profile": "npm-workspaces+plugin-bash",
+    "phase": "D0",
+    "checks": [
+      { "id": "dg01", "name": "dependency-consistency", "status": "skip",
+        "skip_reason": "legacy_no_child_rows", "output_preview": "" }
+    ],
+    "summary": { "total": 12, "pass": 0, "fail": 0, "skip": 11, "unverifiable": 1, "would_block": false }
+  }
+}
+```
+
+Full artifact is a protocol-v2 envelope validated by `aid-protocol-validate.sh`.
+
+---
+
 **Last Updated:** 2026-06-23

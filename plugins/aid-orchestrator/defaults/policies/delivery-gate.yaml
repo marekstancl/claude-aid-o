@@ -1,0 +1,172 @@
+# AID Delivery Gate Policy — v1
+# Producer: C1 (aid-delivery-gate.sh)
+# Enforcement: observe (E2 — no live FSM blocking; would_block telemetry only)
+# E10 = policy promotion to blocking (future)
+#
+# skip_reason_allowlist: ONLY these values are accepted as valid skip reasons.
+# Any skip reason NOT in this list counts as blocking in the algorithm —
+# preventing benign skip from masking a false-green.
+#
+# block_on_unverifiable: if any check result is unverifiable (no command,
+# unknown ecosystem, or empty argv after profile resolution), delivery_ready = false.
+
+version: 1
+enforcement: observe
+block_on_unverifiable: true
+output_preview_lines: 80
+
+skip_reason_allowlist:
+  - not_required
+  - no_relevant_change
+  - test_only
+  - legacy_no_child_rows
+  - no_authority_surface
+
+# ---------------------------------------------------------------------------
+# Profiles — ecosystem detection + per-check command overrides
+# Detection order matters: first full match wins; multiple matches → union.
+# detect conditions are AND-ed: ALL must be true for a profile to match.
+# ---------------------------------------------------------------------------
+profiles:
+
+  npm-workspaces:
+    detect:
+      - file: package.json
+        contains: '"workspaces"'
+    commands:
+      dg01:
+        cmd: ["npm", "ls", "--depth=0", "--workspaces"]
+      dg02:
+        cmd: ["npm", "run", "build", "--workspaces"]
+      dg03:
+        cmd: ["npm", "run", "typecheck"]
+      dg04:
+        cmd: ["npm", "test", "--workspaces"]
+      dg05:
+        cmd: ["npm", "run", "build", "--workspaces"]
+      dg06:
+        cmd: ["npm", "ls", "--depth=0", "--workspaces"]
+      dg07:
+        cmd: []
+      dg08:
+        cmd: []
+      dg09:
+        cmd: ["npm", "run", "typecheck"]
+      dg10:
+        cmd: []
+      dg11:
+        cmd: []
+      dg12:
+        cmd: []
+
+  plugin-bash:
+    detect:
+      - file: plugins/aid-orchestrator/.claude-plugin/plugin.json
+      - file: plugins/aid-orchestrator/scripts/aid-fsm.sh
+    commands:
+      dg01:
+        cmd: []
+        skip_reason: legacy_no_child_rows
+      dg02:
+        cmd: []
+        skip_reason: not_required
+      dg03:
+        cmd: []
+        skip_reason: not_required
+      dg04:
+        cmd: ["bash", "plugins/aid-orchestrator/scripts/tests/run-all-tests.sh"]
+      dg05:
+        cmd: []
+        skip_reason: not_required
+      dg06:
+        cmd: []
+        skip_reason: not_required
+      dg07:
+        cmd: []
+      dg08:
+        cmd: []
+        skip_reason: not_required
+      dg09:
+        cmd: []
+        skip_reason: not_required
+      dg10:
+        cmd: []
+        skip_reason: not_required
+      dg11:
+        cmd: []
+        skip_reason: not_required
+      dg12:
+        cmd: []
+        skip_reason: no_authority_surface
+
+  generic:
+    detect: []
+    commands: {}
+
+# ---------------------------------------------------------------------------
+# Checks — per-check metadata and applicability conditions
+# required_when: list of conditions (OR-ed at top level, AND-ed within each item)
+# always: true — check always runs; unverifiable if no command found
+# ---------------------------------------------------------------------------
+checks:
+  dg01:
+    name: dependency-consistency
+    required_when:
+      - has_lockfile: true
+      - has_workspaces: true
+
+  dg02:
+    name: build
+    required_when:
+      - has_build_script: true
+
+  dg03:
+    name: typecheck
+    required_when:
+      - has_typecheck_script: true
+      - has_ts_files: true
+
+  dg04:
+    name: test
+    required_when:
+      - always: true
+
+  dg05:
+    name: consumer-compile
+    required_when:
+      - changed_paths_match: ["src/**/*.ts", "lib/**/*.ts", "index.*"]
+
+  dg06:
+    name: removed-dep
+    required_when:
+      - dep_removed: true
+
+  dg07:
+    name: state-consistency
+    required_when:
+      - always: true
+
+  dg08:
+    name: runtime-env
+    required_when:
+      - changed_paths_match: [".nvmrc", ".node-version", "engines", "Dockerfile", ".github/workflows/**"]
+
+  dg09:
+    name: static-coverage
+    required_when:
+      - has_typecheck_script: true
+
+  dg10:
+    name: startup-smoke
+    required_when:
+      - changed_paths_match: ["src/index.*", "src/main.*", "src/app.*", "dist/**"]
+
+  dg11:
+    name: build-config
+    required_when:
+      - changed_paths_match: ["vite.config.*", "webpack.config.*", "rollup.config.*", "tsconfig.*"]
+
+  dg12:
+    name: authority
+    required_when:
+      - has_authority_surface: true
