@@ -654,23 +654,36 @@ emit_report() {
 
     if [[ "$check_status" == "fail" || "$check_status" == "unverifiable" ]]; then
       local detail="${!var_detail:-}"
-      local project_id="${EPIC_ID:-aid-evidence-verifier}"
-      local fp_input="${project_id}:verification_report:ev-${check_id}:${EPIC_ID}:${check_status}"
-      local fingerprint
-      fingerprint="sha256:$(printf '%s' "$fp_input" | sha256sum | cut -d' ' -f1)"
+      local fp_project_id="${EPIC_ID:-aid-evidence-verifier}"
+      # check_id_field, target_path, finding_class must match exactly what the
+      # validator re-computes in --check-fingerprint (aid-protocol-validate.sh §13)
+      local fp_check_id="ev-${check_id}"
+      local fp_target_path="${EPIC_ID:-}"
+      local fp_finding_class="${check_status}"
+      local fp_val
+      fp_val="sha256:$(printf '%s\x1f%s\x1f%s\x1f%s\x1f%s' \
+        "$fp_project_id" "verification_report" "$fp_check_id" "$fp_target_path" "$fp_finding_class" \
+        | sha256sum | cut -d' ' -f1 | cut -c1-64)"
+      local occ_short="${fp_val#sha256:}"
+      occ_short="${occ_short:0:12}"
+      local occ_id="${RUN_ID:-R-unknown}:${check_id}:${occ_short}"
 
       local severity="high"
       [[ "$check_status" == "unverifiable" ]] && severity="medium"
 
       local finding
+      # Include check_id, target_path, finding_class so validator can recompute fingerprint
       finding=$(jq -n \
-        --arg fingerprint "$fingerprint" \
-        --arg occurrence_id "ev-${check_id}" \
+        --arg fingerprint "$fp_val" \
+        --arg occurrence_id "$occ_id" \
+        --arg check_id "$fp_check_id" \
+        --arg target_path "$fp_target_path" \
+        --arg finding_class "$fp_finding_class" \
         --arg severity "$severity" \
         --arg action_owner "pm" \
         --arg title "${check_id} — ${check_status}" \
         --arg human_summary "${detail:-${check_id} check ${check_status}}" \
-        '{fingerprint: $fingerprint, occurrence_id: $occurrence_id, severity: $severity, action_owner: $action_owner, title: $title, human_summary: $human_summary}')
+        '{fingerprint: $fingerprint, occurrence_id: $occurrence_id, check_id: $check_id, target_path: $target_path, finding_class: $finding_class, severity: $severity, action_owner: $action_owner, title: $title, human_summary: $human_summary}')
 
       findings_json=$(jq -n --argjson arr "$findings_json" --argjson f "$finding" '$arr + [$f]')
     fi
