@@ -551,7 +551,241 @@ run_observe_blocking_check() {
 }
 
 # ---------------------------------------------------------------------------
-# Summary print (minimal for Step 2 — Step 4 adds full JSON report)
+# Step 4: emit_report — write protocol-v2 verification-report.json
+# ---------------------------------------------------------------------------
+emit_report() {
+  local created_at status verified
+  created_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+  # --- Determine overall status and verified flag ---
+  # Required checks: all except observe_blocking_interpretation when skip=no_delivery_gate
+  local all_pass=true
+  local -a blocking_check_ids=()
+
+  local required_checks=(
+    git_clean evidence_pack_found artifact_head_freshness
+    protocol_validate fingerprint ttl_registry
+  )
+  for check_id in "${required_checks[@]}"; do
+    local var="CHECK_${check_id}_STATUS"
+    local s="${!var}"
+    if [[ "$s" != "pass" && "$s" != "skip" ]]; then
+      all_pass=false
+      blocking_check_ids+=("$check_id")
+    fi
+  done
+
+  # observe_blocking_interpretation: skip is OK, fail/unverifiable blocks
+  if [[ "$CHECK_observe_blocking_interpretation_STATUS" != "pass" && \
+        "$CHECK_observe_blocking_interpretation_STATUS" != "skip" ]]; then
+    all_pass=false
+    blocking_check_ids+=("observe_blocking_interpretation")
+  fi
+
+  if $all_pass; then
+    status="pass"
+    verified="true"
+  else
+    status="fail"
+    verified="false"
+  fi
+
+  # --- Build checks JSON array ---
+  local checks_json="[]"
+  local all_check_ids=(
+    git_clean evidence_pack_found artifact_head_freshness
+    protocol_validate fingerprint ttl_registry observe_blocking_interpretation
+  )
+  for check_id in "${all_check_ids[@]}"; do
+    local status_var="CHECK_${check_id}_STATUS"
+    local detail_var="CHECK_${check_id}_DETAIL"
+    local evidence_var="CHECK_${check_id}_EVIDENCE"
+    local s="${!status_var:-skip}"
+    local d="${!detail_var:-}"
+    local e="${!evidence_var:-}"
+
+    checks_json="$(jq -n \
+      --argjson arr "$checks_json" \
+      --arg id "$check_id" \
+      --arg st "$s" \
+      --arg dt "$d" \
+      --arg ev "$e" \
+      '$arr + [{"id": $id, "status": $st, "target": null, "detail": $dt, "evidence": (if $ev == "" then null else $ev end)}]')"
+  done
+
+  # --- Build blocking_reasons JSON array ---
+  local blocking_json="[]"
+  for bid in "${blocking_check_ids[@]}"; do
+    local detail_var="CHECK_${bid}_DETAIL"
+    local d="${!detail_var:-}"
+    blocking_json="$(jq -n \
+      --argjson arr "$blocking_json" \
+      --arg cid "$bid" \
+      --arg dt "$d" \
+      '$arr + [{"check_id": $cid, "detail": $dt}]')"
+  done
+
+  # --- Build verification_report payload (for subject_hash computation) ---
+  local vr_payload
+  vr_payload="$(jq -n \
+    --arg epic_id "${EPIC_ID:-unknown}" \
+    --arg run_id "${RUN_ID:-unknown}" \
+    --arg ev_path "${EVIDENCE_DIR:-}" \
+    --argjson clean "$([ "$CHECK_git_clean_STATUS" = "pass" ] && echo true || echo false)" \
+    --arg head_sha "${CURRENT_HEAD:-}" \
+    --arg pack_head "${PACK_HEAD:-}" \
+    --argjson checks "$checks_json" \
+    --argjson verified_bool "$verified" \
+    --argjson blocking_reasons "$blocking_json" \
+    '{
+      "evidence_pack": {"epic_id": $epic_id, "run_id": $run_id, "path": $ev_path},
+      "git": {"clean": $clean, "head_sha": $head_sha},
+      "pack_head": (if $pack_head == "" then null else $pack_head end),
+      "checks": $checks,
+      "summary": {"verified": $verified_bool, "blocking_reasons": $blocking_reasons}
+    }')"
+
+  # --- Compute subject_hash from payload ---
+  local content_hash subject_hash
+  content_hash="$(echo -n "$vr_payload" | sha256sum | cut -d' ' -f1 | cut -c1-64)"
+  subject_hash="sha256:${content_hash}"
+
+  # --- Determine revision fields ---
+  local head_sha="${CURRENT_HEAD:-}"
+  local revision_freshness="current"
+
+  # --- Resolve project_id from git remote or directory name ---
+  local project_id
+  project_id="$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed 's|.*[/:]||;s|\.git$||')" || \
+    project_id="$(basename "$ROOT")"
+
+  # --- Build final protocol-v2 JSON ---
+  local final_json
+  final_json="$(jq -n \
+    --arg schema_version "aid-2.0" \
+    --arg artifact_type "verification_report" \
+    --arg producer "aid-evidence-verify.sh@2.5" \
+    --arg created_at "$created_at" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "$project_id" \
+    --arg epic_id "${EPIC_ID:-unknown}" \
+    --arg run_id "${RUN_ID:-unknown}" \
+    --arg subject_hash "$subject_hash" \
+    --arg head_sha "$head_sha" \
+    --arg revision_freshness "$revision_freshness" \
+    --arg status "$status" \
+    --argjson vr_payload "$vr_payload" \
+    '{
+      "schema_version": $schema_version,
+      "artifact_type": $artifact_type,
+      "producer": $producer,
+      "created_at": $created_at,
+      "control_protocol": $control_protocol,
+      "identity": {
+        "project_id": $project_id,
+        "epic_id": $epic_id,
+        "run_id": $run_id,
+        "step_id": null
+      },
+      "subject": {
+        "subject_hash": $subject_hash
+      },
+      "revision": {
+        "head_sha": $head_sha,
+        "head_is_current": true,
+        "freshness": $revision_freshness
+      },
+      "status": $status,
+      "verdict": {"kind": "none", "ready": false},
+      "provenance": {
+        "dispatch_mode": "deterministic",
+        "generated_by_tool": "aid-evidence-verify.sh"
+      },
+      "verification_report": $vr_payload
+    }')"
+
+  # --- Write output ---
+  local out_path="${OUT_PATH:-$EVIDENCE_DIR/verification-report.json}"
+  # Create parent dir if needed
+  mkdir -p "$(dirname "$out_path")"
+  echo "$final_json" > "$out_path"
+  echo "aid-evidence-verify: wrote $out_path" >&2
+
+  # --- Self-validate ---
+  if [[ -x "$VALIDATOR" ]]; then
+    local val_exit
+    "$VALIDATOR" "$out_path" --current-head "$head_sha" 2>/dev/null && val_exit=0 || val_exit=$?
+    if [[ $val_exit -ne 0 ]]; then
+      echo "aid-evidence-verify: WARNING: self-validation failed (exit $val_exit) — report may be invalid" >&2
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Step 4: print_human_summary — fixed-format human-readable summary
+# ---------------------------------------------------------------------------
+print_human_summary() {
+  local overall_status
+  local -a failures=()
+
+  for check_id in git_clean evidence_pack_found artifact_head_freshness \
+                  protocol_validate fingerprint ttl_registry; do
+    local var="CHECK_${check_id}_STATUS"
+    local s="${!var:-}"
+    [[ "$s" == "fail" || "$s" == "unverifiable" ]] && failures+=("$check_id")
+  done
+  if [[ "$CHECK_observe_blocking_interpretation_STATUS" == "fail" || \
+        "$CHECK_observe_blocking_interpretation_STATUS" == "unverifiable" ]]; then
+    failures+=("observe_blocking_interpretation")
+  fi
+
+  if [[ ${#failures[@]} -eq 0 ]]; then
+    overall_status="VERIFIED"
+  else
+    overall_status="NOT VERIFIED"
+  fi
+
+  echo ""
+  echo "============================================"
+  echo " Evidence Pack Verification — $overall_status"
+  echo "============================================"
+  echo " Epic:    ${EPIC_ID:-unknown}"
+  echo " Run:     ${RUN_ID:-unknown}"
+  echo " Pack:    ${PACK_HEAD:-n/a}"
+  echo " HEAD:    ${CURRENT_HEAD:-n/a}"
+  echo "--------------------------------------------"
+  echo " Checks:"
+  for check_id in git_clean evidence_pack_found artifact_head_freshness \
+                  protocol_validate fingerprint ttl_registry \
+                  observe_blocking_interpretation; do
+    local var="CHECK_${check_id}_STATUS"
+    local s="${!var:-n/a}"
+    local icon
+    case "$s" in
+      pass)          icon="✓" ;;
+      skip)          icon="-" ;;
+      fail)          icon="✗" ;;
+      unverifiable)  icon="?" ;;
+      *)             icon=" " ;;
+    esac
+    printf "  %s  %-38s %s\n" "$icon" "$check_id" "$s"
+  done
+  echo "--------------------------------------------"
+  if [[ ${#failures[@]} -gt 0 ]]; then
+    echo " Blocking issues:"
+    for check_id in "${failures[@]}"; do
+      local detail_var="CHECK_${check_id}_DETAIL"
+      printf "  • %s: %s\n" "$check_id" "${!detail_var:-no detail}"
+    done
+  else
+    echo " All required checks passed."
+  fi
+  echo "============================================"
+  echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Summary print (minimal for debugging — kept but not called from main)
 # ---------------------------------------------------------------------------
 print_check_summary() {
   echo ""
@@ -640,10 +874,8 @@ main() {
   run_protocol_checks
   run_ttl_registry_check
   run_observe_blocking_check
-  # Step 4 adds: emit_report (writes verification-report.json); replaces print_check_summary
-
-  print_check_summary
-
+  emit_report
+  print_human_summary
   compute_exit_code
   exit $?
 }
