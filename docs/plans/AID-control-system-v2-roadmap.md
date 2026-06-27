@@ -117,8 +117,11 @@ Sdílená obálka + type-specific schemas pro každý artefakt; deterministický
 **EPIC 2: E2 - C1 Delivery Engine core (DG-01..12) + FSM state hardening**
 Deterministická delivery vrstva v observe módu; implementuje policy-gated DG-07 false-DONE rozhodnutí (FC-22). V testu `blocking` přechod zastaví, v živém výchozím `observe` pouze zapíše `would_block`. Negative fixtures: multer (FC-11), vacuous typecheck (FC-14).
 
+**EPIC 2.5: E2.5 - Evidence Pack Verifier CLI** (vsuvka mezi E2 a E3)
+Deterministický standalone CLI `aid-evidence-verify.sh`, který automatizuje ruční DONE-ověření evidence packu (git clean, per-artefakt as-of-pack freshness, protokol-v2 validace + fingerprint, TTL/registry, observe-vs-blocking interpretace) → `verification-report.json` (15. protokol-v2 typ) + lidské shrnutí. Bez LLM, bez FSM wiringu; napojení do C4 release policy je E9. Použije se zpětně na E2 i na každou další fázi. Plán P051.
+
 **EPIC 3: E3 - Adaptivní review profil detektor (observe)**
-Profile resolver: plan-time + candidate-time union (FC-41), detektor vlastní applicability, `profile_hash`. Strop autorit per profil.
+Profile resolver: plan-time + candidate-time union (FC-41), detektor vlastní applicability, `profile_hash`. Strop autorit per profil. Plán P052.
 
 **EPIC 4: E4 - C0 Plan Contract Gate + contract handoff + consumption proof**
 Plan-graph, identifier-domain, reuse-compat, planned-call, dep-API, idempotency, authority matrix; hashovaný contract-manifest a policy-gated FSM hook. E4 vytvoří producer kontrakt a `pending/unverifiable` consumption slot; autoritativní C2 local validaci FC-09 doplní až E5. Negative fixture: kompletní P045 plán musí selhat v C0 evaluaci; živé blokování zůstává do promotion v observe.
