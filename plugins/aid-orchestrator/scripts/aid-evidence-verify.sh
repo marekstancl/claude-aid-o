@@ -18,6 +18,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATOR="${SCRIPT_DIR}/aid-protocol-validate.sh"
+TTL_GUARD="${SCRIPT_DIR}/aid-registry-ttl-guard.sh"
 
 # ---------------------------------------------------------------------------
 # Check result variables (populated by run_* functions)
@@ -41,6 +42,14 @@ CHECK_protocol_validate_EVIDENCE=""
 CHECK_fingerprint_STATUS="skip"
 CHECK_fingerprint_DETAIL=""
 CHECK_fingerprint_EVIDENCE=""
+
+CHECK_ttl_registry_STATUS=""
+CHECK_ttl_registry_DETAIL=""
+CHECK_ttl_registry_EVIDENCE=""
+
+CHECK_observe_blocking_interpretation_STATUS=""
+CHECK_observe_blocking_interpretation_DETAIL=""
+CHECK_observe_blocking_interpretation_EVIDENCE=""
 
 PACK_HEAD=""
 EVIDENCE_DIR=""
@@ -457,6 +466,89 @@ run_protocol_checks() {
 }
 
 # ---------------------------------------------------------------------------
+# Check 6: ttl_registry
+# ---------------------------------------------------------------------------
+run_ttl_registry_check() {
+  if [[ ! -x "$TTL_GUARD" ]]; then
+    CHECK_ttl_registry_STATUS="unverifiable"
+    CHECK_ttl_registry_DETAIL="aid-registry-ttl-guard.sh not found or not executable"
+    CHECK_ttl_registry_EVIDENCE=""
+    return
+  fi
+
+  local output exit_code
+  output=$("$TTL_GUARD" 2>&1) && exit_code=0 || exit_code=$?
+
+  if [[ $exit_code -eq 0 ]]; then
+    CHECK_ttl_registry_STATUS="pass"
+    CHECK_ttl_registry_DETAIL="registry TTL guard passed"
+    CHECK_ttl_registry_EVIDENCE=""
+  elif [[ $exit_code -eq 2 ]]; then
+    CHECK_ttl_registry_STATUS="unverifiable"
+    CHECK_ttl_registry_DETAIL="registry not found or not readable"
+    CHECK_ttl_registry_EVIDENCE="exit 2"
+  else
+    CHECK_ttl_registry_STATUS="fail"
+    CHECK_ttl_registry_DETAIL="TTL violation: one or more planned rows are past deadline without deferral"
+    CHECK_ttl_registry_EVIDENCE="exit $exit_code: $output"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Check 7: observe_blocking_interpretation
+# ---------------------------------------------------------------------------
+run_observe_blocking_check() {
+  local dg_file="$EVIDENCE_DIR/delivery-gate.json"
+
+  if [[ ! -f "$dg_file" ]]; then
+    CHECK_observe_blocking_interpretation_STATUS="skip"
+    CHECK_observe_blocking_interpretation_DETAIL="no delivery-gate.json in evidence pack"
+    CHECK_observe_blocking_interpretation_EVIDENCE=""
+    return
+  fi
+
+  # Read fields with jq — use // null for missing key detection
+  # IMPORTANT: enforcement field may be ABSENT (not just null). Check with has().
+  local has_enforcement enforcement would_block
+  has_enforcement=$(jq '.delivery_gate.summary | has("enforcement")' "$dg_file" 2>/dev/null) || has_enforcement="false"
+  enforcement=$(jq -r '.delivery_gate.summary.enforcement // "null"' "$dg_file" 2>/dev/null) || enforcement="null"
+  would_block=$(jq -r '.delivery_gate.summary.would_block // "null"' "$dg_file" 2>/dev/null) || would_block="null"
+
+  # Rule 1: enforcement key MUST be present AND not null
+  if [[ "$has_enforcement" != "true" || "$enforcement" == "null" ]]; then
+    CHECK_observe_blocking_interpretation_STATUS="fail"
+    CHECK_observe_blocking_interpretation_DETAIL="enforcement key absent or null in delivery_gate.summary (expected: observe|dual_run|blocking)"
+    CHECK_observe_blocking_interpretation_EVIDENCE="has_enforcement=$has_enforcement enforcement=$enforcement"
+    return
+  fi
+
+  # Rule 2: enforcement must be a valid value
+  case "$enforcement" in
+    observe|dual_run|blocking) ;;  # valid
+    *)
+      CHECK_observe_blocking_interpretation_STATUS="fail"
+      CHECK_observe_blocking_interpretation_DETAIL="enforcement value '$enforcement' not in {observe, dual_run, blocking}"
+      CHECK_observe_blocking_interpretation_EVIDENCE="enforcement=$enforcement"
+      return
+      ;;
+  esac
+
+  # Rule 3: if enforcement=observe, would_block must be a bool (present and not null)
+  if [[ "$enforcement" == "observe" ]]; then
+    if [[ "$would_block" == "null" ]]; then
+      CHECK_observe_blocking_interpretation_STATUS="fail"
+      CHECK_observe_blocking_interpretation_DETAIL="enforcement=observe but would_block is absent/null (must be bool)"
+      CHECK_observe_blocking_interpretation_EVIDENCE="would_block=$would_block"
+      return
+    fi
+  fi
+
+  CHECK_observe_blocking_interpretation_STATUS="pass"
+  CHECK_observe_blocking_interpretation_DETAIL="observe-vs-blocking interpretation consistent (enforcement=$enforcement, would_block=$would_block)"
+  CHECK_observe_blocking_interpretation_EVIDENCE=""
+}
+
+# ---------------------------------------------------------------------------
 # Summary print (minimal for Step 2 — Step 4 adds full JSON report)
 # ---------------------------------------------------------------------------
 print_check_summary() {
@@ -482,6 +574,14 @@ print_check_summary() {
   [[ -n "$CHECK_fingerprint_DETAIL" ]] && printf "    detail: %s\n" "$CHECK_fingerprint_DETAIL"
   [[ -n "$CHECK_fingerprint_EVIDENCE" ]] && printf "    evidence: %s\n" "$CHECK_fingerprint_EVIDENCE"
 
+  printf "  %-35s %s\n" "ttl_registry:"                "$CHECK_ttl_registry_STATUS"
+  [[ -n "$CHECK_ttl_registry_DETAIL" ]] && printf "    detail: %s\n" "$CHECK_ttl_registry_DETAIL"
+  [[ -n "$CHECK_ttl_registry_EVIDENCE" ]] && printf "    evidence: %s\n" "$CHECK_ttl_registry_EVIDENCE"
+
+  printf "  %-35s %s\n" "observe_blocking_interpretation:" "$CHECK_observe_blocking_interpretation_STATUS"
+  [[ -n "$CHECK_observe_blocking_interpretation_DETAIL" ]] && printf "    detail: %s\n" "$CHECK_observe_blocking_interpretation_DETAIL"
+  [[ -n "$CHECK_observe_blocking_interpretation_EVIDENCE" ]] && printf "    evidence: %s\n" "$CHECK_observe_blocking_interpretation_EVIDENCE"
+
   if [[ -n "$PACK_HEAD" ]]; then
     echo ""
     echo "  pack_head: $PACK_HEAD"
@@ -502,13 +602,21 @@ compute_exit_code() {
     "$CHECK_evidence_pack_found_STATUS" \
     "$CHECK_artifact_head_freshness_STATUS" \
     "$CHECK_protocol_validate_STATUS" \
-    "$CHECK_fingerprint_STATUS"
+    "$CHECK_fingerprint_STATUS" \
+    "$CHECK_ttl_registry_STATUS"
   do
     if [[ "$status" != "pass" && "$status" != "skip" ]]; then
       all_pass=false
       break
     fi
   done
+
+  # observe_blocking_interpretation: skip (reason: no_delivery_gate) is NOT a failure
+  # Any other non-pass, non-skip value is a failure
+  if [[ "$CHECK_observe_blocking_interpretation_STATUS" != "pass" && \
+        "$CHECK_observe_blocking_interpretation_STATUS" != "skip" ]]; then
+    all_pass=false
+  fi
 
   if $all_pass; then
     return 0
@@ -528,7 +636,8 @@ main() {
   run_pack_discovery
   run_freshness_check
   run_protocol_checks
-  # Step 3 adds: run_ttl_registry_check; run_observe_blocking_check
+  run_ttl_registry_check
+  run_observe_blocking_check
   # Step 4 adds: emit_report (writes verification-report.json); replaces print_check_summary
 
   print_check_summary
