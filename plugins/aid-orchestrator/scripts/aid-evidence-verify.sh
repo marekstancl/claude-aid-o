@@ -507,12 +507,14 @@ run_observe_blocking_check() {
     return
   fi
 
-  # Read fields with jq — use // null for missing key detection
+  # Read fields with jq — use has() for presence check, separate read for raw value
   # IMPORTANT: enforcement field may be ABSENT (not just null). Check with has().
-  local has_enforcement enforcement would_block
+  # IMPORTANT: would_block may be false (bool), so use has() not //, which treats false as falsy.
+  local has_enforcement enforcement has_would_block would_block_raw
   has_enforcement=$(jq '.delivery_gate.summary | has("enforcement")' "$dg_file" 2>/dev/null) || has_enforcement="false"
   enforcement=$(jq -r '.delivery_gate.summary.enforcement // "null"' "$dg_file" 2>/dev/null) || enforcement="null"
-  would_block=$(jq -r '.delivery_gate.summary.would_block // "null"' "$dg_file" 2>/dev/null) || would_block="null"
+  has_would_block=$(jq '.delivery_gate.summary | has("would_block")' "$dg_file" 2>/dev/null) || has_would_block="false"
+  would_block_raw=$(jq -r '.delivery_gate.summary.would_block' "$dg_file" 2>/dev/null) || would_block_raw="null"
 
   # Rule 1: enforcement key MUST be present AND not null
   if [[ "$has_enforcement" != "true" || "$enforcement" == "null" ]]; then
@@ -533,18 +535,18 @@ run_observe_blocking_check() {
       ;;
   esac
 
-  # Rule 3: if enforcement=observe, would_block must be a bool (present and not null)
+  # Rule 3: if enforcement=observe, would_block must be present (bool, not absent/null)
   if [[ "$enforcement" == "observe" ]]; then
-    if [[ "$would_block" == "null" ]]; then
+    if [[ "$has_would_block" != "true" || "$would_block_raw" == "null" ]]; then
       CHECK_observe_blocking_interpretation_STATUS="fail"
       CHECK_observe_blocking_interpretation_DETAIL="enforcement=observe but would_block is absent/null (must be bool)"
-      CHECK_observe_blocking_interpretation_EVIDENCE="would_block=$would_block"
+      CHECK_observe_blocking_interpretation_EVIDENCE="has_would_block=$has_would_block would_block=$would_block_raw"
       return
     fi
   fi
 
   CHECK_observe_blocking_interpretation_STATUS="pass"
-  CHECK_observe_blocking_interpretation_DETAIL="observe-vs-blocking interpretation consistent (enforcement=$enforcement, would_block=$would_block)"
+  CHECK_observe_blocking_interpretation_DETAIL="observe-vs-blocking interpretation consistent (enforcement=$enforcement, would_block=$would_block_raw)"
   CHECK_observe_blocking_interpretation_EVIDENCE=""
 }
 
