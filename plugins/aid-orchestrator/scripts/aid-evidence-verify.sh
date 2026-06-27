@@ -722,7 +722,7 @@ emit_report() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 4: print_human_summary — fixed-format human-readable summary
+# Step 5: print_human_summary — fixed-format human-readable summary
 # ---------------------------------------------------------------------------
 print_human_summary() {
   local overall_status
@@ -829,7 +829,7 @@ print_check_summary() {
 }
 
 # ---------------------------------------------------------------------------
-# Exit code aggregation (Step 4 will replace this with emit_report)
+# Step 6: compute_exit_code — derive exit status from check results
 # ---------------------------------------------------------------------------
 compute_exit_code() {
   local all_pass=true

@@ -337,8 +337,6 @@ Full artifact is a protocol-v2 envelope validated by `aid-protocol-validate.sh`.
 
 ---
 
----
-
 ## Evidence Pack Verifier (E2.5)
 
 `aid-evidence-verify.sh` is a standalone deterministic CLI that verifies an evidence pack for a completed run. It does not modify FSM state — it is a PM/CI tool for post-DONE validation.

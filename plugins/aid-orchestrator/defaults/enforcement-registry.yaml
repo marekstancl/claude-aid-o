@@ -504,7 +504,7 @@ enforcements:
   - id: ev-git-clean
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_git_clean_check
-    instruction: E2.5 standalone CLI — git status --porcelain empty → pass
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -517,7 +517,7 @@ enforcements:
   - id: ev-evidence-pack-found
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_pack_discovery
-    instruction: E2.5 standalone CLI — evidence pack exists with ≥1 v2 artifact
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -525,12 +525,12 @@ enforcements:
     deferred_until: "2027-06-01"
     deferred_by: PM
     deferred_reason: "standalone CLI E2.5, FSM wiring in E9"
-    description: "evidence_pack_found check: canonical evidence pack must exist"
+    description: "evidence_pack_found check: canonical evidence pack must exist with >=1 v2 artifact"
 
   - id: ev-artifact-head-freshness
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_freshness_check
-    instruction: E2.5 standalone CLI — all v2 artifacts share one pack_head reachable from HEAD
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -543,7 +543,7 @@ enforcements:
   - id: ev-protocol-validate
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_protocol_checks
-    instruction: E2.5 standalone CLI — delegates to aid-protocol-validate.sh per artifact
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -556,7 +556,7 @@ enforcements:
   - id: ev-fingerprint
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_protocol_checks
-    instruction: E2.5 standalone CLI — delegates --check-fingerprint to aid-protocol-validate.sh
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -569,7 +569,7 @@ enforcements:
   - id: ev-ttl-registry
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_ttl_registry_check
-    instruction: E2.5 standalone CLI — delegates to aid-registry-ttl-guard.sh
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
@@ -582,7 +582,7 @@ enforcements:
   - id: ev-observe-blocking-interpretation
     type: out-of-band
     source: scripts/aid-evidence-verify.sh:run_observe_blocking_check
-    instruction: E2.5 standalone CLI — enforcement key must be present and valid in delivery-gate.json
+    instruction: "docs/extending-aid.md:Evidence Pack Verifier (E2.5)"
     severity: blocking
     surface: internal-guard
     status: planned
