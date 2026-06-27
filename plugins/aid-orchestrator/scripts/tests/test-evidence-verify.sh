@@ -321,14 +321,129 @@ test_enforcement_absent() {
 }
 
 # ---------------------------------------------------------------------------
-# T12: validator-missing — documented via code inspection
-# (VALIDATOR is resolved from SCRIPT_DIR and cannot be hidden via PATH override;
-# the code path at aid-evidence-verify.sh:run_protocol_checks sets
-# CHECK_protocol_validate_STATUS="unverifiable" when VALIDATOR file is absent)
+# T12: idempotency — verifier run 2x on same pack must both succeed
 # ---------------------------------------------------------------------------
-test_validator_missing() {
-  echo "NOTE: T12/validator-missing — tested via code inspection (VALIDATOR not-found path in run_protocol_checks)"
-  _pass "T12/validator-missing (code inspection — SCRIPT_DIR isolation prevents PATH override)"
+test_idempotency() {
+  local repo="$SCRATCHPAD/repo-idem"
+  local pack_head
+  pack_head=$(setup_git_repo "$repo")
+  setup_evidence_pack "$repo" "clean-pack" "$pack_head"
+
+  # First run
+  local out1="$SCRATCHPAD/vr-idem-1.json"
+  local exit1=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out1" 2>/dev/null || exit1=$?
+  if [[ "$exit1" -ne 0 ]]; then
+    _fail "T12/first-run (expected exit 0, got $exit1)"
+    return
+  fi
+  _pass "T12/first-run"
+
+  # Second run — must also pass (idempotent)
+  local out2="$SCRATCHPAD/vr-idem-2.json"
+  local exit2=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out2" 2>/dev/null || exit2=$?
+  if [[ "$exit2" -eq 0 ]]; then
+    _pass "T12/second-run (idempotent)"
+  else
+    _fail "T12/second-run (expected exit 0, got $exit2)"
+  fi
+
+  # Both outputs claim verified: true
+  assert_json_field "T12/first-verified" "$out1" ".verification_report.summary.verified" "true"
+  assert_json_field "T12/second-verified" "$out2" ".verification_report.summary.verified" "true"
+}
+
+# ---------------------------------------------------------------------------
+# T12a: --at-head strict mode — pack_head != HEAD must fail
+# ---------------------------------------------------------------------------
+test_at_head_strict() {
+  local repo="$SCRATCHPAD/repo-athead"
+  local pack_head current_head
+
+  # Create repo with 2 commits: pack at first, HEAD at second
+  git init -q "$repo"
+  git -C "$repo" config user.email "test@test.com"
+  git -C "$repo" config user.name "Test"
+  echo ".aid-o/" > "$repo/.gitignore"
+  echo "v1" > "$repo/README.md"
+  git -C "$repo" add .gitignore README.md
+  git -C "$repo" commit -q -m "first"
+  pack_head=$(git -C "$repo" rev-parse HEAD)
+  echo "v2" >> "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -q -m "second"
+
+  setup_evidence_pack "$repo" "clean-pack" "$pack_head"
+
+  # Without --at-head: ancestor -> pass
+  local out_nstrict="$SCRATCHPAD/vr-athead-normal.json"
+  local exit_nstrict=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --out "$out_nstrict" 2>/dev/null || exit_nstrict=$?
+  assert_check_status "T12a/no-flag-freshness" "$out_nstrict" "artifact_head_freshness" "pass"
+
+  # With --at-head: pack_head != HEAD -> fail
+  local out_strict="$SCRATCHPAD/vr-athead-strict.json"
+  local exit_strict=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --at-head --out "$out_strict" 2>/dev/null || exit_strict=$?
+  assert_check_status "T12a/at-head-freshness" "$out_strict" "artifact_head_freshness" "fail"
+  if [[ "$exit_strict" -ne 0 ]]; then
+    _pass "T12a/at-head-nonzero-exit"
+  else
+    _fail "T12a/at-head-nonzero-exit (expected non-zero)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# T12b: auto-detect without args
+# ---------------------------------------------------------------------------
+test_auto_detect() {
+  local repo="$SCRATCHPAD/repo-autodetect"
+  local pack_head
+  pack_head=$(setup_git_repo "$repo")
+
+  # Setup pack with explicit epic_id and run_id
+  local ev_dir="$repo/.aid-o/work/evidence/E-autodetect/autorun"
+  mkdir -p "$ev_dir"
+  echo "epic_id: E-autodetect" > "$ev_dir/fsm-state.yaml"
+  sed "s/__PACK_HEAD__/$pack_head/g" \
+    "$FIXTURES_DIR/clean-pack/delivery-gate.json" > "$ev_dir/delivery-gate.json"
+
+  # Run without positional args — auto-detect
+  local out="$SCRATCHPAD/vr-autodetect.json"
+  local exit_code=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" --out "$out" 2>/dev/null || exit_code=$?
+
+  # Should discover E-autodetect/autorun
+  if [[ -f "$out" ]]; then
+    _pass "T12b/output-exists"
+    assert_json_field "T12b/epic_id" "$out" ".verification_report.evidence_pack.epic_id" "E-autodetect"
+  else
+    _fail "T12b/output-exists (no output file generated)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# T12c: validator-missing runtime test
+# ---------------------------------------------------------------------------
+test_validator_missing_runtime() {
+  local repo="$SCRATCHPAD/repo-valm-rt"
+  local pack_head
+  pack_head=$(setup_git_repo "$repo")
+  setup_evidence_pack "$repo" "clean-pack" "$pack_head"
+
+  local out="$SCRATCHPAD/vr-valm.json"
+  local exit_code=0
+  AID_PROJECT_ROOT="$repo" AID_VALIDATOR_PATH="/nonexistent/aid-protocol-validate.sh" \
+    bash "$VERIFIER" "E-test" "clean-pack" --out "$out" 2>/dev/null || exit_code=$?
+
+  assert_check_status "T12c/protocol_validate" "$out" "protocol_validate" "unverifiable"
+  assert_json_field "T12c/verified" "$out" ".verification_report.summary.verified" "false"
+  if [[ "$exit_code" -ne 0 ]]; then
+    _pass "T12c/nonzero-exit"
+  else
+    _fail "T12c/nonzero-exit (expected non-zero)"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -402,7 +517,10 @@ main() {
   test_nondeterministic_fingerprint
   test_ttl_violation
   test_enforcement_absent
-  test_validator_missing
+  test_idempotency
+  test_at_head_strict
+  test_auto_detect
+  test_validator_missing_runtime
   test_self_validate
   test_golden_sample
 

@@ -17,7 +17,7 @@ set -uo pipefail
 # Script location — used to resolve peer scripts (no eval)
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VALIDATOR="${SCRIPT_DIR}/aid-protocol-validate.sh"
+VALIDATOR="${AID_VALIDATOR_PATH:-${SCRIPT_DIR}/aid-protocol-validate.sh}"
 TTL_GUARD="${SCRIPT_DIR}/aid-registry-ttl-guard.sh"
 
 # ---------------------------------------------------------------------------
@@ -140,6 +140,16 @@ parse_args() {
       exit 2
       ;;
   esac
+
+  # Validate EPIC_ID and RUN_ID against path traversal
+  if [[ -n "${EPIC_ID:-}" && ! "$EPIC_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "aid-evidence-verify: Invalid EPIC_ID '${EPIC_ID}': must match [A-Za-z0-9._-]+" >&2
+    exit 2
+  fi
+  if [[ -n "${RUN_ID:-}" && ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "aid-evidence-verify: Invalid RUN_ID '${RUN_ID}': must match [A-Za-z0-9._-]+" >&2
+    exit 2
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -248,11 +258,19 @@ run_pack_discovery() {
   fi
 
   # Filter to v2 artifacts (schema_version == "aid-2.0", control_protocol != "legacy")
+  # Skip previous verifier output (verification_report artifacts) for idempotency
   local found_v2=false
   for jf in "${json_files[@]}"; do
-    local sv cp
+    local sv cp atype
     sv=$(jq -r '.schema_version // ""' "$jf" 2>/dev/null) || continue
     cp=$(jq -r '.control_protocol // ""' "$jf" 2>/dev/null) || continue
+    atype=$(jq -r '.artifact_type // ""' "$jf" 2>/dev/null) || continue
+
+    # Skip previous verifier output — idempotency guard
+    if [[ "$atype" == "verification_report" ]]; then
+      continue
+    fi
+
     if [[ "$sv" == "aid-2.0" && "$cp" != "legacy" ]]; then
       V2_ARTIFACTS+=("$jf")
       found_v2=true
@@ -625,6 +643,39 @@ emit_report() {
       '$arr + [{"check_id": $cid, "detail": $dt}]')"
   done
 
+  # --- Build findings[] for failed/unverifiable checks ---
+  local findings_json="[]"
+  local -a check_ids_for_findings=(git_clean evidence_pack_found artifact_head_freshness protocol_validate fingerprint ttl_registry observe_blocking_interpretation)
+
+  for check_id in "${check_ids_for_findings[@]}"; do
+    local var_status="CHECK_${check_id}_STATUS"
+    local var_detail="CHECK_${check_id}_DETAIL"
+    local check_status="${!var_status:-pass}"
+
+    if [[ "$check_status" == "fail" || "$check_status" == "unverifiable" ]]; then
+      local detail="${!var_detail:-}"
+      local project_id="${EPIC_ID:-aid-evidence-verifier}"
+      local fp_input="${project_id}:verification_report:ev-${check_id}:${EPIC_ID}:${check_status}"
+      local fingerprint
+      fingerprint="sha256:$(printf '%s' "$fp_input" | sha256sum | cut -d' ' -f1)"
+
+      local severity="high"
+      [[ "$check_status" == "unverifiable" ]] && severity="medium"
+
+      local finding
+      finding=$(jq -n \
+        --arg fingerprint "$fingerprint" \
+        --arg occurrence_id "ev-${check_id}" \
+        --arg severity "$severity" \
+        --arg action_owner "pm" \
+        --arg title "${check_id} — ${check_status}" \
+        --arg human_summary "${detail:-${check_id} check ${check_status}}" \
+        '{fingerprint: $fingerprint, occurrence_id: $occurrence_id, severity: $severity, action_owner: $action_owner, title: $title, human_summary: $human_summary}')
+
+      findings_json=$(jq -n --argjson arr "$findings_json" --argjson f "$finding" '$arr + [$f]')
+    fi
+  done
+
   # --- Build verification_report payload (for subject_hash computation) ---
   local vr_payload
   vr_payload="$(jq -n \
@@ -675,6 +726,7 @@ emit_report() {
     --arg revision_freshness "$revision_freshness" \
     --arg status "$status" \
     --argjson vr_payload "$vr_payload" \
+    --argjson findings "$findings_json" \
     '{
       "schema_version": $schema_version,
       "artifact_type": $artifact_type,
@@ -701,6 +753,7 @@ emit_report() {
         "dispatch_mode": "deterministic",
         "generated_by_tool": "aid-evidence-verify.sh"
       },
+      "findings": $findings,
       "verification_report": $vr_payload
     }')"
 
@@ -711,12 +764,13 @@ emit_report() {
   echo "$final_json" > "$out_path"
   echo "aid-evidence-verify: wrote $out_path" >&2
 
-  # --- Self-validate ---
+  # --- Self-validate (MUST pass — verifier cannot emit invalid artifact) ---
   if [[ -x "$VALIDATOR" ]]; then
-    local val_exit
-    "$VALIDATOR" "$out_path" --current-head "$head_sha" 2>/dev/null && val_exit=0 || val_exit=$?
+    local val_exit=0
+    "$VALIDATOR" "$out_path" --current-head "$head_sha" --check-fingerprint 2>/dev/null && val_exit=0 || val_exit=$?
     if [[ $val_exit -ne 0 ]]; then
-      echo "aid-evidence-verify: WARNING: self-validation failed (exit $val_exit) — report may be invalid" >&2
+      echo "aid-evidence-verify: FATAL: self-validation of verification-report failed (exit $val_exit) — report is invalid" >&2
+      exit 20
     fi
   fi
 }
