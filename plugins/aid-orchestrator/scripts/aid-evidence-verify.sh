@@ -10,6 +10,8 @@
 #   0  — all checks pass
 #   1  — one or more checks failed or are unverifiable
 #   2  — usage error
+#  10  — internal fatal error (missing dependency, state corruption)
+#  20  — self-validation of emitted verification-report failed
 
 set -uo pipefail
 
