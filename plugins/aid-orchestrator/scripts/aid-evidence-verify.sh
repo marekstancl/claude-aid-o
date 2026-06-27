@@ -477,7 +477,7 @@ run_ttl_registry_check() {
   fi
 
   local output exit_code
-  output=$("$TTL_GUARD" 2>&1) && exit_code=0 || exit_code=$?
+  output=$("$TTL_GUARD" ${AID_REGISTRY_PATH:+"$AID_REGISTRY_PATH"} 2>&1) && exit_code=0 || exit_code=$?
 
   if [[ $exit_code -eq 0 ]]; then
     CHECK_ttl_registry_STATUS="pass"

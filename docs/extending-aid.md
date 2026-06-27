@@ -337,4 +337,78 @@ Full artifact is a protocol-v2 envelope validated by `aid-protocol-validate.sh`.
 
 ---
 
-**Last Updated:** 2026-06-23
+---
+
+## Evidence Pack Verifier (E2.5)
+
+`aid-evidence-verify.sh` is a standalone deterministic CLI that verifies an evidence pack for a completed run. It does not modify FSM state — it is a PM/CI tool for post-DONE validation.
+
+### How to run
+
+```bash
+# Verify specific run
+bash plugins/aid-orchestrator/scripts/aid-evidence-verify.sh <epic_id> <run_id>
+
+# Strict mode (pack_head must equal current HEAD — for live DONE-review)
+bash plugins/aid-orchestrator/scripts/aid-evidence-verify.sh <epic_id> <run_id> --at-head
+
+# Write report to custom path
+bash plugins/aid-orchestrator/scripts/aid-evidence-verify.sh <epic_id> <run_id> --out /tmp/vr.json
+
+# Auto-detect most recent epic/run
+bash plugins/aid-orchestrator/scripts/aid-evidence-verify.sh
+```
+
+Exit codes: 0 = pack verified, non-zero = one or more required checks failed.
+
+### What it verifies
+
+| Check | When it fails |
+|-------|---------------|
+| `git_clean` | Working tree has uncommitted changes |
+| `evidence_pack_found` | No evidence pack dir or no v2 artifacts |
+| `artifact_head_freshness` | Artifacts disagree on head_sha, or pack_head not reachable from HEAD |
+| `protocol_validate` | Any artifact fails `aid-protocol-validate.sh` |
+| `fingerprint` | Any artifact has nondeterministic finding fingerprint |
+| `ttl_registry` | Registry has planned row past deadline without deferral |
+| `observe_blocking_interpretation` | `delivery-gate.json` missing `enforcement` key, or value not in {observe, dual_run, blocking} |
+
+### Observe-vs-blocking rule
+
+The `observe_blocking_interpretation` check fires only when `delivery-gate.json` is in the evidence pack. If absent → `skip` (not a failure). The check validates that:
+- `delivery_gate.summary.enforcement` is present and not null
+- Its value is in `{observe, dual_run, blocking}`
+- If `enforcement: observe` → `would_block` is a bool (present and not null)
+
+This catches the real E2 finding: `delivery-gate.json` has `summary.would_block: true` but `enforcement` key is **absent** — the verifier reports `observe_blocking_interpretation: fail`.
+
+### Output
+
+Writes `verification-report.json` (protocol-v2 artifact) to the evidence pack dir (or `--out` path). The artifact self-validates: `aid-protocol-validate.sh verification-report.json` exits 0.
+
+Human summary is printed to stdout. Example (failing pack):
+
+```
+============================================
+ Evidence Pack Verification — NOT VERIFIED
+============================================
+ Epic:    E-050-1_1
+ Run:     R-E050-1
+ Pack:    a5da342...
+ HEAD:    7bfe57e...
+--------------------------------------------
+ Checks:
+  ✓  git_clean                            pass
+  ✓  evidence_pack_found                  pass
+  ✓  artifact_head_freshness              pass
+  ✓  protocol_validate                    pass
+  ✓  fingerprint                          pass
+  ✓  ttl_registry                         pass
+  ✗  observe_blocking_interpretation      fail
+--------------------------------------------
+ Blocking issues:
+  • observe_blocking_interpretation: enforcement key absent or null
+============================================
+```
+
+**Last Updated:** 2026-06-27

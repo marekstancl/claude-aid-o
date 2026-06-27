@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.41.0] — 2026-06-27
+
+### Added
+- **Evidence Pack Verifier CLI (E2.5)** — `aid-evidence-verify.sh <epic> <run> [--out <path>] [--at-head]` deterministically verifies a completed run's evidence pack: git cleanliness, artifact freshness (as-of-pack, ancestor-of-HEAD; strict `--at-head` mode for live DONE-review), protocol-v2 validation + finding fingerprints per artifact, TTL/registry guard, and observe-vs-blocking interpretation consistency; emits `verification-report.json` (protocol-v2, self-validated) + human summary; standalone CLI outside FSM.
+- **`verification_report` Protocol-v2 Type** — 15th artifact type in `aid-protocol-v2.schema.json` enum + `VALID_ARTIFACT_TYPES` validator array + `TYPE_PAYLOAD_MAP` entry + `verification-report.schema.json` type schema.
+- **Evidence Verifier QA** — 11 purpose-built fixtures (clean-pack, ancestor-pack, divergent-stale, inconsistent-head, invalid-artifact, enum-garbage, mixed-legacy, nondeterministic-fingerprint, dirty-git, ttl-violation, enforcement-absent) + `test-evidence-verify.sh` harness + golden sample; every check has positive and negative coverage.
+- **Enforcement Registry** — 7 verifier checks registered in `defaults/enforcement-registry.yaml` (`surface: internal-guard`, `status: planned`, `deadline: 2027-06-01`); FSM wiring deferred to E9.
+
 ## [2.40.0] — 2026-06-26
 
 ### Added
