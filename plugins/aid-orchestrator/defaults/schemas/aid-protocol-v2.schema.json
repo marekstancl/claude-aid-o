@@ -37,7 +37,8 @@
         "release_decision",
         "pm_decision_brief",
         "curator",
-        "delivery_report"
+        "delivery_report",
+        "verification_report"
       ],
       "$comment": "enforced"
     },

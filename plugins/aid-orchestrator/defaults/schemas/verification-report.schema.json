@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/verification-report.schema.json",
+  "title": "AID Protocol v2 — VerificationReport",
+  "$comment": "producer: aid-evidence-verify.sh (E2.5), consumers: [PM, CI gate]",
+  "description": "Artifact emitted by aid-evidence-verify.sh. Carries the protocol-v2 envelope and a deterministic evidence-pack verification result. verdict.kind is always 'none' — this tool reports, it does not release.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "verification_report",
+      "$comment": "enforced — must equal this type"
+    },
+    "verification_report": {
+      "type": "object",
+      "$comment": "enforced — required root payload key; inner shape is reference only",
+      "properties": {
+        "evidence_pack": {
+          "type": "object",
+          "description": "Identification of the evidence pack that was verified.",
+          "properties": {
+            "epic_id": { "type": "string" },
+            "run_id": { "type": "string" },
+            "path": { "type": "string" }
+          }
+        },
+        "git": {
+          "type": "object",
+          "description": "Git workspace state at verification time.",
+          "properties": {
+            "clean": { "type": "boolean" },
+            "head_sha": { "type": "string" }
+          }
+        },
+        "pack_head": {
+          "type": ["string", "null"],
+          "description": "Shared head_sha across all v2 artifacts in the pack. Null if pack has no v2 artifacts."
+        },
+        "checks": {
+          "type": "array",
+          "description": "Per-check results. Each entry corresponds to one deterministic invariant.",
+          "items": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": {
+              "id": {
+                "enum": [
+                  "git_clean",
+                  "evidence_pack_found",
+                  "artifact_head_freshness",
+                  "protocol_validate",
+                  "fingerprint",
+                  "ttl_registry",
+                  "observe_blocking_interpretation"
+                ]
+              },
+              "status": {
+                "enum": ["pass", "fail", "unverifiable", "skip"]
+              },
+              "target": {
+                "type": ["string", "null"],
+                "description": "Artifact path or file this check applies to (null for pack-level checks)."
+              },
+              "detail": {
+                "type": "string",
+                "description": "Human-readable reason for the status."
+              },
+              "evidence": {
+                "type": ["string", "null"],
+                "description": "Machine evidence: exit code, git output, file:line, etc."
+              }
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "description": "Aggregated verdict across all required checks.",
+          "properties": {
+            "verified": {
+              "type": "boolean",
+              "description": "True only when no required check is fail or unverifiable."
+            },
+            "blocking_reasons": {
+              "type": "array",
+              "description": "List of required checks that caused verified=false.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "check_id": { "type": "string" },
+                  "detail": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": ["verification_report"]
+}
