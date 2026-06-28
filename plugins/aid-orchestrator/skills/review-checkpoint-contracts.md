@@ -155,3 +155,87 @@ Before EPIC generation for a high-risk plan, all 4 files must exist, be non-empt
 - `cp1-adjudicator.md` — must contain `verdict:` at line-start
 
 Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`.
+
+### C0 Observe Lenses — Adjudicator Addendum (append-only, E4)
+
+When 5 C0 lens files (`c0-lens-{name}.md`) are present in `.aid-o/work/evidence/{plan_id}/c0/`:
+- Record their `stop_rule_blockers` and `findings` in the adjudicator verdict as **advisory** observations
+- Do NOT include C0 lens blockers in `accepted_blockers` — they are observe-only in E4
+- Do NOT change the pass/fail verdict based on C0 lens findings
+- Add a field `c0_lens_observations: [{lens, blockers_count, confidence}]` to the verdict (optional field)
+
+The 3 existing lenses (L1/L2/L3) and their blocking behavior are UNCHANGED.
+
+## C0 Semantic Lenses (Observe, E4)
+
+Dispatched by the orchestrator in the CP1-deep flow alongside L1/L2/L3. All 5 lenses are **observe-only in E4** — their `stop_rule_blockers` are advisory, not blocking. Blocking promotion: E10.
+
+Each lens writes to `.aid-o/work/evidence/{plan_id}/c0/c0-lens-{name}.md` and MUST contain:
+- `stop_rule_blockers:` at line-start (list; advisory in E4 — recorded in adjudicator verdict as observe, NOT counted in `accepted_blockers`)
+- `findings:` list (any severity)
+- `confidence: high|medium|low`
+
+### Lens: reuse_compat
+
+**Focus:** Detect incompatible component reuse — where a step plans to reuse a component in a way that breaks its existing contract, interface, or invariants.
+
+**What to look for:**
+- A step reuses a function, class, or module but requires it to behave differently from its current documented behavior
+- A step imports/calls a shared component but the plan changes that component's signature/return type for another step concurrently
+- Reuse that would require the shared component to carry contradictory state
+
+**Output file:** `c0-lens-reuse_compat.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** findings are advisory in E4; `stop_rule_blockers` recorded in adjudicator verdict as advisory only, NOT counted in `accepted_blockers`
+
+### Lens: planned_call_feasibility
+
+**Focus:** Detect plan steps that call an output, function, or API of another step that does not appear feasible to produce given the step's scope.
+
+**What to look for:**
+- Step B calls `step_A.output.field_X` but Step A's scope/artifacts don't mention producing field_X
+- Step B assumes a specific API endpoint exists that no step in the plan creates
+- A downstream step depends on a runtime artifact (file, DB row, service endpoint) whose producer step doesn't clearly emit it
+
+**Output file:** `c0-lens-planned_call_feasibility.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** advisory in E4
+
+### Lens: dep_api_grounding
+
+**Focus:** Detect cases where the plan builds on a dependency's API that doesn't match the actual version or documented interface.
+
+**What to look for:**
+- Plan references a library method/parameter that was added/removed in a version not in the project's dependency spec
+- Plan assumes an external API response shape that differs from the documented API for the version range in use
+- Plan calls a deprecated method that may be removed
+
+**Output file:** `c0-lens-dep_api_grounding.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** advisory in E4
+
+### Lens: idempotency_matrix
+
+**Focus:** Detect non-idempotent mutations against at-most-once acceptance criteria.
+
+**What to look for:**
+- A step performs a state mutation (INSERT, file write, external API call) but the plan's AC requires at-most-once execution, yet the step has no idempotency guard (ON CONFLICT IGNORE, file existence check, deduplication key)
+- A step that may be retried (retry logic mentioned in plan) but whose mutation is non-idempotent
+- Batch operations with no cursor/offset tracking that would re-process on retry
+
+**Output file:** `c0-lens-idempotency_matrix.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** advisory in E4
+
+### Lens: authority_runtime_matrix
+
+**Focus:** Detect mutations that cross ownership or tenant boundaries without explicit authorization.
+
+**What to look for:**
+- A step writes to a resource (DB table, file path, service endpoint) that is owned by another component/tenant without explicit cross-boundary authorization in the plan
+- A step reads/modifies data of a different user/tenant using a service account that implies cross-tenant access
+- A step escalates privileges beyond what the plan's stated execution context allows
+
+**Output file:** `c0-lens-authority_runtime_matrix.md`
+**Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
+**Observe semantics:** advisory in E4
