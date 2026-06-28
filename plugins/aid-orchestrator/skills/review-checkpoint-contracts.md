@@ -9,7 +9,24 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-28
+
+## False-Green Guardrails
+
+These guardrails apply to plan and implementation reviews in addition to the
+per-checkpoint rules below:
+
+- DONE review must not be based on "tests pass" alone. It must include an
+  independent runtime path check through the real caller path used by
+  production, FSM, CLI, API, or the user flow.
+- Any AC that says "always", "all", "each", "never", or similar must define
+  the exact universe it ranges over, such as "all documents" vs "documents with
+  `client_id`". Ambiguous universes are not objectively verifiable.
+- Eval/evidence artifacts must state which part of the pipeline they actually
+  execute and which parts they do not. A partial pipeline run must not be
+  presented as full coverage.
+- Every new integration function must have at least one caller-flow test. A
+  unit test of the helper itself is insufficient for integration claims.
 
 ## High-Risk Pattern Detection
 

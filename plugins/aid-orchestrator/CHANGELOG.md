@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.41.1] — 2026-06-28
+
+### Changed
+- **False-Green Guardrails in Verify Commands + Contracts** — `aid-verify-implementation` and `aid-verify-plan` now enforce four additional review requirements: (1) mandatory "Independent runtime path check" output section — DONE review cannot be based on "tests pass" alone; (2) every AC using "always"/"all"/"each"/"never" must define its exact universe or the plan/AC is rejected as not objectively verifiable; (3) eval/evidence artifacts must name which pipeline slice they actually exercise; (4) every new integration function requires at least one caller-flow test, not just a unit test of the pure helper. Same four guardrails added to `review-checkpoint-contracts.md` so they apply to in-pipeline CP2–CP5 reviews, not only the manual verify commands.
+
 ## [2.41.0] — 2026-06-27
 
 ### Added

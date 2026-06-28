@@ -66,14 +66,21 @@ project rule: *adversarially verify non-trivial plans before presenting as final
 >    Conversely, a critical part missing without which the result is unusable?
 > 4. **Check acceptance criteria.** Concrete, verifiable, blocking? Each
 >    step/phase its own AC? Not just "tests pass" or "file exists"? Is PASS /
->    FAIL / PARTIAL / UNVERIFIABLE clearly defined?
+>    FAIL / PARTIAL / UNVERIFIABLE clearly defined? Every AC that says
+>    "always", "all", "each", "never", or similar must define its exact
+>    universe (for example: "all documents" vs "documents with `client_id`").
+>    If the universe is implicit, require a plan fix before implementation.
 > 5. **Check producer-consumer contracts.** Who produces the artifact? Who reads
 >    it? How is it bound to HEAD/revision/hash? How is stale evidence detected?
->    Is there a cycle or a missing consumer?
+>    Is there a cycle or a missing consumer? For any eval/evidence artifact, the
+>    plan must say which part of the pipeline it actually runs and which parts
+>    are not exercised, so it cannot be misread as full coverage.
 > 6. **Check the test strategy.** Positive *and* negative fixtures? Negative
 >    controls that must fail on a typical regression? Not dependent on synthetic
 >    data alone? Real-data/oracle verification where needed? Is it clear how
 >    absence-of-evidence, stale evidence, and a wrong enum/schema are tested?
+>    Every new integration function must have at least one caller-flow test, not
+>    only a unit test of the pure function.
 > 7. **Check false-green risks.** Can it pass while the result is unusable? Can
 >    the LLM rewrite a deterministic fail into a pass? Can old evidence apply to a
 >    new commit? Can a missing fixture cause a skip instead of a fail? Can the
@@ -106,6 +113,9 @@ project rule: *adversarially verify non-trivial plans before presenting as final
 > **Missing acceptance / tests:** what must be added so the plan can be
 > objectively verified.
 >
+> **Missing runtime/eval coverage:** any planned evidence that does not identify
+> the real caller path, pipeline slice, inputs, outputs, and untested parts.
+>
 > **Recommended revised approach:** the concrete order of plan fixes; what must
 > be blocking before implementation starts; what can remain a later extension.
 >
@@ -130,4 +140,4 @@ project rule: *adversarially verify non-trivial plans before presenting as final
   checkpoints (CP2–CP5) during `/aid-run`. `/aid-verify-plan` is the manual,
   pre-execution gut-check the PM fires by hand on a plan that is not yet running.
 
-**Last Updated:** 2026-06-23
+**Last Updated:** 2026-06-28

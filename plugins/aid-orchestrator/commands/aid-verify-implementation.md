@@ -61,6 +61,10 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
 > 1. **Read the plan/spec and extract the real acceptance criteria.** What was
 >    meant to be delivered? What is explicitly out of scope? What evidence was
 >    supposed to be produced? What user or system problem was it meant to solve?
+>    For every AC that says "always", "all", "each", "never", or similar,
+>    verify that the universe is explicit (for example: "all documents" vs
+>    "documents with `client_id`"). If the universe is implicit, mark the AC as
+>    not objectively verifiable.
 > 2. **Check the actual diff/repo state.** Which files were created/changed? Is
 >    the scope disproportionate? Any dead branches, duplicate implementations,
 >    leftover old code, or a parallel resolver? Any placeholders, TODOs,
@@ -68,16 +72,22 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
 > 3. **Verify runtime, not just statics.** Can it actually boot/run? Is the
 >    endpoint/UI/CLI really reachable? Is the output usable against real data? Is
 >    it just a library layer with no consumer? If it is frontend, verify with a
->    screenshot and a real flow, not just components.
+>    screenshot and a real flow, not just components. DONE review must include
+>    an **independent runtime path check**: exercise the real caller path used by
+>    production/FSM/CLI/API/UI, not only a helper function or isolated unit.
 > 4. **Verify the tests.** Do they test real behaviour, or only their own
 >    mock/synthetic world? Are there negative controls? Does a test fail when you
 >    introduce a typical regression? Are tests green only because a fixture is
->    missing/skipped? Are tests oversized without value?
+>    missing/skipped? Are tests oversized without value? Every new integration
+>    function must have at least one test through its caller flow; a unit test of
+>    the pure helper alone is not enough.
 > 5. **Verify producer-consumer contracts.** Does the implementation produce
 >    artifacts that another part actually reads? Do the names, IDs, paths, hash,
 >    HEAD, timestamp, schema line up? Is there a second parallel implementation
 >    of the same logic? Is the evidence old, stale, self-consistent, or not bound
->    to the current revision?
+>    to the current revision? Any evaluation evidence must state which part of
+>    the pipeline was actually executed and which parts were not; otherwise it
+>    only proves coverage for the executed slice, not the whole pipeline.
 > 6. **Verify against real data / an oracle.** Compare the output with an
 >    independent source of truth if one exists. Do not use implementation-
 >    generated output as its own evidence. For cross-project/read-model things,
@@ -102,6 +112,11 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
 > recommended fix.
 >
 > **What is genuinely done:** briefly, no marketing.
+>
+> **Independent runtime path check:** command/flow executed, caller entrypoint,
+> inputs or fixture, artifact/output path, exit code/result, whether this is the
+> same path production/FSM/CLI/API/UI uses, and what was explicitly not
+> exercised.
 >
 > **What is not proven:** list the missing evidence, runtime gaps, test gaps.
 >
@@ -131,4 +146,4 @@ tests. This mirrors the project rule: *adversarially verify before claiming done
   `/aid-verify-implementation` is the manual DONE gut-check the PM fires by hand
   on work that already claims to be complete.
 
-**Last Updated:** 2026-06-23
+**Last Updated:** 2026-06-28
