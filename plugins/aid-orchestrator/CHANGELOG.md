@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [2.41.2] — 2026-06-28
 
+### Fixed
+- **CI: dg07/dg12 bash-test failures** — delivery-gate fixture `.aid-o/` trees were gitignored by `**/.aid-o/`; added exception in `.gitignore` matching the existing `mini/` pattern; fixture files (`fsm-state.yaml`, `execution.yaml`) are now tracked and available in CI.
+- **CI: dg12 unverifiable on GitHub Actions** — `yq` was not installed in the `bash-tests` job; `dg12-authority.sh` fell through to exit=2 instead of parsing the authority YAML and returning exit=1; added `yq` install step.
+- **CI: vitest `@aid/contract` resolution failure** — `dist/` is gitignored so `@aid/contract/dist/index.js` was absent in CI; added `npm run build -w @aid/contract` step before `npm test` in the vitest job.
+
+## [2.41.1] — 2026-06-28
+
 ### Changed
 - **False-Green Guardrails in Verify Commands + Contracts** — `aid-verify-implementation` and `aid-verify-plan` now enforce four additional review requirements: (1) mandatory "Independent runtime path check" output section — DONE review cannot be based on "tests pass" alone; (2) every AC using "always"/"all"/"each"/"never" must define its exact universe or the plan/AC is rejected as not objectively verifiable; (3) eval/evidence artifacts must name which pipeline slice they actually exercise; (4) every new integration function requires at least one caller-flow test, not just a unit test of the pure helper. Same four guardrails added to `review-checkpoint-contracts.md` so they apply to in-pipeline CP2–CP5 reviews, not only the manual verify commands.
 
