@@ -21,9 +21,9 @@ profile_hash() {
   local pid="$1"
   # Convert space-separated lists to sorted, newline-joined canonical strings
   local plan_nl candidate_nl lens_nl
-  plan_nl=$(tr ' ' '\n' <<< "$2" | sort -u | tr '\n' '\n' | grep -v '^$' | paste -sd $'\n' - || true)
-  candidate_nl=$(tr ' ' '\n' <<< "$3" | sort -u | tr '\n' '\n' | grep -v '^$' | paste -sd $'\n' - || true)
-  lens_nl=$(tr ' ' '\n' <<< "$4" | sort -u | tr '\n' '\n' | grep -v '^$' | paste -sd $'\n' - || true)
+  plan_nl=$(tr ' ' '\n' <<< "$2" | sort -u | grep -v '^$' | paste -sd $'\n' - || true)
+  candidate_nl=$(tr ' ' '\n' <<< "$3" | sort -u | grep -v '^$' | paste -sd $'\n' - || true)
+  lens_nl=$(tr ' ' '\n' <<< "$4" | sort -u | grep -v '^$' | paste -sd $'\n' - || true)
 
   local hex
   hex=$(printf '%s\x1f%s\x1f%s\x1f%s' "$pid" "$plan_nl" "$candidate_nl" "$lens_nl" | sha256sum | cut -d' ' -f1 | cut -c1-64)

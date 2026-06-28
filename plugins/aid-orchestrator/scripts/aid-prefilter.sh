@@ -400,7 +400,7 @@ cmd_profile() {
   declare -A plan_seen
   if [[ -n "$plan_path" && -f "$plan_path" ]]; then
     for sid in "${surface_ids[@]}"; do
-      if grep -q "$sid" "$plan_path" 2>/dev/null; then
+      if grep -qF "$sid" "$plan_path" 2>/dev/null; then
         if [[ -z "${plan_seen[$sid]:-}" ]]; then
           plan_seen[$sid]=1
           plan_surfaces+=("$sid")

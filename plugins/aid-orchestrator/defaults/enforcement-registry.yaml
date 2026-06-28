@@ -598,6 +598,7 @@ enforcements:
     instruction: "docs/extending-aid.md"
     severity: fail
     surface: internal-guard
+    enforcement: observe
     status: planned
     verdict: unmapped
     deadline: "2027-12-31"
