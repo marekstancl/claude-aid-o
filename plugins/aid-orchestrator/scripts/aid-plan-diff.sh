@@ -104,6 +104,11 @@ parse_ac_blocks() {
       sub(/^- \[[ x]\] AC[0-9]+: */, "", tmp)
       return tmp
     }
+    function extract_text_role(s,   tmp) {
+      tmp = s
+      sub(/^- \[[ x]\] \[[a-z_]+\] */, "", tmp)
+      return tmp
+    }
     function extract_yaml_val(s, key,   tmp, prefix) {
       tmp = s
       prefix = ".*" key ":[[:space:]]*"
@@ -116,11 +121,23 @@ parse_ac_blocks() {
       sub(/[[:space:]]+$/, "", tmp)
       return tmp
     }
+    function flush_no_verify(  ) {
+      if (ac_label != "" && !ac_flushed) {
+        printf "%s%s%s%s%s%s%s%s%s%s%s%s%s\n", \
+          ac_label, US, ac_text, US, "no_verification", US, "", US, "", US, "", US, "0"
+        ac_flushed=1
+      }
+    }
     /^## Acceptance Criteria/,/^## [^A]/ {
-      if ($0 ~ /^- \[[ x]\] AC[0-9]+:/) {
+      if ($0 ~ /^- \[[ x]\] AC[0-9]+:/ || $0 ~ /^- \[[ x]\] \[[a-z_]+\]/) {
+        flush_no_verify()
         ac_label=extract_label($0)
-        ac_text=extract_text($0)
-        in_yaml=0
+        if ($0 ~ /^- \[[ x]\] AC[0-9]+:/) {
+          ac_text=extract_text($0)
+        } else {
+          ac_text=extract_text_role($0)
+        }
+        in_yaml=0; ac_flushed=0
         ac_type=""; ac_cmd=""; ac_file=""; ac_regex=""; ac_expected_exit="0"
       }
       if ($0 ~ /^[[:space:]]*```yaml/) { in_yaml=1; next }
@@ -128,6 +145,7 @@ parse_ac_blocks() {
         in_yaml=0
         if (ac_type != "") {
           printf "%s%s%s%s%s%s%s%s%s%s%s%s%s\n", ac_label, US, ac_text, US, ac_type, US, ac_cmd, US, ac_file, US, ac_regex, US, ac_expected_exit
+          ac_flushed=1
         }
         next
       }
@@ -139,6 +157,7 @@ parse_ac_blocks() {
         if ($0 ~ /expected_exit:/) ac_expected_exit=extract_yaml_val($0, "expected_exit")
       }
     }
+    END { flush_no_verify() }
   ' "$PLAN"
 }
 
@@ -181,6 +200,9 @@ run_pattern() {
         verdict="absent"; evidence="regex not found in $file"
       fi
       ;;
+    no_verification)
+      verdict="skipped"; evidence="no verification_pattern block — prose AC, cannot auto-verify"
+      ;;
     *)
       verdict="absent"; evidence="unknown pattern type: $type"
       ;;
@@ -222,7 +244,7 @@ if [[ "$ac_count" -eq 0 ]]; then
   exit 2
 fi
 
-present_count=0; absent_count=0
+present_count=0; absent_count=0; skipped_count=0
 # Collect per-AC NDJSON lines for batched slurp (avoids O(n) growing-payload
 # re-parse per AC — measurable at 44+ ACs per /simplify efficiency review).
 ac_result_lines=()
@@ -237,7 +259,8 @@ while IFS= read -r line; do
   IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit")"
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
-  [[ "$verdict" == "absent" ]] && absent_count=$((absent_count + 1))
+  [[ "$verdict" == "absent"  ]] && absent_count=$((absent_count + 1))
+  [[ "$verdict" == "skipped" ]] && skipped_count=$((skipped_count + 1))
 
   # NOTE: jq reserves `label` as a keyword (label/break syntax), so we pass it
   # as $lbl. Same for `verdict` — rename to $vrd defensively.
@@ -260,6 +283,7 @@ fi
 
 overall="pass"
 [[ "$absent_count" -gt 0 ]] && overall="fail"
+[[ "$overall" == "pass" && "$skipped_count" -gt 0 && "$present_count" -eq 0 ]] && overall="partial"
 
 jq -n \
   --arg gb "aid-plan-diff.sh@${PLUGIN_VERSION}" \
@@ -271,6 +295,7 @@ jq -n \
   --argjson res "$results_json" \
   --argjson pcnt "$present_count" \
   --argjson acnt "$absent_count" \
+  --argjson scnt "$skipped_count" \
   --arg ov "$overall" \
   '{
     "_generated_by": $gb,
@@ -280,7 +305,7 @@ jq -n \
     "head_commit": $hc,
     "ac_count": $cnt,
     "results": $res,
-    "summary": {"present_count": $pcnt, "absent_count": $acnt, "skipped_count": 0},
+    "summary": {"present_count": $pcnt, "absent_count": $acnt, "skipped_count": $scnt},
     "overall_verdict": $ov
   }' > "$OUTPUT_FILE"
 
