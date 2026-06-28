@@ -20,12 +20,52 @@
       "$comment": "enforced — minimal payload; full schema defined in owning phase",
       "properties": {
         "required_lenses": {
-          "type": "array"
+          "type": "array",
+          "items": {"type": "string"}
         },
         "profile_hash": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "matched_surfaces": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "plan_time_surfaces": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "candidate_time_surfaces": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "risk_profile": {
+          "type": "string",
+          "enum": ["docs_trivial", "low", "medium", "high", "unverifiable"]
+        },
+        "ir_cadence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "c2_authorities_max": {
+          "type": "integer"
+        },
+        "llm_authorities_total_max": {
+          "type": "integer"
         }
-      }
+      },
+      "required": [
+        "required_lenses",
+        "profile_hash",
+        "matched_surfaces",
+        "plan_time_surfaces",
+        "candidate_time_surfaces",
+        "risk_profile",
+        "ir_cadence",
+        "c2_authorities_max",
+        "llm_authorities_total_max"
+      ]
     }
   },
   "required": ["review_profile"]

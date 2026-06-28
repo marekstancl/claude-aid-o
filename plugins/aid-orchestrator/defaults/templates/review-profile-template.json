@@ -1,0 +1,25 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "review_profile",
+  "epic_id": "E-000-0_0",
+  "run_id": "R-E000-0",
+  "step": 0,
+  "produced_at": "2026-06-28T00:00:00Z",
+  "producer": "aid-prefilter.sh profile",
+  "review_profile": {
+    "matched_surfaces": ["scripts_core", "schemas_and_policies"],
+    "plan_time_surfaces": ["scripts_core"],
+    "candidate_time_surfaces": ["scripts_core", "schemas_and_policies"],
+    "required_lenses": [
+      "behavior_trace",
+      "ac_to_test_identity",
+      "negative_case",
+      "security_threat_model"
+    ],
+    "risk_profile": "medium",
+    "ir_cadence": 2,
+    "c2_authorities_max": 2,
+    "llm_authorities_total_max": 3,
+    "profile_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}
