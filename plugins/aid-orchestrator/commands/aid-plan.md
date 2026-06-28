@@ -365,7 +365,7 @@ Runs the standard `plan-writing.md` completeness checklist (28 checks). If no `R
 
 ### CP1-deep (for high-risk plans)
 
-Extends CP1-light with 3 parallel review lenses and an adjudicator. All 4 evidence files must exist before EPIC generation is allowed.
+Extends CP1-light with 8 parallel review lenses (L1/L2/L3 blocking + 5 C0 observe) and an adjudicator. The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is allowed; 5 C0 lens files are observe-only (E4).
 
 **Flow:**
 
