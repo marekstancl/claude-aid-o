@@ -424,17 +424,57 @@ cmd_profile() {
     fi
   done
 
-  # --- Plan-time surfaces (best-effort: grep surface IDs in plan/epic file) ---
+  # --- Plan-time surfaces: parse Files/Allowed files/paths section, match via path_globs ---
   local plan_surfaces=()
   declare -A plan_seen
   if [[ -n "$plan_path" && -f "$plan_path" ]]; then
-    for sid in "${surface_ids[@]}"; do
-      if grep -qF "$sid" "$plan_path" 2>/dev/null; then
-        if [[ -z "${plan_seen[$sid]:-}" ]]; then
-          plan_seen[$sid]=1
-          plan_surfaces+=("$sid")
+    local plan_paths=()
+    local in_section=false
+    while IFS= read -r line; do
+      # Detect section headers
+      if [[ "$line" =~ \*\*Files:\*\*|^###\ Allowed\ files|^##\ Allowed\ files|^##\ Scope ]]; then
+        in_section=true
+        continue
+      fi
+      if [[ "$in_section" == "true" ]]; then
+        # Stop at next markdown heading or empty section end indicator
+        if [[ "$line" =~ ^#{1,4}[[:space:]] ]]; then
+          in_section=false
+          continue
+        fi
+        # Extract path from bullet line: "- `path/to/file`" or "- path/to/file"
+        local extracted=""
+        if [[ "$line" =~ ^[[:space:]]*[-*][[:space:]]+\`([^\`]+)\` ]]; then
+          extracted="${BASH_REMATCH[1]}"
+        elif [[ "$line" =~ ^[[:space:]]*[-*][[:space:]]+([^[:space:]].+) ]]; then
+          extracted="${BASH_REMATCH[1]}"
+          # Strip trailing backtick/quote/comment if any
+          extracted="${extracted%%\`*}"
+          extracted="${extracted%% #*}"
+          extracted="${extracted%% —*}"
+          extracted="${extracted%%[[:space:]]}"
+        fi
+        # Only keep if looks like a file path (contains / or has extension)
+        if [[ -n "$extracted" && ("$extracted" == *"/"* || "$extracted" == *"."*) ]]; then
+          plan_paths+=("$extracted")
         fi
       fi
+    done < "$plan_path"
+
+    # Match each plan path against each surface's path_globs
+    for ppath in "${plan_paths[@]}"; do
+      for sid in "${surface_ids[@]}"; do
+        [[ -n "${plan_seen[$sid]:-}" ]] && continue
+        local globs
+        mapfile -t globs < <(yq -r ".surfaces.${sid}.match.path_globs[]?" "$PROFILES_FILE" 2>/dev/null)
+        for glob in "${globs[@]}"; do
+          if path_matches_glob "$ppath" "$glob"; then
+            plan_seen[$sid]=1
+            plan_surfaces+=("$sid")
+            break
+          fi
+        done
+      done
     done
   fi
 

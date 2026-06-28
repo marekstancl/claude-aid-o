@@ -27,6 +27,7 @@ PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 PREFILTER="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-prefilter.sh"
 CHECK_SCRIPT="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/lib/review-profile-check.sh"
 HASH_LIB="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/lib/aid-profile-hash.sh"
+PROFILES_FILE="${PLUGIN_ROOT}/plugins/aid-orchestrator/defaults/policies/review-profiles.yaml"
 
 SCRATCHPAD="${TMPDIR:-/tmp}/aid-rp-test-$$"
 mkdir -p "$SCRATCHPAD"
@@ -120,6 +121,52 @@ run_profile() {
     --range HEAD~1..HEAD --out "$out_path" >/dev/null 2>/dev/null || rc=$?
   echo "$rc"
 }
+
+# ---------------------------------------------------------------------------
+# AC01: review-profiles.yaml enforcement + risk_profiles sanity check
+# ---------------------------------------------------------------------------
+AC01_RC=0
+python3 -c "
+import yaml, sys
+d = yaml.safe_load(open('${PROFILES_FILE}'))
+assert d.get('enforcement') == 'observe', 'enforcement != observe'
+assert d.get('unknown_surface_profile') == 'unverifiable', 'unknown_surface_profile != unverifiable'
+rp = d.get('risk_profiles', {})
+for k in ['docs_trivial','low','medium','high','unverifiable']:
+    assert k in rp, f'risk_profile {k} missing'
+print('ok')
+" 2>&1 && AC01_RC=0 || AC01_RC=1
+assert_exit "AC01: review-profiles.yaml sanity (python3)" 0 "$AC01_RC"
+
+# ---------------------------------------------------------------------------
+# AC03: all lenses subset of C2 vocabulary
+# ---------------------------------------------------------------------------
+CONTROL_TOPO="${PLUGIN_ROOT}/plugins/aid-orchestrator/docs/design/control-topology.yaml"
+if [[ -f "$CONTROL_TOPO" ]]; then
+  AC03_RC=0
+  python3 -c "
+import yaml, sys
+profiles = yaml.safe_load(open('${PROFILES_FILE}'))
+topo = yaml.safe_load(open('${CONTROL_TOPO}'))
+c2_lenses = set(topo.get('C2',{}).get('lenses', []))
+if not c2_lenses:
+    # Try alternate path
+    c2_lenses = set(topo.get('mechanisms',{}).get('C2',{}).get('lenses', []))
+all_lenses = set()
+for s in profiles.get('surfaces',{}).values():
+    all_lenses.update(s.get('lenses', []))
+for rp in profiles.get('risk_profiles',{}).values():
+    all_lenses.update(rp.get('mandatory_lenses', []))
+unknown = all_lenses - c2_lenses
+if unknown:
+    print(f'FAIL: lenses not in C2 vocab: {unknown}', file=sys.stderr)
+    sys.exit(1)
+print('ok: all lenses in C2 vocab')
+" 2>&1 && AC03_RC=0 || AC03_RC=1
+  assert_exit "AC03: all lenses in C2 vocabulary" 0 "$AC03_RC"
+else
+  echo "SKIP: AC03 (control-topology.yaml not found at $CONTROL_TOPO)"
+fi
 
 # ===========================================================================
 # T01: docs-trivial — CHANGELOG.md → docs_trivial, no required_lenses
@@ -365,6 +412,39 @@ T13_OUT=$(bash "$CHECK_SCRIPT" "${T13_EVIDENCE}/review-profile.json" "$T13_EVIDE
   || T13_RC=$?
 assert_exit "T13: missing lenses → exit=1" 1 "$T13_RC"
 assert_contains "T13: missing lenses in stdout" "$T13_OUT" "behavior_trace"
+
+# ===========================================================================
+# T14: plan declares scripts path, diff is docs only → union expands profile
+# ===========================================================================
+T14_REPO="${SCRATCHPAD}/t14"
+setup_temp_repo "$T14_REPO"
+# Create a mini plan file that declares scripts path
+T14_PLAN="${SCRATCHPAD}/t14-plan.md"
+cat > "$T14_PLAN" << 'PLAN'
+# Plan P-TEST
+
+## Scope
+
+**Files:**
+- plugins/aid-orchestrator/scripts/aid-new.sh
+
+## Steps
+nothing
+PLAN
+# Diff only touches README.md (docs_content)
+add_and_commit "$T14_REPO" "docs only change" \
+  "README.md" "Updated docs"
+T14_OUT="${SCRATCHPAD}/t14-profile.json"
+T14_RC=$(run_profile "$T14_REPO" "$T14_PLAN" "$T14_OUT")
+assert_exit "T14: plan-declares-scripts exit" 0 "$T14_RC"
+T14_PLAN_S=$(jq -r '.review_profile.plan_time_surfaces | join(",")' "$T14_OUT" 2>/dev/null)
+T14_CAND_S=$(jq -r '.review_profile.candidate_time_surfaces | join(",")' "$T14_OUT" 2>/dev/null)
+T14_RISK=$(jq -r '.review_profile.risk_profile' "$T14_OUT" 2>/dev/null)
+assert_contains "T14: plan declares scripts_core" "$T14_PLAN_S" "scripts_core"
+assert_contains "T14: candidate has docs_content" "$T14_CAND_S" "docs_content"
+# Union should elevate risk beyond docs_trivial
+if [[ "$T14_RISK" != "docs_trivial" ]]; then _pass "T14: risk elevated by plan-time (=$T14_RISK)"
+else _fail "T14: risk NOT elevated by plan-time surface — union broken"; fi
 
 # ===========================================================================
 # Results
