@@ -29,8 +29,7 @@ C0_SCRIPT="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-c0-contract.sh"
 FIXTURES_DIR="${SCRIPT_DIR}/fixtures/c0"
 
 # Scratchpad for temp git repos (isolated, never need cwd change)
-SCRATCHPAD="${TMPDIR:-/tmp}/aid-c0-test-$$"
-mkdir -p "$SCRATCHPAD"
+SCRATCHPAD="$(mktemp -d)"
 trap 'rm -rf "$SCRATCHPAD"' EXIT
 
 # ---------------------------------------------------------------------------

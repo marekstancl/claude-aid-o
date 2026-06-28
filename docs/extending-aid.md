@@ -507,6 +507,10 @@ transition is blocked in E4. Blocking promotion is planned for E10.
 
 All artifacts are protocol-v2 envelopes validated by `aid-protocol-validate.sh`.
 
+### Implementation
+
+The producer script `scripts/aid-c0-contract.sh` implements both the `contract` and `review` subcommands. The `contract` subcommand computes the binding hashes and manifest, while the `review` subcommand performs the five structural checks and lens evidence scan.
+
 ### The 5 semantic lenses
 
 Each lens is dispatched by the orchestrator in CP1-deep and runs in **observe

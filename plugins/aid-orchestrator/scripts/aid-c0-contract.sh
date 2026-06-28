@@ -189,7 +189,7 @@ cmd_contract() {
   # Resolve project root (directory containing plan.json, or its parent git root)
   # -------------------------------------------------------------------------
   local plan_dir
-  plan_dir="$(dirname "$(cd "$(dirname "$plan_json")" && pwd)/$(basename "$plan_json")")"
+  plan_dir="$(dirname "$(realpath "$plan_json")")"
   local project_root
   project_root="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)" || project_root="$plan_dir"
 
@@ -388,7 +388,7 @@ cmd_review() {
   # Resolve project root (for envelope metadata)
   # -------------------------------------------------------------------------
   local plan_dir
-  plan_dir="$(dirname "$(cd "$(dirname "$plan_md")" && pwd)/$(basename "$plan_md")")"
+  plan_dir="$(dirname "$(realpath "$plan_md")")"
   local project_root
   project_root="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)" || project_root="$plan_dir"
 
@@ -464,11 +464,6 @@ cmd_review() {
 
     # Check for duplicates
     if [[ "${#step_ids[@]}" -gt 0 ]]; then
-      local sorted_ids
-      sorted_ids="$(printf '%s\n' "${step_ids[@]}" | sort)"
-      local unique_ids
-      unique_ids="$(printf '%s\n' "${step_ids[@]}" | sort -u)"
-
       local total_count unique_count
       total_count="$(printf '%s\n' "${step_ids[@]}" | wc -l | tr -d ' ')"
       unique_count="$(printf '%s\n' "${step_ids[@]}" | sort -u | wc -l | tr -d ' ')"
