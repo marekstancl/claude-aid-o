@@ -320,7 +320,9 @@ ${bhash}"
 }
 
 # ===========================================================================
-# Subcommand: review (STUB — Step 3 will implement fully)
+# Subcommand: review
+# Runs 5 deterministic structural checks, scans 5 C0 lens evidence files,
+# and emits plan-review.json (observe — never exits non-zero due to findings).
 # ===========================================================================
 cmd_review() {
   # -------------------------------------------------------------------------
@@ -358,7 +360,17 @@ cmd_review() {
     esac
   done
 
-  if [[ -z "$plan_md" || -z "$evidence_dir" ]]; then
+  if [[ -z "$plan_md" ]]; then
+    echo "Usage: aid-c0-contract.sh review <plan.md> <c0_evidence_dir> [--out <path>]" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "$plan_md" ]]; then
+    echo "ERROR: plan.md not found: $plan_md" >&2
+    exit 1
+  fi
+
+  if [[ -z "$evidence_dir" ]]; then
     echo "Usage: aid-c0-contract.sh review <plan.md> <c0_evidence_dir> [--out <path>]" >&2
     exit 1
   fi
@@ -372,10 +384,413 @@ cmd_review() {
     review_out="${evidence_dir}/plan-review.json"
   fi
 
-  # Minimal stub JSON — Step 3 will replace this with 5 structural checks
-  # and lens evidence scan
-  printf '%s\n' '{}' > "$review_out"
-  exit 0
+  # -------------------------------------------------------------------------
+  # Resolve project root (for envelope metadata)
+  # -------------------------------------------------------------------------
+  local plan_dir
+  plan_dir="$(dirname "$(cd "$(dirname "$plan_md")" && pwd)/$(basename "$plan_md")")"
+  local project_root
+  project_root="$(git -C "$plan_dir" rev-parse --show-toplevel 2>/dev/null)" || project_root="$plan_dir"
+
+  # -------------------------------------------------------------------------
+  # Structural checks (all observe — never exit non-zero due to findings)
+  # -------------------------------------------------------------------------
+  local structural_checks_json="[]"
+  local findings_json="[]"
+
+  # --------------------------------------------------------------------------
+  # Check 1: plan_graph_topo
+  # Does plan-graph.json exist? Are cycles empty?
+  # --------------------------------------------------------------------------
+  local pg_file="${evidence_dir}/plan-graph.json"
+  local pg_status="unverifiable"
+  local pg_detail=""
+
+  if [[ ! -f "$pg_file" ]]; then
+    pg_status="unverifiable"
+    pg_detail="plan-graph.json not found in evidence dir"
+  elif ! jq . "$pg_file" >/dev/null 2>&1; then
+    pg_status="observe"
+    pg_detail="plan-graph.json is not valid JSON"
+  else
+    local cycles_count
+    cycles_count="$(jq '(.plan_graph.cycles // .cycles // []) | length' "$pg_file" 2>/dev/null || echo "0")"
+    if [[ "$cycles_count" -gt 0 ]]; then
+      pg_status="observe"
+      pg_detail="plan-graph contains ${cycles_count} cycle(s)"
+    else
+      pg_status="pass"
+      pg_detail="no cycles"
+    fi
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "plan_graph_topo" \
+    --arg status "$pg_status" \
+    --arg detail "$pg_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # --------------------------------------------------------------------------
+  # Check 2: identifier_domain
+  # Are step IDs syntactically unique? Do all dependency references resolve?
+  # --------------------------------------------------------------------------
+  local id_status="pass"
+  local id_detail=""
+
+  # Parse step table rows: lines matching "| N | role |..." (skip header/separator)
+  local step_rows
+  step_rows="$(grep -E '^\| *[0-9]+ *\|' "$plan_md" 2>/dev/null | grep -vE '^\| *#' | grep -vE '^\| *-' || true)"
+
+  if [[ -n "$step_rows" ]]; then
+    # Build step IDs: step_{N}_{role_sanitized}
+    local step_ids=()
+    while IFS= read -r row; do
+      [[ -z "$row" ]] && continue
+      # Extract step number (first column after opening |)
+      local step_num
+      step_num="$(echo "$row" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}')"
+      # Extract role (second column)
+      local role_raw
+      role_raw="$(echo "$row" | awk -F'|' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')"
+
+      # Sanitize role: lowercase, replace non-alphanumeric with _
+      local role_sanitized
+      role_sanitized="$(echo "$role_raw" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/__*/_/g' | sed 's/^_//; s/_$//')"
+
+      if [[ -n "$step_num" && -n "$role_sanitized" ]]; then
+        step_ids+=("step_${step_num}_${role_sanitized}")
+      fi
+    done <<< "$step_rows"
+
+    # Check for duplicates
+    if [[ "${#step_ids[@]}" -gt 0 ]]; then
+      local sorted_ids
+      sorted_ids="$(printf '%s\n' "${step_ids[@]}" | sort)"
+      local unique_ids
+      unique_ids="$(printf '%s\n' "${step_ids[@]}" | sort -u)"
+
+      local total_count unique_count
+      total_count="$(printf '%s\n' "${step_ids[@]}" | wc -l | tr -d ' ')"
+      unique_count="$(printf '%s\n' "${step_ids[@]}" | sort -u | wc -l | tr -d ' ')"
+
+      if [[ "$total_count" -ne "$unique_count" ]]; then
+        local dup_ids
+        dup_ids="$(printf '%s\n' "${step_ids[@]}" | sort | uniq -d | tr '\n' ',' | sed 's/,$//')"
+        id_status="observe"
+        id_detail="duplicate step ids: ${dup_ids}"
+
+        # Add to findings
+        findings_json="$(printf '%s' "$findings_json" | jq \
+          --arg id "identifier_domain" \
+          --arg detail "duplicate step ids: ${dup_ids}" \
+          '. + [{"id": $id, "status": "observe", "detail": $detail}]')"
+      fi
+    fi
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "identifier_domain" \
+    --arg status "$id_status" \
+    --arg detail "$id_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # --------------------------------------------------------------------------
+  # Check 3: schema_completeness
+  # Does plan.md have required frontmatter and section headers?
+  # --------------------------------------------------------------------------
+  local sc_status="pass"
+  local sc_missing=()
+
+  # Check frontmatter block exists (--- delimiters)
+  local fm_block
+  fm_block="$(awk '/^---$/{if(p==0){p=1;next}else{exit}} p{print}' "$plan_md" 2>/dev/null || true)"
+
+  if [[ -z "$fm_block" ]]; then
+    sc_missing+=("frontmatter block")
+    sc_status="observe"
+  else
+    # Check required frontmatter keys: id, type, status
+    for fm_key in id type status; do
+      if ! echo "$fm_block" | grep -qE "^${fm_key}:"; then
+        sc_missing+=("missing ${fm_key}:")
+        sc_status="observe"
+      fi
+    done
+
+    # Check for risk: field (advisory only — note if missing but keep observe not fail)
+    if ! echo "$fm_block" | grep -qE "^risk:"; then
+      sc_missing+=("missing risk: field")
+      sc_status="observe"
+    fi
+  fi
+
+  # Check section headers
+  # Goal: ## Goal or ## Cíl
+  if ! grep -qE '^## (Goal|Cíl)' "$plan_md" 2>/dev/null; then
+    sc_missing+=("missing ## Goal section")
+    sc_status="observe"
+  fi
+
+  # Scope: ## Scope or ## Rozsah
+  if ! grep -qE '^## (Scope|Rozsah)' "$plan_md" 2>/dev/null; then
+    sc_missing+=("missing ## Scope section")
+    sc_status="observe"
+  fi
+
+  # Steps: ## Steps or ## Kroky or a step table with | # | Role |
+  local has_steps_section=0
+  if grep -qE '^## (Steps|Kroky)' "$plan_md" 2>/dev/null; then
+    has_steps_section=1
+  elif grep -qE '^\| *# *\| *(Role|role)' "$plan_md" 2>/dev/null; then
+    has_steps_section=1
+  elif grep -qE '^\| *[0-9]+ *\|' "$plan_md" 2>/dev/null; then
+    has_steps_section=1
+  fi
+
+  if [[ "$has_steps_section" -eq 0 ]]; then
+    sc_missing+=("missing ## Steps section")
+    sc_status="observe"
+  fi
+
+  local sc_detail=""
+  if [[ "${#sc_missing[@]}" -gt 0 ]]; then
+    sc_detail="$(printf '%s; ' "${sc_missing[@]}" | sed 's/; $//')"
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "schema_completeness" \
+    --arg status "$sc_status" \
+    --arg detail "$sc_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # --------------------------------------------------------------------------
+  # Check 4: producer_consumer_order
+  # Does topological_order from plan-graph.json have each producer before consumers?
+  # --------------------------------------------------------------------------
+  local pc_status="unverifiable"
+  local pc_detail=""
+
+  if [[ -f "$pg_file" ]] && jq . "$pg_file" >/dev/null 2>&1; then
+    # Extract topological_order and edges from plan-graph.json
+    # plan-graph may have the data at top level or inside plan_graph key
+    local topo_order
+    topo_order="$(jq -r '(.plan_graph.topological_order // .topological_order // [])[]' "$pg_file" 2>/dev/null || true)"
+
+    local edges_data
+    edges_data="$(jq -r '(.plan_graph.edges // .edges // [])[] | "\(.before)->\(.after)"' "$pg_file" 2>/dev/null || true)"
+
+    if [[ -z "$topo_order" && -z "$edges_data" ]]; then
+      pc_status="pass"
+      pc_detail="no edges to check"
+    elif [[ -z "$topo_order" ]]; then
+      pc_status="observe"
+      pc_detail="topological_order is empty (possible cycles)"
+    else
+      # Build position map from topological order
+      local order_violation=0
+      local violation_detail=""
+      local pos=0
+      declare -A topo_pos
+
+      while IFS= read -r node; do
+        [[ -z "$node" ]] && continue
+        topo_pos["$node"]="$pos"
+        (( pos++ )) || true
+      done <<< "$topo_order"
+
+      if [[ -n "$edges_data" ]]; then
+        while IFS= read -r edge; do
+          [[ -z "$edge" ]] && continue
+          local prod="${edge%%->*}"
+          local cons="${edge##*->}"
+
+          local prod_pos="${topo_pos[$prod]:-}"
+          local cons_pos="${topo_pos[$cons]:-}"
+
+          if [[ -z "$prod_pos" || -z "$cons_pos" ]]; then
+            # Node not in topo order (possibly from a cycle)
+            continue
+          fi
+
+          if [[ "$prod_pos" -ge "$cons_pos" ]]; then
+            order_violation=1
+            violation_detail="${prod} (pos ${prod_pos}) appears after consumer ${cons} (pos ${cons_pos})"
+            break
+          fi
+        done <<< "$edges_data"
+      fi
+
+      if [[ "$order_violation" -eq 1 ]]; then
+        pc_status="observe"
+        pc_detail="order violation: $violation_detail"
+      else
+        pc_status="pass"
+        pc_detail=""
+      fi
+
+      unset topo_pos
+    fi
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "producer_consumer_order" \
+    --arg status "$pc_status" \
+    --arg detail "$pc_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # --------------------------------------------------------------------------
+  # Check 5: contract_manifest_hash
+  # Does contract-manifest.json exist? Is manifest_hash present and non-empty?
+  # --------------------------------------------------------------------------
+  local cm_file="${evidence_dir}/contract-manifest.json"
+  local cm_status="unverifiable"
+  local cm_detail=""
+
+  if [[ ! -f "$cm_file" ]]; then
+    cm_status="unverifiable"
+    cm_detail="contract-manifest.json not found in evidence dir"
+  elif ! jq . "$cm_file" >/dev/null 2>&1; then
+    cm_status="observe"
+    cm_detail="contract-manifest.json is not valid JSON"
+  else
+    # manifest_hash may be at top level or inside contract_manifest key
+    local mhash
+    mhash="$(jq -r '(.contract_manifest.manifest_hash // .manifest_hash // "") ' "$cm_file" 2>/dev/null || true)"
+    if [[ -z "$mhash" || "$mhash" == "null" ]]; then
+      cm_status="observe"
+      cm_detail="manifest_hash is absent or empty"
+    else
+      cm_status="pass"
+      cm_detail=""
+    fi
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "contract_manifest_hash" \
+    --arg status "$cm_status" \
+    --arg detail "$cm_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # -------------------------------------------------------------------------
+  # Lens evidence scan (5 C0 lenses)
+  # -------------------------------------------------------------------------
+  local lens_findings_json="[]"
+  local lenses_found=0
+
+  _scan_lens() {
+    local lens_name="$1"
+    local lens_file="${evidence_dir}/c0-lens-${lens_name}.md"
+
+    local verdict="absent"
+    local count=0
+
+    if [[ -f "$lens_file" ]]; then
+      # Find stop_rule_blockers line and count items
+      # Supported formats:
+      #   stop_rule_blockers: []           -> count=0
+      #   stop_rule_blockers: [item1, item2] -> count=N (inline list)
+      #   stop_rule_blockers:              -> followed by "  - ..." or "- ..." lines
+
+      local blockers_line
+      blockers_line="$(grep -m1 '^stop_rule_blockers:' "$lens_file" 2>/dev/null || true)"
+
+      if [[ -n "$blockers_line" ]]; then
+        # Check for inline empty list: []
+        if echo "$blockers_line" | grep -qE '^stop_rule_blockers:[[:space:]]*\[\]'; then
+          count=0
+        # Check for inline list with items: [item1, item2]
+        elif echo "$blockers_line" | grep -qE '^stop_rule_blockers:[[:space:]]*\[.+\]'; then
+          # Count commas + 1 to estimate items (simple heuristic for non-empty inline lists)
+          local inline_content
+          inline_content="$(echo "$blockers_line" | sed 's/^stop_rule_blockers:[[:space:]]*//' | sed 's/^\[//; s/\]$//')"
+          # Count items separated by commas
+          count=$(( $(echo "$inline_content" | tr -cd ',' | wc -c) + 1 ))
+        else
+          # Multi-line block: count following lines starting with "  - " or "- "
+          # Get line number of stop_rule_blockers:
+          local start_line
+          start_line="$(grep -n '^stop_rule_blockers:' "$lens_file" 2>/dev/null | head -1 | cut -d: -f1)"
+          if [[ -n "$start_line" ]]; then
+            # Count subsequent lines starting with optional spaces + dash
+            count="$(awk -v start="$start_line" '
+              NR > start {
+                if (/^[[:space:]]*-[[:space:]]/) { c++ }
+                else if (/^[a-zA-Z]/) { exit }
+              }
+              END { print c+0 }
+            ' "$lens_file" 2>/dev/null || echo "0")"
+          fi
+        fi
+
+        if [[ "$count" -gt 0 ]]; then
+          verdict="found"
+        else
+          verdict="clean"
+        fi
+      else
+        # File exists but no stop_rule_blockers: line found — treat as clean
+        verdict="clean"
+        count=0
+      fi
+
+      (( lenses_found++ )) || true
+    fi
+
+    lens_findings_json="$(printf '%s' "$lens_findings_json" | jq \
+      --arg lens "$lens_name" \
+      --arg verdict "$verdict" \
+      --argjson count "$count" \
+      '. + [{"lens": $lens, "verdict": $verdict, "count": $count}]')"
+  }
+
+  _scan_lens "reuse_compat"
+  _scan_lens "planned_call_feasibility"
+  _scan_lens "dep_api_grounding"
+  _scan_lens "idempotency_matrix"
+  _scan_lens "authority_runtime_matrix"
+
+  local lens_dispatch_observed="${lenses_found}/5"
+
+  # -------------------------------------------------------------------------
+  # Assemble plan_review payload
+  # -------------------------------------------------------------------------
+  local pr_payload
+  pr_payload="$(jq -n \
+    --argjson structural_checks "$structural_checks_json" \
+    --argjson lens_findings     "$lens_findings_json" \
+    --arg     lens_dispatch     "$lens_dispatch_observed" \
+    --argjson findings          "$findings_json" \
+    '{
+      "structural_checks":       $structural_checks,
+      "lens_findings":           $lens_findings,
+      "lens_dispatch_observed":  $lens_dispatch,
+      "findings":                $findings
+    }')"
+
+  # -------------------------------------------------------------------------
+  # Wrap in protocol v2 envelope and write plan-review.json
+  # -------------------------------------------------------------------------
+  local review_envelope
+  review_envelope="$(_build_envelope "plan_review" "plan_review" "$pr_payload" "$project_root")"
+
+  # Override status from "pending" to "pass" (observe-only — structural checks
+  # never block, so outcome is always pass at envelope level)
+  review_envelope="$(printf '%s' "$review_envelope" | jq '.status = "pass"')"
+
+  printf '%s\n' "$review_envelope" > "$review_out"
+
+  # -------------------------------------------------------------------------
+  # Self-validate with aid-protocol-validate.sh (advisory — errors to stderr only)
+  # -------------------------------------------------------------------------
+  local validate_script="${SCRIPT_DIR}/aid-protocol-validate.sh"
+  if [[ -f "$validate_script" ]]; then
+    if ! bash "$validate_script" "$review_out" >/dev/null 2>&1; then
+      echo "WARNING: plan-review.json failed protocol validation (non-blocking)" >&2
+      bash "$validate_script" "$review_out" >&2 || true
+    fi
+  fi
+
+  return 0
 }
 
 # ---------------------------------------------------------------------------
