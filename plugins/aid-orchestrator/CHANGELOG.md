@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.42.0] — 2026-06-28
+## [2.42.1] — 2026-06-28
 
 ### Added
 - **E3 Adaptive Review Profile Detector** — deterministic, LLM-free resolver (`aid-prefilter.sh profile`) computes surface→lens matrix from plan-time + candidate-time git diff union; emits `review-profile.json` with `required_lenses`, `profile_hash`, `risk_profile`, and IR cadence; FSM observe hook logs `missing_lenses` telemetry without blocking (promotion to blocking in E10); 6 surfaces, 5 risk profiles, 13-scenario test harness.

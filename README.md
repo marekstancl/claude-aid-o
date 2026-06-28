@@ -116,7 +116,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.42.0** (current) — E3 Adaptive Review Profile Detector: deterministic surface→lens resolver, observe FSM hook, 13-scenario test harness
+- **v2.42.1** (current) — E3 Adaptive Review Profile Detector: deterministic surface→lens resolver, observe FSM hook, 13-scenario test harness
 - **v2.41.2** — CI fixes: delivery-gate fixtures committed (gitignore exception), `yq` added to bash-tests job (dg12), `@aid/contract` build step before vitest
 - **v2.41.1** — four false-green guardrails in verify commands + `review-checkpoint-contracts`: mandatory runtime path check, scope for "always/all" ACs, eval evidence must name pipeline slice, caller-flow test for integrations
 - **v2.38.0** — `/aid-verify-plan` + `/aid-verify-implementation` manual PM commands: independent adversarial review of a plan (pre-execution) and an implementation (DONE), dispatched to a fresh-context agent
