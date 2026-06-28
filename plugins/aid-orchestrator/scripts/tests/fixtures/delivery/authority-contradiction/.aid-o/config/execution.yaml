@@ -1,0 +1,8 @@
+# execution.yaml — DG-12 fail fixture: enforcement:blocking with status:planned (contradiction)
+version: 1
+gates:
+  mygate:
+    enforcement: blocking
+    status: planned
+    command: some-check
+    description: A gate that claims to be blocking but is only planned

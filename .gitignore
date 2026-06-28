@@ -64,4 +64,7 @@ CLAUDE.MD
 # **/.aid-o/ ignore rule above.
 !packages/aid-server/tests/fixtures/mini/**/.aid-o
 !packages/aid-server/tests/fixtures/mini/**/.aid-o/**
+# Delivery-gate test fixtures: committed .aid-o trees for dg07/dg12 bash tests.
+!plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o
+!plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o/**
 .playwright-mcp/

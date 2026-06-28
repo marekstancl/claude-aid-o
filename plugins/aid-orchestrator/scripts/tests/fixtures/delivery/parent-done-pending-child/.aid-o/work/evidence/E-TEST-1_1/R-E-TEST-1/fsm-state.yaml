@@ -1,0 +1,6 @@
+epic_id: E-TEST-1_1
+run_id: R-E-TEST-1
+state: DONE
+done_phase: release
+current_step: 2
+total_steps: 3

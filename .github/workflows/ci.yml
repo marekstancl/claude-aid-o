@@ -9,10 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install jq + bats
+      - name: Install jq + bats + yq
         # bats is required for the FSM / release / integration suites; without it
         # run-all-tests.sh silently SKIPS them (they look green but never run).
-        run: sudo apt-get install -y jq bats
+        # yq is required for dg12-authority.sh to parse YAML authority files.
+        run: |
+          sudo apt-get install -y jq bats
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
       - name: Run bash test suite
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
@@ -26,6 +30,8 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
+      - name: Build @aid/contract (required by aid-gui tests)
+        run: npm run build -w @aid/contract
       - run: npm test
         timeout-minutes: 10
 
