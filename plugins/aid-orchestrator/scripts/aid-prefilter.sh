@@ -319,14 +319,43 @@ cmd_profile() {
 
   # CRITICAL: no silent HEAD~1..HEAD fallback (FC-41)
   if [[ -z "$diff_range" ]]; then
+    # Read project_id from fsm-state.yaml for identity field
+    local project_id="unknown"
+    if [[ -f "$fsm_state" ]]; then
+      project_id=$(yq -r '.project_id // "unknown"' "$fsm_state" 2>/dev/null || echo "unknown")
+    fi
+
+    local head_sha subject_hash
+    head_sha=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
+    if [[ "$head_sha" != "unknown" ]]; then
+      subject_hash="sha256:$(printf '%s' "$head_sha" | sha256sum | cut -d' ' -f1)"
+    else
+      subject_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    fi
+
     local result_json
     result_json=$(jq -n \
-      --arg now "$now" \
+      --arg schema_version "aid-2.0" \
+      --arg artifact_type "review_profile" \
+      --arg producer "aid-prefilter.sh profile" \
+      --arg created_at "$now" \
+      --arg control_protocol "aid-2.0" \
+      --arg project_id "$project_id" \
+      --arg subject_hash "$subject_hash" \
+      --arg head_sha "$head_sha" \
+      --arg status "pass" \
       '{
-        schema_version: "aid-2.0",
-        artifact_type: "review_profile",
-        produced_at: $now,
-        producer: "aid-prefilter.sh profile",
+        schema_version: $schema_version,
+        artifact_type: $artifact_type,
+        producer: $producer,
+        created_at: $created_at,
+        control_protocol: $control_protocol,
+        identity: {project_id: $project_id},
+        subject: {subject_hash: $subject_hash},
+        revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+        status: $status,
+        verdict: {kind: "none", ready: false},
+        provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-prefilter.sh"},
         review_profile: {
           matched_surfaces: [],
           plan_time_surfaces: [],
@@ -528,21 +557,38 @@ cmd_profile() {
   local wall_start; wall_start=$(date +%s%3N)
 
   # --- Read epic_id / run_id from fsm-state.yaml if available ---
-  local epic_id="unknown" run_id="unknown"
+  local epic_id="unknown" run_id="unknown" project_id="unknown"
   local fsm_state_f="${evidence_dir}/fsm-state.yaml"
   if [[ -f "$fsm_state_f" ]]; then
     epic_id=$(yq -r '.epic_id // "unknown"' "$fsm_state_f" 2>/dev/null || echo "unknown")
     run_id=$(yq -r '.run_id // "unknown"' "$fsm_state_f" 2>/dev/null || echo "unknown")
+    project_id=$(yq -r '.project_id // "unknown"' "$fsm_state_f" 2>/dev/null || echo "unknown")
   fi
+
+  # --- Compute subject hash and producer version ---
+  local head_sha subject_hash
+  head_sha=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo "unknown")
+  # For subject_hash, compute sha256 of the HEAD sha to get 64-char hex
+  if [[ "$head_sha" != "unknown" ]]; then
+    subject_hash="sha256:$(printf '%s' "$head_sha" | sha256sum | cut -d' ' -f1)"
+  else
+    subject_hash="sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  fi
+
+  local producer_version="$(cd "${AID_PLUGIN_PATH:-.}/.." && git describe --tags --always 2>/dev/null || echo "2.42.0")"
+  local producer="aid-prefilter.sh profile@${producer_version}"
 
   # --- Emit review-profile.json ---
   jq -n \
     --arg schema_version "aid-2.0" \
     --arg artifact_type "review_profile" \
-    --arg epic_id "$epic_id" \
-    --arg run_id "$run_id" \
-    --arg now "$now" \
-    --arg producer "aid-prefilter.sh profile" \
+    --arg producer "$producer" \
+    --arg created_at "$now" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "$project_id" \
+    --arg subject_hash "$subject_hash" \
+    --arg head_sha "$head_sha" \
+    --arg status "pass" \
     --argjson matched "$matched_json" \
     --argjson plan "$plan_json" \
     --argjson candidate "$candidate_json" \
@@ -555,10 +601,15 @@ cmd_profile() {
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
-      epic_id: $epic_id,
-      run_id: $run_id,
-      produced_at: $now,
       producer: $producer,
+      created_at: $created_at,
+      control_protocol: $control_protocol,
+      identity: {project_id: $project_id},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: $status,
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-prefilter.sh"},
       review_profile: {
         matched_surfaces: $matched,
         plan_time_surfaces: $plan,

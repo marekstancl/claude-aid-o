@@ -1,11 +1,15 @@
 {
   "schema_version": "aid-2.0",
   "artifact_type": "review_profile",
-  "epic_id": "E-000-0_0",
-  "run_id": "R-E000-0",
-  "step": 0,
-  "produced_at": "2026-06-28T00:00:00Z",
-  "producer": "aid-prefilter.sh profile",
+  "producer": "aid-prefilter.sh profile@2.42.0",
+  "created_at": "2026-06-28T00:00:00Z",
+  "control_protocol": "aid-2.0",
+  "identity": {"project_id": "example-project"},
+  "subject": {"subject_hash": "sha256:abc123def456abc123def456abc123def456abc123def456abc123def456abc1"},
+  "revision": {"head_sha": "abc123def456abc123def456abc123def456abc1", "head_is_current": true, "freshness": "current"},
+  "status": "pass",
+  "verdict": {"kind": "none", "ready": false},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-prefilter.sh"},
   "review_profile": {
     "matched_surfaces": ["scripts_core", "schemas_and_policies"],
     "plan_time_surfaces": ["scripts_core"],
@@ -14,12 +18,13 @@
       "behavior_trace",
       "ac_to_test_identity",
       "negative_case",
-      "security_threat_model"
+      "security_threat_model",
+      "field_lineage"
     ],
-    "risk_profile": "medium",
-    "ir_cadence": 2,
-    "c2_authorities_max": 2,
-    "llm_authorities_total_max": 3,
+    "risk_profile": "high",
+    "ir_cadence": 3,
+    "c2_authorities_max": 3,
+    "llm_authorities_total_max": 5,
     "profile_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
   }
 }
