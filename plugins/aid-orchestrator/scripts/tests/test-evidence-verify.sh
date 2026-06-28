@@ -146,10 +146,10 @@ test_dirty_git() {
 
   assert_check_status "T02/git_clean" "$LAST_VR_FILE" "git_clean" "fail"
   assert_json_field   "T02/verified"  "$LAST_VR_FILE" ".verification_report.summary.verified" "false"
-  if [[ "$LAST_VR_EXIT" -ne 0 ]]; then
-    _pass "T02/non-zero-exit"
+  if [[ "$LAST_VR_EXIT" -eq 1 ]]; then
+    _pass "T02/exit-1"
   else
-    _fail "T02/non-zero-exit (expected non-zero, got 0)"
+    _fail "T02/exit-1 (expected exit 1, got $LAST_VR_EXIT)"
   fi
 }
 
@@ -387,10 +387,10 @@ test_at_head_strict() {
   local exit_strict=0
   AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "clean-pack" --at-head --out "$out_strict" 2>/dev/null || exit_strict=$?
   assert_check_status "T12a/at-head-freshness" "$out_strict" "artifact_head_freshness" "fail"
-  if [[ "$exit_strict" -ne 0 ]]; then
-    _pass "T12a/at-head-nonzero-exit"
+  if [[ "$exit_strict" -eq 1 ]]; then
+    _pass "T12a/at-head-exit-1"
   else
-    _fail "T12a/at-head-nonzero-exit (expected non-zero)"
+    _fail "T12a/at-head-exit-1 (expected exit 1, got $exit_strict)"
   fi
 }
 
@@ -439,10 +439,10 @@ test_validator_missing_runtime() {
 
   assert_check_status "T12c/protocol_validate" "$out" "protocol_validate" "unverifiable"
   assert_json_field "T12c/verified" "$out" ".verification_report.summary.verified" "false"
-  if [[ "$exit_code" -ne 0 ]]; then
-    _pass "T12c/nonzero-exit"
+  if [[ "$exit_code" -eq 1 ]]; then
+    _pass "T12c/exit-1"
   else
-    _fail "T12c/nonzero-exit (expected non-zero)"
+    _fail "T12c/exit-1 (expected exit 1, got $exit_code)"
   fi
 }
 
@@ -477,6 +477,48 @@ test_self_validate() {
 
   assert_json_field "T13/artifact_type" "$vr_file" ".artifact_type" "verification_report"
   assert_json_field "T13/verdict_kind"  "$vr_file" ".verdict.kind"  "none"
+}
+
+# ---------------------------------------------------------------------------
+# T13b: self-validate failing pack — verification-report with findings[] passes
+#       --check-fingerprint (verifies project_id consistency in fingerprints)
+# ---------------------------------------------------------------------------
+test_self_validate_with_findings() {
+  local repo="$SCRATCHPAD/repo-self-val-findings"
+  local pack_head
+  pack_head=$(setup_git_repo "$repo")
+  # dirty-git pack → git_clean:fail → produces findings[]
+  touch "$repo/untracked-file-for-t13b.txt"
+  setup_evidence_pack "$repo" "dirty-pack-t13b" "$pack_head"
+
+  local out="$SCRATCHPAD/vr-findings.json"
+  local exit_code=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "dirty-pack-t13b" --out "$out" 2>/dev/null || exit_code=$?
+
+  if [[ "$exit_code" -ne 1 ]]; then
+    _fail "T13b/exit-1 (expected exit 1, got $exit_code)"
+    return
+  fi
+  _pass "T13b/exit-1"
+
+  # Must have at least one finding
+  local nf
+  nf=$(jq '.findings | length' "$out" 2>/dev/null || echo 0)
+  if [[ "$nf" -gt 0 ]]; then
+    _pass "T13b/has-findings ($nf finding(s))"
+  else
+    _fail "T13b/has-findings (expected findings[], got 0)"
+    return
+  fi
+
+  # Protocol-validate --check-fingerprint must exit 0 (project_id consistency)
+  local val_exit=0
+  bash "$VALIDATOR" "$out" --check-fingerprint 2>/dev/null && val_exit=0 || val_exit=$?
+  if [[ "$val_exit" -eq 0 ]]; then
+    _pass "T13b/check-fingerprint (findings[] fingerprints valid)"
+  else
+    _fail "T13b/check-fingerprint (protocol-validate --check-fingerprint exit $val_exit)"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -522,6 +564,7 @@ main() {
   test_auto_detect
   test_validator_missing_runtime
   test_self_validate
+  test_self_validate_with_findings
   test_golden_sample
 
   echo ""

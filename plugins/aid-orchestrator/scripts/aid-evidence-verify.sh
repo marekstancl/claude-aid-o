@@ -20,6 +20,9 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALIDATOR="${AID_VALIDATOR_PATH:-${SCRIPT_DIR}/aid-protocol-validate.sh}"
+# Self-validation always uses the canonical validator (not the AID_VALIDATOR_PATH override).
+# AID_VALIDATOR_PATH tests the check step; self-validation verifies our own artifact integrity.
+SELF_VALIDATOR="${SCRIPT_DIR}/aid-protocol-validate.sh"
 TTL_GUARD="${SCRIPT_DIR}/aid-registry-ttl-guard.sh"
 
 # ---------------------------------------------------------------------------
@@ -645,6 +648,11 @@ emit_report() {
       '$arr + [{"check_id": $cid, "detail": $dt}]')"
   done
 
+  # --- Resolve project_id from git remote or directory name (needed before findings loop) ---
+  local project_id
+  project_id="$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed 's|.*[/:]||;s|\.git$||')" || \
+    project_id="$(basename "$ROOT")"
+
   # --- Build findings[] for failed/unverifiable checks ---
   local findings_json="[]"
   local -a check_ids_for_findings=(git_clean evidence_pack_found artifact_head_freshness protocol_validate fingerprint ttl_registry observe_blocking_interpretation)
@@ -656,7 +664,7 @@ emit_report() {
 
     if [[ "$check_status" == "fail" || "$check_status" == "unverifiable" ]]; then
       local detail="${!var_detail:-}"
-      local fp_project_id="${EPIC_ID:-aid-evidence-verifier}"
+      local fp_project_id="$project_id"
       # check_id_field, target_path, finding_class must match exactly what the
       # validator re-computes in --check-fingerprint (aid-protocol-validate.sh §13)
       local fp_check_id="ev-${check_id}"
@@ -719,11 +727,7 @@ emit_report() {
   # --- Determine revision fields ---
   local head_sha="${CURRENT_HEAD:-}"
   local revision_freshness="current"
-
-  # --- Resolve project_id from git remote or directory name ---
-  local project_id
-  project_id="$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed 's|.*[/:]||;s|\.git$||')" || \
-    project_id="$(basename "$ROOT")"
+  # project_id already resolved above (before findings loop — required for fingerprint consistency)
 
   # --- Build final protocol-v2 JSON ---
   local final_json
@@ -780,9 +784,10 @@ emit_report() {
   echo "aid-evidence-verify: wrote $out_path" >&2
 
   # --- Self-validate (MUST pass — verifier cannot emit invalid artifact) ---
-  if [[ -x "$VALIDATOR" ]]; then
+  # Uses SELF_VALIDATOR (canonical path), not VALIDATOR (which may be overridden by AID_VALIDATOR_PATH for testing).
+  if [[ -x "$SELF_VALIDATOR" ]]; then
     local val_exit=0
-    "$VALIDATOR" "$out_path" --current-head "$head_sha" --check-fingerprint 2>/dev/null && val_exit=0 || val_exit=$?
+    "$SELF_VALIDATOR" "$out_path" --current-head "$head_sha" --check-fingerprint 2>/dev/null && val_exit=0 || val_exit=$?
     if [[ $val_exit -ne 0 ]]; then
       echo "aid-evidence-verify: FATAL: self-validation of verification-report failed (exit $val_exit) — report is invalid" >&2
       exit 20
