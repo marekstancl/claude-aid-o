@@ -1,0 +1,3 @@
+version: "1.0"
+enforcement: blocking
+promotion_phase: E10

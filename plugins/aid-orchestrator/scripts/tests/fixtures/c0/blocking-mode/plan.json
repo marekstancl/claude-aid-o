@@ -1,0 +1,75 @@
+{
+  "epic_id": "E-C0-BLOCK-1_1",
+  "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/c0/blocking-mode/plan.md",
+  "version": 1,
+  "created_at": "2026-06-28T00:00:00Z",
+  "steps": [
+    {
+      "id": "step_1",
+      "role": "backend",
+      "objective": "Implement service A.",
+      "inputs": ["EPIC specification", "Output from step_3"],
+      "outputs": ["src/service_a.py"],
+      "constraints": [],
+      "allowed_paths": ["src/service_a.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Service A starts"]
+    },
+    {
+      "id": "step_2",
+      "role": "backend",
+      "objective": "Implement service B.",
+      "inputs": ["Output from step_1"],
+      "outputs": ["src/service_b.py"],
+      "constraints": [],
+      "allowed_paths": ["src/service_b.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Service B starts"]
+    },
+    {
+      "id": "step_2",
+      "role": "qa",
+      "objective": "Test both services (duplicate step ID).",
+      "inputs": ["Output from step_2"],
+      "outputs": ["tests/test_services.py"],
+      "constraints": [],
+      "allowed_paths": ["tests/test_services.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["All tests pass"]
+    },
+    {
+      "id": "step_3",
+      "role": "devops",
+      "objective": "Set up deployment (creates cycle back to step_1).",
+      "inputs": ["Output from step_1"],
+      "outputs": ["deploy/config.yaml"],
+      "constraints": [],
+      "allowed_paths": ["deploy/"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Deploy config valid"]
+    }
+  ],
+  "dependencies": [
+    {
+      "before": "step_1",
+      "after": "step_2",
+      "reason": "Service B needs service A"
+    },
+    {
+      "before": "step_2",
+      "after": "step_3",
+      "reason": "Deploy needs both services"
+    },
+    {
+      "before": "step_3",
+      "after": "step_1",
+      "reason": "Intentional cycle"
+    }
+  ],
+  "parallel_groups": [],
+  "analysis_groups": [],
+  "gates": ["tests_pass"],
+  "budget": {
+    "max_retries_per_gate": 3
+  }
+}
