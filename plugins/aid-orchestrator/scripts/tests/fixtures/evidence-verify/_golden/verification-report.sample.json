@@ -1,0 +1,97 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "verification_report",
+  "producer": "aid-evidence-verify.sh@2.5",
+  "created_at": "2026-06-27T16:06:07Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "repo",
+    "epic_id": "E-test",
+    "run_id": "clean-pack",
+    "step_id": null
+  },
+  "subject": {
+    "subject_hash": "sha256:ea901e203326c00105f53029738c28ea2af2f3d4d7cd0c60c88d50218f167e59"
+  },
+  "revision": {
+    "head_sha": "bd0f407054643397aaa4a390d4c7aecdad32f55e",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pass",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-evidence-verify.sh"
+  },
+  "verification_report": {
+    "evidence_pack": {
+      "epic_id": "E-test",
+      "run_id": "clean-pack",
+      "path": "/tmp/tmp.YlAMrryFCS/repo/.aid-o/work/evidence/E-test/clean-pack"
+    },
+    "git": {
+      "clean": true,
+      "head_sha": "bd0f407054643397aaa4a390d4c7aecdad32f55e"
+    },
+    "pack_head": "bd0f407054643397aaa4a390d4c7aecdad32f55e",
+    "checks": [
+      {
+        "id": "git_clean",
+        "status": "pass",
+        "target": null,
+        "detail": "working tree is clean",
+        "evidence": null
+      },
+      {
+        "id": "evidence_pack_found",
+        "status": "pass",
+        "target": null,
+        "detail": "found 1 v2 artifact(s) in /tmp/tmp.YlAMrryFCS/repo/.aid-o/work/evidence/E-test/clean-pack",
+        "evidence": null
+      },
+      {
+        "id": "artifact_head_freshness",
+        "status": "pass",
+        "target": null,
+        "detail": "all v2 artifacts share pack_head: bd0f407054643397aaa4a390d4c7aecdad32f55e",
+        "evidence": null
+      },
+      {
+        "id": "protocol_validate",
+        "status": "pass",
+        "target": null,
+        "detail": "",
+        "evidence": null
+      },
+      {
+        "id": "fingerprint",
+        "status": "pass",
+        "target": null,
+        "detail": "",
+        "evidence": null
+      },
+      {
+        "id": "ttl_registry",
+        "status": "pass",
+        "target": null,
+        "detail": "registry TTL guard passed",
+        "evidence": null
+      },
+      {
+        "id": "observe_blocking_interpretation",
+        "status": "pass",
+        "target": null,
+        "detail": "observe-vs-blocking interpretation consistent (enforcement=observe, would_block=false)",
+        "evidence": null
+      }
+    ],
+    "summary": {
+      "verified": true,
+      "blocking_reasons": []
+    }
+  }
+}

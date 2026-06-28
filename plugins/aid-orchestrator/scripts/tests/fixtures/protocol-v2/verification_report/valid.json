@@ -1,0 +1,22 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "verification_report",
+  "producer": "aid-evidence-verify.sh@2.5.0",
+  "created_at": "2026-06-27T10:00:00Z",
+  "control_protocol": "aid-2.0",
+  "identity": {"project_id": "test-project"},
+  "subject": {"subject_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001"},
+  "revision": {"head_sha": "abc123def456", "head_is_current": true, "freshness": "current"},
+  "status": "pass",
+  "verdict": {"kind": "none", "ready": false},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-evidence-verify.sh"},
+  "verification_report": {
+    "evidence_pack": {"epic_id": "E-051-1_1", "run_id": "R-E051-1", "path": ".aid-o/work/evidence/E-051-1_1/R-E051-1"},
+    "git": {"clean": true, "head_sha": "abc123def456"},
+    "pack_head": "abc123def456",
+    "checks": [
+      {"id": "git_clean", "status": "pass", "target": null, "detail": "working tree clean", "evidence": null}
+    ],
+    "summary": {"verified": true, "blocking_reasons": []}
+  }
+}

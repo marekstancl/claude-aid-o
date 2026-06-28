@@ -1,0 +1,11 @@
+version: 1
+checks:
+  - id: test-expired-check
+    type: out-of-band
+    source: scripts/test.sh
+    instruction: test instruction
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    deadline: "2020-01-01"
+    description: "expired check for test"
