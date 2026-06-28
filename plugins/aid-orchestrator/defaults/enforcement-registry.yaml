@@ -591,3 +591,18 @@ enforcements:
     deferred_by: PM
     deferred_reason: "standalone CLI E2.5, FSM wiring in E9"
     description: "observe_blocking_interpretation check: delivery_gate.summary.enforcement must be present and in {observe,dual_run,blocking}"
+
+  - id: review_profile_missing_lenses
+    type: fsm_precondition
+    source: "scripts/aid-fsm.sh (lib/review-profile-check.sh)"
+    instruction: "docs/extending-aid.md"
+    severity: fail
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "2027-12-31"
+    deferred_until: "2027-12-31"
+    deferred_by: PM
+    promotion_phase: E10
+    deferred_reason: "observe-only missing_lenses telemetry; blocking promotion after E10 calibration"
+    description: "review profile detector (aid-prefilter.sh profile emits review-profile.json, authority none) gated by observe FSM hook computing missing_lenses"
