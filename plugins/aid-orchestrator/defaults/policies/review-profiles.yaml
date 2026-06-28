@@ -73,6 +73,7 @@ surfaces:
       path_globs:
         - "plugins/aid-orchestrator/defaults/schemas/**/*.json"
         - "plugins/aid-orchestrator/defaults/policies/**/*.yaml"
+        - "plugins/aid-orchestrator/defaults/templates/**/*.json"
       content_signals:
         - "required"
         - "enforcement"

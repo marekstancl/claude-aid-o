@@ -248,6 +248,9 @@ EOF
 
 path_matches_glob() {
   # Glob matching with ** support via bash case statement (shopt globstar).
+  # NOTE: bash case/**  does NOT match zero directory levels, so "a/**/*.sh"
+  # won't match "a/foo.sh". We handle this by also trying with "**/" removed
+  # (the direct-child pattern) when the glob contains "/**/".
   # Returns 0 if fpath matches glob, 1 otherwise.
   local fpath="$1" glob="$2"
   local save_globstar
@@ -257,6 +260,13 @@ path_matches_glob() {
   case "$fpath" in
     $glob) result=0 ;;
   esac
+  # Fallback: try direct-child match (strip "**/" from glob) for zero-level ** matching
+  if [[ $result -ne 0 && "$glob" == *"/**/"* ]]; then
+    local direct_glob="${glob/\*\*\//}"
+    case "$fpath" in
+      $direct_glob) result=0 ;;
+    esac
+  fi
   eval "$save_globstar" 2>/dev/null || true
   return $result
 }
@@ -336,10 +346,10 @@ cmd_profile() {
     exit 22
   fi
 
-  # --- Get candidate-time diff ---
+  # --- Get candidate-time diff (run in $ROOT to target the correct repo) ---
   local diff_files diff_content
-  diff_files=$(git diff --name-only "${diff_range}" 2>/dev/null || echo "")
-  diff_content=$(git diff "${diff_range}" 2>/dev/null || echo "")
+  diff_files=$(git -C "$ROOT" diff --name-only "${diff_range}" 2>/dev/null || echo "")
+  diff_content=$(git -C "$ROOT" diff "${diff_range}" 2>/dev/null || echo "")
 
   # --- Load docs_allowlist and surface IDs from policy ---
   local unknown_surface_profile
@@ -506,11 +516,13 @@ cmd_profile() {
   fi
 
   # --- Build JSON arrays ---
+  # grep exits 1 on no-match; under pipefail that would corrupt the $() capture.
+  # Use { grep … || true; } to absorb grep's non-zero exit so only jq failures propagate.
   local matched_json plan_json candidate_json required_json
-  matched_json=$(printf '%s\n' "${matched_surfaces[@]:-}" | grep -v '^$' | jq -R . | jq -sc . 2>/dev/null || echo "[]")
-  plan_json=$(printf '%s\n' "${plan_surfaces[@]:-}" | grep -v '^$' | jq -R . | jq -sc . 2>/dev/null || echo "[]")
-  candidate_json=$(printf '%s\n' "${candidate_surfaces[@]:-}" | grep -v '^$' | jq -R . | jq -sc . 2>/dev/null || echo "[]")
-  required_json=$(printf '%s\n' "${required_lenses[@]:-}" | grep -v '^$' | jq -R . | jq -sc . 2>/dev/null || echo "[]")
+  matched_json=$(printf '%s\n' "${matched_surfaces[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -sc . 2>/dev/null || echo "[]")
+  plan_json=$(printf '%s\n' "${plan_surfaces[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -sc . 2>/dev/null || echo "[]")
+  candidate_json=$(printf '%s\n' "${candidate_surfaces[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -sc . 2>/dev/null || echo "[]")
+  required_json=$(printf '%s\n' "${required_lenses[@]:-}" | { grep -v '^$' || true; } | jq -R . | jq -sc . 2>/dev/null || echo "[]")
 
   # --- T6 resource accounting: wall time start ---
   local wall_start; wall_start=$(date +%s%3N)
