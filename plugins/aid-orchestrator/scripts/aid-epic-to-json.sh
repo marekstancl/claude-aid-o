@@ -331,80 +331,28 @@ for i in "${!step_nums[@]}"; do
 done
 
 # =============================================================================
-# Step 6: Cycle detection — Kahn's algorithm
+# Step 6: Cycle detection — via shared lib
 # =============================================================================
-# Build adjacency list and in-degree count
-cycle_check="$(awk -v step_list="${step_ids[*]}" -v edges="$(printf '%s\n' "${!dep_edges[@]}")" '
-  BEGIN {
-    # Parse step IDs
-    n = split(step_list, steps, " ")
+# Source shared lib and call build_plan_graph
+# shellcheck source=lib/aid-plan-graph.sh
+source "${SCRIPT_DIR}/lib/aid-plan-graph.sh"
 
-    # Initialize in-degree
-    for (i = 1; i <= n; i++) {
-      in_degree[steps[i]] = 0
-      exists[steps[i]] = 1
-    }
+# Build newline-joined inputs for build_plan_graph
+step_ids_nl="$(printf '%s\n' "${step_ids[@]}")"
+edges_nl="$(printf '%s\n' "${!dep_edges[@]}")"
 
-    # Parse edges
-    m = split(edges, edge_arr, "\n")
-    edge_count = 0
-    for (i = 1; i <= m; i++) {
-      if (edge_arr[i] == "") continue
-      split(edge_arr[i], parts, "->")
-      from = parts[1]
-      to = parts[2]
-      if (from == "" || to == "") continue
-      edge_count++
-      adj[edge_count] = from "|" to
-      in_degree[to]++
-    }
+pg_result="$(build_plan_graph "$step_ids_nl" "$edges_nl")"
+pg_status=$?
 
-    # Find all nodes with in-degree 0
-    queue_head = 0
-    queue_tail = 0
-    for (i = 1; i <= n; i++) {
-      if (in_degree[steps[i]] == 0) {
-        queue[queue_tail++] = steps[i]
-      }
-    }
+if [[ $pg_status -ne 0 ]]; then
+  error_exit "build_plan_graph failed (exit $pg_status)" 1
+fi
 
-    # Process queue
-    processed = 0
-    while (queue_head < queue_tail) {
-      node = queue[queue_head++]
-      processed++
-
-      # Reduce in-degree of neighbors
-      for (i = 1; i <= edge_count; i++) {
-        split(adj[i], parts, "|")
-        if (parts[1] == node) {
-          in_degree[parts[2]]--
-          if (in_degree[parts[2]] == 0) {
-            queue[queue_tail++] = parts[2]
-          }
-        }
-      }
-    }
-
-    if (processed < n) {
-      # Cycle detected — find nodes still with in-degree > 0
-      cycle_nodes = ""
-      for (i = 1; i <= n; i++) {
-        if (in_degree[steps[i]] > 0) {
-          if (cycle_nodes != "") cycle_nodes = cycle_nodes ", "
-          cycle_nodes = cycle_nodes steps[i]
-        }
-      }
-      print "CYCLE:" cycle_nodes
-    } else {
-      print "OK"
-    }
-  }
-')"
-
-if [[ "$cycle_check" == CYCLE:* ]]; then
-  cycle_path="${cycle_check#CYCLE:}"
-  error_exit "Circular dependency detected among steps: $cycle_path" 1
+# Check for cycles in the result
+cycles_count="$(echo "$pg_result" | jq '.cycles | length')"
+if [[ "$cycles_count" -gt 0 ]]; then
+  cycle_nodes="$(echo "$pg_result" | jq -r '.cycles | join(", ")')"
+  error_exit "Circular dependency detected among steps: $cycle_nodes" 1
 fi
 
 # =============================================================================

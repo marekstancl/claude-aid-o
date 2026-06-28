@@ -17,18 +17,22 @@
     },
     "plan_graph": {
       "type": "object",
-      "$comment": "enforced — presence of plan_graph required; sub-fields edges/topological_order/cycles defined in owning phase",
+      "$comment": "required: edges, topological_order, cycles",
       "properties": {
         "edges": {
-          "type": "array"
+          "type": "array",
+          "items": { "type": "object" }
         },
         "topological_order": {
-          "type": "array"
+          "type": "array",
+          "items": { "type": "string" }
         },
         "cycles": {
-          "type": "array"
+          "type": "array",
+          "items": { "type": "string" }
         }
-      }
+      },
+      "required": ["edges", "topological_order", "cycles"]
     }
   },
   "required": ["plan_graph"]

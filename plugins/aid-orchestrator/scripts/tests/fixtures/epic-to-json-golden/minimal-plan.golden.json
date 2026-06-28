@@ -1,0 +1,72 @@
+{
+  "analysis_groups": [],
+  "budget": {
+    "max_retries_per_gate": 3
+  },
+  "dependencies": [],
+  "epic_id": "E-TEST-001-1_1",
+  "gates": [
+    "docs_updated"
+  ],
+  "parallel_groups": [],
+  "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md",
+  "steps": [
+    {
+      "acceptance_criteria": [
+        "Module loads without errors",
+        "Helper functions return expected types",
+        "Unit tests cover happy path"
+      ],
+      "allowed_paths": [
+        "src/core/module.py",
+        "src/core/utils.py",
+        "tests/test_module.py"
+      ],
+      "constraints": [
+        "Python 3.10+ only",
+        "No external runtime dependencies"
+      ],
+      "forbidden_paths": [],
+      "id": "step_1_backend",
+      "inputs": [
+        "EPIC specification"
+      ],
+      "objective": "Implement the core module with basic data structures and helper utilities.",
+      "outputs": [
+        "Create: `src/core/module.py`",
+        "Create: `src/core/utils.py`",
+        "Create: `tests/test_module.py`"
+      ],
+      "role": "backend"
+    },
+    {
+      "acceptance_criteria": [
+        "All public functions have at least one test",
+        "Test coverage exceeds 80 percent",
+        "Tests pass in CI"
+      ],
+      "allowed_paths": [
+        "src/core/module.py",
+        "src/core/utils.py",
+        "tests/test_module.py"
+      ],
+      "constraints": [
+        "Python 3.10+ only",
+        "No external runtime dependencies"
+      ],
+      "forbidden_paths": [],
+      "id": "step_2_qa",
+      "inputs": [
+        "EPIC specification"
+      ],
+      "objective": "Create a comprehensive unit test suite covering all public functions.",
+      "outputs": [
+        "Create: `src/core/module.py`",
+        "Create: `src/core/utils.py`",
+        "Create: `tests/test_module.py`"
+      ],
+      "role": "qa"
+    }
+  ],
+  "version": 1
+}
