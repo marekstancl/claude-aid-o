@@ -1,0 +1,5 @@
+# C0 Plan Contract Gate policy
+# E4: observe-only. Blocking promotion: E10.
+version: "1.0"
+enforcement: observe
+promotion_phase: E10

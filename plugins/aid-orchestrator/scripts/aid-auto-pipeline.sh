@@ -289,6 +289,72 @@ for phase in $(seq 1 "$total_phases"); do
   fi
 
   # -------------------------------------------------------------------------
+  # Phase N.b5: C0 Plan Contract Gate (observe)
+  # Runs after plan.json exists; before FSM init. Plan-level evidence only.
+  # -------------------------------------------------------------------------
+  {
+    # Determine plan_id from plan filename
+    _c0_plan_id="$(basename "$plan" .md)"
+    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/c0"
+    mkdir -p "$_c0_dir"
+
+    # Read enforcement policy (fail-safe: default to observe)
+    _c0_policy="observe"
+    _c0_policy_file="${SCRIPT_DIR}/../defaults/policies/c0-contract.yaml"
+    if [[ -n "${C0_CONTRACT_POLICY:-}" ]]; then
+      _c0_policy="$C0_CONTRACT_POLICY"
+    elif [[ -f "$_c0_policy_file" ]] && command -v yq &>/dev/null; then
+      _c0_policy_val="$(yq '.enforcement // "observe"' "$_c0_policy_file" 2>/dev/null)"
+      [[ -n "$_c0_policy_val" && "$_c0_policy_val" != "null" ]] && _c0_policy="$_c0_policy_val"
+    fi
+
+    # Run C0 contract producer
+    _c0_contract_exit=0
+    "${SCRIPT_DIR}/aid-c0-contract.sh" contract "$plan_json_path" "$_c0_dir" \
+      2>>"$_c0_dir/c0-producer.log" || _c0_contract_exit=$?
+
+    if [[ $_c0_contract_exit -ne 0 ]]; then
+      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_producer_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_contract_exit}}" \
+        >> "$_c0_dir/c0-observe.jsonl"
+    fi
+
+    # Run C0 review checker
+    _c0_review_exit=0
+    "${SCRIPT_DIR}/aid-c0-contract.sh" review "$plan" "$_c0_dir" \
+      2>>"$_c0_dir/c0-producer.log" || _c0_review_exit=$?
+
+    if [[ $_c0_review_exit -ne 0 ]]; then
+      _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+      printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_review_error\",\"plan_id\":\"${_c0_plan_id}\",\"exit\":${_c0_review_exit}}" \
+        >> "$_c0_dir/c0-observe.jsonl"
+    fi
+
+    # Log c0_would_block if any structural or lens findings
+    _c0_would_block=false
+    if [[ -f "$_c0_dir/plan-review.json" ]]; then
+      _c0_finding_count="$(jq '
+        ((.plan_review.structural_checks // []) | map(select(.status != "pass")) | length) +
+        ((.plan_review.lens_findings // []) | map(select(.verdict == "found")) | length)
+      ' "$_c0_dir/plan-review.json" 2>/dev/null || echo 0)"
+      if [[ "$_c0_finding_count" -gt 0 ]]; then
+        _c0_would_block=true
+        _c0_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+        printf '%s\n' "{\"ts\":\"${_c0_ts}\",\"event\":\"c0_would_block\",\"plan_id\":\"${_c0_plan_id}\",\"finding_count\":${_c0_finding_count},\"policy\":\"${_c0_policy}\"}" \
+          >> "$_c0_dir/c0-observe.jsonl"
+        echo "[C0] would_block: ${_c0_finding_count} findings (policy=${_c0_policy})" >&2
+      fi
+    fi
+
+    # Enforce policy (blocking mode — E10 / tests only; default is observe)
+    if [[ "$_c0_policy" == "blocking" && "$_c0_would_block" == "true" ]]; then
+      error_exit "C0 Plan Contract Gate: blocking policy activated with ${_c0_finding_count} findings" 2
+    fi
+
+    # NEVER propagate non-zero from C0 block in observe mode
+  }
+
+  # -------------------------------------------------------------------------
   # Phase N.c: plan.json -> run.md
   # -------------------------------------------------------------------------
   run_output_dir=".aid-o/work/runs/${run_id}"
