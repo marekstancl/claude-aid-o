@@ -43,6 +43,7 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
+      - run: npm run build -w @aid/contract
       - run: npm run build
         working-directory: packages/aid-gui
         timeout-minutes: 10
