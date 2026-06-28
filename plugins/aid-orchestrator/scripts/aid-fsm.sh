@@ -2411,6 +2411,47 @@ cmd_done_advance() {
       fi
       # End DG-07 E2 hook
 
+      # E3 review_profile hook: missing_lenses observe telemetry
+      # REVIEW_PROFILE_POLICY env overrides policy path for test/CI.
+      # Fail-safe: missing policy → observe (never block).
+      local _rp_enforcement _rp_policy _rp_check_script _rp_exit _rp_output
+      local _rp_timeline="${evidence_dir}/timeline.jsonl"
+      _rp_policy="${REVIEW_PROFILE_POLICY:-${SCRIPT_DIR}/../defaults/policies/review-profiles.yaml}"
+      _rp_enforcement="observe"
+      if [[ -f "$_rp_policy" ]] && command -v yq >/dev/null 2>&1; then
+        local _pol_rp_enforcement
+        _pol_rp_enforcement=$(yq e '.enforcement // "observe"' "$_rp_policy" 2>/dev/null || echo "observe")
+        [[ "$_pol_rp_enforcement" == "blocking" ]] && _rp_enforcement="blocking"
+      fi
+
+      _rp_check_script="${SCRIPT_DIR}/lib/review-profile-check.sh"
+      if [[ -f "$_rp_check_script" ]]; then
+        _rp_exit=0
+        _rp_output=$(AID_PROJECT_ROOT="$project_root" \
+                     AID_EPIC_ID="$epic_id" \
+                     AID_RUN_ID="$run_id" \
+                     bash "$_rp_check_script" 2>&1) || _rp_exit=$?
+
+        if [[ "$_rp_exit" -eq 1 ]]; then
+          log_event "$_rp_timeline" "review_profile_missing_lenses" \
+            check="review_profile" enforcement="$_rp_enforcement" missing_lenses="$_rp_output"
+
+          if [[ "$_rp_enforcement" == "blocking" ]]; then
+            echo "ERROR: review profile missing lenses (enforcement=blocking):" >&2
+            echo "$_rp_output" >&2
+            log_event "$_rp_timeline" "fsm_done_advance_fail" check="review_profile" reason="missing_lenses"
+            exit 2
+          else
+            log_warn "review_profile missing_lenses (enforcement=observe, non-blocking): $_rp_output"
+          fi
+        elif [[ "$_rp_exit" -eq 2 ]]; then
+          log_event "$_rp_timeline" "review_profile_missing_lenses" \
+            check="review_profile" enforcement="observe" missing_lenses="unverifiable" reason="$_rp_output"
+          log_warn "review_profile unverifiable: $_rp_output"
+        fi
+      fi
+      # End E3 review_profile hook
+
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
       # Evaluates compliance checks inline (no file write), filters severity:blocking

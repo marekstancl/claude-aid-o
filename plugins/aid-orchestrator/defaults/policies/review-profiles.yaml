@@ -1,0 +1,156 @@
+version: "1.0"
+enforcement: observe
+unknown_surface_profile: unverifiable
+
+# docs_allowlist: narrowed to actual documentation paths only
+# control_instruction surface (commands/skills/agents/templates) is NOT here — different semantics
+docs_allowlist:
+  - "docs/**"
+  - "README.md"
+  - "CHANGELOG.md"
+  - "plugins/aid-orchestrator/README.md"
+  - "plugins/aid-orchestrator/CHANGELOG.md"
+
+surfaces:
+  control_instruction:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/commands/**/*.md"
+        - "plugins/aid-orchestrator/skills/**/*.md"
+        - "plugins/aid-orchestrator/agents/**/*.md"
+        - "plugins/aid-orchestrator/defaults/templates/**/*.md"
+      content_signals: []
+    risk: medium
+    lenses:
+      - behavior_trace
+      - ac_to_test_identity
+    probes:
+      - "check for behavioral changes in step dispatch instructions"
+      - "verify AC and test-identity alignment"
+
+  scripts_core:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/**/*.sh"
+        - "plugins/aid-orchestrator/scripts/lib/**/*.sh"
+      content_signals:
+        - "cmd_"
+        - "transition"
+        - "log_event"
+        - "die "
+        - "exit "
+    risk: high
+    lenses:
+      - behavior_trace
+      - negative_case
+      - ac_to_test_identity
+      - security_threat_model
+    probes:
+      - "check FSM state transitions"
+      - "check exit codes and error paths"
+      - "check input validation"
+
+  test_harness:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/tests/**/*.sh"
+        - "plugins/aid-orchestrator/scripts/tests/bats/**/*.bats"
+      content_signals:
+        - "assert"
+        - "PASS"
+        - "FAIL"
+        - "Results:"
+    risk: low
+    lenses:
+      - behavior_trace
+      - requirement_test_drift
+    probes:
+      - "verify test covers new behavior"
+      - "check for gap between AC and test assertions"
+
+  schemas_and_policies:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/defaults/schemas/**/*.json"
+        - "plugins/aid-orchestrator/defaults/policies/**/*.yaml"
+        - "plugins/aid-orchestrator/defaults/templates/**/*.json"
+      content_signals:
+        - "required"
+        - "enforcement"
+        - "blocking"
+        - "observe"
+    risk: medium
+    lenses:
+      - behavior_trace
+      - ac_to_test_identity
+      - field_lineage
+    probes:
+      - "check required fields align with producers/consumers"
+      - "verify policy enforcement fields"
+
+  fixtures:
+    match:
+      path_globs:
+        - "plugins/aid-orchestrator/scripts/tests/fixtures/**"
+      content_signals: []
+    risk: low
+    lenses:
+      - requirement_test_drift
+    probes:
+      - "verify fixture covers expected scenarios"
+
+  docs_content:
+    match:
+      path_globs:
+        - "docs/**"
+        - "README.md"
+        - "CHANGELOG.md"
+        - "plugins/aid-orchestrator/README.md"
+        - "plugins/aid-orchestrator/CHANGELOG.md"
+      content_signals: []
+    risk: docs_trivial
+    lenses: []
+    probes:
+      - "no behavioral lenses required for pure docs changes"
+
+risk_profiles:
+  docs_trivial:
+    mandatory_lenses: []
+    c2_authorities_max: 0
+    llm_authorities_total_max: 0
+    ir_cadence: 1
+
+  low:
+    mandatory_lenses:
+      - behavior_trace
+    c2_authorities_max: 1
+    llm_authorities_total_max: 2
+    ir_cadence: 1
+
+  medium:
+    mandatory_lenses:
+      - behavior_trace
+      - ac_to_test_identity
+    c2_authorities_max: 2
+    llm_authorities_total_max: 3
+    ir_cadence: 2
+
+  high:
+    mandatory_lenses:
+      - behavior_trace
+      - ac_to_test_identity
+      - negative_case
+      - security_threat_model
+    c2_authorities_max: 3
+    llm_authorities_total_max: 5
+    ir_cadence: 3
+
+  unverifiable:
+    mandatory_lenses:
+      - behavior_trace
+      - ac_to_test_identity
+      - negative_case
+      - security_threat_model
+    c2_authorities_max: 3
+    llm_authorities_total_max: 5
+    ir_cadence: 3

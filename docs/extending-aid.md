@@ -56,7 +56,7 @@ Do all five in the **same change** that introduces the check — "register +
 document" is definition-of-done, not later cleanup:
 
 1. **Add a registry entry** in
-   `docs/plans/AID-audit-2026-06/enforcement-registry.yaml` with
+   `plugins/aid-orchestrator/defaults/enforcement-registry.yaml` with
    `id` / `type` / `source` / `instruction` / `severity` / `surface` / `status`.
    The `instruction` field forces the enforcement to name *where* its cedule is;
    a blank `instruction` on an `llm-facing` entry is exactly the GAP class.
@@ -186,7 +186,7 @@ and canonical home:
 - **Dispatch guard.** `aid-emit-dispatch.sh` enforces a focus allowlist so
   `reporter` / `simplifier` are recognized dispatch foci.
 - **Registry.** Entries for the new check and agents in
-  `docs/plans/AID-audit-2026-06/enforcement-registry.yaml`.
+  `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`.
 
 **agent_tool caveat.** Because the default dispatch mode is `agent_tool`, the
 Reporter's delivery report is held honest by structural presence + the
@@ -409,4 +409,83 @@ Human summary is printed to stdout. Example (failing pack):
 ============================================
 ```
 
-**Last Updated:** 2026-06-27
+---
+
+## Adaptive Review Profile (E3)
+
+E3 adds a **deterministic, LLM-free profile resolver** (`aid-prefilter.sh profile`)
+that computes which review lenses are required for a given EPIC run. It operates in
+**observe mode** — it emits telemetry but never blocks.
+
+### How it works
+
+1. **Plan-time surfaces (best-effort):** Reads surface hints from the plan/EPIC file.
+   Missing plan section → empty list `[]`. Authoritative plan-time contract is E4.
+
+2. **Candidate-time surfaces:** `git diff <range>` over actual changed files + content
+   signals. Path globs and content signals (bash `case`/`grep -F`) determine which
+   surfaces are touched.
+
+3. **Monotonic union (FC-41):** `matched_surfaces = plan_time ∪ candidate_time`.
+   The profile only grows, never shrinks. An unplanned candidate surface expands
+   the profile — it does NOT invalidate it (invalidation is E5/E9).
+
+4. **Unknown surface = `unverifiable`:** A production path that doesn't match any
+   surface glob and isn't in `docs_allowlist` → `risk_profile: unverifiable`.
+   Never silently downgrade to `docs_trivial`.
+
+5. **Range required:** No `--range` and no `base_commit` in `fsm-state.yaml` →
+   `risk_profile: unverifiable` + exit 22 (`range_undetermined`). No silent
+   `HEAD~1..HEAD` fallback (would miss earlier-step surfaces — FC-41 risk).
+
+6. **Profile hash:** `aid-profile-hash.sh profile_hash <pid> <plan_surfaces>
+   <candidate_surfaces> <lenses>` → `sha256:<64 hex>`. Inputs sorted before
+   hashing (deterministic). Hash change = profile change (E5 uses this).
+
+### Observe mode semantics
+
+The FSM hook (`cmd_done_advance` review→release) calls `review-profile-check.sh`:
+- Exit 0 → no missing lenses (completed_lenses ⊇ required_lenses) → silent
+- Exit 1 → missing lenses → `log_event review_profile_missing_lenses` + **proceed**
+  (observe: non-blocking)
+- Exit 2 → unverifiable → `log_warn` + **proceed** (always observe for unverifiable)
+
+`completed_lenses` is always `[]` in E3 — C2/C3 don't exist yet. E5 will populate
+the evidence markers. This means in E3 every non-trivial profile will log missing
+lenses telemetry — that is intentional, not a defect.
+
+Promotion to **blocking** is planned for E10 after calibration.
+
+### enforcement-registry.yaml entry
+
+```yaml
+- id: review_profile_missing_lenses
+  type: fsm_precondition
+  source: "scripts/aid-fsm.sh (lib/review-profile-check.sh)"
+  enforcement: observe
+  promotion_phase: E10
+  description: "review profile detector (aid-prefilter.sh profile emits
+    review-profile.json, authority none) gated by observe FSM hook
+    computing missing_lenses"
+```
+
+See [`plugins/aid-orchestrator/defaults/enforcement-registry.yaml`](../plugins/aid-orchestrator/defaults/enforcement-registry.yaml) for the full entry.
+
+### Adding a new surface
+
+1. Add an entry to `defaults/policies/review-profiles.yaml` under `surfaces:`:
+   ```yaml
+   my_new_surface:
+     match:
+       path_globs: ["path/to/**/*.ext"]
+       content_signals: ["keyword_in_diff"]
+     risk: medium
+     lenses: [behavior_trace, ac_to_test_identity]
+     probes: ["what to check in this surface"]
+   ```
+2. Lenses MUST be from the C2 vocabulary in `docs/design/control-topology.yaml`
+   (`C2.lenses`). No invented names.
+3. Add fixtures in `scripts/tests/fixtures/review-profile/<scenario>/` and cover
+   in `test-review-profile.sh`.
+
+**Last Updated:** 2026-06-28
