@@ -488,4 +488,93 @@ See [`plugins/aid-orchestrator/defaults/enforcement-registry.yaml`](../plugins/a
 3. Add fixtures in `scripts/tests/fixtures/review-profile/<scenario>/` and cover
    in `test-review-profile.sh`.
 
+---
+
+## C0 Plan Contract Gate (E4)
+
+C0 is an **observe-only gate layer** that runs in `aid-auto-pipeline.sh` after
+`aid-epic-to-json` extracts the plan graph. It produces three artifacts and
+dispatches five semantic lenses (via CP1-deep) — all in observe mode. No FSM
+transition is blocked in E4. Blocking promotion is planned for E10.
+
+### Artifacts produced
+
+| Artifact | Location | Description |
+|----------|----------|-------------|
+| `plan-graph.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-graph.json` | Directed acyclic graph of plan steps with dependency edges; produced by `scripts/lib/aid-plan-graph.sh` `build_plan_graph` + `topological_order` |
+| `contract-manifest.json` | `.aid-o/work/evidence/{plan_id}/c0/contract-manifest.json` | Per-step contract declarations: authority, idempotency class, external calls, reuse candidates |
+| `plan-review.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-review.json` | Aggregated lens findings; `would_block` bool; protocol-v2 envelope |
+
+All artifacts are protocol-v2 envelopes validated by `aid-protocol-validate.sh`.
+
+### The 5 semantic lenses
+
+Each lens is dispatched by the orchestrator in CP1-deep and runs in **observe
+mode** (advisory, never blocking in E4). Findings are appended to
+`plan-review.json`.
+
+| Lens | id | What it checks |
+|------|----|----------------|
+| Reuse compatibility | `c0_lens_reuse_compat` | Planned implementations that duplicate existing helpers or APIs |
+| Planned call feasibility | `c0_lens_planned_call_feasibility` | External/internal calls declared in the plan that don't exist or have incompatible signatures |
+| Dependency API grounding | `c0_lens_dep_api_grounding` | Library/API usage in plan steps where the imported API differs from what the dependency exposes |
+| Idempotency matrix | `c0_lens_idempotency_matrix` | Steps without idempotency class declaration, or classes that conflict with their callers |
+| Authority runtime matrix | `c0_lens_authority_runtime_matrix` | Authority declarations in contract-manifest that conflict with runtime permission model |
+
+Lens contracts (stop rules, stop_rule_blockers count, severity) live in
+`skills/review-checkpoint-contracts.md` §C0 Lenses.
+
+### Policy file
+
+`defaults/policies/c0-contract.yaml` governs the gate:
+
+```yaml
+enforcement: observe        # observe | blocking (promote to blocking in E10)
+promotion_phase: E10
+lenses:
+  - reuse_compat
+  - planned_call_feasibility
+  - dep_api_grounding
+  - idempotency_matrix
+  - authority_runtime_matrix
+```
+
+### Observe log
+
+`c0-observe.jsonl` in the evidence directory records every `c0_would_block`
+event. Each line is a JSON object:
+
+```json
+{"event": "c0_would_block", "plan_id": "P-001", "lens": "reuse_compat",
+ "finding_count": 2, "timestamp": "2026-06-28T10:00:00Z"}
+```
+
+The log is append-only. The FSM never reads it — it exists for PM telemetry and
+E10 calibration.
+
+### Promotion to blocking (E10)
+
+To promote C0 from observe to blocking:
+
+1. Set `enforcement: blocking` in `defaults/policies/c0-contract.yaml`
+2. All five lenses must have green baselines on your codebase (zero
+   `would_block` events across ≥5 EPICs)
+3. Update all seven `c0_*` entries in `defaults/enforcement-registry.yaml`
+   from `status: planned` to `status: active`
+4. Wire `c0_would_block` as an FSM precondition in `aid-auto-pipeline.sh`
+
+### Adding a new C0 lens
+
+1. Create `skills/c0-lens-{name}.md` with the lens contract:
+   - `stop_rule_blockers: N` — number of blockers that trigger `would_block`
+   - `severity`: advisory | fail
+   - `probes`: list of questions the lens answers
+2. Add the lens to the `lenses:` list in
+   `defaults/policies/c0-contract.yaml`
+3. Add a `c0_lens_{name}` entry in
+   `plugins/aid-orchestrator/defaults/enforcement-registry.yaml`
+4. Register the lens in `skills/review-checkpoint-contracts.md` §C0 Lenses
+5. Add fixtures in `scripts/tests/fixtures/c0/<scenario>/` and cover in
+   `test-c0-contract.sh`
+
 **Last Updated:** 2026-06-28
