@@ -116,7 +116,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.41.0** (current) — C1 delivery engine: 13 DG registry entries, TTL deferral fields, AC7 yq assertion fix (DG-07-fsm-hook source pattern), version file sync
+- **v2.41.0** (current) — E2.5 Evidence Pack Verifier CLI: `aid-evidence-verify.sh` + `verification_report` as 15th protocol-v2 type, 48-test harness, idempotent, self-validating with canonical fingerprints
 - **v2.38.0** — `/aid-verify-plan` + `/aid-verify-implementation` manual PM commands: independent adversarial review of a plan (pre-execution) and an implementation (DONE), dispatched to a fresh-context agent
 - **v2.37.0** — per-step Acceptance Criteria pre-flight in aid-epic-to-json.sh (multi-step EPIC needs >=1 AC per step)
 - **v2.36.2** — stale aid-plan.md CP1 lenses synced; boundary manifest committed
