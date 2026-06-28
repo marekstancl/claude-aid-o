@@ -125,9 +125,11 @@ Profile resolver: plan-time + candidate-time union (FC-41), detektor vlastní ap
 
 **EPIC 4: E4 - C0 Plan Contract Gate + contract handoff + consumption proof**
 Plan-graph, identifier-domain, reuse-compat, planned-call, dep-API, idempotency, authority matrix; hashovaný contract-manifest a policy-gated FSM hook. E4 vytvoří producer kontrakt a `pending/unverifiable` consumption slot; autoritativní C2 local validaci FC-09 doplní až E5. Negative fixture: kompletní P045 plán musí selhat v C0 evaluaci; živé blokování zůstává do promotion v observe.
+**Vstup z E3 (P052):** E3 dělá jen *best-effort* plan-time surface extrakci (definovaná Files sekce, jinak `[]`); **autoritativní strukturovaný plan-time kontrakt = E4** (contract-manifest s hashovanými cestami feeduje profile resolver místo best-effort parsování).
 
 **EPIC 5: E5 - C2 Semantic Review Engine (local/wiring/behavior/final) + acceptance-evidence**
 Jeden engine, jedno schema, čtyři modes; lenses fan-out bez nové rozhodovací autority a se samostatným resource accountingem; policy-gated `wiring` precondition; acceptance-evidence rekonstrukce. Negative fixture: E-044.
+**Vstup z E3 (P052):** E3 jen *deklaruje* `required_lenses` a v observe loguje `missing_lenses` (`completed_lenses` je v E3 vždy prázdné). **E5 musí:** (1) emitovat lens-completion markery, aby `completed_lenses` mělo reálný zdroj; (2) v C2 artefaktech opakovat `profile_hash`; (3) zapnout profil-change invalidaci neúplné starší evidence podle `profile_hash` (E3 hash jen vyrobil, neinvaliduje).
 
 **EPIC 6: E6 - C1 DG-13..18 (wiring, wire, route, fallback, oracle, acceptance struct)**
 Sémanticky-hraniční deterministické probes (FC-20, FC-21, FC-29, FC-33, FC-34). Negative fixtures: E-047-5, E-047-4.
@@ -140,6 +142,7 @@ Risk-gated nezávislý audit (provider-neutral, independence levels), mechanicky
 
 **EPIC 9: E9 - C4 Release Policy + fast profile + PM communication**
 Jediná release eligibility autorita → `release-decision.json`; `/aid-do` fast profil stejných enginů; PM brief sekvenčně z release-decision (žádný cyklus); opravený Reporter s controlled runner.
+**Vstup z E3 (P052):** freshness ověření `profile_hash` (že review evidence vznikla proti aktuálnímu profilu) je C4/E9 odpovědnost (`freshness_verified_by: C4` v topologii); E3 hash jen vyrobil.
 
 **EPIC 10: E10 - Kalibrace na známých selháních + dual-run metriky**
 Kompozitní regression fixtures E-047-1/4/5, E-044, P045; měření false-DONE/false-positive/nákladů; numerické budget stropy; promotion observe→blocking. Toto teprve prokáže, že systém kontroluje stejně dobře jako nezávislý audit.
