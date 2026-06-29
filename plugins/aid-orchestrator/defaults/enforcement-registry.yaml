@@ -628,6 +628,8 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "observe C0 would_block telemetry; blocking promotion E10"
 
@@ -640,6 +642,8 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: reuse_compat (advisory, promotion E10)"
 
@@ -652,6 +656,8 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: planned_call_feasibility (advisory, promotion E10)"
 
@@ -664,6 +670,8 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: dep_api_grounding (advisory, promotion E10)"
 
@@ -676,6 +684,8 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: idempotency_matrix (advisory, promotion E10)"
 
@@ -688,5 +698,7 @@ enforcements:
     enforcement: observe
     status: planned
     verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: authority_runtime_matrix (advisory, promotion E10)"
