@@ -122,7 +122,7 @@ reconstruct() {
       --arg control_protocol "aid-2.0" \
       --arg project_id "$PROJECT_ID" \
       --arg subject_hash "sha256:${SUBJECT_HASH}" \
-      --arg head_sha "$HEAD_SHORT" \
+      --arg head_sha "$HEAD_SHA" \
       '{
         schema_version: $schema_version,
         artifact_type: $artifact_type,
@@ -243,7 +243,7 @@ reconstruct() {
     --arg control_protocol "aid-2.0" \
     --arg project_id "$PROJECT_ID" \
     --arg subject_hash "sha256:${SUBJECT_HASH}" \
-    --arg head_sha "$HEAD_SHORT" \
+    --arg head_sha "$HEAD_SHA" \
     --argjson criteria "$criteria_array" \
     '{
       schema_version: $schema_version,

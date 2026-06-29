@@ -183,5 +183,39 @@ else
 fi
 
 echo ""
+echo "T10: protocol-validate --current-head on generated artifacts"
+T10_DIR=$(mktemp -d)
+T10_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+mkdir -p "$T10_DIR/ev"
+cat > "$T10_DIR/plan.json" <<'J'
+{"steps":[{"id":"step-1","title":"SHA test","acceptance_criteria":["SHA must be full 40 chars"]}]}
+J
+# Create step-1 verifier output
+T10_HASH=$(printf '%s' "SHA must be full 40 chars" | sha256sum | cut -c1-12)
+cat > "$T10_DIR/ev/verifier-output-step-1.md" <<MD
+## AC Coverage
+ac_coverage:
+  - ac_id: "${T10_HASH}_1"
+    ac_text: "SHA must be full 40 chars"
+    covered: true
+    evidence: "test"
+    deviation: none
+MD
+bash "$PLUGIN_DIR/scripts/aid-acceptance-evidence.sh" reconstruct "$T10_DIR/plan.json" "$T10_DIR/ev" 2>/dev/null
+bash "$PLUGIN_DIR/scripts/aid-protocol-validate.sh" "$T10_DIR/ev/acceptance-evidence.json" --current-head "$T10_HEAD" 2>/dev/null
+if [[ $? -eq 0 ]]; then _pass "acceptance-evidence passes --current-head validation"; else _fail "acceptance-evidence fails --current-head (short SHA in head_sha?)"; fi
+
+# consumption-proof
+cat > "$T10_DIR/manifest.json" <<'J'
+{"bindings":[{"id":"SHA-BIND","contract_ref":"x.json","status":"pending"}]}
+J
+echo "SHA-BIND evidence for sha test" > "$T10_DIR/ev/sha-evidence.txt"
+bash "$PLUGIN_DIR/scripts/aid-consumption-proof.sh" verify "$T10_DIR/manifest.json" "$T10_DIR/ev" 2>/dev/null
+bash "$PLUGIN_DIR/scripts/aid-protocol-validate.sh" "$T10_DIR/ev/consumption-proof.json" --current-head "$T10_HEAD" 2>/dev/null
+if [[ $? -eq 0 ]]; then _pass "consumption-proof passes --current-head validation"; else _fail "consumption-proof fails --current-head (short SHA in head_sha?)"; fi
+
+rm -rf "$T10_DIR"
+
+echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
 [[ "$FAIL" -eq 0 ]] && exit 0 || exit 1

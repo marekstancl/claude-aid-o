@@ -724,6 +724,7 @@ enforcements:
     verdict: unmapped
     deadline: "E10"
     deferred_until: "E10"
+    promotion_phase: E10
     deferred_by: "E-054-1_1"
     deferred_reason: "E5 observe-only; promoted to blocking when SEMANTIC_REVIEW_POLICY=blocking in E10"
     description: "Wiring-gate would block increment-step on unresolved Critical/High semantic findings; blocking deferred to E10"
@@ -737,6 +738,7 @@ enforcements:
     verdict: unmapped
     deadline: "E10"
     deferred_until: "E10"
+    promotion_phase: E10
     deferred_by: "E-054-1_1"
     deferred_reason: "E5 observe-only; deviation=changed → blocking finding in E10"
     description: "acceptance-evidence deviation=changed signals requirement drift; blocking deferred to E10"
@@ -750,6 +752,7 @@ enforcements:
     verdict: unmapped
     deadline: "E10"
     deferred_until: "E10"
+    promotion_phase: E10
     deferred_by: "E-054-1_1"
     deferred_reason: "E5 observe-only; state=unresolvable → blocking in E10"
     description: "consumption-proof state=unresolvable on bindings without evidence; blocking deferred to E10"

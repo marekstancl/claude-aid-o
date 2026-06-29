@@ -74,7 +74,7 @@ _emit_unresolvable_manifest() {
     --arg control_protocol "aid-2.0" \
     --arg project_id "${_PROJECT_ID:-unknown}" \
     --arg subject_hash "sha256:${_SUBJECT_HASH}" \
-    --arg head_sha "${_HEAD_SHORT}" \
+    --arg head_sha "${_HEAD_SHA}" \
     --arg reason "$reason" \
     '{
       schema_version: $schema_version,
@@ -125,7 +125,7 @@ if [[ "$BINDINGS_COUNT" -eq 0 ]]; then
     --arg control_protocol "aid-2.0" \
     --arg project_id "${_PROJECT_ID:-unknown}" \
     --arg subject_hash "sha256:${_SUBJECT_HASH}" \
-    --arg head_sha "${_HEAD_SHORT}" \
+    --arg head_sha "${_HEAD_SHA}" \
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
@@ -224,7 +224,7 @@ jq -n \
   --arg control_protocol "aid-2.0" \
   --arg project_id "${_PROJECT_ID:-unknown}" \
   --arg subject_hash "sha256:${_SUBJECT_HASH}" \
-  --arg head_sha "${_HEAD_SHORT}" \
+  --arg head_sha "${_HEAD_SHA}" \
   --arg status "$_FINAL_STATUS" \
   --arg state "$TOP_STATE" \
   --argjson verified_at "$VERIFIED_AT" \
