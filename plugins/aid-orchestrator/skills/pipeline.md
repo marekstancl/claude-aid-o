@@ -485,6 +485,13 @@ Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verif
 start/complete pair to `timeline.jsonl`; provenance binding uses the last
 pair (closest to `_generated_at`).
 
+#### C2 Dual-Emit in CP2
+
+When step diff matches a C2 semantic surface (controlled by `review-profile.required_lenses`):
+- Verifier task input includes: `c2_mode: "local"` (for local/contract steps) or omit for trivial steps
+- Verifier writes `semantic-review-local.json` alongside `verifier-output-step-N.md`
+- Gate (aid-fsm.sh) reads ONLY the .md — JSON is additive evidence (D1: gate unchanged)
+
 ### Dispatch Protocol
 
 **`dispatch_mode` determines whether timeline events are required:**
@@ -602,6 +609,43 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    documented above (focus=`cp3-code-review` and `cp3-security`,
    step_n=`null`). Iteration 2 appends 4 additional events to
    `timeline.jsonl`; provenance binding uses the last pair per focus.
+
+#### C2 Dual-Emit in CP3
+
+CP3 always dispatches with `c2_mode: "final"` (full EPIC diff):
+- Verifier writes `semantic-review-final.json` to `evidence/{epic_id}/{run_id}/`
+- Verifier writes existing `verifier-output-cp3-code-review.md` / `verifier-output-cp3-security.md` UNCHANGED
+- Gate reads only the .md files (D1 unchanged)
+
+### Wiring and Behavior Dispatch (C2 observe, E5)
+
+Two additional C2 dispatch points run when the review-profile's required_lenses include wiring/behavior surfaces.
+These are **observe-only** in E5 — they emit `semantic-review-{wiring|behavior}.json` but do NOT block EXECUTE progression.
+
+#### Wiring dispatch (`c2_mode: "wiring"`)
+
+**Criterion:** Dispatch when ALL of:
+- At least 2 inter-step contracts (producer→consumer) are visible in the current diff AND
+- Profile includes wiring surface (`wiring` in `review-profile.matched_surfaces[]`) AND
+- At least one wiring lens applies (transaction_boundary, field_lineage, operation_order_resource_bound, ui_lifecycle, false_empty_distinction)
+
+**Output:** `semantic-review-wiring.json` in evidence dir
+**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"wiring"` in the JSON
+
+#### Behavior dispatch (`c2_mode: "behavior"`)
+
+**Criterion:** Dispatch when ALL of:
+- All core behavior paths for this EPIC are present in the accumulated diff (feature-complete slice) AND
+- Profile includes behavior surface (`behavior` in `review-profile.matched_surfaces[]`) AND
+- At least one behavior lens applies
+
+**Output:** `semantic-review-behavior.json` in evidence dir
+**dispatch_observed:** Set `dispatch_observed.modes_dispatched[]` += `"behavior"` in the JSON
+
+**Both wiring and behavior dispatches:**
+- Log `dispatch_observed` count to timeline.jsonl
+- On failure: log `semantic_wiring_would_block` (observe, does NOT block increment)
+- Gate (aid-fsm.sh) does NOT check these files — they are additive evidence only (D1)
 
 ### D0 Gate Point — Post-Execute Observe (E2)
 
@@ -1361,7 +1405,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-29
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

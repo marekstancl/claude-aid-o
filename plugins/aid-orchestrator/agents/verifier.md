@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-29
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -211,3 +211,134 @@ behavior_trace_count: 0
 behavior_trace_required: false
 behavior_trace_skip_reason: "no handler patterns in diff — docs/config only"
 ```
+
+---
+
+## C2 Dual-Emit Protocol
+
+When dispatched with a `c2_mode` field in task input (`local|wiring|behavior|final`), the verifier produces TWO outputs:
+
+### Output 1 (UNCHANGED): `.md` gate file
+Write to the NORMAL output file (verifier-output-step-N.md / verifier-output-cp3-{focus}.md) in the EXACT SAME FORMAT as today. The FSM gate reads this file — format must not change.
+
+### Output 2 (NEW): `semantic-review-{mode}.json`
+After writing the .md file, ALSO write `semantic-review-{c2_mode}.json` to the evidence directory (`evidence/{epic_id}/{run_id}/`):
+
+```json
+{
+  "artifact_type": "semantic_review",
+  "semantic_review": {
+    "mode": "<c2_mode>",
+    "profile_hash": "<echo from review-profile if provided, else omit>",
+    "lenses_run": ["<lens IDs that were applied>"],
+    "findings": [
+      {
+        "fingerprint": "sha256:<64hex>",
+        "severity": "critical|high|medium|low|info",
+        "lens": "<lens_id>",
+        "check_id": "<RD-001 etc>",
+        "target_path": "<file>",
+        "finding_class": "<class>",
+        "status": "open",
+        "detail": "<explanation>"
+      }
+    ]
+  }
+}
+```
+
+**Fingerprint computation:** For each finding, compute using `aid-finding-fingerprint.sh`:
+```
+fingerprint <project_id> semantic_review <check_id> <target_path> <finding_class>
+```
+where `project_id` comes from `aid-fsm.sh get-field epic_id <state_file>` (or from task input).
+
+**Merge:** If multiple lens runs produced findings for same fingerprint, use `aid-finding-merge.sh merge_findings` to merge them before writing.
+
+**Gate unchanged (D1):** The FSM reads ONLY the `.md` file. The JSON is additive evidence — not read by `aid-fsm.sh` or `aid-prefilter.sh`. Do NOT modify those scripts.
+
+**Dispatch_observed:** After emitting, note in the .md file under `## C2 Semantic Evidence` section:
+```
+c2_semantic_emitted: true
+c2_mode: <mode>
+c2_evidence_path: evidence/{epic_id}/{run_id}/semantic-review-{mode}.json
+```
+(This goes at end of the .md file, after all required gate fields — does not affect gate parsing since gate reads specific line-start fields only.)
+
+### When c2_mode is absent
+If task input has no `c2_mode` field, skip C2 dual-emit entirely. Normal .md output only. Existing behavior is unchanged.
+
+---
+
+## Final Mode Additions (C2 `mode: final`)
+
+When dispatched with `c2_mode: "final"` (CP3 full diff), the verifier applies these
+additional semantic checks beyond the standard lens catalog:
+
+### 1. Requirement-Test Drift Lens
+
+Check: Does any test change the expected status code, HTTP method, field name, or
+response contract from what was approved in the plan or EPIC AC?
+
+**Pattern:** Find test file changes where:
+- Expected status code differs from plan AC (e.g. `403` → `401` without PM waiver)
+- Expected response field names renamed vs AC
+- Endpoint path changed vs plan
+
+**Action:** Emit a `requirement_test_drift` finding with `severity: critical`:
+```json
+{
+  "fingerprint": "sha256:<64hex>",
+  "lens": "requirement_test_drift",
+  "check_id": "RTD-001",
+  "target_path": "<test file path>",
+  "finding_class": "drift",
+  "severity": "critical",
+  "detail": "Test expects HTTP 401 but plan AC specifies 403 — drift requires PM approval"
+}
+```
+Fingerprint: `fingerprint <project_id> semantic_review RTD-001 <target_path> drift`
+
+**Observe semantics:** finding is emitted in semantic-review-final.json; does NOT block
+CP3 verdict (the `.md` gate verdict remains based on code review, not this finding).
+
+### 2. AC↔Evidence LLM Matching
+
+After standard code review, perform semantic coverage assessment:
+
+For each acceptance criterion in the EPIC plan:
+1. Read the AC text
+2. Assess: does the diff contain evidence that this criterion is satisfied?
+3. Output coverage signal in the `.md` file under `## AC Coverage`:
+```
+## AC Coverage
+ac_coverage:
+  - ac_id: "<sha256[:12]>_00"
+    ac_text: "<original AC text, truncated to 80 chars>"
+    covered: true|false
+    evidence: "<brief: what in the diff satisfies this AC>"
+    deviation: none|missing|changed
+```
+This section is read by `aid-acceptance-evidence.sh reconstruct` to build acceptance-evidence.json.
+
+**Note:** Coverage is a SEMANTIC judgment (LLM). `aid-acceptance-evidence.sh` only
+aggregates — it does not re-evaluate coverage (D3).
+
+### 3. C1 Evidence Ancestor-Aware Ref
+
+When referencing C1 evidence (structural check outputs), check freshness using:
+```
+git merge-base --is-ancestor <c1_evidence_commit> HEAD
+```
+NOT `==HEAD` equality check.
+
+If C1 evidence commit is a git ancestor of HEAD: `c1_freshness: current`
+If C1 evidence commit is NOT an ancestor (diverged): `c1_freshness: stale`
+
+Include in `.md` output:
+```
+c1_evidence_ref: "<path to C1 evidence artifact>"
+c1_evidence_commit: "<sha>"
+c1_freshness: current|stale
+```
+Stale C1 evidence → advisory note in findings (not a blocker in E5).

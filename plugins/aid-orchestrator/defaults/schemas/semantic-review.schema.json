@@ -17,14 +17,117 @@
     },
     "semantic_review": {
       "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase (E5). All properties below are optional at top level (D5 observe/best-effort compat); finding fingerprint computed as: fingerprint <project_id> semantic_review <check_id> <target_path> <finding_class> via scripts/lib/aid-finding-fingerprint.sh",
       "properties": {
         "mode": {
           "type": "string",
           "enum": ["local", "wiring", "behavior", "final"]
         },
+        "profile_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "hash of the review-profile used for this run (for E3 invalidation)"
+        },
+        "lenses_run": {
+          "type": "array",
+          "items": { "type": "string" },
+          "$comment": "lens identifiers that were applied in this review run"
+        },
         "findings": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$comment": "finding fingerprint = sha256(project_id + 'semantic_review' + check_id + target_path + finding_class) via aid-finding-fingerprint.sh",
+            "properties": {
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "$comment": "envelope-consistent fingerprint; input: project_id semantic_review check_id target_path finding_class"
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "info"]
+              },
+              "lens": {
+                "type": "string",
+                "$comment": "which lens produced this finding"
+              },
+              "check_id": {
+                "type": "string",
+                "$comment": "input to fingerprint(); identifies the specific check within the lens"
+              },
+              "target_path": {
+                "type": "string",
+                "$comment": "input to fingerprint(); file or component path being evaluated"
+              },
+              "finding_class": {
+                "type": "string",
+                "$comment": "input to fingerprint(); semantic category of the finding"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["open", "resolved", "deferred"]
+              },
+              "detail": {
+                "type": "string",
+                "$comment": "human-readable detail for this finding"
+              }
+            },
+            "required": ["fingerprint", "severity", "lens", "check_id", "target_path", "finding_class"]
+          }
+        },
+        "merge_meta": {
+          "type": "object",
+          "$comment": "populated when this artifact is the result of a deterministic lossless merge of multiple mode-specific reviews",
+          "properties": {
+            "merged_from": {
+              "type": "array",
+              "items": { "type": "string" },
+              "$comment": "source semantic-review JSON file paths that were merged"
+            },
+            "conflicts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "fingerprint": {
+                    "type": "string",
+                    "pattern": "^sha256:[0-9a-f]{64}$"
+                  },
+                  "severity_conflict": {
+                    "type": "object",
+                    "properties": {
+                      "from": { "type": "string" },
+                      "to":   { "type": "string" }
+                    }
+                  },
+                  "detail_union": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "c1_evidence_ref": {
+          "type": "string",
+          "$comment": "path to C1 evidence artifact used as input to this C2 review"
+        },
+        "dispatch_observed": {
+          "type": "object",
+          "$comment": "wiring-gate observe signal: records which modes were dispatched (observe/best-effort, E5)",
+          "properties": {
+            "modes_dispatched": {
+              "type": "array",
+              "items": { "type": "string" },
+              "$comment": "which review modes actually ran"
+            },
+            "modes_count": {
+              "type": "integer",
+              "$comment": "count of modes_dispatched for quick aggregation"
+            }
+          }
         }
       }
     }

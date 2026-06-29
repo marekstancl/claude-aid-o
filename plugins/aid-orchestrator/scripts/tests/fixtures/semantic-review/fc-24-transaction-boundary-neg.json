@@ -1,0 +1,22 @@
+{
+  "_fixture": "FC-24 negative — transaction_boundary",
+  "_fc_id": "FC-24",
+  "_lens": "transaction_boundary",
+  "_mode": "behavior",
+  "_expected_outcome": "fail",
+  "_neg_fixture_desc": "MinIO cleanup wraps flush — cleanup not at commit boundary",
+  "semantic_review": {
+    "lenses_run": ["transaction_boundary"],
+    "findings": [
+      {
+        "fingerprint": "sha256:fc24000000000000000000000000000000000000000000000000000000000000",
+        "lens": "transaction_boundary",
+        "check_id": "TXN-001",
+        "target_path": "src/storage/upload.ts",
+        "finding_class": "boundary_violation",
+        "severity": "high",
+        "detail": "MinIO cleanup called inside flush wrapper — cleanup must be at transaction commit, not inside flush"
+      }
+    ]
+  }
+}

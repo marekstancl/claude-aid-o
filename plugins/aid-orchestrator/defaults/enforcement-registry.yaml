@@ -75,10 +75,10 @@ enforcements:
   - {id: run_closure_done_invariant,   type: 1, source: "skills/run-management.md:149", instruction: "skills/run-management.md:149", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "Run Closure ordered checklist (state:DONE, timeline, curator, archive)"}
 
   # ── Type 2: FSM-precondition (subagent output) ─────────────────────────────
-  - {id: cp2_verifier_output,          type: 2, source: "scripts/aid-fsm.sh:720",  instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP2 per-step verifier-output with _generated_by + classification"}
+  - {id: cp2_verifier_output,          type: 2, source: "scripts/aid-fsm.sh:720",  instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP2 per-step verifier-output with _generated_by + classification; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
   - {id: verifier_provenance,          type: 2, source: "scripts/aid-fsm.sh:614",  instruction: "skills/agent-protocol.md:197", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "verify_provenance cross-ref _generated_by vs timeline/git", test: "scripts/tests/bats/test-anti-fabrication.bats"}
   - {id: provenance_aggregate_fabricated, type: 2, source: "scripts/aid-fsm.sh:975", instruction: "docs/plans/AID-v3-agents-outputs.md NR17§4D", severity: blocking, surface: llm-facing, status: active, verdict: CONTRADICTORY, description: "fabricated provenance forces overall=fail; reflection reframes as timestamp false-positive"}
-  - {id: cp3_generated_by,             type: 2, source: "scripts/aid-fsm.sh:758",  instruction: "agents/verifier.md:72", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP3 code-review+security need _generated_by to count as dispatched"}
+  - {id: cp3_generated_by,             type: 2, source: "scripts/aid-fsm.sh:758",  instruction: "agents/verifier.md:72", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP3 code-review+security need _generated_by to count as dispatched; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
   - {id: memory_writes_validation,     type: 2, source: "skills/memory-mcp.md:240", instruction: "skills/memory-mcp.md:96", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "controller validates memory_writes block, rejects + re-dispatches"}
   - {id: memory_writes_na_reject,      type: 2, source: "skills/memory-mcp.md:264", instruction: "skills/memory-mcp.md:229", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "memory_writes N/A rejected when code files changed"}
   - {id: increment_verify_exists,      type: 2, source: "scripts/aid-fsm.sh:1727", instruction: "skills/memory.md:53", severity: blocking, surface: llm-facing, status: active, verdict: unmapped, description: "increment-step: step-N-verify.md must exist"}
@@ -702,3 +702,57 @@ enforcements:
     deferred_until: "E10"
     promotion_phase: E10
     description: "C0 observe lens: authority_runtime_matrix (advisory, promotion E10)"
+
+  # ── E5: C2 Semantic Review Engine (E-054-1_1, observe/best-effort) ──────────
+  - {id: c2_wiring_gate_observe,         type: 11, source: "scripts/aid-fsm.sh:~2250 (cmd_increment_step)", instruction: "defaults/policies/semantic-review.yaml + agents/verifier.md", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 wiring-gate observe: unresolved Critical/High in semantic-review-wiring.json → log_event semantic_wiring_would_block + increment continues (blocking deferred to E10 via SEMANTIC_REVIEW_POLICY=blocking)"}
+  - {id: c2_dual_emit,                   type: 4,  source: "agents/verifier.md (C2 Dual-Emit Protocol)", instruction: "skills/review-checkpoint-contracts.md (C2 lens catalog)", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "E5 dual-emit: .md gate unchanged + semantic-review-{mode}.json additive evidence; c2_mode absent → skip dual-emit entirely"}
+  - {id: c2_lens_catalog,                type: 10, source: "skills/review-checkpoint-contracts.md (C2 Semantic Review — Lens Catalog)", instruction: "agents/verifier.md", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, description: "12-lens C2 catalog (FC-09,FC-24..28,FC-30..32,FC-35); no-mega-prompt rule (D2); lens dispatch per profile; C1/structural excluded (D4)"}
+  - {id: c2_acceptance_evidence,         type: 4,  source: "scripts/aid-acceptance-evidence.sh", instruction: "agents/verifier.md (Final Mode Additions §2)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 observe: reconstruct ac_id=sha256[:12]_step_idx, covered from LLM ## AC Coverage block (D3: bash aggregates, LLM determines), emits acceptance-evidence.json"}
+  - {id: c2_consumption_proof,           type: 4,  source: "scripts/aid-consumption-proof.sh", instruction: "defaults/schemas/contract-manifest.schema.json (bindings[].status)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 observe: verify bindings[] against evidence_dir (grep+filename pattern); state=verified only when ALL bindings verified; manifest missing → unresolvable+exit 0 (fail-safe)"}
+  - {id: c2_completed_lenses_e5,         type: 11, source: "scripts/lib/review-profile-check.sh:~84 (E5 block)", instruction: "defaults/schemas/review-profile.schema.json (completed_lenses)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5: completed_lenses read from lenses_run[] union across semantic-review-{mode}.json; E3 backward-compat: no C2 files → COMPLETED_LENSES='' (identical to E3 stub)"}
+  - {id: c2_requirement_drift,           type: 4,  source: "agents/verifier.md (Final Mode Additions §1)", instruction: "scripts/tests/fixtures/semantic-review/fc-28-requirement-drift-neg.json", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "E5 observe: requirement-test drift (403→401 without PM approval) → RTD-001 finding severity=critical, fingerprinted; emitted in semantic-review-final.json; does NOT block .md gate verdict in E5 (blocking deferred to E10)"}
+  - {id: c2_finding_merge,               type: 4,  source: "scripts/lib/aid-finding-merge.sh", instruction: "agents/verifier.md (C2 Dual-Emit Protocol)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "Lossless merge of semantic-review findings by fingerprint: severity=max, detail=union sorted, conflicts recorded in merge_meta; deterministic output (sorted by fingerprint)"}
+  - {id: c2_semantic_review_policy,      type: 15, source: "defaults/policies/semantic-review.yaml (enforcement: observe)", instruction: "scripts/aid-fsm.sh (cmd_increment_step wiring-gate)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 policy: enforcement=observe (default); SEMANTIC_REVIEW_POLICY=blocking env → _increment_fail (E10 path); fail-safe: policy unreadable → observe"}
+
+  - id: semantic_wiring_would_block
+    type: 1
+    source: "scripts/aid-fsm.sh:~2268 (cmd_increment_step wiring-gate log_event)"
+    instruction: "defaults/policies/semantic-review.yaml + agents/verifier.md"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; promoted to blocking when SEMANTIC_REVIEW_POLICY=blocking in E10"
+    description: "Wiring-gate would block increment-step on unresolved Critical/High semantic findings; blocking deferred to E10"
+  - id: c2_acceptance_deviation
+    type: 4
+    source: "scripts/aid-acceptance-evidence.sh"
+    instruction: "agents/verifier.md (Final Mode Additions §2 AC Coverage)"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; deviation=changed → blocking finding in E10"
+    description: "acceptance-evidence deviation=changed signals requirement drift; blocking deferred to E10"
+  - id: c2_consumption_unresolvable
+    type: 4
+    source: "scripts/aid-consumption-proof.sh"
+    instruction: "defaults/schemas/contract-manifest.schema.json (consumption_proof.state)"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; state=unresolvable → blocking in E10"
+    description: "consumption-proof state=unresolvable on bindings without evidence; blocking deferred to E10"

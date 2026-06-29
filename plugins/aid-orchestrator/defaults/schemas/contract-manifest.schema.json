@@ -26,7 +26,7 @@
               "producer":   { "type": "string" },
               "consumer":   { "type": "string" },
               "field":      { "type": "string" },
-              "status":     { "type": "string", "enum": ["pending", "unverifiable"] },
+              "status":     { "type": "string", "enum": ["pending", "unverifiable", "verified"] },
               "provenance": { "type": "string", "enum": ["plan_dependency", "explicit", "inferred"] },
               "hash":       { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
             },
@@ -36,7 +36,7 @@
         "consumption_proof": {
           "type": "object",
           "properties": {
-            "state":               { "type": "string" },
+            "state":               { "type": "string", "enum": ["pending", "verified", "unresolvable"], "$comment": "E5 adds verified/unresolvable; aid-consumption-proof.sh sets these best-effort" },
             "authoritative_phase": { "type": "string" }
           },
           "required": ["state", "authoritative_phase"]

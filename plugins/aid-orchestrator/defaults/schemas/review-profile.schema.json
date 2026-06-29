@@ -53,6 +53,11 @@
         },
         "llm_authorities_total_max": {
           "type": "integer"
+        },
+        "completed_lenses": {
+          "type": "array",
+          "items": { "type": "string" },
+          "$comment": "populated by C2 from lenses_run[] aggregate; fallback to empty [] when C2 absent (E3 backward-compat)"
         }
       },
       "required": [

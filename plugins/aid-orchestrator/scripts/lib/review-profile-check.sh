@@ -8,8 +8,11 @@
 #   AID_EPIC_ID      — EPIC ID
 #   AID_RUN_ID       — Run ID
 #
-# In E3: completed_lenses is always [] (C2/C3 contract for E5).
+# In E5: completed_lenses read from C2 semantic-review-{mode}.json lenses_run[].
+# E3 backward-compat: no C2 files → COMPLETED_LENSES="" (same as E3 stub).
 # Outputs CSV of missing lenses to stdout when exit=1.
+#
+# **Last Updated:** 2026-06-29
 
 set -uo pipefail
 
@@ -81,10 +84,27 @@ if [[ "$HAS_REQUIRED" == "false" ]]; then
   exit 2
 fi
 
-# --- E3 contract: completed_lenses = [] (C2/C3 contract for E5) ---
-# In E3, completed_lenses is always empty. Evidence markers from C2/C3 will be
-# added by E5. For now: missing = all required_lenses.
+# --- E5: completed_lenses from C2 semantic-review outputs ---
+# Read lenses_run[] from any semantic-review-{mode}.json in evidence_dir.
+# E3 backward-compat: if no C2 output exists, fallback to "" (same as E3 stub).
 COMPLETED_LENSES=""
+
+if command -v jq &>/dev/null; then
+  # Collect lenses_run[] from all semantic-review-{mode}.json files
+  _c2_files=()
+  for _mode in local wiring behavior final; do
+    _f="${EVIDENCE_DIR}/semantic-review-${_mode}.json"
+    [[ -f "$_f" ]] && _c2_files+=("$_f")
+  done
+
+  if [[ ${#_c2_files[@]} -gt 0 ]]; then
+    COMPLETED_LENSES=$(
+      jq -rs '
+        [ .[] | .semantic_review.lenses_run? // [] | .[] ] | unique | sort | .[]
+      ' "${_c2_files[@]}" 2>/dev/null | tr '\n' ' ' | xargs || true
+    )
+  fi
+fi
 
 # --- Compute missing = required - completed ---
 MISSING_LENSES=""

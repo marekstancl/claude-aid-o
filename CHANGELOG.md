@@ -3,6 +3,37 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.44.1] — 2026-06-29
+
+### Fixed
+- **`aid-acceptance-evidence.sh` + `aid-consumption-proof.sh` protocol-v2 envelopes** — both scripts now emit full protocol-v2 envelope (`schema_version`, `identity`, `subject`, `revision`, `status`, `verdict`, `provenance`); `revision.head_sha` carries the full 40-char git SHA (was short SHA, broke `--current-head` validation)
+- **`aid-acceptance-evidence.sh` step naming** — verifier evidence files looked up as `step-1.md` (1-indexed, no zero-padding) instead of `step-00.md`; `ac_id` suffix changed from `_00` to `_1`
+- **`aid-consumption-proof.sh` false-verified** — Strategy 2 (filename pattern fallback: `*contract*`/`*binding*`) removed; only Strategy 1 (grep for binding_id) is valid
+- **`consumption_proof` protocol-v2 type registration** — added to `aid-protocol-validate.sh` + fixtures (`valid.json`, `invalid-missing-payload.json`)
+- **Enforcement registry planned rows** — `semantic_wiring_would_block`, `c2_acceptance_deviation`, `c2_consumption_unresolvable` now carry `status: planned`, `deadline/deferred_until/promotion_phase: E10`
+- **FC-24..28 fingerprints** — `fc{NN}neg` contained non-hex chars; fixed to `fc{NN}000...` (64 valid hex chars)
+- **Evidence pack regenerated at HEAD** — `delivery-gate.json`, `acceptance-evidence.json`, `consumption-proof.json` regenerated; all pass `aid-protocol-validate --current-head --check-fingerprint`
+
+### Added
+- **E5 wiring-gate bats test** — `E5 wiring-gate observe: Critical finding logged but increment proceeds`; seeds Critical finding in `semantic-review-wiring.json`, asserts exit 0 + `semantic_wiring_would_block` in `timeline.jsonl`
+- **T8 fingerprint schema validation** — `test-semantic-review.sh` T8 verifies `sha256:[0-9a-f]{64}` format per FC fixture
+- **T9 mutation-survives + low-profile-no-local** — merge count dedup + final-only dispatch-mode tests
+- **T10 `--current-head` regression guard** — both `aid-acceptance-evidence.sh` and `aid-consumption-proof.sh` output verified against `aid-protocol-validate --current-head` in test harness
+
+## [2.44.0] — 2026-06-29
+
+### Added
+- **C2 Semantic Review Engine (observe)** — 4-mode dual-emit engine (local/wiring/behavior/final) producing auditable `semantic-review-{mode}.json` alongside the existing `.md` gate (D1 unchanged); 12-lens catalog from failure-mode-control-matrix FC-09, FC-24..28, FC-30..32, FC-35; no-mega-prompt rule (D2); observe-only (E5), blocking deferred to E10
+- **Wiring-gate observe** — `cmd_increment_step` logs `semantic_wiring_would_block` on unresolved Critical/High wiring findings; `SEMANTIC_REVIEW_POLICY=blocking` enables E10 blocking path without code change
+- **`aid-finding-merge.sh`** — lossless fingerprint-keyed merge: severity=max, detail=union sorted, conflicts in `merge_meta`; deterministic output
+- **`aid-acceptance-evidence.sh`** — reconstructs `acceptance-evidence.json` from plan.json AC + LLM coverage signals (`## AC Coverage` block); ac_id=sha256[:12]_step_idx; D3: bash aggregates, LLM determines coverage
+- **`aid-consumption-proof.sh`** — verifies contract-manifest.json bindings against evidence_dir (grep+filename); fail-safe: missing manifest → `unresolvable` + exit 0
+- **`review-profile-check.sh` E5** — `completed_lenses` read from `lenses_run[]` union across `semantic-review-{mode}.json`; E3 backward-compat: no C2 files → same `COMPLETED_LENSES=""` behavior
+- **FC-24..28 negative fixtures** — 5 runnable JSON fixtures for transaction_boundary, field_lineage, negative_case, operation_order_resource_bound, requirement_test_drift failure modes
+- **`test-semantic-review.sh`** — 8-test harness covering merge, acceptance-evidence, consumption-proof, review-profile-check (E5+E3 backward-compat), fixture validity
+- **Enforcement registry** — 9 new C2 entries covering wiring-gate, dual-emit, lens catalog, acceptance-evidence, consumption-proof, completed_lenses, requirement-drift, finding-merge, semantic-review-policy
+- **`docs/extending-aid.md`** — C2 extension guide: how to add lenses, dual-emit protocol, fingerprint format, policy promotion path
+
 ## [2.43.0] — 2026-06-28
 
 ### Added

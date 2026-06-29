@@ -145,7 +145,7 @@ if [[ "$schema_version" != "aid-2.0" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: artifact_type enum (15 values)
+# Step 5: artifact_type enum (16 values)
 # ---------------------------------------------------------------------------
 VALID_ARTIFACT_TYPES=(
   plan_review
@@ -156,6 +156,7 @@ VALID_ARTIFACT_TYPES=(
   ui_fidelity
   semantic_review
   acceptance_evidence
+  consumption_proof
   audit_report
   audit_input_manifest
   release_decision
@@ -353,6 +354,7 @@ TYPE_PAYLOAD_MAP[delivery_gate]="delivery_gate"
 TYPE_PAYLOAD_MAP[ui_fidelity]="ui_fidelity"
 TYPE_PAYLOAD_MAP[semantic_review]="semantic_review"
 TYPE_PAYLOAD_MAP[acceptance_evidence]="acceptance_evidence"
+TYPE_PAYLOAD_MAP[consumption_proof]="consumption_proof"
 TYPE_PAYLOAD_MAP[audit_report]="audit_report"
 TYPE_PAYLOAD_MAP[audit_input_manifest]="audit_input_manifest"
 TYPE_PAYLOAD_MAP[release_decision]="release_decision"

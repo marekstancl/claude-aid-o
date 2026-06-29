@@ -2247,6 +2247,57 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
     echo "WARNING: --force used, skipping step verification check" >&2
   fi
 
+  # ---- E5 C2 Semantic Wiring-Gate (observe) ─────────────────────────────
+  # Fresh inline impl; NOT a copy of cmd_done_advance (different context and
+  # error mechanism: _increment_fail, not the errors counter used there).
+  # Reads enforcement from defaults/policies/semantic-review.yaml
+  # (env SEMANTIC_REVIEW_POLICY overrides; fail-safe: unreadable → observe).
+  local _wiring_report="${evidence_dir}/semantic-review-wiring.json"
+  local _semantic_enforcement="observe"
+
+  # Read policy file; fail-safe to observe if missing/unreadable
+  local _policy_file="${project_root}/plugins/aid-orchestrator/defaults/policies/semantic-review.yaml"
+  if [[ -n "${SEMANTIC_REVIEW_POLICY:-}" ]]; then
+    _semantic_enforcement="${SEMANTIC_REVIEW_POLICY}"
+  elif [[ -f "$_policy_file" ]] && command -v yq >/dev/null 2>&1; then
+    _semantic_enforcement=$(yq -r '.enforcement // "observe"' "$_policy_file" 2>/dev/null || echo "observe")
+  fi
+
+  # Count how many C2 modes have been dispatched (dispatch_observed)
+  local _c2_modes_dispatched=0
+  for _mode in local wiring behavior final; do
+    [[ -f "${evidence_dir}/semantic-review-${_mode}.json" ]] && (( _c2_modes_dispatched++ )) || true
+  done
+
+  # Check wiring report for unresolved Critical/High findings
+  if [[ -f "$_wiring_report" ]] && command -v jq >/dev/null 2>&1; then
+    local _unresolved_blockers
+    _unresolved_blockers=$(jq -r '
+      .semantic_review.findings[]?
+      | select(.status != "resolved" and .status != "deferred")
+      | select(.severity == "critical" or .severity == "high")
+      | .fingerprint
+    ' "$_wiring_report" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "${_unresolved_blockers:-0}" -gt 0 ]]; then
+      local _timeline
+      _timeline=$(derive_timeline "$state_file") || true
+      [[ -n "$_timeline" ]] && log_event "$_timeline" "semantic_wiring_would_block" \
+        step="$step" unresolved_count="${_unresolved_blockers}" enforcement="${_semantic_enforcement}" \
+        dispatch_observed="${_c2_modes_dispatched}"
+
+      if [[ "$_semantic_enforcement" == "blocking" ]]; then
+        _increment_fail semantic_wiring_blocked \
+          "WIRING-GATE BLOCK: ${_unresolved_blockers} unresolved Critical/High wiring finding(s)." \
+          "Wiring report: ${_wiring_report}" \
+          "Set SEMANTIC_REVIEW_POLICY=observe to proceed in observe mode (E5 default)." \
+          "Blocking mode is reserved for E10."
+      fi
+      # observe (default E5): log emitted above, increment continues
+    fi
+  fi
+  # ---- end E5 C2 wiring-gate ─────────────────────────────────────────────
+
   # ---- P040 Component B: reconciliation backstop (orphan dispatch check) ----
   # Run orphan check UNCONDITIONALLY unless PM explicitly waived via BOTH
   # --force AND --blocked-checks dispatch_orphan_complete (HIGH-2 fix).
