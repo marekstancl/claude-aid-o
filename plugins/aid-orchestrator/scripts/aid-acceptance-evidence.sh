@@ -100,17 +100,46 @@ reconstruct() {
     return 1
   }
 
+  # Collect envelope fields (needed for both empty and full emit)
+  local HEAD_SHA HEAD_SHORT PROJECT_ID CREATED_AT SUBJECT_HASH
+  HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+  HEAD_SHORT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  PROJECT_ID=$(grep -m1 'project_id:' "$(dirname "$plan_json")/../../../config/project.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "unknown")
+  if [[ -z "$PROJECT_ID" || "$PROJECT_ID" == "unknown" ]]; then
+    PROJECT_ID=$(grep -m1 'project_id:' "$(find "$(dirname "$plan_json")" -name "project.yaml" 2>/dev/null | head -1)" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "unknown")
+  fi
+  CREATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  # Derive a valid sha256 64-hex subject_hash from HEAD_SHA
+  SUBJECT_HASH=$(printf '%s' "$HEAD_SHA" | sha256sum | cut -c1-64)
+
   if [[ -z "$criteria_json" ]]; then
-    # No acceptance criteria found — emit empty but valid structure
-    cat > "$out_path" <<'EOF'
-{
-  "artifact_type": "acceptance_evidence",
-  "acceptance_evidence": {
-    "coverage_mode": "llm_match",
-    "criteria": []
-  }
-}
-EOF
+    # No acceptance criteria found — emit empty but valid structure with protocol-v2 envelope
+    jq -n \
+      --arg schema_version "aid-2.0" \
+      --arg artifact_type "acceptance_evidence" \
+      --arg producer "aid-acceptance-evidence.sh@2.44.0" \
+      --arg created_at "$CREATED_AT" \
+      --arg control_protocol "aid-2.0" \
+      --arg project_id "$PROJECT_ID" \
+      --arg subject_hash "sha256:${SUBJECT_HASH}" \
+      --arg head_sha "$HEAD_SHORT" \
+      '{
+        schema_version: $schema_version,
+        artifact_type: $artifact_type,
+        producer: $producer,
+        created_at: $created_at,
+        control_protocol: $control_protocol,
+        identity: {project_id: $project_id},
+        subject: {subject_hash: $subject_hash},
+        revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+        status: "pass",
+        verdict: {kind: "none", ready: false},
+        provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-acceptance-evidence.sh"},
+        acceptance_evidence: {
+          coverage_mode: "llm_match",
+          criteria: []
+        }
+      }' > "$out_path"
     echo "acceptance-evidence.json emitted (no AC found): $out_path" >&2
     return 0
   fi
@@ -124,15 +153,15 @@ EOF
     ac_text=$(echo "$entry" | jq -r '.ac_text')
     step_idx=$(echo "$entry" | jq -r '.step_idx')
 
-    # Compute ac_id: sha256[:12]_<step_idx padded to 2 digits>
-    local hash step_padded ac_id
+    # Compute ac_id: sha256[:12]_<step_num> where step_num is 1-indexed
+    local hash step_num ac_id
     hash=$(printf '%s' "$ac_text" | sha256sum | cut -c1-12)
-    step_padded=$(printf '%02d' "$step_idx")
-    ac_id="${hash}_${step_padded}"
+    step_num=$((step_idx + 1))
+    ac_id="${hash}_${step_num}"
 
-    # Evidence file for this step
+    # Evidence file for this step (1-indexed, no zero-padding)
     local evidence_ref
-    evidence_ref="verifier-output-step-${step_padded}.md"
+    evidence_ref="verifier-output-step-${step_num}.md"
     local evidence_file="${evidence_dir}/${evidence_ref}"
 
     # COVERAGE DETERMINATION (D3):
@@ -204,12 +233,30 @@ EOF
 
   done < <(echo "$criteria_json" | jq -c '.')
 
-  # Emit acceptance-evidence.json
+  # Emit acceptance-evidence.json with protocol-v2 envelope
   # observe — no blocking (D5)
   jq -n \
+    --arg schema_version "aid-2.0" \
+    --arg artifact_type "acceptance_evidence" \
+    --arg producer "aid-acceptance-evidence.sh@2.44.0" \
+    --arg created_at "$CREATED_AT" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "$PROJECT_ID" \
+    --arg subject_hash "sha256:${SUBJECT_HASH}" \
+    --arg head_sha "$HEAD_SHORT" \
     --argjson criteria "$criteria_array" \
     '{
-      artifact_type: "acceptance_evidence",
+      schema_version: $schema_version,
+      artifact_type: $artifact_type,
+      producer: $producer,
+      created_at: $created_at,
+      control_protocol: $control_protocol,
+      identity: {project_id: $project_id},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "pass",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-acceptance-evidence.sh"},
       acceptance_evidence: {
         coverage_mode: "llm_match",
         criteria: $criteria

@@ -51,11 +51,11 @@ cat > "$TMPDIR/plan.json" <<'J'
 {"steps":[{"id":"step-0","title":"Test step","acceptance_criteria":["The feature works correctly"]}]}
 J
 mkdir -p "$TMPDIR/evidence"
-# Compute ac_id: sha256[:12] of the AC text + step_padded
+# Compute ac_id: sha256[:12] of the AC text + step_num (1-indexed, no zero-padding)
 AC_TEXT="The feature works correctly"
 AC_HASH=$(printf '%s' "$AC_TEXT" | sha256sum | cut -c1-12)
-AC_ID="${AC_HASH}_00"
-cat > "$TMPDIR/evidence/verifier-output-step-00.md" <<MD
+AC_ID="${AC_HASH}_1"
+cat > "$TMPDIR/evidence/verifier-output-step-1.md" <<MD
 ## AC Coverage
 ac_coverage:
   - ac_id: "${AC_ID}"

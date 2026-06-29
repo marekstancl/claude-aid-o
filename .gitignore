@@ -68,3 +68,6 @@ CLAUDE.MD
 !plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o
 !plugins/aid-orchestrator/scripts/tests/fixtures/delivery/**/.aid-o/**
 .playwright-mcp/
+
+# FSM transition artifact (created by aid-fsm.sh during state transitions; never tracked)
+/transition

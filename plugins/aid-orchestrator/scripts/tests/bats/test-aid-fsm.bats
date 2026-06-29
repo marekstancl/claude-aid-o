@@ -1123,3 +1123,47 @@ EOF
   grep -q "d0_delivery_gate" "$ev/timeline.jsonl"
   rm -rf "$td"
 }
+
+# ─── E5 C2 Semantic Wiring-Gate (observe mode) ───────────────────────────────
+
+@test "E5 wiring-gate observe: Critical finding logged but increment proceeds" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  # write_post_deploy_state_yaml creates state with current_step=3; total_steps=3
+  write_post_deploy_state_yaml "$state_file"
+
+  # CP2 preconditions: step-3-verify.md + verifier-output-step-3.md (valid, non-pending)
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-step-3.md"
+
+  # Timeline seed (log_event appends to this file)
+  echo '{"ts":"2026-06-18T00:00:00Z","event":"run_started"}' > "$TEST_EVIDENCE_DIR/timeline.jsonl"
+
+  # Wiring report with one Critical unresolved finding
+  cat > "$TEST_EVIDENCE_DIR/semantic-review-wiring.json" <<'WIRING'
+{
+  "semantic_review": {
+    "findings": [
+      {
+        "fingerprint": "sha256:aabb000000000000000000000000000000000000000000000000000000000001",
+        "severity": "critical",
+        "lens": "transaction_boundary",
+        "check_id": "TXN-001",
+        "target_path": "src/test.ts",
+        "finding_class": "boundary_violation",
+        "status": "open",
+        "detail": "test finding for wiring gate"
+      }
+    ]
+  }
+}
+WIRING
+
+  # Run increment-step in observe mode (default)
+  SEMANTIC_REVIEW_POLICY=observe run "$FSM" increment-step "$state_file"
+
+  # observe mode: must not block (exit 0)
+  [ "$status" -eq 0 ]
+
+  # Timeline must contain semantic_wiring_would_block event
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "semantic_wiring_would_block"
+}

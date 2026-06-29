@@ -713,3 +713,43 @@ enforcements:
   - {id: c2_requirement_drift,           type: 4,  source: "agents/verifier.md (Final Mode Additions §1)", instruction: "scripts/tests/fixtures/semantic-review/fc-28-requirement-drift-neg.json", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "E5 observe: requirement-test drift (403→401 without PM approval) → RTD-001 finding severity=critical, fingerprinted; emitted in semantic-review-final.json; does NOT block .md gate verdict in E5 (blocking deferred to E10)"}
   - {id: c2_finding_merge,               type: 4,  source: "scripts/lib/aid-finding-merge.sh", instruction: "agents/verifier.md (C2 Dual-Emit Protocol)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "Lossless merge of semantic-review findings by fingerprint: severity=max, detail=union sorted, conflicts recorded in merge_meta; deterministic output (sorted by fingerprint)"}
   - {id: c2_semantic_review_policy,      type: 15, source: "defaults/policies/semantic-review.yaml (enforcement: observe)", instruction: "scripts/aid-fsm.sh (cmd_increment_step wiring-gate)", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E5 policy: enforcement=observe (default); SEMANTIC_REVIEW_POLICY=blocking env → _increment_fail (E10 path); fail-safe: policy unreadable → observe"}
+
+  - id: semantic_wiring_would_block
+    type: 1
+    source: "scripts/aid-fsm.sh:~2268 (cmd_increment_step wiring-gate log_event)"
+    instruction: "defaults/policies/semantic-review.yaml + agents/verifier.md"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; promoted to blocking when SEMANTIC_REVIEW_POLICY=blocking in E10"
+    description: "Wiring-gate would block increment-step on unresolved Critical/High semantic findings; blocking deferred to E10"
+  - id: c2_acceptance_deviation
+    type: 4
+    source: "scripts/aid-acceptance-evidence.sh"
+    instruction: "agents/verifier.md (Final Mode Additions §2 AC Coverage)"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; deviation=changed → blocking finding in E10"
+    description: "acceptance-evidence deviation=changed signals requirement drift; blocking deferred to E10"
+  - id: c2_consumption_unresolvable
+    type: 4
+    source: "scripts/aid-consumption-proof.sh"
+    instruction: "defaults/schemas/contract-manifest.schema.json (consumption_proof.state)"
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    deferred_by: "E-054-1_1"
+    deferred_reason: "E5 observe-only; state=unresolvable → blocking in E10"
+    description: "consumption-proof state=unresolvable on bindings without evidence; blocking deferred to E10"

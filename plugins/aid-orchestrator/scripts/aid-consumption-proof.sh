@@ -57,20 +57,44 @@ mkdir -p "$(dirname "$OUT_PATH")" 2>/dev/null || true
 
 ISO_NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+# --- Collect protocol-v2 envelope fields ---
+_HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+_HEAD_SHORT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+_SUBJECT_HASH=$(printf '%s' "$_HEAD_SHA" | sha256sum | cut -c1-64)
+_PROJECT_ID=$(grep -m1 'project_id:' "$(find "$(pwd)" -name "project.yaml" -path '*/.aid-o/config/*' 2>/dev/null | head -1)" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "unknown")
+
 # --- Fail-safe: manifest missing or invalid ---
 _emit_unresolvable_manifest() {
   local reason="${1:-manifest_not_found}"
-  cat > "$OUT_PATH" <<EOF
-{
-  "artifact_type": "consumption_proof",
-  "consumption_proof": {
-    "state": "unresolvable",
-    "verified_at": null,
-    "reason": "${reason}",
-    "bindings": []
-  }
-}
-EOF
+  jq -n \
+    --arg schema_version "aid-2.0" \
+    --arg artifact_type "consumption_proof" \
+    --arg producer "aid-consumption-proof.sh@2.44.0" \
+    --arg created_at "$ISO_NOW" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "${_PROJECT_ID:-unknown}" \
+    --arg subject_hash "sha256:${_SUBJECT_HASH}" \
+    --arg head_sha "${_HEAD_SHORT}" \
+    --arg reason "$reason" \
+    '{
+      schema_version: $schema_version,
+      artifact_type: $artifact_type,
+      producer: $producer,
+      created_at: $created_at,
+      control_protocol: $control_protocol,
+      identity: {project_id: $project_id},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "fail",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-consumption-proof.sh"},
+      consumption_proof: {
+        state: "unresolvable",
+        verified_at: null,
+        reason: $reason,
+        bindings: []
+      }
+    }' > "$OUT_PATH"
   exit 0
 }
 
@@ -93,16 +117,33 @@ BINDINGS_COUNT=$(jq 'if .bindings then (.bindings | length) else 0 end' "$MANIFE
 
 if [[ "$BINDINGS_COUNT" -eq 0 ]]; then
   # pending state — no bindings
-  cat > "$OUT_PATH" <<EOF
-{
-  "artifact_type": "consumption_proof",
-  "consumption_proof": {
-    "state": "pending",
-    "verified_at": null,
-    "bindings": []
-  }
-}
-EOF
+  jq -n \
+    --arg schema_version "aid-2.0" \
+    --arg artifact_type "consumption_proof" \
+    --arg producer "aid-consumption-proof.sh@2.44.0" \
+    --arg created_at "$ISO_NOW" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "${_PROJECT_ID:-unknown}" \
+    --arg subject_hash "sha256:${_SUBJECT_HASH}" \
+    --arg head_sha "${_HEAD_SHORT}" \
+    '{
+      schema_version: $schema_version,
+      artifact_type: $artifact_type,
+      producer: $producer,
+      created_at: $created_at,
+      control_protocol: $control_protocol,
+      identity: {project_id: $project_id},
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "pass",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-consumption-proof.sh"},
+      consumption_proof: {
+        state: "pending",
+        verified_at: null,
+        bindings: []
+      }
+    }' > "$OUT_PATH"
   exit 0
 fi
 
@@ -124,21 +165,9 @@ for i in $(seq 0 $((BINDINGS_COUNT - 1))); do
 
   # Strategy 1: grep for binding_id in any file in evidence_dir
   if [[ -n "$BINDING_ID" ]]; then
-    FOUND_FILE=$(grep -rl "$BINDING_ID" "$EVIDENCE_DIR" 2>/dev/null | head -1 || true)
+    FOUND_FILE=$(grep -rl -- "$BINDING_ID" "$EVIDENCE_DIR" 2>/dev/null | head -1 || true)
     if [[ -n "$FOUND_FILE" ]]; then
       EVIDENCE_PATH="$FOUND_FILE"
-      STATE="verified"
-      REASON="null"
-    fi
-  fi
-
-  # Strategy 2: look for named pattern files (contract*, binding*, consumption*)
-  if [[ "$STATE" == "unresolvable" ]]; then
-    PATTERN_FILE=$(find "$EVIDENCE_DIR" -maxdepth 2 \( \
-      -name "*contract*" -o -name "*binding*" -o -name "*consumption*" \
-    \) -type f 2>/dev/null | head -1 || true)
-    if [[ -n "$PATTERN_FILE" ]]; then
-      EVIDENCE_PATH="$PATTERN_FILE"
       STATE="verified"
       REASON="null"
     fi
@@ -183,14 +212,35 @@ else
   VERIFIED_AT="null"
 fi
 
-# --- Emit consumption-proof.json ---
+# --- Emit consumption-proof.json with protocol-v2 envelope ---
+_FINAL_STATUS="pass"
+[[ "$TOP_STATE" == "unresolvable" ]] && _FINAL_STATUS="fail"
+
 jq -n \
+  --arg schema_version "aid-2.0" \
   --arg artifact_type "consumption_proof" \
+  --arg producer "aid-consumption-proof.sh@2.44.0" \
+  --arg created_at "$ISO_NOW" \
+  --arg control_protocol "aid-2.0" \
+  --arg project_id "${_PROJECT_ID:-unknown}" \
+  --arg subject_hash "sha256:${_SUBJECT_HASH}" \
+  --arg head_sha "${_HEAD_SHORT}" \
+  --arg status "$_FINAL_STATUS" \
   --arg state "$TOP_STATE" \
   --argjson verified_at "$VERIFIED_AT" \
   --argjson bindings "$BINDINGS_ARRAY" \
   '{
+    schema_version: $schema_version,
     artifact_type: $artifact_type,
+    producer: $producer,
+    created_at: $created_at,
+    control_protocol: $control_protocol,
+    identity: {project_id: $project_id},
+    subject: {subject_hash: $subject_hash},
+    revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+    status: $status,
+    verdict: {kind: "none", ready: false},
+    provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-consumption-proof.sh"},
     consumption_proof: {
       state: $state,
       verified_at: $verified_at,
