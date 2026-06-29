@@ -40,6 +40,7 @@ _unzipped/
 docs/plans/*
 !docs/plans/AID-control-system-v2-roadmap.md
 !docs/plans/AID-control-system-v2-session-prompts.md
+!docs/plans/BACKLOG.md
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 # Use .aid-o/* (not .aid-o/) so git can honour negation for reports/ subdirectory.
