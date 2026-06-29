@@ -14,6 +14,8 @@
 #
 # **Last Updated:** 2026-06-29
 
+# Note: -e (errexit) is intentionally absent. This script uses explicit exit 0 on all
+# fail-safe paths (_emit_unresolvable_manifest) and must not abort on jq soft-failures.
 set -uo pipefail
 
 SUBCOMMAND="${1:-}"
@@ -105,9 +107,6 @@ EOF
 fi
 
 # --- Check each binding for evidence ---
-# Build bindings JSON array via jq
-BINDINGS_JSON=$(jq -r '.bindings[]' "$MANIFEST_JSON" 2>/dev/null || true)
-
 # Process bindings one by one using jq indices
 ALL_VERIFIED=true
 BINDINGS_ARRAY="[]"

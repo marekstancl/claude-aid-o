@@ -16,7 +16,8 @@ _fail() { echo "  FAIL: $1"; (( FAIL++ )) || true; }
 
 echo "=== C2 Semantic Review Engine Tests ==="
 TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+TMPDIR2=""
+trap 'rm -rf "$TMPDIR" "${TMPDIR2:-}"' EXIT
 
 # --- T1: aid-finding-merge.sh — same fingerprint, different severity → max ---
 echo "T1: finding-merge severity=max"
@@ -120,7 +121,6 @@ J
 bash "$PLUGIN_DIR/scripts/lib/review-profile-check.sh" "$TMPDIR2/review-profile.json" "$TMPDIR2" 2>/dev/null
 EXIT_E3=$?
 if [[ "$EXIT_E3" -eq 1 ]]; then _pass "review-profile-check E3 compat → exit 1 (missing)"; else _fail "expected exit 1 (E3 missing), got: $EXIT_E3"; fi
-rm -rf "$TMPDIR2"
 
 # --- T8: FC-24..28 fixture files exist and are valid JSON ---
 echo "T8: FC fixtures valid JSON"

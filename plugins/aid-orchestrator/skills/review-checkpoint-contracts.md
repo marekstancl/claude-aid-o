@@ -242,7 +242,7 @@ Each lens writes to `.aid-o/work/evidence/{plan_id}/c0/c0-lens-{name}.md` and MU
 
 ## C2 Semantic Review — Lens Catalog
 
-C2 produces auditovatelnou semantic evidence alongside the existing `.md` gate output (dual-emit, D1).
+C2 produces auditable semantic evidence alongside the existing `.md` gate output (dual-emit, D1).
 Evidence format: `semantic-review-{mode}.json` wrapping findings via `aid-finding-merge.sh`.
 
 ### 4-Mode Dispatch Contract
