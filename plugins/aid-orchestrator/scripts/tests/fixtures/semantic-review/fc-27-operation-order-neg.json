@@ -1,0 +1,22 @@
+{
+  "_fixture": "FC-27 negative — operation_order_resource_bound",
+  "_fc_id": "FC-27",
+  "_lens": "operation_order_resource_bound",
+  "_mode": "behavior",
+  "_expected_outcome": "fail",
+  "_neg_fixture_desc": "20MB guard after full file read",
+  "semantic_review": {
+    "lenses_run": ["operation_order_resource_bound"],
+    "findings": [
+      {
+        "fingerprint": "sha256:fc27neg0000000000000000000000000000000000000000000000000000000000",
+        "lens": "operation_order_resource_bound",
+        "check_id": "OOR-001",
+        "target_path": "src/uploads/upload.controller.ts",
+        "finding_class": "guard_order_violation",
+        "severity": "high",
+        "detail": "20MB size guard applied after full file read — guard must precede upload buffer allocation"
+      }
+    ]
+  }
+}

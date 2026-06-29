@@ -1,0 +1,22 @@
+{
+  "_fixture": "FC-28 negative — requirement_test_drift",
+  "_fc_id": "FC-28",
+  "_lens": "requirement_test_drift",
+  "_mode": "final",
+  "_expected_outcome": "fail",
+  "_neg_fixture_desc": "Test changes expected status 403 to 401 without PM approval",
+  "semantic_review": {
+    "lenses_run": ["requirement_test_drift"],
+    "findings": [
+      {
+        "fingerprint": "sha256:fc28neg0000000000000000000000000000000000000000000000000000000000",
+        "lens": "requirement_test_drift",
+        "check_id": "RTD-001",
+        "target_path": "test/auth.spec.ts",
+        "finding_class": "drift",
+        "severity": "critical",
+        "detail": "Test expects HTTP 401 but plan AC specifies 403 — drift requires PM approval"
+      }
+    ]
+  }
+}

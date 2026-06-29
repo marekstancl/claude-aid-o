@@ -1,0 +1,22 @@
+{
+  "_fixture": "FC-25 negative — field_lineage",
+  "_fc_id": "FC-25",
+  "_lens": "field_lineage",
+  "_mode": "behavior",
+  "_expected_outcome": "fail",
+  "_neg_fixture_desc": "contract select, no DeliveryPoint persist",
+  "semantic_review": {
+    "lenses_run": ["field_lineage"],
+    "findings": [
+      {
+        "fingerprint": "sha256:fc25neg0000000000000000000000000000000000000000000000000000000000",
+        "lens": "field_lineage",
+        "check_id": "FL-001",
+        "target_path": "src/contracts/contract.service.ts",
+        "finding_class": "missing_persistence",
+        "severity": "critical",
+        "detail": "DeliveryPoint derived from request but not persisted — request-to-storage lineage broken"
+      }
+    ]
+  }
+}

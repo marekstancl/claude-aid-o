@@ -581,4 +581,50 @@ To promote C0 from observe to blocking:
 5. Add fixtures in `scripts/tests/fixtures/c0/<scenario>/` and cover in
    `test-c0-contract.sh`
 
-**Last Updated:** 2026-06-28
+---
+
+## C2 Semantic Review Engine (E5)
+
+The C2 Semantic Review Engine runs in **observe/best-effort mode** (E5). Findings are
+emitted as additive JSON evidence; the existing `.md` gate is unchanged (D1).
+
+### How to Add a New Lens
+
+1. **Define the lens** in `skills/review-checkpoint-contracts.md` → `## C2 Semantic Review — Lens Catalog` table.
+   Give it: FC code, lens name, dispatch mode (local/wiring/behavior/final), trigger, stop condition, negative fixture.
+
+2. **Register in enforcement-registry.yaml**: add entry with `type: 4`, `source: agents/verifier.md`, `severity: advisory`, `status: active`.
+
+3. **Write the negative fixture** in `scripts/tests/fixtures/semantic-review/<fc-XX>-<lens>-neg.json`.
+   Format: `semantic_review.findings[]` with a finding that the negative fixture should trigger.
+
+4. **Add a test case** in `scripts/tests/test-semantic-review.sh` — verify the fixture validates.
+
+### Dual-Emit Protocol (D1 Safety)
+
+The `.md` gate verdict (`verdict: pass|fail`) is the FSM gate signal. It MUST NOT be
+changed by C2. The `semantic-review-{mode}.json` file is additive evidence only.
+
+When `c2_mode` is absent in the task input, skip dual-emit entirely. This ensures
+existing non-C2 pipelines are unaffected.
+
+### Fingerprint Format
+
+Every C2 finding MUST carry a `fingerprint` field:
+```
+fingerprint <project_id> semantic_review <check_id> <target_path> <finding_class>
+```
+Use `scripts/lib/aid-finding-fingerprint.sh` to compute it.
+
+### Policy and Promotion
+
+E5 policy (`defaults/policies/semantic-review.yaml`):
+- `enforcement: observe` — findings log, never block
+- `promotion_phase: E10` — blocking mode deferred to E10
+
+To test blocking behavior without waiting for E10:
+```bash
+SEMANTIC_REVIEW_POLICY=blocking bash scripts/aid-fsm.sh increment-step ...
+```
+
+**Last Updated:** 2026-06-29

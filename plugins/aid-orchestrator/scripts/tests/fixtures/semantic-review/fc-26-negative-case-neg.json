@@ -1,0 +1,22 @@
+{
+  "_fixture": "FC-26 negative — negative_case",
+  "_fc_id": "FC-26",
+  "_lens": "negative_case",
+  "_mode": "final",
+  "_expected_outcome": "fail",
+  "_neg_fixture_desc": "moved_away accepted — no negative proof",
+  "semantic_review": {
+    "lenses_run": ["negative_case"],
+    "findings": [
+      {
+        "fingerprint": "sha256:fc26neg0000000000000000000000000000000000000000000000000000000000",
+        "lens": "negative_case",
+        "check_id": "NC-001",
+        "target_path": "src/contracts/contract.service.ts",
+        "finding_class": "missing_negative_proof",
+        "severity": "high",
+        "detail": "No negative test for moved_away invariant — prohibition must have corresponding rejection test"
+      }
+    ]
+  }
+}

@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.44.0] — 2026-06-29
+
+### Added
+- **C2 Semantic Review Engine (observe)** — 4-mode dual-emit engine (local/wiring/behavior/final) producing auditable `semantic-review-{mode}.json` alongside the existing `.md` gate (D1 unchanged); 12-lens catalog from failure-mode-control-matrix FC-09, FC-24..28, FC-30..32, FC-35; no-mega-prompt rule (D2); observe-only (E5), blocking deferred to E10
+- **Wiring-gate observe** — `cmd_increment_step` logs `semantic_wiring_would_block` on unresolved Critical/High wiring findings; `SEMANTIC_REVIEW_POLICY=blocking` enables E10 blocking path without code change
+- **`aid-finding-merge.sh`** — lossless fingerprint-keyed merge: severity=max, detail=union sorted, conflicts in `merge_meta`; deterministic output
+- **`aid-acceptance-evidence.sh`** — reconstructs `acceptance-evidence.json` from plan.json AC + LLM coverage signals (`## AC Coverage` block); ac_id=sha256[:12]_step_idx; D3: bash aggregates, LLM determines coverage
+- **`aid-consumption-proof.sh`** — verifies contract-manifest.json bindings against evidence_dir (grep+filename); fail-safe: missing manifest → `unresolvable` + exit 0
+- **`review-profile-check.sh` E5** — `completed_lenses` read from `lenses_run[]` union across `semantic-review-{mode}.json`; E3 backward-compat: no C2 files → same `COMPLETED_LENSES=""` behavior
+- **FC-24..28 negative fixtures** — 5 runnable JSON fixtures for transaction_boundary, field_lineage, negative_case, operation_order_resource_bound, requirement_test_drift failure modes
+- **`test-semantic-review.sh`** — 8-test harness covering merge, acceptance-evidence, consumption-proof, review-profile-check (E5+E3 backward-compat), fixture validity
+- **Enforcement registry** — 9 new C2 entries covering wiring-gate, dual-emit, lens catalog, acceptance-evidence, consumption-proof, completed_lenses, requirement-drift, finding-merge, semantic-review-policy
+- **`docs/extending-aid.md`** — C2 extension guide: how to add lenses, dual-emit protocol, fingerprint format, policy promotion path
+
 ## [2.43.0] — 2026-06-28
 
 ### Added
