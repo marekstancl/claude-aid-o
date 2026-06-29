@@ -113,6 +113,16 @@ for _req_arg in EPIC_ID RUN_ID BASE_SHA PHASE; do
   fi
 done
 
+# Validate EPIC_ID and RUN_ID to prevent path traversal
+if ! [[ "$EPIC_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: EPIC_ID contains invalid characters: '${EPIC_ID}'" >&2
+  exit 1
+fi
+if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: RUN_ID contains invalid characters: '${RUN_ID}'" >&2
+  exit 1
+fi
+
 if [[ "$PHASE" != "D0" && "$PHASE" != "D1" ]]; then
   echo "ERROR: --phase must be D0 or D1, got: ${PHASE}" >&2
   exit 1
@@ -263,8 +273,10 @@ _changed_paths_match() {
   while IFS= read -r changed_path; do
     [[ -z "$changed_path" ]] && continue
     for pattern in "${patterns[@]}"; do
+      # Validate pattern contains no whitespace (glob patterns should be single tokens)
+      if [[ "$pattern" =~ [[:space:]] ]]; then continue; fi
       # Use bash glob matching (extglob-safe)
-      # shellcheck disable=SC2254
+      # shellcheck disable=SC2254 — intentional glob matching (not literal)
       case "$changed_path" in
         $pattern) return 0 ;;
       esac
@@ -329,7 +341,9 @@ _map_section_globs() {
     [[ -z "$changed_path" ]] && continue
     while IFS= read -r pattern; do
       [[ -z "$pattern" ]] && continue
-      # shellcheck disable=SC2254
+      # Validate pattern contains no whitespace (glob patterns should be single tokens)
+      if [[ "$pattern" =~ [[:space:]] ]]; then continue; fi
+      # shellcheck disable=SC2254 — intentional glob matching (not literal)
       case "$changed_path" in
         $pattern) return 0 ;;
       esac
@@ -581,7 +595,10 @@ _run_check() {
   # 5. Find check script
   # -------------------------------------------------------------------------
   # Determine script filename: dg<N>-<name>.sh (e.g. dg01-dependency-consistency.sh)
-  local check_script="${CHECK_SCRIPT_DIR}/${check_id}-${check_name}.sh"
+  # Use basename to prevent directory traversal in check_name
+  local safe_check_name
+  safe_check_name="$(basename "$check_name")"
+  local check_script="${CHECK_SCRIPT_DIR}/${check_id}-${safe_check_name}.sh"
 
   if [[ ! -f "$check_script" ]]; then
     COUNT_UNVERIFIABLE=$(( COUNT_UNVERIFIABLE + 1 ))

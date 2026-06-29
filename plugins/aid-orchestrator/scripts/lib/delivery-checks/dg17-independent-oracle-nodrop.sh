@@ -76,15 +76,21 @@ echo "dg17: found ${#BASELINE_NAMES[@]} baseline(s): ${BASELINE_NAMES[*]}"
 FAILURES=()
 
 for baseline in "${BASELINE_NAMES[@]}"; do
+  # Validate baseline key name to prevent jq injection
+  if ! [[ "$baseline" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "dg17: config_missing — baseline key '${baseline}' contains invalid characters (allowed: [a-zA-Z0-9_-])"
+    exit 2
+  fi
+
   # 4a: read analytics_output_file
-  analytics_output_file="$(echo "$baselines_json" | jq -r ".${baseline}.analytics_output_file // empty" 2>/dev/null)"
+  analytics_output_file="$(echo "$baselines_json" | jq -r --arg k "$baseline" '.[$k].analytics_output_file // empty' 2>/dev/null)"
   if [[ -z "$analytics_output_file" ]]; then
     echo "dg17: config_missing — baseline '${baseline}' missing analytics_output_file"
     exit 2
   fi
 
   # 4b: read expected_cardinality
-  expected_cardinality="$(echo "$baselines_json" | jq -r ".${baseline}.expected_cardinality // empty" 2>/dev/null)"
+  expected_cardinality="$(echo "$baselines_json" | jq -r --arg k "$baseline" '.[$k].expected_cardinality // empty' 2>/dev/null)"
   if [[ -z "$expected_cardinality" ]]; then
     echo "dg17: config_missing — baseline '${baseline}' missing expected_cardinality"
     exit 2
@@ -97,11 +103,19 @@ for baseline in "${BASELINE_NAMES[@]}"; do
   fi
 
   # 4d: read cardinality_method (default: jq_length)
-  cardinality_method="$(echo "$baselines_json" | jq -r ".${baseline}.cardinality_method // \"jq_length\"" 2>/dev/null)"
+  cardinality_method="$(echo "$baselines_json" | jq -r --arg k "$baseline" '.[$k].cardinality_method // "jq_length"' 2>/dev/null)"
 
   # Resolve path relative to ROOT if not absolute
   if [[ "$analytics_output_file" != /* ]]; then
     analytics_output_file="${ROOT}/${analytics_output_file}"
+  fi
+
+  # Containment check: resolved path must stay within ROOT (prevents path traversal)
+  real_root="$(realpath -m "$ROOT" 2>/dev/null || echo "$ROOT")"
+  real_file="$(realpath -m "$analytics_output_file" 2>/dev/null || echo "$analytics_output_file")"
+  if [[ "$real_file" != "${real_root}/"* && "$real_file" != "$real_root" ]]; then
+    echo "dg17: config_missing — baseline '${baseline}' analytics_output_file escapes project root: '${analytics_output_file}'"
+    exit 2
   fi
 
   # 4e: check file exists — missing file is config_missing, not a fake pass
