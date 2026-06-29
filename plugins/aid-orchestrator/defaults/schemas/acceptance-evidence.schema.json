@@ -17,10 +17,43 @@
     },
     "acceptance_evidence": {
       "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase (E5). All properties optional at top level (D5 observe/best-effort compat).",
       "properties": {
         "criteria": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$comment": "ac_id = sha256(ac_text)[:12]+step_idx (content-addressable, stable across runs for same AC text)",
+            "properties": {
+              "ac_id": {
+                "type": "string",
+                "$comment": "sha256(ac_text)[:12]+step_idx — content-addressable identifier for the acceptance criterion"
+              },
+              "source": {
+                "type": "string",
+                "$comment": "original AC text preserved for auditability"
+              },
+              "covered": {
+                "type": "boolean",
+                "$comment": "LLM matching result — C2 verifier determines this; bash only aggregates"
+              },
+              "evidence_ref": {
+                "type": "string",
+                "$comment": "path to evidence artifact supporting the coverage claim"
+              },
+              "deviation": {
+                "type": "string",
+                "enum": ["none", "missing", "changed"],
+                "$comment": "none=criterion fully covered; missing=AC not met; changed=requirement drifted from original"
+              }
+            },
+            "required": ["ac_id", "covered", "deviation"]
+          }
+        },
+        "coverage_mode": {
+          "type": "string",
+          "enum": ["llm_match", "deterministic"],
+          "$comment": "C2 uses LLM matching for coverage determination; bash aggregates — D3"
         }
       }
     }

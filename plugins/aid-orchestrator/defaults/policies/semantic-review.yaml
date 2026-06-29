@@ -1,0 +1,4 @@
+# AID C2 Semantic Review Engine — policy configuration
+# E5 introduces the engine in observe mode; E10 promotes to blocking.
+enforcement: observe
+promotion_phase: E10
