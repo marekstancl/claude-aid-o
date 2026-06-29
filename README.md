@@ -116,7 +116,7 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.44.0** (current) — C2 Semantic Review Engine (observe): 4-mode dual-emit, 12-lens catalog, wiring-gate, acceptance-evidence, consumption-proof, E3→E5 completed_lenses
+- **v2.44.1** (current) — C2 Semantic Review Engine (observe): 4-mode dual-emit, 12-lens catalog, wiring-gate, acceptance-evidence, consumption-proof, E3→E5 completed_lenses
 - **v2.43.0** — C0 Plan Contract Gate v2: delivery-gate enforcement field, evidence pack HEAD, registry deadline fields
 - **v2.42.1** — E3 Adaptive Review Profile Detector: deterministic surface→lens resolver, observe FSM hook, 13-scenario test harness
 - **v2.38.0** — `/aid-verify-plan` + `/aid-verify-implementation` manual PM commands: independent adversarial review of a plan (pre-execution) and an implementation (DONE), dispatched to a fresh-context agent

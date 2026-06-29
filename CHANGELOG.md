@@ -3,6 +3,23 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.44.1] — 2026-06-29
+
+### Fixed
+- **`aid-acceptance-evidence.sh` + `aid-consumption-proof.sh` protocol-v2 envelopes** — both scripts now emit full protocol-v2 envelope (`schema_version`, `identity`, `subject`, `revision`, `status`, `verdict`, `provenance`); `revision.head_sha` carries the full 40-char git SHA (was short SHA, broke `--current-head` validation)
+- **`aid-acceptance-evidence.sh` step naming** — verifier evidence files looked up as `step-1.md` (1-indexed, no zero-padding) instead of `step-00.md`; `ac_id` suffix changed from `_00` to `_1`
+- **`aid-consumption-proof.sh` false-verified** — Strategy 2 (filename pattern fallback: `*contract*`/`*binding*`) removed; only Strategy 1 (grep for binding_id) is valid
+- **`consumption_proof` protocol-v2 type registration** — added to `aid-protocol-validate.sh` + fixtures (`valid.json`, `invalid-missing-payload.json`)
+- **Enforcement registry planned rows** — `semantic_wiring_would_block`, `c2_acceptance_deviation`, `c2_consumption_unresolvable` now carry `status: planned`, `deadline/deferred_until/promotion_phase: E10`
+- **FC-24..28 fingerprints** — `fc{NN}neg` contained non-hex chars; fixed to `fc{NN}000...` (64 valid hex chars)
+- **Evidence pack regenerated at HEAD** — `delivery-gate.json`, `acceptance-evidence.json`, `consumption-proof.json` regenerated; all pass `aid-protocol-validate --current-head --check-fingerprint`
+
+### Added
+- **E5 wiring-gate bats test** — `E5 wiring-gate observe: Critical finding logged but increment proceeds`; seeds Critical finding in `semantic-review-wiring.json`, asserts exit 0 + `semantic_wiring_would_block` in `timeline.jsonl`
+- **T8 fingerprint schema validation** — `test-semantic-review.sh` T8 verifies `sha256:[0-9a-f]{64}` format per FC fixture
+- **T9 mutation-survives + low-profile-no-local** — merge count dedup + final-only dispatch-mode tests
+- **T10 `--current-head` regression guard** — both `aid-acceptance-evidence.sh` and `aid-consumption-proof.sh` output verified against `aid-protocol-validate --current-head` in test harness
+
 ## [2.44.0] — 2026-06-29
 
 ### Added
