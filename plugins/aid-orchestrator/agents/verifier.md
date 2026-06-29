@@ -288,6 +288,7 @@ response contract from what was approved in the plan or EPIC AC?
 **Action:** Emit a `requirement_test_drift` finding with `severity: critical`:
 ```json
 {
+  "fingerprint": "sha256:<64hex>",
   "lens": "requirement_test_drift",
   "check_id": "RTD-001",
   "target_path": "<test file path>",
