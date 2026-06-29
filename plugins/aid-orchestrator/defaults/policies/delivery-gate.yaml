@@ -58,6 +58,12 @@ profiles:
         cmd: []
       dg12:
         cmd: []
+      dg15:
+        cmd: []
+      dg17:
+        cmd: []
+      dg18:
+        cmd: []
 
   plugin-bash:
     detect:
@@ -98,6 +104,12 @@ profiles:
       dg12:
         cmd: []
         skip_reason: no_authority_surface
+      dg15:
+        cmd: []
+      dg17:
+        cmd: []
+      dg18:
+        cmd: []
 
   generic:
     detect: []
@@ -170,3 +182,18 @@ checks:
     name: authority
     required_when:
       - has_authority_surface: true
+
+  dg15:
+    name: route-resolve
+    required_when:
+      - map_section_globs: routes
+
+  dg17:
+    name: independent-oracle-nodrop
+    required_when:
+      - map_section_globs: oracle_baselines
+
+  dg18:
+    name: acceptance-struct
+    required_when:
+      - has_acceptance_evidence: true

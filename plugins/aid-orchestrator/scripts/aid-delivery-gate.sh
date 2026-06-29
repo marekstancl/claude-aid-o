@@ -49,11 +49,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-delivery-profile.sh"
 # shellcheck source=lib/aid-finding-fingerprint.sh
 source "${SCRIPT_DIR}/lib/aid-finding-fingerprint.sh"
+# shellcheck source=lib/aid-delivery-map.sh
+source "${SCRIPT_DIR}/lib/aid-delivery-map.sh"
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-readonly CHECKS=(dg01 dg02 dg03 dg04 dg05 dg06 dg07 dg08 dg09 dg10 dg11 dg12)
+readonly CHECKS=(dg01 dg02 dg03 dg04 dg05 dg06 dg07 dg08 dg09 dg10 dg11 dg12 dg15 dg17 dg18)
 readonly CHECK_SCRIPT_DIR="${SCRIPT_DIR}/lib/delivery-checks"
 readonly PRODUCER="aid-delivery-gate@2.0"
 readonly SCHEMA_VERSION="aid-2.0"
@@ -298,6 +300,54 @@ _has_authority_surface() {
   grep -qE '\.(yaml|yml|json)$' "$changed_file"
 }
 
+# _map_section_globs(area) → 0=changed paths match globs from delivery-map section, 1=no match
+# Section must exist. If it does and CHANGED_PATHS_FILE provided, extracts all string values
+# from arrays in the section (recursive) and matches using bash glob (not regex).
+# Falls back to: section exists + no CHANGED_PATHS_FILE → applicable.
+_map_section_globs() {
+  local area="$1"
+
+  # Section must exist in delivery-map
+  local section_json
+  section_json="$(AID_PROJECT_ROOT="${PROJECT_ROOT}" get_section "$area" 2>/dev/null)" || return 1
+
+  # No changed paths file → section exists, applicable
+  local changed_file="${CHANGED_PATHS_FILE:-}"
+  [[ -z "$changed_file" || ! -f "$changed_file" ]] && return 0
+
+  # Collect all string values from arrays in the section (recursive descent)
+  local all_globs
+  all_globs="$(echo "$section_json" | jq -r '[.. | arrays | .[]? | strings] | .[]' 2>/dev/null)"
+
+  if [[ -z "$all_globs" ]]; then
+    # Section has no array globs → existence alone makes it applicable
+    return 0
+  fi
+
+  # Match changed paths against globs using bash case (true glob matching, not regex)
+  while IFS= read -r changed_path; do
+    [[ -z "$changed_path" ]] && continue
+    while IFS= read -r pattern; do
+      [[ -z "$pattern" ]] && continue
+      # shellcheck disable=SC2254
+      case "$changed_path" in
+        $pattern) return 0 ;;
+      esac
+    done <<< "$all_globs"
+  done < "$changed_file"
+
+  return 1
+}
+
+# _has_acceptance_evidence() → 0=step-*-verify.md files exist in evidence dir, 1=no evidence
+# Uses EVIDENCE_BASE global (always absolute, computed at script init from AID_EVIDENCE_BASE or PROJECT_ROOT).
+_has_acceptance_evidence() {
+  local evidence_dir="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}/steps"
+
+  # Check if any step-*-verify.md exists
+  ls "${evidence_dir}"/step-*-verify.md >/dev/null 2>&1
+}
+
 # ---------------------------------------------------------------------------
 # _check_applicable(check_id) → 0=applicable, 1=not applicable
 # ---------------------------------------------------------------------------
@@ -380,6 +430,20 @@ _check_applicable() {
     has_auth="$(echo "$cond_json" | jq -r '.has_authority_surface // false')"
     if [[ "$has_auth" == "true" ]]; then
       _has_authority_surface "${CHANGED_PATHS_FILE:-}" && return 0
+    fi
+
+    # Check map_section_globs
+    local msg
+    msg="$(echo "$cond_json" | jq -r '.map_section_globs // empty')"
+    if [[ -n "$msg" ]]; then
+      _map_section_globs "$msg" && return 0
+    fi
+
+    # Check has_acceptance_evidence
+    local hae
+    hae="$(echo "$cond_json" | jq -r '.has_acceptance_evidence // false')"
+    if [[ "$hae" == "true" ]]; then
+      _has_acceptance_evidence && return 0
     fi
   done
 

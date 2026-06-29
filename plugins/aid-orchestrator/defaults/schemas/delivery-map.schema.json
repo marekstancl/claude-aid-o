@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/delivery-map.schema.json",
+  "title": "AID Delivery Map — C1 Probe Configuration",
+  "description": "Per-project delivery probe configuration for the AID C1 Delivery Engine. Defines route discovery parameters, oracle baselines, and probe metadata. All sections are optional; omitted sections cause dependent DG checks to be skipped.",
+  "type": "object",
+  "required": [],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "description": "Metadata about this delivery-map configuration.",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["draft", "active", "deprecated"],
+          "description": "Lifecycle status of this delivery-map."
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["low", "medium", "high"],
+          "description": "Confidence level in the accuracy of probe configuration."
+        },
+        "source": {
+          "type": "string",
+          "description": "How this delivery-map was generated (e.g. 'auto-generated from codebase scan')."
+        },
+        "stack": {
+          "type": "string",
+          "description": "Technology stack identifier (e.g. 'react-router+express')."
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "description": "Route discovery configuration for DG-15 route-resolve check.",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["react-router", "express"],
+          "description": "Routing framework used by the project."
+        },
+        "route_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns for files that declare routes (e.g. ['src/routes/**/*.tsx'])."
+        },
+        "link_globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns for files containing link components to cross-reference against declared routes (e.g. ['src/**/*.tsx'])."
+        }
+      }
+    },
+    "oracle_baselines": {
+      "type": "object",
+      "description": "Named oracle baseline configurations for DG-17 independent-oracle-nodrop check.",
+      "required": [],
+      "additionalProperties": {
+        "type": "object",
+        "description": "A single oracle baseline definition.",
+        "required": [],
+        "additionalProperties": false,
+        "properties": {
+          "analytics_output_file": {
+            "type": "string",
+            "description": "Path to the file whose cardinality should be checked."
+          },
+          "expected_cardinality": {
+            "type": "integer",
+            "description": "Minimum expected number of rows or items in the output file.",
+            "minimum": 0
+          },
+          "cardinality_method": {
+            "type": "string",
+            "enum": ["jq_length", "grep_count"],
+            "description": "Method used to count items in the output file. Defaults to jq_length."
+          }
+        }
+      }
+    }
+  }
+}
