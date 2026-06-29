@@ -9,7 +9,7 @@
     "lenses_run": ["field_lineage"],
     "findings": [
       {
-        "fingerprint": "sha256:fc25neg0000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:fc25000000000000000000000000000000000000000000000000000000000000",
         "lens": "field_lineage",
         "check_id": "FL-001",
         "target_path": "src/contracts/contract.service.ts",

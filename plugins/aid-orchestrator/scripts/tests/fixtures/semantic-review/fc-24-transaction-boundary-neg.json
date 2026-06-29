@@ -9,7 +9,7 @@
     "lenses_run": ["transaction_boundary"],
     "findings": [
       {
-        "fingerprint": "sha256:fc24neg0000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:fc24000000000000000000000000000000000000000000000000000000000000",
         "lens": "transaction_boundary",
         "check_id": "TXN-001",
         "target_path": "src/storage/upload.ts",

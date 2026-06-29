@@ -9,7 +9,7 @@
     "lenses_run": ["negative_case"],
     "findings": [
       {
-        "fingerprint": "sha256:fc26neg0000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:fc26000000000000000000000000000000000000000000000000000000000000",
         "lens": "negative_case",
         "check_id": "NC-001",
         "target_path": "src/contracts/contract.service.ts",

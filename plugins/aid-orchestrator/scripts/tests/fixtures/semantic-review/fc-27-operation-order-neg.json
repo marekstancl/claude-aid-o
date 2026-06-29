@@ -9,7 +9,7 @@
     "lenses_run": ["operation_order_resource_bound"],
     "findings": [
       {
-        "fingerprint": "sha256:fc27neg0000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:fc27000000000000000000000000000000000000000000000000000000000000",
         "lens": "operation_order_resource_bound",
         "check_id": "OOR-001",
         "target_path": "src/uploads/upload.controller.ts",

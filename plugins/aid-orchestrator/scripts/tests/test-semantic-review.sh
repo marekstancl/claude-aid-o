@@ -122,8 +122,8 @@ bash "$PLUGIN_DIR/scripts/lib/review-profile-check.sh" "$TMPDIR2/review-profile.
 EXIT_E3=$?
 if [[ "$EXIT_E3" -eq 1 ]]; then _pass "review-profile-check E3 compat → exit 1 (missing)"; else _fail "expected exit 1 (E3 missing), got: $EXIT_E3"; fi
 
-# --- T8: FC-24..28 fixture files exist and are valid JSON ---
-echo "T8: FC fixtures valid JSON"
+# --- T8: FC-24..28 fixture files exist, valid JSON, and valid fingerprint format ---
+echo "T8: FC fixtures valid JSON + fingerprint schema"
 for fc in fc-24-transaction-boundary-neg fc-25-field-lineage-neg fc-26-negative-case-neg fc-27-operation-order-neg fc-28-requirement-drift-neg; do
   F="${FIXTURE_DIR}/${fc}.json"
   if [[ -f "$F" ]] && jq empty "$F" 2>/dev/null; then
@@ -131,7 +131,56 @@ for fc in fc-24-transaction-boundary-neg fc-25-field-lineage-neg fc-26-negative-
   else
     _fail "fixture ${fc}.json missing or invalid"
   fi
+  FP=$(jq -r '.semantic_review.findings[0].fingerprint // ""' "$F" 2>/dev/null)
+  if echo "$FP" | grep -qE '^sha256:[0-9a-f]{64}$'; then
+    _pass "fixture ${fc}.json fingerprint valid"
+  else
+    _fail "fixture ${fc}.json fingerprint invalid: $FP"
+  fi
 done
+
+# --- T9: mutation-survives (FC merge count) + low-profile-no-local ---
+echo "T9: mutation-survives + low-profile-no-local"
+MERGE_ALL=$(bash "$PLUGIN_DIR/scripts/lib/aid-finding-merge.sh" merge_findings \
+  "$FIXTURE_DIR/fc-24-transaction-boundary-neg.json" \
+  "$FIXTURE_DIR/fc-25-field-lineage-neg.json" \
+  "$FIXTURE_DIR/fc-26-negative-case-neg.json" \
+  "$FIXTURE_DIR/fc-27-operation-order-neg.json" \
+  "$FIXTURE_DIR/fc-28-requirement-drift-neg.json" 2>/dev/null)
+COUNT_ALL=$(echo "$MERGE_ALL" | jq '.findings | length' 2>/dev/null)
+if [[ "$COUNT_ALL" -eq 5 ]]; then
+  _pass "FC-24..28 merge → 5 unique findings"
+else
+  _fail "FC-24..28 merge: expected 5, got: ${COUNT_ALL}"
+fi
+
+MERGE_4=$(bash "$PLUGIN_DIR/scripts/lib/aid-finding-merge.sh" merge_findings \
+  "$FIXTURE_DIR/fc-24-transaction-boundary-neg.json" \
+  "$FIXTURE_DIR/fc-25-field-lineage-neg.json" \
+  "$FIXTURE_DIR/fc-26-negative-case-neg.json" \
+  "$FIXTURE_DIR/fc-27-operation-order-neg.json" 2>/dev/null)
+COUNT_4=$(echo "$MERGE_4" | jq '.findings | length' 2>/dev/null)
+if [[ "$COUNT_4" -eq 4 ]]; then
+  _pass "mutation-survives: removing FC-28 → 4 findings (not 5)"
+else
+  _fail "mutation-survives: expected 4, got: ${COUNT_4}"
+fi
+
+TMPDIR3=$(mktemp -d)
+cat > "$TMPDIR3/review-profile.json" <<'J'
+{"review_profile":{"required_lenses":["requirement_test_drift"],"dispatch_mode":"final"}}
+J
+cat > "$TMPDIR3/semantic-review-final.json" <<'J'
+{"semantic_review":{"lenses_run":["requirement_test_drift"],"findings":[]}}
+J
+bash "$PLUGIN_DIR/scripts/lib/review-profile-check.sh" "$TMPDIR3/review-profile.json" "$TMPDIR3" 2>/dev/null
+EXIT_FINAL=$?
+rm -rf "$TMPDIR3"
+if [[ "$EXIT_FINAL" -eq 0 ]]; then
+  _pass "low-profile-no-local: final-only profile satisfied by semantic-review-final.json"
+else
+  _fail "low-profile-no-local: expected exit 0, got: $EXIT_FINAL"
+fi
 
 echo ""
 echo "=== Results: ${PASS} passed, ${FAIL} failed ==="

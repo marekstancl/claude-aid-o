@@ -9,7 +9,7 @@
     "lenses_run": ["requirement_test_drift"],
     "findings": [
       {
-        "fingerprint": "sha256:fc28neg0000000000000000000000000000000000000000000000000000000000",
+        "fingerprint": "sha256:fc28000000000000000000000000000000000000000000000000000000000000",
         "lens": "requirement_test_drift",
         "check_id": "RTD-001",
         "target_path": "test/auth.spec.ts",
