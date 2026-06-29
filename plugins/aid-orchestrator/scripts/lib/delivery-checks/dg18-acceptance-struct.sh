@@ -12,7 +12,7 @@
 #       AID_EVIDENCE_BASE   — base path override for evidence root
 #       AID_PROJECT_ROOT    — project root
 
-set -uo pipefail
+set -euo pipefail
 
 # ---------------------------------------------------------------------------
 # Step 1: argv provided → delegate to external command (map exit code to 0)

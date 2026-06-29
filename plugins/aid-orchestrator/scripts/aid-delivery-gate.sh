@@ -171,6 +171,12 @@ else
   EVIDENCE_BASE="${PROJECT_ROOT}/.aid-o/work/evidence"
 fi
 
+# Validate EVIDENCE_BASE: must not contain whitespace (prevents path splitting)
+if [[ "$EVIDENCE_BASE" =~ [[:space:]] ]]; then
+  echo "ERROR: EVIDENCE_BASE contains whitespace: '${EVIDENCE_BASE}'" >&2
+  exit 1
+fi
+
 OUTPUT_DIR="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
 OUTPUT_FILE="${OUTPUT_DIR}/delivery-gate.json"
 PROJECT_ID="$(basename "$PROJECT_ROOT")"  # must be set before findings[] loop at line ~648

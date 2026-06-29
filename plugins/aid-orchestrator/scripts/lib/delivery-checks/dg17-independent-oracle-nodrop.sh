@@ -10,11 +10,10 @@
 # Env:  AID_PROJECT_ROOT   — project root directory
 #       AID_CHANGED_PATHS  — path to file with one changed path per line (checked but not used in core logic)
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".")}"
-CHANGED_PATHS_FILE="${AID_CHANGED_PATHS:-}"
 
 # Source delivery-map accessor
 source "${SCRIPT_DIR}/../aid-delivery-map.sh"
@@ -128,10 +127,6 @@ for baseline in "${BASELINE_NAMES[@]}"; do
   actual_count=0
   case "$cardinality_method" in
     jq_length)
-      if ! command -v jq >/dev/null 2>&1; then
-        echo "dg17: config_missing — jq not found; required for cardinality_method=jq_length"
-        exit 2
-      fi
       actual_count_raw="$(jq 'length' "$analytics_output_file" 2>/dev/null)"
       if [[ -z "$actual_count_raw" ]]; then
         echo "dg17: config_missing — baseline '${baseline}' jq could not parse '${analytics_output_file}'"

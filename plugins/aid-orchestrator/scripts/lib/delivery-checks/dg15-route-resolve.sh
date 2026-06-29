@@ -13,7 +13,7 @@
 #
 # Supported frameworks: react-router, express
 
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".")}"
@@ -103,11 +103,7 @@ fi
 
 # express has no client-side links — nothing to resolve
 if [[ "$framework" == "express" ]]; then
-  if [[ ${#LINK_GLOBS[@]} -gt 0 ]]; then
-    echo "dg15: pass — framework '${framework}' has no client-side routing; link_globs present but skipped"
-  else
-    echo "dg15: pass — framework '${framework}' has no client-side links to resolve"
-  fi
+  echo "dg15: pass — framework '${framework}' has no client-side routing; link_globs present but skipped"
   exit 0
 fi
 

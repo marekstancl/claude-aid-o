@@ -657,6 +657,8 @@ oracle_baselines:
 ### DG-15 — Route Resolve (literal links only)
 Checks that `<Link to="...">` paths resolve to declared routes. Scope: **literal strings only** — dynamic links (computed values, template literals) are not checked and no false-negative is claimed.
 
+Dynamic links (`to={variable}`, `to={computedPath}`, template literals) are **out of scope** — the probe cannot see them and makes no false-negative claim for those patterns.
+
 ### DG-17 — Independent Oracle No-Drop
 Checks that analytics output files meet declared minimum cardinality. Requires `analytics_output_file` and `expected_cardinality` per baseline. Without a file → config_missing (not a fake pass).
 
