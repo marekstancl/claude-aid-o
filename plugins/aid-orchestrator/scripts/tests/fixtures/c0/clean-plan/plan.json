@@ -1,0 +1,49 @@
+{
+  "epic_id": "E-C0-CLEAN-1_1",
+  "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/c0/clean-plan/plan.md",
+  "version": 1,
+  "created_at": "2026-06-28T00:00:00Z",
+  "steps": [
+    {
+      "id": "step_1",
+      "role": "backend",
+      "objective": "Implement the core feature module.",
+      "inputs": ["EPIC specification"],
+      "outputs": ["src/feature.py"],
+      "constraints": [],
+      "allowed_paths": ["src/feature.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": [
+        "Module loads without errors",
+        "Unit tests pass"
+      ]
+    },
+    {
+      "id": "step_2",
+      "role": "qa",
+      "objective": "Write tests for the core feature module.",
+      "inputs": ["EPIC specification", "Output from step_1"],
+      "outputs": ["tests/test_feature.py"],
+      "constraints": [],
+      "allowed_paths": ["tests/test_feature.py"],
+      "forbidden_paths": ["src/"],
+      "acceptance_criteria": [
+        "All public functions have at least one test",
+        "Coverage exceeds 80 percent"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "before": "step_1",
+      "after": "step_2",
+      "reason": "QA tests require the backend implementation to exist"
+    }
+  ],
+  "parallel_groups": [],
+  "analysis_groups": [],
+  "gates": ["tests_pass"],
+  "budget": {
+    "max_retries_per_gate": 3
+  }
+}

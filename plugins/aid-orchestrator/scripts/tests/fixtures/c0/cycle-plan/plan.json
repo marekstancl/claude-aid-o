@@ -1,0 +1,48 @@
+{
+  "epic_id": "E-C0-CYCLE-1_1",
+  "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/c0/cycle-plan/plan.md",
+  "version": 1,
+  "created_at": "2026-06-28T00:00:00Z",
+  "steps": [
+    {
+      "id": "step_1",
+      "role": "backend",
+      "objective": "Implement module A (depends on module B).",
+      "inputs": ["Output from step_2"],
+      "outputs": ["src/module_a.py"],
+      "constraints": [],
+      "allowed_paths": ["src/module_a.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Module A loads without errors"]
+    },
+    {
+      "id": "step_2",
+      "role": "backend",
+      "objective": "Implement module B (depends on module A).",
+      "inputs": ["Output from step_1"],
+      "outputs": ["src/module_b.py"],
+      "constraints": [],
+      "allowed_paths": ["src/module_b.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Module B loads without errors"]
+    }
+  ],
+  "dependencies": [
+    {
+      "before": "step_1",
+      "after": "step_2",
+      "reason": "Module B needs module A"
+    },
+    {
+      "before": "step_2",
+      "after": "step_1",
+      "reason": "Module A needs module B (intentional cycle for testing)"
+    }
+  ],
+  "parallel_groups": [],
+  "analysis_groups": [],
+  "gates": ["tests_pass"],
+  "budget": {
+    "max_retries_per_gate": 3
+  }
+}

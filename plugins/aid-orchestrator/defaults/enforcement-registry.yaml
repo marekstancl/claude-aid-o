@@ -607,3 +607,98 @@ enforcements:
     promotion_phase: E10
     deferred_reason: "observe-only missing_lenses telemetry; blocking promotion after E10 calibration"
     description: "review profile detector (aid-prefilter.sh profile emits review-profile.json, authority none) gated by observe FSM hook computing missing_lenses"
+
+  # ── E4 C0 Plan Contract Gate — observe mode, blocking promotion E10 ──────────
+  - id: c0_contract_producer
+    type: out-of-band
+    source: scripts/aid-c0-contract.sh
+    instruction: docs/extending-aid.md
+    severity: advisory
+    surface: internal-guard
+    status: active
+    verdict: unmapped
+    description: "C0 artifact producer (plan-graph/contract-manifest/plan-review), authority none, observe"
+
+  - id: c0_would_block
+    type: out-of-band
+    source: scripts/aid-auto-pipeline.sh
+    instruction: defaults/policies/c0-contract.yaml
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "observe C0 would_block telemetry; blocking promotion E10"
+
+  - id: c0_lens_reuse_compat
+    type: out-of-band
+    source: skills/review-checkpoint-contracts.md
+    instruction: skills/review-checkpoint-contracts.md
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "C0 observe lens: reuse_compat (advisory, promotion E10)"
+
+  - id: c0_lens_planned_call_feasibility
+    type: out-of-band
+    source: skills/review-checkpoint-contracts.md
+    instruction: skills/review-checkpoint-contracts.md
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "C0 observe lens: planned_call_feasibility (advisory, promotion E10)"
+
+  - id: c0_lens_dep_api_grounding
+    type: out-of-band
+    source: skills/review-checkpoint-contracts.md
+    instruction: skills/review-checkpoint-contracts.md
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "C0 observe lens: dep_api_grounding (advisory, promotion E10)"
+
+  - id: c0_lens_idempotency_matrix
+    type: out-of-band
+    source: skills/review-checkpoint-contracts.md
+    instruction: skills/review-checkpoint-contracts.md
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "C0 observe lens: idempotency_matrix (advisory, promotion E10)"
+
+  - id: c0_lens_authority_runtime_matrix
+    type: out-of-band
+    source: skills/review-checkpoint-contracts.md
+    instruction: skills/review-checkpoint-contracts.md
+    severity: fail
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    verdict: unmapped
+    deadline: "E10"
+    deferred_until: "E10"
+    promotion_phase: E10
+    description: "C0 observe lens: authority_runtime_matrix (advisory, promotion E10)"

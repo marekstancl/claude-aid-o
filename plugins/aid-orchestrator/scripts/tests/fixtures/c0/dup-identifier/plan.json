@@ -1,0 +1,37 @@
+{
+  "epic_id": "E-C0-DUP-1_1",
+  "source_plan": "plugins/aid-orchestrator/scripts/tests/fixtures/c0/dup-identifier/plan.md",
+  "version": 1,
+  "created_at": "2026-06-28T00:00:00Z",
+  "steps": [
+    {
+      "id": "step_1",
+      "role": "backend",
+      "objective": "First implementation step.",
+      "inputs": ["EPIC specification"],
+      "outputs": ["src/feature_a.py"],
+      "constraints": [],
+      "allowed_paths": ["src/feature_a.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Module loads without errors"]
+    },
+    {
+      "id": "step_1",
+      "role": "qa",
+      "objective": "Duplicate step ID — same number as first step.",
+      "inputs": ["EPIC specification"],
+      "outputs": ["tests/test_feature_a.py"],
+      "constraints": [],
+      "allowed_paths": ["tests/test_feature_a.py"],
+      "forbidden_paths": [],
+      "acceptance_criteria": ["Tests pass"]
+    }
+  ],
+  "dependencies": [],
+  "parallel_groups": [],
+  "analysis_groups": [],
+  "gates": ["tests_pass"],
+  "budget": {
+    "max_retries_per_gate": 3
+  }
+}

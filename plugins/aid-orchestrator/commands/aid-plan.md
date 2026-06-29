@@ -365,7 +365,7 @@ Runs the standard `plan-writing.md` completeness checklist (28 checks). If no `R
 
 ### CP1-deep (for high-risk plans)
 
-Extends CP1-light with 3 parallel review lenses and an adjudicator. All 4 evidence files must exist before EPIC generation is allowed.
+Extends CP1-light with 8 parallel review lenses (L1/L2/L3 blocking + 5 C0 observe) and an adjudicator. The 4 L1/L2/L3+adjudicator evidence files must exist before EPIC generation is allowed; 5 C0 lens files are observe-only (E4).
 
 **Flow:**
 
@@ -380,12 +380,18 @@ CP1-light:
 CP1-deep:
   → run plan-writing.md checklist (same as light)
   → detect high-risk patterns (automatic via review-checkpoint-contracts.md heuristic)
-  → dispatch 3 lenses in parallel (per plan taxonomy — see review-checkpoint-contracts.md §CP1-deep):
-      L1 behavior:    request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
-      L2 feasibility: touched files, output contracts, parser/producer ordering, implementation feasibility
-      L3 enforcement: gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
-  → each lens produces: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
-  → adjudicator reviews all 3 lenses: accepts blocker only if it has command/artifact + file:line evidence
+  → dispatch 8 lenses in parallel (per plan taxonomy — see review-checkpoint-contracts.md §CP1-deep and §C0 Semantic Lenses):
+      L1 behavior:                  request→branch→sink flow, undeclared outcomes, user-visible regressions, edge cases
+      L2 feasibility:               touched files, output contracts, parser/producer ordering, implementation feasibility
+      L3 enforcement:               gitignored artifacts, remote CI visibility, test runner execution, release/CI breakage
+      C0 reuse_compat:              incompatible component reuse — output to c0-lens-reuse_compat.md
+      C0 planned_call_feasibility:  calls to outputs/APIs that the plan doesn't clearly produce — output to c0-lens-planned_call_feasibility.md
+      C0 dep_api_grounding:         dependency API mismatch against actual version/interface — output to c0-lens-dep_api_grounding.md
+      C0 idempotency_matrix:        non-idempotent mutations against at-most-once AC — output to c0-lens-idempotency_matrix.md
+      C0 authority_runtime_matrix:  mutations crossing ownership/tenant boundary — output to c0-lens-authority_runtime_matrix.md
+  → L1/L2/L3 each produce: stop_rule_blockers[] (required field), findings[], confidence: high|medium|low
+  → C0 lenses each produce: stop_rule_blockers[] (advisory/observe in E4), findings[], confidence: high|medium|low
+  → adjudicator reviews all 8 lenses: accepts blocker only if it has command/artifact + file:line evidence (L1/L2/L3 blocking; C0 advisory — see review-checkpoint-contracts.md §C0 Adjudicator Addendum)
   → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
   → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
   → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
@@ -394,12 +400,20 @@ CP1-deep:
 
 **Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
 
-| File | Produced by | Required field |
-|------|-------------|----------------|
-| `cp1-lens-L1-behavior.md` | L1 behavior lens agent | `stop_rule_blockers:` at line-start |
-| `cp1-lens-L2-feasibility.md` | L2 feasibility lens agent | `stop_rule_blockers:` at line-start |
-| `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start |
-| `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start |
+| File | Produced by | Required field | Gate |
+|------|-------------|----------------|------|
+| `cp1-lens-L1-behavior.md` | L1 behavior lens agent | `stop_rule_blockers:` at line-start | blocking |
+| `cp1-lens-L2-feasibility.md` | L2 feasibility lens agent | `stop_rule_blockers:` at line-start | blocking |
+| `cp1-lens-L3-enforcement.md` | L3 enforcement lens agent | `stop_rule_blockers:` at line-start | blocking |
+| `cp1-adjudicator.md` | adjudicator agent | `verdict:` at line-start | blocking |
+| `c0-lens-reuse_compat.md` | C0 reuse_compat lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-lens-planned_call_feasibility.md` | C0 planned_call_feasibility lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-lens-authority_runtime_matrix.md` | C0 authority_runtime_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
+
+Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
+Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
 
 EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces this: missing files or unresolved accepted blockers cause a non-zero exit.
 
@@ -448,4 +462,4 @@ runs. Streamlined mode never relaxes the integration-review, orphan-dispatch, or
 abandoned-run enforcement at `done-advance`.
 
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-29

@@ -17,7 +17,7 @@
     },
     "plan_review": {
       "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "$comment": "enforced — minimal payload; structural_checks/lens_findings/findings are OPTIONAL for C4 backward-compat",
       "properties": {
         "plan_id": {
           "type": "string"
@@ -26,7 +26,40 @@
           "type": "string"
         },
         "structural_issues": {
-          "type": "array"
+          "type": "array",
+          "$comment": "legacy field — pre-E4 plans may use this"
+        },
+        "structural_checks": {
+          "type": "array",
+          "$comment": "optional — added in E4",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id":     { "type": "string" },
+              "status": { "type": "string", "enum": ["pass", "observe", "unverifiable", "fail"] },
+              "detail": { "type": "string" }
+            }
+          }
+        },
+        "lens_findings": {
+          "type": "array",
+          "$comment": "optional — added in E4",
+          "items": {
+            "type": "object",
+            "properties": {
+              "lens":    { "type": "string" },
+              "verdict": { "type": "string", "enum": ["found", "clean", "absent"] },
+              "count":   { "type": "integer" }
+            }
+          }
+        },
+        "lens_dispatch_observed": {
+          "type": "string",
+          "$comment": "optional — format: '{found}/5', e.g. '3/5'"
+        },
+        "findings": {
+          "type": "array",
+          "$comment": "optional — aggregated findings from all checks/lenses"
         }
       }
     }

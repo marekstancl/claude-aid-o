@@ -1,0 +1,44 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "contract_manifest",
+  "producer": "aid-c0-contract.sh@1.0",
+  "created_at": "TIMESTAMP_PLACEHOLDER",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "PROJECT_ID_PLACEHOLDER"
+  },
+  "subject": {
+    "subject_hash": "SUBJECT_HASH_PLACEHOLDER"
+  },
+  "revision": {
+    "head_sha": "HEAD_SHA_PLACEHOLDER",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pending",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c0-contract.sh"
+  },
+  "contract_manifest": {
+    "bindings": [
+      {
+        "producer": "step_1",
+        "consumer": "step_2",
+        "field": "output",
+        "status": "pending",
+        "provenance": "plan_dependency",
+        "hash": "sha256:7e234b09deecd91c5cc29c399d624e8554506788095757b06f328b33367e2e0e"
+      }
+    ],
+    "consumption_proof": {
+      "state": "pending_slot",
+      "authoritative_phase": "E5"
+    },
+    "manifest_hash": "sha256:12744ec556d5c6d00b57fe40b458a3e33f17025956a2bf35382a1c87f18486b9"
+  }
+}

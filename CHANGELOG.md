@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.43.0] — 2026-06-28
+
+### Added
+- **C0 Plan Contract Gate** — observe-only gate layer running in `aid-auto-pipeline.sh` after plan-graph extraction, producing `plan-graph.json`, `contract-manifest.json`, and `plan-review.json` with 5 semantic lenses (observe, E10 promotion target)
+- **Shared Kahn topo-sort lib** — `scripts/lib/aid-plan-graph.sh` with `build_plan_graph` function and deterministic `topological_order` output; `aid-epic-to-json.sh` refactored to use it
+- **C0 QA harness** — `test-c0-contract.sh` with 66 assertions across 7 fixture sets (clean, cycle, dup-id, p045-style, per-lens, blocking-mode, clean-low-risk)
+
 ## [2.42.1] — 2026-06-28
 
 ### Added

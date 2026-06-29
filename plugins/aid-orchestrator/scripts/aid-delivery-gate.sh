@@ -202,6 +202,7 @@ PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
 # Read policy settings
 BLOCK_ON_UNVERIFIABLE="$(yq e '.block_on_unverifiable // true' "$POLICY_FILE" 2>/dev/null)"
 OUTPUT_PREVIEW_LINES="$(yq e '.output_preview_lines // 80' "$POLICY_FILE" 2>/dev/null)"
+ENFORCEMENT_MODE="$(yq e '.enforcement // "observe"' "$POLICY_FILE" 2>/dev/null)"
 
 # Read skip_reason_allowlist
 mapfile -t SKIP_REASON_ALLOWLIST < <(yq e '.skip_reason_allowlist[]' "$POLICY_FILE" 2>/dev/null)
@@ -726,6 +727,7 @@ DG_PAYLOAD_FOR_HASH="$(jq -n \
   --argjson skip_count "$COUNT_SKIP" \
   --argjson unverifiable_count "$COUNT_UNVERIFIABLE" \
   --argjson would_block "$WOULD_BLOCK" \
+  --arg enforcement "$ENFORCEMENT_MODE" \
   '{
     "phase": $phase,
     "profile": $profile,
@@ -738,7 +740,8 @@ DG_PAYLOAD_FOR_HASH="$(jq -n \
       "fail": $fail_count,
       "skip": $skip_count,
       "unverifiable": $unverifiable_count,
-      "would_block": $would_block
+      "would_block": $would_block,
+      "enforcement": $enforcement
     }
   }')"
 
