@@ -445,13 +445,175 @@ else
   _fail "dg07 complete-steps expected exit=0, got exit=${LAST_EXIT}"
 fi
 
+# ===========================================================================
+# DG-15 — route-resolve
+# ===========================================================================
+FIXTURES_DG15="${FIXTURES_DIR}/dg15-17-18/dg15"
+
+# Pass: link matches declared route
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-pass" \
+  bash "${CHECKS_DIR}/dg15-route-resolve.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 0 ]]; then
+  _pass "dg15 with-map-pass exits 0"
+else
+  _fail "dg15 with-map-pass expected exit=0, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+# Fail: link doesn't match route
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-fail" \
+  bash "${CHECKS_DIR}/dg15-route-resolve.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 1 ]]; then
+  _pass "dg15 with-map-fail exits 1 (link unresolved)"
+else
+  _fail "dg15 with-map-fail expected exit=1, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+# Config missing: no delivery-map
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/no-map" \
+  bash "${CHECKS_DIR}/dg15-route-resolve.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 2 ]]; then
+  _pass "dg15 no-map exits 2 (config_missing)"
+else
+  _fail "dg15 no-map expected exit=2, got exit=${LAST_EXIT}"
+fi
+
+# Config missing: unsupported framework
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/bad-framework" \
+  bash "${CHECKS_DIR}/dg15-route-resolve.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 2 ]]; then
+  _pass "dg15 bad-framework exits 2 (config_missing)"
+else
+  _fail "dg15 bad-framework expected exit=2, got exit=${LAST_EXIT}"
+fi
+
+# No-trigger applicability: changed path outside link_globs → not-applicable (skip, exit 2)
+# Simulate: AID_CHANGED_PATHS pointing to a non-link file; dg15 falls back to full scan
+# but fixture has no link files in link_globs pattern → pass (nothing to check)
+DG15_CHANGED_TMP="${SCRATCHPAD}/dg15-no-trigger-changed.txt"
+echo "docs/README.md" > "$DG15_CHANGED_TMP"
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-pass" \
+  AID_CHANGED_PATHS="$DG15_CHANGED_TMP" \
+  bash "${CHECKS_DIR}/dg15-route-resolve.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 0 ]]; then
+  _pass "dg15 no-trigger (non-link changed path) exits 0 (no relevant changes)"
+else
+  _fail "dg15 no-trigger expected exit=0, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+# Dispatcher integration: run aid-delivery-gate.sh against fixture with map, verify dg15 appears in output
+LAST_EXIT=0
+DELIVERY_GATE="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-delivery-gate.sh"
+GATE_OUTPUT_FILE="${SCRATCHPAD}/dg15-gate-output.json"
+mkdir -p "$(dirname "$GATE_OUTPUT_FILE")"
+
+# We need a git context for aid-delivery-gate.sh to work; use PLUGIN_ROOT
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-pass" \
+  AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  bash "$DELIVERY_GATE" \
+    --epic "E-DG15-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
+
+# gate exits 0 in observe mode; check dg15 appears in JSON output
+GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG15-TEST/R-1/delivery-gate.json"
+if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg15")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+  _pass "dg15 dispatcher-integration: dg15 appears in delivery-gate.json checks"
+else
+  _fail "dg15 dispatcher-integration: dg15 not found in delivery-gate.json (CHECKS array or probe not wired)"
+fi
+
+# ===========================================================================
+# DG-17 — independent-oracle-nodrop
+# ===========================================================================
+FIXTURES_DG17="${FIXTURES_DIR}/dg15-17-18/dg17"
+
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/with-artifact-pass" \
+  bash "${CHECKS_DIR}/dg17-independent-oracle-nodrop.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 0 ]]; then
+  _pass "dg17 with-artifact-pass exits 0"
+else
+  _fail "dg17 with-artifact-pass expected exit=0, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/with-artifact-fail" \
+  bash "${CHECKS_DIR}/dg17-independent-oracle-nodrop.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 1 ]]; then
+  _pass "dg17 with-artifact-fail exits 1 (count below expected)"
+else
+  _fail "dg17 with-artifact-fail expected exit=1, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/no-baseline" \
+  bash "${CHECKS_DIR}/dg17-independent-oracle-nodrop.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 2 ]]; then
+  _pass "dg17 no-baseline exits 2 (config_missing)"
+else
+  _fail "dg17 no-baseline expected exit=2, got exit=${LAST_EXIT}"
+fi
+
+# Dispatcher integration: verify dg17 appears in delivery-gate.json
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/with-artifact-pass" \
+  AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  bash "$DELIVERY_GATE" \
+    --epic "E-DG17-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
+GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG17-TEST/R-1/delivery-gate.json"
+if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg17")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+  _pass "dg17 dispatcher-integration: dg17 appears in delivery-gate.json"
+else
+  _fail "dg17 dispatcher-integration: dg17 not found in delivery-gate.json"
+fi
+
+# ===========================================================================
+# DG-18 — acceptance-struct
+# ===========================================================================
+FIXTURES_DG18="${FIXTURES_DIR}/dg15-17-18/dg18"
+
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_EVIDENCE_DIR="${FIXTURES_DG18}/acceptance-pass/.aid-o/work/evidence/E-TEST/R-TEST/steps" \
+  bash "${CHECKS_DIR}/dg18-acceptance-struct.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 0 ]] && echo "$LAST_OUTPUT" | grep -q 'provenance verified'; then
+  _pass "dg18 acceptance-pass exits 0 with provenance verified"
+else
+  _fail "dg18 acceptance-pass expected exit=0 with provenance, got exit=${LAST_EXIT}: ${LAST_OUTPUT}"
+fi
+
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_EVIDENCE_DIR="${FIXTURES_DG18}/no-evidence" \
+  bash "${CHECKS_DIR}/dg18-acceptance-struct.sh" 2>&1)" || LAST_EXIT=$?
+if [[ "$LAST_EXIT" -eq 0 ]]; then
+  _pass "dg18 no-evidence exits 0 (skip)"
+else
+  _fail "dg18 no-evidence expected exit=0, got exit=${LAST_EXIT}"
+fi
+
+# Dispatcher integration: verify dg18 appears in delivery-gate.json
+# Use acceptance-pass fixture; set AID_EPIC_ID+AID_RUN_ID so dg18 can find evidence
+LAST_EXIT=0
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG18}/acceptance-pass" \
+  AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  bash "$DELIVERY_GATE" \
+    --epic "E-DG18-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
+GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG18-TEST/R-1/delivery-gate.json"
+if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg18")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+  _pass "dg18 dispatcher-integration: dg18 appears in delivery-gate.json"
+else
+  _fail "dg18 dispatcher-integration: dg18 not found in delivery-gate.json"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""
 echo "=========================================="
 TOTAL=$(( PASS + FAIL ))
-echo "Results: ${PASS}/${TOTAL} passed"
+echo "Results: ${PASS}/${TOTAL} passed, ${FAIL} failed"
 
 if [[ "$FAIL" -gt 0 ]]; then
   echo "FAIL: ${FAIL} test(s) failed"

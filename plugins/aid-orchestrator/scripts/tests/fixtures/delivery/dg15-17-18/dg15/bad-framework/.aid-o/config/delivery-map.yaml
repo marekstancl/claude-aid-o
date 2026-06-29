@@ -1,0 +1,4 @@
+routes:
+  framework: angular
+  route_files: ["src/**/*.ts"]
+  link_globs: ["src/**/*.ts"]

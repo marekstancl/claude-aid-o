@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 203          # granular registry rows; inventory groups some as ~177 E-ids
+  enforcements: 258          # granular registry rows; updated E6 (was 203, actual was 255 pre-E6, +3 DG-15/17/18 = 258)
   mapped_with_verdict: 92    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
   mapping_pending: 111       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
   verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 111}
@@ -756,3 +756,44 @@ enforcements:
     deferred_by: "E-054-1_1"
     deferred_reason: "E5 observe-only; state=unresolvable → blocking in E10"
     description: "consumption-proof state=unresolvable on bindings without evidence; blocking deferred to E10"
+
+  # ── E6 C1 Delivery Probes (aid-delivery-gate.sh) ─────────────────────────
+  - id: DG-15-route-resolve
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg15-route-resolve.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "literal link vs declared route resolution; react-router/express; observe mode E6"
+
+  - id: DG-17-independent-oracle-nodrop
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg17-independent-oracle-nodrop.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: fail
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "analytics output cardinality vs declared baseline; no-drop guarantee; observe mode E6"
+
+  - id: DG-18-acceptance-struct
+    type: out-of-band
+    source: scripts/lib/delivery-checks/dg18-acceptance-struct.sh
+    instruction: C1 engine invokes via aid-delivery-gate.sh, phase D0
+    severity: advisory
+    surface: delivery-gate
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "acceptance provenance adapter; reads FSM step-verify evidence; never fails"
+    note: "provenance-only, never fails"

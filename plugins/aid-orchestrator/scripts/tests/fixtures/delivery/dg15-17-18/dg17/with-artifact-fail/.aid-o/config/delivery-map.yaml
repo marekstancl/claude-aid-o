@@ -1,0 +1,5 @@
+oracle_baselines:
+  events_log:
+    analytics_output_file: "data/events.json"
+    expected_cardinality: 10
+    cardinality_method: jq_length
