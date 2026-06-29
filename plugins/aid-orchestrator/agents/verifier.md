@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-29
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -211,3 +211,59 @@ behavior_trace_count: 0
 behavior_trace_required: false
 behavior_trace_skip_reason: "no handler patterns in diff — docs/config only"
 ```
+
+---
+
+## C2 Dual-Emit Protocol
+
+When dispatched with a `c2_mode` field in task input (`local|wiring|behavior|final`), the verifier produces TWO outputs:
+
+### Output 1 (UNCHANGED): `.md` gate file
+Write to the NORMAL output file (verifier-output-step-N.md / verifier-output-cp3-{focus}.md) in the EXACT SAME FORMAT as today. The FSM gate reads this file — format must not change.
+
+### Output 2 (NEW): `semantic-review-{mode}.json`
+After writing the .md file, ALSO write `semantic-review-{c2_mode}.json` to the evidence directory (`evidence/{epic_id}/{run_id}/`):
+
+```json
+{
+  "artifact_type": "semantic_review",
+  "semantic_review": {
+    "mode": "<c2_mode>",
+    "profile_hash": "<echo from review-profile if provided, else omit>",
+    "lenses_run": ["<lens IDs that were applied>"],
+    "findings": [
+      {
+        "fingerprint": "sha256:<64hex>",
+        "severity": "critical|high|medium|low|info",
+        "lens": "<lens_id>",
+        "check_id": "<RD-001 etc>",
+        "target_path": "<file>",
+        "finding_class": "<class>",
+        "status": "open",
+        "detail": "<explanation>"
+      }
+    ]
+  }
+}
+```
+
+**Fingerprint computation:** For each finding, compute using `aid-finding-fingerprint.sh`:
+```
+fingerprint <project_id> semantic_review <check_id> <target_path> <finding_class>
+```
+where `project_id` comes from `aid-fsm.sh get-field epic_id <state_file>` (or from task input).
+
+**Merge:** If multiple lens runs produced findings for same fingerprint, use `aid-finding-merge.sh merge_findings` to merge them before writing.
+
+**Gate unchanged (D1):** The FSM reads ONLY the `.md` file. The JSON is additive evidence — not read by `aid-fsm.sh` or `aid-prefilter.sh`. Do NOT modify those scripts.
+
+**Dispatch_observed:** After emitting, note in the .md file under `## C2 Semantic Evidence` section:
+```
+c2_semantic_emitted: true
+c2_mode: <mode>
+c2_evidence_path: evidence/{epic_id}/{run_id}/semantic-review-{mode}.json
+```
+(This goes at end of the .md file, after all required gate fields — does not affect gate parsing since gate reads specific line-start fields only.)
+
+### When c2_mode is absent
+If task input has no `c2_mode` field, skip C2 dual-emit entirely. Normal .md output only. Existing behavior is unchanged.

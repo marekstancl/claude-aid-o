@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-06-28
+**Last Updated:** 2026-06-29
 
 ## False-Green Guardrails
 
@@ -239,3 +239,54 @@ Each lens writes to `.aid-o/work/evidence/{plan_id}/c0/c0-lens-{name}.md` and MU
 **Output file:** `c0-lens-authority_runtime_matrix.md`
 **Required fields:** `stop_rule_blockers:` (line-start), `findings:`, `confidence:`
 **Observe semantics:** advisory in E4
+
+## C2 Semantic Review — Lens Catalog
+
+C2 produces auditovatelnou semantic evidence alongside the existing `.md` gate output (dual-emit, D1).
+Evidence format: `semantic-review-{mode}.json` wrapping findings via `aid-finding-merge.sh`.
+
+### 4-Mode Dispatch Contract
+
+| Mode | When dispatched | Typical trigger |
+|------|----------------|-----------------|
+| `local` | CP2 (per-step, contract/high-risk steps) | Pre-filter classification RUN on step diff |
+| `wiring` | First runnable assembly slice | At least 2 inter-step contracts exist in diff + wiring surface detected |
+| `behavior` | Feature-complete assembly point | All core behavior paths present in diff |
+| `final` | CP3 (full EPIC diff) | EXECUTE→GATES transition |
+
+**No-mega-prompt rule (D2):** Verifier dispatches C2 with a profile-selected subset of lenses, not all 12 at once. The `review-profile.required_lenses[]` field governs which lenses run per dispatch.
+
+### 12 C2 Semantic Lenses
+
+These lenses are SEMANTIC (C2). Shape/wire/structural checks are C1 (E6) — NOT C2 lenses (D4).
+
+| Lens ID | Name | Mode(s) | FC | What it checks |
+|---------|------|---------|-----|----------------|
+| `requirement_test_drift` | Requirement/test drift | local, final | FC-28 | Test changes approved contract/status (e.g. 403→401 without PM approval) |
+| `transaction_boundary` | Transaction boundary | behavior, wiring | FC-24 | Cleanup wraps commit correctly; MinIO/SQL transaction order |
+| `field_lineage` | Field lineage | behavior, wiring | FC-25 | Field derived from request is persisted/propagated to storage and read path |
+| `negative_case` | Negative case coverage | final | FC-26 | Prohibition invariants have negative tests; "accepted when should be rejected" |
+| `operation_order_resource_bound` | Operation order / resource bound | behavior, wiring | FC-27 | Size/MIME guards fire before full read; operation ordering correct |
+| `false_empty_distinction` | False empty distinction | behavior, wiring | FC-32 | Error/offline/not-found/empty remain semantically distinct; no broad catch converts failure to false empty |
+| `ac_to_test_identity` | AC-to-test identity | final | FC-31 | Tests are falsifiable claims for ACs; scenarios not silently replaced |
+| `contract_consumption` | Contract consumption | local | FC-09 | Contracts from brainstorm/Writer don't get lost to implementor |
+| `fallback_resilience` | Fallback resilience | behavior, final | — | Fallbacks tested by forcing primary failure; degradation and recovery observable |
+| `integration_oracle` | Integration oracle | behavior, final | — | Output compared with independent oracle; negative mutation proof present |
+| `ui_lifecycle` | UI lifecycle | behavior | FC-30 | Modal/component close/reopen retains or correctly resets state |
+| `frontend_user_outcome` | Frontend user outcome | behavior | FC-35 | Looks correct over real data, not mocked; user-visible outcomes verified |
+
+**C1/structural checks excluded (D4):** Delivery gate presence, producer-consumer file contracts, build config resolution, route registration, import resolution — these belong to C1/E6, not C2.
+
+### Lens Output per Finding
+
+Each C2 finding carries:
+```yaml
+fingerprint: "sha256:<64hex>"  # aid-finding-fingerprint.sh fingerprint <project_id> semantic_review <check_id> <target_path> <finding_class>
+severity: critical|high|medium|low|info
+lens: <lens_id from table above>
+check_id: "<string>"   # short ID like RD-001, TX-001 etc.
+target_path: "<file path being analyzed>"
+finding_class: "<category string>"
+status: open|resolved|deferred
+detail: "<human-readable explanation>"
+```
