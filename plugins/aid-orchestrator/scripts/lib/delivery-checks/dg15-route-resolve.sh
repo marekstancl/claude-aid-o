@@ -190,8 +190,8 @@ fi
 strip_query_fragment() {
   local path="$1"
   # Remove ?... and #...
-  path="${path%%?*}"
-  path="${path%%#*}"
+  path="${path%%\?*}"
+  path="${path%%\#*}"
   echo "$path"
 }
 
