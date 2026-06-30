@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/frontend-user-outcome-contract.schema.json",
+  "title": "AID Frontend User Outcome Contract",
+  "$comment": "C2 lens content for frontend_user_outcome (FC-35). Row registered in review-checkpoint-contracts.md. Dispatch: observe (C2 -> E10, not blocking in E7, D5).",
+  "description": "Defines the expected user-visible outcomes for a frontend feature. Used by C2 semantic review to verify user-facing behavior over real data.",
+  "type": "object",
+  "properties": {
+    "persona": {
+      "type": "string",
+      "description": "Target user type -- who this feature serves (e.g. 'logged-in customer', 'PM reviewing plan')"
+    },
+    "user_questions": {
+      "type": "array",
+      "description": "1-5 questions the user should be able to answer using this UI",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 5
+    },
+    "actions": {
+      "type": "array",
+      "description": "User-visible actions enabled by this feature (e.g. 'submit form', 'view dashboard')",
+      "items": { "type": "string" }
+    },
+    "data_oracle": {
+      "type": "object",
+      "description": "Source of truth for verifying user-visible data correctness",
+      "properties": {
+        "source": { "type": "string", "description": "Where to fetch expected data (e.g. API endpoint, DB query)" },
+        "comparison": { "type": "string", "description": "How to compare UI output to oracle (e.g. 'field equality', 'contains subset')" }
+      },
+      "additionalProperties": true
+    },
+    "significant_states": {
+      "type": "array",
+      "description": "UI states that must be tested separately",
+      "items": {
+        "type": "string",
+        "enum": ["loading", "empty", "partial", "error"]
+      }
+    },
+    "success": {
+      "type": "string",
+      "description": "One-sentence definition of what 'works correctly' means for this feature"
+    }
+  },
+  "required": ["persona", "user_questions", "actions", "data_oracle", "significant_states", "success"],
+  "additionalProperties": false
+}
