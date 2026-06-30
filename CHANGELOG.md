@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.45.0] — 2026-06-29
+## [2.46.0] — 2026-06-30
 
 ### Added
 - **DG-15 Route Resolve** — Literal link vs declared route-files probe (react-router/express); opt-in via delivery-map.yaml routes section; config_missing when framework unsupported or map absent
