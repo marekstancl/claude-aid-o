@@ -1,0 +1,21 @@
+contract_id: fixture-D-mobile-screeng
+version: "1.0.0"
+viewport:
+  width: 375
+  height: 812
+target:
+  id: screeng-root
+  selector: "[data-testid=\"hermetic-box\"]"
+  api_mocks:
+    - url_pattern: "/api/projects"
+      method: GET
+      status: 200
+      body: '{"projects":[{"id":1,"name":"Test Project"}]}'
+      content_type: "application/json"
+    - url_pattern: "/api/brief"
+      method: GET
+      status: 200
+      body: '{"brief":"Test brief content"}'
+      content_type: "application/json"
+  presence:
+    state: visible

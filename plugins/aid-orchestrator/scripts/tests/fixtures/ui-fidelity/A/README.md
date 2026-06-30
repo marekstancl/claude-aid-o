@@ -1,0 +1,1 @@
+Case A: synthetic button color change — PASS case verifying `positive_delta` and `rest_lock` with a single approved `color` property update from `#333333` to `#0066cc`.

@@ -14,3 +14,9 @@
 
 # Legacy v1 structure
 .aid-o/04-engine/
+
+# UI fidelity runtime outputs (capture sessions, not fixture data)
+.aid-o/work/**/ui/
+
+# lib/ui-fidelity node_modules
+lib/ui-fidelity/node_modules/

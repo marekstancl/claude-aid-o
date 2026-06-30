@@ -1,0 +1,29 @@
+{
+  "verdict": "pass",
+  "contract_id": "fixture-D-desktop-screeng",
+  "target_id": "screeng-root",
+  "checks": {
+    "positive_delta": {
+      "pass": true,
+      "skipped": false,
+      "findings": []
+    },
+    "rest_lock": {
+      "pass": true,
+      "skipped": false,
+      "findings": []
+    },
+    "locked_crops": {
+      "pass": true,
+      "findings": []
+    },
+    "affected_reflow": {
+      "pass": true,
+      "findings": []
+    },
+    "outside_mask": {
+      "pass": true,
+      "findings": []
+    }
+  }
+}
