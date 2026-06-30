@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.50.0] — 2026-06-30
+
+### Added
+- **E7B existing_ui wiring** — Full pipeline support for modifying existing UI: `visual-companion/SKILL.md` phase-aware baseline capture, `role-cards.md` ui_change_contract constraint, `agent-protocol.md` branched reading order, `pipeline.md` envelope injection + mechanical verdict via `ui-compare.mjs`
+- **ui_change_contract envelope transport** — `plan-writing.md` positive assertion rule; `aid-plan-to-epic.sh` encodes per-step contracts into EPIC HTML comments; `aid-epic-to-json.sh` decodes into `steps[].ui_change_contract` (T4 round-trip test proves chain)
+- **FSM existing_ui guard** — `aid-fsm.sh cmd_increment_step` blocks with `frontend_visual_fidelity_block` when `ui_change_mode: existing_ui` and `steps/{id}/ui/verdict.json` is absent or result != pass; step-local only (D6 — delivery-gate/C4 aggregation deferred to E9)
+- **ui_change_mode + ui_change_contract step fields** — `plan.schema.json` extended; `companion` added to `visual_assets.source_type` enum
+- **ui-fidelity.schema.json result field** — `result: pass|fail|unverifiable` and `result_detail` added to verdict sub-document
+- **frontend-user-outcome-contract.schema.json** — C2 lens schema for `frontend_user_outcome` (FC-35): persona, user_questions (1-5), actions, data_oracle, significant_states, success
+- **`/aid-do` existing_ui redirect** — detects `--ui` flag or `existing_ui` in description, refuses with redirect to `/aid-run` (contract enforcement required); `--no-ui-check` bypass documented
+- **test-fsm-ui-fidelity.sh** — 3 runtime tests: pass/fail/absent verdict; all 3 confirm guard fires (P026 pattern avoided)
+- **test-ui-fidelity-e2e.sh** — 4 scenarios (happy/un-applied/collateral/capture-absent) + Playwright skip guard (exit 0 with message when browsers absent)
+
+### Changed
+- **enforcement-registry.yaml** — Added `frontend_visual_fidelity_block` row (entry 259); instruction now references `pipeline.md §4`
+- **test-epic-to-json-regression.sh** — T4 added: full round-trip for existing_ui envelope
+- **plan.schema.json golden** — `ui_change_mode: null, ui_change_contract: null` added to step objects
+
 ## [2.46.0] — 2026-06-30
 
 ### Added

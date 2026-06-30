@@ -6,8 +6,6 @@ user_invocable: false
 
 # Agent Protocol
 
-**Last Updated:** 2026-06-30
-
 Universal boilerplate for all AID agents. Every agent dispatched by the AID orchestrator
 reads this file. Role-specific behavior is in `skills/role-cards.md`.
 
