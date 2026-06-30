@@ -47,7 +47,7 @@ mechanisms:
       - {id: removed_dependency_import, required_when: dependency_removed}
       - {id: public_contract_consumer_compile, required_when: public_contract_changed}
       - {id: runtime_startup_smoke, required_when: bootstrap_or_framework_changed}
-      - {id: route_resolve, required_when: router_or_links_changed}
+      - {id: dg15, required_when: router_or_links_changed}
       - {id: build_config_resolve, required_when: build_config_changed}
       - {id: production_reachability, required_when: feature_or_provider_added}    # DG-13
       - {id: wire_shape_deterministic, required_when: cross_layer_boundary_changed} # DG-14 deterministic part

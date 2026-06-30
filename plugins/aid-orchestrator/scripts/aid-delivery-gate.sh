@@ -49,11 +49,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-delivery-profile.sh"
 # shellcheck source=lib/aid-finding-fingerprint.sh
 source "${SCRIPT_DIR}/lib/aid-finding-fingerprint.sh"
+# shellcheck source=lib/aid-delivery-map.sh
+source "${SCRIPT_DIR}/lib/aid-delivery-map.sh"
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-readonly CHECKS=(dg01 dg02 dg03 dg04 dg05 dg06 dg07 dg08 dg09 dg10 dg11 dg12)
+readonly CHECKS=(dg01 dg02 dg03 dg04 dg05 dg06 dg07 dg08 dg09 dg10 dg11 dg12 dg15 dg17 dg18)
 readonly CHECK_SCRIPT_DIR="${SCRIPT_DIR}/lib/delivery-checks"
 readonly PRODUCER="aid-delivery-gate@2.0"
 readonly SCHEMA_VERSION="aid-2.0"
@@ -111,6 +113,16 @@ for _req_arg in EPIC_ID RUN_ID BASE_SHA PHASE; do
   fi
 done
 
+# Validate EPIC_ID and RUN_ID to prevent path traversal
+if ! [[ "$EPIC_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: EPIC_ID contains invalid characters: '${EPIC_ID}'" >&2
+  exit 1
+fi
+if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "ERROR: RUN_ID contains invalid characters: '${RUN_ID}'" >&2
+  exit 1
+fi
+
 if [[ "$PHASE" != "D0" && "$PHASE" != "D1" ]]; then
   echo "ERROR: --phase must be D0 or D1, got: ${PHASE}" >&2
   exit 1
@@ -159,6 +171,12 @@ else
   EVIDENCE_BASE="${PROJECT_ROOT}/.aid-o/work/evidence"
 fi
 
+# Validate EVIDENCE_BASE: must not contain whitespace (prevents path splitting)
+if [[ "$EVIDENCE_BASE" =~ [[:space:]] ]]; then
+  echo "ERROR: EVIDENCE_BASE contains whitespace: '${EVIDENCE_BASE}'" >&2
+  exit 1
+fi
+
 OUTPUT_DIR="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
 OUTPUT_FILE="${OUTPUT_DIR}/delivery-gate.json"
 PROJECT_ID="$(basename "$PROJECT_ROOT")"  # must be set before findings[] loop at line ~648
@@ -193,11 +211,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Resolve profile
+# AID_DELIVERY_PROFILE env var overrides auto-detection (test hook).
 # ---------------------------------------------------------------------------
-PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
-  echo "ERROR: resolve_profile failed" >&2
-  exit 1
-}
+if [[ -n "${AID_DELIVERY_PROFILE:-}" ]]; then
+  PROFILE="${AID_DELIVERY_PROFILE}"
+else
+  PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
+    echo "ERROR: resolve_profile failed" >&2
+    exit 1
+  }
+fi
 
 # Read policy settings
 BLOCK_ON_UNVERIFIABLE="$(yq e '.block_on_unverifiable // true' "$POLICY_FILE" 2>/dev/null)"
@@ -261,8 +284,10 @@ _changed_paths_match() {
   while IFS= read -r changed_path; do
     [[ -z "$changed_path" ]] && continue
     for pattern in "${patterns[@]}"; do
+      # Validate pattern contains no whitespace (glob patterns should be single tokens)
+      if [[ "$pattern" =~ [[:space:]] ]]; then continue; fi
       # Use bash glob matching (extglob-safe)
-      # shellcheck disable=SC2254
+      # shellcheck disable=SC2254 — intentional glob matching (not literal)
       case "$changed_path" in
         $pattern) return 0 ;;
       esac
@@ -296,6 +321,56 @@ _has_authority_surface() {
 
   [[ -z "$changed_file" || ! -f "$changed_file" ]] && return 1
   grep -qE '\.(yaml|yml|json)$' "$changed_file"
+}
+
+# _map_section_globs(area) → 0=changed paths match globs from delivery-map section, 1=no match
+# Section must exist. If it does and CHANGED_PATHS_FILE provided, extracts all string values
+# from arrays in the section (recursive) and matches using bash glob (not regex).
+# Falls back to: section exists + no CHANGED_PATHS_FILE → applicable.
+_map_section_globs() {
+  local area="$1"
+
+  # Section must exist in delivery-map
+  local section_json
+  section_json="$(AID_PROJECT_ROOT="${PROJECT_ROOT}" get_section "$area" 2>/dev/null)" || return 1
+
+  # No changed paths file → section exists, applicable
+  local changed_file="${CHANGED_PATHS_FILE:-}"
+  [[ -z "$changed_file" || ! -f "$changed_file" ]] && return 0
+
+  # Collect all string values from arrays in the section (recursive descent)
+  local all_globs
+  all_globs="$(echo "$section_json" | jq -r '[.. | arrays | .[]? | strings] | .[]' 2>/dev/null)"
+
+  if [[ -z "$all_globs" ]]; then
+    # Section has no array globs → existence alone makes it applicable
+    return 0
+  fi
+
+  # Match changed paths against globs using bash case (true glob matching, not regex)
+  while IFS= read -r changed_path; do
+    [[ -z "$changed_path" ]] && continue
+    while IFS= read -r pattern; do
+      [[ -z "$pattern" ]] && continue
+      # Validate pattern contains no whitespace (glob patterns should be single tokens)
+      if [[ "$pattern" =~ [[:space:]] ]]; then continue; fi
+      # shellcheck disable=SC2254 — intentional glob matching (not literal)
+      case "$changed_path" in
+        $pattern) return 0 ;;
+      esac
+    done <<< "$all_globs"
+  done < "$changed_file"
+
+  return 1
+}
+
+# _has_acceptance_evidence() → 0=step-*-verify.md files exist in evidence dir, 1=no evidence
+# Uses EVIDENCE_BASE global (always absolute, computed at script init from AID_EVIDENCE_BASE or PROJECT_ROOT).
+_has_acceptance_evidence() {
+  local evidence_dir="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
+
+  # Check if any step-*-verify.md exists (FSM writes them to run root, not steps/)
+  ls "${evidence_dir}"/step-*-verify.md >/dev/null 2>&1
 }
 
 # ---------------------------------------------------------------------------
@@ -380,6 +455,20 @@ _check_applicable() {
     has_auth="$(echo "$cond_json" | jq -r '.has_authority_surface // false')"
     if [[ "$has_auth" == "true" ]]; then
       _has_authority_surface "${CHANGED_PATHS_FILE:-}" && return 0
+    fi
+
+    # Check map_section_globs
+    local msg
+    msg="$(echo "$cond_json" | jq -r '.map_section_globs // empty')"
+    if [[ -n "$msg" ]]; then
+      _map_section_globs "$msg" && return 0
+    fi
+
+    # Check has_acceptance_evidence
+    local hae
+    hae="$(echo "$cond_json" | jq -r '.has_acceptance_evidence // false')"
+    if [[ "$hae" == "true" ]]; then
+      _has_acceptance_evidence && return 0
     fi
   done
 
@@ -517,7 +606,10 @@ _run_check() {
   # 5. Find check script
   # -------------------------------------------------------------------------
   # Determine script filename: dg<N>-<name>.sh (e.g. dg01-dependency-consistency.sh)
-  local check_script="${CHECK_SCRIPT_DIR}/${check_id}-${check_name}.sh"
+  # Use basename to prevent directory traversal in check_name
+  local safe_check_name
+  safe_check_name="$(basename "$check_name")"
+  local check_script="${CHECK_SCRIPT_DIR}/${check_id}-${safe_check_name}.sh"
 
   if [[ ! -f "$check_script" ]]; then
     COUNT_UNVERIFIABLE=$(( COUNT_UNVERIFIABLE + 1 ))
@@ -550,6 +642,7 @@ _run_check() {
     AID_RUN_ID="$RUN_ID" \
     AID_BASE_SHA="$BASE_SHA" \
     AID_CHANGED_PATHS="${CHANGED_PATHS_FILE:-}" \
+    AID_EVIDENCE_BASE="$EVIDENCE_BASE" \
     timeout "$timeout_seconds" \
     "$check_script" "${check_argv[@]}" 2>&1)" || check_exit=$?
   _t_end=$(date +%s%3N 2>/dev/null || date +%s)

@@ -160,3 +160,11 @@ precondition test. Remaining, deferred:
 - **GitHub Actions Node 20 → 24** — `actions/checkout@v4` + `actions/setup-node@v4` run on Node 20,
   which GitHub force-migrates to Node 24 on 2026-06-16 (~12 days out) and removes 2026-09-16. Bump to
   the @v5 actions (or pin FORCE_JAVASCRIPT_ACTIONS_TO_NODE24) before then. Currently warnings only.
+
+## E6 Deferred (P055 honest-minimal)
+
+- **DG-13 Reachability Analysis** — Requires AST/runtime tooling to reliably detect unreachable routes; heuristic grep approach rejected (false-positive risk). Deferred to AST tooling foundation phase.
+- **DG-14 Wire Shape** — Deterministic cross-layer type contract verification requires AST; deferred.
+- **DG-16 Fallback Invocation** — Call-graph analysis needed to verify fallback retry/reconnect coverage; deferred.
+- **Living Contract Enforcement** — map_drift + C0 preflight + delivery_areas substrate; requires dedicated delivery-map schema/setup phase before enforcement can be meaningful.
+- **aid-init delivery-map proposal** — Auto-generate skeleton delivery-map.yaml during `/aid-init`; deferred pending living-contract design.

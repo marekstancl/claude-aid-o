@@ -3,6 +3,19 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.46.0] — 2026-06-30
+
+### Added
+- **DG-15 Route Resolve** — Literal link vs declared route-files probe (react-router/express); opt-in via delivery-map.yaml routes section; config_missing when framework unsupported or map absent
+- **DG-17 Independent Oracle No-Drop** — Analytics output cardinality vs declared baseline; requires analytics_output_file + expected_cardinality; missing file → config_missing, not fake pass
+- **DG-18 Acceptance Provenance** — FSM step-verify evidence adapter; surfaces acceptance history into delivery-gate.json; never emits fail (provenance-only)
+- **delivery-map.schema.json** — JSON Schema for delivery-map.yaml (meta/routes/oracle_baselines, all optional)
+- **aid-delivery-map.sh** — Accessor library for delivery-map.yaml with pinned exit-code contract (null → exit 2)
+- **map_section_globs + has_acceptance_evidence** — Two new dispatcher condition types in aid-delivery-gate.sh
+
+### Changed
+- **enforcement-registry.yaml** — Added DG-15/17/18 rows (surface: delivery-gate, observe, planned E10); totals.enforcements corrected to 258
+
 ## [2.44.1] — 2026-06-29
 
 ### Fixed

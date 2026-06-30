@@ -627,4 +627,49 @@ To test blocking behavior without waiting for E10:
 SEMANTIC_REVIEW_POLICY=blocking bash scripts/aid-fsm.sh increment-step ...
 ```
 
+---
+
+## Delivery Map Configuration (E6)
+
+The `delivery-map.yaml` file (`.aid-o/config/delivery-map.yaml`) configures opt-in C1 probes for DG-15, DG-17, and DG-18. Without this file, all three probes are skipped (not-applicable).
+
+### Schema
+
+```yaml
+# .aid-o/config/delivery-map.yaml
+meta:
+  status: active        # draft | active | deprecated
+  confidence: high      # low | medium | high
+  stack: react-router+express
+
+routes:
+  framework: react-router   # react-router | express
+  route_files: ["src/routes/**/*.tsx"]
+  link_globs: ["src/**/*.tsx"]
+
+oracle_baselines:
+  events_log:
+    analytics_output_file: "data/events.json"
+    expected_cardinality: 100
+    cardinality_method: jq_length  # jq_length | grep_count
+```
+
+### DG-15 — Route Resolve (literal links only)
+Checks that `<Link to="...">` paths resolve to declared routes. Scope: **literal strings only** — dynamic links (computed values, template literals) are not checked and no false-negative is claimed.
+
+Dynamic links (`to={variable}`, `to={computedPath}`, template literals) are **out of scope** — the probe cannot see them and makes no false-negative claim for those patterns.
+
+### DG-17 — Independent Oracle No-Drop
+Checks that analytics output files meet declared minimum cardinality. Requires `analytics_output_file` and `expected_cardinality` per baseline. Without a file → config_missing (not a fake pass).
+
+### DG-18 — Acceptance Provenance
+Reads FSM step-*-verify.md evidence, surfaces acceptance history into delivery-gate.json. Never emits a fail — skip is handled by the dispatcher.
+
+### What E6 Does NOT Deliver
+- DG-13 (reachability analysis) — requires AST tooling
+- DG-14 (wire shape) — requires AST tooling
+- DG-16 (fallback invocation) — requires call-graph analysis
+- Living-contract enforcement (map_drift, C0 preflight, delivery_areas) — separate schema/setup phase
+- Automatic delivery-map generation (`aid-init` proposal)
+
 **Last Updated:** 2026-06-29
