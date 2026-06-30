@@ -301,4 +301,4 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-30

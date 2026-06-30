@@ -248,14 +248,14 @@ Dispatch prompt contains (in order):
    c. If only PNG: include file paths for agent to Read as confirmation
    d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
    e. Priority: source code > visual-spec.yaml > PNG
-9b. **UI CHANGE CONTRACT** — loaded when step has `ui_change_mode: existing_ui` in plan.json:
+9. **UI CHANGE CONTRACT** — loaded when step has `ui_change_mode: existing_ui` in plan.json:
     a. Extract `step.ui_change_contract` from plan.json (path + sha256 + schema_version)
     b. Read the contract file at `step.ui_change_contract.path`
     c. Inject into agent prompt as `## UI Change Contract` block (verbatim JSON)
     d. If contract file missing or sha256 mismatch → ESCALATION (missing transport artifact)
     e. Also inject `gestalt_approval` object if companion set it (from companion evidence)
 
-9c. **MEMORY CONTEXT** (if `memory.enabled: true` in integrations.yaml):
+10. **MEMORY CONTEXT** (if `memory.enabled: true` in integrations.yaml):
    - Query Qdrant: `qdrant-find` with step objective as query
    - 2-tier injection into agent prompt:
      a. Top 10 results: summary only (~400 tokens)
@@ -264,7 +264,7 @@ Dispatch prompt contains (in order):
    - Graceful skip if Qdrant unavailable (log warning, continue without memory)
    - Include in agent prompt under `## Project Memory Context` heading
 
-10. **E2E CONTEXT** (if step has `role: e2e`):
+11. **E2E CONTEXT** (if step has `role: e2e`):
    - Include ALL previous step outputs (not just last — agent needs full picture)
    - Include `project.yaml` (infra detection: test_cmd, build_cmd, docker-compose path)
    - Include `docker-compose.yml` if exists (services, ports, healthchecks)
@@ -375,7 +375,7 @@ After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
 - [x] AC2 description — PASS (evidence: ...)
 - [ ] AC3 description — FAIL (reason: ...)
 
-## Visual Check (UI steps only — skip if no visual_refs)
+## Visual Check (UI steps only — skip if no visual_refs and no ui_change_mode: existing_ui)
 Mockup: {mockup_path}
 Screenshot: {evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png}
 
