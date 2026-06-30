@@ -1,0 +1,168 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "delivery_gate",
+  "producer": "aid-delivery-gate@2.0",
+  "created_at": "2026-06-30T04:46:34Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "aid-orchestrator",
+    "epic_id": "E-055-1_1",
+    "run_id": "R-E055-1"
+  },
+  "subject": {
+    "subject_hash": "sha256:4da127ae1356ea39565731987fe90f43b7827b1e5fd7e1de45d922fd66421054"
+  },
+  "revision": {
+    "head_sha": "3c65e74a02d6b3fe66a3f4072761c93dd114489a",
+    "base_sha": "23d1b185bc8b9126239549975cf1b01cfe4c68c2",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "fail",
+  "verdict": {
+    "kind": "delivery_ready",
+    "value": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-delivery-gate"
+  },
+  "findings": [],
+  "delivery_gate": {
+    "phase": "D0",
+    "profile": "npm-workspaces+plugin-bash",
+    "freshness": "stale",
+    "delivery_ready": false,
+    "checks": [
+      {
+        "id": "dg01",
+        "name": "dependency-consistency",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg01: running command: npm ls --depth=0 --workspaces\naid-cockpit-workspace@0.1.0 /opt/eco/projects/aid-orchestrator\n├─┬ @aid/contract@0.1.0 -> ./packages/aid-contract\n│ ├── typescript@5.9.3\n│ └── vitest@2.1.9\n├─┬ @aid/gui@0.1.0 -> ./packages/aid-gui\n│ ├── @aid/contract@0.1.0 deduped -> ./packages/aid-contract\n│ ├── @base-ui/react@1.6.0\n│ ├── @playwright/test@1.61.0\n│ ├── @tailwindcss/vite@4.3.1\n│ ├── @tanstack/react-query@5.101.0\n│ ├── @testing-library/jest-dom@6.9.1\n│ ├── @testing-library/react@16.3.2\n│ ├── @types/js-yaml@4.0.9\n│ ├── @types/node@22.20.0\n│ ├── @types/react-dom@19.2.3\n│ ├── @types/react@19.2.17\n│ ├── @vitejs/plugin-react@4.7.0\n│ ├── @vitest/ui@2.1.9\n│ ├── clsx@2.1.1\n│ ├── js-yaml@4.2.0\n│ ├── jsdom@25.0.1\n│ ├── lucide-react@0.400.0\n│ ├── react-dom@19.2.7\n│ ├── react-router-dom@7.18.0\n│ ├── react@19.2.7\n│ ├── recharts@2.15.4\n│ ├── tailwind-merge@2.6.1\n│ ├── tailwindcss@4.3.1\n│ ├── typescript@5.9.3 deduped\n│ ├── vite-plugin-pwa@0.21.2\n│ ├── vite@6.4.3\n│ ├── vitest@2.1.9 deduped\n│ └── zustand@5.0.14\n└─┬ @aid/server@0.1.0 -> ./packages/aid-server\n  ├── @aid/contract@0.1.0 deduped -> ./packages/aid-contract\n  ├── @types/cors@2.8.19\n  ├── @types/express@4.17.25 overridden\n  ├── @types/js-yaml@4.0.9 deduped\n  ├── @types/node@22.20.0 deduped\n  ├── @types/supertest@6.0.3\n  ├── @types/ws@8.18.1\n  ├── chokidar@4.0.3\n  ├── cors@2.8.6\n  ├── express@4.22.2\n  ├── gray-matter@4.0.3\n  ├── js-yaml@4.2.0 deduped\n  ├── lru-cache@10.4.3\n  ├── p-limit@5.0.0\n  ├── supertest@7.2.2\n  ├── tsx@4.22.4\n  ├── typescript@5.9.3 deduped\n  ├── vitest@2.1.9 deduped\n  └── ws@8.21.0\n\ndg01: command passed\ndg01: pass — all package.json dependencies found in lockfile",
+        "duration_ms": 1326
+      },
+      {
+        "id": "dg02",
+        "name": "build",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg02: running build command: npm run build --workspaces\ndg02: build passed\n\n> @aid/contract@0.1.0 build\n> tsc\n\n\n> @aid/gui@0.1.0 build\n> vite build\n\nvite v6.4.3 building for production...\ntransforming...\n✓ 2482 modules transformed.\nGenerated an empty chunk: \"vendor-react\".\nrendering chunks...\ncomputing gzip size...\ndist/registerSW.js                         0.13 kB\ndist/manifest.webmanifest                  0.45 kB\ndist/index.html                            0.81 kB │ gzip:   0.44 kB\ndist/assets/index-CsUqV-Ij.css            38.06 kB │ gzip:   7.57 kB\ndist/assets/vendor-react-l0sNRNKZ.js       0.00 kB │ gzip:   0.02 kB\ndist/assets/vendor-recharts-BDKJRYEo.js  405.52 kB │ gzip: 111.58 kB\ndist/assets/index-CoGY2YP1.js            627.25 kB │ gzip: 194.44 kB\n\n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n✓ built in 8.80s\n\nPWA v0.21.2\nmode      generateSW\nprecache  11 entries (1046.95 KiB)\nfiles generated\n  dist/sw.js\n  dist/workbox-abeb32eb.js\n\n> @aid/server@0.1.0 build\n> tsc",
+        "duration_ms": 20086
+      },
+      {
+        "id": "dg03",
+        "name": "typecheck",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg03: TypeScript files detected (e.g. /opt/eco/projects/aid-orchestrator/packages/aid-gui/server/parsers/yaml.ts)\ndg03: running typecheck command: npm run typecheck\ndg03: typecheck passed\n\n> aid-cockpit-workspace@0.1.0 typecheck\n> npm run typecheck --workspaces --if-present\n\n\n> @aid/contract@0.1.0 typecheck\n> tsc --noEmit\n\n\n> @aid/gui@0.1.0 typecheck\n> tsc --noEmit\n\n\n> @aid/server@0.1.0 typecheck\n> tsc --noEmit",
+        "duration_ms": 15104
+      },
+      {
+        "id": "dg04",
+        "name": "test",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg04: running test command: npm test --workspaces\n\n> @aid/contract@0.1.0 test\n> vitest run\n\n\n RUN  v2.1.9 /opt/eco/projects/aid-orchestrator/packages/aid-contract\n\n ✓ test/raw.test.ts (3 tests) 5ms\n ✓ test/managerial.test.ts (4 tests) 8ms\n ✓ test/contract.test.ts (12 tests) 12ms\n\n Test Files  3 passed (3)\n      Tests  19 passed (19)\n   Start at  06:46:00\n   Duration  566ms (transform 106ms, setup 0ms, collect 161ms, tests 24ms, environment 1ms, prepare 304ms)\n\n\n> @aid/gui@0.1.0 test\n> vitest run\n\n\n RUN  v2.1.9 /opt/eco/projects/aid-orchestrator/packages/aid-gui\n\n ✓ |dom| src/lib/backlog-delta.test.ts (15 tests) 33ms\nstdout | src/components/managerial/RawMarkdownDialog.test.tsx > RawMarkdownDialog > shows error message on fetch failure\nFailed to fetch artifact missing.md: NOT_FOUND Artifact not found\n\n ✓ |dom| src/components/managerial/RawMarkdownDialog.test.tsx (9 tests) 486ms\n ✓ |dom| src/components/managerial/PlanOutcomeTable.test.tsx (18 tests) 596ms\n ✓ |dom| src/screens/ScreenG.test.tsx (7 tests) 416ms\n ✓ |dom| src/screens/ScreenE.test.tsx (8 tests) 729ms\nstderr | src/hooks/useAidSocket.test.tsx > useAidSocket — real-server frame conformance > a malformed frame never throws and keeps the socket open\n[useAidSocket] dropped a malformed frame\n\n ✓ |dom| src/hooks/useAidSocket.test.tsx (5 tests) 59ms\n ✓ |dom| src/screens/ScreenF.test.tsx (6 tests) 1216ms\n   ✓ ScreenF — Help (/help) > renders all 13 SECTIONS 353ms\n ✓ |dom| src/screens/ScreenB.test.tsx (7 tests) 1015ms\n ✓ |dom| src/screens/ScreenA.test.tsx (13 tests) 1568ms\n ✓ |dom| src/screens/ScreenPlan.test.tsx (12 tests) 1233ms\n ✓ |dom| src/screens/ScreenC.test.tsx (16 tests) 1450ms\n ✓ |dom| src/lib/explain.test.ts (8 tests) 8ms\n ✓ |dom| src/components/managerial/ReporterDeliveryPanel.test.tsx (11 tests) 221ms\n ✓ |dom| src/hooks/usePollingFallback.test.tsx (4 tests) 97ms\n ✓ |dom| src/screens/ScreenD.test.tsx (8 tests) 2449ms\n   ✓ ScreenD — merged live activity stream > pause FREEZES the visible list — new poll results buffer but do NOT render until unpause 2053ms\n ✓ |dom| src/components/CheckpointStrip.test.tsx (9 tests) 149ms\n ✓ |dom| src/lib/api.test.ts (7 tests) 22ms\n ✓ |node| tests/frontend/error-boundary-toast.test.ts (62 tests) 45ms\n ✓ |dom| src/components/common/StatusBadge.test.tsx (12 tests) 131ms\n ✓ |dom| src/components/managerial/BacklogDeltaList.test.tsx (4 tests) 124ms\n ✓ |dom| src/components/shell/ProjectsContext.test.tsx (2 tests) 63ms\nstderr | src/App.wiring.test.tsx > App wiring — live monitoring is mounted > mounts useAidSocket (constructs a /ws WebSocket)\nAn update to ProjectsProvider inside a test was not wrapped in act(...).\n\nWhen testing, code that causes React state updates should be wrapped into act(...):\n\nact(() => {\n  /* fire events that update state */\n});\n/* assert on the output */\n\nThis ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act\nAn update to ProjectsProvider inside a test was not wrapped in act(...).\n\nWhen testing, code that causes React state updates should be wrapped into act(...):\n\nact(() => {\n  /* fire events that update state */\n});\n/* assert on the output */\n\nThis ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act\nAn update to ProjectsProvider inside a test was not wrapped in act(...).\n\nWhen testing, code that causes React state updates should be wrapped into act(...):\n\nact(() => {\n  /* fire events that update state */",
+        "duration_ms": 14668
+      },
+      {
+        "id": "dg05",
+        "name": "consumer-compile",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg06",
+        "name": "removed-dep",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg07",
+        "name": "state-consistency",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg07: checking state consistency for E-055-1_1/R-E055-1\ndg07: state=DONE done_phase=review step=4/4\ndg07: pass — state consistent (step=4/4, compliance=pass, no open pending dispatches)",
+        "duration_ms": 25
+      },
+      {
+        "id": "dg08",
+        "name": "runtime-env",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg09",
+        "name": "static-coverage",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg09: running command: npm run typecheck\ndg09: pass — command exited 0 with file-processing evidence\n\n> aid-cockpit-workspace@0.1.0 typecheck\n> npm run typecheck --workspaces --if-present\n\n\n> @aid/contract@0.1.0 typecheck\n> tsc --noEmit\n\n\n> @aid/gui@0.1.0 typecheck\n> tsc --noEmit\n\n\n> @aid/server@0.1.0 typecheck\n> tsc --noEmit",
+        "duration_ms": 15225
+      },
+      {
+        "id": "dg10",
+        "name": "startup-smoke",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg11",
+        "name": "build-config",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg12",
+        "name": "authority",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg15",
+        "name": "route-resolve",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg17",
+        "name": "independent-oracle-nodrop",
+        "status": "skip",
+        "skip_reason": "not_required",
+        "output_preview": "",
+        "duration_ms": 0
+      },
+      {
+        "id": "dg18",
+        "name": "acceptance-struct",
+        "status": "pass",
+        "skip_reason": "",
+        "output_preview": "dg18: pass — provenance verified: 4/4 step-verify files contain '## Result: PASS'",
+        "duration_ms": 33
+      }
+    ],
+    "summary": {
+      "total": 15,
+      "pass": 7,
+      "fail": 0,
+      "skip": 8,
+      "unverifiable": 0,
+      "would_block": true,
+      "enforcement": "observe"
+    }
+  }
+}
