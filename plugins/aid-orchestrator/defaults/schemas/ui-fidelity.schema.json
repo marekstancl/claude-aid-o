@@ -23,9 +23,19 @@
           "type": "object",
           "properties": {
             "kind": {
-              "const": "none"
+              "const": "none",
+              "$comment": "D6: sub-evidence only, not a release authority; delivery-gate/C4 = E9"
             }
           }
+        },
+        "result": {
+          "type": "string",
+          "enum": ["pass", "fail", "unverifiable"],
+          "$comment": "Guard outcome: pass = visual fidelity confirmed; fail = mismatch detected; unverifiable = capture absent"
+        },
+        "result_detail": {
+          "type": ["string", "null"],
+          "description": "Human-readable reason for fail or unverifiable result"
         }
       }
     }
