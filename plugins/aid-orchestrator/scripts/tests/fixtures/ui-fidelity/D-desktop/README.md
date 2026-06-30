@@ -1,1 +1,13 @@
-Hermetic mock (1280x720) — determinism round-trip test. NOT a real ScreenG capture. Uses HERMETIC_TEST_PAGE_HTML from ui-capture-fixtures.mjs.
+# Fixture D-desktop — ScreenG desktop calibration
+
+Real `ScreenG` component captured at viewport 1280x720 via Playwright with `page.route` API mocks.
+
+**Calibration strategy:**
+- `baseline` — ScreenG with good API mocks (`/api/brief` returns mock brief, `/api/projects` returns mock project list)
+- `regressed` — ScreenG with broken brief mock (`/api/brief` returns 500 error -> error banner appears)
+- `rerun` — ScreenG with good API mocks again (matches baseline)
+
+**Expected FAIL reason:** `pixel_match` detects visual difference (error banner vs BriefPanel content)
+**Expected PASS:** `pixel_match` confirms matching renders after recovery
+
+**Note:** `before.png`/`after.png` are placeholder references. Calibration captures fresh screenshots via `screeng-capture.mjs` at run time.

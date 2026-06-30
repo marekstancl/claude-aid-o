@@ -93,7 +93,9 @@ jobs:
         run: |
           FIXTURES_DIR="plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity"
           REQUIRED_FILES="contract.yaml before-computed.json after-computed.json expected-verdict.json README.md"
-          D_EXTRA="before.png after.png"
+          # Note: D-desktop and D-mobile use dynamic Playwright capture (screeng-capture.mjs)
+          # and do not have static before.png/after.png in the repo. PNG check is intentionally
+          # omitted for D cases — actual screenshots are generated at calibration runtime.
           EXIT=0
           for case_dir in A B C D-desktop D-mobile; do
             dir="$FIXTURES_DIR/$case_dir"
@@ -104,14 +106,6 @@ jobs:
                 EXIT=1
               fi
             done
-            case "$case_dir" in D-desktop|D-mobile)
-              for f in $D_EXTRA; do
-                if [ ! -f "$dir/$f" ]; then
-                  echo "  MISSING: $dir/$f"
-                  EXIT=1
-                fi
-              done
-            esac
           done
           if [ "$EXIT" -eq 0 ]; then
             echo "All fixture files present."

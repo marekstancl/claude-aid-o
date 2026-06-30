@@ -1,25 +1,17 @@
 {
-  "target_id": "screeng-root",
-  "captured_at": "2023-11-14T22:13:20.000Z",
-  "url": "hermetic://screeng-mock",
-  "selector": "[data-testid=\"hermetic-box\"]",
-  "viewport": {
-    "width": 375,
-    "height": 812
-  },
-  "bbox": {
-    "x": 0,
-    "y": 0,
-    "width": 200,
-    "height": 100
-  },
+  "target_id": "screeng-mobile",
+  "captured_at": "placeholder-regenerated-at-calibration-time",
+  "url": "http://localhost:3911/",
+  "selector": "section[aria-label=\"Co potřebuju vědět\"]",
+  "viewport": { "width": 375, "height": 812 },
+  "bbox": { "x": 0, "y": 0, "width": 375, "height": 812 },
   "computed_styles": {
-    "color": "rgb(255, 255, 255)",
-    "background-color": "rgb(0, 102, 204)",
+    "color": "rgb(15, 23, 42)",
+    "background-color": "rgba(0, 0, 0, 0)",
     "font-size": "16px",
-    "display": "flex",
+    "display": "block",
     "visibility": "visible",
     "opacity": "1"
   },
-  "text_content": "DETERMINISTIC"
+  "text_content": "Co potřebuju vědět Brief se nepodařilo načíst — zkouším znovu."
 }
