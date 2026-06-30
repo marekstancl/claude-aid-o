@@ -1,0 +1,59 @@
+# ui-change-contract.example.yaml
+# Example contract demonstrating all fields of ui-change-contract.schema.json
+# Valid against: https://aid-orchestrator.aidlab.dev/schemas/ui-change-contract.schema.json
+
+contract_id: "example-button-color-change"
+version: "1.0.0"
+
+viewport:
+  width: 1280
+  height: 720
+  device_scale_factor: 1
+
+target:
+  id: "submit-button"
+  selector: ".submit-btn"
+  api_mocks:
+    - url_pattern: "/api/projects"
+      method: "GET"
+      status: 200
+      body: '{"projects": []}'
+      content_type: "application/json"
+    - url_pattern: "/api/user"
+      method: "GET"
+      status: 200
+      body: '{"id": 1, "name": "Test User"}'
+  presence:
+    state: "visible"
+
+gestalt_approval:
+  approved_by: "PM"
+  approved_at: "2026-06-30T10:00:00Z"
+  notes: "Approved color change for WCAG AA contrast compliance"
+
+delta:
+  typed:
+    - property: "color"
+      from: "#333333"
+      to: "#0066cc"
+    - property: "background-color"
+      from: "#ffffff"
+      to: "#f0f8ff"
+    - property: "border-color"
+      from: "#cccccc"
+      to: "#0066cc"
+  affected:
+    max_reflow_px: 5
+    max_reflow_percent: 2.0
+  locked:
+    - selector: ".header"
+      tolerance_px: 0
+    - selector: ".footer"
+      tolerance_px: 0
+    - selector: ".sidebar"
+      tolerance_px: 2
+
+envelope:
+  baseline_path: "scripts/tests/fixtures/ui-fidelity/A/before.png"
+  baseline_sha256: "a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4"
+  schema_version: "1.0.0"
