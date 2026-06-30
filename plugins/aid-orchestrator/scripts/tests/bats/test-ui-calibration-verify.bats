@@ -14,8 +14,6 @@ setup() {
   mkdir -p "$TMP/ui-cal/cases"/{A,B,C,D-desktop,D-mobile}
 
   # Create valid PNG files (real PNG header: 0x89 PNG \r\n 0x1a \n)
-  local PNG_HEADER
-  PNG_HEADER=$'\x89PNG\r\n\x1a\n'
   for case_id in A B C D-desktop D-mobile; do
     for png in baseline.png regressed.png rerun.png; do
       printf '\x89PNG\r\n\x1a\n' > "$TMP/ui-cal/cases/$case_id/$png"
@@ -233,6 +231,30 @@ r = json.load(open('$TMP/ui-cal/ui-calibration-record.json'))
 for c in r['calibration']['cases']:
     if c['case_id'] == 'D-desktop':
         c['real_surface']['selector'] = '[data-testid=\"hermetic-box\"]'
+json.dump(r, open('$TMP/ui-cal/ui-calibration-record.json', 'w'), indent=2)
+"
+  run bash "$VERIFIER" "$TMP/ui-cal/ui-calibration-record.json" "$TMP" 2>&1
+  [ "$status" -eq 1 ]
+}
+
+@test "calibration result=fail in record: verifier fails" {
+  write_valid_record
+  python3 -c "
+import json
+r = json.load(open('$TMP/ui-cal/ui-calibration-record.json'))
+r['calibration']['result'] = 'fail'
+json.dump(r, open('$TMP/ui-cal/ui-calibration-record.json', 'w'), indent=2)
+"
+  run bash "$VERIFIER" "$TMP/ui-cal/ui-calibration-record.json" "$TMP" 2>&1
+  [ "$status" -eq 1 ]
+}
+
+@test "record with fewer than 5 cases: verifier fails" {
+  write_valid_record
+  python3 -c "
+import json
+r = json.load(open('$TMP/ui-cal/ui-calibration-record.json'))
+r['calibration']['cases'] = r['calibration']['cases'][:3]
 json.dump(r, open('$TMP/ui-cal/ui-calibration-record.json', 'w'), indent=2)
 "
   run bash "$VERIFIER" "$TMP/ui-cal/ui-calibration-record.json" "$TMP" 2>&1

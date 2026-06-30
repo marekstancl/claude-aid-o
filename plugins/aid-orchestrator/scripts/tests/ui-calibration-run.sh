@@ -394,7 +394,7 @@ PYEOF
 
   # --- Verify all 8 required artifacts exist ---
   local artifact_error=0
-  REQUIRED_ARTIFACTS=("baseline.png" "regressed.png" "rerun.png" "baseline-computed.json" "regressed-computed.json" "rerun-computed.json" "first-run-verdict.json" "rerun-verdict.json")
+  local REQUIRED_ARTIFACTS=("baseline.png" "regressed.png" "rerun.png" "baseline-computed.json" "regressed-computed.json" "rerun-computed.json" "first-run-verdict.json" "rerun-verdict.json")
   for art in "${REQUIRED_ARTIFACTS[@]}"; do
     if [[ ! -f "$case_output/$art" ]]; then
       echo "  MISSING ARTIFACT: $art" >&2

@@ -85,6 +85,7 @@ gates:
     timeout_seconds: 30
     pass_criteria: "exit code 0 (all verification checks pass)"
     max_retries: 0
+
   ui_calibration_signoff:
     description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
     required: true
