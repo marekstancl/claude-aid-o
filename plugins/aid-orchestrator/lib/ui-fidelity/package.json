@@ -1,0 +1,15 @@
+{
+  "name": "aid-ui-fidelity",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "UI fidelity capture and comparison for AID orchestrator",
+  "main": "ui-capture.mjs",
+  "scripts": {
+    "install:playwright": "npx playwright install chromium"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.45.0",
+    "pixelmatch": "^5.3.0",
+    "pngjs": "^7.0.0"
+  }
+}
