@@ -499,9 +499,9 @@ function checkOutsideMask(contract, beforeComputed, afterComputed, beforePng, af
     maskBboxes.push({ x: 0, y: 0, width: imgW, height: imgH });
   }
 
-  // Affected region: use after bbox if it changed
+  // Affected region: use after bbox if it changed (compare by value, not reference)
   const afterBbox = afterComputed.bbox;
-  if (afterBbox && afterBbox !== targetBbox) {
+  if (afterBbox && JSON.stringify(afterBbox) !== JSON.stringify(targetBbox)) {
     maskBboxes.push(afterBbox);
   }
 

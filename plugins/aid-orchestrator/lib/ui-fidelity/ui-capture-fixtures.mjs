@@ -16,7 +16,7 @@
  */
 
 import { chromium } from '@playwright/test';
-import { createReadStream, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
@@ -43,8 +43,6 @@ export const HERMETIC_TEST_PAGE_HTML = `<!DOCTYPE html>
 // ---------------------------------------------------------------------------
 // Determinism fixtures
 // ---------------------------------------------------------------------------
-
-const FIXED_TIMESTAMP = 1700000000000; // 2023-11-14T22:13:20.000Z
 
 /**
  * Apply determinism fixtures to a Playwright page + context.

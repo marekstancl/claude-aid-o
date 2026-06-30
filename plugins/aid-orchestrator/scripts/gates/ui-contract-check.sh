@@ -176,6 +176,11 @@ envelope_check() {
   contract_id=$(yq_get "$contract_file" '.contract_id')
   [[ -n "$contract_id" && "$contract_id" != "null" ]] || err "contract_id is required for envelope check"
 
+  # Validate contract_id is safe to use in path
+  if [[ ! "$contract_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    err "contract_id must contain only alphanumeric, dash, underscore characters: $contract_id"
+  fi
+
   # 1. envelope.baseline_path must be present
   local baseline_path
   baseline_path=$(yq_get "$contract_file" '.envelope.baseline_path')
