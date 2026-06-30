@@ -1,0 +1,10 @@
+contract_id: fixture-D-mobile-hermetic
+version: "1.0.0"
+viewport:
+  width: 375
+  height: 812
+target:
+  id: hermetic-box-mobile
+  selector: "[data-testid=\"hermetic-box\"]"
+  presence:
+    state: visible

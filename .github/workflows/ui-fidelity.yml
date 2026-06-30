@@ -1,0 +1,119 @@
+name: UI Fidelity
+
+on:
+  push:
+    paths:
+      - 'plugins/aid-orchestrator/lib/ui-fidelity/**'
+      - 'plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/**'
+      - '.github/workflows/ui-fidelity.yml'
+  pull_request:
+    paths:
+      - 'plugins/aid-orchestrator/lib/ui-fidelity/**'
+      - 'plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/**'
+      - '.github/workflows/ui-fidelity.yml'
+
+jobs:
+  ui-fidelity-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: plugins/aid-orchestrator/lib/ui-fidelity/package-lock.json
+
+      - name: Install dependencies
+        working-directory: plugins/aid-orchestrator/lib/ui-fidelity
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: plugins/aid-orchestrator/lib/ui-fidelity
+        run: npx playwright install chromium --with-deps
+
+      - name: Determinism check
+        working-directory: plugins/aid-orchestrator/lib/ui-fidelity
+        run: |
+          mkdir -p /tmp/determinism-test
+          node ui-capture-fixtures.mjs --output-dir /tmp/determinism-test
+
+      - name: Contract type-check (fixtures)
+        run: |
+          for f in plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/*/contract.yaml; do
+            echo "Checking: $f"
+            bash plugins/aid-orchestrator/scripts/gates/ui-contract-check.sh --type-check "$f"
+          done
+
+      - name: Run ui-compare.mjs against A/B/C fixtures
+        run: |
+          set -e
+          mkdir -p /tmp/compare-results
+          for case in A B C; do
+            fixture="plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/$case"
+            echo "--- Case $case ---"
+            node plugins/aid-orchestrator/lib/ui-fidelity/ui-compare.mjs \
+              --before-png "$fixture/before.png" \
+              --after-png "$fixture/after.png" \
+              --before-computed "$fixture/before-computed.json" \
+              --after-computed "$fixture/after-computed.json" \
+              --contract "$fixture/contract.yaml" \
+              --output-dir "/tmp/compare-results/$case"
+
+            expected=$(cat "$fixture/expected-verdict.json")
+            actual=$(cat "/tmp/compare-results/$case/ui/verdict.json")
+            expected_verdict=$(echo "$expected" | python3 -c "import sys,json; print(json.load(sys.stdin)['verdict'])")
+            actual_verdict=$(echo "$actual" | python3 -c "import sys,json; print(json.load(sys.stdin)['verdict'])")
+
+            if [ "$expected_verdict" = "$actual_verdict" ]; then
+              echo "Case $case: PASS (verdict=$actual_verdict matches expected)"
+            else
+              echo "Case $case: FAIL (expected verdict=$expected_verdict, got=$actual_verdict)"
+              exit 1
+            fi
+          done
+          echo "All fixture cases match expected verdicts"
+
+      - name: Schema validation (YAML parse)
+        run: |
+          python3 -c "
+          import yaml, glob, sys
+          files = glob.glob('plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/*/contract.yaml')
+          if not files:
+              print('ERROR: no contract.yaml files found', file=sys.stderr)
+              sys.exit(1)
+          for f in sorted(files):
+              yaml.safe_load(open(f))
+              print(f'  valid YAML: {f}')
+          print(f'All {len(files)} contracts valid YAML')
+          "
+
+      - name: Verify fixture completeness
+        run: |
+          FIXTURES_DIR="plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity"
+          REQUIRED_FILES="contract.yaml before-computed.json after-computed.json expected-verdict.json README.md"
+          D_EXTRA="before.png after.png"
+          EXIT=0
+          for case_dir in A B C D-desktop D-mobile; do
+            dir="$FIXTURES_DIR/$case_dir"
+            echo "Checking $case_dir..."
+            for f in $REQUIRED_FILES; do
+              if [ ! -f "$dir/$f" ]; then
+                echo "  MISSING: $dir/$f"
+                EXIT=1
+              fi
+            done
+            case "$case_dir" in D-desktop|D-mobile)
+              for f in $D_EXTRA; do
+                if [ ! -f "$dir/$f" ]; then
+                  echo "  MISSING: $dir/$f"
+                  EXIT=1
+                fi
+              done
+            esac
+          done
+          if [ "$EXIT" -eq 0 ]; then
+            echo "All fixture files present."
+          fi
+          exit $EXIT

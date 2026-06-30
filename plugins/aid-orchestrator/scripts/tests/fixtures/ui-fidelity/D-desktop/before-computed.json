@@ -1,0 +1,25 @@
+{
+  "target_id": "screeng-root",
+  "captured_at": "2023-11-14T22:13:20.000Z",
+  "url": "hermetic://screeng-mock",
+  "selector": "[data-testid=\"hermetic-box\"]",
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "bbox": {
+    "x": 0,
+    "y": 0,
+    "width": 200,
+    "height": 100
+  },
+  "computed_styles": {
+    "color": "rgb(255, 255, 255)",
+    "background-color": "rgb(0, 102, 204)",
+    "font-size": "16px",
+    "display": "flex",
+    "visibility": "visible",
+    "opacity": "1"
+  },
+  "text_content": "DETERMINISTIC"
+}

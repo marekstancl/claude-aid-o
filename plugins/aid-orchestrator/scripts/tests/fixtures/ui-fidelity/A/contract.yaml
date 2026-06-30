@@ -1,0 +1,22 @@
+contract_id: fixture-A-button-color
+version: "1.0.0"
+viewport:
+  width: 1280
+  height: 720
+target:
+  id: submit-btn
+  selector: ".submit-btn"
+  presence:
+    state: visible
+delta:
+  typed:
+    - property: color
+      from: "#333333"
+      to: "#0066cc"
+  affected:
+    max_reflow_px: 5
+    max_reflow_percent: 2.0
+envelope:
+  baseline_path: "plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/A/before.png"
+  baseline_sha256: "7540bf6d30a9346b3f50fd1511f1e1f7867d3ef4d71fb75b24aadcd43e44cec8"
+  schema_version: "1.0.0"

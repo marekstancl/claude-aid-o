@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/ui-change-contract.schema.json",
+  "title": "AID — UI Change Contract",
+  "$comment": "producer: PM/C0 brainstorm, consumers: [ui-contract-check.sh, C1 UI gate]. Typed contract for a single viewport change with hard envelope binding (D7).",
+  "description": "Typed contract describing a single intentional UI change: what element, what CSS properties change, gestalt approval, and an immutable baseline envelope for hash-verified transport (D7).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_id", "version", "viewport", "target"],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique human-readable identifier for this contract (e.g. 'submit-button-color-change')."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of this contract (e.g. '1.0.0')."
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "description": "Single viewport dimensions (not an array — one contract per viewport).",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Viewport width in pixels."
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Viewport height in pixels."
+        },
+        "device_scale_factor": {
+          "type": "number",
+          "minimum": 0.1,
+          "default": 1,
+          "description": "Device pixel ratio (default 1)."
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "selector"],
+      "description": "The UI element being changed.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier for this target within the contract."
+        },
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CSS selector for the target element."
+        },
+        "api_mocks": {
+          "type": "array",
+          "description": "Optional API mocks to apply during capture.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url_pattern", "method", "status", "body"],
+            "properties": {
+              "url_pattern": {
+                "type": "string",
+                "description": "URL pattern to intercept (substring or glob)."
+              },
+              "method": {
+                "type": "string",
+                "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                "description": "HTTP method to intercept."
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599,
+                "description": "HTTP status code to return."
+              },
+              "body": {
+                "type": "string",
+                "description": "Response body as a string."
+              },
+              "content_type": {
+                "type": "string",
+                "description": "Response Content-Type header (optional, defaults to application/json)."
+              }
+            }
+          }
+        },
+        "presence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state"],
+          "description": "Optional: assert the element's presence state during capture.",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": ["visible", "hidden", "exists", "removed"],
+              "description": "Expected presence state of the element."
+            }
+          }
+        }
+      }
+    },
+    "gestalt_approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved_by", "approved_at"],
+      "description": "Optional PM gestalt approval record.",
+      "properties": {
+        "approved_by": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the approver (e.g. 'PM', 'marek@example.com')."
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 datetime of approval."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional approval notes or rationale."
+        }
+      }
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional: describes the intended CSS property changes and layout constraints.",
+      "required": ["typed"],
+      "properties": {
+        "typed": {
+          "type": "array",
+          "minItems": 1,
+          "description": "List of typed CSS property changes (must have at least 1 item).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["property", "from", "to"],
+            "properties": {
+              "property": {
+                "type": "string",
+                "minLength": 1,
+                "description": "CSS property name (e.g. 'color', 'background-color', 'font-size')."
+              },
+              "from": {
+                "type": "string",
+                "description": "Previous CSS value."
+              },
+              "to": {
+                "type": "string",
+                "description": "New CSS value."
+              }
+            }
+          }
+        },
+        "affected": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional: maximum allowed reflow caused by the change.",
+          "properties": {
+            "max_reflow_px": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum layout shift in pixels allowed for surrounding elements."
+            },
+            "max_reflow_percent": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Maximum layout shift as a percentage of viewport height."
+            }
+          }
+        },
+        "locked": {
+          "type": "array",
+          "description": "Optional: elements that must not move beyond tolerance.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["selector", "tolerance_px"],
+            "properties": {
+              "selector": {
+                "type": "string",
+                "minLength": 1,
+                "description": "CSS selector for the locked element."
+              },
+              "tolerance_px": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Maximum allowed pixel movement for this element (0 = strictly locked)."
+              }
+            }
+          }
+        }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["baseline_path", "baseline_sha256", "schema_version"],
+      "description": "Optional: immutable baseline binding for hash-verified transport (D7). baseline_path must be relative; sha256 is verified on every envelope-check invocation.",
+      "properties": {
+        "baseline_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Relative path (from repo root) to the baseline PNG. Must not start with '/' or contain '..'."
+        },
+        "baseline_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "SHA-256 hex digest of the baseline PNG file."
+        },
+        "schema_version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Version of this contract schema used to produce the envelope."
+        }
+      }
+    }
+  }
+}

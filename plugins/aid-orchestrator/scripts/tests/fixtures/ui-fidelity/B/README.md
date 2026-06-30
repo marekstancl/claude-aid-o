@@ -1,0 +1,1 @@
+Case B: synthetic element hidden — PASS case with `presence.state: hidden` which causes `rest_lock` to be skipped; tests that `display: flex → none` change is accepted without unauthorized-change false-positives.
