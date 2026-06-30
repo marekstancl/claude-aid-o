@@ -114,6 +114,22 @@
             "description": "Relative paths to mockup files (source code or images) for this step. Controller reads these before dispatch and generates visual-spec.yaml.",
             "examples": [".aid-o/plans/P011/mockups/CompanyDashboard.tsx", ".aid-o/plans/P011/mockups/dashboard-mockup.png"]
           },
+          "ui_change_mode": {
+            "type": ["string", "null"],
+            "enum": ["existing_ui", "new_ui", null],
+            "description": "When present, specifies whether this step modifies existing UI (real capture) or creates new UI (mockup-based)"
+          },
+          "ui_change_contract": {
+            "type": ["object", "null"],
+            "description": "Typed delta contract for existing_ui steps — path reference + integrity hash",
+            "properties": {
+              "path": { "type": "string", "description": "Path to the delta contract JSON file" },
+              "sha256": { "type": "string", "description": "SHA256 hash of the contract file" },
+              "schema_version": { "type": "string", "description": "Schema version of the contract" }
+            },
+            "required": ["path", "sha256", "schema_version"],
+            "additionalProperties": false
+          },
           "wiring_context": {
             "type": "object",
             "description": "Context for wiring steps (only present when wiring=true). Describes which files are shared, which steps produced them, and what integration actions are expected.",
@@ -234,7 +250,7 @@
       "properties": {
         "mockup_dir": { "type": "string", "description": "Path to mockups directory" },
         "visual_spec": { "type": ["string", "null"], "description": "Path to visual-spec.yaml" },
-        "source_type": { "type": "string", "enum": ["github", "ai_studio", "image"], "description": "How mockups were provided" }
+        "source_type": { "type": "string", "enum": ["github", "ai_studio", "image", "companion"], "description": "How mockups were provided" }
       },
       "additionalProperties": false
     },
