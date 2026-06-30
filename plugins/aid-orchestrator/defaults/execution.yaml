@@ -78,21 +78,21 @@ gates:
     when: "frontend files changed"
 
   ui_calibration_result:
-    description: "Calibration evidence verified: 5 cases pass/fail, all artifacts present on disk, D-desktop/D-mobile prove real ScreenG capture"
+    description: "Calibration evidence verified: 5 cases pass/fail, all artifacts present on disk, D-desktop/D-mobile prove real ScreenG capture. Skips automatically when no calibration record is present (non-E7-CAL EPICs)."
     required: true
     type: deterministic
-    command: "bash plugins/aid-orchestrator/scripts/tests/ui-calibration-verify.sh .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json .aid-o/work/evidence/{epic_id}/{run_id}"
+    command: "test ! -f .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json || bash plugins/aid-orchestrator/scripts/tests/ui-calibration-verify.sh .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json .aid-o/work/evidence/{epic_id}/{run_id}"
     timeout_seconds: 30
-    pass_criteria: "exit code 0 (all verification checks pass)"
+    pass_criteria: "exit code 0 (no record present → auto-pass; record present → all verification checks pass)"
     max_retries: 0
 
   ui_calibration_signoff:
-    description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
+    description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack. Skips automatically when no calibration record is present (non-E7-CAL EPICs)."
     required: true
     type: deterministic
-    command: "jq -e '.calibration.pm_signoff.confirmed_by | length > 0' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
+    command: "test ! -f .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json || jq -e '.calibration.pm_signoff.confirmed_by | length > 0' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
     timeout_seconds: 10
-    pass_criteria: "exit code 0 (confirmed_by is non-empty string)"
+    pass_criteria: "exit code 0 (no record present → auto-pass; record present → confirmed_by is non-empty string)"
     max_retries: 0
 
 # Python project gates (language-specific override example)

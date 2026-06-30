@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.48.0] — 2026-06-30
+
+### Added
+- **E7-CAL Calibration Mechanism** — `ui-calibration-run.sh` runs 5 fixture cases (A/B/C hermetic + D-desktop/D-mobile real ScreenG via Playwright `page.route` mocks), persists 8 artifacts per case (baseline/regressed/rerun PNG + computed JSON + verdicts), writes `ui-calibration-record.json` with artifact map and D `real_surface` assertions proving live URL capture.
+- **`ui-calibration-verify.sh`** — Standalone evidence verifier: checks PNG validity, JSON validity, verdict cross-check against record, D cases real_surface assertions (no `hermetic://` URL, no `DETERMINISTIC` text, correct viewport), rejects structurally incomplete records.
+- **`screeng-capture.mjs`** — Playwright script capturing ScreenG in 3 states (regressed → baseline → rerun) in a single browser session using `page.route` API mocks.
+- **`test-ui-calibration-verify.bats`** — 15 BATS tests preventing false-green calibration (missing PNG, hermetic URL, DETERMINISTIC text, wrong viewport, verdict mismatch, invalid JSON/PNG).
+- **`ui-calibration-record.schema.json` v1.1.0** — `artifacts` object required per case; `real_surface` optional object for D cases.
+- **`ui_calibration_result` gate** — Calls `ui-calibration-verify.sh`; auto-passes when no calibration record present (non-E7-CAL EPICs unaffected).
+- **`ui_calibration_signoff` gate** — PM manual sign-off gate; auto-passes when no calibration record present.
+
+### Fixed
+- **`ui-compare.mjs` dimension mismatch reason** — Both `checkLockedCrops` and `checkOutsideMask` now emit `image_dimension_mismatch` (was `locked_violation` and `outside_mask_diff` respectively).
+
 ## [2.47.0] — 2026-06-30
 
 ### Added
