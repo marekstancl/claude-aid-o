@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.48.0] — 2026-06-30
+## [2.49.0] — 2026-06-30
 
 ### Added
 - **E7-CAL Calibration Mechanism** — `ui-calibration-run.sh` runs 5 fixture cases (A/B/C hermetic + D-desktop/D-mobile real ScreenG via Playwright `page.route` mocks), persists 8 artifacts per case (baseline/regressed/rerun PNG + computed JSON + verdicts), writes `ui-calibration-record.json` with artifact map and D `real_surface` assertions proving live URL capture.
