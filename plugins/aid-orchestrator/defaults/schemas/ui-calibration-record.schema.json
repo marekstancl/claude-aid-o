@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/ui-calibration-record.schema.json",
   "title": "AID UI Calibration Record",
   "description": "Evidence record produced by ui-calibration-run.sh. pm_signoff is filled manually by PM after reviewing evidence.",
@@ -24,9 +24,9 @@
             "properties": {
               "case_id": { "type": "string" },
               "description": { "type": "string" },
-              "first_run": { "type": "string", "enum": ["pass", "fail", "error"] },
+              "first_run": { "type": "string", "enum": ["pass", "fail", "error", "unverifiable"] },
               "first_run_reason": { "type": "string" },
-              "rerun": { "type": "string", "enum": ["pass", "fail", "error"] },
+              "rerun": { "type": "string", "enum": ["pass", "fail", "error", "unverifiable"] },
               "evidence_dir": { "type": "string" }
             }
           }

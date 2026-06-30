@@ -35,7 +35,6 @@ done
 
 # Verify dependencies
 command -v node >/dev/null 2>&1 || { echo "ERROR: node is required but not in PATH" >&2; exit 1; }
-command -v yq >/dev/null 2>&1 || { echo "ERROR: yq is required but not in PATH" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 is required for JSON manipulation" >&2; exit 1; }
 
 # Install ui-fidelity node_modules if missing
