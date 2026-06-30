@@ -12,14 +12,14 @@
       "required": ["schema_version", "run_at", "cases", "result", "pm_signoff"],
       "additionalProperties": false,
       "properties": {
-        "schema_version": { "type": "string", "const": "1.0.0" },
+        "schema_version": { "type": "string", "const": "1.1.0" },
         "run_at": { "type": "string", "format": "date-time" },
         "cases": {
           "type": "array",
           "minItems": 5,
           "items": {
             "type": "object",
-            "required": ["case_id", "description", "first_run", "first_run_reason", "rerun", "evidence_dir"],
+            "required": ["case_id", "description", "first_run", "first_run_reason", "rerun", "evidence_dir", "artifacts"],
             "additionalProperties": false,
             "properties": {
               "case_id": { "type": "string" },
@@ -27,7 +27,37 @@
               "first_run": { "type": "string", "enum": ["pass", "fail", "error", "unverifiable"] },
               "first_run_reason": { "type": "string" },
               "rerun": { "type": "string", "enum": ["pass", "fail", "error", "unverifiable"] },
-              "evidence_dir": { "type": "string" }
+              "evidence_dir": { "type": "string" },
+              "artifacts": {
+                "type": "object",
+                "required": ["baseline_png", "regressed_png", "rerun_png", "baseline_computed", "regressed_computed", "rerun_computed", "first_run_verdict", "rerun_verdict"],
+                "additionalProperties": false,
+                "properties": {
+                  "baseline_png": { "type": "string" },
+                  "regressed_png": { "type": "string" },
+                  "rerun_png": { "type": "string" },
+                  "baseline_computed": { "type": "string" },
+                  "regressed_computed": { "type": "string" },
+                  "rerun_computed": { "type": "string" },
+                  "first_run_verdict": { "type": "string" },
+                  "rerun_verdict": { "type": "string" }
+                }
+              },
+              "real_surface": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "app": { "type": "string" },
+                  "route": { "type": "string" },
+                  "component": { "type": "string" },
+                  "selector": { "type": "string" },
+                  "url": { "type": "string" },
+                  "viewport": { "type": "object" },
+                  "assertions": { "type": "object" },
+                  "captured_text_content": { "type": "string" },
+                  "captured_bbox": { "type": "object" }
+                }
+              }
             }
           }
         },

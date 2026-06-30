@@ -368,6 +368,56 @@ PYEOF
     sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
   fi
 
+  # --- Copy artifact files to case_output ---
+  # baseline.png / regressed.png / rerun.png: A/B/C use fixture PNGs (before.png = baseline, after.png = regressed/rerun)
+  cp "$before_png"      "$case_output/baseline.png"
+  cp "$after_png"       "$case_output/regressed.png"
+  cp "$after_png"       "$case_output/rerun.png"
+
+  # baseline-computed: always the fixture before-computed.json
+  cp "$before_computed" "$case_output/baseline-computed.json"
+
+  # regressed-computed: the injected bad computed used for first_run
+  if [[ -n "$tmp_bad" ]]; then
+    cp "$tmp_bad" "$case_output/regressed-computed.json"
+  else
+    # Case C: first_run_computed == original after_computed (already has unauthorized change)
+    cp "$first_run_computed" "$case_output/regressed-computed.json"
+  fi
+
+  # rerun-computed: for C it's the synthesized fixed version; for others it's after_computed
+  if [[ "$case_id" == "C" ]]; then
+    cp "$TMP_DIR/fixed-C-after-computed.json" "$case_output/rerun-computed.json"
+  else
+    cp "$after_computed" "$case_output/rerun-computed.json"
+  fi
+
+  # --- Verify all 8 required artifacts exist ---
+  local artifact_error=0
+  REQUIRED_ARTIFACTS=("baseline.png" "regressed.png" "rerun.png" "baseline-computed.json" "regressed-computed.json" "rerun-computed.json" "first-run-verdict.json" "rerun-verdict.json")
+  for art in "${REQUIRED_ARTIFACTS[@]}"; do
+    if [[ ! -f "$case_output/$art" ]]; then
+      echo "  MISSING ARTIFACT: $art" >&2
+      artifact_error=1
+    fi
+  done
+
+  if [[ $artifact_error -eq 1 ]]; then
+    # Override verdicts to error and count as failure
+    first_run_verdict="error"
+    rerun_verdict="error"
+    first_run_reason="missing_artifacts"
+    local fc
+    fc=$(grep '^FAIL_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
+    # Undo any previously incremented PASS_COUNT for this case
+    local pc
+    pc=$(grep '^PASS_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    if [[ $pc -gt 0 ]]; then
+      sed -i "s/^PASS_COUNT=.*/PASS_COUNT=$((pc - 1))/" "$STATE_FILE"
+    fi
+  fi
+
   echo ""
 
   # Write case result JSON to tmp file (using env vars for safe string handling)
@@ -378,13 +428,24 @@ PYEOF
   RERUN="$rerun_verdict" \
   python3 - "$TMP_DIR/case-${case_id}.json" <<'PYEOF'
 import json, sys, os
+cid = os.environ['CASE_ID']
 result = {
-    'case_id': os.environ['CASE_ID'],
+    'case_id': cid,
     'description': os.environ['CASE_DESC'],
     'first_run': os.environ['FIRST_RUN'],
     'first_run_reason': os.environ['FIRST_REASON'],
     'rerun': os.environ['RERUN'],
-    'evidence_dir': 'ui-cal/cases/' + os.environ['CASE_ID'],
+    'evidence_dir': 'ui-cal/cases/' + cid,
+    'artifacts': {
+        'baseline_png':       f'ui-cal/cases/{cid}/baseline.png',
+        'regressed_png':      f'ui-cal/cases/{cid}/regressed.png',
+        'rerun_png':          f'ui-cal/cases/{cid}/rerun.png',
+        'baseline_computed':  f'ui-cal/cases/{cid}/baseline-computed.json',
+        'regressed_computed': f'ui-cal/cases/{cid}/regressed-computed.json',
+        'rerun_computed':     f'ui-cal/cases/{cid}/rerun-computed.json',
+        'first_run_verdict':  f'ui-cal/cases/{cid}/first-run-verdict.json',
+        'rerun_verdict':      f'ui-cal/cases/{cid}/rerun-verdict.json',
+    },
 }
 with open(sys.argv[1], 'w') as f:
     json.dump(result, f, indent=2)
@@ -441,13 +502,24 @@ run_screeng_case() {
     RERUN="error" \
     python3 - "$TMP_DIR/case-${case_id}.json" <<'PYEOF'
 import json, sys, os
+cid = os.environ['CASE_ID']
 result = {
-    'case_id': os.environ['CASE_ID'],
+    'case_id': cid,
     'description': os.environ['CASE_DESC'],
     'first_run': os.environ['FIRST_RUN'],
     'first_run_reason': os.environ['FIRST_REASON'],
     'rerun': os.environ['RERUN'],
-    'evidence_dir': 'ui-cal/cases/' + os.environ['CASE_ID'],
+    'evidence_dir': 'ui-cal/cases/' + cid,
+    'artifacts': {
+        'baseline_png':       f'ui-cal/cases/{cid}/baseline.png',
+        'regressed_png':      f'ui-cal/cases/{cid}/regressed.png',
+        'rerun_png':          f'ui-cal/cases/{cid}/rerun.png',
+        'baseline_computed':  f'ui-cal/cases/{cid}/baseline-computed.json',
+        'regressed_computed': f'ui-cal/cases/{cid}/regressed-computed.json',
+        'rerun_computed':     f'ui-cal/cases/{cid}/rerun-computed.json',
+        'first_run_verdict':  f'ui-cal/cases/{cid}/first-run-verdict.json',
+        'rerun_verdict':      f'ui-cal/cases/{cid}/rerun-verdict.json',
+    },
 }
 with open(sys.argv[1], 'w') as f:
     json.dump(result, f, indent=2)
@@ -512,6 +584,69 @@ PYEOF
     sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
   fi
 
+  # --- Copy artifact files from capture_dir to case_output ---
+  mkdir -p "$case_output"
+  for art_file in baseline.png regressed.png rerun.png baseline-computed.json regressed-computed.json rerun-computed.json; do
+    if [[ -f "$capture_dir/$art_file" ]]; then
+      cp "$capture_dir/$art_file" "$case_output/$art_file"
+    fi
+  done
+
+  # --- Verify all 8 required artifacts exist ---
+  local d_artifact_error=0
+  local REQUIRED_D_ARTIFACTS=("baseline.png" "regressed.png" "rerun.png" "baseline-computed.json" "regressed-computed.json" "rerun-computed.json" "first-run-verdict.json" "rerun-verdict.json")
+  for art in "${REQUIRED_D_ARTIFACTS[@]}"; do
+    if [[ ! -f "$case_output/$art" ]]; then
+      echo "  MISSING ARTIFACT: $art" >&2
+      d_artifact_error=1
+    fi
+  done
+
+  if [[ $d_artifact_error -eq 1 ]]; then
+    first_run_verdict="error"
+    rerun_verdict="error"
+    first_run_reason="missing_artifacts"
+    local fc
+    fc=$(grep '^FAIL_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
+    local pc
+    pc=$(grep '^PASS_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    if [[ $pc -gt 0 ]]; then
+      sed -i "s/^PASS_COUNT=.*/PASS_COUNT=$((pc - 1))/" "$STATE_FILE"
+    fi
+  fi
+
+  # --- Extract real_surface from baseline-computed.json ---
+  local real_surface_json="{}"
+  if [[ -f "$case_output/baseline-computed.json" ]]; then
+    real_surface_json=$(VIEWPORT_W="$viewport_width" VIEWPORT_H="$viewport_height" CASE_ID_RS="$case_id" \
+    python3 - "$case_output/baseline-computed.json" <<'PYEOF'
+import json, sys, os
+with open(sys.argv[1]) as f:
+    computed = json.load(f)
+vw = int(os.environ.get('VIEWPORT_W', '1280'))
+vh = int(os.environ.get('VIEWPORT_H', '720'))
+real_surface = {
+    "app": "aid-gui",
+    "route": "/",
+    "component": "ScreenG",
+    "selector": computed.get("selector", ""),
+    "url": computed.get("url", ""),
+    "viewport": {"width": vw, "height": vh},
+    "assertions": {
+        "contains_text": "Co potřebuju vědět",
+        "forbidden_text": "DETERMINISTIC",
+        "has_selector": "section[aria-label=\"Co potřebuju vědět\"]",
+        "url_not_hermetic": True,
+    },
+    "captured_text_content": computed.get("text_content", ""),
+    "captured_bbox": computed.get("bbox", {}),
+}
+print(json.dumps(real_surface))
+PYEOF
+    )
+  fi
+
   echo ""
 
   CASE_ID="$case_id" \
@@ -519,15 +654,28 @@ PYEOF
   FIRST_RUN="$first_run_verdict" \
   FIRST_REASON="$first_run_reason" \
   RERUN="$rerun_verdict" \
+  REAL_SURFACE_JSON="$real_surface_json" \
   python3 - "$TMP_DIR/case-${case_id}.json" <<'PYEOF'
 import json, sys, os
+cid = os.environ['CASE_ID']
 result = {
-    'case_id': os.environ['CASE_ID'],
+    'case_id': cid,
     'description': os.environ['CASE_DESC'],
     'first_run': os.environ['FIRST_RUN'],
     'first_run_reason': os.environ['FIRST_REASON'],
     'rerun': os.environ['RERUN'],
-    'evidence_dir': 'ui-cal/cases/' + os.environ['CASE_ID'],
+    'evidence_dir': 'ui-cal/cases/' + cid,
+    'artifacts': {
+        'baseline_png':       f'ui-cal/cases/{cid}/baseline.png',
+        'regressed_png':      f'ui-cal/cases/{cid}/regressed.png',
+        'rerun_png':          f'ui-cal/cases/{cid}/rerun.png',
+        'baseline_computed':  f'ui-cal/cases/{cid}/baseline-computed.json',
+        'regressed_computed': f'ui-cal/cases/{cid}/regressed-computed.json',
+        'rerun_computed':     f'ui-cal/cases/{cid}/rerun-computed.json',
+        'first_run_verdict':  f'ui-cal/cases/{cid}/first-run-verdict.json',
+        'rerun_verdict':      f'ui-cal/cases/{cid}/rerun-verdict.json',
+    },
+    'real_surface': json.loads(os.environ.get('REAL_SURFACE_JSON', '{}')),
 }
 with open(sys.argv[1], 'w') as f:
     json.dump(result, f, indent=2)
@@ -585,7 +733,7 @@ for f in case_files:
 
 record = {
     'calibration': {
-        'schema_version': '1.0.0',
+        'schema_version': '1.1.0',
         'run_at': os.environ['RUN_AT_ENV'],
         'cases': cases,
         'result': os.environ['OVERALL_ENV'],

@@ -365,7 +365,7 @@ function checkLockedCrops(contract, beforeComputed, afterComputed, beforePng, af
   // Images must have the same dimensions for comparison
   if (beforePng.width !== afterPng.width || beforePng.height !== afterPng.height) {
     findings.push({
-      reason: 'locked_violation',
+      reason: 'image_dimension_mismatch',
       note: 'before and after PNGs have different dimensions, cannot compare',
       before_dims: `${beforePng.width}x${beforePng.height}`,
       after_dims: `${afterPng.width}x${afterPng.height}`,
