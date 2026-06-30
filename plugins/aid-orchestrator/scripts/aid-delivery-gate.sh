@@ -211,11 +211,16 @@ fi
 
 # ---------------------------------------------------------------------------
 # Resolve profile
+# AID_DELIVERY_PROFILE env var overrides auto-detection (test hook).
 # ---------------------------------------------------------------------------
-PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
-  echo "ERROR: resolve_profile failed" >&2
-  exit 1
-}
+if [[ -n "${AID_DELIVERY_PROFILE:-}" ]]; then
+  PROFILE="${AID_DELIVERY_PROFILE}"
+else
+  PROFILE="$(resolve_profile "$PROJECT_ROOT" "${CHANGED_PATHS_FILE:-}")" || {
+    echo "ERROR: resolve_profile failed" >&2
+    exit 1
+  }
+fi
 
 # Read policy settings
 BLOCK_ON_UNVERIFIABLE="$(yq e '.block_on_unverifiable // true' "$POLICY_FILE" 2>/dev/null)"
@@ -362,9 +367,9 @@ _map_section_globs() {
 # _has_acceptance_evidence() → 0=step-*-verify.md files exist in evidence dir, 1=no evidence
 # Uses EVIDENCE_BASE global (always absolute, computed at script init from AID_EVIDENCE_BASE or PROJECT_ROOT).
 _has_acceptance_evidence() {
-  local evidence_dir="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}/steps"
+  local evidence_dir="${EVIDENCE_BASE}/${EPIC_ID}/${RUN_ID}"
 
-  # Check if any step-*-verify.md exists
+  # Check if any step-*-verify.md exists (FSM writes them to run root, not steps/)
   ls "${evidence_dir}"/step-*-verify.md >/dev/null 2>&1
 }
 
@@ -637,6 +642,7 @@ _run_check() {
     AID_RUN_ID="$RUN_ID" \
     AID_BASE_SHA="$BASE_SHA" \
     AID_CHANGED_PATHS="${CHANGED_PATHS_FILE:-}" \
+    AID_EVIDENCE_BASE="$EVIDENCE_BASE" \
     timeout "$timeout_seconds" \
     "$check_script" "${check_argv[@]}" 2>&1)" || check_exit=$?
   _t_end=$(date +%s%3N 2>/dev/null || date +%s)

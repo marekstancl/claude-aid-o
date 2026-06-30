@@ -40,7 +40,7 @@ elif [[ -n "${AID_EPIC_ID:-}" && -n "${AID_RUN_ID:-}" ]]; then
   # Construct from EPIC_ID + RUN_ID
   _root="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".")}"
   _base="${AID_EVIDENCE_BASE:-${_root}/.aid-o/work/evidence}"
-  EVIDENCE_STEPS_DIR="${_base}/${AID_EPIC_ID}/${AID_RUN_ID}/steps"
+  EVIDENCE_STEPS_DIR="${_base}/${AID_EPIC_ID}/${AID_RUN_ID}"
 else
   # Fallback: scan .aid-o/work/evidence/ for step-*-verify.md via glob
   _root="${AID_PROJECT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || echo ".")}"

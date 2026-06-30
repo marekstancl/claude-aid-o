@@ -511,18 +511,22 @@ DELIVERY_GATE="${PLUGIN_ROOT}/plugins/aid-orchestrator/scripts/aid-delivery-gate
 GATE_OUTPUT_FILE="${SCRATCHPAD}/dg15-gate-output.json"
 mkdir -p "$(dirname "$GATE_OUTPUT_FILE")"
 
-# We need a git context for aid-delivery-gate.sh to work; use PLUGIN_ROOT
-LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-pass" \
+# Use with-map-fail: dg15 should detect unresolved link → status: fail
+# AID_DELIVERY_PROFILE overrides auto-detection (fixture has no package.json/plugin.json)
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG15}/with-map-fail" \
   AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  AID_DELIVERY_PROFILE="plugin-bash" \
   bash "$DELIVERY_GATE" \
     --epic "E-DG15-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
 
-# gate exits 0 in observe mode; check dg15 appears in JSON output
+# Assert dg15 ran and produced status: fail (not just present)
 GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG15-TEST/R-1/delivery-gate.json"
-if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg15")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+DG15_STATUS=""
+[[ -f "$GATE_JSON_FILE" ]] && DG15_STATUS="$(jq -r '.delivery_gate.checks[] | select(.id == "dg15") | .status' "$GATE_JSON_FILE" 2>/dev/null)"
+if [[ "$DG15_STATUS" == "fail" ]]; then
   _pass "dg15 dispatcher-integration: dg15 appears in delivery-gate.json checks"
 else
-  _fail "dg15 dispatcher-integration: dg15 not found in delivery-gate.json (CHECKS array or probe not wired)"
+  _fail "dg15 dispatcher-integration: expected status=fail in delivery-gate.json, got '${DG15_STATUS}' (CHECKS array or probe not wired, or probe did not run)"
 fi
 
 # ===========================================================================
@@ -557,17 +561,20 @@ else
   _fail "dg17 no-baseline expected exit=2, got exit=${LAST_EXIT}"
 fi
 
-# Dispatcher integration: verify dg17 appears in delivery-gate.json
+# Dispatcher integration: use with-artifact-fail; dg17 should detect drop → status: fail
 LAST_EXIT=0
-LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/with-artifact-pass" \
+LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG17}/with-artifact-fail" \
   AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  AID_DELIVERY_PROFILE="plugin-bash" \
   bash "$DELIVERY_GATE" \
     --epic "E-DG17-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
 GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG17-TEST/R-1/delivery-gate.json"
-if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg17")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+DG17_STATUS=""
+[[ -f "$GATE_JSON_FILE" ]] && DG17_STATUS="$(jq -r '.delivery_gate.checks[] | select(.id == "dg17") | .status' "$GATE_JSON_FILE" 2>/dev/null)"
+if [[ "$DG17_STATUS" == "fail" ]]; then
   _pass "dg17 dispatcher-integration: dg17 appears in delivery-gate.json"
 else
-  _fail "dg17 dispatcher-integration: dg17 not found in delivery-gate.json"
+  _fail "dg17 dispatcher-integration: expected status=fail in delivery-gate.json, got '${DG17_STATUS}' (probe not wired or did not run)"
 fi
 
 # ===========================================================================
@@ -576,7 +583,7 @@ fi
 FIXTURES_DG18="${FIXTURES_DIR}/dg15-17-18/dg18"
 
 LAST_EXIT=0
-LAST_OUTPUT="$(AID_EVIDENCE_DIR="${FIXTURES_DG18}/acceptance-pass/.aid-o/work/evidence/E-TEST/R-TEST/steps" \
+LAST_OUTPUT="$(AID_EVIDENCE_DIR="${FIXTURES_DG18}/acceptance-pass/.aid-o/work/evidence/E-TEST/R-TEST" \
   bash "${CHECKS_DIR}/dg18-acceptance-struct.sh" 2>&1)" || LAST_EXIT=$?
 if [[ "$LAST_EXIT" -eq 0 ]] && echo "$LAST_OUTPUT" | grep -q 'provenance verified'; then
   _pass "dg18 acceptance-pass exits 0 with provenance verified"
@@ -593,18 +600,24 @@ else
   _fail "dg18 no-evidence expected exit=0, got exit=${LAST_EXIT}"
 fi
 
-# Dispatcher integration: verify dg18 appears in delivery-gate.json
-# Use acceptance-pass fixture; set AID_EPIC_ID+AID_RUN_ID so dg18 can find evidence
+# Dispatcher integration: verify dg18 runs and produces status: pass
+# Pre-seed evidence so _has_acceptance_evidence() sees step-*-verify.md at the run root
+EVIDENCE_ROOT_DG18="${SCRATCHPAD}/evidence/E-DG18-TEST/R-1"
+mkdir -p "${EVIDENCE_ROOT_DG18}"
+printf '## Result: PASS\nStep 0 completed.\n' > "${EVIDENCE_ROOT_DG18}/step-0-verify.md"
 LAST_EXIT=0
 LAST_OUTPUT="$(AID_PROJECT_ROOT="${FIXTURES_DG18}/acceptance-pass" \
   AID_EVIDENCE_BASE="${SCRATCHPAD}/evidence" \
+  AID_DELIVERY_PROFILE="plugin-bash" \
   bash "$DELIVERY_GATE" \
     --epic "E-DG18-TEST" --run "R-1" --base "HEAD" --phase D0 2>&1)" || LAST_EXIT=$?
 GATE_JSON_FILE="${SCRATCHPAD}/evidence/E-DG18-TEST/R-1/delivery-gate.json"
-if [[ -f "$GATE_JSON_FILE" ]] && jq -e '.delivery_gate.checks[] | select(.id == "dg18")' "$GATE_JSON_FILE" >/dev/null 2>&1; then
+DG18_STATUS=""
+[[ -f "$GATE_JSON_FILE" ]] && DG18_STATUS="$(jq -r '.delivery_gate.checks[] | select(.id == "dg18") | .status' "$GATE_JSON_FILE" 2>/dev/null)"
+if [[ "$DG18_STATUS" == "pass" ]]; then
   _pass "dg18 dispatcher-integration: dg18 appears in delivery-gate.json"
 else
-  _fail "dg18 dispatcher-integration: dg18 not found in delivery-gate.json"
+  _fail "dg18 dispatcher-integration: expected status=pass in delivery-gate.json, got '${DG18_STATUS}' (evidence not found or probe not wired)"
 fi
 
 # ---------------------------------------------------------------------------
