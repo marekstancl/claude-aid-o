@@ -46,6 +46,35 @@ jobs:
             bash plugins/aid-orchestrator/scripts/gates/ui-contract-check.sh --type-check "$f"
           done
 
+      - name: Run ui-compare.mjs against A/B/C fixtures
+        run: |
+          set -e
+          mkdir -p /tmp/compare-results
+          for case in A B C; do
+            fixture="plugins/aid-orchestrator/scripts/tests/fixtures/ui-fidelity/$case"
+            echo "--- Case $case ---"
+            node plugins/aid-orchestrator/lib/ui-fidelity/ui-compare.mjs \
+              --before-png "$fixture/before.png" \
+              --after-png "$fixture/after.png" \
+              --before-computed "$fixture/before-computed.json" \
+              --after-computed "$fixture/after-computed.json" \
+              --contract "$fixture/contract.yaml" \
+              --output-dir "/tmp/compare-results/$case"
+
+            expected=$(cat "$fixture/expected-verdict.json")
+            actual=$(cat "/tmp/compare-results/$case/ui/verdict.json")
+            expected_verdict=$(echo "$expected" | python3 -c "import sys,json; print(json.load(sys.stdin)['verdict'])")
+            actual_verdict=$(echo "$actual" | python3 -c "import sys,json; print(json.load(sys.stdin)['verdict'])")
+
+            if [ "$expected_verdict" = "$actual_verdict" ]; then
+              echo "Case $case: PASS (verdict=$actual_verdict matches expected)"
+            else
+              echo "Case $case: FAIL (expected verdict=$expected_verdict, got=$actual_verdict)"
+              exit 1
+            fi
+          done
+          echo "All fixture cases match expected verdicts"
+
       - name: Schema validation (YAML parse)
         run: |
           python3 -c "

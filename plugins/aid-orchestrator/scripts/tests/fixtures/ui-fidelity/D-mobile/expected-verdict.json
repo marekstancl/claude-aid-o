@@ -1,7 +1,7 @@
 {
   "verdict": "pass",
-  "contract_id": "fixture-D-mobile-screeng",
-  "target_id": "screeng-root",
+  "contract_id": "fixture-D-mobile-hermetic",
+  "target_id": "hermetic-box-mobile",
   "checks": {
     "positive_delta": {
       "pass": true,

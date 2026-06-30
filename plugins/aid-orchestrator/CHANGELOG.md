@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.47.0] — 2026-06-30
+
+### Added
+- **E7A UI Fidelity Foundation** — Standalone `lib/ui-fidelity/` package with Playwright capture, pixelmatch comparison, typed contract schema, envelope validator, 5 calibration fixture sets (A/B/C hermetic + D-desktop/D-mobile hermetic), CI workflow, and `ui-contract-check.sh` gate script.
+
 ## [2.46.0] — 2026-06-30
 
 ### Added

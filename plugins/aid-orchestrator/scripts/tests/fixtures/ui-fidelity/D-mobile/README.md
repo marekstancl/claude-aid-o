@@ -1,1 +1,1 @@
-Case D-mobile: ScreenG hermetic mock at 375x812 — PASS round-trip capture test at mobile viewport using `page.route` API mocks; identical to D-desktop but at mobile dimensions.
+Hermetic mock (375x812) — determinism round-trip test at mobile viewport. NOT a real ScreenG capture. Uses HERMETIC_TEST_PAGE_HTML from ui-capture-fixtures.mjs.

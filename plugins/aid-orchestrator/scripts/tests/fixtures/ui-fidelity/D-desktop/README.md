@@ -1,1 +1,1 @@
-Case D-desktop: ScreenG hermetic mock at 1280x720 — PASS round-trip capture test using `page.route` API mocks and the hermetic test page; before/after PNGs are identical (no UI change expected).
+Hermetic mock (1280x720) — determinism round-trip test. NOT a real ScreenG capture. Uses HERMETIC_TEST_PAGE_HTML from ui-capture-fixtures.mjs.

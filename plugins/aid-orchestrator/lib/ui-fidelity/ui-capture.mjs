@@ -2,7 +2,7 @@
  * ui-capture.mjs — Playwright-based screenshot capture + computed styles extractor
  *
  * CLI usage:
- *   node ui-capture.mjs --url <url> --selector <css-selector> --target-id <id> --output-dir <path> [--api-mocks-file <json-file>]
+ *   node ui-capture.mjs --url <url> --selector <css-selector> --target-id <id> --output-dir <path> [--api-mocks-file <json-file>] [--viewport-width <n>] [--viewport-height <n>]
  *
  * Outputs to --output-dir:
  *   <target-id>.png           — clipped screenshot of matched element
@@ -39,7 +39,7 @@ function printHelp() {
 ui-capture.mjs — UI fidelity screenshot + computed styles capture
 
 Usage:
-  node ui-capture.mjs --url <url> --selector <css-selector> --target-id <id> --output-dir <path> [--api-mocks-file <json-file>]
+  node ui-capture.mjs --url <url> --selector <css-selector> --target-id <id> --output-dir <path> [--api-mocks-file <json-file>] [--viewport-width <n>] [--viewport-height <n>]
 
 Options:
   --url <url>               Page URL to navigate to
@@ -47,6 +47,8 @@ Options:
   --target-id <id>          Identifier used for output filenames
   --output-dir <path>       Directory to write outputs into (created if missing)
   --api-mocks-file <file>   JSON file with API mock definitions (optional)
+  --viewport-width <n>      Viewport width in pixels (default: 1280)
+  --viewport-height <n>     Viewport height in pixels (default: 720)
   --help                    Show this help
 
 Output files (written to --output-dir):
@@ -142,7 +144,7 @@ async function extractElementData(page, selector, targetId, url) {
 /**
  * Main capture function — navigates to URL, mocks APIs, captures element.
  */
-async function capture({ url, selector, targetId, outputDir, apiMocksFile }) {
+async function capture({ url, selector, targetId, outputDir, apiMocksFile, viewportWidth = 1280, viewportHeight = 720 }) {
   const absOutputDir = resolve(outputDir);
   mkdirSync(absOutputDir, { recursive: true });
 
@@ -153,13 +155,13 @@ async function capture({ url, selector, targetId, outputDir, apiMocksFile }) {
 
   try {
     const context = await browser.newContext({
-      viewport: { width: 1280, height: 720 },
       locale: 'en-US',
       timezoneId: 'UTC',
       colorScheme: 'light',
     });
 
     const page = await context.newPage();
+    await page.setViewportSize({ width: viewportWidth, height: viewportHeight });
 
     // Register API mocks before navigation
     if (apiMocksFile) {
@@ -214,6 +216,9 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+const viewportWidth = parseInt(args.viewportWidth) || 1280;
+const viewportHeight = parseInt(args.viewportHeight) || 720;
+
 try {
   await capture({
     url: args.url,
@@ -221,6 +226,8 @@ try {
     targetId: args.targetId,
     outputDir: args.outputDir,
     apiMocksFile: args.apiMocksFile ?? null,
+    viewportWidth,
+    viewportHeight,
   });
   process.exit(0);
 } catch (err) {

@@ -1,1 +1,1 @@
-Case A: synthetic button color change — PASS case verifying `positive_delta` and `rest_lock` with a single approved `color` property update from `#333333` to `#0066cc`.
+Case A: synthetic button color change — PASS case verifying `positive_delta` and `rest_lock` with a single approved `color` property update from `#333333` to `#0066cc`. Includes envelope example with `baseline_sha256` for baseline integrity validation.
