@@ -77,6 +77,15 @@ gates:
     timeout_seconds: 180
     when: "frontend files changed"
 
+  ui_calibration_signoff:
+    description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
+    required: true
+    type: deterministic
+    command: "jq -e '.calibration.pm_signoff.confirmed_by | length > 0' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
+    timeout_seconds: 10
+    pass_criteria: "exit code 0 (confirmed_by is non-empty string)"
+    max_retries: 0
+
 # Python project gates (language-specific override example)
 # Uncomment and customize for Python-heavy projects:
 # gates_python:
