@@ -77,6 +77,14 @@ gates:
     timeout_seconds: 180
     when: "frontend files changed"
 
+  ui_calibration_result:
+    description: "Calibration runner completed with result: pass (all 5 cases demonstrated first_run=fail and rerun=pass)"
+    required: true
+    type: deterministic
+    command: "jq -e '.calibration.result == \"pass\"' .aid-o/work/evidence/{epic_id}/{run_id}/ui-cal/ui-calibration-record.json"
+    timeout_seconds: 10
+    pass_criteria: "exit code 0 (result field is 'pass')"
+    max_retries: 0
   ui_calibration_signoff:
     description: "PM has manually signed off on E7-CAL calibration results after reviewing 5-case evidence pack"
     required: true

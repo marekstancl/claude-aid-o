@@ -1,10 +1,10 @@
-contract_id: fixture-D-mobile-hermetic
+contract_id: fixture-D-mobile-screeng
 version: "1.0.0"
 viewport:
   width: 375
   height: 812
 target:
-  id: hermetic-box-mobile
-  selector: "[data-testid=\"hermetic-box\"]"
+  id: screeng-mobile
+  selector: "section[aria-label=\"Co potřebuju vědět\"]"
   presence:
     state: visible

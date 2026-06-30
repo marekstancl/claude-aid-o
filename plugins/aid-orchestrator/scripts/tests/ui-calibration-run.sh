@@ -16,6 +16,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE_BASE="$SCRIPT_DIR/fixtures/ui-fidelity"
 COMPARE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/ui-compare.mjs")"
+SCREENG_CAPTURE_MJS="$(realpath "$SCRIPT_DIR/../../lib/ui-fidelity/screeng-capture.mjs")"
+AID_GUI_DIR="$(realpath "$SCRIPT_DIR/../../../../packages/aid-gui")"
+# Workspace root for hoisted node_modules (npm workspaces)
+AID_WORKSPACE_ROOT="$(realpath "$SCRIPT_DIR/../../../../")"
+AID_GUI_PORT=3911
+VITE_PID=""
+VITE_STARTED_BY_SCRIPT=false
 OUTPUT_DIR=".aid-o/work/evidence/E-056-2_3/R-E056-2/ui-cal"
 
 # Parse --output-dir flag
@@ -50,13 +57,19 @@ if [[ ! -f "$COMPARE_MJS" ]]; then
   exit 1
 fi
 
+# Check if screeng-capture.mjs is available
+if [[ ! -f "$SCREENG_CAPTURE_MJS" ]]; then
+  echo "ERROR: screeng-capture.mjs not found at: $SCREENG_CAPTURE_MJS" >&2
+  exit 1
+fi
+
 # Create output directories
 mkdir -p "$OUTPUT_DIR/cases"
 
 CASES_DIR="$OUTPUT_DIR/cases"
 RECORD_FILE="$OUTPUT_DIR/ui-calibration-record.json"
 TMP_DIR=$(mktemp -d "/tmp/ui-cal-XXXXXX")
-trap 'rm -rf "$TMP_DIR"' EXIT
+trap 'rm -rf "$TMP_DIR"; stop_vite_server' EXIT
 
 RUN_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo "E7-CAL calibration starting at $RUN_AT"
@@ -67,6 +80,67 @@ echo ""
 STATE_FILE="$TMP_DIR/state"
 echo "PASS_COUNT=0" > "$STATE_FILE"
 echo "FAIL_COUNT=0" >> "$STATE_FILE"
+
+# ---------------------------------------------------------------------------
+# Vite dev server management for D-desktop/D-mobile cases
+# ---------------------------------------------------------------------------
+check_vite_server() {
+  # Try localhost first, then the host's primary IP (Vite may bind to --host)
+  curl -s --max-time 3 "http://localhost:$AID_GUI_PORT/" >/dev/null 2>&1 || \
+  curl -s --max-time 3 "http://$(hostname -I | awk '{print $1}'):$AID_GUI_PORT/" >/dev/null 2>&1
+}
+
+# Resolve Vite server URL (localhost or host IP, whichever responds)
+get_vite_url() {
+  if curl -s --max-time 3 "http://localhost:$AID_GUI_PORT/" >/dev/null 2>&1; then
+    echo "http://localhost:$AID_GUI_PORT"
+  else
+    echo "http://$(hostname -I | awk '{print $1}'):$AID_GUI_PORT"
+  fi
+}
+
+start_vite_server() {
+  if check_vite_server; then
+    echo "Vite dev server already running on :$AID_GUI_PORT"
+    return 0
+  fi
+
+  if [[ ! -d "$AID_GUI_DIR" ]]; then
+    echo "ERROR: packages/aid-gui not found at $AID_GUI_DIR" >&2
+    echo "D-desktop/D-mobile cases require aid-gui to be present." >&2
+    exit 1
+  fi
+
+  echo "Installing workspace dependencies (if needed)..."
+  npm install --prefix "$AID_WORKSPACE_ROOT" --silent
+
+  echo "Starting aid-gui Vite dev server on :$AID_GUI_PORT..."
+  (cd "$AID_GUI_DIR" && "$AID_WORKSPACE_ROOT/node_modules/.bin/vite" --port "$AID_GUI_PORT" --host) >"$TMP_DIR/vite.log" 2>&1 &
+  VITE_PID=$!
+  VITE_STARTED_BY_SCRIPT=true
+
+  local retries=0
+  while ! check_vite_server; do
+    retries=$((retries + 1))
+    if [[ $retries -gt 45 ]]; then
+      echo "ERROR: Vite dev server failed to start after 90s" >&2
+      echo "Last vite output:" >&2
+      tail -20 "$TMP_DIR/vite.log" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+  echo "Vite dev server ready on :$AID_GUI_PORT"
+}
+
+stop_vite_server() {
+  if [[ "$VITE_STARTED_BY_SCRIPT" == "true" && -n "$VITE_PID" ]]; then
+    kill "$VITE_PID" 2>/dev/null || true
+    wait "$VITE_PID" 2>/dev/null || true
+    VITE_PID=""
+    VITE_STARTED_BY_SCRIPT=false
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Helper: run ui-compare.mjs and return verdict string (pass/fail/error)
@@ -318,14 +392,161 @@ PYEOF
 }
 
 # ---------------------------------------------------------------------------
+# ScreenG calibration case runner (D-desktop / D-mobile)
+# Uses real aid-gui ScreenG component via Playwright page.route mocks.
+# Captures 3 states in ONE Playwright session: baseline, regressed, rerun.
+# Writes result JSON to $TMP_DIR/case-<id>.json
+# ---------------------------------------------------------------------------
+run_screeng_case() {
+  local case_id="$1"
+  local description="$2"
+  local fixture_dir="$FIXTURE_BASE/$case_id"
+  local contract="$fixture_dir/contract.yaml"
+  local case_output="$CASES_DIR/$case_id"
+
+  echo "Running case $case_id: $description"
+
+  # Parse viewport and selector from contract.yaml
+  local viewport_width viewport_height selector
+  viewport_width=$(python3 -c "import yaml,sys; c=yaml.safe_load(open('$contract')); print(c['viewport']['width'])")
+  viewport_height=$(python3 -c "import yaml,sys; c=yaml.safe_load(open('$contract')); print(c['viewport']['height'])")
+  selector=$(python3 -c "import yaml,sys; c=yaml.safe_load(open('$contract')); print(c['target']['selector'])")
+
+  # Capture all 3 states in one Playwright session
+  local capture_dir="$TMP_DIR/screeng-capture-$case_id"
+  mkdir -p "$capture_dir"
+
+  local vite_url
+  vite_url=$(get_vite_url)
+
+  local capture_exit=0
+  node "$SCREENG_CAPTURE_MJS" \
+    --base-url "$vite_url" \
+    --port "$AID_GUI_PORT" \
+    --viewport-width "$viewport_width" \
+    --viewport-height "$viewport_height" \
+    --selector "$selector" \
+    --output-dir "$capture_dir" \
+    2>&1 || capture_exit=$?
+
+  if [[ $capture_exit -ne 0 || ! -f "$capture_dir/baseline.png" ]]; then
+    echo "  ERROR: screeng-capture.mjs failed for $case_id (exit $capture_exit)" >&2
+    local fc
+    fc=$(grep '^FAIL_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
+    CASE_ID="$case_id" \
+    CASE_DESC="$description" \
+    FIRST_RUN="error" \
+    FIRST_REASON="screeng-capture failed" \
+    RERUN="error" \
+    python3 - "$TMP_DIR/case-${case_id}.json" <<'PYEOF'
+import json, sys, os
+result = {
+    'case_id': os.environ['CASE_ID'],
+    'description': os.environ['CASE_DESC'],
+    'first_run': os.environ['FIRST_RUN'],
+    'first_run_reason': os.environ['FIRST_REASON'],
+    'rerun': os.environ['RERUN'],
+    'evidence_dir': 'ui-cal/cases/' + os.environ['CASE_ID'],
+}
+with open(sys.argv[1], 'w') as f:
+    json.dump(result, f, indent=2)
+PYEOF
+    return
+  fi
+
+  # --- first_run: baseline vs regressed → expect FAIL ---
+  local first_run_output="$case_output/first-run-tmp"
+  local first_run_verdict
+  first_run_verdict=$(run_compare \
+    "$capture_dir/baseline.png" \
+    "$capture_dir/regressed.png" \
+    "$capture_dir/baseline-computed.json" \
+    "$capture_dir/regressed-computed.json" \
+    "$contract" \
+    "$first_run_output")
+
+  mkdir -p "$case_output"
+  if [[ -f "$first_run_output/ui/verdict.json" ]]; then
+    cp "$first_run_output/ui/verdict.json" "$case_output/first-run-verdict.json"
+  fi
+
+  local first_run_reason="unknown"
+  if [[ -f "$case_output/first-run-verdict.json" ]]; then
+    first_run_reason=$(extract_fail_reason "$case_output/first-run-verdict.json")
+  fi
+
+  if [[ "$first_run_verdict" == "fail" ]]; then
+    echo "  first_run: FAIL (reason: $first_run_reason) [expected]"
+  else
+    echo "  first_run: $first_run_verdict (expected: fail) [UNEXPECTED]"
+    local fc
+    fc=$(grep '^FAIL_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
+  fi
+
+  # --- rerun: baseline vs rerun → expect PASS ---
+  local rerun_output="$case_output/rerun-tmp"
+  local rerun_verdict
+  rerun_verdict=$(run_compare \
+    "$capture_dir/baseline.png" \
+    "$capture_dir/rerun.png" \
+    "$capture_dir/baseline-computed.json" \
+    "$capture_dir/rerun-computed.json" \
+    "$contract" \
+    "$rerun_output")
+
+  if [[ -f "$rerun_output/ui/verdict.json" ]]; then
+    cp "$rerun_output/ui/verdict.json" "$case_output/rerun-verdict.json"
+  fi
+
+  if [[ "$rerun_verdict" == "pass" ]]; then
+    echo "  rerun:     PASS [expected]"
+    local pc
+    pc=$(grep '^PASS_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^PASS_COUNT=.*/PASS_COUNT=$((pc + 1))/" "$STATE_FILE"
+  else
+    echo "  rerun:     $rerun_verdict (expected: pass) [UNEXPECTED]"
+    local fc
+    fc=$(grep '^FAIL_COUNT=' "$STATE_FILE" | cut -d= -f2)
+    sed -i "s/^FAIL_COUNT=.*/FAIL_COUNT=$((fc + 1))/" "$STATE_FILE"
+  fi
+
+  echo ""
+
+  CASE_ID="$case_id" \
+  CASE_DESC="$description" \
+  FIRST_RUN="$first_run_verdict" \
+  FIRST_REASON="$first_run_reason" \
+  RERUN="$rerun_verdict" \
+  python3 - "$TMP_DIR/case-${case_id}.json" <<'PYEOF'
+import json, sys, os
+result = {
+    'case_id': os.environ['CASE_ID'],
+    'description': os.environ['CASE_DESC'],
+    'first_run': os.environ['FIRST_RUN'],
+    'first_run_reason': os.environ['FIRST_REASON'],
+    'rerun': os.environ['RERUN'],
+    'evidence_dir': 'ui-cal/cases/' + os.environ['CASE_ID'],
+}
+with open(sys.argv[1], 'w') as f:
+    json.dump(result, f, indent=2)
+PYEOF
+}
+
+# ---------------------------------------------------------------------------
 # Run all 5 cases
 # ---------------------------------------------------------------------------
 
 run_case "A" "Button color change - authorized change PASS"
 run_case "B" "Element hidden - presence:hidden rest-lock skipped PASS"
 run_case "C" "Unauthorized font-size change REST-LOCK FAIL then fixed PASS"
-run_case "D-desktop" "Hermetic box desktop PASS"
-run_case "D-mobile" "Hermetic box mobile PASS"
+
+# Before Vite-dependent D cases, start server
+start_vite_server
+
+run_screeng_case "D-desktop" "Real ScreenG desktop: brief API error triggers FAIL, good mocks PASS"
+run_screeng_case "D-mobile"  "Real ScreenG mobile: brief API error triggers FAIL, good mocks PASS"
 
 # ---------------------------------------------------------------------------
 # Read counters from state file
