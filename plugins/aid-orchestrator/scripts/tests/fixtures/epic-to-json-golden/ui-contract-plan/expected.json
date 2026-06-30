@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {
+      "id": "step_1_frontend",
+      "role": "frontend",
+      "ui_change_mode": "existing_ui",
+      "ui_change_contract": {
+        "path": ".aid-o/work/evidence/E-TEST-004/companion/delta-contract.json",
+        "sha256": "abc123deadbeef",
+        "schema_version": "1.0.0"
+      }
+    }
+  ]
+}
