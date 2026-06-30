@@ -178,5 +178,5 @@ echo "TEST: T3 — absent verdict.json blocks increment"
 }
 
 echo ""
-echo "Results: $((PASS + FAIL)) run, $PASS passed, $FAIL failed"
+echo "Results: $PASS/$((PASS + FAIL)) passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

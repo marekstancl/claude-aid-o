@@ -280,7 +280,7 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 **UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json)*
 ```
 
-> **Rule:** Every step with `AID Role: frontend` and `UI Change Mode: existing_ui` MUST include a `UI Change Contract` field. Plans with an `existing_ui` step that omits the contract are invalid — `aid-epic-to-json.sh` will reject them.
+> **Rule:** Every step with `AID Role: frontend` and `UI Change Mode: existing_ui` MUST include a `UI Change Contract` field. Plans missing this field emit `ui_change_contract: null` in plan.json, and the FSM guard in `aid-fsm.sh cmd_increment_step` will block the step with `frontend_visual_fidelity_block`.
 
 ### E2E Verification Step (auto-added as last step)
 
