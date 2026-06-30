@@ -19,7 +19,7 @@ if [[ -z "$RECORD" ]]; then
 fi
 
 # evidence_root is the parent of ui-cal/ — so paths like "ui-cal/cases/A/baseline.png" resolve
-EVIDENCE_ROOT="${2:-$(realpath "$(dirname "$RECORD")/../..")}"
+EVIDENCE_ROOT="${2:-$(realpath "$(dirname "$RECORD")/..")}"
 
 FAILURES=0
 fail() { echo "FAIL: $1" >&2; FAILURES=$((FAILURES + 1)); }

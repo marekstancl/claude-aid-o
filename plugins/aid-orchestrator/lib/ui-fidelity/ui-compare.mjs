@@ -478,7 +478,7 @@ function checkOutsideMask(contract, beforeComputed, afterComputed, beforePng, af
   // Images must match dimensions
   if (beforePng.width !== afterPng.width || beforePng.height !== afterPng.height) {
     findings.push({
-      reason: 'outside_mask_diff',
+      reason: 'image_dimension_mismatch',
       note: 'before and after PNGs have different dimensions, cannot perform outside-mask check',
     });
     return { pass: false, diff_pixels: null, diff_ratio: null, findings };
