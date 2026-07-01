@@ -12,6 +12,7 @@ For tasks estimated under 2 hours of work. Creates a quick log entry (`Q-NNN.md`
 
 ```
 /aid-do <task description>
+/aid-do --ui <task description>
 ```
 
 **Examples:**
@@ -19,7 +20,15 @@ For tasks estimated under 2 hours of work. Creates a quick log entry (`Q-NNN.md`
 /aid-do "add a console.log to debug auth flow"
 /aid-do "fix typo in README"
 /aid-do "add login button with Google OAuth"
+/aid-do --ui "redesign the ScreenG component"  # redirected to /aid-run
 ```
+
+## Flags
+
+| Flag | Behavior |
+|------|----------|
+| `--ui` | Marks task as existing_ui change -- redirects to /aid-run (contract enforcement required) |
+| `--no-ui-check` | Bypass existing_ui detection (for tasks matching the pattern but not needing contract) |
 
 ## Flow
 
@@ -31,7 +40,38 @@ For tasks estimated under 2 hours of work. Creates a quick log entry (`Q-NNN.md`
 
 ### Step 2: Scope Estimate
 
-Analyze the task description to estimate scope:
+**Existing UI detection (first check):**
+
+If the task description contains `existing_ui` OR the `--ui` flag was passed (and `--no-ui-check` was NOT passed):
+- This indicates a change to existing frontend UI requiring a `ui_change_contract`
+- `/aid-do` cannot safely scope-limit UI changes (no contract enforcement mechanism)
+- **Refuse with redirect:**
+  ```
+  Use /aid-run for existing UI changes
+
+  /aid-do cannot safely deliver existing UI changes -- they require a
+  ui_change_contract envelope (path/sha256/schema_version) to enforce
+  typed delta, which is only wired in the full EPIC pipeline.
+
+  Redirect to /aid-run:
+    /aid-plan "describe your UI change"  -- brainstorm -> plan with contract
+    /aid-run                             -- execute with companion baseline + FSM guard
+
+  Why this matters: undeclared visual changes cannot be verified against
+  the baseline. /aid-run's existing_ui guard catches regressions; /aid-do
+  bypasses it.
+
+  False-positive tradeoff: if your description accidentally contains
+  'existing_ui' but this is not a UI change, add --no-ui-check to bypass
+  this detection.
+  ```
+- Stop. Do NOT proceed with implementation.
+
+**Tradeoff:** explicit `existing_ui` text OR `--ui` flag triggers redirect; task descriptions
+that modify UI components without this marker are NOT redirected (too many false positives
+for UI fixes, typo corrections, and minor adjustments that do not need contract enforcement).
+
+**Standard scope analysis (runs only if not redirected above):**
 
 1. Identify affected files and architectural layers (frontend, backend, DB, config, infra)
 2. Estimate file count and layer count from task description
@@ -180,4 +220,4 @@ plan→EPIC→run FSM pipeline.
 - If `$ARGUMENTS` is empty → ask PM: "What task should I implement?"
 
 
-**Last Updated:** 2026-03-19
+**Last Updated:** 2026-06-30

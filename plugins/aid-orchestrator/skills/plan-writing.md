@@ -276,7 +276,11 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 **Effort:** {S / M / L}
 **AID Role:** {architect / domain / backend / frontend / qa / e2e / security / observability / docs-writer / release}
 **Visual Refs:** `{path/to/mockup-source.tsx}` lines {start}-{end} — {what part this step implements} *(optional — only for frontend/UI steps with mockups)*
+**UI Change Mode:** `existing_ui` | `new_ui` *(frontend steps that modify existing UI — omit for new UI/greenfield)*
+**UI Change Contract:** `path: .aid-o/work/.../delta-contract.json | sha256: <hash> | schema_version: 1.0.0` *(REQUIRED when UI Change Mode is `existing_ui` — omitting this blocks controller dispatch; see plan.schema.json)*
 ```
+
+> **Rule:** Every step with `AID Role: frontend` and `UI Change Mode: existing_ui` MUST include a `UI Change Contract` field. Plans missing this field emit `ui_change_contract: null` in plan.json. Without a contract the companion has no reference to compare against, so the verdict.json will be absent or unverifiable — and the FSM guard in `aid-fsm.sh cmd_increment_step` will then block the step with `frontend_visual_fidelity_block`. (The guard triggers on verdict result, not on null contract directly.)
 
 ### E2E Verification Step (auto-added as last step)
 
@@ -1069,4 +1073,4 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-30

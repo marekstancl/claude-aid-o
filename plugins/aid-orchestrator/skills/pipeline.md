@@ -248,7 +248,14 @@ Dispatch prompt contains (in order):
    c. If only PNG: include file paths for agent to Read as confirmation
    d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
    e. Priority: source code > visual-spec.yaml > PNG
-9. **MEMORY CONTEXT** (if `memory.enabled: true` in integrations.yaml):
+9. **UI CHANGE CONTRACT** — loaded when step has `ui_change_mode: existing_ui` in plan.json:
+    a. Extract `step.ui_change_contract` from plan.json (path + sha256 + schema_version)
+    b. Read the contract file at `step.ui_change_contract.path`
+    c. Inject into agent prompt as `## UI Change Contract` block (verbatim JSON)
+    d. If contract file missing or sha256 mismatch → ESCALATION (missing transport artifact)
+    e. Also inject `gestalt_approval` object if companion set it (from companion evidence)
+
+10. **MEMORY CONTEXT** (if `memory.enabled: true` in integrations.yaml):
    - Query Qdrant: `qdrant-find` with step objective as query
    - 2-tier injection into agent prompt:
      a. Top 10 results: summary only (~400 tokens)
@@ -257,7 +264,7 @@ Dispatch prompt contains (in order):
    - Graceful skip if Qdrant unavailable (log warning, continue without memory)
    - Include in agent prompt under `## Project Memory Context` heading
 
-10. **E2E CONTEXT** (if step has `role: e2e`):
+11. **E2E CONTEXT** (if step has `role: e2e`):
    - Include ALL previous step outputs (not just last — agent needs full picture)
    - Include `project.yaml` (infra detection: test_cmd, build_cmd, docker-compose path)
    - Include `docker-compose.yml` if exists (services, ports, healthchecks)
@@ -368,7 +375,7 @@ After all checks pass, write `evidence/{epic_id}/{run_id}/step-{N}-verify.md`:
 - [x] AC2 description — PASS (evidence: ...)
 - [ ] AC3 description — FAIL (reason: ...)
 
-## Visual Check (UI steps only — skip if no visual_refs)
+## Visual Check (UI steps only — skip if no visual_refs and no ui_change_mode: existing_ui)
 Mockup: {mockup_path}
 Screenshot: {evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png}
 
@@ -405,14 +412,11 @@ On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
    output lacks a `## Visual Anchoring` section (reason `frontend_missing_visual_anchoring`).
 1. **Screenshot capture:** Start dev server if not running → Playwright navigates to
    affected page → screenshot at 1280x720 → save to `evidence/{epic_id}/{run_id}/screenshots/step_{N}_actual.png`
-2. **Semantic comparison:** Controller reads both images (mockup + screenshot), produces
-   the Visual Check table above (5 aspects: layout, colors, typography, spacing, components)
-3. **Thresholds:**
-   - **MATCH** — all aspects YES → PASS
-   - **PARTIAL** — layout YES, 1-2 minor color/spacing diffs → PASS_WITH_NOTES
-   - **MISMATCH** — layout NO or 3+ aspects NO → FAIL → resume agent with specific visual failures
-4. **FAIL handling:** Resume agent with the comparison table + mockup path. Max 2 visual fix attempts → ESCALATION.
-5. **Skip conditions:** No visual_refs on step → skip. Dev server not running → warn, skip, note in verify.
+2. **Mechanical comparison:** Run `node {plugin_path}/lib/ui-fidelity/ui-compare.mjs --before <baseline.png> --after <actual.png>` → reads `verdict.json`
+   - `verdict.pass: true` → PASS
+   - `verdict.pass: false` → FAIL → resume agent with `verdict.reason` + paths. Max 2 fix attempts → ESCALATION.
+3. **capture-absent = unverifiable:** If baseline or actual screenshot missing → verdict `unverifiable` → log to step-verify, do NOT PASS or FAIL the visual check; continue to next step with note.
+4. **Skip conditions:** No visual_refs AND no `ui_change_mode: existing_ui` on step → skip visual check entirely.
 
 ### Review Checkpoint CP2 (per-step, ENFORCED v2.18.0+)
 
@@ -1405,7 +1409,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-06-30
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

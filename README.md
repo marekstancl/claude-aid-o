@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.49.0** (current) — E7-CAL calibration mechanism: real ScreenG Playwright capture, artifact persistence (8 files/case), standalone verifier, 15 false-green BATS tests, `image_dimension_mismatch` reason, auto-skip gates for non-calibration EPICs
+- **v2.50.0** (current) — E7B existing_ui wiring: FSM step-local guard, envelope transport (plan→EPIC→plan.json), C2 lens schema, `/aid-do` redirect, 3 test harnesses
+- **v2.49.0** — E7-CAL calibration mechanism: real ScreenG Playwright capture, artifact persistence (8 files/case), standalone verifier, 15 false-green BATS tests, `image_dimension_mismatch` reason, auto-skip gates for non-calibration EPICs
 - **v2.47.0** — E7A UI fidelity foundation: Playwright capture, pixelmatch comparison, typed contract schema, envelope validator, 5 calibration fixture sets, CI workflow
 - **v2.46.0** — E6 C1 honest-minimal delivery probes: DG-15/17/18 + delivery-map foundation
 - **v2.44.1** — C2 Semantic Review Engine (observe): 4-mode dual-emit, 12-lens catalog, wiring-gate, acceptance-evidence, consumption-proof, E3→E5 completed_lenses

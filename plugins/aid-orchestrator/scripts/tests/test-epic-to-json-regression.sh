@@ -168,6 +168,50 @@ echo "TEST: T3 — Cycle fixture exits non-zero with circular dependency error"
 }
 
 # ---------------------------------------------------------------------------
+# T4: ui_change_contract round-trip — steps[0].ui_change_contract non-null
+# ---------------------------------------------------------------------------
+echo "TEST: T4 — ui_change_contract envelope round-trip"
+{
+  FIXTURE_UI_CONTRACT="$SCRIPT_DIR/fixtures/epic-to-json-golden/ui-contract-plan/epic.md"
+  EXPECTED_UI_CONTRACT="$SCRIPT_DIR/fixtures/epic-to-json-golden/ui-contract-plan/expected.json"
+
+  if [[ ! -f "$FIXTURE_UI_CONTRACT" ]]; then
+    _fail "T4 — fixture missing: $FIXTURE_UI_CONTRACT"
+  elif [[ ! -f "$EXPECTED_UI_CONTRACT" ]]; then
+    _fail "T4 — expected.json missing: $EXPECTED_UI_CONTRACT"
+  else
+    t4_out="$TMPDIR_ROOT/t4"
+    mkdir -p "$t4_out"
+    t4_plan="$(run_on_fixture "$FIXTURE_UI_CONTRACT" "$t4_out")"
+
+    if [[ -z "$t4_plan" || ! -f "$t4_plan" ]]; then
+      _fail "T4 — aid-epic-to-json.sh failed on ui-contract fixture"
+    else
+      # Check that steps[0].ui_change_contract is non-null
+      step0_contract="$(jq -r '.steps[0].ui_change_contract' "$t4_plan")"
+      if [[ "$step0_contract" == "null" || -z "$step0_contract" ]]; then
+        _fail "T4 — steps[0].ui_change_contract is null (expected non-null)"
+      else
+        # Verify specific fields match expected.json
+        contract_path="$(jq -r '.steps[0].ui_change_contract.path' "$t4_plan")"
+        contract_sha="$(jq -r '.steps[0].ui_change_contract.sha256' "$t4_plan")"
+        contract_schema="$(jq -r '.steps[0].ui_change_contract.schema_version' "$t4_plan")"
+
+        expected_path="$(jq -r '.steps[0].ui_change_contract.path' "$EXPECTED_UI_CONTRACT")"
+        expected_sha="$(jq -r '.steps[0].ui_change_contract.sha256' "$EXPECTED_UI_CONTRACT")"
+        expected_schema="$(jq -r '.steps[0].ui_change_contract.schema_version' "$EXPECTED_UI_CONTRACT")"
+
+        if [[ "$contract_path" == "$expected_path" && "$contract_sha" == "$expected_sha" && "$contract_schema" == "$expected_schema" ]]; then
+          _pass "T4 — ui_change_contract round-trip: path/sha256/schema_version match"
+        else
+          _fail "T4 — ui_change_contract mismatch. Got: path=$contract_path sha256=$contract_sha schema=$contract_schema | Expected: path=$expected_path sha256=$expected_sha schema=$expected_schema"
+        fi
+      fi
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 total=$((PASS + FAIL))

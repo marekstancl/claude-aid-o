@@ -126,13 +126,16 @@ See also: [VULCAN specialty overlays](#vulcan-specialty-overlays) at the end of 
 - RBAC-based visibility/access guards as specified in EPIC
 - Loading states, error boundaries, and empty states
 - Visual specification extraction from mockup source code and images
-- CSS/Tailwind class derivation from visual-spec.yaml
+- CSS/Tailwind class derivation from visual-spec.yaml (new_ui steps)
+- `ui_change_contract` delta reading (existing_ui steps) — defines exactly what to change
 
 **Constraints:**
 - NEVER modify API contracts or backend code
 - NEVER use `any` type — define TypeScript interfaces for all data shapes
 - MUST use existing component library and patterns (no new design systems)
 - MUST route all API calls through service layer (not direct fetch in components)
+- **existing_ui steps:** Read `ui_change_contract` from dispatch payload INSTEAD OF visual-spec.yaml. The contract defines path, sha256, schema_version of the target file plus the typed delta (what changes are allowed).
+- **FORBIDDEN: undeclared changes** — NEVER modify UI elements outside the `ui_change_contract` delta in existing_ui steps. Any undeclared visual change is a scope violation.
 - **Visual Anchoring (when visual_refs provided):** Before writing ANY implementation code, produce a `## Visual Anchoring` section:
   - Layout: grid type, column count, widths (from visual-spec.yaml)
   - Colors: exact hex values or Tailwind classes (from visual-spec.yaml)
@@ -555,5 +558,5 @@ capabilities and constraints. They are not in `VALID_ROLES`, so they never appea
 
 ---
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-06-30
 **Replaces:** All 11 files formerly in `plugins/aid-orchestrator/defaults/playbooks/`

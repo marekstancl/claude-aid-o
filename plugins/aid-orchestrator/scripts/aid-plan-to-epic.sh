@@ -484,6 +484,7 @@ all_forbidden_paths=""
 all_artifacts=""
 step_objectives=""
 step_counter=0
+all_step_ui_meta=""
 
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
@@ -620,6 +621,42 @@ for sn in "${phase_steps[@]}"; do
   ')"
   if [[ -n "$step_artifacts" ]]; then
     all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
+  fi
+
+  # Extract UI Change Mode from step content
+  ui_change_mode="$(echo "$step_content" | awk '
+    /^\*\*UI Change Mode:\*\*/ {
+      sub(/^\*\*UI Change Mode:\*\*[[:space:]]*`?/, "")
+      sub(/`.*/, "")
+      gsub(/[[:space:]]/, "")
+      if ($0 == "existing_ui" || $0 == "new_ui") print $0
+      exit
+    }
+  ')"
+
+  # Extract UI Change Contract from step content
+  ui_change_contract_raw="$(echo "$step_content" | awk '
+    /^\*\*UI Change Contract:\*\*/ {
+      sub(/^\*\*UI Change Contract:\*\*[[:space:]]*`?/, "")
+      sub(/`.*/, "")
+      print
+      exit
+    }
+  ')"
+  ui_change_path="$(echo "$ui_change_contract_raw" | sed -n "s/.*path:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
+  ui_change_sha256="$(echo "$ui_change_contract_raw" | sed -n "s/.*sha256:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
+  ui_change_schema_version="$(echo "$ui_change_contract_raw" | sed -n "s/.*schema_version:[[:space:]]*\([^|]*\).*/\1/p" | tr -d ' ')"
+
+  # Build per-step UI metadata comment line
+  if [[ -n "$ui_change_mode" ]]; then
+    step_ui_meta="<!-- step-${step_counter}: ui_change_mode=${ui_change_mode}"
+    if [[ -n "$ui_change_path" ]]; then
+      step_ui_meta="${step_ui_meta} | path=${ui_change_path}"
+      step_ui_meta="${step_ui_meta} | sha256=${ui_change_sha256}"
+      step_ui_meta="${step_ui_meta} | schema_version=${ui_change_schema_version}"
+    fi
+    step_ui_meta="${step_ui_meta} -->"
+    all_step_ui_meta="${all_step_ui_meta}${step_ui_meta}"$'\n'
   fi
 
   # Build step objectives list for Goal section.
@@ -958,6 +995,10 @@ depends_on: ${depends_on_list}
 ## Steps (Role Pipeline)
 
 ${steps_table}
+
+## Step UI Contracts
+
+$(if [[ -n "$all_step_ui_meta" ]]; then echo "$all_step_ui_meta"; else echo "<!-- No ui_change_mode fields in this plan -->"; fi)
 
 ## Run Breakdown
 

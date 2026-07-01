@@ -465,6 +465,20 @@ done
 # Step 9: Extract per-step detail from EPIC sections
 # =============================================================================
 
+# Helper: parse Step UI Contracts section from EPIC
+# Returns the raw content of the ## Step UI Contracts section
+parse_step_ui_contracts() {
+  local epic_content="$1"
+  echo "$epic_content" | awk '
+    /^## Step UI Contracts/ { found=1; next }
+    found && /^## / { exit }
+    found { print }
+  '
+}
+
+# Extract the Step UI Contracts section once (used per-step in the loop below)
+ui_contracts_section="$(parse_step_ui_contracts "$(cat "$epic")")"
+
 # Extract Scope sections
 scope_allowed_raw="$(extract_subsection "$epic" "Scope" "Allowed files/paths")"
 scope_forbidden_raw="$(extract_subsection "$epic" "Scope" "Forbidden zones")"
@@ -604,6 +618,31 @@ for i in "${!step_nums[@]}"; do
     done
   fi
 
+  # Extract ui_change fields for this step from the Step UI Contracts section
+  step_n="${step_nums[$i]}"
+  step_ui_mode="null"
+  step_ui_contract="null"
+
+  if [[ -n "$ui_contracts_section" ]]; then
+    ui_meta_line="$(echo "$ui_contracts_section" | grep "<!-- step-${step_n}:" || true)"
+    if [[ -n "$ui_meta_line" ]]; then
+      ui_mode="$(echo "$ui_meta_line" | sed -n "s/.*ui_change_mode=\([a-z_]*\).*/\1/p")"
+      if [[ -n "$ui_mode" && "$ui_mode" != "null" ]]; then
+        step_ui_mode="\"$ui_mode\""
+        ui_path="$(echo "$ui_meta_line" | sed -n "s/.*| path=\([^|]*\).*/\1/p" | tr -d ' ')"
+        ui_sha256="$(echo "$ui_meta_line" | sed -n "s/.*| sha256=\([^|]*\).*/\1/p" | tr -d ' ')"
+        ui_schema_v="$(echo "$ui_meta_line" | sed -n "s/.*| schema_version=\([^| >]*\).*/\1/p" | tr -d ' ')"
+        if [[ -n "$ui_path" ]]; then
+          step_ui_contract="$(jq -n \
+            --arg path "$ui_path" \
+            --arg sha256 "$ui_sha256" \
+            --arg schema_version "$ui_schema_v" \
+            '{path: $path, sha256: $sha256, schema_version: $schema_version}')"
+        fi
+      fi
+    fi
+  fi
+
   # Assemble step object
   step_obj="$(jq -n \
     --arg id "$step_id" \
@@ -615,6 +654,8 @@ for i in "${!step_nums[@]}"; do
     --argjson allowed_paths "$allowed_paths_json" \
     --argjson forbidden_paths "$forbidden_paths_json" \
     --argjson acceptance_criteria "$step_ac_json" \
+    --argjson ui_change_mode "$step_ui_mode" \
+    --argjson ui_change_contract "$step_ui_contract" \
     '{
       id: $id,
       role: $role,
@@ -624,7 +665,9 @@ for i in "${!step_nums[@]}"; do
       constraints: $constraints,
       allowed_paths: $allowed_paths,
       forbidden_paths: $forbidden_paths,
-      acceptance_criteria: $acceptance_criteria
+      acceptance_criteria: $acceptance_criteria,
+      ui_change_mode: $ui_change_mode,
+      ui_change_contract: $ui_change_contract
     }')"
 
   steps_json="$(echo "$steps_json" | jq --argjson step "$step_obj" '. + [$step]')"

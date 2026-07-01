@@ -37,7 +37,9 @@
         "Create: `src/core/utils.py`",
         "Create: `tests/test_module.py`"
       ],
-      "role": "backend"
+      "role": "backend",
+      "ui_change_contract": null,
+      "ui_change_mode": null
     },
     {
       "acceptance_criteria": [
@@ -65,7 +67,9 @@
         "Create: `src/core/utils.py`",
         "Create: `tests/test_module.py`"
       ],
-      "role": "qa"
+      "role": "qa",
+      "ui_change_contract": null,
+      "ui_change_mode": null
     }
   ],
   "version": 1

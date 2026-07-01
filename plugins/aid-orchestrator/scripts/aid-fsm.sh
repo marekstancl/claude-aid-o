@@ -2185,6 +2185,34 @@ cmd_increment_step() {
       fi
     fi
 
+    # E7B: existing_ui EXECUTE guard (step-local, D6 — not a delivery gate)
+    # Reads step.ui_change_mode from plan.json. If existing_ui: checks for
+    # steps/{step_id}/ui/verdict.json with result=pass. Missing or non-pass → _increment_fail.
+    # Only fires when plan.json and jq are available (graceful degradation otherwise).
+    if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
+      local _ui_mode="" _ui_step_id=""
+      { read -r _ui_mode; read -r _ui_step_id; } < <(
+        jq -r --argjson i "$step" \
+          '(.steps[$i].ui_change_mode // "null"), (.steps[$i].id // "")' \
+          "$_plan_json" 2>/dev/null
+      ) || true
+      if [[ "$_ui_mode" == "existing_ui" && -n "$_ui_step_id" ]]; then
+        local _verdict_file="${evidence_dir}/steps/${_ui_step_id}/ui/verdict.json"
+        local _verdict_result="absent"
+        if [[ -f "$_verdict_file" ]]; then
+          _verdict_result="$(jq -r '.ui_fidelity.result // "unverifiable"' "$_verdict_file" 2>/dev/null || echo "unverifiable")"
+        fi
+        if [[ "$_verdict_result" != "pass" ]]; then
+          _increment_fail frontend_visual_fidelity_block \
+            "PRECONDITION FAIL: existing_ui step requires ui/verdict.json with result=pass." \
+            "Expected: ${_verdict_file}" \
+            "Got result: ${_verdict_result} (absent|fail|unverifiable all block increment)" \
+            "Fix: ensure companion captured baseline + ui-compare.mjs ran and produced result=pass before advancing." \
+            "This is a step-local check. Delivery-gate/C4 aggregation is E9."
+        fi
+      fi
+    fi
+
     # Session B CP2: verifier-output-step-N.md precondition
     # P040 Component D: streamlined mode skips per-step CP2 (covered by
     # integration-review enforcement at done-advance instead).
