@@ -59,7 +59,8 @@ jobs:
               --before-computed "$fixture/before-computed.json" \
               --after-computed "$fixture/after-computed.json" \
               --contract "$fixture/contract.yaml" \
-              --output-dir "/tmp/compare-results/$case"
+              --output-dir "/tmp/compare-results/$case" || true
+            # ui-compare.mjs exits 1 for fail verdict; capture JSON and compare below
 
             expected=$(cat "$fixture/expected-verdict.json")
             actual=$(cat "/tmp/compare-results/$case/ui/verdict.json")
