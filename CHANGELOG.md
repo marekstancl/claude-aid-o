@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [2.50.0] — 2026-07-01
+## [2.50.1] — 2026-07-01
 
 ### Added
 - **E7B existing_ui wiring** — Full pipeline support for modifying existing UI: `visual-companion/SKILL.md` phase-aware baseline capture, `role-cards.md` ui_change_contract constraint, `agent-protocol.md` branched reading order, `pipeline.md` envelope injection + mechanical verdict via `ui-compare.mjs`
