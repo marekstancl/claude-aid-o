@@ -8,6 +8,129 @@ plan via `/aid-plan`.
 
 ---
 
+## B-004 — Live usage probe for AID v2 control-system friction
+
+**Status:** scoped
+**Area:** AID Control System v2 operations / verification
+**Nalezeno:** 2026-07-01, field report from real AID v2.50.1 usage during a multi-EPIC plan run
+
+**Summary:** Run a temporary live probe in a second observer session while another
+agent uses the latest AID on real work. The probe records concrete control-system
+friction before starting a broader cleanup/refactor.
+
+**Kontext:** Several issues surfaced only during real usage: ambiguous checkpoint
+commands, evidence overwrite risk, undocumented required fields, 0-index/1-index
+step confusion, and CP3 review range fallback. These are AID-system findings, not
+project-specific implementation findings.
+
+**Navrhovaná změna:** Use `docs/AID-control-system-v2-live-probe.md` as the
+operating mode for the next several EPICs/plans. Store each observation with date,
+AID version, source, severity, reproduction, and likely fix. After enough evidence,
+open a dedicated AID cleanup/refactor plan instead of patching every symptom
+immediately.
+
+**Open questions:** How many EPICs are enough before cleanup? Suggested threshold:
+at least 2 independent EPICs or any one confirmed evidence-corruption path.
+
+---
+
+## B-005 — CP3 prefilter command can overwrite CP2 verifier evidence
+
+**Status:** ready
+**Area:** `plugins/aid-orchestrator/scripts/aid-prefilter.sh`
+**Nalezeno:** 2026-07-01, live AID v2.50.1 field report; confirmed by code inspection
+
+**Summary:** `aid-prefilter.sh classify --checkpoint cp3` is a supported command
+surface, but it writes to `verifier-output-step-N.md`, the same file used by CP2.
+This can overwrite a valid per-step verifier output with a pending stub.
+
+**Kontext:** CP3 documentation expects dedicated files:
+`verifier-output-cp3-code-review.md` and `verifier-output-cp3-security.md`.
+The current CP3 prefilter command does not write those files and does not fit the
+documented CP3 flow.
+
+**Navrhovaná změna:** Either remove/disable `--checkpoint cp3` from `classify`, or
+change CP3 prefilter to write only CP3-specific evidence files. Add a regression test:
+running CP3 prefilter must not modify an existing `verifier-output-step-N.md`.
+
+**Open questions:** Should CP3 have any prefilter at all? Current pipeline says CP3
+always dispatches code-review + security; safest short-term fix is to reject
+`--checkpoint cp3` with a clear message.
+
+---
+
+## B-006 — DONE merge policy is ambiguous: per-EPIC release vs per-Plan closure
+
+**Status:** scoped
+**Area:** `plugins/aid-orchestrator/skills/pipeline.md`, FSM plan-close semantics
+**Nalezeno:** 2026-07-01, live AID v2.50.1 field report; confirmed by docs/script review
+
+**Summary:** `pipeline.md` contains two competing models: the newer
+"dispatch per EPIC, validate per Plan" section and the older per-EPIC DONE Closure
+Checklist with MERGE/release. Scripts enforce a plan-boundary `ca-review-complete`
+gate for cross-plan starts, but do not cleanly state whether intermediate EPICs
+should merge.
+
+**Kontext:** This causes PM ambiguity on multi-EPIC plans: should each EPIC merge
+after Curator/Auditor, or should branches stay open until the entire plan finishes?
+Keeping many EPIC branches unmerged increases stale evidence and merge conflict risk.
+
+**Navrhovaná změna:** Make the policy explicit:
+`release/merge per EPIC, closure/reporting per Plan`.
+Update `pipeline.md`, DONE summaries, and any prompt text so agents stop asking this
+as an architectural decision during every multi-EPIC plan.
+
+**Open questions:** Are there plan types where per-Plan merge is still required?
+If yes, make it an explicit plan flag rather than the default interpretation.
+
+---
+
+## B-007 — Step numbering UX: FSM is 0-indexed while plans are 1-indexed
+
+**Status:** idea
+**Area:** FSM output, evidence naming, pipeline instructions
+**Nalezeno:** 2026-07-01, live AID v2.50.1 field report
+
+**Summary:** `fsm-state.yaml.current_step` and evidence files such as
+`step-0-verify.md` are 0-indexed, while plans are presented to humans as Step 1..N.
+Agents can easily dispatch or verify the wrong step.
+
+**Kontext:** The field report described repeated mistakes caused by this mismatch.
+The internal index can stay 0-based, but every human/LLM-facing output should show
+the mapped plan step.
+
+**Navrhovaná změna:** Add helper wording everywhere the FSM prints or instructs a
+step number: `current_step=0 (Plan Step 1)`. Consider evidence aliases or report
+labels that include both forms.
+
+**Open questions:** Should evidence file names remain 0-indexed for compatibility,
+or should new files adopt plan-step labels while preserving old reads?
+
+---
+
+## B-008 — CP3 base_commit fallback can silently widen/narrow review scope
+
+**Status:** ready
+**Area:** `plugins/aid-orchestrator/scripts/aid-prefilter.sh`, CP3 review range handling
+**Nalezeno:** 2026-07-01, live AID v2.50.1 field report; confirmed by code inspection
+
+**Summary:** CP3 range resolution falls back to `git merge-base HEAD origin/main`
+or `HEAD~5` when it cannot read the run `base_commit`. That can silently include
+unrelated commits or miss relevant ones.
+
+**Kontext:** CP3 is supposed to review the full EPIC diff. A guessed range undermines
+the independence and relevance of CP3 review. In live use this created uncertainty
+about whether the review covered one extra older commit.
+
+**Navrhovaná změna:** For CP3, require exact `base_commit` from the canonical
+`fsm-state.yaml`. If unavailable, return `unverifiable`/hard fail with a clear
+recovery command. Do not silently approximate.
+
+**Open questions:** If CP3 prefilter is disabled by B-005, this still applies to any
+other CP3 tooling that resolves review range.
+
+---
+
 ## B-002 — test-semantic-review.sh hlášen jako 0/0 v run-all-tests.sh agregátoru
 
 **Status:** idea

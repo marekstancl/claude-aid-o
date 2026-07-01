@@ -163,3 +163,21 @@ ho pozdeji vynucoval system:
   waiveru.
 
 Do te doby se tento dokument pouziva jako manualni checklist.
+
+## Live usage probe
+
+Od 2026-07-01 doplnujeme jeste druhy zdroj pravdy: live probe nad realnym
+pouzivanim AID jinym implementatorem. Nejde o bezny DONE review jednoho EPICu,
+ale o pozorovani toho, kde se agent pri praci s posledni verzi AID realne plete,
+kde evidence vznikne spatne, kde se stare CP vrstvy biji s novymi C0-C4 vrstvami,
+nebo kde dokumentace nesedi na skripty.
+
+Postup je popsany v `docs/AID-control-system-v2-live-probe.md`.
+
+Pravidlo:
+
+- jednotlive nalezy se nejdriv zapisuji do backlogu s datem a zdrojem,
+- okamzite se opravuje jen aktivni evidence corruption nebo hard blocker,
+- po nekolika EPICich/planech se udela samostatna cleanup/refactor session,
+- cleanup nesmi predpokladat, ze stare CP1-CP6 chovani je spravne jen proto, ze
+  existuje.
