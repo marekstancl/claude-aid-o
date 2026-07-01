@@ -1,0 +1,4 @@
+{
+  "verdict": "pass",
+  "_note": "D fixtures use dynamic Playwright capture; this file satisfies CI completeness check only. Actual verdict generated at calibration time by screeng-capture.mjs."
+}

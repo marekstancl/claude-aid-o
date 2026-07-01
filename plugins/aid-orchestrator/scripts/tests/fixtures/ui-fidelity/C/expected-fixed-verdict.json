@@ -1,0 +1,13 @@
+{
+  "verdict": "pass",
+  "contract_id": "fixture-C-unauthorized-change",
+  "target_id": "submit-btn",
+  "checks": {
+    "positive_delta": { "pass": true, "skipped": false, "findings": [] },
+    "rest_lock": { "pass": true, "skipped": false, "findings": [] },
+    "locked_crops": { "pass": true, "findings": [] },
+    "affected_reflow": { "pass": true, "findings": [] },
+    "outside_mask": { "pass": true, "diff_pixels": 0, "diff_ratio": 0.0, "findings": [] }
+  },
+  "generated_at": "2026-06-30T10:00:00Z"
+}

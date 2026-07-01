@@ -1,0 +1,17 @@
+{
+  "target_id": "screeng-desktop",
+  "captured_at": "placeholder-regenerated-at-calibration-time",
+  "url": "http://localhost:3911/",
+  "selector": "section[aria-label=\"Co potřebuju vědět\"]",
+  "viewport": { "width": 1280, "height": 720 },
+  "bbox": { "x": 0, "y": 0, "width": 1280, "height": 720 },
+  "computed_styles": {
+    "color": "rgb(15, 23, 42)",
+    "background-color": "rgba(0, 0, 0, 0)",
+    "font-size": "16px",
+    "display": "block",
+    "visibility": "visible",
+    "opacity": "1"
+  },
+  "text_content": "Co potřebuju vědět"
+}

@@ -1,0 +1,21 @@
+{
+  "target_id": "submit-btn",
+  "captured_at": "2023-11-14T22:13:20.000Z",
+  "url": "hermetic://fixture-A",
+  "selector": ".submit-btn",
+  "bbox": {
+    "x": 100,
+    "y": 200,
+    "width": 120,
+    "height": 40
+  },
+  "computed_styles": {
+    "color": "#0066cc",
+    "background-color": "rgb(255, 255, 255)",
+    "font-size": "16px",
+    "display": "inline-flex",
+    "visibility": "visible",
+    "opacity": "1"
+  },
+  "text_content": "Submit"
+}

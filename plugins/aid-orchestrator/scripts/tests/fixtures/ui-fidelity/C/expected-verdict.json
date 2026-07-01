@@ -1,0 +1,36 @@
+{
+  "verdict": "fail",
+  "contract_id": "fixture-C-unauthorized-change",
+  "target_id": "submit-btn",
+  "checks": {
+    "positive_delta": {
+      "pass": true,
+      "skipped": false,
+      "findings": []
+    },
+    "rest_lock": {
+      "pass": false,
+      "skipped": false,
+      "findings": [
+        {
+          "reason": "delta_unauthorized_change",
+          "property": "font-size",
+          "before": "16px",
+          "after": "18px"
+        }
+      ]
+    },
+    "locked_crops": {
+      "pass": true,
+      "findings": []
+    },
+    "affected_reflow": {
+      "pass": true,
+      "findings": []
+    },
+    "outside_mask": {
+      "pass": true,
+      "findings": []
+    }
+  }
+}
