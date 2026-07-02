@@ -167,6 +167,13 @@ vs `grep -i delivery .aid-o/work/evidence/E-058-2_6/R-E058-2/final_report.md`
 setup pointer). Define which freshness field is authoritative in
 delivery-gate.json and remove or derive the other.
 
+**Recurrence 2026-07-02 (E-058-3_6/R-E058-3):** identical on the next EPIC —
+`delivery-gate.json` again `status: fail`, `delivery_ready: false`, 15
+unverifiable findings, same internal freshness contradiction
+(`delivery_gate.freshness: stale` vs `revision.freshness: current`), and
+`final_report.md` again contains zero mention of D0/delivery-gate. Two
+independent EPICs → **cleanup trigger for this class is met.**
+
 ### OBS-20260702-05 - Plan-declared gate silently never runs when undefined in execution.yaml
 
 **Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
@@ -212,6 +219,12 @@ cannot be pass. plan.schema.json should state which component consumes
 silent drop will repeat at E3's gates phase and, since the declaration comes
 from the shared P058 plan, in every remaining EPIC of the plan. Second
 independent EPIC → **cleanup trigger for this class is met.**
+Confirmed at E3 gates time (07:38Z): gates_report again ran only the 4
+execution.yaml gates, overall pass. Mitigation nuance: this time
+`final_report.md` DISCLOSED the gap manually ("docs_updated gate by
+triggeroval" in Open Items) — the implementer learned from the E2 audit
+finding. The mitigation is agent discipline, not system enforcement; the
+silent-drop mechanism itself is unchanged.
 
 ### OBS-20260702-06 - FSM pre-commit hook conflicts with per-Plan deferred-merge model, normalizing --no-verify bypass
 
