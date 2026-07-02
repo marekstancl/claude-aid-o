@@ -309,6 +309,30 @@ prior init is documented only in this backlog entry. A transactional gen (or
 manifest rollback) would have produced the same clean end state without erasing
 run history.
 
+### OBS-20260702-08 - Generated plan.json contracts are malformed and no gate validates them (pointer)
+
+**Observed in:** aid-orchestrator / P057 / E-057-1_2 + E-057-2_2 (generated contracts)
+**AID version:** HEAD (post v2.50.1)
+**Observed at:** 2026-07-02
+**Status:** confirmed (PM manual inspection; independently verified by observer)
+**Severity:** high
+**Class:** false-green / command surface (generator contract validation)
+
+**What happened:** PM field finding, recorded in full in the
+"GENERATOR / CONTRACT-VALIDATION gap" section at the end of this file:
+`aid-plan-to-epic.sh` + `aid-epic-to-json.sh` collapse per-step scoping
+(every step gets ALL outputs/ACs/allowed_paths), corrupt ACs containing `|`
+(split on pipe), leak prose into allowed_paths, and drop inter-step deps —
+while C0/CP1 review only the PLAN, so the malformed generated contract passes
+everything. Observer verification on E-057-1_2 plan.json: 4 steps with
+identical outputs (8) and ACs (13) each, AC[12] is the fragment
+"length\`; TTL guard projde." (pipe-split), `depends: [None×4]`.
+
+**Why it matters / likely fix:** see the PM section (fix candidates 1-5; key
+one: a NEW GATE validating the generated plan.json contract). Probe-wise this
+is the strongest false-green instance so far: it affects every EPIC generation
+and has silently degraded per-step contracts across E1-E8.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
@@ -622,3 +646,30 @@ The following are explicitly deferred out of P057 and MUST be picked up later:
 - **C4 consumption of audit-report/curator/invalidation** into release-decision → **E9**.
 - **Large legacy A-J project-health audit cleanup / separation** → later. E8 keeps A-J as a legacy
   compat section on the converted auditor; a proper split into a standalone project-health tool is deferred.
+
+## GENERATOR / CONTRACT-VALIDATION gap (found P057/E8 manual inspection, 2026-07-02)
+
+**Class:** false-green — plan passes C0/CP1 but the GENERATED executable EPIC contract is malformed.
+**Severity:** high (affects every EPIC generation; degrades per-step contracts silently).
+
+The plan→EPIC.md→plan.json pipeline (`aid-plan-to-epic.sh` + `aid-epic-to-json.sh`) produces malformed
+executable contracts that the review gates do NOT catch:
+- **Step-scoping collapse:** outputs/acceptance_criteria/allowed_paths are aggregated at EPIC level and
+  copied to EVERY step (per-step scoping only exists for role/objective/depends/parallel). Result: each
+  step claims all files + all ACs → "what did THIS step deliver" is meaningless. (E-057-1_2: every step
+  has all 8 outputs+13 AC; E-057-2_2: every step all 13 outputs.)
+- **AC split on `|`:** `aid-epic-to-json.sh` splits an AC line on the pipe char → a single jq expression
+  (`jq '...enum | length == 3'`) becomes two bogus ACs (plan.json:57/58, 62). Any AC containing `|`
+  (jq pipes, enum alternations) is corrupted.
+- **Prose in allowed_paths:** `aid-plan-to-epic.sh` doesn't extract just the path from
+  "Create: `path` — description"; whole prose lines land in allowed_paths ("CHANGELOG + version 2.51.0…").
+- **No inter-step deps:** step table depends column is always `---`; real Step N→Step M deps lost.
+- **META (the important one):** C0 `plan-review.json` = status:pass, `lens_dispatch_observed: 0/5`,
+  no findings — the gates review the PLAN, nothing validates the generated plan.json/task contract.
+
+**Fix candidates:** (1) per-step scoping in the generator (parse each step's Files/AC sub-section, assign
+to the right step object); (2) stop splitting ACs on `|` (use a safe delimiter / preserve verification_pattern
+blocks verbatim); (3) extract clean path from Files entries (strip "Verb:" prefix + "— description"/"(note)");
+(4) derive step deps; (5) **NEW GATE: validate the generated plan.json contract** (per-step scoping sane,
+allowed_paths are real paths, ACs well-formed) so malformed generation fails a gate instead of reaching /aid-run.
+NB: E1-E8 EPICs likely all had degraded per-step contracts (ran anyway because implementer works holistically).
