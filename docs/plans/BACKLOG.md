@@ -8,6 +8,78 @@ plan via `/aid-plan`.
 
 ---
 
+## Live probe observations (B-004 operating mode)
+
+### OBS-20260702-01 - Re-scope re-init reuses run_id, overwrites plan evidence, bypasses duplicate-init guard without audit event
+
+**Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** medium
+**Class:** evidence integrity / command surface
+
+**What happened:** The EPIC was narrowed from 3 steps to 1 step (PM decision,
+option A). The run was re-initialized under the SAME run_id `R-E058-2`:
+`timeline.jsonl` shows two `fsm_init` events (2026-07-01 `total_steps=3`,
+2026-07-02 `total_steps=1`) with no `fsm_force_override` event between them.
+`aid-fsm.sh` has a duplicate-init guard (`state_file already exists`, ~line 1617)
+and its `--force` path logs `fsm_force_override` — absence of that event means the
+old `fsm-state.yaml` was deleted manually to get past the guard. `plan.json` and
+`epic_input.md` in the canonical evidence dir were overwritten in place (mtimes
+2026-07-02 06:03); the original 3-step plan.json is not archived anywhere.
+
+**Why it matters:** Run identity is now ambiguous — `R-E058-2` refers to two
+materially different plans over time, and the only surviving trace is the
+append-only timeline plus an accidentally-surviving old run.md. The guard exists
+but the practical workaround (delete state file) leaves no force/override audit
+trail. A later audit that checks "evidence matches plan for R-E058-2" cannot
+reconstruct what was descoped. Positive: `base_commit` was correctly refreshed to
+the new branch start (`2a06b76`) on re-init, and the append-only timeline is what
+made this detectable at all.
+
+**Reproduction:** `cat .aid-o/work/evidence/E-058-2_6/R-E058-2/timeline.jsonl`
+(two fsm_init, no force event); mtimes of `plan.json`/`epic_input.md` vs first
+`fsm_init` ts; `grep -n "state_file already exists" aid-fsm.sh`.
+
+**Likely fix:** Add a first-class re-scope path: `aid-fsm.sh init --rescope`
+that (a) archives prior `plan.json`, `epic_input.md`, `fsm-state.yaml` into
+`rescope-<ts>/` inside the run evidence dir, (b) logs an `fsm_rescope` timeline
+event with old/new step counts, and (c) refuses plain re-init when evidence
+exists. Alternative: require a new run_id suffix (`R-E058-2b`) for any plan-hash
+change.
+
+### OBS-20260702-02 - run.md for the same run_id exists at two different canonical paths
+
+**Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** low
+**Class:** UX indexing / command surface
+
+**What happened:** The 2026-07-01 generation wrote the run file to
+`.aid-o/work/runs/R-E058-2/R-E058-2-ocr-pipeline-produkuje-spolehliv-data-gd.md`
+(subdirectory per run_id, 26 KB, broad 3-step scope). The 2026-07-02 regeneration
+after descope wrote `.aid-o/work/runs/R-E058-2-e-058-2-6-ocr-extrakce-normalizace-docum.md`
+(flat file at runs/ top level, 7 KB, narrowed scope). Nothing marks the older
+file as superseded.
+
+**Why it matters:** An agent (or the PM) looking up "the run file for R-E058-2"
+finds two candidates with different scopes and no supersede marker — exactly the
+"file names cause the agent to pick the wrong target" probe class. The stale
+broad-scope run.md is the more detailed-looking of the two, which invites picking
+the wrong one.
+
+**Reproduction:** `ls .aid-o/work/runs/ | grep -i 058-2` and
+`ls .aid-o/work/runs/R-E058-2/` in the WAN repo.
+
+**Likely fix:** Pin one canonical location (`runs/<run_id>/run.md` preferred);
+regeneration must replace or archive the previous file at that same path, never
+create a differently-named sibling. Related: OBS-20260702-01 (same re-init flow).
+
+---
+
 ## B-004 — Live usage probe for AID v2 control-system friction
 
 **Status:** scoped
@@ -291,3 +363,31 @@ precondition test. Remaining, deferred:
 - **DG-16 Fallback Invocation** — Call-graph analysis needed to verify fallback retry/reconnect coverage; deferred.
 - **Living Contract Enforcement** — map_drift + C0 preflight + delivery_areas substrate; requires dedicated delivery-map schema/setup phase before enforcement can be meaningful.
 - **aid-init delivery-map proposal** — Auto-generate skeleton delivery-map.yaml during `/aid-init`; deferred pending living-contract design.
+
+## E8 Deferred (P057 E8 core — recorded 2026-07-01, do NOT forget)
+
+E8 (P057) is deliberately **C3 audit core**, not a full external audit + auto-rerun system.
+The following are explicitly deferred out of P057 and MUST be picked up later:
+
+- **Curator merge-authority removal** → **E9/C4** (release-policy territory, FC-38). E8 only does
+  Curator *sequencing* (after C3) + *vocabulary* (PROPOSALS_READY/NO_PROPOSALS/INPUT_INCOMPLETE).
+  The real auto-approve `recommended_disposition` merge-influence is a shared contract consumed by
+  gate-fixer.md:48/180 + simplifier.md:100 + pipeline.md:918 — removing it before C4 exists would
+  break the auto-apply pipeline. Replace/remove it only when C4 release-policy provides the substitute.
+- **Full `codex exec` adapter** → follow-up. E8 delivers only Codex *capability detection* +
+  graceful degrade to `unverifiable`. The actual subprocess dispatch (codex exec, output-schema
+  parsing, merge into audit-report.json) is net-new infra deferred. cross_provider audit stays
+  "detected → unverifiable until dispatch is wired".
+- **Codex `auth` detection mechanism** → research + follow-up. Every design doc says "auth OK" as a
+  detection factor but none specify the actual check (no codex login-status mechanism exists in-repo).
+  E8 treats un-confirmable auth as → unverifiable (fail-closed), and flags the concrete auth probe as TBD.
+- **Automatic selective C1/C2 re-run orchestration** → follow-up. E8 delivers `invalidation-map.json`
+  as an **observe** artifact (deterministic C1 subset + registry row + timeline event) only. It does
+  NOT re-invoke C1/C2. Auto re-run orchestration (a new FSM/pipeline primitive) is deferred.
+- **Precise C2-mode affectedness derivation** → follow-up. C2 modes (wiring/behavior/final) are
+  triggered by plan-graph assembly position, not by file path — there is no path→mode substrate.
+  E8 marks C2 affectedness *conservatively* (any change touching a C2 evidence surface → all relevant
+  C2 modes affected). Fine-grained per-mode derivation is deferred (do not pretend path-based C2 derivation).
+- **C4 consumption of audit-report/curator/invalidation** into release-decision → **E9**.
+- **Large legacy A-J project-health audit cleanup / separation** → later. E8 keeps A-J as a legacy
+  compat section on the converted auditor; a proper split into a standalone project-health tool is deferred.
