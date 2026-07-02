@@ -260,6 +260,13 @@ not in the consumer project.
 (5 hits on P058); hook source `.git/hooks/pre-commit` (AID-generated block);
 WAN `.aid-o/work/backlog.md` T-151.
 
+**Escalation 2026-07-02 (E-058-3_6, commit `c0505fb`):** the normalization has
+progressed to SILENT bypass — the E3 DONE-review bookkeeping commit landed on a
+DONE/review branch (hook active and blocking by design) with NO `--no-verify`
+note in the commit message, unlike the five earlier bypasses which at least
+self-documented. The bypass is now invisible: only cross-referencing hook
+source + fsm-state at commit time reveals it. Sixth bypass, first undocumented.
+
 **Likely fix:** Adopt T-151's direction: (a) a documented post-review-fix path
 — PM-approved marker file (`post-review-fix-approved.json` with reason +
 timestamp, analogous to `--force --reason`) that the hook honors and logs as a
@@ -267,6 +274,45 @@ timeline event, or (b) an `aid-fsm.sh` subcommand for a "reopen fix cycle"
 that permits commits in DONE/review without forcing premature release. Either
 way the hook must offer a legitimate escape hatch so `--no-verify` stops being
 the path of least resistance.
+
+### OBS-20260702-10 - Auditor/Curator verdicts exist only as implementer prose; no canonical audit-report artifact for E-058-3
+
+**Observed in:** WAN / P058 / E-058-3_6 / R-E058-3
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** high
+**Class:** evidence integrity (missing provenance / self-written review evidence)
+
+**What happened:** The E3 DONE-review bookkeeping commit (`c0505fb`) and
+`active.md` cite "Auditor skóre 96/100, blocking_findings=false" and Curator
+findings IMP-123/124 — but no `audit-report.yaml`, `audit-report.md`, or any
+curator artifact exists anywhere in `.aid-o` for E-058-3 (searched the whole
+tree, zero files matching `*audit*`/`*curator*` modified today). Contrast E2:
+`evidence/E-058-2_6/audit-report.yaml` with the machine-readable top-level
+`blocking_findings: false` field explicitly commented "CANONICAL — FSM reads
+this", plus the full `audit-report.md`.
+
+**Why it matters:** The auditor verdict for E3 is unverifiable from artifacts —
+it survives only as prose WRITTEN BY THE IMPLEMENTER (active.md + commit
+message), which is exactly the "self-written verifier evidence" probe class.
+The FSM's done-advance machinery reads `blocking_findings` from
+audit-report.yaml; with no file, any later mechanical check (plan-close
+aggregating per-EPIC Curator+Auditor results — the whole point of the per-Plan
+model) has nothing to read for E3. Artifact persistence is also inconsistent
+across consecutive EPICs of the same plan (E2: EPIC-level files; E3: nothing),
+so a plan-close aggregator cannot even rely on a stable location.
+
+**Reproduction:** `find .aid-o -iname "*audit*" -newermt "2026-07-02 09:00"`
+in the WAN repo (empty) vs `git log -1 --format=%B c0505fb` (cites the score);
+`ls .aid-o/work/evidence/E-058-2_6/audit-report.*` (E2 files exist).
+
+**Likely fix:** Auditor/Curator dispatch must write their canonical artifacts
+(audit-report.yaml/md, curator findings) to a pinned per-EPIC evidence path as
+a hard output contract — and the DONE-review phase should have a precondition
+(like CP2/CP3 have) that refuses to record "review complete" without the
+artifacts on disk. Prose summaries in active.md are a view, never the source
+of truth.
 
 ### OBS-20260702-07 - EPIC generation is not idempotent across partial runs and has no clean recovery path
 
