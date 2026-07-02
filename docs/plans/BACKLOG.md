@@ -292,6 +292,17 @@ partial generation created (reading them from a generation manifest). The
 rollback path must be non-destructive-by-whitelist (only deletes files the
 manifest lists) so it does not require blanket destructive permissions.
 
+**Recovery outcome (2026-07-02 ~08:00):** PM recovered via manual wipe + full
+regeneration — both evidence dirs recreated at 07:59 with single fsm_init each,
+branches re-pointed to the current main tip, base_commit now clean (`ac0f287`).
+Two follow-up facts for the cleanup session: (a) run_ids R-E057-1/R-E057-2 were
+reused for the regenerated runs, and (b) the crashed generation's timeline
+(fsm_init 04:40Z, base 8a38f68) was erased with the wipe — unlike the WAN
+rescope (OBS-01) where the append-only timeline preserved the history, here the
+prior init is documented only in this backlog entry. A transactional gen (or
+manifest rollback) would have produced the same clean end state without erasing
+run history.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
