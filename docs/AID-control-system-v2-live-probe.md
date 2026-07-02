@@ -22,6 +22,80 @@ This probe is a temporary observation mode:
 The probe must not turn every observation into an immediate fix. The goal is to find
 patterns before changing the control system again.
 
+## Runbook
+
+**Observer role, not implementer:**
+
+- The observer never implements fixes, never touches the branch under
+  observation, and never deletes or overwrites evidence.
+- If active evidence corruption or a hard blocker is found, stop and flag the PM
+  immediately instead of continuing to watch silently.
+- Otherwise, findings are only recorded as OBS entries (see Probe Output Format)
+  — no live intervention in the observed run.
+- The observer tracks AID control-system process behavior, not project
+  implementation quality. Skip findings that are only about implementation
+  quality unless they are also relevant to AID control-system behavior.
+
+**What to check, continuously — not just from transcript:**
+
+- `git log` / `git status` on the branch under observation
+- `.aid-o/work/evidence/**`
+- `fsm-state.yaml`
+- `plan.json`
+- `run.md`
+- `verifier-output-*`
+- `gates_report.json`
+- `delivery-gate.json`
+- audit / curator / reporter outputs
+- pipeline/docs text vs actual script behavior
+
+Check local on-disk state directly and periodically. The implementer's transcript
+is a supplementary signal only, not the primary source.
+
+**Per-run setup:**
+
+- Observed plan/EPIC: filled in at the start of each run
+- AID version: verified from repo HEAD/CHANGELOG at run start, never assumed
+
+**"Significant state" means:**
+
+- an FSM transition
+- a CP2 / CP3 / CP4 / CP5 checkpoint
+- a gate run
+- creation or change of an evidence artifact
+- a precondition fail
+- a force override
+- a merge / release / plan-close decision
+- the agent visibly hesitating over an unclear instruction
+- documentation saying one thing while a script does another
+
+**When to write an OBS entry:** write to `docs/plans/BACKLOG.md` immediately
+once a finding is confirmed. An unconfirmed suspicion stays as a working note
+in the observer report only — it does not become a backlog item until
+confirmed.
+
+**When to stop the run and flag the PM immediately:**
+
+- active evidence corruption
+- an existing valid evidence file gets overwritten
+- a false-green gate/release result
+- stale evidence used as release proof
+- a branch/merge situation that risks losing work
+- a hard blocker that prevents the run from continuing
+
+**Report format, after each significant state:**
+
+1. What happened
+2. Whether the AID process worked / failed / was confusing
+3. Whether an OBS finding results
+4. Whether the observer needs to stop and flag the PM
+
+**After each completed run:** update this Runbook section with anything that
+made the next round of monitoring more accurate — additional artifacts worth
+checking, a sharper definition of "significant state", recurring false
+positives to filter out, etc. This section evolves; it is not a fixed
+checklist.
+
 ## What To Observe
 
 Record an item when any of these happens:
