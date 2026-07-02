@@ -476,6 +476,76 @@ strip_cross_phase_deps() {
   fi
 }
 
+# _aid_split_path_entry — D4 reference cleaner for a single RAW Files bullet
+# (as stored, verbatim, in a per-step scoping block's files=[...] array —
+# see the "## Step UI Contracts" per-step comment block built below).
+#
+# NOT called anywhere in THIS script today (see the step_files extraction
+# above, which stays on its original single-path logic to keep plan.json
+# byte-identical until Step 3 lands — this step only emits the block, it
+# does not change what's read from EPIC.md today). This function is the
+# exact algorithm aid-epic-to-json.sh (P058 Step 3) should reuse when it
+# derives per-step allowed_paths from a block's files[] values, verified
+# against real plan Files bullets during this step's development:
+#
+#   - The path declaration always sits immediately after the "Create:"/
+#     "Modify:" label, as ONE backtick-wrapped span, or several joined by
+#     literal " + `" (the "`a.md` + `b.md`" dual-file convention — e.g.
+#     "Modify: `CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md`
+#     (identical)"). Only that LEADING run is consumed as path(s).
+#   - Anything else — a "(...)" parenthetical, an em-dash/"--" description,
+#     or ANY other backtick-wrapped code reference later in a prose-heavy
+#     bullet (e.g. an inline "`:131`" line reference or a "`step_ac`"
+#     variable name mentioned in the description) — stops the run and is
+#     discarded as prose, not consumed as a path.
+#   - IMPORTANT: do not naively extract every backtick span in the line —
+#     that was tried first and rejected: it pulled unrelated inline-code
+#     references out of long descriptions as bogus "paths" (reproduced
+#     against P058's own Files bullets, which are description-heavy).
+#   - No leading backtick span found → fall back to stripping the entry
+#     after the first "--"/em-dash separator, then removing stray backticks
+#     (matches the plain, non-backtick-wrapped path case).
+#
+# Args:
+#   $1 — a single RAW Files bullet with the "- " bullet marker and
+#        "Create:"/"Modify:" label already stripped (e.g.
+#        "`CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` (identical)")
+#
+# Output (stdout): one cleaned path per line (may be more than one line)
+_aid_split_path_entry() {
+  local entry="$1"
+  local rest="$entry"
+  local candidate found_backtick_path=0 first_span=1
+
+  while true; do
+    if [[ "$first_span" -eq 1 ]]; then
+      [[ "$rest" == '`'* ]] || break
+    else
+      [[ "$rest" == ' + `'* ]] || break
+      rest="${rest# + }"
+    fi
+    rest="${rest#\`}"           # drop the opening backtick
+    candidate="${rest%%\`*}"    # everything up to the next backtick
+    rest="${rest#*\`}"          # drop through the closing backtick
+    if [[ -n "$candidate" && "$candidate" != *[[:space:]]* ]]; then
+      printf '%s\n' "$candidate"
+      found_backtick_path=1
+      first_span=0
+    else
+      break
+    fi
+  done
+
+  if [[ "$found_backtick_path" -eq 0 ]]; then
+    local fallback="$entry"
+    fallback="${fallback%%--[[:space:]]*}"
+    fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
+    fallback="${fallback//\`/}"
+    fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
+  fi
+}
+
 # Collect per-step data
 steps_table_rows=""
 all_ac=""
@@ -485,6 +555,15 @@ all_artifacts=""
 step_objectives=""
 step_counter=0
 all_step_ui_meta=""
+all_step_scoping_meta=""
+
+# Sentinel used to encode a literal "-->" inside per-step scoping block
+# payload values (files=[...]/ac=[...]) BEFORE JSON-encoding them, so an
+# embedded comment-closer sequence in source text (e.g. an AC describing a
+# "start --> middle --> end" flow) can never truncate the HTML comment block
+# early. aid-epic-to-json.sh (P058 Step 3) must decode this back to a literal
+# "-->" when parsing block values — this exact token is the parse contract.
+AID_ARROW_SENTINEL='@@AID_ARROW@@'
 
 for sn in "${phase_steps[@]}"; do
   step_counter=$(( step_counter + 1 ))
@@ -580,7 +659,61 @@ for sn in "${phase_steps[@]}"; do
     all_ac="${all_ac}${step_ac}"$'\n'
   fi
 
-  # Extract files (Create/Modify paths)
+  # Raw (unprefixed) per-step AC text for the per-step scoping block below
+  # (D2). Same extraction/scope as step_ac above, but WITHOUT the
+  # "- [ ] [role] " wrapper that the flattened all_ac section needs — the
+  # scoping block is already step-scoped, so no role tag is forced on. This
+  # matches the ac[] convention frozen in the E-TEST-005 fixture (P058 Step 1).
+  step_ac_raw="$(echo "$step_content" | awk '
+    BEGIN { in_ac = 0 }
+    {
+      gsub(/\r$/, "")
+      if ($0 ~ /^\*\*Acceptance Criteria:?\*\*/) { in_ac = 1; next }
+      if (in_ac && $0 ~ /^\*\*/) { in_ac = 0 }
+      if (in_ac && $0 ~ /^-[[:space:]]/) {
+        line = $0
+        sub(/^-[[:space:]]+/, "", line)
+        sub(/^\[[ xX]\][[:space:]]*/, "", line)
+        print line
+      }
+    }
+  ')"
+
+  # Extract artifacts (RAW Files bullets, verbatim "Create: `path` — desc" /
+  # "Modify: `a` + `b` (desc)" form). This drives both:
+  #  (a) all_artifacts — the flattened `## Artifacts` section (unchanged use)
+  #  (b) the per-step scoping block's `files=[...]` value below (D2/D4) — the
+  #      block gets the RAW text, not the cleaned/split step_files derivation.
+  step_artifacts="$(echo "$step_content" | awk '
+    BEGIN { in_files = 0 }
+    {
+      gsub(/\r$/, "")
+      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
+      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
+      if (in_files && $0 ~ /^[[:space:]]*-/) {
+        sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+        if ($0 != "") print "- " $0
+      }
+    }
+  ')"
+  if [[ -n "$step_artifacts" ]]; then
+    all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
+  fi
+
+  # Extract files (Create/Modify paths) for the flattened `## Scope >
+  # Allowed files/paths` section — UNCHANGED from before this step. D4's
+  # improved multi-path SPLIT + trailing-prose-strip logic (see
+  # _aid_split_path_entry below) deliberately does NOT replace this
+  # extraction: this section is read today by aid-epic-to-json.sh and
+  # broadcast into plan.json's steps[].allowed_paths, so any change here
+  # changes plan.json output NOW, before Step 3 exists to consume the new
+  # per-step block. Verified: this step's change must be inert on the JSON
+  # side (byte-identical plan.json before/after, module docstring "Testing"
+  # requirement) — an earlier draft that fixed this extraction in place was
+  # reverted after a before/after `aid-epic-to-json.sh` diff showed it
+  # was NOT inert (allowed_paths content changed). Step 3 will call
+  # _aid_split_path_entry itself when it derives per-step allowed_paths
+  # from the block's RAW files[] values.
   step_files="$(echo "$step_content" | awk '
     BEGIN { in_files = 0 }
     {
@@ -604,23 +737,6 @@ for sn in "${phase_steps[@]}"; do
   ')"
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
-  fi
-
-  # Extract artifacts from step files and description
-  step_artifacts="$(echo "$step_content" | awk '
-    BEGIN { in_files = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
-      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
-      if (in_files && $0 ~ /^[[:space:]]*-/) {
-        sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
-        if ($0 != "") print "- " $0
-      }
-    }
-  ')"
-  if [[ -n "$step_artifacts" ]]; then
-    all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
   fi
 
   # Extract UI Change Mode from step content
@@ -658,6 +774,45 @@ for sn in "${phase_steps[@]}"; do
     step_ui_meta="${step_ui_meta} -->"
     all_step_ui_meta="${all_step_ui_meta}${step_ui_meta}"$'\n'
   fi
+
+  # Build per-step scoping metadata block (D2 — per-step files/ac, same
+  # HTML-comment-block pattern as step_ui_meta above, emitted under
+  # `## Step UI Contracts`). This is the block aid-epic-to-json.sh (P058
+  # Step 3) will read PER STEP instead of broadcasting the flattened
+  # `## Artifacts` / `## Acceptance Criteria` sections to every step. It is
+  # inert today — nothing parses "files="/"ac=" yet, so plan.json output is
+  # unaffected by this block's presence.
+  #
+  # Shape (frozen by the E-TEST-005 fixture, P058 Step 1):
+  #   <!-- step-N: files=["Create: `path` — desc","Modify: `a` + `b`"]; ac=["AC text 1","AC text 2"] -->
+  #   - files[]: RAW step_artifacts entries, one JSON string per Files bullet,
+  #     leading "- " stripped but otherwise verbatim (label + backticks +
+  #     description kept) — Step 3 derives outputs=verbatim / allowed_paths=
+  #     cleaned FROM this raw text, it does not read the already-cleaned
+  #     step_files/all_allowed_paths values.
+  #   - ac[]: RAW step_ac_raw entries — AC text with the leading "- " bullet
+  #     and "[ ]" checkbox stripped, but WITHOUT the "[role]" prefix that
+  #     all_ac forces on (block is already step-scoped, so no role tag).
+  #   - Both arrays are JSON-encoded via `jq -R -s -c` (compact, one string
+  #     per source line); any literal "-->" substring in a value is replaced
+  #     with $AID_ARROW_SENTINEL BEFORE JSON-encoding, so the block's own
+  #     closing "-->" can never be truncated early. Step 3 must reverse this
+  #     substitution after JSON-decoding each string.
+  step_files_json="[]"
+  if [[ -n "$step_artifacts" ]]; then
+    step_files_json="$(echo "$step_artifacts" \
+      | sed 's/^- //' \
+      | sed "s/-->/${AID_ARROW_SENTINEL}/g" \
+      | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+  fi
+  step_ac_json="[]"
+  if [[ -n "$step_ac_raw" ]]; then
+    step_ac_json="$(echo "$step_ac_raw" \
+      | sed "s/-->/${AID_ARROW_SENTINEL}/g" \
+      | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+  fi
+  step_scoping_meta="<!-- step-${step_counter}: files=${step_files_json}; ac=${step_ac_json} -->"
+  all_step_scoping_meta="${all_step_scoping_meta}${step_scoping_meta}"$'\n'
 
   # Build step objectives list for Goal section.
   # Use the EPIC-local step number (step_counter) so the Goal list stays
@@ -999,6 +1154,7 @@ ${steps_table}
 ## Step UI Contracts
 
 $(if [[ -n "$all_step_ui_meta" ]]; then echo "$all_step_ui_meta"; else echo "<!-- No ui_change_mode fields in this plan -->"; fi)
+$(if [[ -n "$all_step_scoping_meta" ]]; then echo "$all_step_scoping_meta"; fi)
 
 ## Run Breakdown
 
