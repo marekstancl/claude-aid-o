@@ -333,6 +333,32 @@ one: a NEW GATE validating the generated plan.json contract). Probe-wise this
 is the strongest false-green instance so far: it affects every EPIC generation
 and has silently degraded per-step contracts across E1-E8.
 
+### OBS-20260702-09 - aid-plan-diff parses only "## Acceptance Criteria" heading; plans use "## Success Criteria" → skip→pass, ACs never executed (pointer)
+
+**Observed in:** aid-orchestrator / plans P049-P058 era / `aid-plan-diff.sh`
+**AID version:** HEAD (post v2.50.1)
+**Observed at:** 2026-07-02
+**Status:** confirmed (PM finding via P058 CP1-deep L3 lens; independently verified by observer)
+**Severity:** high
+**Class:** false-green / docs drift
+
+**What happened:** PM field finding, recorded in full in the
+"PLAN-DIFF heading drift" section at the end of this file. Observer
+verification: `aid-plan-diff.sh` AWK range (line ~131) matches only
+`/^## Acceptance Criteria/`; P057 and at least 10 recent plans put their
+verification_pattern ACs under `## Success Criteria` (P057 line 404, no
+Acceptance heading) → `ac_count: 0` → `verdict: skipped`, exit 2 → gate treats
+skip as pass. The verification_pattern ACs of those plans were never executed
+by plan-diff.
+
+**Why it matters / likely fix:** see the PM section. Probe-wise: second
+generator/contract false-green in one day (with OBS-08) — both are
+"declared control never actually runs, everything reports green", same class
+as OBS-05 (undefined gate silently dropped). Pattern across all three: a
+declared control resolves to a no-op without any error surface. Also note the
+PM point that skip-as-pass on a plan that HAS ACs should be distinguishable
+from a legitimate Fast-Mode skip.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
@@ -673,3 +699,22 @@ blocks verbatim); (3) extract clean path from Files entries (strip "Verb:" prefi
 (4) derive step deps; (5) **NEW GATE: validate the generated plan.json contract** (per-step scoping sane,
 allowed_paths are real paths, ACs well-formed) so malformed generation fails a gate instead of reaching /aid-run.
 NB: E1-E8 EPICs likely all had degraded per-step contracts (ran anyway because implementer works holistically).
+
+## PLAN-DIFF heading drift (found P058 CP1-deep L3, 2026-07-02)
+
+**Class:** false-green — `aid-plan-diff.sh` reports skip→pass while the plan's verification_pattern ACs are never run.
+**Severity:** high (systemic across P049-P058).
+
+`aid-plan-diff.sh:131` parses only `/^## Acceptance Criteria/` for verification_pattern AC blocks, but the plan
+template + every recent plan (P052-P058 confirmed: `## Success Criteria`=1, `## Acceptance Criteria` heading=0)
+put their AC1..N + `verification_pattern` blocks under **`## Success Criteria`**. Result: `aid-plan-diff` finds
+`ac_count:0` → graceful skip (exit 2) → the plan_diff gate's pass_criteria treats skip as PASS → **the
+verification_pattern ACs of every one of these plans were never executed by plan-diff** (decorative at that gate).
+
+**P058 fixes the parser** (`:131` → `/^## (Acceptance Criteria|Success Criteria)/`) so it retroactively runs for
+all existing plans. **Remaining backlog:** decide the canonical heading (align the plan template + plan-writing
+skill to ONE of `## Acceptance Criteria` / `## Success Criteria`), and audit whether the per-step
+`**Acceptance Criteria:**` checklists (which DO flow to plan.json via aid-plan-to-epic) vs the plan-level
+`## Success Criteria` verification_patterns are both meant to be enforced and by which gate. Also: aid-plan-diff
+skip-as-pass should arguably be distinguishable from real pass in gate evidence (a skip on a plan that HAS ACs is
+a bug, not a legitimate Fast-Mode skip).
