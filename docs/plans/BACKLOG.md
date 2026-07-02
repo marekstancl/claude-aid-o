@@ -160,6 +160,46 @@ vs `grep -i delivery .aid-o/work/evidence/E-058-2_6/R-E058-2/final_report.md`
 setup pointer). Define which freshness field is authoritative in
 delivery-gate.json and remove or derive the other.
 
+### OBS-20260702-05 - Plan-declared gate silently never runs when undefined in execution.yaml
+
+**Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** high
+**Class:** docs drift / command surface (false-green surface)
+
+**What happened:** `plan.json` declares a top-level `gates: ["docs_updated"]`
+for the EPIC. `execution.yaml` defines only `unit_tests`,
+`moved_integration_tests`, `counts_invariant_tests`, `ruff_lint` — no
+`docs_updated`. The gate runner executed exactly the 4 execution.yaml gates and
+reported `overall: pass`; the plan-declared gate never ran, produced no
+unknown-gate error, no warning in `gates_report.json`, and no line in
+`final_report.md`. The run reached DONE with the documentation gap the gate was
+supposed to catch (new API field with zero doc trail). The EPIC-level auditor
+(C1 trigger) caught it post-DONE — detection worked at the audit layer, but the
+gate layer silently dropped a declared control.
+
+**Why it matters:** A plan author can declare a quality gate that structurally
+cannot execute, and every downstream report still says PASS. This is a
+false-green surface: the plan→execution contract is not reconciled anywhere.
+The failure mode is silent by construction, so it will recur in every project
+whose execution.yaml lags behind plan vocabulary. Textbook Principle #1 case
+(*Detector without Enforcement is Decoration*): the declaration exists, the
+enforcement never fires.
+
+**Reproduction:** In the WAN repo compare
+`python3 -c "import json; print(json.load(open('.aid-o/work/evidence/E-058-2_6/R-E058-2/plan.json'))['gates'])"`
+(`['docs_updated']`) vs `grep docs_updated .aid-o/config/execution.yaml` (no
+match) vs `gates_report.json` `_command_log` (4 gates, overall pass).
+
+**Likely fix:** `aid-run-gates.sh` (or the FSM pre-gates step) must reconcile
+`plan.json.gates[]` against execution.yaml gate definitions and hard-fail with
+a clear message when a declared gate has no definition — or at minimum write a
+`result: fail, reason: undefined_gate` entry into gates_report.json so overall
+cannot be pass. plan.schema.json should state which component consumes
+`gates[]` and what happens when a name does not resolve.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
