@@ -249,6 +249,49 @@ that permits commits in DONE/review without forcing premature release. Either
 way the hook must offer a legitimate escape hatch so `--no-verify` stops being
 the path of least resistance.
 
+### OBS-20260702-07 - EPIC generation is not idempotent across partial runs and has no clean recovery path
+
+**Observed in:** aid-orchestrator / P057 (e8-c3-independent-audit) / epic-gen for E-057-1_2 + E-057-2_2
+**AID version:** HEAD (post v2.50.1)
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** medium
+**Class:** command surface / evidence integrity (partial-run recovery)
+
+**What happened:** During P057 epic generation, a git race with a concurrent
+observer session (docs commit `8a38f68` landed on the freshly created
+`task/E-057-1_2/main` branch — the repo checkout is shared) caused the pipeline
+to crash mid-generation on a duplicate/branch-state error. Leftover partial
+state on disk: `evidence/E-057-1_2/R-E057-1/` with fsm-state.yaml (READY,
+`base_commit: 8a38f68` — the foreign docs commit is baked into the run
+identity), `evidence/E-057-2_2/R-E057-2/` WITHOUT fsm-state.yaml (only
+epic_input + plan.json + timeline), two task files, two runs dirs, the task
+branch, and a queue entry. PM removed the queue entry manually (worked), but
+resetting the remaining artifacts required destructive deletes that the
+permission layer (correctly) refused — leaving no supported way to return to a
+clean pre-generation state.
+
+**Why it matters:** A crashed epic-gen cannot be cleanly re-run: the
+duplicate-init guard (see OBS-20260702-01) now blocks regeneration, and manual
+cleanup requires exactly the destructive operations agents are prevented from
+doing. The operator is stuck between a guard and a denial. Shared-checkout git
+races make partial crashes more likely, and foreign commits get recorded as
+`base_commit`, contaminating run identity. Recovery friction directly invites
+guard-bypass behavior (delete state files by hand — the OBS-01 root cause).
+
+**Reproduction:** In aid-orchestrator repo: `find .aid-o/work/evidence/E-057-* -type f`
+(R-E057-2 missing fsm-state.yaml), `grep base_commit
+.aid-o/work/evidence/E-057-1_2/R-E057-1/fsm-state.yaml` (foreign docs commit),
+`git branch | grep 057`. PM field report 2026-07-02.
+
+**Likely fix:** Make epic generation transactional: stage all generated
+artifacts (evidence dirs, task files, run files, queue entry, branch creation)
+and commit them atomically at the end, or provide
+`aid-auto-pipeline.sh rollback <plan-id>` that removes exactly the artifacts a
+partial generation created (reading them from a generation manifest). The
+rollback path must be non-destructive-by-whitelist (only deletes files the
+manifest lists) so it does not require blanket destructive permissions.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
