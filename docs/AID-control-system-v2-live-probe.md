@@ -56,6 +56,45 @@ is a supplementary signal only, not the primary source.
 
 - Observed plan/EPIC: filled in at the start of each run
 - AID version: verified from repo HEAD/CHANGELOG at run start, never assumed
+- Observed worktree/branch: discovered by the observer from `git worktree list`,
+  `git status --short --branch`, and `fsm-state.yaml branch`, not assumed from
+  the PM transcript.
+- Evidence root: discovered from `.aid-o/work/evidence/{epic_id}/{run_id}/`
+  and checked against `fsm-state.yaml`, `plan.json`, and the active branch.
+
+If a prepared run exists but its branch is not checked out anywhere, this is a
+baseline observation, not an OBS finding by itself. It becomes a finding only if
+the controller proceeds using the wrong branch/worktree, writes evidence under
+the wrong run, or reports progress that the on-disk FSM does not show.
+
+**Continuous polling mode:**
+
+The observer should actively poll local state. Do not wait only for PM pings or
+the implementer's transcript.
+
+Default cadence:
+
+- every 5-10 minutes while the run is active,
+- immediately after visible FSM/gate/checkpoint activity,
+- immediately after a new commit,
+- immediately after the implementer claims DONE / PASS / MERGE readiness.
+
+Each poll should be cheap and read-only. The observer should capture only the
+delta since the last poll unless a stop condition appears.
+
+Minimum poll checklist:
+
+- current branch and worktree mapping (`git worktree list`, `git status --short --branch`)
+- latest commits since run base (`git log --oneline --decorate`)
+- FSM state, `current_step`, `total_steps`, `done_phase`, `base_commit`, branch
+- `timeline.jsonl` tail and new event types
+- newly created/modified evidence files and their mtimes
+- verifier outputs and whether they match the expected checkpoint names
+- gate reports: `overall`, required vs optional failures, command exit codes
+- protocol-v2 JSON artifacts: `revision.head_sha`, `freshness`, `status`, `verdict`
+- delivery/audit/curator/reporter artifacts if present
+- whether any old evidence file was overwritten after a later checkpoint
+- whether docs/instructions used by the agent match the scripts that enforced the step
 
 **"Significant state" means:**
 
@@ -74,6 +113,16 @@ once a finding is confirmed. An unconfirmed suspicion stays as a working note
 in the observer report only — it does not become a backlog item until
 confirmed.
 
+Confirmation threshold:
+
+- Confirm immediately when the observer can point to a file, command output, or
+  git state proving the issue.
+- Keep as working note when the only source is transcript wording, missing future
+  activity, or a state that may still be normal setup.
+- Promote a repeated working note to confirmed when the same friction happens in
+  two independent checkpoints/EPICs even if each instance was individually
+  recoverable.
+
 **When to stop the run and flag the PM immediately:**
 
 - active evidence corruption
@@ -89,6 +138,26 @@ confirmed.
 2. Whether the AID process worked / failed / was confusing
 3. Whether an OBS finding results
 4. Whether the observer needs to stop and flag the PM
+
+**What the observer is trying to improve in AID:**
+
+The probe is successful when it reveals how AID itself should be simplified,
+made stricter, or made less confusing. Prioritize observations that help improve:
+
+- evidence integrity: stale, overwritten, non-canonical, or unauthenticated evidence
+- checkpoint ownership: old CP aliases vs new C0-C4 mechanisms conflicting
+- script/doc alignment: instructions that do not match enforced behavior
+- branch/worktree safety: wrong branch, stale branch, merge ambiguity, lost work risk
+- verifier independence: fake, reused, self-written, or under-specified reviews
+- false-green prevention: reports that say PASS while required proof is missing
+- step/run identity: 0-index vs 1-index, plan/run/EPIC mismatch, ambiguous file names
+- release semantics: per-EPIC vs per-Plan ambiguity, stale evidence used for release
+- performance/cost: checks that look hung, repeat wastefully, or hide timeouts
+- GUI/read-model readiness: whether evidence has enough stable fields for future AID Cockpit views
+- PM communication: summaries that hide important caveats or require source-code archaeology
+
+Do not spend observer attention on product-level bugs unless they expose one of
+the AID control-system issues above.
 
 **After each completed run:** update this Runbook section with anything that
 made the next round of monitoring more accurate — additional artifacts worth
@@ -164,4 +233,3 @@ The first field report produced five confirmed AID-system findings:
    exact run base cannot be read.
 
 These are tracked in `docs/plans/BACKLOG.md` as B-004 through B-008.
-
