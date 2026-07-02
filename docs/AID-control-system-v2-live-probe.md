@@ -159,6 +159,17 @@ made stricter, or made less confusing. Prioritize observations that help improve
 Do not spend observer attention on product-level bugs unless they expose one of
 the AID control-system issues above.
 
+**Observer commit discipline (lesson from 2026-07-02):**
+
+The aid-orchestrator repo checkout is shared with other sessions, including AID
+runs executed on the AID repo itself. Before every observer commit (OBS entries,
+runbook updates), verify with `git status --short --branch` that the checkout is
+on `main`. If a `task/*`/`epic/*` branch is checked out, a parallel AID run owns
+the checkout — do not commit there and do not leave uncommitted edits in it;
+defer the write until the checkout returns to `main`, or flag the PM. (Incident:
+an OBS commit landed on `task/E-057-1_2/main`; recovered by fast-forwarding
+`main` to the commit since its parent was the `main` tip.)
+
 **After each completed run:** update this Runbook section with anything that
 made the next round of monitoring more accurate — additional artifacts worth
 checking, a sharper definition of "significant state", recurring false
