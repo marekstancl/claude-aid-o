@@ -49,6 +49,13 @@ event with old/new step counts, and (c) refuses plain re-init when evidence
 exists. Alternative: require a new run_id suffix (`R-E058-2b`) for any plan-hash
 change.
 
+**Recurrence 2026-07-02 (E-058-3_6/R-E058-3):** same pattern on the very next
+EPIC — timeline shows two `fsm_init` events (2026-07-01 and 2026-07-02, both
+total_steps=3), no `fsm_force_override`, plan.json/epic_input.md/fsm-state.yaml
+overwritten in place at 06:35. base_commit again correctly refreshed (9b3cc16).
+Two independent EPICs within one plan → **cleanup trigger for this class is
+met** ("the same failure class appears in at least two independent EPICs").
+
 ### OBS-20260702-02 - run.md for the same run_id exists at two different canonical paths
 
 **Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
@@ -199,6 +206,48 @@ a clear message when a declared gate has no definition — or at minimum write a
 `result: fail, reason: undefined_gate` entry into gates_report.json so overall
 cannot be pass. plan.schema.json should state which component consumes
 `gates[]` and what happens when a name does not resolve.
+
+### OBS-20260702-06 - FSM pre-commit hook conflicts with per-Plan deferred-merge model, normalizing --no-verify bypass
+
+**Observed in:** WAN / P058 / E-058-1_6 + E-058-2_6 + E-058-3_6 (5 commits)
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** high
+**Class:** docs drift / merge policy (enforcement bypass normalization)
+
+**What happened:** The AID-generated pre-commit hook blocks ANY commit on
+`task/*`/`epic/*` branches when `state: DONE && done_phase != release`. The
+PM-chosen per-Plan deferred-merge model intentionally holds every EPIC in
+`DONE/review` until the whole plan finishes — so every legitimate post-review
+action (PM-approved bug fixes, Curator bookkeeping, even the NEXT EPIC's task
+scaffold) hits the hook. Result on plan P058: five commits bypassed it with
+`--no-verify`, self-documented in their commit messages (`a6174d9`, `4e98076`,
+`57d89f0`, `f22f0d1`, `9b3cc16`). The bypass has become the routine, applied
+even to commits the hook might not have blocked. The FSM transition table has
+no path out of DONE except `done-advance review→release`, so no mechanical
+"reopen for fix cycle" exists.
+
+**Why it matters:** A guardrail that legitimate workflow must routinely bypass
+trains agents to reach for `--no-verify` by default — which skips ALL hook
+checks, not just the FSM guard. This inverts the control system's purpose:
+the hook now selects FOR unaudited commits. Every bypass is invisible to the
+FSM/timeline (no force-override event, only a good-faith commit-message note).
+WAN-side already analyzed this as backlog item T-151 (2026-07-01) with a
+concrete proposal; recording here because the fix belongs in the AID plugin,
+not in the consumer project.
+
+**Reproduction:** `git log --all --grep="no-verify" --oneline` in the WAN repo
+(5 hits on P058); hook source `.git/hooks/pre-commit` (AID-generated block);
+WAN `.aid-o/work/backlog.md` T-151.
+
+**Likely fix:** Adopt T-151's direction: (a) a documented post-review-fix path
+— PM-approved marker file (`post-review-fix-approved.json` with reason +
+timestamp, analogous to `--force --reason`) that the hook honors and logs as a
+timeline event, or (b) an `aid-fsm.sh` subcommand for a "reopen fix cycle"
+that permits commits in DONE/review without forcing premature release. Either
+way the hook must offer a legitimate escape hatch so `--no-verify` stops being
+the path of least resistance.
 
 ---
 
