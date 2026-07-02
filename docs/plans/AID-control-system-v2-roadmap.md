@@ -143,6 +143,7 @@ Risk-gated nezávislý audit (provider-neutral, independence levels), mechanicky
 **EPIC 9: E9 - C4 Release Policy + fast profile + PM communication**
 Jediná release eligibility autorita → `release-decision.json`; `/aid-do` fast profil stejných enginů; PM brief sekvenčně z release-decision (žádný cyklus); opravený Reporter s controlled runner.
 **Vstup z E3 (P052):** freshness ověření `profile_hash` (že review evidence vznikla proti aktuálnímu profilu) je C4/E9 odpovědnost (`freshness_verified_by: C4` v topologii); E3 hash jen vyrobil.
+**Vstup z E8 (P057), odloženo do E9/C4 — viz BACKLOG.md „E8 Deferred":** (1) **skutečné odstranění/nahrazení Curator merge-authority** (auto-approve `recommended_disposition`, FC-38) - E8 udělalo jen sequencing+vocabulary, protože merge-influence je release-policy teritorium a sdílený kontrakt s gate-fixer/simplifier; (2) **C4 konzumace** `audit-report.json` + `curator-report.json` + `invalidation-map.json` do `release-decision.json`; (3) **UI verdict** z E7 (`frontend_visual_fidelity` → delivery-gate → release).
 
 **EPIC 10: E10 - Kalibrace na známých selháních + dual-run metriky**
 Kompozitní regression fixtures E-047-1/4/5, E-044, P045; měření false-DONE/false-positive/nákladů; numerické budget stropy; promotion observe→blocking. Toto teprve prokáže, že systém kontroluje stejně dobře jako nezávislý audit.
