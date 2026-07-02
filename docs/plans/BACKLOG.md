@@ -207,6 +207,12 @@ a clear message when a declared gate has no definition — or at minimum write a
 cannot be pass. plan.schema.json should state which component consumes
 `gates[]` and what happens when a name does not resolve.
 
+**Recurrence 2026-07-02 (E-058-3_6):** the next EPIC's plan.json again declares
+`gates: ["docs_updated"]` while execution.yaml still lacks the definition — the
+silent drop will repeat at E3's gates phase and, since the declaration comes
+from the shared P058 plan, in every remaining EPIC of the plan. Second
+independent EPIC → **cleanup trigger for this class is met.**
+
 ### OBS-20260702-06 - FSM pre-commit hook conflicts with per-Plan deferred-merge model, normalizing --no-verify bypass
 
 **Observed in:** WAN / P058 / E-058-1_6 + E-058-2_6 + E-058-3_6 (5 commits)

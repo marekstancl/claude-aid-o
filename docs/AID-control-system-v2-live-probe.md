@@ -113,6 +113,25 @@ once a finding is confirmed. An unconfirmed suspicion stays as a working note
 in the observer report only — it does not become a backlog item until
 confirmed.
 
+**Working-notes persistence (lesson from 2026-07-02):** keep all unconfirmed
+suspicions, active watch items, and positive control moments in a persistent
+observer-working-notes file (session scratchpad or equivalent), not only in
+conversation memory. Each poll re-reads the watch items; each report updates
+the file. This survives context compaction and lets a follow-up session resume
+the probe without losing the pre-confirmation state.
+
+**Record positive control moments too:** when an enforcement mechanism
+demonstrably works (a precondition blocks an invalid advance, a stub is
+rejected, append-only history enables detection), record it in the working
+notes as calibration. The cleanup session needs to know what must NOT be
+broken as much as what must be fixed.
+
+**Proactive trap checks:** when a new EPIC's plan.json/evidence appears, check
+it immediately against already-confirmed OBS patterns (declared-but-undefined
+gates, reused run_ids, CP3 freshness exposure) instead of waiting for the
+failure to replay. A recurrence confirmed from static state counts toward the
+cleanup trigger the same as an observed replay.
+
 Confirmation threshold:
 
 - Confirm immediately when the observer can point to a file, command output, or
