@@ -78,6 +78,88 @@ the wrong one.
 regeneration must replace or archive the previous file at that same path, never
 create a differently-named sibling. Related: OBS-20260702-01 (same re-init flow).
 
+### OBS-20260702-03 - CP3 evidence freshness not enforced: GATES→DONE accepts review that predates gate-fix commits
+
+**Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** high
+**Class:** stale evidence / evidence integrity
+
+**What happened:** CP3 code-review + security outputs were generated at
+04:14-04:16Z and explicitly state they reviewed `git diff 2a06b76..HEAD` when
+HEAD was `32323b4`. Gates then FAILED (`moved_integration_tests` — migration
+chain test hardcoded old head), a gate-fix commit `96a72df` landed (~04:19Z),
+gates re-ran PASS, and the FSM transitioned EXECUTE→GATES (04:20:29Z) and
+GATES→DONE (04:20:41Z) with the original CP3 files untouched (mtimes 06:15/06:17
+local). `fsm_check_verifier_output` (aid-fsm.sh ~177-236) validates existence,
+`_generated_by`, `_generated_at`, `classification`, and `verdict` — it has no
+freshness/head-binding check, so a CP3 review that predates later commits
+satisfies the DONE precondition. `final_report.md` reports "CP3 — PASS" and
+lists commit `96a72df`, without disclosing that CP3 never reviewed it.
+
+**Why it matters:** Gate-fix commits land after CP3 review BY CONSTRUCTION
+whenever gates fail — this exact sequence occurs in every fail→fix→pass cycle
+(E-058-1 had gate-fix loops with production-code changes). In this run the
+uncovered commit was a test-only assertion update (harmless), but the mechanism
+lets arbitrarily large post-review commits reach DONE marked "CP3 PASS". At
+plan-close the stale PASS becomes release proof. Contrast: the protocol-v2
+`delivery-gate.json` in the same run DOES bind evidence to a revision
+(`revision.head_sha`, `freshness: current`) — the binding machinery exists in
+C0-C4 but legacy CP3 markdown evidence is not revision-bound. This is the
+head-side twin of B-008 (base-side range approximation).
+
+**Reproduction:** In the WAN run evidence dir compare
+`verifier-output-cp3-*.md` `_generated_at` (04:14/04:16Z) and the reviewed
+range stated in the security file vs `git log` (`96a72df` committed ~04:19Z)
+and `timeline.jsonl` (GATES→DONE 04:20:41Z, no CP3 re-dispatch, no force
+override). `grep -n -A60 'fsm_check_verifier_output()' aid-fsm.sh` — no HEAD
+comparison.
+
+**Likely fix:** CP3 verifier outputs must record the reviewed `head_sha`;
+GATES→DONE precondition compares it to current HEAD and fails with a clear
+recovery instruction (re-dispatch CP3 or explicit `--force --reason` waiver)
+when commits exist past the reviewed head. Optionally allow a scoped exception
+for diffs touching only test files, but make that an explicit policy, not
+silence.
+
+### OBS-20260702-04 - final_report.md omits D0 delivery-gate result (delivery_ready=false, 15 unverifiable findings)
+
+**Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** medium
+**Class:** docs drift / merge policy (PM communication)
+
+**What happened:** The D0 observe-mode delivery gate ran at the EXECUTE→GATES
+transition (timeline `d0_delivery_gate`, exit_code 0, observe=true) and wrote
+`delivery-gate.json` with `status: "fail"`, `verdict.delivery_ready: false`,
+and 15 medium findings — all `delivery_gate_unverifiable` (dg01-dg18,
+`skip_reason: unverifiable_profile`, i.e. no delivery profile configured for
+WAN). `final_report.md` reports CP2 PASS, CP3 PASS, Gates 4/4 PASS and does not
+mention the delivery gate at all. Additionally the artifact contradicts itself:
+`delivery_gate.freshness: "stale"` while `revision.freshness: "current"`.
+
+**Why it matters:** This is probe class "a report says pass while important
+advisory checks failed without clear wording". Observe-mode non-blocking is by
+design (E2/E-050 rollout), but a PM reading final_report.md sees all-green and
+has no signal that (a) a delivery-readiness artifact exists, (b) it could not
+verify anything because the project has no profile, and (c) it says
+delivery_ready=false. Silent observe-mode also generates no pressure to ever
+configure the profile. The dual freshness fields make the artifact ambiguous
+for any future automated consumer (AID Cockpit / read-model class).
+
+**Reproduction:** `python3 -c "import json; d=json.load(open('.aid-o/work/evidence/E-058-2_6/R-E058-2/delivery-gate.json')); print(d['status'], d['verdict'], d['delivery_gate']['freshness'], d['revision']['freshness'])"`
+vs `grep -i delivery .aid-o/work/evidence/E-058-2_6/R-E058-2/final_report.md`
+(no match).
+
+**Likely fix:** Final report template gains a mandatory delivery-gate line
+(phase, status, delivery_ready, findings count, unverifiable-profile hint with
+setup pointer). Define which freshness field is authoritative in
+delivery-gate.json and remove or derive the other.
+
 ---
 
 ## B-004 — Live usage probe for AID v2 control-system friction
