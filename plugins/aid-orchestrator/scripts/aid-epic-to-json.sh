@@ -748,7 +748,13 @@ for i in "${!step_nums[@]}"; do
   step_allowed_paths_json="[]"
 
   if [[ -n "$ui_contracts_section" ]]; then
-    scoping_line="$(echo "$ui_contracts_section" | grep "<!-- step-${step_n}: files=" || true)"
+    # -m1 -F: match aid-contract-validate.sh's _ac_block_count() convention
+    # (fixed-string, first-match-only) — without them, a self-referential
+    # prose line elsewhere in the section that happens to contain this
+    # exact literal prefix (e.g. text describing this very block syntax)
+    # could make this grep return multiple/wrong lines, diverging from the
+    # gate's own lookup for the same step (CP3 code-review finding).
+    scoping_line="$(echo "$ui_contracts_section" | grep -m1 -F "<!-- step-${step_n}: files=" || true)"
     if [[ -n "$scoping_line" ]]; then
       scoping_parsed="$(_aid_parse_scoping_line "$scoping_line" "$step_n" || true)"
       if [[ -n "$scoping_parsed" ]]; then

@@ -142,7 +142,15 @@ _ac_block_count() {
 #   "## Acceptance Criteria" section tagged "[role]" (case-insensitive),
 #   ignoring code-fenced and nested (indented) bullets. Echoes 0 if none.
 _ac_role_bullet_count() {
-  local epic_md="$1" role="$2"
+  local epic_md="$1" role="$2" role_re
+  # Escape regex metacharacters in $role before interpolating into grep -E:
+  # `role` comes from plan.json (sourced from the EPIC.md Steps table role
+  # column, not the more tightly-validated AC-block role tag), so it is not
+  # guaranteed to match [a-z_]+ — an unescaped regex metacharacter (e.g. a
+  # typo'd "." or "*") would silently make this count check under- or
+  # over-match, degrading it to a false PASS on a real AC-fragmentation
+  # defect (CP3 security finding).
+  role_re="$(printf '%s' "$role" | sed 's/[][\.^$*+?(){}|\\]/\\&/g')"
   awk '
     /^## Acceptance Criteria/ { found=1; next }
     found && /^## / { exit }
@@ -151,7 +159,7 @@ _ac_role_bullet_count() {
       if (fence) next
       if ($0 ~ /^- \[[ x]\]/) print
     }
-  ' "$epic_md" 2>/dev/null | grep -ciE "^- \\[[ x]\\] \\[${role}\\]" || true
+  ' "$epic_md" 2>/dev/null | grep -ciE "^- \\[[ x]\\] \\[${role_re}\\]" || true
 }
 
 # _ac_fragment_smell <text>
