@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.51.0] — 2026-07-05
+
+### Added
+- **Per-step scoping HTML block (D2)** — `aid-plan-to-epic.sh` emits a `<!-- step-N: files=[...]; ac=[...] -->` block per step so `aid-epic-to-json.sh` scopes `outputs`/`allowed_paths`/`acceptance_criteria` per step instead of broadcasting flattened EPIC-level sections to every step, with legacy no-block EPICs keeping today's exact broadcast behavior.
+- **Contract Validation Gate (D5)** — new blocking `scripts/gates/aid-contract-validate.sh` checks generated `plan.json` for per-step-scoping broadcast, AC pipe-split fragments, and prose-shaped `allowed_paths`, wired as the one blocking exception inside the observe-only C0 block of `aid-auto-pipeline.sh` and persisting `contract-validate.json` before aborting so a later phase's failure never hides behind an earlier phase's stale pass; registered as `contract_validation_gate` in `enforcement-registry.yaml`.
+- **C0 Check 6 (`contract_validation`)** — `aid-c0-contract.sh`'s `review` subcommand reads (never re-runs) the persisted D5 gate result into the evidence pack.
+- **`docs/extending-aid.md` section** — documents the D2 per-step scoping block and the D5 contract validation gate for contributors.
+
+### Fixed
+- **`aid-plan-diff.sh` false-green on `## Success Criteria` plans** — the AC-extraction awk used a range pattern whose terminator matched a `## Success Criteria` heading as an end-of-range marker, collapsing the whole section to `ac_count: 0` and silently skipping AC enforcement for every plan using that heading instead of `## Acceptance Criteria`; replaced with a flag-based block that recognizes both headings.
+- **`ac_no_fragments` false-positive** — the D5 gate's quote-parity backstop no longer misfires on plural possessives (`users' permissions`) or on quotes inside balanced backtick spans (CP2 finding).
+- **Self-consistency regen bugs** — per-step scoping line parsing now anchors on the last occurrence of the `ac=` delimiter instead of the first, and per-step Files-bullet extraction is top-level-only, fixing corruption when a plan's own text describes the block syntax it is itself written in.
+
+### Changed
+- **Minor version bump rationale** — this release is a `bug-fix`-type EPIC per its source plan, but bumps MINOR (2.50.1 → 2.51.0) rather than PATCH because it introduces a new blocking gate capability (Contract Validation Gate, D5), not just a fix.
+
 ## [2.50.1] — 2026-07-01
 
 ### Added
