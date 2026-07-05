@@ -483,10 +483,13 @@ strip_cross_phase_deps() {
 # NOT called anywhere in THIS script today (see the step_files extraction
 # above, which stays on its original single-path logic to keep plan.json
 # byte-identical until Step 3 lands — this step only emits the block, it
-# does not change what's read from EPIC.md today). This function is the
-# exact algorithm aid-epic-to-json.sh (P058 Step 3) should reuse when it
-# derives per-step allowed_paths from a block's files[] values, verified
-# against real plan Files bullets during this step's development:
+# does not change what's read from EPIC.md today). aid-epic-to-json.sh does
+# NOT source this script (only lib/common.sh is shared between the two CLI
+# entry points), so this function cannot be called cross-script — it is the
+# exact algorithm Step 3 must PORT/reimplement directly inside
+# aid-epic-to-json.sh when it derives per-step allowed_paths from a block's
+# files[] values, verified against real plan Files bullets during this
+# step's development:
 #
 #   - The path declaration always sits immediately after the "Create:"/
 #     "Modify:" label, as ONE backtick-wrapped span, or several joined by
@@ -711,9 +714,12 @@ for sn in "${phase_steps[@]}"; do
   # side (byte-identical plan.json before/after, module docstring "Testing"
   # requirement) — an earlier draft that fixed this extraction in place was
   # reverted after a before/after `aid-epic-to-json.sh` diff showed it
-  # was NOT inert (allowed_paths content changed). Step 3 will call
-  # _aid_split_path_entry itself when it derives per-step allowed_paths
-  # from the block's RAW files[] values.
+  # was NOT inert (allowed_paths content changed). aid-epic-to-json.sh does
+  # NOT source this script (no shared entry point exists between the two
+  # CLI scripts, only lib/common.sh) — Step 3 must PORT/reimplement this
+  # exact algorithm directly inside aid-epic-to-json.sh when it derives
+  # per-step allowed_paths from the block's RAW files[] values, using
+  # _aid_split_path_entry below as the reference spec, not as callable code.
   step_files="$(echo "$step_content" | awk '
     BEGIN { in_files = 0 }
     {
