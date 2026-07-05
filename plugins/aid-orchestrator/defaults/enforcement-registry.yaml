@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 259          # granular registry rows; updated E7B (was 258, +1 frontend_visual_fidelity_block = 259)
-  mapped_with_verdict: 92    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
+  enforcements: 260          # granular registry rows; updated E-058-1_1 Step 6 (was 259, +1 contract_validation_gate = 260)
+  mapped_with_verdict: 93    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
   mapping_pending: 111       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
-  verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 111}
+  verdict_distribution: {ALIGNED: 75, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 111}
 
 enforcements:
 
@@ -103,6 +103,7 @@ enforcements:
   - {id: cp4_curator_validation,       type: 4, source: "scripts/aid-fsm.sh:292",  instruction: "skills/agent-protocol.md:272", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "fsm_check_cp4 requires cp4-curator-validation.md with valid _generated_by/_generated_at/classification (content-validated since E-046-1_3 Step 2)"}
   - {id: cp4_glob_invalid,             type: 4, source: "scripts/aid-fsm.sh:310",  instruction: "skills/agent-protocol.md:273", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "malformed cp4_production_paths ERE → die (fail closed)"}
   - {id: plan_ac_match,                type: 4, source: "scripts/aid-plan-diff.sh:12", instruction: "skills/pipeline.md", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "plan_ac_match: >=1 AC absent → exit 1", test: "scripts/tests/bats/test-plan-ac-diff.bats"}
+  - {id: contract_validation_gate,     type: 4, source: "scripts/gates/aid-contract-validate.sh", instruction: "docs/extending-aid.md:Contract Validation Gate (D5)", severity: blocking, surface: internal-guard, status: active, verdict: ALIGNED, description: "D5: plan.json per-step-scoping broadcast, AC pipe-split fragments, and prose-shaped allowed_paths -> hard fail before FSM init (wired in aid-auto-pipeline.sh, P058 Step 4)", test: "scripts/tests/bats/test-contract-validate.bats"}
   - {id: compliance_aggregation,       type: 4, source: "scripts/aid-fsm.sh:707",  instruction: "skills/pipeline.md:783", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "evaluate/write_compliance_json aggregates check dimensions"}
   - {id: streamlined_integration_review, type: 4, source: "scripts/aid-fsm.sh:362", instruction: "skills/agent-protocol.md:282", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "streamlined mode requires cp3 code-review+security+gates"}
   - {id: streamlined_abandoned,        type: 4, source: "scripts/aid-fsm.sh:400",  instruction: "skills/agent-protocol.md:281", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "streamlined + <3 timeline events → die"}

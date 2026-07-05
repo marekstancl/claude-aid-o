@@ -128,7 +128,18 @@ parse_ac_blocks() {
         ac_flushed=1
       }
     }
-    /^## Acceptance Criteria/,/^## [^A]/ {
+    # AC-section flag: turns on at "## Acceptance Criteria" OR "## Success Criteria"
+    # (P052-P058-era plans use "Success Criteria" as the heading for the same
+    # verification_pattern-bearing bullets) and turns off at the next "## " heading.
+    # A start/end range pattern (start = the AC heading; end = a heading whose
+    # first letter is not "A") is NOT used here on purpose: a "Success Criteria"
+    # heading itself starts with "S", so that not-"A" terminator would match it
+    # as an end-of-range marker on the very next occurrence and collapse the
+    # whole section to zero AC rows (empirically confirmed 0 AC
+    # false-negative). The flag-based form below has no such collision.
+    /^## (Acceptance Criteria|Success Criteria)/ { f=1; next }
+    /^## / { f=0 }
+    f {
       if ($0 ~ /^- \[[ x]\] AC[0-9]+:/ || $0 ~ /^- \[[ x]\] \[[a-z_]+\]/) {
         flush_no_verify()
         ac_label=extract_label($0)
