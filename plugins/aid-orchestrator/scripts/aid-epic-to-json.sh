@@ -479,6 +479,127 @@ parse_step_ui_contracts() {
 # Extract the Step UI Contracts section once (used per-step in the loop below)
 ui_contracts_section="$(parse_step_ui_contracts "$(cat "$epic")")"
 
+# =============================================================================
+# _aid_parse_scoping_line — split a per-step scoping HTML-comment line into
+# its files=[...] and ac=[...] JSON-array substrings (D2).
+#
+# Shape (frozen by aid-plan-to-epic.sh / E-TEST-005 fixture, P058 Step 2):
+#   <!-- step-N: files=["Create: `path` — desc", ...]; ac=["AC text", ...] -->
+#
+# Both files=/ac= values are `jq -R -s -c` compact JSON arrays of strings. A
+# literal ";" or "|" inside a string value is NOT JSON-escaped, so this
+# function anchors the split on the literal boundary "]; ac=[" (the files
+# array's closing bracket immediately followed by the ac array's opening
+# bracket) rather than the first "|" or ";" found anywhere in the line —
+# that boundary is far less likely to appear inside prose/AC text than a
+# bare ";" or "|" alone (verified against the E-TEST-005 fixture, whose
+# qa-step AC deliberately embeds a literal "|" and whose backend-step AC
+# deliberately embeds a literal, non-sentinel-encoded "-->").
+#
+# Args: $1 = raw matched line (e.g. from `grep "<!-- step-N: files="`)
+#       $2 = step number N (used only to build the fixed prefix to strip)
+# Output (stdout, on success): 2 lines — files-JSON then ac-JSON.
+# Returns: 1 if the line does not match the expected shape (caller must
+#          treat this as "no block for this step" and fall back to broadcast).
+# =============================================================================
+_aid_parse_scoping_line() {
+  local line="$1"
+  local step_n="$2"
+  local prefix="<!-- step-${step_n}: files="
+
+  [[ "$line" == "$prefix"* ]] || return 1
+  local body="${line#"$prefix"}"
+
+  [[ "$body" == *" -->" ]] || return 1
+  body="${body% -->}"
+
+  [[ "$body" == *"]; ac=["* ]] || return 1
+  local files_part="${body%%; ac=[*}"
+  local ac_part="${body#*; ac=}"
+
+  printf '%s\n%s\n' "$files_part" "$ac_part"
+}
+
+# =============================================================================
+# _aid_split_path_entry — D4 cleaner for a single RAW Files bullet (label
+# already stripped). PORTED from scripts/aid-plan-to-epic.sh's function of
+# the same name — aid-epic-to-json.sh does not source that script (only
+# lib/common.sh is shared between the two CLI entry points), so this exact
+# algorithm is reimplemented here rather than called cross-script. See the
+# source function's comment for the full rationale; summary:
+#   - The path declaration always sits immediately after the "Create:"/
+#     "Modify:" label, as ONE backtick-wrapped span, or several joined by
+#     literal " + `" (the "`a.md` + `b.md`" dual-file convention).
+#   - Anything else (a "(...)" parenthetical, an em-dash/"--" description, or
+#     any other backtick span later in a prose-heavy bullet) stops the run
+#     and is discarded as prose, not consumed as a path.
+#   - No leading backtick span found -> fall back to stripping the entry
+#     after the first "--"/em-dash separator, then removing stray backticks.
+#
+# Args: $1 = one RAW Files bullet with the "Create:"/"Modify:" label already
+#            stripped (e.g. "`CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` (identical)")
+# Output (stdout): one cleaned path per line (may be more than one line).
+# =============================================================================
+_aid_split_path_entry() {
+  local entry="$1"
+  local rest="$entry"
+  local candidate found_backtick_path=0 first_span=1
+
+  while true; do
+    if [[ "$first_span" -eq 1 ]]; then
+      [[ "$rest" == '`'* ]] || break
+    else
+      [[ "$rest" == ' + `'* ]] || break
+      rest="${rest# + }"
+    fi
+    rest="${rest#\`}"           # drop the opening backtick
+    candidate="${rest%%\`*}"    # everything up to the next backtick
+    rest="${rest#*\`}"          # drop through the closing backtick
+    if [[ -n "$candidate" && "$candidate" != *[[:space:]]* ]]; then
+      printf '%s\n' "$candidate"
+      found_backtick_path=1
+      first_span=0
+    else
+      break
+    fi
+  done
+
+  if [[ "$found_backtick_path" -eq 0 ]]; then
+    local fallback="$entry"
+    fallback="${fallback%%--[[:space:]]*}"
+    fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
+    fallback="${fallback//\`/}"
+    fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
+  fi
+}
+
+# =============================================================================
+# _aid_allowed_paths_from_files_json — derive a step's cleaned allowed_paths
+# JSON array from its RAW files[] JSON array (per D2/D4: outputs = files
+# verbatim, allowed_paths = cleaned path(s) from the SAME files entries).
+# Strips the "Create:"/"Modify:" label from each entry, then runs the
+# remainder through _aid_split_path_entry (handles the multi-path
+# "`a` + `b`" join and drops trailing prose). Order-preserving de-dup.
+# Args: $1 = compact JSON array of RAW files[] strings.
+# Output (stdout): compact JSON array of cleaned path strings.
+# =============================================================================
+_aid_allowed_paths_from_files_json() {
+  local files_json="$1"
+  local out_json="[]"
+  local n idx entry stripped p
+  n="$(echo "$files_json" | jq 'length')"
+  for (( idx=0; idx<n; idx++ )); do
+    entry="$(echo "$files_json" | jq -r --argjson i "$idx" '.[$i]')"
+    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify):[[:space:]]*//')"
+    while IFS= read -r p; do
+      [[ -z "$p" ]] && continue
+      out_json="$(echo "$out_json" | jq --arg p "$p" 'if index($p) then . else . + [$p] end')"
+    done < <(_aid_split_path_entry "$stripped")
+  done
+  echo "$out_json"
+}
+
 # Extract Scope sections
 scope_allowed_raw="$(extract_subsection "$epic" "Scope" "Allowed files/paths")"
 scope_forbidden_raw="$(extract_subsection "$epic" "Scope" "Forbidden zones")"
@@ -537,13 +658,19 @@ while IFS= read -r line; do
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*\[([a-z]+)\][[:space:]]*(.*) ]]; then
     ac_role="${BASH_REMATCH[1]}"
     ac_text="${BASH_REMATCH[2]}"
-    ac_by_role["$ac_role"]="${ac_by_role[$ac_role]:-}|||$ac_text"
+    # D3: join with the unit-separator sentinel (0x1f), NOT the literal "|||"
+    # string — bash's IFS is a character CLASS, not a multi-char literal, so
+    # IFS='|||' on the split side collapses to IFS='|' and fragments any AC
+    # text containing a literal "|" (e.g. a jq expression). 0x1f cannot
+    # appear in normal markdown/AC text and splits unambiguously as a single
+    # character class.
+    ac_by_role["$ac_role"]="${ac_by_role[$ac_role]:-}"$'\x1f'"$ac_text"
   elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\[[[:space:]]*\][[:space:]]*(.*) ]]; then
     # AC without role prefix — assign to all roles
     ac_text="${BASH_REMATCH[1]}"
     [[ "$ac_text" == "<!--"* ]] && continue
     [[ -z "$ac_text" ]] && continue
-    ac_by_role["_global"]="${ac_by_role[_global]:-}|||$ac_text"
+    ac_by_role["_global"]="${ac_by_role[_global]:-}"$'\x1f'"$ac_text"
   fi
 done <<< "$ac_raw"
 
@@ -569,6 +696,7 @@ for i in "${!step_nums[@]}"; do
   step_id="${step_ids[$i]}"
   step_role="${step_roles[$i]}"
   step_objective="${step_objectives[$i]}"
+  step_n="${step_nums[$i]}"
 
   # Build inputs: EPIC spec + outputs from dependency steps
   inputs_json='["EPIC specification"]'
@@ -594,32 +722,78 @@ for i in "${!step_nums[@]}"; do
     done
   fi
 
-  # Build outputs from artifacts section (role-relevant entries)
-  outputs_json="$(echo "$artifacts_json" | jq '.')"
-
-  # Build step-specific acceptance criteria
+  # ---------------------------------------------------------------------
+  # D2 — per-step scoping block lookup (Step UI Contracts section). This is
+  # a SEPARATE "<!-- step-N: files=...; ac=... -->" line from the
+  # "ui_change_mode=" line handled below (Step 2 of P058 emits it as its
+  # own line, not merged). If found and it parses cleanly, THIS step's
+  # outputs/acceptance_criteria/allowed_paths come from the block — files[]
+  # verbatim as outputs, ac[] verbatim as acceptance_criteria, and files[]
+  # run through the ported D4 cleaner for allowed_paths. If no block exists
+  # for this step, or it fails to parse, fall back to TODAY's exact
+  # broadcast behavior (never emit an empty array just because the block is
+  # absent/malformed — that would be a regression, not a fix; contract
+  # enforcement belongs to a later step's gate, not this parser).
+  # ---------------------------------------------------------------------
+  step_has_block=0
+  outputs_json="[]"
   step_ac_json="[]"
-  # Add role-specific AC
-  if [[ -n "${ac_by_role[$step_role]+_}" ]]; then
-    IFS='|||' read -ra ac_items <<< "${ac_by_role[$step_role]}"
-    for ac_item in "${ac_items[@]}"; do
-      ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      [[ -z "$ac_item" ]] && continue
-      step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
-    done
+  step_allowed_paths_json="[]"
+
+  if [[ -n "$ui_contracts_section" ]]; then
+    scoping_line="$(echo "$ui_contracts_section" | grep "<!-- step-${step_n}: files=" || true)"
+    if [[ -n "$scoping_line" ]]; then
+      scoping_parsed="$(_aid_parse_scoping_line "$scoping_line" "$step_n" || true)"
+      if [[ -n "$scoping_parsed" ]]; then
+        files_json_raw="$(echo "$scoping_parsed" | sed -n '1p')"
+        ac_json_raw="$(echo "$scoping_parsed" | sed -n '2p')"
+        # Reverse the @@AID_ARROW@@ sentinel encoding aid-plan-to-epic.sh
+        # applies before JSON-encoding, so a literal "-->" inside a value
+        # (e.g. an AC describing a "start --> middle --> end" flow) can
+        # never truncate the HTML comment block early.
+        files_json_decoded="$(echo "$files_json_raw" | sed 's/@@AID_ARROW@@/-->/g')"
+        ac_json_decoded="$(echo "$ac_json_raw" | sed 's/@@AID_ARROW@@/-->/g')"
+        if files_json_valid="$(echo "$files_json_decoded" | jq -c . 2>/dev/null)" \
+           && ac_json_valid="$(echo "$ac_json_decoded" | jq -c . 2>/dev/null)"; then
+          outputs_json="$files_json_valid"
+          step_ac_json="$ac_json_valid"
+          step_allowed_paths_json="$(_aid_allowed_paths_from_files_json "$files_json_valid")"
+          step_has_block=1
+        fi
+      fi
+    fi
   fi
-  # Add global AC
-  if [[ -n "${ac_by_role[_global]+_}" ]]; then
-    IFS='|||' read -ra ac_items <<< "${ac_by_role[_global]}"
-    for ac_item in "${ac_items[@]}"; do
-      ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      [[ -z "$ac_item" ]] && continue
-      step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
-    done
+
+  if [[ "$step_has_block" -eq 0 ]]; then
+    # No-block fallback — preserve today's exact broadcast behavior for
+    # backward compatibility with legacy/hand-authored EPICs and the
+    # existing goldens (minimal-plan.golden.json, ui-contract-plan), which
+    # predate this feature and carry no scoping block at all.
+    outputs_json="$(echo "$artifacts_json" | jq '.')"
+
+    # Add role-specific AC
+    if [[ -n "${ac_by_role[$step_role]+_}" ]]; then
+      IFS=$'\x1f' read -ra ac_items <<< "${ac_by_role[$step_role]}"
+      for ac_item in "${ac_items[@]}"; do
+        ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [[ -z "$ac_item" ]] && continue
+        step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
+      done
+    fi
+    # Add global AC
+    if [[ -n "${ac_by_role[_global]+_}" ]]; then
+      IFS=$'\x1f' read -ra ac_items <<< "${ac_by_role[_global]}"
+      for ac_item in "${ac_items[@]}"; do
+        ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+        [[ -z "$ac_item" ]] && continue
+        step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
+      done
+    fi
+
+    step_allowed_paths_json="$allowed_paths_json"
   fi
 
   # Extract ui_change fields for this step from the Step UI Contracts section
-  step_n="${step_nums[$i]}"
   step_ui_mode="null"
   step_ui_contract="null"
 
@@ -651,7 +825,7 @@ for i in "${!step_nums[@]}"; do
     --argjson inputs "$inputs_json" \
     --argjson outputs "$outputs_json" \
     --argjson constraints "$constraints_json" \
-    --argjson allowed_paths "$allowed_paths_json" \
+    --argjson allowed_paths "$step_allowed_paths_json" \
     --argjson forbidden_paths "$forbidden_paths_json" \
     --argjson acceptance_criteria "$step_ac_json" \
     --argjson ui_change_mode "$step_ui_mode" \
