@@ -110,8 +110,12 @@ if [[ -f "$CP1_GATE_SCRIPT" ]]; then
   fi
 fi
 
-# Extract plan number (strip leading P)
-plan_num="$(echo "$plan_id" | sed 's/^P//')"
+# Extract plan number (strip leading P, then any leading "-" — a plan id
+# like P-TEST-999 would otherwise leave "-TEST-999", producing a double-dash
+# epic_id "E--TEST-999-..." that breaks aid-auto-pipeline.sh's EPIC-ID regex;
+# curator IMP-166, discovered during Step 4, latent since all real plan ids
+# today are numeric-only).
+plan_num="$(echo "$plan_id" | sed 's/^P//; s/^-//')"
 
 # ---------------------------------------------------------------------------
 # Step 2: Generate EPIC ID and slug

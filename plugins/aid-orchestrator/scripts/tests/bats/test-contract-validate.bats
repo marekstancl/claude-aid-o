@@ -133,6 +133,58 @@ JSON
   echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status == "pass"'
 }
 
+@test "aid-contract-validate.sh: ac_no_fragments does NOT false-positive on a plural-possessive AC (CP2 regression)" {
+  local plan_json="$TEST_TMPDIR/plural-possessive-plan.json"
+  cat > "$plan_json" <<'JSON'
+{
+  "epic_id": "E-PLURAL-1_1",
+  "version": 1,
+  "steps": [
+    {
+      "id": "step_1_qa",
+      "role": "qa",
+      "outputs": ["Create: `test_a.py`"],
+      "allowed_paths": ["test_a.py"],
+      "acceptance_criteria": [
+        "Users' permissions must not change when workers' shifts are updated"
+      ]
+    }
+  ],
+  "dependencies": []
+}
+JSON
+
+  run "$GATE" "$plan_json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status == "pass"'
+}
+
+@test "aid-contract-validate.sh: ac_no_fragments STILL flags a generic (non-literal) truncated numeric fragment" {
+  local plan_json="$TEST_TMPDIR/generic-truncation-plan.json"
+  cat > "$plan_json" <<'JSON'
+{
+  "epic_id": "E-TRUNC-1_1",
+  "version": 1,
+  "steps": [
+    {
+      "id": "step_1_qa",
+      "role": "qa",
+      "outputs": ["Create: `test_a.py`"],
+      "allowed_paths": ["test_a.py"],
+      "acceptance_criteria": [
+        "count == 3'"
+      ]
+    }
+  ],
+  "dependencies": []
+}
+JSON
+
+  run "$GATE" "$plan_json"
+  [ "$status" -eq 1 ]
+  echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status == "fail"'
+}
+
 @test "aid-contract-validate.sh: allowed_paths_shape flags prose/verb-prefix/parenthetical entries" {
   local plan_json="$TEST_TMPDIR/proseshape-plan.json"
   cat > "$plan_json" <<'JSON'

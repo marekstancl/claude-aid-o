@@ -175,18 +175,27 @@ _ac_fragment_smell() {
   grep -qF '.enforcements' <<< "$masked" && return 0
 
   # Odd (unpaired) count of "'" signals a truncated `'...'` shell/jq string —
-  # but English possessives/contractions ("step 1's", "don't", and PLURAL
-  # possessives like "users'"/"workers'") also contain a "'" immediately
-  # preceded by a word character and are NOT a fragment signal, so those are
-  # excluded from the count first. Only requiring an alnum BEFORE the quote
-  # (not also after) is deliberate: it covers plural possessives, where
-  # nothing word-like follows the apostrophe (CP2 finding — the stricter
-  # both-sides version false-positived on ordinary English text like "users'
-  # permissions"). The two literal substring checks above already catch the
-  # concrete known truncation signatures ("length ==", ".enforcements") that
-  # also happen to be alnum-preceded, so relaxing this side of the heuristic
-  # does not weaken detection of those — this is only a defense-in-depth
-  # backstop; the authoritative check is the AC-count comparison elsewhere.
+  # but English contractions/possessives ("don't", "step 1's own", and
+  # PLURAL possessives like "users'"/"workers'") also contain a "'" that
+  # isn't a fragment signal, so those are excluded from the count first.
+  # Two shapes are treated as safe:
+  #   (a) alnum on BOTH sides ("don't", "user's") — contraction/singular
+  #       possessive, or a truncation fragment where something happens to
+  #       follow immediately (rare enough not to special-case away).
+  #   (b) a LETTER (not digit) before, whitespace/punctuation/end-of-line
+  #       after ("users' permissions", "workers'" at end-of-string) —
+  #       plural possessive.
+  # Shape (b) is deliberately restricted to alpha (curator IMP-168): a
+  # truncated numeric/field fragment like "count == 3'" or "items == 5'"
+  # has the SAME local shape as a plural possessive at end-of-string
+  # (alnum immediately before the quote, nothing after) — the only
+  # reliable distinguishing signal is that a real plural noun ends in a
+  # LETTER, never a digit, so digit-before-quote-at-end stays counted as
+  # bare/suspicious. The two literal substring checks above already catch
+  # the two concrete known truncation signatures ("length ==",
+  # ".enforcements"); this heuristic only needs to backstop OTHER,
+  # unnamed truncated fields — this is defense-in-depth, not the
+  # authoritative check (that's the AC-count comparison elsewhere).
   #
   # Operate on $masked, not $text: a well-formed, BALANCED backtick-wrapped
   # jq/shell expression (e.g. "`'.foo | length == 3'`") has its quotes
@@ -196,7 +205,7 @@ _ac_fragment_smell() {
   # parity, false-positiving on legitimate inline code exactly like the kind
   # this function's own docstring says masking exists to protect.
   total_quotes="$(tr -cd "'" <<< "$masked" | wc -c)"
-  word_internal_quotes="$(grep -oE "[[:alnum:]]'" <<< "$masked" | wc -l)"
+  word_internal_quotes="$(grep -oE "[[:alnum:]]'[[:alnum:]]|[[:alpha:]]'([[:space:][:punct:]]|$)" <<< "$masked" | wc -l)"
   bare_quotes=$(( total_quotes - word_internal_quotes ))
   if (( bare_quotes % 2 != 0 )); then
     return 0
