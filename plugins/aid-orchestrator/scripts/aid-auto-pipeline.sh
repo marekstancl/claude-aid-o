@@ -289,14 +289,39 @@ for phase in $(seq 1 "$total_phases"); do
   fi
 
   # -------------------------------------------------------------------------
-  # Phase N.b5: C0 Plan Contract Gate (observe)
-  # Runs after plan.json exists; before FSM init. Plan-level evidence only.
+  # Phase N.b5: Contract Validation Gate (blocking, D5) + C0 Plan Contract
+  # Gate (observe). Runs after plan.json exists; before FSM init. The
+  # contract-validate sub-block below is the one BLOCKING exception in this
+  # phase — everything else here is plan-level observe-only evidence.
   # -------------------------------------------------------------------------
   {
     # Determine plan_id from plan filename
     _c0_plan_id="$(basename "$plan" .md)"
     _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/c0"
     mkdir -p "$_c0_dir"
+
+    # -------------------------------------------------------------------------
+    # D5: Contract Validation Gate (BLOCKING — deliberately NOT part of the
+    # observe-only C0 block below). A malformed generator contract (broadcast
+    # outputs/allowed_paths, `|`-split AC fragments, prose leaking into
+    # allowed_paths) is a hard error per plan D5 ("Contract-gate blocking +
+    # C0 evidence — malformed = hard-fail před /aid-run") and must stop the
+    # pipeline before json-to-run / queue-add / branch creation happen below.
+    #
+    # Persist-before-abort: `_c0_dir` is keyed by plan_id, not by phase, so
+    # in a multi-phase plan every phase's hook run writes to the SAME
+    # contract-validate.json. We therefore always overwrite it with THIS
+    # phase's result before inspecting the exit code — otherwise a phase-2
+    # failure after a phase-1 pass would leave a stale pass on disk.
+    # -------------------------------------------------------------------------
+    _cv_exit=0
+    _cv_json="$("${SCRIPT_DIR}/gates/aid-contract-validate.sh" "$plan_json_path" "$epic_path" \
+      2>>"$_c0_dir/c0-producer.log")" || _cv_exit=$?
+    printf '%s\n' "$_cv_json" > "${_c0_dir}/contract-validate.json"
+
+    if [[ "$_cv_exit" -ne 0 ]]; then
+      error_exit "Contract validation failed for phase ${phase} (${_c0_plan_id}): malformed plan.json/EPIC.md contract — see ${_c0_dir}/contract-validate.json" 4
+    fi
 
     # Read enforcement policy (fail-safe: default to observe)
     _c0_policy="observe"
