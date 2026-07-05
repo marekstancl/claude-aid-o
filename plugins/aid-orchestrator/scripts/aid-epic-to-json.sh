@@ -479,6 +479,21 @@ parse_step_ui_contracts() {
 # Extract the Step UI Contracts section once (used per-step in the loop below)
 ui_contracts_section="$(parse_step_ui_contracts "$(cat "$epic")")"
 
+# _aid_append_ac_items <raw \x1f-joined AC text> — appends each trimmed,
+# non-empty AC item to the caller's $step_ac_json (shared scope, not a
+# subshell — deliberately not `local`). Used by the no-block fallback path
+# for both the role-specific and _global accumulators, which were
+# byte-identical loops before this extraction (simplifier SMP-003).
+_aid_append_ac_items() {
+  local raw="$1" ac_item
+  IFS=$'\x1f' read -ra ac_items <<< "$raw"
+  for ac_item in "${ac_items[@]}"; do
+    ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [[ -z "$ac_item" ]] && continue
+    step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
+  done
+}
+
 # =============================================================================
 # _aid_parse_scoping_line — split a per-step scoping HTML-comment line into
 # its files=[...] and ac=[...] JSON-array substrings (D2).
@@ -784,24 +799,9 @@ for i in "${!step_nums[@]}"; do
     # predate this feature and carry no scoping block at all.
     outputs_json="$(echo "$artifacts_json" | jq '.')"
 
-    # Add role-specific AC
-    if [[ -n "${ac_by_role[$step_role]+_}" ]]; then
-      IFS=$'\x1f' read -ra ac_items <<< "${ac_by_role[$step_role]}"
-      for ac_item in "${ac_items[@]}"; do
-        ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [[ -z "$ac_item" ]] && continue
-        step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
-      done
-    fi
-    # Add global AC
-    if [[ -n "${ac_by_role[_global]+_}" ]]; then
-      IFS=$'\x1f' read -ra ac_items <<< "${ac_by_role[_global]}"
-      for ac_item in "${ac_items[@]}"; do
-        ac_item="$(echo "$ac_item" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-        [[ -z "$ac_item" ]] && continue
-        step_ac_json="$(echo "$step_ac_json" | jq --arg a "$ac_item" '. + [$a]')"
-      done
-    fi
+    # Add role-specific AC, then global AC (both no-block fallback sources)
+    [[ -n "${ac_by_role[$step_role]+_}" ]] && _aid_append_ac_items "${ac_by_role[$step_role]}"
+    [[ -n "${ac_by_role[_global]+_}" ]] && _aid_append_ac_items "${ac_by_role[_global]}"
 
     step_allowed_paths_json="$allowed_paths_json"
   fi
