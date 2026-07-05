@@ -126,7 +126,13 @@ _ac_block_count() {
   body="${line%" -->"}"
   body="${body#"$prefix"}"
   [[ "$body" == *"]; ac=["* ]] || return 0
-  ac_part="${body#*"; ac="}"
+  # Anchor on the LAST occurrence of "; ac=", not the first (`##` = longest
+  # matching prefix removal): a files[] value can itself contain that exact
+  # literal substring (e.g. prose describing this very block's own syntax —
+  # this is exactly what P058's own plan text does, and is why its
+  # self-consistency regen surfaced this). Same fix as
+  # aid-epic-to-json.sh's _aid_parse_scoping_line — keep both in sync.
+  ac_part="${body##*"; ac="}"
 
   jq 'length' <<< "$ac_part" 2>/dev/null || true
 }

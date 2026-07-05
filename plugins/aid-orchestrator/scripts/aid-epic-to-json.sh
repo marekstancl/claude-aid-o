@@ -514,8 +514,15 @@ _aid_parse_scoping_line() {
   body="${body% -->}"
 
   [[ "$body" == *"]; ac=["* ]] || return 1
-  local files_part="${body%%; ac=[*}"
-  local ac_part="${body#*; ac=}"
+  # Anchor on the LAST occurrence of "; ac=[", not the first: a files[] value
+  # can itself contain that literal substring (e.g. prose describing this
+  # very block syntax — this is exactly what happens when P058's own plan
+  # text is regenerated through this parser, a real self-consistency
+  # failure caught during Step 5). `%` (shortest-suffix removal) and `##`
+  # (longest-prefix removal) both anchor on the rightmost match, unlike the
+  # previous `%%`/`#` pairing which anchored on the leftmost (first) one.
+  local files_part="${body%; ac=[*}"
+  local ac_part="${body##*; ac=}"
 
   printf '%s\n%s\n' "$files_part" "$ac_part"
 }

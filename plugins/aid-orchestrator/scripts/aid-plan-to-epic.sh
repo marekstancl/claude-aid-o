@@ -703,6 +703,33 @@ for sn in "${phase_steps[@]}"; do
     all_artifacts="${all_artifacts}${step_artifacts}"$'\n'
   fi
 
+  # Top-level-only variant of the above, for the per-step scoping block's
+  # files=[...] value (below) ONLY — NOT for all_artifacts (legacy flattened
+  # section stays on the indentation-agnostic extraction above, unchanged,
+  # to avoid regressing existing goldens). A Files entry sometimes carries
+  # further-INDENTED sub-bullets that elaborate on a single top-level
+  # "Create:"/"Modify:" bullet (e.g. this very plan's own Step 2/4/5/6 Files
+  # sections use indented "**SPLIT multi-path bullet:** ..." elaboration
+  # under one Modify: line) — those are prose continuation, not separate
+  # files, and must NOT be surfaced as their own files[] array entry (a
+  # later per-step allowed_paths derivation would otherwise try to clean
+  # them into a "path" and fail the D5 allowed_paths_shape check — caught
+  # during Step 5's self-consistency regen of this very plan). Only a
+  # bullet with NO leading whitespace before its "-" is a real, distinct
+  # Files entry.
+  step_artifacts_top_level="$(echo "$step_content" | awk '
+    BEGIN { in_files = 0 }
+    {
+      gsub(/\r$/, "")
+      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
+      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
+      if (in_files && $0 ~ /^-[[:space:]]/) {
+        sub(/^-[[:space:]]*/, "", $0)
+        if ($0 != "") print "- " $0
+      }
+    }
+  ')"
+
   # Extract files (Create/Modify paths) for the flattened `## Scope >
   # Allowed files/paths` section — UNCHANGED from before this step. D4's
   # improved multi-path SPLIT + trailing-prose-strip logic (see
@@ -805,8 +832,8 @@ for sn in "${phase_steps[@]}"; do
   #     closing "-->" can never be truncated early. Step 3 must reverse this
   #     substitution after JSON-decoding each string.
   step_files_json="[]"
-  if [[ -n "$step_artifacts" ]]; then
-    step_files_json="$(echo "$step_artifacts" \
+  if [[ -n "$step_artifacts_top_level" ]]; then
+    step_files_json="$(echo "$step_artifacts_top_level" \
       | sed 's/^- //' \
       | sed "s/-->/${AID_ARROW_SENTINEL}/g" \
       | jq -R -s -c 'split("\n") | map(select(length > 0))')"
