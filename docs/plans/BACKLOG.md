@@ -420,6 +420,193 @@ from a legitimate Fast-Mode skip.
 
 ---
 
+### OBS-20260702-11 - Evidence step-numbering offset drift: agents write 1-based files, FSM checks 0-based
+
+**Observed in:** aid-orchestrator / P058 / E-058-1_1 / R-E058-1 (and B-007 corroboration in WAN E-058-2/3)
+**AID version:** HEAD (pre-v2.51.0)
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** medium
+**Class:** UX indexing / evidence integrity
+
+**What happened:** The implementer wrote CP2 evidence for the FIRST step as
+`verifier-output-step-1.md` (1-based, matching plan "Step 1"); the FSM
+increment demanded 0-based `step-0` files (`fsm_increment_fail:
+missing_step_verify`). The agent recovered by DUPLICATING evidence under both
+numberings (step-0 + step-1 files for one step), then continued 1-based for
+verifier outputs and 0-based for step-N-verify files — a consistent offset:
+`verifier-output-step-{k}` is 1-based while `step-{k-1}-verify.md` is 0-based,
+and the FSM's per-step check validates a file whose number does not match the
+step it gates. No overwrite occurred (each artifact type stayed internally
+consistent), but the numbering convention is pinned nowhere and each
+session/project picks differently (WAN runs used 0-based verifier outputs).
+
+**Why it matters:** B-007 escalated from UX annoyance to evidence-integrity
+risk: one step owning two file numbers invites a later step to overwrite or a
+consumer to read the wrong step's verdict. The FSM enforcement caught the
+initial mismatch (good), but the recovery created duplicate evidence rather
+than a canonical correction.
+
+**Reproduction:** `ls .aid-o/work/evidence/E-058-1_1/R-E058-1/ | grep -E
+"step-[0-9]"` — step-0..step-2 files where 0 and 1 are both the first step;
+timeline increment_fail events 2026-07-02 08:23Z.
+
+**Likely fix:** Pin ONE canonical numbering for evidence filenames (recommend
+1-based to match plans, with FSM translating internally), enforce it in
+`fsm_check_verifier_output` (reject wrong-numbered files with a clear message),
+and print both forms in all FSM output (`current_step=1 (Plan Step 2)`) per
+B-007.
+
+### OBS-20260705-01 - CP2 prefilter classifies by wrong diff range: production step marked docs_only SKIP
+
+**Observed in:** WAN / P058 / E-058-4_6 / R-E058-4 step 0
+**AID version:** v2.50.1
+**Observed at:** 2026-07-05
+**Status:** confirmed (recovered same run)
+**Severity:** high
+**Class:** false-green / prefilter diff range
+
+**What happened:** Step 1 (`7580ed0`) changed production code (erp_write.py
++19, enums.py +13, validators/format.py +44, +95 test lines). A bookkeeping
+commit (`b0ef918`, active.md only) landed on top. CP2 prefilter then classified
+the step SKIP with matched rule `docs_only` — it evidently evaluated only the
+latest commit instead of the step's full diff range — and wrote a SKIP stub
+that `fsm_check_verifier_output` accepts. A production step would have passed
+with zero verification. Recovery: the implementer dispatched a real CP2 anyway
+(RUN/pass, 11:22), overwrote the stub, and the run continued correctly; the
+bogus SKIP event remains in the append-only timeline as proof.
+
+**Why it matters:** Same family as B-008/OBS-03 (wrong diff range), on the
+prefilter side: any step whose last commit is docs/bookkeeping gets its
+verification silently skipped. Recovery relied on agent discipline, not
+enforcement. Contrast: later the same day, a genuinely docs-only step
+(E-058-5 step 2) was correctly SKIPped — the rule itself is fine, the range is
+wrong.
+
+**Reproduction:** WAN timeline event `prefilter_classification step:0
+SKIP docs_only` (2026-07-05 09:16:37Z) vs `git show --stat 7580ed0` and
+`b0ef918`.
+
+**Likely fix:** `aid-prefilter.sh` must diff from the step boundary (or
+base_commit) to HEAD, never a single commit; `docs_only` must never match when
+the range contains production paths.
+
+### OBS-20260705-02 - fsm-state.yaml mutations without timeline events (base_commit, plan_json_hash)
+
+**Observed in:** WAN E-058-4/5/6 starts + aid-orchestrator E-057-1/2 regen
+**AID version:** v2.50.1 / HEAD
+**Observed at:** 2026-07-05 (3+ instances)
+**Status:** confirmed
+**Severity:** medium
+**Class:** evidence integrity (unevented state mutation)
+
+**What happened:** Three-plus confirmed instances of `fsm-state.yaml` fields
+changing with NO corresponding timeline event: (a) E-058-4 start — base_commit
+9e858cd→f9faaae; (b) E-057-1/2 — plan_json_hash refreshed after contract
+regeneration; (c) E-058-5 start — base_commit 9e858cd→431feb7 (and E-058-6
+likewise). All mutations were correct in intent (fresh base for stacked EPICs,
+hash matching regenerated plan) and the timelines were preserved (no wipe —
+improvement over OBS-01), but the state file history is not reconstructible
+from events.
+
+**Why it matters:** The timeline is the audit trail; if routine operations
+mutate state silently, "state matches events" cannot be verified and the OBS-01
+guard-bypass class stays invisible. The improvement (edit-in-place instead of
+wipe+reinit) should be completed with eventing.
+
+**Likely fix:** every fsm-state mutation goes through an `aid-fsm.sh set-field`
+style command that logs a `fsm_field_change` timeline event (field, old, new,
+reason). Note: v2.51.0 already hardened set-field itself (slash/backslash
+bugs) — wiring it as the only mutation path + eventing is the remaining step.
+
+### OBS-20260705-03 - Untracked AID-look-alike branch work never covered by any checkpoint
+
+**Observed in:** WAN / P058 / branch task/E-058-3_6-fe/main (4 commits)
+**AID version:** v2.50.1
+**Observed at:** 2026-07-05 (structurally confirmed)
+**Status:** confirmed
+**Severity:** medium
+**Class:** branch/run identity / review coverage
+
+**What happened:** FE follow-up work (IMP-123) was done on branch
+`task/E-058-3_6-fe/main` — AID naming convention, but NO run: no evidence dir,
+no fsm-state, no task file, no CP2/CP3. The integration branch (f9faaae) then
+became the base for E-058-4/5/6, placing the 4 FE commits BELOW every later
+EPIC's base_commit: E3's CP3 predates them, E4+'s CP3 ranges start after them.
+By construction, no AID checkpoint will ever review these commits, yet they
+flow to main through the plan lineage at plan-close.
+
+**Why it matters:** The naming makes the branch LOOK AID-managed; a plan-close
+reviewer sees task/* branches and assumes coverage. Ad-hoc side work is a PM
+prerogative, but the system offers no signal distinguishing "verified EPIC
+work" from "untracked work in EPIC clothing" in the merged history.
+
+**Likely fix:** plan-close (C4) should compute review coverage over the full
+merge range (which commits were inside some run's verified range) and list
+uncovered commits for explicit PM acknowledgment. Optionally: warn when a
+task/* branch has no matching run evidence.
+
+### OBS-20260706-01 - gates_report.json written to two different paths across runs/re-runs
+
+**Observed in:** aid-orchestrator / E-058-1_1 / R-E058-1
+**AID version:** HEAD (v2.51.0 cycle)
+**Observed at:** 2026-07-06
+**Status:** confirmed
+**Severity:** low
+**Class:** UX indexing / command surface
+
+**What happened:** The original gates run wrote
+`R-E058-1/gates/gates_report.json` (07-05, contains plan_diff:skip); the
+post-fix re-run wrote flat `R-E058-1/gates_report.json` (07-06,
+plan_diff:fail). Two reports, two vintages, no supersede marker — a consumer
+reading the subdir path sees stale results. Same class as OBS-02 (run.md path
+duality), now on gates evidence. WAN runs consistently used the `gates/`
+subdir path.
+
+**Likely fix:** one canonical path; re-runs overwrite it (timeline already
+preserves per-run history).
+
+### Probe update 2026-07-05/06 — recurrences, escalations, remedies observed
+
+Compact ledger updates to existing findings (details in observer working notes):
+
+- **OBS-03 (CP3 freshness): instance #2 confirmed at E-058-4 DONE** (test-only
+  gate-fix `b8f0546` uncovered; GATES→DONE 10:07:55Z with CP3 untouched) →
+  cleanup trigger MET. **Instance #3 at aid-orchestrator E-058-1_1** — first
+  with a PRODUCTION post-review commit (`765aba5`, regex fix in scoping
+  lookup); GATES→DONE with stale CP3, cross-project pattern. **Remedy pattern
+  observed at v2.51.0 merge:** independent `verifier-output-pm-fix-cycle.md`
+  (FULL_REVIEW, pass, found+fixed one more bug 67ee875) dispatched over ALL
+  post-review commits + `BOOTSTRAP-EXCEPTION.md` waiver doc before merge — this
+  is the behavior the OBS-03 fix should mechanize.
+- **OBS-05 (declared gate silently dropped): recurrence #3+ **— every P058 EPIC
+  (WAN E4/E5/E6 + AID E-058-1_1) declares `docs_updated`. Root cause chain:
+  `aid-plan-to-epic.sh:843` hardcodes it into every generated EPIC;
+  `defaults/execution.yaml:23` defines it but live project configs (WAN + AID)
+  drifted and lack it; no reconciliation → silent drop;
+  `enforcement-registry.yaml:154` still lists it severity:blocking
+  status:active. Cross-project systemic.
+- **OBS-06 (hook bypass): tally 9** — 6th (c0505fb) and 7th (3fd7a2c,
+  production post-DONE fix) SILENT, undocumented; 8th (8215500) silent; 9th
+  (f1f253c) documented again. Note: the aid-orchestrator repo has NO FSM
+  pre-commit hook, so the conflict is WAN-deployment-specific.
+- **OBS-10 (audit verdict prose-only): recurrences E4 + E5** (no artifacts,
+  verdicts only in commit messages; WAN on old plugin). **Positive contrast:**
+  AID E-058-1_1 persisted the complete review pack (curator-report,
+  audit-report yaml+md, CP4 curator-validation, simplifier-report, reporter
+  smoke evidence, verification-report.json, ca-review-complete) — pin this as
+  the contract.
+- **OBS-08 (generated contracts): fix VERIFIED live** — v2.51.0 per-step
+  scoping works on regenerated E-057 contracts (outputs 3/1/2/2, zero AC
+  fragments) with `.pre-P058-fix.snapshot` archives (OBS-01 lesson adopted);
+  `depends` derivation still open. The fix-EPIC ran on its own malformed
+  contract under an explicit, PM-authorized `BOOTSTRAP-EXCEPTION.md`.
+- **OBS-09 (plan-diff heading): fix landed** (a22b2cd) — and exposed the next
+  layer: `plan_path: null` in fsm-state made the gate skip-as-pass anyway
+  (plan_path plumbing never wired at init), then after the YAML-unescape fixes
+  the gate finally RUNS and FAILS LOUDLY (advisory) — meta-pattern remedy
+  visible in practice.
+
 ## B-004 — Live usage probe for AID v2 control-system friction
 
 **Status:** scoped
