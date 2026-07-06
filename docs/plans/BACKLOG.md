@@ -491,6 +491,15 @@ SKIP docs_only` (2026-07-05 09:16:37Z) vs `git show --stat 7580ed0` and
 base_commit) to HEAD, never a single commit; `docs_only` must never match when
 the range contains production paths.
 
+**Recurrence 2026-07-06 (E-058-6_6 step 1):** identical mechanism — production
+step `5209475` (Structured Outputs wiring: config/extractor/json_schema) topped
+by docs commit `c127ebf` (D-005) → prefilter SKIP/docs_only (06:13:33Z).
+Recovered again by manual CP2 dispatch, this time SELF-DOCUMENTING: the
+verifier output header states "manual dispatch — pre-filter misfire correction"
+and names the correct reviewed commit. Two EPICs (E4+E6) → **cleanup trigger
+met**; the workaround is becoming routine agent labor that the fix should
+eliminate.
+
 ### OBS-20260705-02 - fsm-state.yaml mutations without timeline events (base_commit, plan_json_hash)
 
 **Observed in:** WAN E-058-4/5/6 starts + aid-orchestrator E-057-1/2 regen
