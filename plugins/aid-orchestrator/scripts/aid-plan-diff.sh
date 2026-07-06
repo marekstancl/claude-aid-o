@@ -119,6 +119,21 @@ parse_ac_blocks() {
       sub(/"[[:space:]]*$/, "", tmp)
       # Strip trailing whitespace
       sub(/[[:space:]]+$/, "", tmp)
+      # Unescape YAML double-quoted-scalar escape sequences: \" -> " and
+      # \\ -> \. Without this, a cmd value containing embedded double
+      # quotes or backslash-escaped single quotes (e.g. verification_pattern
+      # shell commands with nested quoting, as used throughout P052-P058
+      # own Success Criteria) is later handed to eval still carrying
+      # literal backslashes, which corrupts the command actual quoting
+      # and produces a bash syntax error (exit 2) or a jq compile error
+      # (exit 3) instead of running the intended check, silently reporting
+      # absent for a criterion that would otherwise pass. Order matters:
+      # protect literal double-backslash behind a placeholder BEFORE
+      # unescaping the quote form, so an escaped-backslash-then-escaped-
+      # quote sequence is not misread as one combined escape.
+      gsub(/\\\\/, "\001", tmp)
+      gsub(/\\"/, "\"", tmp)
+      gsub(/\001/, "\\", tmp)
       return tmp
     }
     function flush_no_verify(  ) {
