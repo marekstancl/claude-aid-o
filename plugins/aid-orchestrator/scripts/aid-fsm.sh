@@ -2370,8 +2370,15 @@ cmd_set_field() {
   # delimited by "/", and "&"/"\" in the value would be misinterpreted as
   # sed replacement-text metacharacters. awk's print performs no such
   # reinterpretation, so the value is written out literally either way.
+  #
+  # Pass $value via ENVIRON, not `-v v="$value"`: POSIX awk applies C-string
+  # escape processing to `-v` assignments, so a value containing a literal
+  # backslash sequence (e.g. "\n", "\t", "\\") would be silently rewritten
+  # into a real control character instead of staying literal text.
+  # Environment variables are read via ENVIRON[] with no such reprocessing.
   if grep -q "^${field}:" "$state_file"; then
-    awk -v f="$field" -v v="$value" '
+    AID_SETFIELD_VALUE="$value" awk -v f="$field" '
+      BEGIN { v = ENVIRON["AID_SETFIELD_VALUE"] }
       $0 ~ "^" f ":" { print f ": " v; next }
       { print }
     ' "$state_file" > "${state_file}.tmp" && mv "${state_file}.tmp" "$state_file"
