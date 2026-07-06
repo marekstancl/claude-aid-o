@@ -119,6 +119,21 @@ parse_ac_blocks() {
       sub(/"[[:space:]]*$/, "", tmp)
       # Strip trailing whitespace
       sub(/[[:space:]]+$/, "", tmp)
+      # Unescape YAML double-quoted-scalar escape sequences: \" -> " and
+      # \\ -> \. Without this, a cmd value containing embedded double
+      # quotes or backslash-escaped single quotes (e.g. verification_pattern
+      # shell commands with nested quoting, as used throughout P052-P058
+      # own Success Criteria) is later handed to eval still carrying
+      # literal backslashes, which corrupts the command actual quoting
+      # and produces a bash syntax error (exit 2) or a jq compile error
+      # (exit 3) instead of running the intended check, silently reporting
+      # absent for a criterion that would otherwise pass. Order matters:
+      # protect literal double-backslash behind a placeholder BEFORE
+      # unescaping the quote form, so an escaped-backslash-then-escaped-
+      # quote sequence is not misread as one combined escape.
+      gsub(/\\\\/, "\001", tmp)
+      gsub(/\\"/, "\"", tmp)
+      gsub(/\001/, "\\", tmp)
       return tmp
     }
     function flush_no_verify(  ) {
@@ -128,7 +143,18 @@ parse_ac_blocks() {
         ac_flushed=1
       }
     }
-    /^## Acceptance Criteria/,/^## [^A]/ {
+    # AC-section flag: turns on at "## Acceptance Criteria" OR "## Success Criteria"
+    # (P052-P058-era plans use "Success Criteria" as the heading for the same
+    # verification_pattern-bearing bullets) and turns off at the next "## " heading.
+    # A start/end range pattern (start = the AC heading; end = a heading whose
+    # first letter is not "A") is NOT used here on purpose: a "Success Criteria"
+    # heading itself starts with "S", so that not-"A" terminator would match it
+    # as an end-of-range marker on the very next occurrence and collapse the
+    # whole section to zero AC rows (empirically confirmed 0 AC
+    # false-negative). The flag-based form below has no such collision.
+    /^## (Acceptance Criteria|Success Criteria)/ { f=1; next }
+    /^## / { f=0 }
+    f {
       if ($0 ~ /^- \[[ x]\] AC[0-9]+:/ || $0 ~ /^- \[[ x]\] \[[a-z_]+\]/) {
         flush_no_verify()
         ac_label=extract_label($0)

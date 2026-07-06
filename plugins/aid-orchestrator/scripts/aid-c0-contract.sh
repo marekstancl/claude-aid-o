@@ -12,8 +12,12 @@
 #       Exit 0 always unless plan.json is missing or invalid JSON (exit 1).
 #
 #   review   <plan.md>   <c0_evidence_dir> [--out <path>]
-#       STUB — Step 3 will implement the 5 structural checks and lens evidence
-#       scan. Currently emits a minimal plan-review.json and exits 0.
+#       Runs 6 structural checks (plan_graph_topo, identifier_domain,
+#       schema_completeness, producer_consumer_order, contract_manifest_hash,
+#       contract_validation) + the 5-lens evidence scan, emits plan-review.json.
+#       Always exits 0 — observe-only; findings never block from here (the
+#       contract_validation check's underlying gate is enforced separately,
+#       as a BLOCKING pre-check in aid-auto-pipeline.sh, per D5).
 #
 # Protocol v2 envelope fields (contract and plan-graph artifacts):
 #   schema_version: aid-2.0
@@ -664,6 +668,51 @@ cmd_review() {
     --arg id "contract_manifest_hash" \
     --arg status "$cm_status" \
     --arg detail "$cm_detail" \
+    '. + [{"id": $id, "status": $status, "detail": $detail}]')"
+
+  # --------------------------------------------------------------------------
+  # Check 6: contract_validation
+  # Reads the ALREADY-PERSISTED ${evidence_dir}/contract-validate.json
+  # (written by the aid-auto-pipeline.sh D5 hook BEFORE it decides whether to
+  # abort) — single source of truth, this never re-runs
+  # aid-contract-validate.sh itself. If the file is missing (e.g. `review`
+  # invoked standalone, outside the normal pipeline hook), status is
+  # "unverifiable" — NOT "pass" — per plan D5: "C0 evidence nesmí hlásit pass
+  # bez něj" (C0 evidence must not claim pass without it).
+  # --------------------------------------------------------------------------
+  local cv_file="${evidence_dir}/contract-validate.json"
+  local cv_status="unverifiable"
+  local cv_detail=""
+
+  if [[ ! -f "$cv_file" ]]; then
+    cv_status="unverifiable"
+    cv_detail="contract-validate.json not found in evidence dir"
+  elif ! jq . "$cv_file" >/dev/null 2>&1; then
+    cv_status="observe"
+    cv_detail="contract-validate.json is not valid JSON"
+  else
+    local cv_result
+    cv_result="$(jq -r '.result // ""' "$cv_file" 2>/dev/null || true)"
+    case "$cv_result" in
+      pass)
+        cv_status="pass"
+        cv_detail="contract-validate.json result=pass"
+        ;;
+      fail)
+        cv_status="observe"
+        cv_detail="contract-validate.json result=fail (blocking hook should already have aborted the pipeline for this phase)"
+        ;;
+      *)
+        cv_status="observe"
+        cv_detail="contract-validate.json missing/unexpected result field: '${cv_result}'"
+        ;;
+    esac
+  fi
+
+  structural_checks_json="$(printf '%s' "$structural_checks_json" | jq \
+    --arg id "contract_validation" \
+    --arg status "$cv_status" \
+    --arg detail "$cv_detail" \
     '. + [{"id": $id, "status": $status, "detail": $detail}]')"
 
   # -------------------------------------------------------------------------
