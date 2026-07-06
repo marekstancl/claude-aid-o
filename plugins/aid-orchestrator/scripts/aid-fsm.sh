@@ -2365,8 +2365,16 @@ cmd_set_field() {
     done_phase) echo "ERROR: 'done_phase' is reserved — use 'done-advance' command" >&2; exit 1 ;;
   esac
 
+  # Use awk (not sed s///) for the replace: a value containing "/" (e.g. a
+  # path — plan_path is the common case) breaks a sed substitution
+  # delimited by "/", and "&"/"\" in the value would be misinterpreted as
+  # sed replacement-text metacharacters. awk's print performs no such
+  # reinterpretation, so the value is written out literally either way.
   if grep -q "^${field}:" "$state_file"; then
-    sed -i "s/^${field}: .*/${field}: ${value}/" "$state_file"
+    awk -v f="$field" -v v="$value" '
+      $0 ~ "^" f ":" { print f ": " v; next }
+      { print }
+    ' "$state_file" > "${state_file}.tmp" && mv "${state_file}.tmp" "$state_file"
   else
     echo "${field}: ${value}" >> "$state_file"
   fi
