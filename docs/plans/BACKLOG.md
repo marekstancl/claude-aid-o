@@ -616,6 +616,91 @@ Compact ledger updates to existing findings (details in observer working notes):
   the gate finally RUNS and FAILS LOUDLY (advisory) — meta-pattern remedy
   visible in practice.
 
+### OBS-20260708-01 - Shared-checkout session committed EPIC steps to main mid-EXECUTE, duplicating them against the task branch
+
+**Observed in:** aid-orchestrator / P057 / E-057-1_2
+**AID version:** v2.51.0+
+**Observed at:** 2026-07-08
+**Status:** confirmed (resolved safely same day)
+**Severity:** medium
+**Class:** branch/worktree safety (shared checkout)
+
+**What happened:** E-057-1 steps 1+2 landed TWICE with different SHAs: on main
+(46b4f3c/616c1ed) and on task/E-057-1_2/main (d5fdf34/8950bb2, same messages,
+task branch still based on old ac0f287). main carried unreviewed mid-EPIC
+production commits before the EPIC's CP3/gates ran, and a merge conflict was
+pre-programmed. Likely cause: a shared-checkout session committed on main,
+work then recreated on the task branch (or vice versa).
+
+**Recovery (positive pattern):** merge commit `16261b2` brought main INTO the
+task branch with explicit C3-registry reconciliation and a documented
+rationale ("direct merge would have silently dropped P058's work from
+history"). Both lineages preserved, zero work loss; final merge to main
+(`b1b1ab7`) clean. Pin this as the duplicate-lineage recovery pattern.
+
+**Likely fix:** same family as the observer-commit discipline lesson — the
+shared checkout needs a guard: warn/refuse commits to main while an FSM run
+owns the checkout (task branch expected), or run EPICs in dedicated worktrees.
+
+### OBS-20260708-02 - Version skew: release advance retroactively demands new-plugin artifacts from old-plugin runs
+
+**Observed in:** WAN / P058 plan-close (all 6 EPICs)
+**AID version:** runs v2.50.1, machinery v2.51.0+
+**Observed at:** 2026-07-08
+**Status:** confirmed
+**Severity:** medium
+**Class:** checkpoint ownership / upgrade migration
+
+**What happened:** At the first-ever plan-close, `done-advance review→release`
+FAILED on ALL 6 P058 EPICs (`review_profile_missing_lenses` +
+`fsm_done_advance_fail`, 4 errors each): the runs were executed under
+v2.50.1-era expectations, but the release advance was evaluated by newer
+machinery demanding review-profile/audit artifacts the old runs never
+produced. The merge proceeded via documented --no-verify (#11) with "release
+advance follows"; remediation then backfilled audit-report artifacts into run
+dirs and re-ran the advances (all 6 eventually reached release, E2 verified
+passing compliance after backfill — enforcement→backfill→retry worked).
+
+**Why it matters:** every project that upgrades the plugin mid-plan will hit
+fail+bypass at its next release advance. Retroactive preconditions need a
+migration/grandfather policy (era-stamped runs, or a documented backfill
+command) instead of ad-hoc bypass.
+
+**First plan-close outcome (ledger):** merge message disclosure was EXEMPLARY
+(auditor score, plan AC 13/13, conflicts enumerated — all 8 were AID
+bookkeeping files, production code conflict-free byte-verified, per-EPIC
+scores, delivery report path) — pin as merge-message template. The 4 untracked
+FE commits (OBS-20260705-03) merged to main with zero checkpoint coverage,
+unmentioned.
+
+### Probe update 2026-07-08 — recurrences, escalations, remedies
+
+- **OBS-11 ESCALATED to high:** WAN E-060-1 — step index 1's prefilter stub
+  OVERWROTE verifier-output-step-1.md holding the first step's 1-based
+  verifier output (survived only as the 0-based copy). First actual evidence
+  overwrite caused by the numbering duality. Also: hand-copied evidence files
+  carry unreliable metadata (future timestamp seen).
+- **OBS-05 + OBS-08 now in a THIRD project:** VULCAN P56 E-56-1_2 contract has
+  outputs 15×7 identical + phantom docs_updated (execution.yaml lacks it).
+  Root cause: **plugin rollout gap** — v2.51.0 fixes are released but consumer
+  projects (WAN, VULCAN) still run the old plugin. Cleanup must include the
+  plugin-update rollout step (CLAUDE.md procedure) across all consumer
+  projects, else upstream fixes never reach the fleet.
+- **OBS-20260705-01 (prefilter diff-range):** recurrence #2 on WAN E-058-6 was
+  recorded (2fdc192); on E-060 the prefilter behaved correctly when steps'
+  last commits were the feature commits — the failure mode is specifically
+  bookkeeping-commit-on-top.
+- **Security fail-open in new C3 hook: found and fixed within the run** —
+  automated security review flagged HIGH fail-open (unreadable c3-audit-policy
+  → empty required flag → high-risk profile skipped the audit); relayed via
+  observer; fixed same day (`8e919d8` fail-closed policy-path resolution, then
+  `b2e4672`/`aaa5de6` set -e guards, `48dc54e` schema wiring). Meta-pattern
+  instance ("control dissolves into silence on config-read failure") caught
+  BEFORE merge this time.
+- **E-057-1_2 released** (`b1b1ab7` on main): C3 independent-audit shipped,
+  duplicate-lineage recovered safely, full evidence pack persisted incl.
+  compliance.json; first C3 done-advance fired on its own EPIC.
+
 ## B-004 — Live usage probe for AID v2 control-system friction
 
 **Status:** scoped
