@@ -243,6 +243,30 @@ while IFS= read -r -d '' type_dir; do
 done < <(find "$FIXTURES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
 
 # ---------------------------------------------------------------------------
+# C3 audit_report subfield fixtures (Step 14 — E-057-1_2 IMP-174/175 fix).
+# Additional to the standard valid.json/invalid-missing-payload.json pair above:
+# these exercise the .audit_report REQUIRED subfields (provider/model/process_id/
+# input_manifest_hash), not just payload-key presence.
+# ---------------------------------------------------------------------------
+c3_dir="${FIXTURES_DIR}/audit_report"
+c3_valid="${c3_dir}/valid-c3-complete.json"
+c3_invalid="${c3_dir}/invalid-missing-c3-fields.json"
+
+if [[ -f "$c3_valid" ]]; then
+  run_test "audit_report/valid-c3-complete.json" 0 "$c3_valid"
+else
+  echo "FAIL [missing fixture]: audit_report/valid-c3-complete.json"
+  fail=$((fail + 1))
+fi
+
+if [[ -f "$c3_invalid" ]]; then
+  run_test "audit_report/invalid-missing-c3-fields.json" 14 "$c3_invalid"
+else
+  echo "FAIL [missing fixture]: audit_report/invalid-missing-c3-fields.json"
+  fail=$((fail + 1))
+fi
+
+# ---------------------------------------------------------------------------
 # Envelope negative fixtures (11 tests)
 # ---------------------------------------------------------------------------
 ENVELOPE_DIR="${FIXTURES_DIR}/_envelope"
