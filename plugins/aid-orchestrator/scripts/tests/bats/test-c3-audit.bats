@@ -364,25 +364,53 @@ JSON
   [[ "$output" == *"risk profile 'high' requires C3 audit and dual-emitted curator report"* ]]
 }
 
-@test "C3 EPIC scenario 4b (negative control): curator-report.json absent on medium-risk profile → passes (no-op)" {
+@test "C3 EPIC scenario 4b (fix verification): medium profile + valid audit-report.json + missing curator-report.json → blocks (secondary trigger fires)" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
   local head_sha; head_sha="$(git rev-parse HEAD)"
 
-  # Medium risk profile does NOT require C3, so curator-report.json is optional.
-  # Absence is a silent no-op — the run should pass (only the legacy .md check).
+  # E-057-2_2 Step 1 fix verification: medium risk profile (primary trigger doesn't fire)
+  # BUT a valid clean audit-report.json EXISTS (secondary trigger WILL fire after the fix).
+  # The secondary trigger fires BEFORE the Curator guard, making c3_hook_fired="true",
+  # which means curator-report.json is now REQUIRED and its absence blocks.
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
 {"review_profile": {"risk_profile": "medium"}}
 JSON
   printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
   _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
 
-  # Omit both curator-report.json AND curator-report.md. The basic existence check
-  # will block. So we touch the legacy .md file to only isolate the JSON-level behavior.
+  # Omit curator-report.json and curator-report.md. We touch only the legacy .md file
+  # to isolate the JSON-level behavior, but the fix now makes curator-report.json
+  # required because the secondary trigger fires.
   echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
 
-  # Isolate: with medium profile (C3 not required), curator-report.json missing
-  # should NOT block at the JSON level. The .md file satisfies the base requirement.
+  # After E-057-2_2 Step 1 fix: secondary trigger fires (valid audit-report.json present),
+  # so curator-report.json absence MUST block (fail-closed).
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curator-report.json not found"* ]]
+}
+
+@test "C3 EPIC scenario 4c (negative control): medium profile + NO audit-report.json + missing curator-report.json → passes (no-op)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+  local head_sha; head_sha="$(git rev-parse HEAD)"
+
+  # Genuinely-clean no-op: medium risk profile + review-profile.json exists BUT
+  # no audit-report.json at all (C3 stage never ran). Secondary trigger doesn't fire.
+  # Curator-report.json absence is a silent no-op.
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "medium"}}
+JSON
+  printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  # DO NOT create audit-report.json — this is the true "C3 never ran" case.
+
+  # Curator files: touch only legacy .md to pass basic existence check.
+  # curator-report.json is absent, but secondary trigger never fires (no audit-report.json),
+  # so this is a silent no-op.
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  # Should pass: no C3 report, so no requirement for curator JSON file.
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
   [[ "$output" != *"curator-report.json not found"* ]]

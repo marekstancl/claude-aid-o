@@ -2709,6 +2709,29 @@ EOF
         fi
       fi
 
+      # Secondary independent trigger: if review-profile.json exists (this run went through
+      # C3 pipeline) BUT the primary gate didn't fire, AND audit-report.json exists and has
+      # a valid .audit_report structure, fire the hook. This closes the case where the primary
+      # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
+      # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
+      # the C3 stage still ran and produced a report).
+      # NOTE: Must run BEFORE the Curator guard so that c3_hook_fired is fully resolved when
+      # the guard consults it (E-057-2_2 Step 1 defense-in-depth fix).
+      if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+          # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
+          # JSON but not an object at the top level (jq errors piping into `.audit_report`).
+          local has_audit_report="" has_audit_exit_code=0
+          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null) || has_audit_exit_code=$?
+          if [[ $has_audit_exit_code -eq 0 && "$has_audit_report" == "true" ]]; then
+            c3_hook_fired="true"
+            # Secondary trigger fired; set risk_profile for error messages below.
+            # We don't know the original profile, so use "unverifiable" as the reason.
+            c3_risk_profile="unverifiable"
+          fi
+        fi
+      fi
+
       # E-057-2_2 Step 1: Curator content-ref sequencing guard (risk-gated, JSON).
       # Curator now dual-emits curator-report.json alongside curator-report.md
       # (`agents/curator.md`), carrying `.curator.audit_report_ref` = sha256 of the
@@ -2816,28 +2839,11 @@ EOF
       # parseable with a valid .audit_report structure (non-null object), regardless of
       # risk_profile resolution.
       #
-      # NOTE: c3_risk_profile and c3_hook_fired are already initialized and computed at
-      # lines ~2635-2710 (shared initialization for Curator guard + C3 hook).
-      # Secondary independent trigger: if review-profile.json exists (this run went through
-      # C3 pipeline) BUT the primary gate didn't fire, AND audit-report.json exists and has
-      # a valid .audit_report structure, fire the hook. This closes the case where the primary
-      # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
-      # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
-      # the C3 stage still ran and produced a report).
-      if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
-        if command -v jq >/dev/null 2>&1; then
-          # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
-          # JSON but not an object at the top level (jq errors piping into `.audit_report`).
-          local has_audit_report="" has_audit_exit_code=0
-          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null) || has_audit_exit_code=$?
-          if [[ $has_audit_exit_code -eq 0 && "$has_audit_report" == "true" ]]; then
-            c3_hook_fired="true"
-            # Secondary trigger fired; set risk_profile for error messages below.
-            # We don't know the original profile, so use "unverifiable" as the reason.
-            c3_risk_profile="unverifiable"
-          fi
-        fi
-      fi
+      # NOTE: c3_risk_profile and c3_hook_fired are now fully initialized and computed,
+      # including secondary trigger at lines ~2711-2735 (shared initialization for Curator
+      # guard + C3 hook). The secondary trigger completes resolution before the Curator guard
+      # runs, ensuring c3_hook_fired reflects BOTH primary and secondary conditions (E-057-2_2
+      # Step 1 defense-in-depth fix).
 
       if [[ "$c3_hook_fired" == "true" ]]; then
         local c3_block_reason=""
