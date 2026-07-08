@@ -2653,15 +2653,72 @@ EOF
       # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
       # jq fallback anywhere below — absence/unreadability is treated as blocking, never
       # as a silent pass.
+      #
+      # CP2 Fix: Fire hook fail-closed if review-profile.json exists but:
+      #   - jq is unavailable (cannot read it), OR
+      #   - .review_profile.risk_profile is null/missing/invalid enum (not one of
+      #     docs_trivial|low|medium|high|unverifiable from review-profile.schema.json)
+      # Also fire hook (secondary independent trigger) if audit-report.json exists and is
+      # parseable with a valid .audit_report structure (non-null object), regardless of
+      # risk_profile resolution.
       local c3_risk_profile="" c3_hook_fired="false"
       local review_profile_file="${evidence_dir}/review-profile.json"
-      if [[ -f "$review_profile_file" ]] && command -v jq >/dev/null 2>&1; then
-        c3_risk_profile=$(jq -r '.review_profile.risk_profile // empty' "$review_profile_file" 2>/dev/null)
+      local c3_report_file="${evidence_dir}/audit-report.json"
+
+      # Fail-closed risk-profile gate: resolve risk_profile and decide if hook fires.
+      if [[ -f "$review_profile_file" ]]; then
+        if ! command -v jq >/dev/null 2>&1; then
+          # jq missing but file exists → ambiguous, fail-closed: treat as unverifiable
+          c3_risk_profile="unverifiable"
+        else
+          # jq available, try to read. If read succeeds, validate that the resolved
+          # value is one of the known enum values.
+          local resolved_profile
+          resolved_profile=$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null)
+          if [[ $? -eq 0 && "$resolved_profile" != "MISSING" ]]; then
+            # jq succeeded in reading a non-null value; check if it's valid enum.
+            case "$resolved_profile" in
+              docs_trivial|low|medium|high|unverifiable)
+                c3_risk_profile="$resolved_profile"
+                ;;
+              *)
+                # Invalid enum value (should not happen from a well-formed schema,
+                # but fail-closed: treat as unverifiable).
+                c3_risk_profile="unverifiable"
+                ;;
+            esac
+          else
+            # jq failed, or read null/missing key → ambiguous, fail-closed.
+            c3_risk_profile="unverifiable"
+          fi
+        fi
       fi
 
+      # Primary trigger: high or unverifiable risk profiles require C3.
       if [[ "$c3_risk_profile" == "high" || "$c3_risk_profile" == "unverifiable" ]]; then
         c3_hook_fired="true"
-        local c3_report_file="${evidence_dir}/audit-report.json"
+      fi
+
+      # Secondary independent trigger: if review-profile.json exists (this run went through
+      # C3 pipeline) BUT the primary gate didn't fire, AND audit-report.json exists and has
+      # a valid .audit_report structure, fire the hook. This closes the case where the primary
+      # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
+      # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
+      # the C3 stage still ran and produced a report).
+      if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+          local has_audit_report
+          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null)
+          if [[ "$has_audit_report" == "true" ]]; then
+            c3_hook_fired="true"
+            # Secondary trigger fired; set risk_profile for error messages below.
+            # We don't know the original profile, so use "unverifiable" as the reason.
+            c3_risk_profile="unverifiable"
+          fi
+        fi
+      fi
+
+      if [[ "$c3_hook_fired" == "true" ]]; then
         local c3_block_reason=""
 
         if ! command -v jq >/dev/null 2>&1; then
