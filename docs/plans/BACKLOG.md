@@ -710,6 +710,14 @@ unmentioned.
   demands `review-profile.json` that the same plugin's run machinery never
   produces. Producer must be wired, or the check made era/capability-aware.
   See OBS-20260708-03 for the deeper consumer-side fail-open.
+  **Recurrence #3 (VULCAN, 2026-07-08 12:57-12:58Z):** E-56-1_2 done-advance —
+  `review_profile_missing_lenses: unverifiable` fired, first advance attempt
+  FAILED (errors: 1), retry 8s later passed (after
+  `fsm_done_advance_recovered: verifier_provenance`). All three probe projects
+  now hit the same missing-producer wall at release advance. Bonus circular
+  check observed: dg07 reports "compliance.json overall=fail (delivery gate
+  cannot proceed)" while compliance.json is only written BY the successful
+  advance itself — chicken-and-egg in observe mode.
 - **OBS-01/OBS-11 family instance #4 (record/reality drift, inverse):**
   E-057-2 branch was re-pointed onto fresh main (merge-base `89d30ee`) but
   fsm-state `base_commit` stayed `ac0f287` (pre-release era) — state NOT
