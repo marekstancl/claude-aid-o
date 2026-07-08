@@ -879,6 +879,7 @@ Ordered sequence — each step has a named gate. `done-advance` and `plan-close`
 |------|--------|-----------------|
 | 1 | Archive run file + update `active.md` | run.md `status: completed` |
 | 2 | Generate `final_report.md` | file present in evidence dir |
+| 2a | Build `audit-input-manifest.json` (C3 producer hook) | file present, `input_hash` matches hashed `allowlist[]` |
 | 3 | Dispatch Curator + Auditor (parallel) | both `*-report.md` present |
 | 4 | Curator auto-fix (S/M/L) | gate-fixer applied |
 | 5 | Auditor auto-fix (S/M/L, `auto_fixable: true`) | gate-fixer applied |
@@ -902,7 +903,7 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
 **Per-EPIC (non-blocking):**
-- Steps 1-5 as documented above (run file, archive, active.md, final_report, dispatch C+A)
+- Steps 1-6 as documented above (run file, archive, active.md, final_report, C3 producer hook, dispatch C+A)
 - C+A may run as background agents — OK to start next EPIC in same plan
 - done_phase stays `review` until plan-level checkpoint
 
@@ -966,16 +967,92 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 2. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
 3. **Update:** `work/active.md` status
 4. **Final report:** Generate `evidence/{epic_id}/{run_id}/final_report.md`
-5. **Parallel dispatch:** Curator (`agents/curator.md`) + Auditor (`agents/auditor.md`)
+5. **C3 producer hook — build `audit-input-manifest.json`.** Runs after the final report
+    (step 4) and before Curator/Auditor dispatch (step 6). Orchestrator-side, deterministic —
+    no LLM judgment involved. Applies only when the run's risk profile requires C3
+    (`c3_required: true` in `c3-audit-policy.yaml` — currently `high` and `unverifiable`, see
+    that file's header comment); for any other risk profile (`docs_trivial`/`low`/`medium`)
+    C3 is not required and this hook is skipped — Auditor dispatches in `legacy_health` mode
+    instead (mode selection wiring for step 6 is a later step, out of scope here).
+
+    1. **Read the risk profile:**
+       ```bash
+       risk_profile=$(jq -r '.review_profile.risk_profile // "unverifiable"' \
+         "$evidence_dir/review-profile.json" 2>/dev/null || echo "unverifiable")
+       ```
+       Produced earlier in the run by `aid-prefilter.sh profile` (`cmd_profile` — distinct from
+       the `classify` subcommand used by CP2/CP3/CP6, see "Pre-Filter Stage" §13 below). Missing
+       file or missing field → `risk_profile=unverifiable` (fail-closed, matches
+       `unknown_surface_profile: unverifiable` in `review-profiles.yaml`).
+    2. **Look up the required independence level (authoritative source: `c3-audit-policy.yaml`,
+       D8):**
+       ```bash
+       required_independence_level=$(yq -r \
+         ".risk_profiles[\"$risk_profile\"].required_independence_level // \"\"" \
+         "$AID_PLUGIN_PATH/defaults/policies/c3-audit-policy.yaml")
+       ```
+       Empty result (risk profile is not a key in `c3-audit-policy.yaml`, e.g.
+       `docs_trivial`/`low`/`medium`) → C3 not required for this run; stop here and let step 6
+       dispatch Auditor in `legacy_health` mode.
+    3. **Build the allowlist.** Read `$AID_CHANGED_PATHS` — the same file/convention already
+       populated for delivery gates (one repo-relative changed path per line; see
+       `dg05-consumer-compile.sh` / `dg06-removed-dep.sh` for the existing read pattern) — plus
+       this run's own evidence artifacts (`final_report.md`, `gates_report.json`, prior
+       `verifier-output-*.md`). These are the only paths C3 may cite as evidence (auditor.md's
+       "allowlist-only citation" rule). Missing/empty `AID_CHANGED_PATHS` → `allowlist: []`; the
+       Auditor's own C3.1 step 1 still independently re-derives diff scope from `head_sha`.
+    4. **Compute `input_hash`.** For each allowlisted path: `sha256("<path>:" + sha256(file
+       content))`. Sort the resulting per-path lines, join with newlines, and hash the result:
+       `input_hash = "sha256:" + sha256(sorted_joined_lines)`. Deterministic and
+       order-independent — re-running the hook on an unchanged allowlist reproduces the same hash.
+    5. **Set `prior_pass_summaries: "untrusted"`** (D2 — prior PASS claims from earlier stages
+       in this run, or from a previous audit run, are never handed to C3 as trusted fact; this
+       repo's policy never sets `"excluded"` at this hook).
+    6. **Emit the manifest** at `evidence/{epic_id}/{run_id}/audit-input-manifest.json`,
+       conforming to `defaults/schemas/audit-input-manifest.schema.json`:
+       ```json
+       {
+         "schema_version": "aid-2.0",
+         "artifact_type": "audit_input_manifest",
+         "producer": "orchestrator@done-review",
+         "created_at": "{ISO 8601 UTC}",
+         "control_protocol": "aid-2.0",
+         "identity": {"project_id": "{project_id}", "epic_id": "{epic_id}", "run_id": "{run_id}"},
+         "subject": {"subject_hash": "sha256:<64hex>"},
+         "revision": {"head_sha": "{head_sha}", "head_is_current": true, "freshness": "current"},
+         "status": "pass",
+         "verdict": {"kind": "none", "ready": false},
+         "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "pipeline.md#c3-producer-hook"},
+         "audit_input_manifest": {
+           "allowlist": ["path/one.ts", "path/two.md"],
+           "input_hash": "sha256:<64hex>",
+           "prior_pass_summaries": "untrusted",
+           "required_independence_level": "cross_model"
+         }
+       }
+       ```
+    7. **Gate:** DONE Closure Checklist row `2a` requires this file present, with `input_hash`
+       matching a fresh recomputation over `allowlist[]`, before step 6 (Auditor dispatch in C3
+       mode) proceeds. Mechanical enforcement of this gate inside `aid-fsm.sh done-advance` is a
+       later step; this hook documents the producer contract that enforcement will read.
+
+    **Consumed by:** `agents/auditor.md` C3 mode via `audit_trigger.input_manifest_path`
+    (pointing at this file) and `audit_trigger.required_independence_level` (copied verbatim
+    from step 2 above). The dispatch wiring that populates `audit_trigger.provider`/`.model`/
+    `.process_id` and invokes `aid-audit-independence.sh detect --required
+    "$required_independence_level"` to determine the achieved independence level is a later
+    step, out of scope here — this hook only guarantees the manifest artifact exists and is
+    correct before that dispatch runs.
+6. **Parallel dispatch:** Curator (`agents/curator.md`) + Auditor (`agents/auditor.md`)
    dispatched simultaneously via two Agent tool calls in a single message
-6. **Wait:** Both agents must complete before continuing
-7. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
+7. **Wait:** Both agents must complete before continuing
+8. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
    Tier 2 default: S/M/L all approve; only an explicit `always_defer` rule (architecture,
    standards-L) defers.
-8. **Auditor auto-fix:** Gate-fixer applies S/M/L effort items from auditor
+9. **Auditor auto-fix:** Gate-fixer applies S/M/L effort items from auditor
    `recommended_fixes` (where `auto_fixable: true`).
-9. **CP4:** Verifier (`code-review`) reviews the **applied** curator + auditor changes from
-   steps 7–8 (it runs AFTER the fixes are applied, so it actually reviews them).
+10. **CP4:** Verifier (`code-review`) reviews the **applied** curator + auditor changes from
+   steps 8–9 (it runs AFTER the fixes are applied, so it actually reviews them).
    If FAIL → revert those changes, log reversion.
    Skip per `review-checkpoints.yaml` (`cp4_curator_validation`).
 
@@ -997,9 +1074,9 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    `verifier-output-cp4-curator-validation.md` when `curator-report.md` exists and
    any commit in `base_commit..HEAD` touched production code; mode-aware skip
    (`cp4_skipped_streamlined_advisory`) when `streamlined_mode` is true.
-10. **CP5:** Check auditor `blocking_findings` flag. If `true` → flag in summary
+11. **CP5:** Check auditor `blocking_findings` flag. If `true` → flag in summary
     (critical findings block MERGE option). Skip per `review-checkpoints.yaml`.
-11. **PM Summary** (always shown, even in FIRST AID mode):
+12. **PM Summary** (always shown, even in FIRST AID mode):
 
 ```
 DONE REVIEW — {epic_id}
@@ -1409,7 +1486,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-07-08
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

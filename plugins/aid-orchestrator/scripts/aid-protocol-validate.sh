@@ -20,6 +20,7 @@
 #  11  — head freshness mismatch
 #  12  — missing type-specific payload key
 #  13  — nondeterministic fingerprint
+#  14  — missing required audit_report subfield (provider/model/process_id/input_manifest_hash)
 
 set -euo pipefail
 
@@ -370,6 +371,26 @@ if [[ -n "$payload_key" ]]; then
     echo "missing_type_payload:${payload_key}" >&2
     exit 12
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 14: C3 audit_report required subfields (D7 — provider/model/process_id must be
+# echoed from audit_trigger, never self-introspected; input_manifest_hash is the
+# provenance binding). defaults/schemas/audit-report.schema.json declares these 4
+# fields `required` on the .audit_report payload, but Step 12 above only checks that
+# the payload KEY is present — it never descends into the payload, so a report missing
+# these fields previously passed this validator with exit 0 despite the schema's own
+# claim that they're mandatory (E-057-1_2 IMP-174, found by PM review of R-E057-1).
+# Only applies to artifact_type == audit_report; other types are untouched.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "audit_report" ]]; then
+  for field in provider model process_id input_manifest_hash; do
+    field_present=$(jq -r --arg f "$field" 'if (.audit_report[$f] // null) != null and (.audit_report[$f] | type) == "string" and (.audit_report[$f] | length) > 0 then "yes" else "no" end' "$ARTIFACT_FILE")
+    if [[ "$field_present" != "yes" ]]; then
+      echo "missing_audit_report_field:${field}" >&2
+      exit 14
+    fi
+  done
 fi
 
 # ---------------------------------------------------------------------------

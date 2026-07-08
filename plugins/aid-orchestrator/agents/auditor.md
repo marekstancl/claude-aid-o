@@ -122,9 +122,12 @@ Produce **both** artifacts from the same audit run, with equivalent content — 
    is checked by `aid-fsm.sh` (`plan-close` and CP4 checks)** — omitting it breaks those checks
    even when the JSON is perfect.
 
-Both files are written to `evidence/{epic_id}/audit-report.{json,md}` (C3 uses `.json` where
-legacy mode uses `.yaml` for the machine-readable artifact; the `.md` path is identical in both
-modes).
+Both files are written to **two locations** (dual-write, legacy convention):
+
+   - **Run-level** (mandatory, consumed by done-advance gate): `evidence/{epic_id}/{run_id}/audit-report.{json,md}` — this is the blocking check for release authorization
+   - **Epic-level** (consumed by cross-EPIC plan-close checks): `evidence/{epic_id}/audit-report.{json,md}` — used by `aid-fsm.sh` plan-close hook to verify prior EPICs before advancing a new EPIC
+
+   C3 uses `.json` where legacy mode uses `.yaml` for the machine-readable artifact; the `.md` path is identical in both modes.
 
 Minimal envelope example:
 ```json

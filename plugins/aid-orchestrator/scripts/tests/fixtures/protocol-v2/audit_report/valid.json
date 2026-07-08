@@ -10,5 +10,10 @@
   "status": "pass",
   "verdict": {"kind": "none", "ready": false},
   "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-test"},
-  "audit_report": {}
+  "audit_report": {
+    "provider": "anthropic",
+    "model": "claude-opus-4",
+    "process_id": "aid-test-run-0001",
+    "input_manifest_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
+  }
 }

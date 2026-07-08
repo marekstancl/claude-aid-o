@@ -1167,3 +1167,201 @@ WIRING
   # Timeline must contain semantic_wiring_would_block event
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "semantic_wiring_would_block"
 }
+
+# ─── E-057-1_2 Finding 3: C3 risk-profile-resolution hook regression suite ───
+# Tests for done-advance review→release C3 precondition gate. Three scenarios:
+# 1. risk_profile=high + AID_PLUGIN_PATH set + blocking audit → hook fires, blocks
+# 2. risk_profile=high + policy missing high key + blocking audit → hook fires, blocks (Finding 1 fix: yq has() catches absence)
+# 3. risk_profile=medium (non-C3) + no audit-report → hook no-op, passes (true-negative control)
+
+@test "E-057-1_2 C3 hook: risk_profile=high + blocking audit-report → precondition fails" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  # Create review-profile.json with high-risk profile
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "high"
+  }
+}
+JSON
+
+  # Create audit-report.json with blocking finding (matches c3_hook_fired=true condition)
+  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
+{
+  "audit_report": {
+    "blocking_findings": true,
+    "input_manifest_hash": "sha256:abc123"
+  },
+  "status": "pass",
+  "revision": {
+    "head_sha": "deadbeef"
+  }
+}
+JSON
+
+  # Set AID_PLUGIN_PATH so the hook can locate c3-audit-policy.yaml
+  export AID_PLUGIN_PATH
+
+  # Mock current HEAD to match the audit's head_sha (otherwise stale-check fails first)
+  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 independent audit block"* ]]
+  [[ "$output" == *"blocking_findings == true"* ]]
+}
+
+@test "E-057-1_2 C3 hook: has() presence-check prevents false-pass on absent profile key" {
+  # Finding 1 fix: yq has() confirms both .risk_profiles[profile] AND .c3_required exist
+  # before treating policy read as succeeded. If either is absent, fail-closed (hook fires).
+  # This test verifies the has() logic via direct yq call (unit-level verification).
+  local test_policy_good="$TEST_EVIDENCE_DIR/policy-good.yaml"
+  local test_policy_missing_high="$TEST_EVIDENCE_DIR/policy-no-high.yaml"
+
+  # Policy file WITH "high" key (normal case)
+  cat > "$test_policy_good" <<'YAML'
+version: 1
+risk_profiles:
+  high:
+    c3_required: true
+    required_independence_level: cross_model
+  medium:
+    c3_required: false
+YAML
+
+  # Policy file WITHOUT "high" key (corruption scenario)
+  cat > "$test_policy_missing_high" <<'YAML'
+version: 1
+risk_profiles:
+  medium:
+    c3_required: false
+YAML
+
+  # Verify: has() works on good policy
+  local has_high_good
+  has_high_good=$(yq -r '(.risk_profiles | has("high")) and (.risk_profiles["high"] | has("c3_required"))' "$test_policy_good" 2>/dev/null)
+  [ "$has_high_good" == "true" ]
+
+  # Verify: has() returns false on corrupted policy (key absent)
+  local has_high_bad
+  has_high_bad=$(yq -r '(.risk_profiles | has("high")) and (.risk_profiles["high"] | has("c3_required"))' "$test_policy_missing_high" 2>/dev/null)
+  [ "$has_high_bad" == "false" ]
+
+  rm -f "$test_policy_good" "$test_policy_missing_high"
+}
+
+@test "E-057-1_2 C3 hook: risk_profile=medium (non-C3) + no audit-report → hook no-op, precondition passes" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  # Create review-profile.json with medium profile (NOT a C3-required profile)
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "medium"
+  }
+}
+JSON
+
+  # Do NOT create audit-report.json (medium profile doesn't require C3 audit)
+  # This tests that the hook is a no-op for non-C3 profiles
+
+  # Create a legacy audit-report.md (empty blocking_findings) to fall through to legacy path
+  printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  export AID_PLUGIN_PATH
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  # Should NOT see C3 block reason in output
+  [[ "$output" != *"C3 independent audit block"* ]]
+}
+
+@test "E-057-1_2 C3 hook: malformed policy YAML fails closed (no script crash) instead of bypassing" {
+  # CP4 round 2 regression: bare `var=$(yq ...)` under set -e aborted the WHOLE script
+  # when c3-audit-policy.yaml was unparseable, skipping the structured PRECONDITION FAIL
+  # message and the ERROR summary entirely (though the script's own nonzero exit still
+  # prevented the transition from completing — not a bypass, but an unhandled crash
+  # instead of a clean, audited fail-closed message). This test locks the fix: a
+  # malformed policy file for a high-risk profile must still emit the C3 block message.
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "high"
+  }
+}
+JSON
+
+  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
+{
+  "audit_report": {
+    "blocking_findings": true,
+    "input_manifest_hash": "sha256:abc123"
+  },
+  "status": "pass",
+  "revision": {
+    "head_sha": "deadbeef"
+  }
+}
+JSON
+
+  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
+
+  # Point AID_PLUGIN_PATH at a fake plugin root whose c3-audit-policy.yaml is syntactically
+  # broken (missing colon after the risk-profile key) — yq must fail to parse it, and the
+  # done-advance call must NOT crash the whole script as a result.
+  local fake_plugin_root="$TEST_EVIDENCE_DIR/fake-plugin-root"
+  mkdir -p "$fake_plugin_root/defaults/policies"
+  printf 'risk_profiles:\n  high\n    c3_required: true\n' > "$fake_plugin_root/defaults/policies/c3-audit-policy.yaml"
+
+  AID_PLUGIN_PATH="$fake_plugin_root"
+  export AID_PLUGIN_PATH
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 independent audit block"* ]]
+  [[ "$output" == *"blocking_findings == true"* ]]
+  [[ "$output" == *"precondition(s) failed"* ]]
+}
+
+@test "E-057-1_2 C3 hook: non-object .audit_report in valid JSON fails closed (no script crash)" {
+  # CP4 round 3 finding: audit-report.json can be well-formed JSON at the top level while
+  # .audit_report itself is a scalar/string instead of an object — jq errors trying to index
+  # into it (.audit_report.blocking_findings), which under set -e aborted the whole script
+  # before any of the 4 field-extraction jq calls' fail-closed logic could run. This test
+  # locks the guard added to all 4 reads (c3_blocking/c3_status/c3_manifest_hash/c3_head_sha).
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "high"
+  }
+}
+JSON
+
+  # .audit_report is a STRING, not an object — jq's `.audit_report.blocking_findings`
+  # errors ("Cannot index string with string") when read directly.
+  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
+{
+  "audit_report": "oops-not-an-object",
+  "status": "pass",
+  "revision": {
+    "head_sha": "deadbeef"
+  }
+}
+JSON
+
+  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
+
+  export AID_PLUGIN_PATH
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 independent audit block"* ]]
+  [[ "$output" == *"precondition(s) failed"* ]]
+}

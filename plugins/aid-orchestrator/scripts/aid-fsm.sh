@@ -19,6 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
@@ -2647,12 +2648,194 @@ EOF
         errors=$((errors + 1))
       fi
 
+      # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
+      # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
+      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
+      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
+      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
+      # (M2 fix). Risk profile comes from review-profile.json (produced by
+      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
+      # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
+      # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
+      # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
+      # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
+      # no-op and falls through unchanged to the legacy blocking_findings check below.
+      #
+      # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
+      # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
+      # (independence could not be confirmed), or a stale `revision.head_sha` that no
+      # longer matches the run's actual current HEAD (freshness — an audit computed
+      # against a prior commit must not authorize release of the current commit,
+      # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
+      # jq fallback anywhere below — absence/unreadability is treated as blocking, never
+      # as a silent pass.
+      #
+      # CP2 Fix: Fire hook fail-closed if review-profile.json exists but:
+      #   - jq is unavailable (cannot read it), OR
+      #   - .review_profile.risk_profile is null/missing/invalid enum (not one of
+      #     docs_trivial|low|medium|high|unverifiable from review-profile.schema.json)
+      # Also fire hook (secondary independent trigger) if audit-report.json exists and is
+      # parseable with a valid .audit_report structure (non-null object), regardless of
+      # risk_profile resolution.
+      local c3_risk_profile="" c3_hook_fired="false"
+      local review_profile_file="${evidence_dir}/review-profile.json"
+      local c3_report_file="${evidence_dir}/audit-report.json"
+
+      # Fail-closed risk-profile gate: resolve risk_profile and decide if hook fires.
+      if [[ -f "$review_profile_file" ]]; then
+        if ! command -v jq >/dev/null 2>&1; then
+          # jq missing but file exists → ambiguous, fail-closed: treat as unverifiable
+          c3_risk_profile="unverifiable"
+        else
+          # jq available, try to read. If read succeeds, validate that the resolved
+          # value is one of the known enum values.
+          # CP4 round 3 fix: guard against set -e crash if review-profile.json is valid
+          # JSON but .review_profile is not an object (jq errors on the index attempt).
+          local resolved_profile="" resolved_exit_code=0
+          resolved_profile=$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null) || resolved_exit_code=$?
+          if [[ $resolved_exit_code -eq 0 && "$resolved_profile" != "MISSING" ]]; then
+            # jq succeeded in reading a non-null value; check if it's valid enum.
+            case "$resolved_profile" in
+              docs_trivial|low|medium|high|unverifiable)
+                c3_risk_profile="$resolved_profile"
+                ;;
+              *)
+                # Invalid enum value (should not happen from a well-formed schema,
+                # but fail-closed: treat as unverifiable).
+                c3_risk_profile="unverifiable"
+                ;;
+            esac
+          else
+            # jq failed, or read null/missing key → ambiguous, fail-closed.
+            c3_risk_profile="unverifiable"
+          fi
+        fi
+      fi
+
+      # Primary trigger: read c3_required from policy file for the resolved risk profile.
+      # Fail-closed: if profile is unverifiable, or if policy read fails/is ambiguous,
+      # treat as requiring C3.
+      if [[ -n "$c3_risk_profile" ]]; then
+        local c3_required_from_policy="" policy_read_succeeded="false"
+        local policy_file="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
+
+        # Only attempt policy read if both file exists AND yq is available.
+        if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
+          # Use has() to distinguish "key absent" from "key present but false".
+          # Both scenarios yield exit 0 and "false" output with the old // false fallback,
+          # making it impossible to distinguish. The fix: check presence first.
+          # CP4 round 2 fix: bare `var=$(cmd)` under `set -e` aborts the WHOLE SCRIPT if
+          # cmd (yq) exits non-zero (e.g. malformed/unparseable policy YAML) — the `|| ...`
+          # guard is mandatory here so a corrupted policy file fails closed with a proper
+          # PRECONDITION FAIL message instead of an unhandled script crash.
+          local has_profile_key="" has_exit_code=0
+          has_profile_key=$(yq -r "(.risk_profiles | has(\"$c3_risk_profile\")) and (.risk_profiles[\"$c3_risk_profile\"] | has(\"c3_required\"))" "$policy_file" 2>/dev/null) || has_exit_code=$?
+          if [[ $has_exit_code -eq 0 && "$has_profile_key" == "true" ]]; then
+            local c3_required_exit_code=0
+            c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required" "$policy_file" 2>/dev/null) || c3_required_exit_code=$?
+            if [[ $c3_required_exit_code -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
+              policy_read_succeeded="true"
+            fi
+          fi
+        fi
+
+        # Fire hook if:
+        #   1. Policy read succeeded AND c3_required is true, OR
+        #   2. Policy read failed or was ambiguous for a high-risk profile (fail-closed: can't confirm false), OR
+        #   3. Profile is unverifiable (fail-closed for ambiguous/unparseable resolution)
+        if [[ "$policy_read_succeeded" == "true" && "$c3_required_from_policy" == "true" ]]; then
+          c3_hook_fired="true"
+        elif [[ "$policy_read_succeeded" != "true" && "$c3_risk_profile" == "high" ]]; then
+          # Policy read failed/ambiguous for high-risk profile → fail-closed
+          c3_hook_fired="true"
+        elif [[ "$c3_risk_profile" == "unverifiable" ]]; then
+          c3_hook_fired="true"
+        fi
+      fi
+
+      # Secondary independent trigger: if review-profile.json exists (this run went through
+      # C3 pipeline) BUT the primary gate didn't fire, AND audit-report.json exists and has
+      # a valid .audit_report structure, fire the hook. This closes the case where the primary
+      # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
+      # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
+      # the C3 stage still ran and produced a report).
+      if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+          # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
+          # JSON but not an object at the top level (jq errors piping into `.audit_report`).
+          local has_audit_report="" has_audit_exit_code=0
+          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null) || has_audit_exit_code=$?
+          if [[ $has_audit_exit_code -eq 0 && "$has_audit_report" == "true" ]]; then
+            c3_hook_fired="true"
+            # Secondary trigger fired; set risk_profile for error messages below.
+            # We don't know the original profile, so use "unverifiable" as the reason.
+            c3_risk_profile="unverifiable"
+          fi
+        fi
+      fi
+
+      if [[ "$c3_hook_fired" == "true" ]]; then
+        local c3_block_reason=""
+
+        if ! command -v jq >/dev/null 2>&1; then
+          c3_block_reason="jq is required to verify audit-report.json and is not available"
+        elif [[ ! -f "$c3_report_file" ]]; then
+          c3_block_reason="audit-report.json not found (risk profile '${c3_risk_profile}' requires a C3 audit)"
+        elif ! jq -e . "$c3_report_file" >/dev/null 2>&1; then
+          c3_block_reason="audit-report.json is not valid/parseable JSON"
+        else
+          # CP4 round 3 fix: guard all 4 jq reads against set -e crash — audit-report.json
+          # passed the `jq -e .` parseability check above, but that only proves the TOP
+          # level is valid JSON, not that `.audit_report`/`.revision` are objects. A report
+          # where e.g. `.audit_report` is a string/array/scalar makes jq error on `.field`
+          # indexing, which would otherwise abort this whole function via set -e instead of
+          # falling through to the fail-closed checks below (which already correctly treat
+          # empty/MISSING values as blocking — the guard only prevents the crash, it does
+          # not change the fail-closed semantics).
+          local c3_blocking="" c3_status="" c3_manifest_hash="" c3_head_sha="" c3_current_head=""
+          local c3_blocking_ec=0 c3_status_ec=0 c3_manifest_hash_ec=0 c3_head_sha_ec=0
+          c3_blocking=$(jq -r 'if (.audit_report.blocking_findings | type) == "boolean" then (.audit_report.blocking_findings | tostring) else "MISSING" end' "$c3_report_file" 2>/dev/null) || c3_blocking_ec=$?
+          [[ $c3_blocking_ec -ne 0 ]] && c3_blocking="MISSING"
+          c3_status=$(jq -r '.status // "MISSING"' "$c3_report_file" 2>/dev/null) || c3_status_ec=$?
+          [[ $c3_status_ec -ne 0 ]] && c3_status="MISSING"
+          c3_manifest_hash=$(jq -r '.audit_report.input_manifest_hash // empty' "$c3_report_file" 2>/dev/null) || c3_manifest_hash_ec=$?
+          [[ $c3_manifest_hash_ec -ne 0 ]] && c3_manifest_hash=""
+          c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null) || c3_head_sha_ec=$?
+          [[ $c3_head_sha_ec -ne 0 ]] && c3_head_sha=""
+          c3_current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+
+          if [[ "$c3_blocking" != "false" && "$c3_blocking" != "true" ]]; then
+            # Covers missing/null/non-boolean .audit_report.blocking_findings — fail-closed,
+            # deliberately NOT `// false` (that is the exact anti-pattern this hook replaces).
+            c3_block_reason="audit-report.json .audit_report.blocking_findings is missing or not a boolean (fail-closed)"
+          elif [[ "$c3_blocking" == "true" ]]; then
+            c3_block_reason="audit-report.json .audit_report.blocking_findings == true (critical/high finding present)"
+          elif [[ "$c3_status" == "unverifiable" ]]; then
+            c3_block_reason="audit-report.json .status == \"unverifiable\" (required independence level could not be confirmed)"
+          elif [[ -z "$c3_manifest_hash" ]]; then
+            c3_block_reason="audit-report.json missing .audit_report.input_manifest_hash (provenance fail-closed)"
+          elif [[ -z "$c3_head_sha" || -z "$c3_current_head" || "$c3_head_sha" != "$c3_current_head" ]]; then
+            c3_block_reason="audit-report.json .revision.head_sha (${c3_head_sha:-<empty>}) != current HEAD (${c3_current_head:-<empty>}) — stale audit (freshness fail-closed)"
+          fi
+        fi
+
+        if [[ -n "$c3_block_reason" ]]; then
+          echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
+          echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
+          errors=$((errors + 1))
+        fi
+      fi
+
       # Block release on critical-severity findings via the auditor's CANONICAL top-level
       # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
       # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start
       # keys — indented/nested values and prose body lines are INVISIBLE, preventing the
       # old grep-ciE false-positive on negations ("No blocking_findings: true ...").
       # Fail-closed: absent field → field is indented/missing → cannot confirm clean → block.
+      # E-057-1_2 Step 4: this legacy .md/.yaml read is SKIPPED when the C3 hook above
+      # already fired (risk profile high/unverifiable) — audit-report.json is the single
+      # source of truth for those profiles; this remains the only check for all others.
+      if [[ "$c3_hook_fired" != "true" ]]; then
       local audit_file=""
       [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
@@ -2671,6 +2854,7 @@ EOF
           errors=$((errors + 1))
         fi
         # blk == "false" → no blocking findings; passes silently.
+      fi
       fi
 
       if [[ $errors -gt 0 ]]; then
