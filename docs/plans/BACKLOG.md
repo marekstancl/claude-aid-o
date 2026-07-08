@@ -1058,3 +1058,17 @@ skill to ONE of `## Acceptance Criteria` / `## Success Criteria`), and audit whe
 `## Success Criteria` verification_patterns are both meant to be enforced and by which gate. Also: aid-plan-diff
 skip-as-pass should arguably be distinguishable from real pass in gate evidence (a skip on a plan that HAS ACs is
 a bug, not a legitimate Fast-Mode skip).
+
+## STALE PLUGIN CACHE for agent instructions (external auditor, 2026-07-08)
+
+**Class:** instruction drift — dispatched agents (Auditor/Curator/…) may read agent .md instructions from
+the marketplace plugin CACHE (`~/.claude/plugins/marketplaces/claude-aid-o/...` per `.aid-o/config/plugin.yaml`
+`plugin_path`), not from the repo working tree. After in-repo changes (e.g. E8's auditor.md C3 conversion,
+curator.md sequencing), agents can silently run with OUTDATED instructions until `claude plugin update` /
+force-refresh runs (same trap class as P058 Step 5 working-tree-vs-cache regen finding).
+
+**Priority: HIGH. Does NOT block E057 merge / interim phases. DOES block the hard cutover (E10/E11)** —
+promotion to blocking must not happen while instruction delivery is potentially stale. Fix candidates:
+(a) pipeline preflight comparing cache vs repo plugin version/hash → warn/fail on drift; (b) documented
+mandatory refresh step in release workflow (exists in CLAUDE.md but unenforced); (c) dispatch agents from
+working-tree paths within this repo. Decide in E10 cutover plan at the latest.
