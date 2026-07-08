@@ -725,6 +725,12 @@ unmentioned.
   computed the actual base and stated the range explicitly ("89d30ee..HEAD"),
   and delivery-gate.json independently used `base_sha: 89d30ee` — two
   consumers compensating for stale state by agent/tool discipline.
+  **Instance #5 (VULCAN E-56-2_2, 13:07Z):** branch correctly re-pointed onto
+  merge `e29449a` (contains Phase 1), but fsm-state `base_commit` still holds
+  init-time `9200e97` (pre-merge) — same record/reality drift, no event.
+  Also: first branch commit is AGAIN a manual execution.yaml↔AC gate sync
+  (`087f63d`, same as E-56-1's `32c2682`) — the OBS-20260708-06(b) old-plugin
+  startup tax repeats on every VULCAN EPIC.
 - **plan_diff silent-skip recurrence on fresh v2.52 run:** E-057-2
   plan-diff.json has `plan_path: None`, `ac_count: 0`, gate result `skip`
   exit 2 under `overall: pass` — the plan_path-null no-op family replays on
