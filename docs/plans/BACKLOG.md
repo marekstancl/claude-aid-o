@@ -701,6 +701,137 @@ unmentioned.
   duplicate-lineage recovered safely, full evidence pack persisted incl.
   compliance.json; first C3 done-advance fired on its own EPIC.
 
+### Probe update 2026-07-08 (afternoon flush — E-057-2 run + VULCAN/WAN watches)
+
+- **OBS-20260708-02 refinement — producer/consumer gap within ONE plugin
+  version:** WAN E-060-1 (FRESH run under current plugin) also hit
+  `review_profile_missing_lenses` + `fsm_done_advance_fail` (09:43Z). The
+  failure is NOT only old-runs-vs-new-machinery: the done-advance consumer
+  demands `review-profile.json` that the same plugin's run machinery never
+  produces. Producer must be wired, or the check made era/capability-aware.
+  See OBS-20260708-03 for the deeper consumer-side fail-open.
+- **OBS-01/OBS-11 family instance #4 (record/reality drift, inverse):**
+  E-057-2 branch was re-pointed onto fresh main (merge-base `89d30ee`) but
+  fsm-state `base_commit` stayed `ac0f287` (pre-release era) — state NOT
+  updated when git reality moved, no event. No false-green: CP3 verifier
+  computed the actual base and stated the range explicitly ("89d30ee..HEAD"),
+  and delivery-gate.json independently used `base_sha: 89d30ee` — two
+  consumers compensating for stale state by agent/tool discipline.
+- **plan_diff silent-skip recurrence on fresh v2.52 run:** E-057-2
+  plan-diff.json has `plan_path: None`, `ac_count: 0`, gate result `skip`
+  exit 2 under `overall: pass` — the plan_path-null no-op family replays on
+  the newest plugin (execution.yaml note declares it advisory for AID
+  self-host; still a declared-but-validating-nothing gate).
+- **Positives to pin (calibration):** (a) E-057-2 CP3 was a 3-round
+  adversarial fix-loop — 2× FAIL(HIGH) with real-fixture reproduction
+  (`55808d6`, `145d04e` fail-closed fixes), round 3 exhaustive pass 240/240;
+  strongest CP3 observed. (b) curator-report.json dual-emit (run + EPIC dir,
+  identical) with honest `verdict: {kind: none, ready: false}` while its C3
+  input was missing — no fake pass. (c) VULCAN E-56-1 re-ran gates fresh
+  after a 3h pause (and again pre-merge) instead of reusing a stale report;
+  CP3/CP4 artifacts at canonical names in a third project. (d) E-057-2
+  final_report.md disclosed advisory fails, the smoke timeout, and
+  pre-existing failures honestly (PM-communication done right).
+
+### OBS-20260708-03 - C3 audit gate never fires: absent review-profile.json silently resolves to "C3 not required"
+
+**Observed in:** aid-orchestrator / P057 / E-057-2_2 / R-E057-2 (+ WAN, VULCAN)
+**AID version:** v2.52.0 (current)
+**Observed at:** 2026-07-08
+**Status:** confirmed
+**Severity:** high
+**Class:** false-green prevention / checkpoint ownership
+
+**What happened:** The C3 independent-audit gate that P057 exists to deliver
+has never fired for a real EPIC. AID's own E-057-2 audit (audit-report.md,
+health 92/100) found and evidenced it: `review-profile.json` exists in 1 of
+289 evidence run dirs, and `aid-fsm.sh`'s C3 risk-profile resolution has no
+else-branch for "file totally absent" — it silently resolves to "C3 not
+required", contradicting `skills/pipeline.md`'s documented default (absent →
+`unverifiable` → C3 REQUIRED). Live demonstration in the same run: E-057-2's
+own done-advance emitted `review_profile_missing_lenses: unverifiable`
+(observe) at 12:56:44Z, `audit-report.json` was never emitted (only .md), the
+brand-new Curator content-ref guard had nothing to hold (honest
+`ready: false` but C3-not-required → no-op), and the advance proceeded to
+release. Same silent-no-op-on-absence bug class the CP3 fix-loop fixed for
+the Curator guard one layer down — missed by both CP3 reviewers, caught by
+the audit.
+
+**Why it matters:** the flagship control of the last two plans is decoration
+in practice (Principle #1); every risk-gated hook keyed on risk_profile
+inherits the fail-open.
+**Reproduction:** audit-report.md in E-057-2_2/R-E057-2 (section "one
+significant, evidence-backed gap"); timeline 12:56:44Z; `ls **/review-profile.json`.
+**Likely fix:** else-branch: absent file → `unverifiable` (fail-closed, per
+documented default) + wire a producer for review-profile.json into the run
+pipeline; migration policy for the 288 legacy dirs.
+
+### OBS-20260708-04 - fsm-state steps[].status born "pending", never updated — read-model decoration (VULCAN B-142)
+
+**Observed in:** VULCAN E-56-1_2 + E-055-2_2 audits; verified in plugin source
+**AID version:** all since P040 Component E (incl. v2.52.0)
+**Observed at:** 2026-07-08
+**Status:** confirmed
+**Severity:** medium
+**Class:** evidence integrity / GUI read-model
+
+**What happened:** `fsm_init` writes `steps[]` with `status: pending`,
+`started_at/completed_at: null` (aid-fsm.sh ~1839-1848) declared "single
+source of truth", but no code path ever updates them — increment only seds
+`current_step` (~2348). VULCAN's audit hit it twice (E-055-2 F1 2026-06-29,
+E-56-1 2026-07-08, escalated as their B-142): DONE epic shows 7× pending.
+
+**Why it matters:** write-once decoration masquerading as state; any Cockpit
+read-model shows all-pending on finished runs.
+**Likely fix:** increment/verify path writes `steps[N].status: completed` +
+`completed_at` and emits a timeline event (rule: every fsm-state mutation is
+evented).
+
+### OBS-20260708-05 - Permanently-failing advisory gate: shell_pipeline_smoke times out every EPIC under overall:pass
+
+**Observed in:** aid-orchestrator / P057 (E-057-2 and, per its final report, every prior EPIC of the plan)
+**AID version:** v2.52.0
+**Observed at:** 2026-07-08
+**Status:** confirmed
+**Severity:** low
+**Class:** false-green prevention / performance-cost
+
+**What happened:** `shell_pipeline_smoke` fails exit 124 (300s timeout ceiling)
+on every EPIC of the plan; `required: false` keeps `overall: pass`.
+final_report.md admits "same as every prior EPIC in this plan". A gate that
+fails identically on every run provides zero signal and burns 5 min per gate
+run — dead decoration.
+
+**Why it matters:** advisory-fail wallpaper trains everyone to ignore gate
+fails; timeout class hides real hangs.
+**Likely fix:** raise ceiling or shrink smoke scope; add rule "advisory gate
+failing N consecutive runs must be surfaced to PM as a defect".
+
+### OBS-20260708-06 - VULCAN startup friction: ~1h lost before first step, invisible in timeline
+
+**Observed in:** VULCAN / P56 / E-56-1_2 + E-56-2_2 init (2026-07-08 morning)
+**AID version:** old plugin (pre-v2.51 consumer) + current generators
+**Observed at:** 2026-07-08
+**Status:** confirmed
+**Severity:** medium
+**Class:** UX indexing / docs drift / observability
+
+**What happened:** PM-reported lost hour is on disk as: (a)
+`fsm_branch_mismatch_detected` on E-56-2 init 07:57 — sequential multi-EPIC
+generation in one checkout fights the per-EPIC branch preflight (each init
+expects its own branch checked out); (b) old-plugin malformed contract
+(OBS-08) + phantom docs_updated gate (OBS-05) forced the implementer's FIRST
+commit to be a manual execution.yaml↔AC sync (`32c2682`) before any step
+work; (c) increment-before-evidence + duplicate prefilter (known classes);
+(d) META: 43+43-min silent gaps between init→EXECUTE→first activity with only
+6 timeline events total — the worst friction is invisible because preflight
+failures/retries are not evented.
+
+**Why it matters:** startup friction is where consumer projects bleed time,
+and the timeline can't even show it.
+**Likely fix:** epic-gen init must not require branch checkout (defer to
+EXECUTE start); event all preflight failures/retries; plugin rollout step.
+
 ## B-004 — Live usage probe for AID v2 control-system friction
 
 **Status:** scoped
