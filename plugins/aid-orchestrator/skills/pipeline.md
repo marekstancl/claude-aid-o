@@ -970,20 +970,79 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
 2. **Archive:** Move run file to `runs/archive/`; update EPIC frontmatter if all runs complete
 3. **Update:** `work/active.md` status
 4. **Final report:** Generate `evidence/{epic_id}/{run_id}/final_report.md`
+
+   **4a. Produce `review-profile.json` (C3 activation — E-059-1_2 Step 1).** Runs after the
+   final report (step 4) and BEFORE the C3 producer hook (step 5). Orchestrator-side,
+   deterministic. This is the step that actually creates `review-profile.json` in a live run
+   (before IMP-177 it was only ever written by tests, so the whole C3 gate was dead code). The
+   full `base_commit..HEAD` diff exists here, so the profile is computed over the WHOLE EPIC
+   diff, not one step.
+
+   1. **Resolve the EPIC task file** — `tasks/` first, `tasks/archive/` fallback (archival can
+      race ahead of this step). Pass the resolved path POSITIONALLY (no `--epic`/`--run` flags):
+      ```bash
+      evidence_dir=".aid-o/work/evidence/{epic_id}/{run_id}"
+      timeline="$evidence_dir/timeline.jsonl"
+      epic_task_path="$(ls .aid-o/tasks/{epic_id}*.md 2>/dev/null | head -1)"
+      [[ -z "$epic_task_path" ]] && epic_task_path="$(ls .aid-o/tasks/archive/{epic_id}*.md 2>/dev/null | head -1)"
+      ```
+   2. **If the EPIC file resolves → run the profiler** (`aid-prefilter.sh profile`, i.e.
+      `cmd_profile`). Its `diff_range` is `base_commit..HEAD` read from `fsm-state.yaml`. Exit
+      `22` (`range_undetermined`) is **NON-FATAL**: an unverifiable profile is emitted and the
+      run continues — do NOT abort on it.
+      ```bash
+      set +e
+      bash "$AID_PLUGIN_PATH/scripts/aid-prefilter.sh" profile "$epic_task_path" "$evidence_dir"
+      prof_ec=$?
+      set -e
+      # exit 0 = profile emitted; exit 22 = unverifiable profile emitted (continue);
+      # any other non-zero = investigate, but the presence check (below) is observe today.
+      ```
+   3. **If the EPIC file does NOT resolve → FAIL-LOUD (do NOT silently continue).** A missing
+      EPIC file must not degrade to a *silent diff-only* profile: candidate-time surfaces alone
+      could resolve to a LOW risk and skip C3 even though the (unread) EPIC declared high-risk
+      targets. Instead, emit a profile that records the failure explicitly and forces
+      `risk_profile: unverifiable` (so both the FSM presence check and `aid-audit-mode.sh` fail
+      closed toward `c3`), and log a `review_profile_epic_unresolved` event:
+      ```bash
+      bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event "$timeline" \
+        review_profile_epic_unresolved epic="{epic_id}" reason="epic_task_file_not_found"
+      jq -n --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{
+        schema_version: "aid-2.0", artifact_type: "review_profile",
+        producer: "pipeline.md#review-profile-fail-loud", created_at: $created_at,
+        control_protocol: "aid-2.0",
+        provenance: {dispatch_mode: "deterministic", generated_by_tool: "pipeline.md#review-subphase"},
+        review_profile: {
+          matched_surfaces: [], plan_time_surfaces: [], candidate_time_surfaces: [],
+          required_lenses: [], risk_profile: "unverifiable",
+          plan_time_status: "unresolved", reason: "epic_task_file_not_found",
+          ir_cadence: 3, c2_authorities_max: 3, llm_authorities_total_max: 5,
+          profile_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }' > "$evidence_dir/review-profile.json"
+      ```
+      The explicit `plan_time_status: "unresolved"` reason is what distinguishes this from a
+      legitimate empty-plan-time profile — a reviewer (and the presence check) can tell the
+      EPIC file was genuinely unreadable, not merely surface-free.
+
+   **Enforcement:** the FSM `done-advance` review→release presence check reads
+   `review-profile.json` — OBSERVE today (emits `review_profile_would_block`, does not block;
+   grandfather-safe for in-flight EPICs), promoting to blocking at E10.
 5. **C3 producer hook — build `audit-input-manifest.json`.** Runs after the final report
     (step 4) and before Curator/Auditor dispatch (step 6). Orchestrator-side, deterministic —
     no LLM judgment involved. Applies only when the run's risk profile requires C3
     (`c3_required: true` in `c3-audit-policy.yaml` — currently `high` and `unverifiable`, see
     that file's header comment); for any other risk profile (`docs_trivial`/`low`/`medium`)
     C3 is not required and this hook is skipped — Auditor dispatches in `legacy_health` mode
-    instead (mode selection wiring for step 6 is a later step, out of scope here).
+    instead. The Auditor/Curator dispatch mode is now selected mechanically by
+    `aid-audit-mode.sh` (step 6 below), not by prose judgment.
 
     1. **Read the risk profile:**
        ```bash
        risk_profile=$(jq -r '.review_profile.risk_profile // "unverifiable"' \
          "$evidence_dir/review-profile.json" 2>/dev/null || echo "unverifiable")
        ```
-       Produced earlier in the run by `aid-prefilter.sh profile` (`cmd_profile` — distinct from
+       Produced by **step 4a above** (`aid-prefilter.sh profile` / `cmd_profile` — distinct from
        the `classify` subcommand used by CP2/CP3/CP6, see "Pre-Filter Stage" §13 below). Missing
        file or missing field → `risk_profile=unverifiable` (fail-closed, matches
        `unknown_surface_profile: unverifiable` in `review-profiles.yaml`).
@@ -1046,12 +1105,20 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
     "$required_independence_level"` to determine the achieved independence level is a later
     step, out of scope here — this hook only guarantees the manifest artifact exists and is
     correct before that dispatch runs.
-6. **Serial dispatch (E-057-2_2):** Auditor (`agents/auditor.md`, C3) dispatches and completes
-   FIRST via its own `Agent()` tool call. Only after it completes does Curator
-   (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the Auditor's
-   `audit-report.json` output (Curator hashes its content into `.curator.audit_report_ref` —
-   `aid-fsm.sh done-advance` verifies this ref against a fresh `sha256sum` of the file and blocks
-   release on mismatch).
+6. **Serial dispatch (E-057-2_2):** first resolve the Auditor dispatch mode **mechanically**
+   (not by prose judgment) from the profile produced in step 4a:
+   ```bash
+   audit_mode="$(bash "$AID_PLUGIN_PATH/scripts/lib/aid-audit-mode.sh" "$evidence_dir")"
+   # → "c3" (independent audit) or "legacy_health"; a missing profile prints "c3"
+   #   and exits 3 (fail-closed direction) — treat as c3.
+   ```
+   Then Auditor (`agents/auditor.md`) dispatches and completes FIRST via its own `Agent()`
+   tool call, in `$audit_mode` (`c3` → independent-audit mode consuming
+   `audit-input-manifest.json`; `legacy_health` → health-audit mode). Only after it completes
+   does Curator (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the
+   Auditor's `audit-report.json` output (Curator hashes its content into
+   `.curator.audit_report_ref` — `aid-fsm.sh done-advance` verifies this ref against a fresh
+   `sha256sum` of the file and blocks release on mismatch).
 7. **Wait:** Auditor must complete before Curator dispatches; Curator must complete before
    continuing
 8. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
