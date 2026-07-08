@@ -36,12 +36,17 @@ setup() {
   export AUDIT_MODE
   PIPELINE_MD="$AID_PLUGIN_PATH/skills/pipeline.md"
   export PIPELINE_MD
+  INVMAP="$AID_PLUGIN_PATH/scripts/lib/aid-invalidation-map.sh"
+  export INVMAP
+  STAGE_LOG="$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh"
+  export STAGE_LOG
   export AID_TEST_MODE=1
 }
 
 teardown() {
   unset GIT_DIR
   unset C3_AUDIT_POLICY
+  unset INVALIDATION_MAP_ENFORCEMENT
   teardown_test_evidence_dir
 }
 
@@ -344,4 +349,97 @@ YAML
   [ "$status" -eq 22 ]
   [ -f "$TEST_EVIDENCE_DIR/review-profile.json" ]
   [ "$(jq -r '.review_profile.risk_profile' "$TEST_EVIDENCE_DIR/review-profile.json")" = "unverifiable" ]
+}
+
+# ─── Step 2 (E-059-1_2, IMP-177 invalidation half) ──────────────────────────
+#
+# HONEST FRAMING (do not overclaim coverage): the two AC1 scenarios below verify
+# the SCRIPT (scripts/lib/aid-invalidation-map.sh) behaves correctly when handed
+# the EXACT 3-arg CLI the pipeline.md "Invalidation-Map Post-Fix Hook" specifies
+# — i.e. the flow-shaped args, materialized from a real git diff exactly as the
+# hook does. The FSM scenarios verify aid-fsm.sh reacts to the gate_fixer_fix_applied
+# substrate. What these CANNOT verify: that a live LLM controller actually FOLLOWS
+# the pipeline.md prose at runtime (that it really runs the hook after each
+# gate-fixer fix). That runtime adherence is an observe-telemetry concern
+# (invalidation_map_expected_missing would_block fires when the wiring didn't run),
+# NOT something a bats unit test can prove. This suite complements
+# test-invalidation-map.bats (which drives the script with injected policy
+# fixtures) by proving the pipeline-args contract against the REAL default policies.
+# ($INVMAP / $STAGE_LOG are exported from setup() after AID_PLUGIN_PATH resolves.)
+
+@test "(Step2-AC1) direct-CLI with flow-shaped args → invalidation-map.json + invalidation_map_produced event" {
+  export AID_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  # Materialize changed-paths EXACTLY as the pipeline hook does: a real git diff
+  # over a pre-fix..HEAD range.
+  local pre_fix_ref; pre_fix_ref="$(git rev-parse HEAD)"
+  mkdir -p plugins/aid-orchestrator/scripts/lib
+  printf 'cmd_x() { :; }\n' > plugins/aid-orchestrator/scripts/lib/fixdemo.sh
+  git add -A && git commit -q -m "gate-fixer fix"
+  local changed="$TEST_TMPDIR/changed-paths.txt"
+  git diff --name-only "${pre_fix_ref}..HEAD" > "$changed"
+
+  # EXACTLY the 3-arg CLI the pipeline.md hook specifies.
+  run bash "$INVMAP" --fix-ref "cp2-step-1-iter1" --evidence-dir "$TEST_EVIDENCE_DIR" --changed-paths "$changed"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_EVIDENCE_DIR/invalidation-map.json" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_produced"
+  # fix_ref is echoed verbatim into the artifact (opaque label, stored as-is).
+  [ "$(jq -r '.invalidation_map.applied_fix_ref' "$TEST_EVIDENCE_DIR/invalidation-map.json")" = "cp2-step-1-iter1" ]
+}
+
+@test "(Step2-AC1) missing --changed-paths → exit 1 (arg contract), no artifact written" {
+  # The flow ALWAYS passes all three args; this proves the script's own contract
+  # fails closed if a caller omits --changed-paths.
+  run bash "$INVMAP" --fix-ref "cp2-step-1-iter1" --evidence-dir "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [ ! -f "$TEST_EVIDENCE_DIR/invalidation-map.json" ]
+}
+
+@test "(Step2) FSM invalidation_map_expected OBSERVE: gate_fixer_fix_applied present + no invalidation-map.json → done-advance PASSES + invalidation_map_expected_missing event" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  # Emit the substrate event the FSM check keys off (as the pipeline hook would),
+  # but DO NOT produce invalidation-map.json — simulating the wiring not having run.
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
+}
+
+@test "(Step2) FSM invalidation_map_expected OBSERVE: gate_fixer_fix_applied present + invalidation-map.json exists → NO would_block" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  # The artifact IS present → the expectation is satisfied, no would_block emitted.
+  echo '{"invalidation_map":{"applied_fix_ref":"cp2-step-1-iter1"}}' > "$TEST_EVIDENCE_DIR/invalidation-map.json"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  run assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$status" -ne 0 ]   # event must NOT be present
+}
+
+@test "(Step2) FSM invalidation_map_expected OBSERVE: NO gate_fixer_fix_applied event → check is a no-op (no would_block even without artifact)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  # No gate_fixer_fix_applied event and no invalidation-map.json → no fix was applied,
+  # so the check must NOT manufacture a would_block (fail-closed reads = no-op).
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  run assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$status" -ne 0 ]
+}
+
+@test "(Step2) FSM invalidation_map_expected BLOCKING (INVALIDATION_MAP_ENFORCEMENT=blocking): gate_fixer_fix_applied + no artifact → done-advance REJECTED + fsm_done_advance_fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  export INVALIDATION_MAP_ENFORCEMENT=blocking
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_done_advance_fail"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
 }
