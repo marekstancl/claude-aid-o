@@ -1327,3 +1327,41 @@ JSON
   [[ "$output" == *"blocking_findings == true"* ]]
   [[ "$output" == *"precondition(s) failed"* ]]
 }
+
+@test "E-057-1_2 C3 hook: non-object .audit_report in valid JSON fails closed (no script crash)" {
+  # CP4 round 3 finding: audit-report.json can be well-formed JSON at the top level while
+  # .audit_report itself is a scalar/string instead of an object — jq errors trying to index
+  # into it (.audit_report.blocking_findings), which under set -e aborted the whole script
+  # before any of the 4 field-extraction jq calls' fail-closed logic could run. This test
+  # locks the guard added to all 4 reads (c3_blocking/c3_status/c3_manifest_hash/c3_head_sha).
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "high"
+  }
+}
+JSON
+
+  # .audit_report is a STRING, not an object — jq's `.audit_report.blocking_findings`
+  # errors ("Cannot index string with string") when read directly.
+  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
+{
+  "audit_report": "oops-not-an-object",
+  "status": "pass",
+  "revision": {
+    "head_sha": "deadbeef"
+  }
+}
+JSON
+
+  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
+
+  export AID_PLUGIN_PATH
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 independent audit block"* ]]
+  [[ "$output" == *"precondition(s) failed"* ]]
+}

@@ -2674,9 +2674,11 @@ EOF
         else
           # jq available, try to read. If read succeeds, validate that the resolved
           # value is one of the known enum values.
-          local resolved_profile
-          resolved_profile=$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null)
-          if [[ $? -eq 0 && "$resolved_profile" != "MISSING" ]]; then
+          # CP4 round 3 fix: guard against set -e crash if review-profile.json is valid
+          # JSON but .review_profile is not an object (jq errors on the index attempt).
+          local resolved_profile="" resolved_exit_code=0
+          resolved_profile=$(jq -r '.review_profile.risk_profile // "MISSING"' "$review_profile_file" 2>/dev/null) || resolved_exit_code=$?
+          if [[ $resolved_exit_code -eq 0 && "$resolved_profile" != "MISSING" ]]; then
             # jq succeeded in reading a non-null value; check if it's valid enum.
             case "$resolved_profile" in
               docs_trivial|low|medium|high|unverifiable)
@@ -2744,9 +2746,11 @@ EOF
       # the C3 stage still ran and produced a report).
       if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
         if command -v jq >/dev/null 2>&1; then
-          local has_audit_report
-          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null)
-          if [[ "$has_audit_report" == "true" ]]; then
+          # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
+          # JSON but not an object at the top level (jq errors piping into `.audit_report`).
+          local has_audit_report="" has_audit_exit_code=0
+          has_audit_report=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' "$c3_report_file" 2>/dev/null) || has_audit_exit_code=$?
+          if [[ $has_audit_exit_code -eq 0 && "$has_audit_report" == "true" ]]; then
             c3_hook_fired="true"
             # Secondary trigger fired; set risk_profile for error messages below.
             # We don't know the original profile, so use "unverifiable" as the reason.
@@ -2765,11 +2769,24 @@ EOF
         elif ! jq -e . "$c3_report_file" >/dev/null 2>&1; then
           c3_block_reason="audit-report.json is not valid/parseable JSON"
         else
-          local c3_blocking c3_status c3_manifest_hash c3_head_sha c3_current_head
-          c3_blocking=$(jq -r 'if (.audit_report.blocking_findings | type) == "boolean" then (.audit_report.blocking_findings | tostring) else "MISSING" end' "$c3_report_file" 2>/dev/null)
-          c3_status=$(jq -r '.status // "MISSING"' "$c3_report_file" 2>/dev/null)
-          c3_manifest_hash=$(jq -r '.audit_report.input_manifest_hash // empty' "$c3_report_file" 2>/dev/null)
-          c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null)
+          # CP4 round 3 fix: guard all 4 jq reads against set -e crash — audit-report.json
+          # passed the `jq -e .` parseability check above, but that only proves the TOP
+          # level is valid JSON, not that `.audit_report`/`.revision` are objects. A report
+          # where e.g. `.audit_report` is a string/array/scalar makes jq error on `.field`
+          # indexing, which would otherwise abort this whole function via set -e instead of
+          # falling through to the fail-closed checks below (which already correctly treat
+          # empty/MISSING values as blocking — the guard only prevents the crash, it does
+          # not change the fail-closed semantics).
+          local c3_blocking="" c3_status="" c3_manifest_hash="" c3_head_sha="" c3_current_head=""
+          local c3_blocking_ec=0 c3_status_ec=0 c3_manifest_hash_ec=0 c3_head_sha_ec=0
+          c3_blocking=$(jq -r 'if (.audit_report.blocking_findings | type) == "boolean" then (.audit_report.blocking_findings | tostring) else "MISSING" end' "$c3_report_file" 2>/dev/null) || c3_blocking_ec=$?
+          [[ $c3_blocking_ec -ne 0 ]] && c3_blocking="MISSING"
+          c3_status=$(jq -r '.status // "MISSING"' "$c3_report_file" 2>/dev/null) || c3_status_ec=$?
+          [[ $c3_status_ec -ne 0 ]] && c3_status="MISSING"
+          c3_manifest_hash=$(jq -r '.audit_report.input_manifest_hash // empty' "$c3_report_file" 2>/dev/null) || c3_manifest_hash_ec=$?
+          [[ $c3_manifest_hash_ec -ne 0 ]] && c3_manifest_hash=""
+          c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null) || c3_head_sha_ec=$?
+          [[ $c3_head_sha_ec -ne 0 ]] && c3_head_sha=""
           c3_current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
 
           if [[ "$c3_blocking" != "false" && "$c3_blocking" != "true" ]]; then
