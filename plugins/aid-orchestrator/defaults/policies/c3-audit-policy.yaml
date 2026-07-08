@@ -1,0 +1,32 @@
+# AID C3 Independent Audit Policy — v1
+# Producer/reference: audit-input-manifest.json (.audit_input_manifest.required_independence_level),
+#                      aid-audit-independence.sh (level detection), agents/auditor.md (C3)
+#
+# Authoritative source of required_independence_level per risk profile (D8). The orchestrator
+# reads this file when building audit-input-manifest.json; aid-audit-independence.sh reports the
+# actually-achieved level (context_only|cross_model|cross_provider), and C3 sets
+# .audit_report.status = "unverifiable" when the required level for the profile is unreachable
+# or auth fails.
+#
+# Only the two real profiles are listed (fail-closed, D9): "high" (elevated-risk change, needs an
+# independent model/provider) and "unverifiable" (independence cannot be established at all —
+# c3_required stays true so the pipeline still demands a C3 pass, which will itself report
+# status=unverifiable and block done-advance rather than silently skipping the audit).
+#
+# c3_required: whether the C3 audit stage is mandatory for this profile.
+# required_independence_level: minimum independence C3 must run under for this profile.
+#   context_only    — same model/provider, fresh context only (weakest, default floor)
+#   cross_model      — different model, same provider
+#   cross_provider    — different provider entirely (strongest)
+
+version: 1
+enforcement: observe
+
+risk_profiles:
+  high:
+    c3_required: true
+    required_independence_level: cross_model
+
+  unverifiable:
+    c3_required: true
+    required_independence_level: cross_provider

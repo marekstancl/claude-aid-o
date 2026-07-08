@@ -15,17 +15,64 @@
       "const": "audit_report",
       "$comment": "enforced — must equal this type"
     },
-    "audit_report": {
-      "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
-      "properties": {
-        "blocking_findings": {
-          "type": "array"
-        },
-        "findings": {
-          "type": "array"
+    "findings": {
+      "type": "array",
+      "$comment": "enforced by aid-protocol-validate.sh step 10 — envelope top-level (protocol-v2 convention, D9); audit_report.findings was removed (L2 fix) — this is what aid-protocol-validate.sh:263 actually validates",
+      "items": {
+        "type": "object",
+        "required": ["fingerprint", "occurrence_id", "severity"],
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          },
+          "occurrence_id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low", "info"]
+          },
+          "action_owner": {
+            "type": "string",
+            "enum": ["implementer", "reviewer", "pm", "gate-fixer"],
+            "$comment": "required when severity is critical or high — enforced by aid-protocol-validate.sh step 10"
+          }
         }
       }
+    },
+    "audit_report": {
+      "type": "object",
+      "$comment": "enforced — provider/model/process_id/input_manifest_hash are required (H1 fix): schema is the only runtime pojistka for the D7 audit_trigger echo, since value-correctness cannot be tested without an actual LLM dispatch",
+      "properties": {
+        "blocking_findings": {
+          "type": "boolean",
+          "$comment": "true iff envelope top-level findings[] contains a critical|high severity item — mechanical derivation from severity, never LLM-scored"
+        },
+        "independence_level": {
+          "type": "string",
+          "enum": ["context_only", "cross_model", "cross_provider"],
+          "$comment": "resolved by aid-audit-independence.sh; status=unverifiable when required_independence_level is unreachable or auth fails"
+        },
+        "provider": {
+          "type": "string",
+          "$comment": "echoed verbatim from audit_trigger (D7)"
+        },
+        "model": {
+          "type": "string",
+          "$comment": "echoed verbatim from audit_trigger (D7)"
+        },
+        "process_id": {
+          "type": "string",
+          "$comment": "echoed verbatim from audit_trigger (D7)"
+        },
+        "input_manifest_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "must equal the producing audit-input-manifest.json's .audit_input_manifest.input_hash (provenance chaining)"
+        }
+      },
+      "required": ["provider", "model", "process_id", "input_manifest_hash"]
     }
   },
   "required": ["audit_report"]
