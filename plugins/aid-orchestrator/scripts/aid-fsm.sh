@@ -2699,15 +2699,21 @@ EOF
       # Fail-closed: if profile is unverifiable, or if policy read fails/is ambiguous,
       # treat as requiring C3.
       if [[ -n "$c3_risk_profile" ]]; then
-        local c3_required_from_policy="" policy_read_succeeded="false" yq_exit_code=0
+        local c3_required_from_policy="" policy_read_succeeded="false"
         local policy_file="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
 
         # Only attempt policy read if both file exists AND yq is available.
         if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
-          c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required // false" "$policy_file" 2>/dev/null) || yq_exit_code=$?
-          # Policy read succeeded if yq exited cleanly AND returned either "true" or "false"
-          if [[ $yq_exit_code -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
-            policy_read_succeeded="true"
+          # Use has() to distinguish "key absent" from "key present but false".
+          # Both scenarios yield exit 0 and "false" output with the old // false fallback,
+          # making it impossible to distinguish. The fix: check presence first.
+          local has_profile_key
+          has_profile_key=$(yq -r "(.risk_profiles | has(\"$c3_risk_profile\")) and (.risk_profiles[\"$c3_risk_profile\"] | has(\"c3_required\"))" "$policy_file" 2>/dev/null)
+          if [[ "$has_profile_key" == "true" ]]; then
+            c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required" "$policy_file" 2>/dev/null)
+            if [[ $? -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
+              policy_read_succeeded="true"
+            fi
           fi
         fi
 
