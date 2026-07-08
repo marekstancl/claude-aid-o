@@ -20,7 +20,31 @@ setup() {
 
 teardown() {
   unset GIT_DIR
+  unset C3_AUDIT_POLICY
   teardown_test_evidence_dir
+}
+
+# _pin_c3_blocking
+#   E-059-1_2 Step 1: the C3 independent-audit hook is enforcement-gated —
+#   c3-audit-policy.yaml ships `enforcement: observe` (staged wake), so by
+#   default the hook emits c3_gate_would_block telemetry and lets the transition
+#   through. Tests that assert the hook BLOCKS pin enforcement to `blocking` via
+#   the C3_AUDIT_POLICY seam (mirrors DELIVERY_GATE_POLICY). The per-profile
+#   c3_required risk-gate still reads the installed default policy.
+_pin_c3_blocking() {
+  local policy_file="$TEST_TMPDIR/c3-audit-policy-blocking.yaml"
+  cat > "$policy_file" <<'YAML'
+version: 1
+enforcement: blocking
+risk_profiles:
+  high:
+    c3_required: true
+    required_independence_level: cross_model
+  unverifiable:
+    c3_required: true
+    required_independence_level: cross_provider
+YAML
+  export C3_AUDIT_POLICY="$policy_file"
 }
 
 # ─── Step 2: PRE-FLIGHT branch enforcement (6 assertions) ────────────────
@@ -1177,6 +1201,7 @@ WIRING
 @test "E-057-1_2 C3 hook: risk_profile=high + blocking audit-report → precondition fails" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking   # E-059-1_2: hook is observe-by-default; pin blocking to assert the block
 
   # Create review-profile.json with high-risk profile
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
@@ -1286,8 +1311,11 @@ JSON
   # prevented the transition from completing — not a bypass, but an unhandled crash
   # instead of a clean, audited fail-closed message). This test locks the fix: a
   # malformed policy file for a high-risk profile must still emit the C3 block message.
+  # E-059-1_2: the malformed policy exercises the RISK-GATE (fail-closed → hook fires);
+  # the enforcement toggle is pinned blocking via C3_AUDIT_POLICY so the block asserts.
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking
 
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
 {
@@ -1334,8 +1362,10 @@ JSON
   # into it (.audit_report.blocking_findings), which under set -e aborted the whole script
   # before any of the 4 field-extraction jq calls' fail-closed logic could run. This test
   # locks the guard added to all 4 reads (c3_blocking/c3_status/c3_manifest_hash/c3_head_sha).
+  # E-059-1_2: pin enforcement blocking so the fail-closed reason actually blocks.
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking
 
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
 {

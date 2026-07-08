@@ -2547,6 +2547,49 @@ cmd_done_advance() {
       fi
       # End E3 review_profile hook
 
+      # ── C3 activation (IMP-177 / E-059-1_2 Step 1): resolve the C3 audit
+      # enforcement mode ONCE, then apply it to BOTH the review-profile presence
+      # check (below) and the C3 independent-audit hook (further down). The
+      # `enforcement:` key (observe|blocking) already lives in c3-audit-policy.yaml
+      # since E8 — this is the first caller that reads it. C3_AUDIT_POLICY env
+      # overrides the policy PATH (test/CI seam, mirrors DELIVERY_GATE_POLICY);
+      # it overrides the enforcement toggle only, not the per-profile c3_required
+      # risk-gate below (which stays anchored to the installed default policy).
+      # Fail-safe: missing policy / missing yq → observe (never block). The C3
+      # gate is staged OBSERVE by default; E10 promotion flips the policy default
+      # to blocking. See AID-v3-principles.md §1.
+      local c3_default_policy="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
+      local c3_enforce_policy="${C3_AUDIT_POLICY:-$c3_default_policy}"
+      local c3_enforcement="observe"
+      local _c3_timeline="${evidence_dir}/timeline.jsonl"
+      if [[ -f "$c3_enforce_policy" ]] && command -v yq >/dev/null 2>&1; then
+        local _pol_c3_enf
+        _pol_c3_enf=$(yq e '.enforcement // "observe"' "$c3_enforce_policy" 2>/dev/null || echo "observe")
+        [[ "$_pol_c3_enf" == "blocking" ]] && c3_enforcement="blocking"
+      fi
+
+      # ── C3 activation: review-profile.json presence check (producer wiring). ──
+      # review-profile.json is produced in the DONE review sub-phase (pipeline.md,
+      # aid-prefilter.sh profile over the full base_commit..HEAD diff). Its ABSENCE
+      # means the C3 producer wiring did not run for this EPIC. OBSERVE by default:
+      # emit review_profile_would_block telemetry but DO NOT block — grandfather-safe
+      # for in-flight EPICs (e.g. E-046-3_3) that predate the producer wiring.
+      # enforcement=blocking (E10 / C3_AUDIT_POLICY test override) flips this to a
+      # hard precondition failure so the blocking branch stays live, testable code.
+      if [[ ! -f "${evidence_dir}/review-profile.json" ]]; then
+        log_event "$_c3_timeline" "review_profile_would_block" \
+          check="review_profile_presence" enforcement="$c3_enforcement" \
+          reason="review-profile.json absent in evidence dir"
+        if [[ "$c3_enforcement" == "blocking" ]]; then
+          echo "PRECONDITION FAIL: review-profile.json not found in ${evidence_dir}/ — C3 producer hook must run in the DONE review sub-phase (enforcement=blocking)." >&2
+          log_event "$_c3_timeline" "fsm_done_advance_fail" check="review_profile_presence" reason="profile_absent"
+          exit 2
+        else
+          log_warn "review_profile presence would_block (enforcement=observe, non-blocking): review-profile.json absent in ${evidence_dir}"
+        fi
+      fi
+      # End C3 activation review-profile presence check
+
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
       # Evaluates compliance checks inline (no file write), filters severity:blocking
@@ -2673,7 +2716,10 @@ EOF
       # treat as requiring C3.
       if [[ -n "$c3_risk_profile" ]]; then
         local c3_required_from_policy="" policy_read_succeeded="false"
-        local policy_file="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
+        # Per-profile c3_required risk-gate reads the installed default policy
+        # (NOT the C3_AUDIT_POLICY enforcement override) — see c3_default_policy
+        # rationale above. Reuses the single definition for DRY (GEN-007).
+        local policy_file="$c3_default_policy"
 
         # Only attempt policy read if both file exists AND yq is available.
         if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
@@ -2891,9 +2937,22 @@ EOF
         fi
 
         if [[ -n "$c3_block_reason" ]]; then
-          echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
-          echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
-          errors=$((errors + 1))
+          # IMP-177 / E-059-1_2 Step 1 C3 activation: gate the block on the
+          # resolved enforcement mode (c3_enforcement, read from c3-audit-policy.yaml
+          # near the top of this branch). Always emit c3_gate_would_block telemetry
+          # so the gate is observable whether or not it blocks; then:
+          #   observe  → telemetry only, transition continues (staged wake, default)
+          #   blocking → today's fail-closed behavior (counts toward errors → exit 1)
+          log_event "$_c3_timeline" "c3_gate_would_block" \
+            check="c3_independent_audit" enforcement="$c3_enforcement" \
+            risk_profile="$c3_risk_profile" reason="$c3_block_reason"
+          if [[ "$c3_enforcement" == "blocking" ]]; then
+            echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
+            echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
+            errors=$((errors + 1))
+          else
+            log_warn "C3 independent audit would_block (enforcement=observe, non-blocking): ${c3_block_reason}"
+          fi
         fi
       fi
 
