@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 264          # granular registry rows; recomputed via `.enforcements|length` after adding invalidation_map_observe (E-057-2_2 Step 2, D3); was 263 before this row
-  mapped_with_verdict: 120   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 102 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); was 119 before invalidation_map_observe (verdict: ALIGNED)
-  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by this row)
-  verdict_distribution: {ALIGNED: 102, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
+  enforcements: 267          # granular registry rows; recomputed via `.enforcements|length` after adding curator_content_ref_guard + review_profile_presence + c3_gate_enforcement_toggle (E-059-1_2 Step 1, IMP-177); was 264 before these rows
+  mapped_with_verdict: 121   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 103 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); was 120 before curator_content_ref_guard (verdict: ALIGNED); the two new planned observe rows carry no verdict (match the DG-07 convention)
+  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by these rows)
+  verdict_distribution: {ALIGNED: 103, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
 
 enforcements:
 
@@ -803,3 +803,39 @@ enforcements:
     deferred_until: "2026-12-31"
     description: "acceptance provenance adapter; reads FSM step-verify evidence; never fails"
     note: "provenance-only, never fails"
+
+  # ── E-059-1_2: C3 activation (IMP-177) — producer wiring + gate wake ────────
+  # D8 requires search-anchor `source` strings (grep-able substrings), not line
+  # numbers (which drift). curator_content_ref_guard is an ACTIVE blocking guard
+  # that was missing from the registry since E-057-2_2 Step 2 (backfill).
+  # review_profile_presence + c3_gate_enforcement_toggle are staged OBSERVE and
+  # promote to blocking at E10 (mirrors the DG-07 observe rows above).
+  - {id: curator_content_ref_guard, type: 1, source: "scripts/aid-fsm.sh (grep: 'Curator content-ref sequencing guard')", instruction: "skills/pipeline.md §7 Sub-phase review step 6 (Serial dispatch) / agents/curator.md C3.5 dual-emit", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "curator-report.json .curator.audit_report_ref must equal sha256 of audit-report.json content (proves Curator ran AFTER Auditor and consumed that exact output); missing file on a C3-required run, missing/unreadable ref, or hash mismatch all block done-advance", test: "scripts/tests/bats/test-c3-audit.bats"}
+
+  - id: review_profile_presence
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'review-profile.json presence check')"
+    instruction: "skills/pipeline.md §7 Sub-phase review step 4a"
+    severity: advisory
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "done-advance review→release checks review-profile.json exists in the evidence dir; observe-only (emits review_profile_would_block, does not block — grandfather-safe for in-flight EPICs that predate the DONE-review producer wiring); blocking promotion E10"
+    test: "scripts/tests/bats/test-c3-activation.bats"
+
+  - id: c3_gate_enforcement_toggle
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'c3_gate_would_block')"
+    instruction: "defaults/policies/c3-audit-policy.yaml (enforcement key)"
+    severity: advisory
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "the C3 independent-audit done-advance hook reads the enforcement toggle from c3-audit-policy.yaml (observe → c3_gate_would_block telemetry + transition continues; blocking → fail-closed block); C3_AUDIT_POLICY env override is the test seam; the toggle key existed since E8 but was ignored until IMP-177; blocking promotion E10"
+    test: "scripts/tests/bats/test-c3-activation.bats"
