@@ -2632,12 +2632,84 @@ EOF
         errors=$((errors + 1))
       fi
 
+      # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
+      # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
+      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
+      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
+      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
+      # (M2 fix). Risk profile comes from review-profile.json (produced by
+      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
+      # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
+      # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
+      # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
+      # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
+      # no-op and falls through unchanged to the legacy blocking_findings check below.
+      #
+      # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
+      # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
+      # (independence could not be confirmed), or a stale `revision.head_sha` that no
+      # longer matches the run's actual current HEAD (freshness — an audit computed
+      # against a prior commit must not authorize release of the current commit,
+      # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
+      # jq fallback anywhere below — absence/unreadability is treated as blocking, never
+      # as a silent pass.
+      local c3_risk_profile="" c3_hook_fired="false"
+      local review_profile_file="${evidence_dir}/review-profile.json"
+      if [[ -f "$review_profile_file" ]] && command -v jq >/dev/null 2>&1; then
+        c3_risk_profile=$(jq -r '.review_profile.risk_profile // empty' "$review_profile_file" 2>/dev/null)
+      fi
+
+      if [[ "$c3_risk_profile" == "high" || "$c3_risk_profile" == "unverifiable" ]]; then
+        c3_hook_fired="true"
+        local c3_report_file="${evidence_dir}/audit-report.json"
+        local c3_block_reason=""
+
+        if ! command -v jq >/dev/null 2>&1; then
+          c3_block_reason="jq is required to verify audit-report.json and is not available"
+        elif [[ ! -f "$c3_report_file" ]]; then
+          c3_block_reason="audit-report.json not found (risk profile '${c3_risk_profile}' requires a C3 audit)"
+        elif ! jq -e . "$c3_report_file" >/dev/null 2>&1; then
+          c3_block_reason="audit-report.json is not valid/parseable JSON"
+        else
+          local c3_blocking c3_status c3_manifest_hash c3_head_sha c3_current_head
+          c3_blocking=$(jq -r 'if (.audit_report.blocking_findings | type) == "boolean" then (.audit_report.blocking_findings | tostring) else "MISSING" end' "$c3_report_file" 2>/dev/null)
+          c3_status=$(jq -r '.status // "MISSING"' "$c3_report_file" 2>/dev/null)
+          c3_manifest_hash=$(jq -r '.audit_report.input_manifest_hash // empty' "$c3_report_file" 2>/dev/null)
+          c3_head_sha=$(jq -r '.revision.head_sha // empty' "$c3_report_file" 2>/dev/null)
+          c3_current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+
+          if [[ "$c3_blocking" != "false" && "$c3_blocking" != "true" ]]; then
+            # Covers missing/null/non-boolean .audit_report.blocking_findings — fail-closed,
+            # deliberately NOT `// false` (that is the exact anti-pattern this hook replaces).
+            c3_block_reason="audit-report.json .audit_report.blocking_findings is missing or not a boolean (fail-closed)"
+          elif [[ "$c3_blocking" == "true" ]]; then
+            c3_block_reason="audit-report.json .audit_report.blocking_findings == true (critical/high finding present)"
+          elif [[ "$c3_status" == "unverifiable" ]]; then
+            c3_block_reason="audit-report.json .status == \"unverifiable\" (required independence level could not be confirmed)"
+          elif [[ -z "$c3_manifest_hash" ]]; then
+            c3_block_reason="audit-report.json missing .audit_report.input_manifest_hash (provenance fail-closed)"
+          elif [[ -z "$c3_head_sha" || -z "$c3_current_head" || "$c3_head_sha" != "$c3_current_head" ]]; then
+            c3_block_reason="audit-report.json .revision.head_sha (${c3_head_sha:-<empty>}) != current HEAD (${c3_current_head:-<empty>}) — stale audit (freshness fail-closed)"
+          fi
+        fi
+
+        if [[ -n "$c3_block_reason" ]]; then
+          echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
+          echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
+          errors=$((errors + 1))
+        fi
+      fi
+
       # Block release on critical-severity findings via the auditor's CANONICAL top-level
       # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
       # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start
       # keys — indented/nested values and prose body lines are INVISIBLE, preventing the
       # old grep-ciE false-positive on negations ("No blocking_findings: true ...").
       # Fail-closed: absent field → field is indented/missing → cannot confirm clean → block.
+      # E-057-1_2 Step 4: this legacy .md/.yaml read is SKIPPED when the C3 hook above
+      # already fired (risk profile high/unverifiable) — audit-report.json is the single
+      # source of truth for those profiles; this remains the only check for all others.
+      if [[ "$c3_hook_fired" != "true" ]]; then
       local audit_file=""
       [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
       [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
@@ -2656,6 +2728,7 @@ EOF
           errors=$((errors + 1))
         fi
         # blk == "false" → no blocking findings; passes silently.
+      fi
       fi
 
       if [[ $errors -gt 0 ]]; then

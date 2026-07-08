@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 259          # granular registry rows; updated E7B (was 258, +1 frontend_visual_fidelity_block = 259)
+  enforcements: 262          # granular registry rows; updated E-057-1_2 Step 4 (was 259, +3 c3_blocking_high_or_critical/c3_independence_unverifiable/c3_provenance_required = 262)
   mapped_with_verdict: 92    # carry a Phase-2 verdict (incl. UNREACHABLE/ORPHAN/CONTRADICTORY)
   mapping_pending: 111       # convention-derived instruction home, verdict: unmapped (Phase-2 backfill)
   verdict_distribution: {ALIGNED: 74, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 111}
@@ -74,6 +74,9 @@ enforcements:
   - {id: stop_pause_progress_save,     type: 1, source: "commands/aid-stop.md:53", instruction: "commands/aid-stop.md:53", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "/aid-stop sets mode:paused first + resumable:true progress guarantee"}
   - {id: run_closure_done_invariant,   type: 1, source: "skills/run-management.md:149", instruction: "skills/run-management.md:149", severity: advisory, surface: llm-facing, status: active, verdict: unmapped, description: "Run Closure ordered checklist (state:DONE, timeline, curator, archive)"}
   - {id: frontend_visual_fidelity_block, type: 1, source: "scripts/aid-fsm.sh:2206", instruction: "skills/pipeline.md §4 Context Assembly — UI CHANGE CONTRACT block (item 9)", severity: blocking, surface: internal-guard, status: active, verdict: unmapped, description: "step-local EXECUTE guard: existing_ui step needs ui/verdict.json result=pass; delivery-gate/C4 aggregation = E9 (NOT delivered in E7)"}
+  - {id: c3_blocking_high_or_critical, type: 1, source: "scripts/aid-fsm.sh:2685", instruction: "agents/auditor.md:90", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .audit_report.blocking_findings==true (critical/high finding); risk-gated to profile high/unverifiable, replaces legacy .md/.yaml read for those profiles (E-057-1_2 M2 fix)"}
+  - {id: c3_independence_unverifiable, type: 1, source: "scripts/aid-fsm.sh:2687", instruction: "agents/auditor.md:104", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .status==\"unverifiable\" (required independence level could not be confirmed); risk-gated to profile high/unverifiable"}
+  - {id: c3_provenance_required, type: 1, source: "scripts/aid-fsm.sh:2689", instruction: "agents/auditor.md:117", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json is missing/unparseable, missing .audit_report.input_manifest_hash, or .revision.head_sha is stale vs current HEAD (fail-closed, no // false fallback); risk-gated to profile high/unverifiable"}
 
   # ── Type 2: FSM-precondition (subagent output) ─────────────────────────────
   - {id: cp2_verifier_output,          type: 2, source: "scripts/aid-fsm.sh:720",  instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP2 per-step verifier-output with _generated_by + classification; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
