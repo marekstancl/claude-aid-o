@@ -19,6 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
@@ -2695,16 +2696,29 @@ EOF
       fi
 
       # Primary trigger: read c3_required from policy file for the resolved risk profile.
-      # Fail-closed: if profile is unverifiable (couldn't be resolved), treat as requiring C3.
+      # Fail-closed: if profile is unverifiable, or if policy read fails/is ambiguous,
+      # treat as requiring C3.
       if [[ -n "$c3_risk_profile" ]]; then
-        local c3_required_from_policy=""
-        local policy_file="${AID_PLUGIN_PATH}/defaults/policies/c3-audit-policy.yaml"
+        local c3_required_from_policy="" policy_read_succeeded="false" yq_exit_code=0
+        local policy_file="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
+
+        # Only attempt policy read if both file exists AND yq is available.
         if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
-          c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required // false" "$policy_file" 2>/dev/null)
+          c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required // false" "$policy_file" 2>/dev/null) || yq_exit_code=$?
+          # Policy read succeeded if yq exited cleanly AND returned either "true" or "false"
+          if [[ $yq_exit_code -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
+            policy_read_succeeded="true"
+          fi
         fi
-        # If policy read succeeded and c3_required is true, fire the hook. Otherwise only fire
-        # if profile is "unverifiable" (fail-closed for ambiguous/unparseable resolution).
-        if [[ "$c3_required_from_policy" == "true" ]]; then
+
+        # Fire hook if:
+        #   1. Policy read succeeded AND c3_required is true, OR
+        #   2. Policy read failed or was ambiguous for a high-risk profile (fail-closed: can't confirm false), OR
+        #   3. Profile is unverifiable (fail-closed for ambiguous/unparseable resolution)
+        if [[ "$policy_read_succeeded" == "true" && "$c3_required_from_policy" == "true" ]]; then
+          c3_hook_fired="true"
+        elif [[ "$policy_read_succeeded" != "true" && "$c3_risk_profile" == "high" ]]; then
+          # Policy read failed/ambiguous for high-risk profile → fail-closed
           c3_hook_fired="true"
         elif [[ "$c3_risk_profile" == "unverifiable" ]]; then
           c3_hook_fired="true"
