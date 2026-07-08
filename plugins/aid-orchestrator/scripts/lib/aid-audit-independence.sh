@@ -159,10 +159,10 @@ _detect_cross_provider() {
   if [[ $login_exit -eq 0 ]] && grep -qi '^Logged in' <<<"$login_output"; then
     check3=true
   fi
-  _trace "cross_provider check 3/4 (codex login status auth): $([[ "$check3" == "true" ]] && echo PASS || echo "FAIL (exit=${login_exit}, output='${login_output}')")"
+  _trace "cross_provider check 3/4 (codex login status auth): $([[ "$check3" == "true" ]] && echo PASS || echo "FAIL (exit=${login_exit})")"
 
   if [[ "$check3" != "true" ]]; then
-    echo "aid-audit-independence: cross_provider unverifiable — codex auth unconfirmed (check 3/4 failed; exit=${login_exit}, output='${login_output}')"
+    echo "aid-audit-independence: cross_provider unverifiable — codex auth unconfirmed (check 3/4 failed; exit=${login_exit}; see codex login status manually for details)"
     return 1
   fi
 

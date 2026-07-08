@@ -2694,9 +2694,21 @@ EOF
         fi
       fi
 
-      # Primary trigger: high or unverifiable risk profiles require C3.
-      if [[ "$c3_risk_profile" == "high" || "$c3_risk_profile" == "unverifiable" ]]; then
-        c3_hook_fired="true"
+      # Primary trigger: read c3_required from policy file for the resolved risk profile.
+      # Fail-closed: if profile is unverifiable (couldn't be resolved), treat as requiring C3.
+      if [[ -n "$c3_risk_profile" ]]; then
+        local c3_required_from_policy=""
+        local policy_file="${AID_PLUGIN_PATH}/defaults/policies/c3-audit-policy.yaml"
+        if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
+          c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required // false" "$policy_file" 2>/dev/null)
+        fi
+        # If policy read succeeded and c3_required is true, fire the hook. Otherwise only fire
+        # if profile is "unverifiable" (fail-closed for ambiguous/unparseable resolution).
+        if [[ "$c3_required_from_policy" == "true" ]]; then
+          c3_hook_fired="true"
+        elif [[ "$c3_risk_profile" == "unverifiable" ]]; then
+          c3_hook_fired="true"
+        fi
       fi
 
       # Secondary independent trigger: if review-profile.json exists (this run went through
