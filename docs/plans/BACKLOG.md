@@ -167,6 +167,13 @@ vs `grep -i delivery .aid-o/work/evidence/E-058-2_6/R-E058-2/final_report.md`
 setup pointer). Define which freshness field is authoritative in
 delivery-gate.json and remove or derive the other.
 
+**Recurrence 2026-07-02 (E-058-3_6/R-E058-3):** identical on the next EPIC —
+`delivery-gate.json` again `status: fail`, `delivery_ready: false`, 15
+unverifiable findings, same internal freshness contradiction
+(`delivery_gate.freshness: stale` vs `revision.freshness: current`), and
+`final_report.md` again contains zero mention of D0/delivery-gate. Two
+independent EPICs → **cleanup trigger for this class is met.**
+
 ### OBS-20260702-05 - Plan-declared gate silently never runs when undefined in execution.yaml
 
 **Observed in:** WAN / P058 / E-058-2_6 / R-E058-2
@@ -207,6 +214,18 @@ a clear message when a declared gate has no definition — or at minimum write a
 cannot be pass. plan.schema.json should state which component consumes
 `gates[]` and what happens when a name does not resolve.
 
+**Recurrence 2026-07-02 (E-058-3_6):** the next EPIC's plan.json again declares
+`gates: ["docs_updated"]` while execution.yaml still lacks the definition — the
+silent drop will repeat at E3's gates phase and, since the declaration comes
+from the shared P058 plan, in every remaining EPIC of the plan. Second
+independent EPIC → **cleanup trigger for this class is met.**
+Confirmed at E3 gates time (07:38Z): gates_report again ran only the 4
+execution.yaml gates, overall pass. Mitigation nuance: this time
+`final_report.md` DISCLOSED the gap manually ("docs_updated gate by
+triggeroval" in Open Items) — the implementer learned from the E2 audit
+finding. The mitigation is agent discipline, not system enforcement; the
+silent-drop mechanism itself is unchanged.
+
 ### OBS-20260702-06 - FSM pre-commit hook conflicts with per-Plan deferred-merge model, normalizing --no-verify bypass
 
 **Observed in:** WAN / P058 / E-058-1_6 + E-058-2_6 + E-058-3_6 (5 commits)
@@ -241,6 +260,13 @@ not in the consumer project.
 (5 hits on P058); hook source `.git/hooks/pre-commit` (AID-generated block);
 WAN `.aid-o/work/backlog.md` T-151.
 
+**Escalation 2026-07-02 (E-058-3_6, commit `c0505fb`):** the normalization has
+progressed to SILENT bypass — the E3 DONE-review bookkeeping commit landed on a
+DONE/review branch (hook active and blocking by design) with NO `--no-verify`
+note in the commit message, unlike the five earlier bypasses which at least
+self-documented. The bypass is now invisible: only cross-referencing hook
+source + fsm-state at commit time reveals it. Sixth bypass, first undocumented.
+
 **Likely fix:** Adopt T-151's direction: (a) a documented post-review-fix path
 — PM-approved marker file (`post-review-fix-approved.json` with reason +
 timestamp, analogous to `--force --reason`) that the hook honors and logs as a
@@ -248,6 +274,45 @@ timeline event, or (b) an `aid-fsm.sh` subcommand for a "reopen fix cycle"
 that permits commits in DONE/review without forcing premature release. Either
 way the hook must offer a legitimate escape hatch so `--no-verify` stops being
 the path of least resistance.
+
+### OBS-20260702-10 - Auditor/Curator verdicts exist only as implementer prose; no canonical audit-report artifact for E-058-3
+
+**Observed in:** WAN / P058 / E-058-3_6 / R-E058-3
+**AID version:** v2.50.1
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** high
+**Class:** evidence integrity (missing provenance / self-written review evidence)
+
+**What happened:** The E3 DONE-review bookkeeping commit (`c0505fb`) and
+`active.md` cite "Auditor skóre 96/100, blocking_findings=false" and Curator
+findings IMP-123/124 — but no `audit-report.yaml`, `audit-report.md`, or any
+curator artifact exists anywhere in `.aid-o` for E-058-3 (searched the whole
+tree, zero files matching `*audit*`/`*curator*` modified today). Contrast E2:
+`evidence/E-058-2_6/audit-report.yaml` with the machine-readable top-level
+`blocking_findings: false` field explicitly commented "CANONICAL — FSM reads
+this", plus the full `audit-report.md`.
+
+**Why it matters:** The auditor verdict for E3 is unverifiable from artifacts —
+it survives only as prose WRITTEN BY THE IMPLEMENTER (active.md + commit
+message), which is exactly the "self-written verifier evidence" probe class.
+The FSM's done-advance machinery reads `blocking_findings` from
+audit-report.yaml; with no file, any later mechanical check (plan-close
+aggregating per-EPIC Curator+Auditor results — the whole point of the per-Plan
+model) has nothing to read for E3. Artifact persistence is also inconsistent
+across consecutive EPICs of the same plan (E2: EPIC-level files; E3: nothing),
+so a plan-close aggregator cannot even rely on a stable location.
+
+**Reproduction:** `find .aid-o -iname "*audit*" -newermt "2026-07-02 09:00"`
+in the WAN repo (empty) vs `git log -1 --format=%B c0505fb` (cites the score);
+`ls .aid-o/work/evidence/E-058-2_6/audit-report.*` (E2 files exist).
+
+**Likely fix:** Auditor/Curator dispatch must write their canonical artifacts
+(audit-report.yaml/md, curator findings) to a pinned per-EPIC evidence path as
+a hard output contract — and the DONE-review phase should have a precondition
+(like CP2/CP3 have) that refuses to record "review complete" without the
+artifacts on disk. Prose summaries in active.md are a view, never the source
+of truth.
 
 ### OBS-20260702-07 - EPIC generation is not idempotent across partial runs and has no clean recovery path
 
@@ -292,7 +357,264 @@ partial generation created (reading them from a generation manifest). The
 rollback path must be non-destructive-by-whitelist (only deletes files the
 manifest lists) so it does not require blanket destructive permissions.
 
+**Recovery outcome (2026-07-02 ~08:00):** PM recovered via manual wipe + full
+regeneration — both evidence dirs recreated at 07:59 with single fsm_init each,
+branches re-pointed to the current main tip, base_commit now clean (`ac0f287`).
+Two follow-up facts for the cleanup session: (a) run_ids R-E057-1/R-E057-2 were
+reused for the regenerated runs, and (b) the crashed generation's timeline
+(fsm_init 04:40Z, base 8a38f68) was erased with the wipe — unlike the WAN
+rescope (OBS-01) where the append-only timeline preserved the history, here the
+prior init is documented only in this backlog entry. A transactional gen (or
+manifest rollback) would have produced the same clean end state without erasing
+run history.
+
+### OBS-20260702-08 - Generated plan.json contracts are malformed and no gate validates them (pointer)
+
+**Observed in:** aid-orchestrator / P057 / E-057-1_2 + E-057-2_2 (generated contracts)
+**AID version:** HEAD (post v2.50.1)
+**Observed at:** 2026-07-02
+**Status:** confirmed (PM manual inspection; independently verified by observer)
+**Severity:** high
+**Class:** false-green / command surface (generator contract validation)
+
+**What happened:** PM field finding, recorded in full in the
+"GENERATOR / CONTRACT-VALIDATION gap" section at the end of this file:
+`aid-plan-to-epic.sh` + `aid-epic-to-json.sh` collapse per-step scoping
+(every step gets ALL outputs/ACs/allowed_paths), corrupt ACs containing `|`
+(split on pipe), leak prose into allowed_paths, and drop inter-step deps —
+while C0/CP1 review only the PLAN, so the malformed generated contract passes
+everything. Observer verification on E-057-1_2 plan.json: 4 steps with
+identical outputs (8) and ACs (13) each, AC[12] is the fragment
+"length\`; TTL guard projde." (pipe-split), `depends: [None×4]`.
+
+**Why it matters / likely fix:** see the PM section (fix candidates 1-5; key
+one: a NEW GATE validating the generated plan.json contract). Probe-wise this
+is the strongest false-green instance so far: it affects every EPIC generation
+and has silently degraded per-step contracts across E1-E8.
+
+### OBS-20260702-09 - aid-plan-diff parses only "## Acceptance Criteria" heading; plans use "## Success Criteria" → skip→pass, ACs never executed (pointer)
+
+**Observed in:** aid-orchestrator / plans P049-P058 era / `aid-plan-diff.sh`
+**AID version:** HEAD (post v2.50.1)
+**Observed at:** 2026-07-02
+**Status:** confirmed (PM finding via P058 CP1-deep L3 lens; independently verified by observer)
+**Severity:** high
+**Class:** false-green / docs drift
+
+**What happened:** PM field finding, recorded in full in the
+"PLAN-DIFF heading drift" section at the end of this file. Observer
+verification: `aid-plan-diff.sh` AWK range (line ~131) matches only
+`/^## Acceptance Criteria/`; P057 and at least 10 recent plans put their
+verification_pattern ACs under `## Success Criteria` (P057 line 404, no
+Acceptance heading) → `ac_count: 0` → `verdict: skipped`, exit 2 → gate treats
+skip as pass. The verification_pattern ACs of those plans were never executed
+by plan-diff.
+
+**Why it matters / likely fix:** see the PM section. Probe-wise: second
+generator/contract false-green in one day (with OBS-08) — both are
+"declared control never actually runs, everything reports green", same class
+as OBS-05 (undefined gate silently dropped). Pattern across all three: a
+declared control resolves to a no-op without any error surface. Also note the
+PM point that skip-as-pass on a plan that HAS ACs should be distinguishable
+from a legitimate Fast-Mode skip.
+
 ---
+
+### OBS-20260702-11 - Evidence step-numbering offset drift: agents write 1-based files, FSM checks 0-based
+
+**Observed in:** aid-orchestrator / P058 / E-058-1_1 / R-E058-1 (and B-007 corroboration in WAN E-058-2/3)
+**AID version:** HEAD (pre-v2.51.0)
+**Observed at:** 2026-07-02
+**Status:** confirmed
+**Severity:** medium
+**Class:** UX indexing / evidence integrity
+
+**What happened:** The implementer wrote CP2 evidence for the FIRST step as
+`verifier-output-step-1.md` (1-based, matching plan "Step 1"); the FSM
+increment demanded 0-based `step-0` files (`fsm_increment_fail:
+missing_step_verify`). The agent recovered by DUPLICATING evidence under both
+numberings (step-0 + step-1 files for one step), then continued 1-based for
+verifier outputs and 0-based for step-N-verify files — a consistent offset:
+`verifier-output-step-{k}` is 1-based while `step-{k-1}-verify.md` is 0-based,
+and the FSM's per-step check validates a file whose number does not match the
+step it gates. No overwrite occurred (each artifact type stayed internally
+consistent), but the numbering convention is pinned nowhere and each
+session/project picks differently (WAN runs used 0-based verifier outputs).
+
+**Why it matters:** B-007 escalated from UX annoyance to evidence-integrity
+risk: one step owning two file numbers invites a later step to overwrite or a
+consumer to read the wrong step's verdict. The FSM enforcement caught the
+initial mismatch (good), but the recovery created duplicate evidence rather
+than a canonical correction.
+
+**Reproduction:** `ls .aid-o/work/evidence/E-058-1_1/R-E058-1/ | grep -E
+"step-[0-9]"` — step-0..step-2 files where 0 and 1 are both the first step;
+timeline increment_fail events 2026-07-02 08:23Z.
+
+**Likely fix:** Pin ONE canonical numbering for evidence filenames (recommend
+1-based to match plans, with FSM translating internally), enforce it in
+`fsm_check_verifier_output` (reject wrong-numbered files with a clear message),
+and print both forms in all FSM output (`current_step=1 (Plan Step 2)`) per
+B-007.
+
+### OBS-20260705-01 - CP2 prefilter classifies by wrong diff range: production step marked docs_only SKIP
+
+**Observed in:** WAN / P058 / E-058-4_6 / R-E058-4 step 0
+**AID version:** v2.50.1
+**Observed at:** 2026-07-05
+**Status:** confirmed (recovered same run)
+**Severity:** high
+**Class:** false-green / prefilter diff range
+
+**What happened:** Step 1 (`7580ed0`) changed production code (erp_write.py
++19, enums.py +13, validators/format.py +44, +95 test lines). A bookkeeping
+commit (`b0ef918`, active.md only) landed on top. CP2 prefilter then classified
+the step SKIP with matched rule `docs_only` — it evidently evaluated only the
+latest commit instead of the step's full diff range — and wrote a SKIP stub
+that `fsm_check_verifier_output` accepts. A production step would have passed
+with zero verification. Recovery: the implementer dispatched a real CP2 anyway
+(RUN/pass, 11:22), overwrote the stub, and the run continued correctly; the
+bogus SKIP event remains in the append-only timeline as proof.
+
+**Why it matters:** Same family as B-008/OBS-03 (wrong diff range), on the
+prefilter side: any step whose last commit is docs/bookkeeping gets its
+verification silently skipped. Recovery relied on agent discipline, not
+enforcement. Contrast: later the same day, a genuinely docs-only step
+(E-058-5 step 2) was correctly SKIPped — the rule itself is fine, the range is
+wrong.
+
+**Reproduction:** WAN timeline event `prefilter_classification step:0
+SKIP docs_only` (2026-07-05 09:16:37Z) vs `git show --stat 7580ed0` and
+`b0ef918`.
+
+**Likely fix:** `aid-prefilter.sh` must diff from the step boundary (or
+base_commit) to HEAD, never a single commit; `docs_only` must never match when
+the range contains production paths.
+
+**Recurrence 2026-07-06 (E-058-6_6 step 1):** identical mechanism — production
+step `5209475` (Structured Outputs wiring: config/extractor/json_schema) topped
+by docs commit `c127ebf` (D-005) → prefilter SKIP/docs_only (06:13:33Z).
+Recovered again by manual CP2 dispatch, this time SELF-DOCUMENTING: the
+verifier output header states "manual dispatch — pre-filter misfire correction"
+and names the correct reviewed commit. Two EPICs (E4+E6) → **cleanup trigger
+met**; the workaround is becoming routine agent labor that the fix should
+eliminate.
+
+### OBS-20260705-02 - fsm-state.yaml mutations without timeline events (base_commit, plan_json_hash)
+
+**Observed in:** WAN E-058-4/5/6 starts + aid-orchestrator E-057-1/2 regen
+**AID version:** v2.50.1 / HEAD
+**Observed at:** 2026-07-05 (3+ instances)
+**Status:** confirmed
+**Severity:** medium
+**Class:** evidence integrity (unevented state mutation)
+
+**What happened:** Three-plus confirmed instances of `fsm-state.yaml` fields
+changing with NO corresponding timeline event: (a) E-058-4 start — base_commit
+9e858cd→f9faaae; (b) E-057-1/2 — plan_json_hash refreshed after contract
+regeneration; (c) E-058-5 start — base_commit 9e858cd→431feb7 (and E-058-6
+likewise). All mutations were correct in intent (fresh base for stacked EPICs,
+hash matching regenerated plan) and the timelines were preserved (no wipe —
+improvement over OBS-01), but the state file history is not reconstructible
+from events.
+
+**Why it matters:** The timeline is the audit trail; if routine operations
+mutate state silently, "state matches events" cannot be verified and the OBS-01
+guard-bypass class stays invisible. The improvement (edit-in-place instead of
+wipe+reinit) should be completed with eventing.
+
+**Likely fix:** every fsm-state mutation goes through an `aid-fsm.sh set-field`
+style command that logs a `fsm_field_change` timeline event (field, old, new,
+reason). Note: v2.51.0 already hardened set-field itself (slash/backslash
+bugs) — wiring it as the only mutation path + eventing is the remaining step.
+
+### OBS-20260705-03 - Untracked AID-look-alike branch work never covered by any checkpoint
+
+**Observed in:** WAN / P058 / branch task/E-058-3_6-fe/main (4 commits)
+**AID version:** v2.50.1
+**Observed at:** 2026-07-05 (structurally confirmed)
+**Status:** confirmed
+**Severity:** medium
+**Class:** branch/run identity / review coverage
+
+**What happened:** FE follow-up work (IMP-123) was done on branch
+`task/E-058-3_6-fe/main` — AID naming convention, but NO run: no evidence dir,
+no fsm-state, no task file, no CP2/CP3. The integration branch (f9faaae) then
+became the base for E-058-4/5/6, placing the 4 FE commits BELOW every later
+EPIC's base_commit: E3's CP3 predates them, E4+'s CP3 ranges start after them.
+By construction, no AID checkpoint will ever review these commits, yet they
+flow to main through the plan lineage at plan-close.
+
+**Why it matters:** The naming makes the branch LOOK AID-managed; a plan-close
+reviewer sees task/* branches and assumes coverage. Ad-hoc side work is a PM
+prerogative, but the system offers no signal distinguishing "verified EPIC
+work" from "untracked work in EPIC clothing" in the merged history.
+
+**Likely fix:** plan-close (C4) should compute review coverage over the full
+merge range (which commits were inside some run's verified range) and list
+uncovered commits for explicit PM acknowledgment. Optionally: warn when a
+task/* branch has no matching run evidence.
+
+### OBS-20260706-01 - gates_report.json written to two different paths across runs/re-runs
+
+**Observed in:** aid-orchestrator / E-058-1_1 / R-E058-1
+**AID version:** HEAD (v2.51.0 cycle)
+**Observed at:** 2026-07-06
+**Status:** confirmed
+**Severity:** low
+**Class:** UX indexing / command surface
+
+**What happened:** The original gates run wrote
+`R-E058-1/gates/gates_report.json` (07-05, contains plan_diff:skip); the
+post-fix re-run wrote flat `R-E058-1/gates_report.json` (07-06,
+plan_diff:fail). Two reports, two vintages, no supersede marker — a consumer
+reading the subdir path sees stale results. Same class as OBS-02 (run.md path
+duality), now on gates evidence. WAN runs consistently used the `gates/`
+subdir path.
+
+**Likely fix:** one canonical path; re-runs overwrite it (timeline already
+preserves per-run history).
+
+### Probe update 2026-07-05/06 — recurrences, escalations, remedies observed
+
+Compact ledger updates to existing findings (details in observer working notes):
+
+- **OBS-03 (CP3 freshness): instance #2 confirmed at E-058-4 DONE** (test-only
+  gate-fix `b8f0546` uncovered; GATES→DONE 10:07:55Z with CP3 untouched) →
+  cleanup trigger MET. **Instance #3 at aid-orchestrator E-058-1_1** — first
+  with a PRODUCTION post-review commit (`765aba5`, regex fix in scoping
+  lookup); GATES→DONE with stale CP3, cross-project pattern. **Remedy pattern
+  observed at v2.51.0 merge:** independent `verifier-output-pm-fix-cycle.md`
+  (FULL_REVIEW, pass, found+fixed one more bug 67ee875) dispatched over ALL
+  post-review commits + `BOOTSTRAP-EXCEPTION.md` waiver doc before merge — this
+  is the behavior the OBS-03 fix should mechanize.
+- **OBS-05 (declared gate silently dropped): recurrence #3+ **— every P058 EPIC
+  (WAN E4/E5/E6 + AID E-058-1_1) declares `docs_updated`. Root cause chain:
+  `aid-plan-to-epic.sh:843` hardcodes it into every generated EPIC;
+  `defaults/execution.yaml:23` defines it but live project configs (WAN + AID)
+  drifted and lack it; no reconciliation → silent drop;
+  `enforcement-registry.yaml:154` still lists it severity:blocking
+  status:active. Cross-project systemic.
+- **OBS-06 (hook bypass): tally 9** — 6th (c0505fb) and 7th (3fd7a2c,
+  production post-DONE fix) SILENT, undocumented; 8th (8215500) silent; 9th
+  (f1f253c) documented again. Note: the aid-orchestrator repo has NO FSM
+  pre-commit hook, so the conflict is WAN-deployment-specific.
+- **OBS-10 (audit verdict prose-only): recurrences E4 + E5** (no artifacts,
+  verdicts only in commit messages; WAN on old plugin). **Positive contrast:**
+  AID E-058-1_1 persisted the complete review pack (curator-report,
+  audit-report yaml+md, CP4 curator-validation, simplifier-report, reporter
+  smoke evidence, verification-report.json, ca-review-complete) — pin this as
+  the contract.
+- **OBS-08 (generated contracts): fix VERIFIED live** — v2.51.0 per-step
+  scoping works on regenerated E-057 contracts (outputs 3/1/2/2, zero AC
+  fragments) with `.pre-P058-fix.snapshot` archives (OBS-01 lesson adopted);
+  `depends` derivation still open. The fix-EPIC ran on its own malformed
+  contract under an explicit, PM-authorized `BOOTSTRAP-EXCEPTION.md`.
+- **OBS-09 (plan-diff heading): fix landed** (a22b2cd) — and exposed the next
+  layer: `plan_path: null` in fsm-state made the gate skip-as-pass anyway
+  (plan_path plumbing never wired at init), then after the YAML-unescape fixes
+  the gate finally RUNS and FAILS LOUDLY (advisory) — meta-pattern remedy
+  visible in practice.
 
 ## B-004 — Live usage probe for AID v2 control-system friction
 
@@ -605,3 +927,49 @@ The following are explicitly deferred out of P057 and MUST be picked up later:
 - **C4 consumption of audit-report/curator/invalidation** into release-decision → **E9**.
 - **Large legacy A-J project-health audit cleanup / separation** → later. E8 keeps A-J as a legacy
   compat section on the converted auditor; a proper split into a standalone project-health tool is deferred.
+
+## GENERATOR / CONTRACT-VALIDATION gap (found P057/E8 manual inspection, 2026-07-02)
+
+**Class:** false-green — plan passes C0/CP1 but the GENERATED executable EPIC contract is malformed.
+**Severity:** high (affects every EPIC generation; degrades per-step contracts silently).
+
+The plan→EPIC.md→plan.json pipeline (`aid-plan-to-epic.sh` + `aid-epic-to-json.sh`) produces malformed
+executable contracts that the review gates do NOT catch:
+- **Step-scoping collapse:** outputs/acceptance_criteria/allowed_paths are aggregated at EPIC level and
+  copied to EVERY step (per-step scoping only exists for role/objective/depends/parallel). Result: each
+  step claims all files + all ACs → "what did THIS step deliver" is meaningless. (E-057-1_2: every step
+  has all 8 outputs+13 AC; E-057-2_2: every step all 13 outputs.)
+- **AC split on `|`:** `aid-epic-to-json.sh` splits an AC line on the pipe char → a single jq expression
+  (`jq '...enum | length == 3'`) becomes two bogus ACs (plan.json:57/58, 62). Any AC containing `|`
+  (jq pipes, enum alternations) is corrupted.
+- **Prose in allowed_paths:** `aid-plan-to-epic.sh` doesn't extract just the path from
+  "Create: `path` — description"; whole prose lines land in allowed_paths ("CHANGELOG + version 2.51.0…").
+- **No inter-step deps:** step table depends column is always `---`; real Step N→Step M deps lost.
+- **META (the important one):** C0 `plan-review.json` = status:pass, `lens_dispatch_observed: 0/5`,
+  no findings — the gates review the PLAN, nothing validates the generated plan.json/task contract.
+
+**Fix candidates:** (1) per-step scoping in the generator (parse each step's Files/AC sub-section, assign
+to the right step object); (2) stop splitting ACs on `|` (use a safe delimiter / preserve verification_pattern
+blocks verbatim); (3) extract clean path from Files entries (strip "Verb:" prefix + "— description"/"(note)");
+(4) derive step deps; (5) **NEW GATE: validate the generated plan.json contract** (per-step scoping sane,
+allowed_paths are real paths, ACs well-formed) so malformed generation fails a gate instead of reaching /aid-run.
+NB: E1-E8 EPICs likely all had degraded per-step contracts (ran anyway because implementer works holistically).
+
+## PLAN-DIFF heading drift (found P058 CP1-deep L3, 2026-07-02)
+
+**Class:** false-green — `aid-plan-diff.sh` reports skip→pass while the plan's verification_pattern ACs are never run.
+**Severity:** high (systemic across P049-P058).
+
+`aid-plan-diff.sh:131` parses only `/^## Acceptance Criteria/` for verification_pattern AC blocks, but the plan
+template + every recent plan (P052-P058 confirmed: `## Success Criteria`=1, `## Acceptance Criteria` heading=0)
+put their AC1..N + `verification_pattern` blocks under **`## Success Criteria`**. Result: `aid-plan-diff` finds
+`ac_count:0` → graceful skip (exit 2) → the plan_diff gate's pass_criteria treats skip as PASS → **the
+verification_pattern ACs of every one of these plans were never executed by plan-diff** (decorative at that gate).
+
+**P058 fixes the parser** (`:131` → `/^## (Acceptance Criteria|Success Criteria)/`) so it retroactively runs for
+all existing plans. **Remaining backlog:** decide the canonical heading (align the plan template + plan-writing
+skill to ONE of `## Acceptance Criteria` / `## Success Criteria`), and audit whether the per-step
+`**Acceptance Criteria:**` checklists (which DO flow to plan.json via aid-plan-to-epic) vs the plan-level
+`## Success Criteria` verification_patterns are both meant to be enforced and by which gate. Also: aid-plan-diff
+skip-as-pass should arguably be distinguishable from real pass in gate evidence (a skip on a plan that HAS ACs is
+a bug, not a legitimate Fast-Mode skip).

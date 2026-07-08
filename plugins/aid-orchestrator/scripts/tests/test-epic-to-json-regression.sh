@@ -20,6 +20,7 @@ SCHEMA_FILE="$REPO_ROOT/plugins/aid-orchestrator/defaults/templates/plan.schema.
 GOLDEN_DIR="$SCRIPT_DIR/fixtures/epic-to-json-golden"
 FIXTURE_MINIMAL="$SCRIPT_DIR/fixtures/E-TEST-001-1_1-minimal-test-plan.md"
 FIXTURE_CYCLE="$SCRIPT_DIR/fixtures/E-TEST-003-1_1-circular-deps.md"
+FIXTURE_STEP_SCOPING="$SCRIPT_DIR/fixtures/E-TEST-005-1_1-step-scoping-repro.md"
 
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
@@ -47,6 +48,10 @@ if [[ ! -f "$FIXTURE_MINIMAL" ]]; then
 fi
 if [[ ! -f "$FIXTURE_CYCLE" ]]; then
   echo "ERROR: Cycle fixture not found: $FIXTURE_CYCLE" >&2
+  exit 1
+fi
+if [[ ! -f "$FIXTURE_STEP_SCOPING" ]]; then
+  echo "ERROR: Step-scoping repro fixture not found: $FIXTURE_STEP_SCOPING" >&2
   exit 1
 fi
 
@@ -207,6 +212,79 @@ echo "TEST: T4 — ui_change_contract envelope round-trip"
           _fail "T4 — ui_change_contract mismatch. Got: path=$contract_path sha256=$contract_sha schema=$contract_schema | Expected: path=$expected_path sha256=$expected_sha schema=$expected_schema"
         fi
       fi
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# T5 — Per-step scoping repro (P058 Step 1, RED before the Step 2-3 fix)
+#
+# E-TEST-005 has 2 steps (backend, qa) with genuinely distinct Files/AC.
+# Today aid-epic-to-json.sh broadcasts the flat `## Artifacts` and
+# `## Scope > Allowed files/paths` sections to EVERY step, and its AC
+# delimiter (`IFS='|||'`) collides with any literal `|` inside AC text. All
+# 4 asserts below are expected to FAIL against the current (unfixed)
+# generator — that is the point of this test: it freezes the bug as a
+# reproducible red state ahead of the P058 Step 2-3 fix.
+# ---------------------------------------------------------------------------
+echo "TEST: T5 — Per-step scoping repro (E-TEST-005)"
+{
+  t5_out="$TMPDIR_ROOT/t5"
+  mkdir -p "$t5_out"
+  t5_plan="$(run_on_fixture "$FIXTURE_STEP_SCOPING" "$t5_out")"
+
+  if [[ -z "$t5_plan" || ! -f "$t5_plan" ]]; then
+    _fail "T5a — aid-epic-to-json.sh failed on step-scoping fixture"
+    _fail "T5b — aid-epic-to-json.sh failed on step-scoping fixture"
+    _fail "T5c — aid-epic-to-json.sh failed on step-scoping fixture"
+    _fail "T5d — aid-epic-to-json.sh failed on step-scoping fixture"
+  else
+    # T5a: steps[].outputs must NOT be identical across steps (backend step 1
+    # has 3 files, qa step 2 has 2 files — they must differ). Today both
+    # steps get the full 5-entry EPIC-wide artifact union, so this fails.
+    outputs_step0="$(jq -c '.steps[0].outputs' "$t5_plan")"
+    outputs_step1="$(jq -c '.steps[1].outputs' "$t5_plan")"
+    if [[ "$outputs_step0" != "$outputs_step1" ]]; then
+      _pass "T5a — steps[].outputs are NOT identical across steps (per-step scoped)"
+    else
+      _fail "T5a — steps[].outputs ARE identical across steps (broadcast bug): $outputs_step0"
+    fi
+
+    # T5b: count of acceptance_criteria per step must equal the count of
+    # source AC bullets for that role (backend=2, qa=2). qa's first bullet
+    # contains a literal jq pipe `|`, which the current IFS='|||' delimiter
+    # incorrectly splits into an extra fragment (backend has no `|`, so it
+    # is unaffected and should already pass).
+    backend_ac_count="$(jq '.steps[0].acceptance_criteria | length' "$t5_plan")"
+    qa_ac_count="$(jq '.steps[1].acceptance_criteria | length' "$t5_plan")"
+    if [[ "$backend_ac_count" -eq 2 && "$qa_ac_count" -eq 2 ]]; then
+      _pass "T5b — acceptance_criteria count matches source bullets (backend=2, qa=2, no pipe-split fragments)"
+    else
+      _fail "T5b — acceptance_criteria count mismatch (pipe-split fragment): backend=$backend_ac_count (want 2), qa=$qa_ac_count (want 2)"
+    fi
+
+    # T5c: allowed_paths entries must be path-like — no prose, no trailing
+    # sentence, no unstripped multi-path "+" join. Today the Scope-derived
+    # multi-path/prose entry survives as one unsplit blob, which fails this.
+    bad_paths="$(jq -r '
+      [.steps[].allowed_paths[]] | unique | .[]
+      | select(test("^[A-Za-z0-9_./-]+$") | not)
+    ' "$t5_plan")"
+    if [[ -z "$bad_paths" ]]; then
+      _pass "T5c — allowed_paths entries are all path-like (no prose/trailing sentence)"
+    else
+      _fail "T5c — allowed_paths contain non-path-like entries: $(echo "$bad_paths" | tr '\n' '|')"
+    fi
+
+    # T5d: the multi-path "`a` + `b`" Files/Scope entry must produce BOTH
+    # paths as separate allowed_paths entries — the second path must not be
+    # silently dropped or left merged into the first.
+    has_root_changelog="$(jq -r '[.steps[].allowed_paths[]] | index("CHANGELOG.md")' "$t5_plan")"
+    has_plugin_changelog="$(jq -r '[.steps[].allowed_paths[]] | index("plugins/aid-orchestrator/CHANGELOG.md")' "$t5_plan")"
+    if [[ "$has_root_changelog" != "null" && "$has_plugin_changelog" != "null" ]]; then
+      _pass "T5d — multi-path Files entry preserved as two separate allowed_paths entries"
+    else
+      _fail "T5d — multi-path Files entry NOT preserved as two separate paths (root_idx=$has_root_changelog, plugin_idx=$has_plugin_changelog)"
     fi
   fi
 }

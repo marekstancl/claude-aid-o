@@ -583,6 +583,76 @@ To promote C0 from observe to blocking:
 
 ---
 
+## Per-Step Scoping (D2) and Contract Validation Gate (D5)
+
+P058 fixed a class of generator bugs where `aid-plan-to-epic.sh` /
+`aid-epic-to-json.sh` **broadcast** EPIC-level content to every step instead
+of scoping it per step: every step's `outputs`/`allowed_paths` ended up
+byte-identical (the flat `## Artifacts` section copied verbatim to all
+steps), and a `|`-split parsing bug fragmented multi-clause Acceptance
+Criteria into extra bogus array entries. Both defects made `plan.json`
+internally inconsistent without ever failing loudly. D2 is the source-side
+fix (scope content per step at generation time); D5 is the gate that catches
+any recurrence structurally, regardless of which generator produced the
+`plan.json`.
+
+### Per-step scoping block (D2)
+
+`aid-plan-to-epic.sh` emits one HTML-comment metadata block per EPIC step,
+under `## Step UI Contracts`, using the same inert-comment convention as the
+existing `ui_change_mode` per-step block:
+
+```
+<!-- step-N: files=["Create: `path` — desc","Modify: `a` + `b`"]; ac=["AC text 1","AC text 2"] -->
+```
+
+- `files[]` — one JSON string per step-local Files bullet, verbatim (label +
+  backticks + description kept) except for the leading `- `. `outputs` is
+  derived verbatim from this array; `allowed_paths` is derived by cleaning
+  it (stripping the `Create:`/`Modify:` verb prefix and description).
+- `ac[]` — one JSON string per step-local Acceptance Criteria bullet, with
+  the leading `- [ ]` checkbox stripped but no `[role]` prefix (the block is
+  already step-scoped).
+- Both arrays are JSON-encoded (`jq -R -s -c`), one string per source line.
+  A literal `-->` inside a value is replaced with a sentinel before encoding
+  so it can never truncate the block early; `aid-epic-to-json.sh` reverses
+  the substitution after decoding.
+
+`aid-epic-to-json.sh` (P058 Step 3) reads this block **per step** instead of
+assigning the flattened EPIC-level sections to every step — this is what
+makes `outputs`/`allowed_paths`/`acceptance_criteria` distinct per step in
+`plan.json`. Legacy EPICs that predate this block fall back to the flat
+`## Acceptance Criteria` section's `[role]`-tagged bullets.
+
+### Contract Validation Gate (D5)
+
+`scripts/gates/aid-contract-validate.sh` is a **blocking** structural gate
+over the generated `plan.json` (+ optional `task/EPIC.md`), modeled on
+`scope-check.sh` (stdin-free, `<plan_json_path> [epic_md_path]` args, JSON on
+stdout, exit 0 = pass / exit 1 = fail):
+
+| Check | What it catches |
+|-------|------------------|
+| `per_step_scoping` | Multi-step plan where every step's `outputs` OR every step's `allowed_paths` is byte-identical across ALL steps — the broadcast bug D2 fixes. Partial overlap is not a violation; only full identity is. |
+| `ac_no_fragments` | Each step's `acceptance_criteria` array length must equal the count of source AC bullets attributed to that step (from the D2 per-step block, or the legacy `[role]`-tagged fallback). Independently, a defense-in-depth heuristic flags any AC string that — outside balanced backtick spans — contains a bare `length ==`/`.enforcements` substring or an odd count of `'` characters, the textual signature of a `\|`-split mid-fragment. |
+| `allowed_paths_shape` | Any `allowed_paths` entry containing whitespace, `(`, or `)` — real repo paths never contain these; a hit means a verb prefix or trailing prose leaked through. |
+
+It is wired as the one BLOCKING exception inside the otherwise observe-only
+C0 block of `aid-auto-pipeline.sh`, running immediately after
+`aid-epic-to-json.sh` produces `plan.json` and before FSM init / `json-to-run`
+/ queue-add / branch creation. The result is persisted to
+`.aid-o/work/evidence/{plan_id}/c0/contract-validate.json` **before** the
+exit code is inspected (so a later phase's failure can never hide behind an
+earlier phase's stale pass), then `error_exit ... 4` aborts the pipeline on
+`result: "fail"`. `aid-c0-contract.sh`'s `review` subcommand exposes a Check
+6 (`contract_validation`) that reads — never re-runs — that persisted
+result, so the C0 evidence pack always reflects the real gate outcome.
+
+Registered as `contract_validation_gate` (`type: 4`, Structural-check;
+severity `blocking`) in `defaults/enforcement-registry.yaml`.
+
+---
+
 ## C2 Semantic Review Engine (E5)
 
 The C2 Semantic Review Engine runs in **observe/best-effort mode** (E5). Findings are
