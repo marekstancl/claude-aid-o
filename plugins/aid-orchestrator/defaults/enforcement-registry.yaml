@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 267          # granular registry rows; recomputed via `.enforcements|length` after adding curator_content_ref_guard + review_profile_presence + c3_gate_enforcement_toggle (E-059-1_2 Step 1, IMP-177); was 264 before these rows
+  enforcements: 268          # granular registry rows; recomputed via `.enforcements|length` after adding invalidation_map_expected (E-059-1_2 Step 2, IMP-177; was 267 after Step 1's curator_content_ref_guard + review_profile_presence + c3_gate_enforcement_toggle; 264 before those)
   mapped_with_verdict: 121   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 103 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); was 120 before curator_content_ref_guard (verdict: ALIGNED); the two new planned observe rows carry no verdict (match the DG-07 convention)
   mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by these rows)
   verdict_distribution: {ALIGNED: 103, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
@@ -77,7 +77,7 @@ enforcements:
   - {id: c3_blocking_high_or_critical, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:90", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .audit_report.blocking_findings==true (critical/high finding); risk-gated via c3-audit-policy.yaml c3_required per profile (E-057-1_2 M2 fix); Finding 1 fix: yq has() presence check prevents false-pass on absent profile; all jq/yq reads in this hook guarded against set -e crash on malformed input (CP4 rounds 2-3). Anchored by search text, not line number — this block drifted 3x across fix rounds within one EPIC."}
   - {id: c3_independence_unverifiable, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:104", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json .status==\"unverifiable\" (required independence level could not be confirmed); risk-gated via c3-audit-policy.yaml c3_required per profile"}
   - {id: c3_provenance_required, type: 1, source: "scripts/aid-fsm.sh cmd_done_advance() C3 hook (search: 'C3 independent-audit hook')", instruction: "agents/auditor.md:117", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "done-advance blocks release when C3 audit-report.json is missing/unparseable, missing .audit_report.input_manifest_hash (presence/format check), or .revision.head_sha is stale vs current HEAD (fail-closed, no // false fallback); risk-gated via c3-audit-policy.yaml c3_required per profile"}
-  - {id: invalidation_map_observe, type: 11, source: "scripts/lib/aid-invalidation-map.sh", instruction: "defaults/schemas/invalidation-map.schema.json", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "E8 D3 invalidation-map observe: derives affected_c1_checks from delivery-gate.yaml changed_paths_match globs (deterministic subset) + affected_c2_modes conservatively (any C2-relevant surface touched → all of local/wiring/behavior/final) from an applied fix's changed paths; emits invalidation-map.json + timeline log_event invalidation_map_produced; require_rerun is a flag/request only — this script never invokes delivery-gate or semantic-review itself, no auto-rerun exists (promotion of an actual rerun trigger is a future phase, tracked in BACKLOG)"}
+  - {id: invalidation_map_observe, type: 11, source: "scripts/lib/aid-invalidation-map.sh", instruction: "skills/pipeline.md (grep: 'Invalidation-Map Post-Fix Hook') — 5 in-scope gate-fixer dispatch call sites (CP2 / CP3 / GATES / DONE curator+auditor auto-fix / DONE simplifier); CP6 fast-mode OUT per D6", severity: advisory, surface: llm-facing, status: active, verdict: ALIGNED, test: "scripts/tests/bats/test-invalidation-map.bats", description: "E8 D3 invalidation-map observe: derives affected_c1_checks from delivery-gate.yaml changed_paths_match globs (deterministic subset) + affected_c2_modes conservatively (any C2-relevant surface touched → all of local/wiring/behavior/final) from an applied fix's changed paths; emits invalidation-map.json + timeline log_event invalidation_map_produced; require_rerun is a flag/request only — this script never invokes delivery-gate or semantic-review itself, no auto-rerun exists (promotion of an actual rerun trigger is a future phase, tracked in BACKLOG); live-flow caller wired E-059-1_2 Step 2 (IMP-177) via the pipeline.md Invalidation-Map Post-Fix Hook — was test-only before"}
 
   # ── Type 2: FSM-precondition (subagent output) ─────────────────────────────
   - {id: cp2_verifier_output,          type: 2, source: "scripts/aid-fsm.sh:720",  instruction: "agents/verifier.md:71", severity: blocking, surface: llm-facing, status: active, verdict: ALIGNED, description: "CP2 per-step verifier-output with _generated_by + classification; C2 dual-emits semantic-review.json alongside (E5 observe, E10 gate migration)"}
@@ -838,4 +838,18 @@ enforcements:
     promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "the C3 independent-audit done-advance hook reads the enforcement toggle from c3-audit-policy.yaml (observe → c3_gate_would_block telemetry + transition continues; blocking → fail-closed block); C3_AUDIT_POLICY env override is the test seam; the toggle key existed since E8 but was ignored until IMP-177; blocking promotion E10"
+    test: "scripts/tests/bats/test-c3-activation.bats"
+
+  - id: invalidation_map_expected
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'invalidation-map expectation check')"
+    instruction: "skills/pipeline.md (grep: 'Invalidation-Map Post-Fix Hook')"
+    severity: advisory
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "done-advance review→release: when a gate_fixer_fix_applied timeline event is present but no invalidation-map.json exists under the evidence dir, emit invalidation_map_expected_missing (observe — does not block; INVALIDATION_MAP_ENFORCEMENT=blocking seam flips it to fail-closed exit 2); the gate_fixer_fix_applied substrate is written by the pipeline.md Invalidation-Map Post-Fix Hook — this step created that event (nothing emitted it before, which was the IMP-177 root cause: a detector with no real signal wired to it, see AID-v3-principles.md §1); fail-closed reads: no timeline / no event ⇒ no fix applied ⇒ no-op; blocking promotion E10"
     test: "scripts/tests/bats/test-c3-activation.bats"
