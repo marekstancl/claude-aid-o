@@ -1278,3 +1278,52 @@ JSON
   # Should NOT see C3 block reason in output
   [[ "$output" != *"C3 independent audit block"* ]]
 }
+
+@test "E-057-1_2 C3 hook: malformed policy YAML fails closed (no script crash) instead of bypassing" {
+  # CP4 round 2 regression: bare `var=$(yq ...)` under set -e aborted the WHOLE script
+  # when c3-audit-policy.yaml was unparseable, skipping the structured PRECONDITION FAIL
+  # message and the ERROR summary entirely (though the script's own nonzero exit still
+  # prevented the transition from completing — not a bypass, but an unhandled crash
+  # instead of a clean, audited fail-closed message). This test locks the fix: a
+  # malformed policy file for a high-risk profile must still emit the C3 block message.
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{
+  "review_profile": {
+    "risk_profile": "high"
+  }
+}
+JSON
+
+  cat > "$TEST_EVIDENCE_DIR/audit-report.json" <<'JSON'
+{
+  "audit_report": {
+    "blocking_findings": true,
+    "input_manifest_hash": "sha256:abc123"
+  },
+  "status": "pass",
+  "revision": {
+    "head_sha": "deadbeef"
+  }
+}
+JSON
+
+  GIT_AUTHOR_DATE='2026-06-18 00:00:00' git commit --allow-empty --amend -m "test" >/dev/null 2>&1 || true
+
+  # Point AID_PLUGIN_PATH at a fake plugin root whose c3-audit-policy.yaml is syntactically
+  # broken (missing colon after the risk-profile key) — yq must fail to parse it, and the
+  # done-advance call must NOT crash the whole script as a result.
+  local fake_plugin_root="$TEST_EVIDENCE_DIR/fake-plugin-root"
+  mkdir -p "$fake_plugin_root/defaults/policies"
+  printf 'risk_profiles:\n  high\n    c3_required: true\n' > "$fake_plugin_root/defaults/policies/c3-audit-policy.yaml"
+
+  AID_PLUGIN_PATH="$fake_plugin_root"
+  export AID_PLUGIN_PATH
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 independent audit block"* ]]
+  [[ "$output" == *"blocking_findings == true"* ]]
+  [[ "$output" == *"precondition(s) failed"* ]]
+}

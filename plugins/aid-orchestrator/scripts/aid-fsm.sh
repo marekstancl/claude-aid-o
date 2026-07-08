@@ -2707,11 +2707,16 @@ EOF
           # Use has() to distinguish "key absent" from "key present but false".
           # Both scenarios yield exit 0 and "false" output with the old // false fallback,
           # making it impossible to distinguish. The fix: check presence first.
-          local has_profile_key
-          has_profile_key=$(yq -r "(.risk_profiles | has(\"$c3_risk_profile\")) and (.risk_profiles[\"$c3_risk_profile\"] | has(\"c3_required\"))" "$policy_file" 2>/dev/null)
-          if [[ "$has_profile_key" == "true" ]]; then
-            c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required" "$policy_file" 2>/dev/null)
-            if [[ $? -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
+          # CP4 round 2 fix: bare `var=$(cmd)` under `set -e` aborts the WHOLE SCRIPT if
+          # cmd (yq) exits non-zero (e.g. malformed/unparseable policy YAML) — the `|| ...`
+          # guard is mandatory here so a corrupted policy file fails closed with a proper
+          # PRECONDITION FAIL message instead of an unhandled script crash.
+          local has_profile_key="" has_exit_code=0
+          has_profile_key=$(yq -r "(.risk_profiles | has(\"$c3_risk_profile\")) and (.risk_profiles[\"$c3_risk_profile\"] | has(\"c3_required\"))" "$policy_file" 2>/dev/null) || has_exit_code=$?
+          if [[ $has_exit_code -eq 0 && "$has_profile_key" == "true" ]]; then
+            local c3_required_exit_code=0
+            c3_required_from_policy=$(yq -r ".risk_profiles[\"$c3_risk_profile\"].c3_required" "$policy_file" 2>/dev/null) || c3_required_exit_code=$?
+            if [[ $c3_required_exit_code -eq 0 && ("$c3_required_from_policy" == "true" || "$c3_required_from_policy" == "false") ]]; then
               policy_read_succeeded="true"
             fi
           fi
