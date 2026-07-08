@@ -95,6 +95,7 @@ Závazná rozhodnutí PM (nesmí se v executable plánech porušit):
 - Deterministické ≠ LLM - LLM nikdy nepřevede deterministický fail na pass.
 - Jedna release autorita (C4).
 - Jeden mode = jedna rozhodovací autorita; lenses se mohou fan-outovat do více měřených model calls, ale nevytvářejí další autoritu ani obří prompt.
+- **Nový evidence systém je cesta ke ZRYCHLENÍ, ne trvalá vrstva navíc.** Cílový stav NENÍ CP1-CP6 + C0-C4 paralelně navždy: paralelní běh je jen přechodová fáze do E10 kalibrace. Současná pomalost pramení z držení starého i nového zároveň + z ručního dověřování (per-step prověrky, ruční CP1-deep, nezávislé verify-plan runy), kterým se supluje to, čemu pipeline zatím neumí věřit sama. Po E10 promotion (observe→blocking) a E11 cutoveru: v2 JSON artefakty = autorita, markdown CP výstupy jen lidské summary, duplicitní staré gates vypnuté, ruční scaffolding zmizí - méně kontrol, ale tvrdších a adaptivních dle profilu rizika. Pozor: staré kontroly se NEvypínají dřív, než nová vrstva na E10 datech prokazatelně pokryje jejich odpovědnost - jinak si jen zrychlíme cestu k falešně zeleným mergům.
 
 ## Data Model
 
