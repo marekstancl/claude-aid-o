@@ -139,6 +139,15 @@ JSON
   # everything else (status, manifest hash, head_sha) stays clean.
   _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
 
+  # E-057-2_2 Step 1: on high-risk profile, Curator is required to dual-emit
+  # curator-report.json with a matching content-ref. Provide it to isolate the
+  # C3 blocking_findings check.
+  local actual_hash
+  actual_hash="$(sha256sum "$TEST_EVIDENCE_DIR/audit-report.json" | awk '{print $1}')"
+  cat > "$TEST_EVIDENCE_DIR/curator-report.json" <<JSON
+{"curator": {"audit_report_ref": "sha256:${actual_hash}"}}
+JSON
+
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
   [[ "$output" != *"C3 independent audit block"* ]]
@@ -201,6 +210,14 @@ JSON
   # "pass" status (correspondingly achievable/confirmed independence level).
   _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
 
+  # E-057-2_2 Step 1: on high-risk profile, provide curator-report.json with
+  # matching content-ref to isolate the C3 status check.
+  local actual_hash
+  actual_hash="$(sha256sum "$TEST_EVIDENCE_DIR/audit-report.json" | awk '{print $1}')"
+  cat > "$TEST_EVIDENCE_DIR/curator-report.json" <<JSON
+{"curator": {"audit_report_ref": "sha256:${actual_hash}"}}
+JSON
+
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
   [[ "$output" != *"C3 independent audit block"* ]]
@@ -253,6 +270,14 @@ JSON
   # Isolate: ONLY input_manifest_hash flips (present now) relative to the
   # positive test above — everything else stays identical.
   _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
+
+  # E-057-2_2 Step 1: on high-risk profile, provide curator-report.json with
+  # matching content-ref to isolate the C3 manifest_hash check.
+  local actual_hash
+  actual_hash="$(sha256sum "$TEST_EVIDENCE_DIR/audit-report.json" | awk '{print $1}')"
+  cat > "$TEST_EVIDENCE_DIR/curator-report.json" <<JSON
+{"curator": {"audit_report_ref": "sha256:${actual_hash}"}}
+JSON
 
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
@@ -308,4 +333,57 @@ JSON
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
   [[ "$output" != *"sequencing violation"* ]]
+}
+
+# ─── Scenario 4b: curator-report.json missing on C3-required run → block (risk-gated) ─
+
+@test "C3 EPIC scenario 4b (positive): curator-report.json absent on high-risk profile → done-advance blocks" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+  local head_sha; head_sha="$(git rev-parse HEAD)"
+
+  # High risk profile REQUIRES C3 and curator dual-emit. Absence of the entire
+  # curator-report.json file is a hard block (fail-closed) on C3-required runs.
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
+
+  # Deliberately OMIT curator-report.json entirely (not even the .md file). The
+  # existing .md/.yaml check (lines 2622–2626 in aid-fsm.sh) will catch this too,
+  # but we're specifically testing the E-057-2_2 Step 1 fail-closed behavior for
+  # the JSON file when C3 is required.
+  # Touch only the legacy .md file to bypass the basic existence check, isolating
+  # the JSON-level failure.
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curator-report.json not found"* ]]
+  [[ "$output" == *"risk profile 'high' requires C3 audit and dual-emitted curator report"* ]]
+}
+
+@test "C3 EPIC scenario 4b (negative control): curator-report.json absent on medium-risk profile → passes (no-op)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_done_review_state "$state_file"
+  local head_sha; head_sha="$(git rev-parse HEAD)"
+
+  # Medium risk profile does NOT require C3, so curator-report.json is optional.
+  # Absence is a silent no-op — the run should pass (only the legacy .md check).
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "medium"}}
+JSON
+  printf 'blocking_findings: false\n' > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _write_clean_audit_json "$TEST_EVIDENCE_DIR/audit-report.json" "$head_sha" "pass" "false"
+
+  # Omit both curator-report.json AND curator-report.md. The basic existence check
+  # will block. So we touch the legacy .md file to only isolate the JSON-level behavior.
+  echo "curator report" > "$TEST_EVIDENCE_DIR/curator-report.md"
+
+  # Isolate: with medium profile (C3 not required), curator-report.json missing
+  # should NOT block at the JSON level. The .md file satisfies the base requirement.
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"curator-report.json not found"* ]]
 }

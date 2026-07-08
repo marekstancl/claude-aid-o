@@ -825,11 +825,15 @@ table, DONE checklist, and both narrative sequencing notes were updated; see `ag
 `curator-report.md` (unchanged FSM plan-close/CP4 `.md` checks) and a new `curator-report.json`
 carrying `proposal_status: PROPOSALS_READY|NO_PROPOSALS|INPUT_INCOMPLETE` plus
 `.curator.audit_report_ref` — the sha256 of the actual bytes of the `audit-report.json` the
-Curator consumed. `aid-fsm.sh`'s content-ref sequencing guard recomputes `sha256sum` of the
-current `audit-report.json` and compares it against `.curator.audit_report_ref`; a mismatch or
-absence blocks. This proves genuine consumption-order (the Curator actually read the current
-audit output), not merely "same HEAD commit" — a same-HEAD check alone cannot distinguish a
-Curator that ran before C3 from one that ran after. **`recommended_disposition` (the
+Curator consumed. `aid-fsm.sh`'s content-ref sequencing guard validates the integrity chain:
+when `curator-report.json` exists, recomputes `sha256sum` of the current `audit-report.json`
+and compares it against `.curator.audit_report_ref`; a mismatch or missing field blocks
+(fail-closed). When the risk profile requires C3 (high/unverifiable), absence of the entire
+`curator-report.json` file also blocks — because Curator is required to dual-emit it.
+When risk profile does not require C3 (other profiles), absence is a silent no-op (pre-C3
+Curator runs have no JSON file). This proves genuine consumption-order (the Curator actually
+read the current audit output), not merely "same HEAD commit" — a same-HEAD check alone
+cannot distinguish a Curator that ran before C3 from one that ran after. **`recommended_disposition` (the
 approve/reject/defer merge-influence contract consumed by `gate-fixer.md`, `simplifier.md`, and
 `pipeline.md`) is completely untouched** — E8 only changes sequencing and vocabulary, never
 merge-authority.
