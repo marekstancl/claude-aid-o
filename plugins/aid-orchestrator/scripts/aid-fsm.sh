@@ -2612,9 +2612,13 @@ cmd_done_advance() {
       if [[ -f "$_im_timeline" ]]; then
         local _im_applied _im_produced
         # Count gate_fixer_fix_applied events in the timeline (fail-safe to 0).
-        _im_applied=$(jq -r '[inputs | select(.event=="gate_fixer_fix_applied")] | length' -n < "$_im_timeline" 2>/dev/null || echo 0)
+        # Use per-line raw read with fromjson? to skip malformed lines instead of
+        # aborting the whole stream on a single corrupt line (robustness against
+        # partial/truncated JSONL writes).
+        _im_applied=$(jq -R 'fromjson? | select(.event=="gate_fixer_fix_applied")' "$_im_timeline" 2>/dev/null | wc -l)
         # Count invalidation_map_produced events in the timeline (fail-safe to 0).
-        _im_produced=$(jq -r '[inputs | select(.event=="invalidation_map_produced")] | length' -n < "$_im_timeline" 2>/dev/null || echo 0)
+        # Same per-line robustness as above.
+        _im_produced=$(jq -R 'fromjson? | select(.event=="invalidation_map_produced")' "$_im_timeline" 2>/dev/null | wc -l)
 
         if [[ $_im_applied -gt 0 && $_im_produced -lt $_im_applied ]]; then
           # At least one fix was applied but fewer invalidation-map events were produced.
