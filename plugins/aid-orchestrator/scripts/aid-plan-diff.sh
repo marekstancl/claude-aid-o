@@ -203,7 +203,10 @@ run_pattern() {
   case "$type" in
     cmd)
       local actual_exit=0
-      eval "$cmd" >/dev/null 2>&1 || actual_exit=$?
+      # Sub-subshell isolates FATAL bash errors in AC cmds (set -u unbound-var
+      # expansion aborts are NOT catchable by || in the same shell) — a broken
+      # AC must yield a nonzero verdict, never kill the runner (PM fix 2026-07-08).
+      ( eval "$cmd" ) >/dev/null 2>&1 || actual_exit=$?
       if [[ "$actual_exit" -eq "$expected_exit" ]]; then
         verdict="present"; evidence="exit=$actual_exit"
       else
@@ -287,6 +290,13 @@ while IFS= read -r line; do
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
   [[ "$verdict" == "absent"  ]] && absent_count=$((absent_count + 1))
   [[ "$verdict" == "skipped" ]] && skipped_count=$((skipped_count + 1))
+
+  # Runner-crash belt: if run_pattern died mid-way (empty fields), record a
+  # skipped row instead of passing invalid JSON to --argjson (PM fix 2026-07-08).
+  if ! [[ "$duration_ms" =~ ^[0-9]+$ ]]; then
+    verdict="skipped"; evidence="runner_error: pattern produced no result"; duration_ms=0
+    skipped_count=$((skipped_count + 1))
+  fi
 
   # NOTE: jq reserves `label` as a keyword (label/break syntax), so we pass it
   # as $lbl. Same for `verdict` — rename to $vrd defensively.

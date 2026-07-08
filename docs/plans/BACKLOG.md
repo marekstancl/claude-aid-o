@@ -1231,3 +1231,10 @@ trailing sentence). Bare short fragments like `pm-decision-brief.schema.json` (m
 gate said clean. Enhancement candidate: for `Modify:` entries, verify the path exists in the repo
 (Create: targets exempt); or at minimum require a `/` for known-tree files. Same class as P058's
 original findings — the gate closed prose, not wrongness.
+
+### plan-diff AC label regex mismatch (found during PM fix pass, 2026-07-08)
+
+`aid-plan-diff.sh` extracts AC labels via `^- \[[ x]\] AC[0-9]+:` (colon), but P057-P059 plans write
+`- [ ] AC8 — ...` (em-dash) → all rows parse with EMPTY ac_label/ac_text (verdicts still computed
+correctly via the yaml blocks; cosmetic in reports, annoying in evidence). Widen the regex to
+`AC[0-9]+[:—-]` or align plan-writing convention. Low.
