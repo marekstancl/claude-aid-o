@@ -2631,57 +2631,13 @@ EOF
         errors=$((errors + 1))
       fi
 
-      # PM decision must be set to merge
-      local pm_decision
-      pm_decision=$(yaml_field "$state_file" pm_decision)
-      [[ "$pm_decision" == "merge" ]] || {
-        echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
-        errors=$((errors + 1))
-      }
-
-      # EPIC task file must be archived (moved to tasks/archive/)
-      local task_file
-      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
-      if [[ -n "$task_file" ]]; then
-        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
-        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
-        errors=$((errors + 1))
-      fi
-
-      # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
-      # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
-      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
-      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
-      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
-      # (M2 fix). Risk profile comes from review-profile.json (produced by
-      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
-      # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
-      # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
-      # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
-      # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
-      # no-op and falls through unchanged to the legacy blocking_findings check below.
-      #
-      # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
-      # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
-      # (independence could not be confirmed), or a stale `revision.head_sha` that no
-      # longer matches the run's actual current HEAD (freshness — an audit computed
-      # against a prior commit must not authorize release of the current commit,
-      # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
-      # jq fallback anywhere below — absence/unreadability is treated as blocking, never
-      # as a silent pass.
-      #
-      # CP2 Fix: Fire hook fail-closed if review-profile.json exists but:
-      #   - jq is unavailable (cannot read it), OR
-      #   - .review_profile.risk_profile is null/missing/invalid enum (not one of
-      #     docs_trivial|low|medium|high|unverifiable from review-profile.schema.json)
-      # Also fire hook (secondary independent trigger) if audit-report.json exists and is
-      # parseable with a valid .audit_report structure (non-null object), regardless of
-      # risk_profile resolution.
+      # Risk-profile resolution (shared by Curator guard and C3 hook).
+      # Must run BEFORE the Curator guard to determine if C3 is required.
+      # Fail-closed risk-profile gate: resolve risk_profile and decide if hook fires.
       local c3_risk_profile="" c3_hook_fired="false"
       local review_profile_file="${evidence_dir}/review-profile.json"
       local c3_report_file="${evidence_dir}/audit-report.json"
 
-      # Fail-closed risk-profile gate: resolve risk_profile and decide if hook fires.
       if [[ -f "$review_profile_file" ]]; then
         if ! command -v jq >/dev/null 2>&1; then
           # jq missing but file exists → ambiguous, fail-closed: treat as unverifiable
@@ -2759,6 +2715,8 @@ EOF
       # gate (risk-profile resolution) is somehow fooled but a real C3 report was produced for
       # this run (e.g., review-profile.json corrupted, all detection mechanisms missed it, but
       # the C3 stage still ran and produced a report).
+      # NOTE: Must run BEFORE the Curator guard so that c3_hook_fired is fully resolved when
+      # the guard consults it (E-057-2_2 Step 1 defense-in-depth fix).
       if [[ "$c3_hook_fired" != "true" && -f "$review_profile_file" && -f "$c3_report_file" ]]; then
         if command -v jq >/dev/null 2>&1; then
           # CP4 round 3 fix: guard against set -e crash if audit-report.json is valid
@@ -2773,6 +2731,119 @@ EOF
           fi
         fi
       fi
+
+      # E-057-2_2 Step 1: Curator content-ref sequencing guard (risk-gated, JSON).
+      # Curator now dual-emits curator-report.json alongside curator-report.md
+      # (`agents/curator.md`), carrying `.curator.audit_report_ref` = sha256 of the
+      # CONTENT of the audit-report.json it actually consumed — a content hash (not
+      # `head_sha`) proves the Curator genuinely ran AFTER the Auditor and ingested
+      # that exact audit output, not just at the same commit (L1 fix). This check is
+      # ADDITIVE to the .md/.yaml existence checks above (which stay — other code
+      # paths rely on that file-existence contract).
+      #
+      # Risk-gating (mirrors C3 hook pattern at lines ~2725-2799):
+      # - When c3_hook_fired == "true" (high/unverifiable risk profile), curator-report.json
+      #   is REQUIRED: absence of the whole file is a hard block (fail-closed), because on
+      #   a C3-required run, Curator is expected to emit it. This matches agents/curator.md
+      #   C3.5 dual-emit contract.
+      # - When c3_hook_fired == "false" (other profiles or no review-profile.json), the file
+      #   is optional: absence is a silent no-op (pre-C3 Curator runs have no JSON file).
+      #
+      # When curator-report.json DOES exist, fail-closed validation applies to its contents:
+      # missing/unreadable ref, missing audit-report.json, or a hash mismatch all block.
+      # Every jq/sha256sum command substitution is guarded against `set -e` (this script
+      # runs under `set -euo pipefail`), matching the C3 hook pattern.
+      local curator_json="${evidence_dir}/curator-report.json"
+      local audit_json="${evidence_dir}/audit-report.json"
+
+      if [[ -f "$curator_json" ]]; then
+        # File exists: perform content-ref validation (fail-closed on any anomaly).
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "PRECONDITION FAIL: jq is required to verify curator-report.json's audit_report_ref and is not available (fail-closed)." >&2
+          errors=$((errors + 1))
+        elif [[ ! -f "$audit_json" ]]; then
+          echo "PRECONDITION FAIL: curator-report.json exists but audit-report.json not found — cannot verify sequencing ref (fail-closed). See: ${curator_json}" >&2
+          errors=$((errors + 1))
+        else
+          local cref="" cref_ec=0 actual_hash="" actual_hash_ec=0
+          cref=$(jq -r '.curator.audit_report_ref // empty' "$curator_json" 2>/dev/null) || cref_ec=$?
+          [[ $cref_ec -ne 0 ]] && cref=""
+          actual_hash=$(sha256sum "$audit_json" 2>/dev/null | awk '{print $1}') || actual_hash_ec=$?
+          [[ $actual_hash_ec -ne 0 ]] && actual_hash=""
+          local cref_hex="${cref#sha256:}"
+
+          if [[ -z "$cref" ]]; then
+            echo "PRECONDITION FAIL: curator-report.json missing .curator.audit_report_ref (sequencing fail-closed). See: ${curator_json}" >&2
+            errors=$((errors + 1))
+          elif [[ -z "$actual_hash" ]]; then
+            echo "PRECONDITION FAIL: could not compute sha256 of ${audit_json} (sequencing fail-closed)." >&2
+            errors=$((errors + 1))
+          elif [[ "$cref_hex" != "$actual_hash" ]]; then
+            echo "PRECONDITION FAIL: curator-report.json .curator.audit_report_ref (${cref}) does not match sha256 of audit-report.json content (sha256:${actual_hash}) — Curator did not consume the current audit output (sequencing violation)." >&2
+            errors=$((errors + 1))
+          fi
+          # cref_hex == actual_hash → passes silently.
+        fi
+      elif [[ "$c3_hook_fired" == "true" ]]; then
+        # File missing but C3 is required: hard block (fail-closed).
+        echo "PRECONDITION FAIL: curator-report.json not found (risk profile '${c3_risk_profile}' requires C3 audit and dual-emitted curator report)." >&2
+        echo "Curator agent must run after Auditor (C3) and emit both curator-report.md and curator-report.json. See: ${curator_json}" >&2
+        errors=$((errors + 1))
+      fi
+      # If file missing AND c3_hook_fired == "false": silent no-op (pre-C3 run)
+
+      # PM decision must be set to merge
+      local pm_decision
+      pm_decision=$(yaml_field "$state_file" pm_decision)
+      [[ "$pm_decision" == "merge" ]] || {
+        echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
+        errors=$((errors + 1))
+      }
+
+      # EPIC task file must be archived (moved to tasks/archive/)
+      local task_file
+      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
+      if [[ -n "$task_file" ]]; then
+        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
+        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
+        errors=$((errors + 1))
+      fi
+
+      # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
+      # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
+      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
+      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
+      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
+      # (M2 fix). Risk profile comes from review-profile.json (produced by
+      # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
+      # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
+      # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
+      # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
+      # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
+      # no-op and falls through unchanged to the legacy blocking_findings check below.
+      #
+      # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
+      # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
+      # (independence could not be confirmed), or a stale `revision.head_sha` that no
+      # longer matches the run's actual current HEAD (freshness — an audit computed
+      # against a prior commit must not authorize release of the current commit,
+      # mirroring the E2.5 stale-artifact-acceptance lesson) ALL block. No `// false`
+      # jq fallback anywhere below — absence/unreadability is treated as blocking, never
+      # as a silent pass.
+      #
+      # CP2 Fix: Fire hook fail-closed if review-profile.json exists but:
+      #   - jq is unavailable (cannot read it), OR
+      #   - .review_profile.risk_profile is null/missing/invalid enum (not one of
+      #     docs_trivial|low|medium|high|unverifiable from review-profile.schema.json)
+      # Also fire hook (secondary independent trigger) if audit-report.json exists and is
+      # parseable with a valid .audit_report structure (non-null object), regardless of
+      # risk_profile resolution.
+      #
+      # NOTE: c3_risk_profile and c3_hook_fired are now fully initialized and computed,
+      # including secondary trigger at lines ~2711-2735 (shared initialization for Curator
+      # guard + C3 hook). The secondary trigger completes resolution before the Curator guard
+      # runs, ensuring c3_hook_fired reflects BOTH primary and secondary conditions (E-057-2_2
+      # Step 1 defense-in-depth fix).
 
       if [[ "$c3_hook_fired" == "true" ]]; then
         local c3_block_reason=""

@@ -742,4 +742,161 @@ Reads FSM step-*-verify.md evidence, surfaces acceptance history into delivery-g
 - Living-contract enforcement (map_drift, C0 preflight, delivery_areas) — separate schema/setup phase
 - Automatic delivery-map generation (`aid-init` proposal)
 
-**Last Updated:** 2026-06-29
+---
+
+## C3 Independent Audit (E8)
+
+C3 is a **risk-gated, distrust-based** independent audit stage, delivered across two EPICs
+of plan P057: `E-057-1_2` (auditor conversion, FSM hook, policy) and `E-057-2_2` (Curator
+sequencing, invalidation-map observe, red-green tests, this release). It sits between DONE-gate
+completion and merge, and — unlike the legacy A-J health audit it grew out of — is designed to
+be **wrong on purpose in test fixtures** and prove the pipeline actually catches that.
+
+### Protocol-v2 Artifacts
+
+`audit-report.json` and `audit-input-manifest.json` (`defaults/schemas/audit-report.schema.json`,
+`defaults/schemas/audit-input-manifest.schema.json`) follow the same protocol-v2 envelope
+convention as every other C-stage artifact: a **type-named top-level key**
+(`.audit_report`, matching `.semantic_review.findings` / `.ui_fidelity.result`), with
+**findings at the envelope top level** (`scripts/aid-protocol-validate.sh`,
+`defaults/schemas/aid-protocol-v2.schema.json`) rather than nested under the type key. Every
+audit-report.json carries:
+- `.audit_report.blocking_findings` (boolean) — the single source of truth `aid-fsm.sh`
+  reads for release blocking (no legacy `.md`/`.yaml` `yaml_field()` parsing for C3 runs).
+- `.audit_report.provider` / `.model` / `.process_id` — echoed verbatim from the
+  Orchestrator's `audit_trigger` at dispatch time, never self-reported by the auditor agent
+  (D7 — self-introspection ban; see `agents/auditor.md`).
+- `.audit_report.input_manifest_hash` — provenance linkage to the input manifest the audit
+  actually ran against.
+
+### `agents/auditor.md` Dual-Mode
+
+The auditor is now **one agent, two protocols**, selected by `audit_trigger.mode` in the
+Orchestrator's dispatch input — never self-detected:
+- **`mode: "c3"`** — the risk-gated, distrust-based Independent Audit described here. PASS is
+  never the default; the auditor must actively fail to find a blocking issue.
+- **`mode: "legacy_health"`** — the original trust-based A–J project-health audit, kept as a
+  compat section for callers that still want a general health score. `audit_trigger.mode`
+  absent from the dispatch input is a dispatch error, not a silent fallback to legacy.
+
+### Independence Detection — `aid-audit-independence.sh`
+
+`scripts/lib/aid-audit-independence.sh detect --required <level>` reports whether the
+**required** independence level for the current run's risk profile is actually achievable —
+never "what's the best available", matching D8's fail-closed intent. Three levels:
+`context_only` (always available, no external dependency), `cross_model` (requires
+`AID_AUDIT_ALT_MODEL` env var to differ from the auditor's own configured model),
+`cross_provider` (requires Codex binary in PATH + `codex exec --help` sanity + confirmed
+`codex login status` + `--json`/`--output-schema` flags present). This script is
+**detection-only** — it never invokes `codex exec` with a real prompt and never dispatches a
+real audit; unconfirmable or missing signals degrade to `unverifiable`, never to a silent pass.
+
+### `c3-audit-policy.yaml` — Risk Profile → Required Independence
+
+`defaults/policies/c3-audit-policy.yaml` is the authoritative source of
+`required_independence_level` per risk profile (D8). Only two profiles carry `c3_required: true`
+today: `high` (requires `cross_model`) and `unverifiable` (requires `cross_provider` — a
+profile that, by construction, itself will likely report `status: unverifiable` and block,
+rather than silently skip the audit). `docs_trivial`/`low`/`medium` are not C3-required.
+
+### FSM Done-Advance C3 Hook (`aid-fsm.sh`)
+
+`cmd_done_advance()` carries a C3 hook (anchored by the search text `C3 independent-audit hook`,
+not a line number — it drifted across fix rounds within the same EPIC) that fires only when the
+run's risk profile (from `review-profile.json`) is `high` or `unverifiable` — the two
+`c3_required: true` profiles. When it fires, it fail-closed blocks release on any of:
+- `.audit_report.blocking_findings == true` (critical/high finding),
+- `.status == "unverifiable"` (required independence level could not be confirmed),
+- missing/unparseable `audit-report.json`,
+- missing `.audit_report.input_manifest_hash` (provenance — presence/format check only, see
+  "What E8 Does NOT Deliver" below),
+- a stale `.revision.head_sha` that no longer matches the run's current HEAD.
+
+No `// false` jq fallback anywhere in this hook — absence or unreadability is always treated as
+blocking, never as a silent pass. Runs with no `review-profile.json` at all (pre-C3 runs) leave
+the hook a no-op and fall through unchanged to the legacy check.
+
+### Curator Runs Serially After C3 (E-057-2_2 Step 1)
+
+`skills/pipeline.md` now dispatches **Auditor (C3), then Curator — serial, not parallel** (state
+table, DONE checklist, and both narrative sequencing notes were updated; see `agents/curator.md`
+"Dispatched by... AFTER the Auditor (C3) completes — serial, not parallel"). The Curator reads
+`audit-report.json` as a **required** input and dual-emits both the existing
+`curator-report.md` (unchanged FSM plan-close/CP4 `.md` checks) and a new `curator-report.json`
+carrying `proposal_status: PROPOSALS_READY|NO_PROPOSALS|INPUT_INCOMPLETE` plus
+`.curator.audit_report_ref` — the sha256 of the actual bytes of the `audit-report.json` the
+Curator consumed. `aid-fsm.sh`'s content-ref sequencing guard validates the integrity chain:
+when `curator-report.json` exists, recomputes `sha256sum` of the current `audit-report.json`
+and compares it against `.curator.audit_report_ref`; a mismatch or missing field blocks
+(fail-closed). When the risk profile requires C3 (high/unverifiable), absence of the entire
+`curator-report.json` file also blocks — because Curator is required to dual-emit it.
+When risk profile does not require C3 (other profiles), absence is a silent no-op (pre-C3
+Curator runs have no JSON file). This proves genuine consumption-order (the Curator actually
+read the current audit output), not merely "same HEAD commit" — a same-HEAD check alone
+cannot distinguish a Curator that ran before C3 from one that ran after. **`recommended_disposition` (the
+approve/reject/defer merge-influence contract consumed by `gate-fixer.md`, `simplifier.md`, and
+`pipeline.md`) is completely untouched** — E8 only changes sequencing and vocabulary, never
+merge-authority.
+
+### `invalidation-map.json` — Observe-Only (E-057-2_2 Step 2)
+
+`scripts/lib/aid-invalidation-map.sh` is a new, standalone producer (schema:
+`defaults/schemas/invalidation-map.schema.json`) that, given an applied fix's changed paths,
+derives:
+- `affected_c1_checks[]` — a **deterministic subset**: it reads `changed_paths_match` globs
+  directly from `delivery-gate.yaml` via `yq` and re-implements the same glob-matching approach
+  (rather than calling `aid-delivery-gate.sh`'s private `_check_applicable`, which is not
+  designed for reuse — an explicit correction made during E8).
+- `affected_c2_modes[]` — **conservative, not precise**: any changed path touching a C2-relevant
+  surface marks ALL four canonical C2 modes (local/wiring/behavior/final) as affected. There is
+  no path→mode substrate today, so this script is honest about the imprecision instead of
+  pretending derivation it can't deliver.
+
+It emits `invalidation-map.json` plus a timeline `log_event` (`invalidation_map_produced`) and is
+registered in the enforcement registry as `invalidation_map_observe` (advisory, `status: active`,
+same shape as the existing `c2_wiring_gate_observe` pattern). Critically, it **never** invokes
+`aid-delivery-gate.sh` or the semantic-review engine itself — `require_rerun` is a flag/request
+for a human or a future automation to act on, not a trigger. This is proven behaviorally in
+`scripts/tests/bats/test-invalidation-map.bats`.
+
+### What E8 Does NOT Deliver
+
+E8 is deliberately **C3 audit core**, not a full external-audit-and-auto-rerun system. See
+[`docs/plans/BACKLOG.md` § "E8 Deferred"](plans/BACKLOG.md) for the authoritative list; the
+items that most affect how you should read the guarantees above:
+
+- **No real `codex exec` dispatch** — `aid-audit-independence.sh` only *detects* whether
+  `cross_provider` independence is achievable (binary present, `--help` sane, login confirmed,
+  required flags exposed). The actual subprocess dispatch, output-schema parsing, and merge into
+  `audit-report.json` is net-new infra, deferred. A `cross_provider`-required run today stays
+  "detected → unverifiable until dispatch is wired", never a false pass.
+- **No automatic invalidation-triggered re-run** — `invalidation-map.json` is observe-only.
+  `require_rerun` is recorded, never acted on; a new FSM/pipeline re-run primitive is a
+  separate, deferred piece of work.
+- **No precise C2-mode affectedness derivation** — C2 modes are triggered by plan-graph assembly
+  position, not file path; E8 marks affectedness conservatively (see above) rather than
+  pretending a path-based derivation that doesn't exist.
+- **C4 consumption of release decisions — deferred to E9.** Nothing in E8 wires
+  `audit-report.json` / `curator-report.json` / `invalidation-map.json` into an actual
+  release-policy decision; that is C4/E9 territory.
+- **Merge-authority is completely untouched, deferred to E9.** The Curator's
+  `recommended_disposition` auto-approve/reject/defer logic — the actual merge-influence
+  contract — is not modified by E8 in any way; only sequencing (Curator after C3) and vocabulary
+  (`proposal_status`) changed.
+- **No cryptographic hash-equality binding, in either of the two places E8 introduces a
+  "prove real consumption via hash" mechanism.** Both `.audit_report.input_manifest_hash` (the
+  C3 audit report's own provenance hash, E-057-1_2) and `.curator.audit_report_ref` (this
+  EPIC's Curator content-ref sequencing guard) are **presence/format checks**, not a
+  cryptographic chain of custody — self-disclosed as deferred (Curator finding IMP-176,
+  `E-057-1_2` final report). They prove "a hash of the right shape is present and, for the
+  Curator case, matches the current file's sha256" — not a signed or otherwise
+  tamper-evident provenance chain.
+- **Large legacy A-J project-health audit cleanup** — the converted auditor keeps A-J as a
+  legacy-compat section (`agents/auditor.md` "Legacy Compat: A–J Health Audit"); splitting it
+  into a standalone project-health tool is deferred.
+- **Codex auth detection mechanism is a best-effort probe, not a researched standard** — no
+  `codex login-status` convention existed in-repo before E8; the current check treats anything
+  other than a clear "Logged in" signal as unconfirmed (fail-closed), and the concrete auth
+  probe itself is flagged TBD for follow-up research.
+
+**Last Updated:** 2026-07-08

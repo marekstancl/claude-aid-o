@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/invalidation-map.schema.json",
+  "title": "AID Protocol v2 — InvalidationMap",
+  "$comment": "producer: scripts/lib/aid-invalidation-map.sh (E8 D3, observe-only), consumers: none wired yet — this is a request/flag for a human/PM to act on, not an auto-rerun trigger (see docs/extending-aid.md 'What E8 Does NOT Deliver')",
+  "description": "Artifact emitted after a fix is applied, recording which C1 deterministic delivery-gate checks and C2 semantic-review modes are potentially affected by the fix's changed paths. Observe-only: this artifact NEVER causes delivery-gate, semantic-review, or any other stage to actually re-run.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "invalidation_map",
+      "$comment": "enforced — must equal this type"
+    },
+    "invalidation_map": {
+      "type": "object",
+      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "properties": {
+        "applied_fix_ref": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "identifier for the applied fix whose changed paths were analyzed — commit sha, gate-fixer iteration label, or any caller-supplied string; opaque to this schema"
+        },
+        "affected_c1_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "$comment": "deterministic subset of defaults/policies/delivery-gate.yaml check ids — ONLY checks whose required_when declares changed_paths_match (globs read directly from the policy file via yq, D3/L2 fix) — whose glob(s) matched at least one changed path. May be empty. Checks gated by non-path conditions (has_lockfile, has_workspaces, dep_removed, etc.) are out of scope for this deterministic subset."
+        },
+        "affected_c2_modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["local", "wiring", "behavior", "final"]
+          },
+          "$comment": "conservative derivation (D3): the canonical C2 mode catalog (agents/verifier.md c2_mode: local|wiring|behavior|final). ANY changed path matching a C2-relevant surface (a defaults/policies/review-profiles.yaml surface with a non-empty lenses[]) marks ALL relevant modes as affected. No precise path-to-mode derivation exists today — being honest about that absence is the explicit design choice here, not a shortcut. May be empty when no changed path touches a C2-relevant surface."
+        },
+        "require_rerun": {
+          "type": "boolean",
+          "$comment": "a flag/request only — true iff affected_c1_checks or affected_c2_modes is non-empty. NEVER an auto-triggered re-run: this artifact has no consumer wired in E8 that acts on it automatically. A human/PM decides whether to actually re-run the flagged checks/modes."
+        }
+      },
+      "required": ["applied_fix_ref", "affected_c1_checks", "affected_c2_modes", "require_rerun"]
+    }
+  },
+  "required": ["invalidation_map"]
+}

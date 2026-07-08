@@ -146,7 +146,7 @@ if [[ "$schema_version" != "aid-2.0" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: artifact_type enum (16 values)
+# Step 5: artifact_type enum (17 values)
 # ---------------------------------------------------------------------------
 VALID_ARTIFACT_TYPES=(
   plan_review
@@ -165,6 +165,7 @@ VALID_ARTIFACT_TYPES=(
   curator
   delivery_report
   verification_report
+  invalidation_map
 )
 
 artifact_type=$(jq -r '.artifact_type' "$ARTIFACT_FILE")
@@ -363,6 +364,7 @@ TYPE_PAYLOAD_MAP[pm_decision_brief]="pm_decision_brief"
 TYPE_PAYLOAD_MAP[curator]="curator"
 TYPE_PAYLOAD_MAP[delivery_report]="delivery_report"
 TYPE_PAYLOAD_MAP[verification_report]="verification_report"
+TYPE_PAYLOAD_MAP[invalidation_map]="invalidation_map"
 
 payload_key="${TYPE_PAYLOAD_MAP[$artifact_type]:-}"
 if [[ -n "$payload_key" ]]; then
