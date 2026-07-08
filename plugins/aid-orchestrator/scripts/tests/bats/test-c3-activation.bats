@@ -484,6 +484,67 @@ YAML
   [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
 }
 
+# ─── Finding 2 (Regression): High-cardinality mismatch with real event shapes ──
+# Regression for CP4 finding (attempt 1 bug): jq -R without -c pretty-prints,
+# inflating wc -l count. This test uses 8 applied vs 6 produced to expose the bug:
+# without -c, pretty-printing 8 events with 3+ fields each could inflate counts
+# to 16+, failing to detect the real 8>6 mismatch. With -c (compact), counts
+# resolve correctly to 8 and 6, and the mismatch is properly detected.
+
+@test "(Finding 2 Regression) FSM invalidation_map_expected OBSERVE: 8 fixes applied vs 6 produced (high-cardinality, real event shapes) → would_block" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+
+  # Emit 8 gate_fixer_fix_applied events with real multi-field structure
+  for i in {1..8}; do
+    bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" \
+      gate_fixer_fix_applied fix_ref="cp2-step-${i}-iter1" \
+      enforcement="observe" reason="gate_fixer_fix_applied_event_${i}"
+  done
+
+  # Emit 6 invalidation_map_produced events with real multi-field structure
+  for i in {1..6}; do
+    bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" \
+      invalidation_map_produced fix_ref="cp2-step-${i}-iter1" \
+      c1_count=$((i % 2)) c2_count=$((i % 3)) require_rerun=$([[ $((i % 2)) -eq 0 ]] && echo "true" || echo "false")
+  done
+
+  # Verify exact counts (8 and 6, not pretty-print inflated multiples like 16+ and 12+)
+  local applied_count produced_count
+  applied_count=$(jq -Rc 'fromjson? | select(.event=="gate_fixer_fix_applied")' "$TEST_EVIDENCE_DIR/timeline.jsonl" 2>/dev/null | wc -l)
+  produced_count=$(jq -Rc 'fromjson? | select(.event=="invalidation_map_produced")' "$TEST_EVIDENCE_DIR/timeline.jsonl" 2>/dev/null | wc -l)
+  [ "$applied_count" -eq 8 ]
+  [ "$produced_count" -eq 6 ]
+
+  # FSM check must detect the mismatch (8 > 6) in OBSERVE mode and emit would_block
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
+}
+
+@test "(Finding 2 Regression) FSM invalidation_map_expected BLOCKING: 8 fixes vs 6 produced (high-cardinality) → reject" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  export INVALIDATION_MAP_ENFORCEMENT=blocking
+
+  # Emit 8 applied, 6 produced (high-cardinality mismatch)
+  for i in {1..8}; do
+    bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" \
+      gate_fixer_fix_applied fix_ref="cp2-step-${i}-iter1" enforcement="observe"
+  done
+  for i in {1..6}; do
+    bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" \
+      invalidation_map_produced fix_ref="cp2-step-${i}-iter1" c1_count=0 c2_count=0 require_rerun=false
+  done
+
+  # With BLOCKING enforcement, the mismatch must reject the transition
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_done_advance_fail"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
+}
+
 # ─── Finding 2: Event count mismatch detection (multiple fixes) ───────────────
 
 @test "(Finding 2) FSM invalidation_map_expected OBSERVE: 2 fixes applied, only 1 invalidation-map event → would_block" {

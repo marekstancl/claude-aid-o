@@ -43,6 +43,9 @@ resolve_mode() {
   [[ -n "$evidence_dir" ]] || { echo "usage: aid-audit-mode.sh <evidence_dir>" >&2; return 2; }
 
   local profile_file="${evidence_dir}/review-profile.json"
+  # C3_AUDIT_POLICY overrides the enforcement toggle only — the per-profile c3_required
+  # risk-gate always reads the installed default policy, by design (deliberately minimal
+  # scope for E-059-1_2).
   local policy_file="${C3_AUDIT_POLICY:-$DEFAULT_C3_POLICY}"
 
   # Missing profile → fail-closed direction: request c3 but flag via exit 3 so a

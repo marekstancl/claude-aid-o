@@ -851,5 +851,5 @@ enforcements:
     deadline: "2026-12-31"
     promotion_phase: E10
     deferred_until: "2026-12-31"
-    description: "done-advance review→release: when a gate_fixer_fix_applied timeline event is present but no invalidation-map.json exists under the evidence dir, emit invalidation_map_expected_missing (observe — does not block; INVALIDATION_MAP_ENFORCEMENT=blocking seam flips it to fail-closed exit 2); the gate_fixer_fix_applied substrate is written by the pipeline.md Invalidation-Map Post-Fix Hook — this step created that event (nothing emitted it before, which was the IMP-177 root cause: a detector with no real signal wired to it, see AID-v3-principles.md §1); fail-closed reads: no timeline / no event ⇒ no fix applied ⇒ no-op; blocking promotion E10"
+    description: "done-advance review→release: compares gate_fixer_fix_applied event count to invalidation_map_produced event count; when applied > produced, emit invalidation_map_expected_missing (observe by default; INVALIDATION_MAP_ENFORCEMENT=blocking seam makes it exit 2); detects when a fix was applied but its post-fix invalidation-map hook did not run (pipeline.md Invalidation-Map Post-Fix Hook); fail-closed: no timeline or no applied events ⇒ no-op"
     test: "scripts/tests/bats/test-c3-activation.bats"
