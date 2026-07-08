@@ -2590,6 +2590,47 @@ cmd_done_advance() {
       fi
       # End C3 activation review-profile presence check
 
+      # ── C3 activation (IMP-177 / E-059-1_2 Step 2): invalidation-map expectation
+      # check (OBSERVE). Closes the OTHER half of IMP-177: aid-invalidation-map.sh
+      # was registered but never called from the live flow. The pipeline.md post-fix
+      # hook now (a) emits a `gate_fixer_fix_applied` timeline event whenever a
+      # gate-fixer fix lands at an in-scope dispatch site, and (b) calls
+      # aid-invalidation-map.sh, which writes invalidation-map.json. This check keys
+      # off the FORMER event (the substrate the pipeline hook creates — nothing
+      # emitted it before this step, which was the IMP-177 root cause: a detector
+      # with no real signal wired to it, see AID-v3-principles.md §1) and verifies
+      # the LATTER artifact exists. gate_fixer_fix_applied present + invalidation-map.json
+      # absent ⇒ the observe producer wiring did not run ⇒ emit
+      # invalidation_map_expected_missing telemetry.
+      #
+      # OBSERVE by default (transition PASSES). INVALIDATION_MAP_ENFORCEMENT=blocking
+      # (E10 promotion / test seam, mirrors the C3_AUDIT_POLICY override convention)
+      # flips it to a hard precondition so the blocking branch stays live, testable
+      # code rather than decoration. Fail-closed reads: no timeline / no
+      # gate_fixer_fix_applied event ⇒ no fix was applied ⇒ this check is a no-op
+      # (never manufactures a would_block on runs that applied no fixes).
+      local _im_enforcement="${INVALIDATION_MAP_ENFORCEMENT:-observe}"
+      local _im_timeline="${evidence_dir}/timeline.jsonl"
+      if [[ -f "$_im_timeline" ]] && grep -q '"event":"gate_fixer_fix_applied"' "$_im_timeline" 2>/dev/null; then
+        local _im_found
+        # `|| true` guards against set -e aborting the script if evidence_dir is
+        # unexpectedly unreadable (find non-zero) — treat unreadable as "absent".
+        _im_found=$(find "$evidence_dir" -type f -name 'invalidation-map.json' -print -quit 2>/dev/null || true)
+        if [[ -z "$_im_found" ]]; then
+          log_event "$_im_timeline" "invalidation_map_expected_missing" \
+            check="invalidation_map_expected" enforcement="$_im_enforcement" \
+            reason="gate_fixer_fix_applied present but invalidation-map.json absent"
+          if [[ "$_im_enforcement" == "blocking" ]]; then
+            echo "PRECONDITION FAIL: a gate_fixer_fix_applied event is present but no invalidation-map.json was found under ${evidence_dir}/ — the invalidation-map post-fix hook (pipeline.md, search: 'Invalidation-Map Post-Fix Hook') must run after every gate-fixer fix (enforcement=blocking)." >&2
+            log_event "$_im_timeline" "fsm_done_advance_fail" check="invalidation_map_expected" reason="invalidation_map_absent"
+            exit 2
+          else
+            log_warn "invalidation_map_expected would_block (enforcement=observe, non-blocking): gate_fixer_fix_applied present but invalidation-map.json absent in ${evidence_dir}"
+          fi
+        fi
+      fi
+      # End C3 activation invalidation-map expectation check
+
       # P038 Step 3: tiered severity blocking precondition.
       # Runs ONLY for review→release transition (other done-advance phases unchanged).
       # Evaluates compliance checks inline (no file write), filters severity:blocking
