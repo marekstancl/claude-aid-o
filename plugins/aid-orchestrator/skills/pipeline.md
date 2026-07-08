@@ -482,6 +482,7 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    Prompt explicitly says "you do NOT see why, only what changed."
 
 Fix loop per CP2 failure: gate-fixer → re-run pre-filter → re-dispatch verifier. Max 2 iterations. E7 on exhaustion.
+**Invalidation-Map call site 1/5:** after each applied CP2 fix, run the **Invalidation-Map Post-Fix Hook** (§13, observe-only) with `fix_ref=cp2-step-<N>-iter<K>` (capture `pre_fix_ref` before dispatching the fixer).
 
 **Retry telemetry:** Every re-dispatch in the CP2 fix loop re-emits the same
 `verifier_dispatch_start` / `verifier_dispatch_complete` pair documented above
@@ -607,6 +608,8 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
 
 4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
    Max 2 iterations per Session A pattern. E7 escalation on exhaustion.
+   **Invalidation-Map call site 2/5:** after each applied CP3 fix, run the **Invalidation-Map Post-Fix Hook**
+   (§13, observe-only) with `fix_ref=cp3-iter<K>` (capture `pre_fix_ref` before dispatching the fixer).
 
    **Retry telemetry:** Every re-dispatch in the CP3 fix loop re-emits both
    `verifier_dispatch_start` and both `verifier_dispatch_complete` events
@@ -715,9 +718,12 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 `gates_report.json` — required by `GATES→DONE` precondition. Without it, transition is rejected.
 
 **On gate failure (retries remaining):**
+0. Capture the pre-fix ref BEFORE dispatching the fixer: `pre_fix_ref="$(git rev-parse HEAD)"`.
 1. Dispatch gate-fixer agent with failure details and `gates_report.json`
 2. `aid-fsm.sh transition GATES EXECUTE <state_file>` (re-enters EXECUTE for fix)
 3. After fix: `aid-fsm.sh transition EXECUTE GATES <state_file>`
+4. **Invalidation-Map call site 3/5:** run the **Invalidation-Map Post-Fix Hook** (§13, observe-only)
+   with `fix_ref=gates-<gate>-attempt<K>`.
 
 **On gate failure (max_attempts exhausted):**
 `aid-fsm.sh transition GATES ESCALATION <state_file>`
@@ -924,6 +930,9 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
    includes the simplifier edits — and reverts on FAIL, the same rail as the per-EPIC
    `review` sub-phase steps 7–9. Runs serially AFTER the C+A fixes so it simplifies the
    final shipped code, not a moving target. Toggle: `review_checkpoints.simplifier_pass`.
+   **Invalidation-Map call site 5/5:** capture `pre_fix_ref` before dispatching the gate-fixer with the
+   `simplifier` proposal source; after the simplifier-approved fixes are applied, run the
+   **Invalidation-Map Post-Fix Hook** (§13, observe-only) with `fix_ref=done-simplifier`.
 6. **Reporter (last, after the Simplifier + CP4).** Dispatch the Reporter agent
    (`agents/reporter.md`) as the final plan-boundary step. It tests the delivery and
    writes `.aid-o/reports/{plan_id}-delivery.md` (from
@@ -1126,6 +1135,10 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    standards-L) defers.
 9. **Auditor auto-fix:** Gate-fixer applies S/M/L effort items from auditor
    `recommended_fixes` (where `auto_fixable: true`).
+
+   **Invalidation-Map call site 4/5:** capture `pre_fix_ref` before dispatching the gate-fixer in
+   steps 8–9; after the curator/auditor auto-fixes are applied, run the **Invalidation-Map Post-Fix
+   Hook** (§13, observe-only) with `fix_ref=done-curator` / `fix_ref=done-auditor` respectively.
 10. **CP4:** Verifier (`code-review`) reviews the **applied** curator + auditor changes from
    steps 8–9 (it runs AFTER the fixes are applied, so it actually reviews them).
    If FAIL → revert those changes, log reversion.
@@ -1528,6 +1541,70 @@ Configuration: `.aid-o/config/policies/review-checkpoints.yaml` (lazy-created by
 4. If FAIL + NOT fix_loop_eligible → ESCALATION immediately
 5. Max 2 iterations total, then escalate
 ```
+
+> The **Fix Loop Protocol block above is descriptive prose** — a generic template describing
+> how *every* fix loop is shaped. It is **NOT a gate-fixer dispatch call site** and MUST NOT
+> carry an Invalidation-Map Post-Fix Hook invocation. The 5 real call sites are enumerated in
+> the hook section immediately below.
+
+### Invalidation-Map Post-Fix Hook (C3 activation — E-059-1_2 Step 2, IMP-177)
+
+**Observe-only. NEVER triggers a re-run.** Run this hook immediately AFTER a gate-fixer has
+applied a fix at any of the **5 in-scope gate-fixer dispatch sites** listed at the end of this
+section. It closes the invalidation half of IMP-177: `scripts/lib/aid-invalidation-map.sh`
+existed and was registered but was only ever called from tests — this hook is its live-flow
+caller. The hook emits a `gate_fixer_fix_applied` timeline event (the substrate the FSM
+`invalidation_map_expected` check keys off — nothing emitted it before this step) and then
+runs the observe-only producer with the required 3-arg CLI.
+
+**Sequence — the pre-fix ref MUST be captured BEFORE the gate-fixer runs:**
+
+```bash
+# --- BEFORE dispatching the gate-fixer at an in-scope site ---
+pre_fix_ref="$(git rev-parse HEAD)"          # snapshot the ref PRIOR to the fix
+
+# --- gate-fixer applies its fix (and commits it in the fix loop) ---
+
+# --- AFTER the fix is applied: materialize changed paths + run the hook ---
+evidence_dir=".aid-o/work/evidence/{epic_id}/{run_id}"
+timeline="$evidence_dir/timeline.jsonl"
+changed_paths_file="$(mktemp)"
+# post-fix ref = HEAD (fix committed). If the fixer left the fix UNCOMMITTED, use
+# `git diff --name-only "$pre_fix_ref"` (ref → working tree) instead of the range form.
+git diff --name-only "${pre_fix_ref}..HEAD" > "$changed_paths_file"
+
+# 1) Emit the substrate event FIRST — the FSM invalidation_map_expected check keys off it.
+#    <fix_ref_label> is the site+iteration label from the call-site table below.
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh" log_event "$timeline" \
+  gate_fixer_fix_applied fix_ref="<fix_ref_label>"
+
+# 2) Observe-only invalidation-map (3-arg CLI). Records affected C1 checks / C2 modes as a
+#    REQUEST only — it does NOT invoke delivery-gate or semantic-review, no auto-rerun exists.
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-invalidation-map.sh" \
+  --fix-ref "<fix_ref_label>" --evidence-dir "$evidence_dir" --changed-paths "$changed_paths_file"
+```
+
+**Enforcement:** the FSM `done-advance` review→release `invalidation_map_expected` check reads
+these two signals — OBSERVE today (emits `invalidation_map_expected_missing`, does not block),
+promoting to blocking at E10 (`INVALIDATION_MAP_ENFORCEMENT=blocking` seam). See
+AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
+
+**In-scope call sites (5) — each references this hook with a distinct `fix_ref` label:**
+
+| # | Site | `fix_ref` label |
+|---|------|-----------------|
+| 1 | CP2 per-step fix loop (§ EXECUTE) | `cp2-step-<N>-iter<K>` |
+| 2 | CP3 integration fix loop (EXECUTE→GATES) | `cp3-iter<K>` |
+| 3 | GATES gate-fixer (§5) | `gates-<gate>-attempt<K>` |
+| 4 | DONE Curator + Auditor auto-fix (§7 steps 8–9) | `done-curator` / `done-auditor` |
+| 5 | DONE Simplifier-source fix (§7 plan boundary step 5) | `done-simplifier` |
+
+**Explicitly OUT of scope (documented, not silently skipped):**
+- **CP6 / `/aid-do` fast-mode** gate-fixer dispatch (§8) — OUT per **D6**. Fast Mode has no
+  `fsm-state.yaml`, no evidence dir, and no C3/delivery-gate surface, so there is nothing for an
+  invalidation-map to invalidate. Do NOT wire this hook there.
+- The **"Fix Loop Protocol" block above** is descriptive prose, **not a 6th call site** (see note
+  above it).
 
 ### Pre-Filter Stage (CP2, CP3, CP6)
 

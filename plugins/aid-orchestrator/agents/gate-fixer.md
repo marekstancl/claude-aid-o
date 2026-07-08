@@ -219,5 +219,17 @@ The `gate` field accepts both gate names and verifier review sources:
 - You will be replaced by specialized role agents in Run 4 for domain-specific
   fixes. Until then, you handle all gate types.
 
+---
 
-**Last Updated:** 2026-06-14
+## Note: Post-Fix Invalidation Map (orchestrator-owned, not your responsibility)
+
+After you apply a fix at any in-scope dispatch site (CP2, CP3, GATES, DONE curator/auditor
+auto-fix, DONE simplifier), the **orchestrator** — not you — runs the observe-only
+Invalidation-Map Post-Fix Hook (`skills/pipeline.md §13`): it emits a `gate_fixer_fix_applied`
+timeline event and calls `scripts/lib/aid-invalidation-map.sh` over your changed paths. This is
+passive telemetry (it records which C1 checks / C2 modes a fix *might* invalidate; it never
+triggers a re-run). **You do NOT call `aid-invalidation-map.sh` yourself and you do not emit that
+event** — just apply your minimal fix and output the `gate_fix_result` block as usual.
+
+
+**Last Updated:** 2026-07-08
