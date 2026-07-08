@@ -2631,6 +2631,51 @@ EOF
         errors=$((errors + 1))
       fi
 
+      # E-057-2_2 Step 1: Curator content-ref sequencing guard (additive, JSON-only).
+      # Curator now dual-emits curator-report.json alongside curator-report.md
+      # (`agents/curator.md`), carrying `.curator.audit_report_ref` = sha256 of the
+      # CONTENT of the audit-report.json it actually consumed — a content hash (not
+      # `head_sha`) proves the Curator genuinely ran AFTER the Auditor and ingested
+      # that exact audit output, not just at the same commit (L1 fix). This check is
+      # ADDITIVE to the .md/.yaml existence checks above (which stay — other code
+      # paths rely on that file-existence contract) and fires ONLY when
+      # curator-report.json exists: a pre-E8-Curator run (dual-emit is new in this
+      # step) has no JSON file, so this is a no-op then, not a hard block.
+      # Fail-closed per AID-v3-principles.md §1: missing/unreadable ref, missing
+      # audit-report.json, or a hash mismatch all block — never a silent pass. Every
+      # jq/sha256sum command substitution is guarded against `set -e` (this script
+      # runs under `set -euo pipefail`), matching the C3 hook pattern above.
+      local curator_json="${evidence_dir}/curator-report.json"
+      local audit_json="${evidence_dir}/audit-report.json"
+      if [[ -f "$curator_json" ]]; then
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "PRECONDITION FAIL: jq is required to verify curator-report.json's audit_report_ref and is not available (fail-closed)." >&2
+          errors=$((errors + 1))
+        elif [[ ! -f "$audit_json" ]]; then
+          echo "PRECONDITION FAIL: curator-report.json exists but audit-report.json not found — cannot verify sequencing ref (fail-closed). See: ${curator_json}" >&2
+          errors=$((errors + 1))
+        else
+          local cref="" cref_ec=0 actual_hash="" actual_hash_ec=0
+          cref=$(jq -r '.curator.audit_report_ref // empty' "$curator_json" 2>/dev/null) || cref_ec=$?
+          [[ $cref_ec -ne 0 ]] && cref=""
+          actual_hash=$(sha256sum "$audit_json" 2>/dev/null | awk '{print $1}') || actual_hash_ec=$?
+          [[ $actual_hash_ec -ne 0 ]] && actual_hash=""
+          local cref_hex="${cref#sha256:}"
+
+          if [[ -z "$cref" ]]; then
+            echo "PRECONDITION FAIL: curator-report.json missing .curator.audit_report_ref (sequencing fail-closed). See: ${curator_json}" >&2
+            errors=$((errors + 1))
+          elif [[ -z "$actual_hash" ]]; then
+            echo "PRECONDITION FAIL: could not compute sha256 of ${audit_json} (sequencing fail-closed)." >&2
+            errors=$((errors + 1))
+          elif [[ "$cref_hex" != "$actual_hash" ]]; then
+            echo "PRECONDITION FAIL: curator-report.json .curator.audit_report_ref (${cref}) does not match sha256 of audit-report.json content (sha256:${actual_hash}) — Curator did not consume the current audit output (sequencing violation)." >&2
+            errors=$((errors + 1))
+          fi
+          # cref_hex == actual_hash → passes silently.
+        fi
+      fi
+
       # PM decision must be set to merge
       local pm_decision
       pm_decision=$(yaml_field "$state_file" pm_decision)

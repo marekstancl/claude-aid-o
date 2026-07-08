@@ -20,7 +20,14 @@
       "$comment": "enforced — minimal payload; full schema defined in owning phase",
       "properties": {
         "proposal_status": {
-          "type": "string"
+          "type": "string",
+          "enum": ["PROPOSALS_READY", "NO_PROPOSALS", "INPUT_INCOMPLETE"],
+          "$comment": "E-057-2_2 Step 1 — vocabulary for whether Curator had a complete input set (audit-report.json) to work from"
+        },
+        "audit_report_ref": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "E-057-2_2 Step 1 (L1 fix) — sha256 of the CONTENT of the audit-report.json Curator actually consumed (not head_sha, which only proves same-commit); same pattern convention as audit-report.schema.json's input_manifest_hash. aid-fsm.sh done-advance recomputes this hash and blocks release on mismatch (sequencing proof)."
         },
         "proposals": {
           "type": "array"

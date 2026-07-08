@@ -107,7 +107,7 @@ Six states. Scripts handle transitions. LLM acts within a state.
 | **EXECUTE** | GO received or gate-fixer retry | Dispatch agent, verify output | `aid-fsm.sh transition EXECUTE GATES\|ESCALATION\|EXECUTE` |
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
 | **ESCALATION** | EXECUTE or GATES failure | Present options A/B/C to PM, act on response | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |
-| **DONE** | All gates pass | Curator+Auditor parallel, PM summary, merge on approval | — |
+| **DONE** | All gates pass | Auditor (C3) then Curator (serial), PM summary, merge on approval | — |
 | **ERROR** | Unrecoverable failure or PM abort | Preserve evidence, report to PM | — (terminal) |
 
 **Valid transitions** (enforced by `aid-fsm.sh transition`):
@@ -880,7 +880,7 @@ Ordered sequence — each step has a named gate. `done-advance` and `plan-close`
 | 1 | Archive run file + update `active.md` | run.md `status: completed` |
 | 2 | Generate `final_report.md` | file present in evidence dir |
 | 2a | Build `audit-input-manifest.json` (C3 producer hook) | file present, `input_hash` matches hashed `allowlist[]` |
-| 3 | Dispatch Curator + Auditor (parallel) | both `*-report.md` present |
+| 3 | Dispatch Auditor (C3), then Curator (serial, consumes `audit-report.json`) | both `*-report.md` present |
 | 4 | Curator auto-fix (S/M/L) | gate-fixer applied |
 | 5 | Auditor auto-fix (S/M/L, `auto_fixable: true`) | gate-fixer applied |
 | 6 | CP4 verifier (curator/auditor diff) | `verifier-output-cp4-curator-validation.md` |
@@ -903,8 +903,11 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
 **Per-EPIC (non-blocking):**
-- Steps 1-6 as documented above (run file, archive, active.md, final_report, C3 producer hook, dispatch C+A)
-- C+A may run as background agents — OK to start next EPIC in same plan
+- Steps 1-6 as documented above (run file, archive, active.md, final_report, C3 producer hook,
+  dispatch Auditor then Curator — serial, not parallel, E-057-2_2)
+- C+A (as a pair) may still run as background agents relative to the NEXT EPIC — OK to start the
+  next EPIC in the same plan while this EPIC's Auditor→Curator sequence is in flight. Within the
+  pair itself, Auditor completes before Curator dispatches (Curator consumes `audit-report.json`).
 - done_phase stays `review` until plan-level checkpoint
 
 **Per-Plan checkpoint (HARD STOP after last EPIC in plan):**
@@ -1043,9 +1046,14 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
     "$required_independence_level"` to determine the achieved independence level is a later
     step, out of scope here — this hook only guarantees the manifest artifact exists and is
     correct before that dispatch runs.
-6. **Parallel dispatch:** Curator (`agents/curator.md`) + Auditor (`agents/auditor.md`)
-   dispatched simultaneously via two Agent tool calls in a single message
-7. **Wait:** Both agents must complete before continuing
+6. **Serial dispatch (E-057-2_2):** Auditor (`agents/auditor.md`, C3) dispatches and completes
+   FIRST via its own `Agent()` tool call. Only after it completes does Curator
+   (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the Auditor's
+   `audit-report.json` output (Curator hashes its content into `.curator.audit_report_ref` —
+   `aid-fsm.sh done-advance` verifies this ref against a fresh `sha256sum` of the file and blocks
+   release on mismatch).
+7. **Wait:** Auditor must complete before Curator dispatches; Curator must complete before
+   continuing
 8. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
    Tier 2 default: S/M/L all approve; only an explicit `always_defer` rule (architecture,
    standards-L) defers.

@@ -5,14 +5,15 @@ model: sonnet
 
 # Curator Agent
 
-**Last Updated:** 2026-06-03
+**Last Updated:** 2026-07-08
 
 **Role:** Post-run specialist. Collects improvement observations from worker agents,
 deduplicates against backlog, proposes improvements, extracts lessons learned, and
 recommends a disposition (approve/reject/defer) for each proposal. The Orchestrator
 runs the pre-flight status protocol and dispatches fixes — the Curator only proposes.
 
-**Dispatched by:** `skills/pipeline.md` during DONE state (§7), in parallel with Auditor, pre-merge.
+**Dispatched by:** `skills/pipeline.md` during DONE state (§7), AFTER the Auditor (C3) completes
+— serial, not parallel (E-057-2_2), pre-merge.
 
 ---
 
@@ -26,16 +27,18 @@ You analyze evidence and propose. The Orchestrator evaluates your proposals.
 
 ## Input
 
-Dispatched by `pipeline.md` in the DONE state (§7), in parallel with the Auditor, pre-merge.
-You receive:
+Dispatched by `pipeline.md` in the DONE state (§7), AFTER the Auditor (C3) has already completed
+— serial dispatch (E-057-2_2): you consume the Auditor's actual `audit-report.json` output, not
+just run at the same commit. You receive:
 
 ```yaml
 curator_trigger:
   epic_id: "{epic_id}"
   run_id: "{run_id}"
   evidence_dir: ".aid-o/work/evidence/{epic_id}/{run_id}/"
-  audit_report: "{evidence_dir}/audit-report.yaml|.md"   # OPTIONAL — may not exist yet (Auditor is
-                                                         # dispatched in parallel with you); Phase 1 reads it conditionally
+  audit_report: "{evidence_dir}/audit-report.json"   # REQUIRED — Auditor (C3) runs BEFORE you and
+                                                      # must have already written this file; Phase 1
+                                                      # reads it unconditionally (fails closed if absent)
   backlog: ".aid-o/work/backlog.md"
 ```
 
@@ -51,12 +54,23 @@ Read all step outputs:
 Extract `improvement_notes` sections. Merge into flat list with `source_agent`
 and `source_step` fields. Skip empty arrays.
 
-**Standards compliance input:** If an auditor report exists at
-`evidence/{epic_id}/{run_id}/audit-report.yaml` (or `.md`) — it **may not exist yet**, since the
-Auditor is dispatched in parallel with you, so read it only if present — and it contains a
+**Standards compliance input (REQUIRED):** Read `audit-report.json` at
+`evidence/{epic_id}/{run_id}/audit-report.json`. The Auditor (C3) runs BEFORE you (serial
+dispatch, E-057-2_2), so this file MUST already exist — it is no longer optional/"if present".
+If it is missing or unreadable, this is an input-completeness failure: set
+`proposal_status: INPUT_INCOMPLETE` in your `curator-report.json` (see Output Format) and do not
+fabricate a `standards_compliance` section. When it is present and contains a
 `standards_compliance` section, extract all findings and add them to the flat list with
 `source_agent: auditor` and `source_type: standards`. Each finding retains its
 `standard_rule` ID (e.g., `GEN-003`, `VUL-012`) for traceability.
+
+Also compute `audit_report_ref` = `sha256:<hex>` — the sha256 hash of the raw bytes of
+`audit-report.json` exactly as you read it (`sha256sum audit-report.json`, prefixed
+`sha256:`). Carry this value through to `.curator.audit_report_ref` in your
+`curator-report.json` output. This is a content hash, NOT the commit `head_sha` — a `head_sha`
+match only proves you ran at the same commit, while a content hash proves you genuinely ingested
+that exact audit output. `aid-fsm.sh done-advance` recomputes this hash and blocks release on
+mismatch (the mechanical sequencing proof for this step).
 
 ---
 
@@ -161,6 +175,13 @@ is governed by the memory subsystem (see `memory-mcp.md`) — not by you.
 
 ## Output Format
 
+**Dual-emit (E-057-2_2):** write BOTH files below. `curator-report.md` is unchanged from the
+existing format — the FSM's plan-close/CP4 checks depend on this file's existence, do not break
+that. `curator-report.json` is new (protocol-v2 dictionary) and is additive — it does not replace
+the `.md`.
+
+### curator-report.md (existing format — unchanged)
+
 ```yaml
 curator_report:
   run_id: "{run_id}"
@@ -191,6 +212,40 @@ curator_report:
 
 If zero notes collected: output with `notes_collected: 0` and empty lists.
 Do not fabricate observations.
+
+### curator-report.json (new — protocol-v2)
+
+Payload key is `.curator` (matches `TYPE_PAYLOAD_MAP[curator]="curator"` in
+`aid-protocol-validate.sh` — NOT `.curator_report`).
+
+```json
+{
+  "artifact_type": "curator",
+  "curator": {
+    "proposal_status": "PROPOSALS_READY",
+    "audit_report_ref": "sha256:<64hex>",
+    "proposals": [
+      {
+        "id": "IMP-{NNN}",
+        "recommended_disposition": "approve"
+      }
+    ]
+  }
+}
+```
+
+- `proposal_status` — exactly one of three values:
+  - `PROPOSALS_READY` — `audit-report.json` was read successfully (Phase 1 REQUIRED input) and
+    the run produced zero-or-more proposals from a complete input set
+  - `NO_PROPOSALS` — `audit-report.json` was read successfully but nothing met the Phase 4
+    proposal threshold
+  - `INPUT_INCOMPLETE` — `audit-report.json` could not be read (missing, unparseable, or
+    otherwise unavailable) — see Phase 1
+- `audit_report_ref` — `sha256:<64hex>` of the CONTENT of the `audit-report.json` you actually
+  consumed (see Phase 1 for how to compute it). This is the mechanical proof that you ran AFTER
+  the Auditor and ingested its real output, not just at the same commit.
+- `proposals[].recommended_disposition` — same enum/values/meaning as the `.md` format's
+  `recommended_disposition` (Phase 6) — untouched, just echoed into the JSON payload.
 
 ---
 
