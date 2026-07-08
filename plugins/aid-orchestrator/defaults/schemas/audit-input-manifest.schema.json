@@ -20,10 +20,26 @@
       "$comment": "enforced — minimal payload; full schema defined in owning phase",
       "properties": {
         "allowlist": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "$comment": "hashed paths C3 is permitted to consume"
         },
         "input_hash": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "sha256 of the input set; must equal the consuming audit-report.json's .audit_report.input_manifest_hash (provenance chaining, D7)"
+        },
+        "prior_pass_summaries": {
+          "type": "string",
+          "enum": ["untrusted", "excluded"],
+          "$comment": "prior PASS results are never trusted as-is by C3 — either passed through unverified (untrusted) or withheld (excluded)"
+        },
+        "required_independence_level": {
+          "type": "string",
+          "enum": ["context_only", "cross_model", "cross_provider"],
+          "$comment": "authoritative source: c3-audit-policy.yaml risk_profiles.<profile>.required_independence_level (D8)"
         }
       }
     }
