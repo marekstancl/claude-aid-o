@@ -634,6 +634,7 @@ fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 [[ -z "$fsm_branch" || "$fsm_branch" == "HEAD" ]] && error_exit "aid-json-to-run.sh Step 18: cannot determine current git branch (detached HEAD?)" 1
 [[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
 
+fsm_plan_path="$(jq -r '.source_plan // empty' "$plan_json_path" 2>/dev/null || true)"  # PM fix 2026-07-08: fsm-state must carry plan_path (plan-diff skipped on null = false-green class)
 if [[ ! -f "$fsm_state_file" ]]; then
   echo "P040 Component E: initializing FSM state at $fsm_state_file" >&2
   # aid-fsm.sh init runs branch enforcement and may auto-checkout
@@ -653,12 +654,14 @@ if [[ ! -f "$fsm_state_file" ]]; then
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
+      ${fsm_plan_path:+--plan "$fsm_plan_path"} \
       --streamlined
   else
     bash "${SCRIPT_DIR}/aid-fsm.sh" init \
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
-      "$fsm_state_file"
+      "$fsm_state_file" \
+      ${fsm_plan_path:+--plan "$fsm_plan_path"}
   fi
   fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then

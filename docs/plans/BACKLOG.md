@@ -1222,3 +1222,12 @@ promotion to blocking must not happen while instruction delivery is potentially 
 (a) pipeline preflight comparing cache vs repo plugin version/hash → warn/fail on drift; (b) documented
 mandatory refresh step in release workflow (exists in CLAUDE.md but unenforced); (c) dispatch agents from
 working-tree paths within this repo. Decide in E10 cutover plan at the latest.
+
+### Contract-validate gate gap: path-like ≠ real repo path (PM, 2026-07-08, E-059 gen)
+
+`aid-contract-validate.sh` allowed_paths_shape check only rejects prose-shaped entries (` + `, `(`,
+trailing sentence). Bare short fragments like `pm-decision-brief.schema.json` (missing the full
+`plugins/.../defaults/schemas/` prefix) PASS as "path-like" — E-059-2 shipped such fragments and the
+gate said clean. Enhancement candidate: for `Modify:` entries, verify the path exists in the repo
+(Create: targets exempt); or at minimum require a `/` for known-tree files. Same class as P058's
+original findings — the gate closed prose, not wrongness.
