@@ -1206,6 +1206,11 @@ a bug, not a legitimate Fast-Mode skip).
 
 ## STALE PLUGIN CACHE for agent instructions (external auditor, 2026-07-08)
 
+**Cross-ref: IMP-179** (`.aid-o/work/backlog.md`) — the DEEPER layer of the same failure class: subagent
+system prompts do not pick up `agents/*.md` changes within the same session (dogfood-proven on
+E-057-2_2 Curator dispatch). This section = marketplace-cache layer; IMP-179 = session/dispatch layer.
+BOTH must be resolved before E10/E11 promotion (anchored in roadmap E10 "Tvrdé preconditions").
+
 **Class:** instruction drift — dispatched agents (Auditor/Curator/…) may read agent .md instructions from
 the marketplace plugin CACHE (`~/.claude/plugins/marketplaces/claude-aid-o/...` per `.aid-o/config/plugin.yaml`
 `plugin_path`), not from the repo working tree. After in-repo changes (e.g. E8's auditor.md C3 conversion,

@@ -239,6 +239,7 @@ Každý blok zkopíruj do nového Claude Code okna, až přijde řada na danou f
 /aid-plan write docs/plans/AID-control-system-v2-roadmap.md E10: Kalibrace a dual-run metriky
 ```
 **Context pro writer:** Executable plán pro E10. Cíl: kompozitní regression fixtures E-047-1/4/5, E-044, P045; `aid-control-metrics.sh` (false-DONE/false-positive/náklady); dual-run nový vs starý proces; numerické budget stropy (T6); promotion observe→blocking dle empirického kritéria + negative fixtures + positive controls. Toto teprve prokáže, že systém kontroluje stejně dobře jako nezávislý audit. Reference: master §10 E10 + §11-12. Vstup: E1-E9.
+**Tvrdé preconditions promotion (⚠️ NEZAPOMENOUT):** (1) promotion observe→blocking NESMÍ proběhnout, dokud není vyřešena **stale doprava instrukcí agentům — IMP-179** (`.aid-o/work/backlog.md`; subagent system prompty nepřečtou změnu `agents/*.md` v téže session - dogfood důkaz E-057-2_2) **+ marketplace plugin cache drift** (`docs/plans/BACKLOG.md` „STALE PLUGIN CACHE", 2026-07-08) - jinak blokující brány poběží se zastaralými instrukcemi; E10 musí rozhodnout fix mechanismus (dispatch-time freshness hash check / restart-požadavek / hot-reload potvrzení). (2) Ověřit metrikami, že **C3 gate reálně naskočil v živých runech** (IMP-177 zavírá E9/P059 EPIC 1 - C3 activation; E10 potvrdí nenulový počet `c3_hook_fired` runů, jinak promotion C3/C4 nemá data).
 
 ### E11 - Řízený cutover + zjednodušení
 
