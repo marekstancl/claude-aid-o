@@ -30,9 +30,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 
 # Named constants (GEN-007: no inline magic strings for config-like values).
-readonly C3_MODE_INDEPENDENT="c3"
-readonly C3_MODE_LEGACY="legacy_health"
-readonly DEFAULT_C3_POLICY="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
+# Not `readonly` so the file stays safe to source more than once in a test shell.
+C3_MODE_INDEPENDENT="c3"
+C3_MODE_LEGACY="legacy_health"
+DEFAULT_C3_POLICY="${PLUGIN_ROOT}/defaults/policies/c3-audit-policy.yaml"
 
 # resolve_mode — echo the audit mode for a run and return its exit code.
 # Args: $1 = evidence_dir. Fail-closed everywhere: any ambiguity in reading the
