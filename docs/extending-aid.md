@@ -895,4 +895,4 @@ items that most affect how you should read the guarantees above:
   other than a clear "Logged in" signal as unconfirmed (fail-closed), and the concrete auth
   probe itself is flagged TBD for follow-up research.
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-07-08
