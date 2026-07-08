@@ -256,6 +256,46 @@ YAML
   grep -q "review-profile.json not found" "$TEST_TMPDIR/audit-mode-err.log"
 }
 
+# ─── Finding 1a: Missing "high" case when policy file exists ────────────────
+
+@test "(Finding 1a) aid-audit-mode.sh: policy file with only unverifiable + risk_profile=high → c3 (fail-closed)" {
+  # E-059-1_2 Step 1: Partial policy that defines only risk_profiles.unverifiable
+  # (missing risk_profiles.high) + input risk_profile="high" must resolve to c3,
+  # not legacy_health (the bug: the elif arm was missing "high").
+  local policy_file="$TEST_TMPDIR/partial-policy.yaml"
+  cat > "$policy_file" <<'YAML'
+version: 1
+risk_profiles:
+  unverifiable:
+    c3_required: true
+YAML
+  export C3_AUDIT_POLICY="$policy_file"
+
+  echo '{"review_profile":{"risk_profile":"high"}}' > "$TEST_EVIDENCE_DIR/review-profile.json"
+  run bash "$AUDIT_MODE" "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "c3" ]  # Must be c3, not legacy_health (fail-closed)
+}
+
+# ─── Finding 1b: Injection prevention + fail-closed on unknown values ────────
+
+@test "(Finding 1b) aid-audit-mode.sh: malformed risk_profile (injection attempt) → c3 (fail-closed)" {
+  # E-059-1_2 Step 1: Input with injection-like character (literal quote) must
+  # be validated and fall back to "unverifiable", which resolves to c3.
+  echo '{"review_profile":{"risk_profile":"high\" | echo injected"}}' > "$TEST_EVIDENCE_DIR/review-profile.json"
+  run bash "$AUDIT_MODE" "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "c3" ]  # Malformed → validated to "unverifiable" → c3
+}
+
+@test "(Finding 1b) aid-audit-mode.sh: unknown risk_profile value → c3 (fail-closed)" {
+  # Input with unknown enum value (e.g., typo) must fall back to "unverifiable".
+  echo '{"review_profile":{"risk_profile":"UNKNOWN_PROFILE"}}' > "$TEST_EVIDENCE_DIR/review-profile.json"
+  run bash "$AUDIT_MODE" "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ "$output" = "c3" ]  # Unknown → validated to "unverifiable" → c3
+}
+
 # ─── Scenario (c): FSM review-profile presence check (observe/blocking) ─────
 
 @test "(c) FSM presence check OBSERVE: missing review-profile.json → done-advance PASSES + review_profile_would_block event" {
@@ -408,12 +448,12 @@ YAML
   [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
 }
 
-@test "(Step2) FSM invalidation_map_expected OBSERVE: gate_fixer_fix_applied present + invalidation-map.json exists → NO would_block" {
+@test "(Step2) FSM invalidation_map_expected OBSERVE: gate_fixer_fix_applied present + invalidation_map_produced event → NO would_block" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_clean_done_review "$state_file"
   bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
-  # The artifact IS present → the expectation is satisfied, no would_block emitted.
-  echo '{"invalidation_map":{"applied_fix_ref":"cp2-step-1-iter1"}}' > "$TEST_EVIDENCE_DIR/invalidation-map.json"
+  # The invalidation_map_produced event IS present → the expectation is satisfied, no would_block emitted.
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" invalidation_map_produced fix_ref="cp2-step-1-iter1" c1_count=0 c2_count=0 require_rerun=false
 
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -eq 0 ]
@@ -436,6 +476,57 @@ YAML
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_clean_done_review "$state_file"
   bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  export INVALIDATION_MAP_ENFORCEMENT=blocking
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_done_advance_fail"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
+}
+
+# ─── Finding 2: Event count mismatch detection (multiple fixes) ───────────────
+
+@test "(Finding 2) FSM invalidation_map_expected OBSERVE: 2 fixes applied, only 1 invalidation-map event → would_block" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  # Simulate 2 gate-fixer fixes applied (CP2 + CP3) but only 1 invalidation_map_produced
+  # event was emitted (CP2 ran, CP3's hook skipped). The check must detect this count
+  # mismatch and emit invalidation_map_expected_missing (Finding 2 fix).
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp3-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" invalidation_map_produced fix_ref="cp2-step-1-iter1" c1_count=1 c2_count=0 require_rerun=true
+  # Only 1 invalidation_map_produced vs 2 gate_fixer_fix_applied.
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
+}
+
+@test "(Finding 2) FSM invalidation_map_expected OBSERVE: equal counts (2 fixes, 2 events) → no would_block" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  # Now both fixes have corresponding invalidation_map_produced events.
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp3-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" invalidation_map_produced fix_ref="cp2-step-1-iter1" c1_count=1 c2_count=0 require_rerun=true
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" invalidation_map_produced fix_ref="cp3-step-1-iter1" c1_count=0 c2_count=1 require_rerun=true
+  # Counts match: 2 fixes, 2 events.
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  run assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "invalidation_map_expected_missing"
+  [ "$status" -ne 0 ]   # event must NOT be present (counts match, no would_block)
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
+}
+
+@test "(Finding 2) FSM invalidation_map_expected BLOCKING: count mismatch → done-advance REJECTED + fsm_done_advance_fail" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _seed_clean_done_review "$state_file"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp2-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" gate_fixer_fix_applied fix_ref="cp3-step-1-iter1"
+  bash "$STAGE_LOG" log_event "$TEST_EVIDENCE_DIR/timeline.jsonl" invalidation_map_produced fix_ref="cp2-step-1-iter1" c1_count=1 c2_count=0 require_rerun=true
+  # 2 fixes applied, only 1 event produced; enforcement=blocking.
   export INVALIDATION_MAP_ENFORCEMENT=blocking
 
   run "$FSM" done-advance review release "$state_file"

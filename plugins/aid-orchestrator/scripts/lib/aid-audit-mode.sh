@@ -63,6 +63,13 @@ resolve_mode() {
     fi
   fi
 
+  # Validate risk_profile against closed enum to prevent injection (fail-closed to
+  # unverifiable on unknown value). Mirrors aid-fsm.sh's cmd_done_advance guard.
+  case "$risk_profile" in
+    docs_trivial|low|medium|high|unverifiable) ;;
+    *) risk_profile="unverifiable" ;;  # unknown/malformed → fail-closed
+  esac
+
   # Look up c3_required for this profile. Fail-closed: any ambiguity → c3.
   local c3_required="false"
   if [[ -f "$policy_file" ]] && command -v yq >/dev/null 2>&1; then
@@ -74,8 +81,8 @@ resolve_mode() {
       local val val_ec=0
       val=$(yq -r ".risk_profiles[\"$risk_profile\"].c3_required" "$policy_file" 2>/dev/null) || val_ec=$?
       [[ $val_ec -eq 0 && "$val" == "true" ]] && c3_required="true"
-    elif [[ "$risk_profile" == "unverifiable" ]]; then
-      # Profile absent from policy but unverifiable → fail-closed to c3.
+    elif [[ "$risk_profile" == "high" || "$risk_profile" == "unverifiable" ]]; then
+      # Profile absent from policy but high/unverifiable → fail-closed to c3.
       c3_required="true"
     fi
   else

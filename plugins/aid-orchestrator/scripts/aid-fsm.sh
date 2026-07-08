@@ -2595,13 +2595,11 @@ cmd_done_advance() {
       # was registered but never called from the live flow. The pipeline.md post-fix
       # hook now (a) emits a `gate_fixer_fix_applied` timeline event whenever a
       # gate-fixer fix lands at an in-scope dispatch site, and (b) calls
-      # aid-invalidation-map.sh, which writes invalidation-map.json. This check keys
-      # off the FORMER event (the substrate the pipeline hook creates — nothing
-      # emitted it before this step, which was the IMP-177 root cause: a detector
-      # with no real signal wired to it, see AID-v3-principles.md §1) and verifies
-      # the LATTER artifact exists. gate_fixer_fix_applied present + invalidation-map.json
-      # absent ⇒ the observe producer wiring did not run ⇒ emit
-      # invalidation_map_expected_missing telemetry.
+      # aid-invalidation-map.sh, which emits an `invalidation_map_produced` event.
+      # This check compares the COUNTS of these two events (not just presence) to
+      # detect when a fix was applied but its post-fix hook did not run. Multiple
+      # applied fixes without corresponding invalidation_map_produced events
+      # ⇒ emit invalidation_map_expected_missing telemetry.
       #
       # OBSERVE by default (transition PASSES). INVALIDATION_MAP_ENFORCEMENT=blocking
       # (E10 promotion / test seam, mirrors the C3_AUDIT_POLICY override convention)
@@ -2611,21 +2609,24 @@ cmd_done_advance() {
       # (never manufactures a would_block on runs that applied no fixes).
       local _im_enforcement="${INVALIDATION_MAP_ENFORCEMENT:-observe}"
       local _im_timeline="${evidence_dir}/timeline.jsonl"
-      if [[ -f "$_im_timeline" ]] && grep -q '"event":"gate_fixer_fix_applied"' "$_im_timeline" 2>/dev/null; then
-        local _im_found
-        # `|| true` guards against set -e aborting the script if evidence_dir is
-        # unexpectedly unreadable (find non-zero) — treat unreadable as "absent".
-        _im_found=$(find "$evidence_dir" -type f -name 'invalidation-map.json' -print -quit 2>/dev/null || true)
-        if [[ -z "$_im_found" ]]; then
+      if [[ -f "$_im_timeline" ]]; then
+        local _im_applied _im_produced
+        # Count gate_fixer_fix_applied events in the timeline (fail-safe to 0).
+        _im_applied=$(jq -r '[inputs | select(.event=="gate_fixer_fix_applied")] | length' -n < "$_im_timeline" 2>/dev/null || echo 0)
+        # Count invalidation_map_produced events in the timeline (fail-safe to 0).
+        _im_produced=$(jq -r '[inputs | select(.event=="invalidation_map_produced")] | length' -n < "$_im_timeline" 2>/dev/null || echo 0)
+
+        if [[ $_im_applied -gt 0 && $_im_produced -lt $_im_applied ]]; then
+          # At least one fix was applied but fewer invalidation-map events were produced.
           log_event "$_im_timeline" "invalidation_map_expected_missing" \
             check="invalidation_map_expected" enforcement="$_im_enforcement" \
-            reason="gate_fixer_fix_applied present but invalidation-map.json absent"
+            reason="gate_fixer_fix_applied events($_im_applied) > invalidation_map_produced($_im_produced)"
           if [[ "$_im_enforcement" == "blocking" ]]; then
-            echo "PRECONDITION FAIL: a gate_fixer_fix_applied event is present but no invalidation-map.json was found under ${evidence_dir}/ — the invalidation-map post-fix hook (pipeline.md, search: 'Invalidation-Map Post-Fix Hook') must run after every gate-fixer fix (enforcement=blocking)." >&2
-            log_event "$_im_timeline" "fsm_done_advance_fail" check="invalidation_map_expected" reason="invalidation_map_absent"
+            echo "PRECONDITION FAIL: gate_fixer_fix_applied events($_im_applied) exceeds invalidation_map_produced events($_im_produced) — the invalidation-map post-fix hook (pipeline.md, search: 'Invalidation-Map Post-Fix Hook') must run after every gate-fixer fix (enforcement=blocking)." >&2
+            log_event "$_im_timeline" "fsm_done_advance_fail" check="invalidation_map_expected" reason="invalidation_map_event_count_mismatch"
             exit 2
           else
-            log_warn "invalidation_map_expected would_block (enforcement=observe, non-blocking): gate_fixer_fix_applied present but invalidation-map.json absent in ${evidence_dir}"
+            log_warn "invalidation_map_expected would_block (enforcement=observe, non-blocking): gate_fixer_fix_applied($_im_applied) > invalidation_map_produced($_im_produced) in ${evidence_dir}"
           fi
         fi
       fi
