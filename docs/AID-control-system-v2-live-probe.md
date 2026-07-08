@@ -189,6 +189,45 @@ defer the write until the checkout returns to `main`, or flag the PM. (Incident:
 an OBS commit landed on `task/E-057-1_2/main`; recovered by fast-forwarding
 `main` to the commit since its parent was the `main` tip.)
 
+**Read verdicts, not just file presence (lesson 2026-07-08):** a new artifact
+in the evidence dir is not yet a signal — open it. Check `verdict`, `status`,
+`overall`, `ready`, `findings[]`, and internal consistency (e.g. a
+delivery-gate `status: fail` with zero failing checks and empty findings, or
+two contradictory `freshness` fields in one JSON). An artifact that cannot
+explain its own verdict without source-code archaeology is itself a finding.
+
+**Record/reality drift check (lesson 2026-07-08):** at every EPIC start and
+before every CP3, compare fsm-state `base_commit` against the actual
+`git merge-base <task-branch> main`. Silent drift between recorded state and
+git reality is a recurring family (5 instances); verifiers/tools compensating
+with the real base is a positive moment worth recording, but the drift still
+counts.
+
+**Release watch does not end at merge (lesson 2026-07-08):** after a
+merge/release advance, keep watching: done-advance events (incl. fail+retry
+visible only in timeline), version tag creation, push to origin, and the
+plugin-update rollout to consumer projects. Each of these has independently
+stalled or been forgotten in observed runs.
+
+**Self-refreshing poll prompts (multi-probe mode):** each probe's scheduled
+poll prompt carries its own state summary. When the observed state changes
+materially (FSM phase change, new EPIC, cadence change), replace the job with
+an updated prompt instead of letting the next poll run on stale context.
+Cadence defaults: 6 min while active; thin to 15-30 min after 5 consecutive
+no-ops; restore 6 min on first resumed activity.
+
+**Flush discipline (extends observer commit discipline):** the moment the
+shared checkout returns to `main`, flush ALL deferred writes accumulated in
+the working notes — not only the finding that triggered the check. Mark
+flushed sections in the working notes with the commit hash so a resumed
+session knows what is already in the BACKLOG.
+
+**PM relay pattern:** when the PM relays an implementer request (e.g. a
+--no-verify approval), the observer answers with a concrete recommendation
+plus the relevant OBS tally/context — not just a description. The PM decides;
+the observer's job is to make the decision cheap and the bypass loud
+(explicit reason in the commit message body).
+
 **After each completed run:** update this Runbook section with anything that
 made the next round of monitoring more accurate — additional artifacts worth
 checking, a sharper definition of "significant state", recurring false
