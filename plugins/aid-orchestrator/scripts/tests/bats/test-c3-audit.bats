@@ -43,7 +43,33 @@ setup() {
 
 teardown() {
   unset GIT_DIR
+  unset C3_AUDIT_POLICY
   teardown_test_evidence_dir
+}
+
+# _pin_c3_blocking
+#   E-059-1_2 Step 1: the C3 independent-audit hook is now enforcement-gated —
+#   c3-audit-policy.yaml ships `enforcement: observe` (staged wake), so the hook
+#   emits c3_gate_would_block telemetry and lets the transition through instead
+#   of blocking. Scenarios that assert the "C3 independent audit block" message
+#   must pin the enforcement toggle to `blocking` via the C3_AUDIT_POLICY seam
+#   (mirrors DELIVERY_GATE_POLICY in test-fsm-dg07-observe.bats). The per-profile
+#   c3_required risk-gate still reads the installed default policy, so this
+#   fixture only needs the enforcement key.
+_pin_c3_blocking() {
+  local policy_file="$TEST_TMPDIR/c3-audit-policy-blocking.yaml"
+  cat > "$policy_file" <<'YAML'
+version: 1
+enforcement: blocking
+risk_profiles:
+  high:
+    c3_required: true
+    required_independence_level: cross_model
+  unverifiable:
+    c3_required: true
+    required_independence_level: cross_provider
+YAML
+  export C3_AUDIT_POLICY="$policy_file"
 }
 
 # ─── Shared fixture helper (copied/adapted from test-aid-fsm.bats) ──────────
@@ -105,6 +131,7 @@ JSON
 @test "C3 EPIC scenario 1 (positive): blocking_findings == true → done-advance blocks" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking
   local head_sha; head_sha="$(git rev-parse HEAD)"
 
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
@@ -169,6 +196,7 @@ JSON
 @test "C3 EPIC scenario 2 (positive, FSM consequence): status == unverifiable → done-advance blocks" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking
   local head_sha; head_sha="$(git rev-parse HEAD)"
 
   # risk_profile "unverifiable" maps to required_independence_level: cross_provider
@@ -228,6 +256,7 @@ JSON
 @test "C3 EPIC scenario 3 (positive): missing input_manifest_hash → done-advance blocks" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _seed_done_review_state "$state_file"
+  _pin_c3_blocking
   local head_sha; head_sha="$(git rev-parse HEAD)"
 
   cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'

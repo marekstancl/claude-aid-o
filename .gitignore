@@ -36,17 +36,13 @@ workspace/
 # Reference specs (internal, not for distribution)
 _unzipped/
 
-# Development plans (internal design documents)
-docs/plans/*
-!docs/plans/AID-control-system-v2-roadmap.md
-!docs/plans/AID-control-system-v2-session-prompts.md
-!docs/plans/BACKLOG.md
+# Internal documentation, design notes, plans, audits, and project-local docs.
+# Public GitHub should contain plugin/runtime assets and plugin-facing docs in
+# plugin paths, not private planning material under docs/.
+docs/
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
-# Use .aid-o/* (not .aid-o/) so git can honour negation for reports/ subdirectory.
-.aid-o/*
-!.aid-o/reports/
-!.aid-o/reports/**
+.aid-o/
 # Test suites call aid-fsm.sh init and create nested .aid-o/ workspaces
 **/.aid-o/
 
