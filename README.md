@@ -116,20 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.51.0** (current) — per-step scoping (D2) + blocking Contract Validation Gate (D5): plan.json outputs/allowed_paths/AC scoped per step instead of broadcast, structural gate catches broadcast/AC-fragment/prose-path regressions before FSM init, `aid-plan-diff.sh` `## Success Criteria` parsing fix
+- **v2.52.0** (current) — E8 C3 Independent Audit (P057): risk-gated distrust-based `agents/auditor.md` C3 mode + legacy A-J compat, protocol-v2 `audit-report.json`/`audit-input-manifest.json`, `aid-audit-independence.sh` Codex capability detection, `c3-audit-policy.yaml`, fail-closed FSM done-advance hook, Curator now serial after C3 with content-ref sequencing guard, observe-only `invalidation-map.json` producer, behavioral red-green bats coverage
+- **v2.51.0** — per-step scoping (D2) + blocking Contract Validation Gate (D5): plan.json outputs/allowed_paths/AC scoped per step instead of broadcast, structural gate catches broadcast/AC-fragment/prose-path regressions before FSM init, `aid-plan-diff.sh` `## Success Criteria` parsing fix
 - **v2.50.1** — E7B existing_ui wiring: FSM step-local guard, envelope transport (plan→EPIC→plan.json), C2 lens schema, `/aid-do` redirect, 3 test harnesses
-- **v2.49.0** — E7-CAL calibration mechanism: real ScreenG Playwright capture, artifact persistence (8 files/case), standalone verifier, 15 false-green BATS tests, `image_dimension_mismatch` reason, auto-skip gates for non-calibration EPICs
-- **v2.47.0** — E7A UI fidelity foundation: Playwright capture, pixelmatch comparison, typed contract schema, envelope validator, 5 calibration fixture sets, CI workflow
-- **v2.46.0** — E6 C1 honest-minimal delivery probes: DG-15/17/18 + delivery-map foundation
-- **v2.44.1** — C2 Semantic Review Engine (observe): 4-mode dual-emit, 12-lens catalog, wiring-gate, acceptance-evidence, consumption-proof, E3→E5 completed_lenses
-- **v2.42.1** — E3 Adaptive Review Profile Detector: deterministic surface→lens resolver, observe FSM hook, 13-scenario test harness
-- **v2.38.0** — `/aid-verify-plan` + `/aid-verify-implementation` manual PM commands: independent adversarial review of a plan (pre-execution) and an implementation (DONE), dispatched to a fresh-context agent
-- **v2.37.0** — per-step Acceptance Criteria pre-flight in aid-epic-to-json.sh (multi-step EPIC needs >=1 AC per step)
-- **v2.36.2** — stale aid-plan.md CP1 lenses synced; boundary manifest committed
-- **v2.36.1** — CP1-deep empty-file bypass closed; L1/L2/L3 lens taxonomy; aid-init gitignore guidance
-- **v2.36.0** — behavior-first review contracts; `behavior_trace` structural gate; CP1 risk-scaling + `aid-cp1-gate.sh`; `.gitignore` negation fix; CP1 gate `risk:low` precedence fix; frontmatter parser state machine
-- **v2.35.0** — `plan-close` FSM command enforces all 4 boundary reports; toggle-skip for disabled specialists; boundary manifest committed artifact; CI floor check; force-override audit enrichment; 13 new bats assertions
-- **v2.34.2** — `plan_diff` gate evidence truthfulness (exit 2 → `skip` not `pass`); `review_result` instruction drift cleaned up in `role-cards.md` + `gate-fixer.md`
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

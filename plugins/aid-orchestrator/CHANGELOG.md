@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.52.0] — 2026-07-08
+
+### Added
+- **C3 Independent Audit (E8, P057)** — `agents/auditor.md` converts to dual-mode, selected by `audit_trigger.mode`: risk-gated, distrust-based `c3` (PASS is never the default) alongside the original trust-based `legacy_health` A-J audit kept as compat. C3 emits protocol-v2 `audit-report.json`/`audit-input-manifest.json` (type-named `.audit_report` key, findings top-level, `blocking_findings` boolean, `provider`/`model`/`process_id` echoed verbatim from the harness — never self-reported).
+- **`aid-audit-independence.sh`** — detects the actually-achieved audit independence level (`context_only`/`cross_model`/`cross_provider`) against the level required by `c3-audit-policy.yaml` for the run's risk profile; detection-only, never dispatches a real `codex exec` audit; unconfirmable signals degrade to `unverifiable`, never a silent pass.
+- **`c3-audit-policy.yaml`** — authoritative risk-profile → required-independence-level policy; only `high` (needs `cross_model`) and `unverifiable` (needs `cross_provider`) carry `c3_required: true`.
+- **`aid-fsm.sh` C3 done-advance hook** — fail-closed release block on `blocking_findings`, unverifiable independence, missing/malformed provenance, or a stale audit `head_sha`; risk-gated to the `high`/`unverifiable` profiles only, with no `// false` fallback anywhere in the check.
+- **Curator serial after C3 + content-ref sequencing guard** — `skills/pipeline.md` dispatches Auditor (C3) then Curator serially (was parallel); Curator dual-emits `curator-report.json` with `.curator.audit_report_ref` (sha256 of the actually-consumed `audit-report.json`), and a new `aid-fsm.sh` guard blocks unless that hash matches the current report — proving real consumption order, not just a shared commit. `recommended_disposition` merge-authority is untouched (deferred to E9).
+- **`invalidation-map.json` observe-only producer** — `scripts/lib/aid-invalidation-map.sh` derives `affected_c1_checks[]` (deterministic subset, read from `delivery-gate.yaml` globs) and `affected_c2_modes[]` (conservative — any C2-touching change affects all modes) from an applied fix's changed paths, emitting the artifact plus a timeline event; registered as `invalidation_map_observe`; never triggers a re-run itself.
+- **Behavioral red-green test suites** — `scripts/tests/bats/test-c3-audit.bats` (High→blocking, unavailable→unverifiable, no-provenance→fail, curator-before-audit→fail, each with a positive and negative control via subprocess `aid-fsm.sh`) and `scripts/tests/bats/test-invalidation-map.bats` (real producer execution against fixtures).
+- **`docs/extending-aid.md` C3 Independent Audit (E8) section** — documents the full C3 pipeline plus an explicit "What E8 Does NOT Deliver" scope-honesty subsection (no real Codex dispatch, no auto re-run, no C4 consumption, merge-authority untouched, no cryptographic hash-equality binding — see `docs/plans/BACKLOG.md` § "E8 Deferred").
+
 ## [2.51.0] — 2026-07-05
 
 ### Added
