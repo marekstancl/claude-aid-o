@@ -247,3 +247,23 @@ _d() { jq -r "$1" "$DEC"; }
   _run
   [ "$status" -eq 2 ]
 }
+
+# ─── REGRESSION: empty/whitespace-only decision (jq 1.6 edge case) ──────────
+
+@test "REGRESSION: release-decision.json EMPTY (0-byte) → communication_status incomplete + exit!=0" {
+  : > "$DEC"    # truncate to 0 bytes
+  _run "$DIR"
+  [ "$status" -ne 0 ]
+  [ "$status" -eq 7 ]
+  [ -f "$BJ" ]
+  [ "$(_b '.pm_decision_brief.communication_status')" == "incomplete" ]
+}
+
+@test "REGRESSION: release-decision.json WHITESPACE-ONLY → communication_status incomplete + exit!=0" {
+  printf '\n' > "$DEC"
+  _run "$DIR"
+  [ "$status" -ne 0 ]
+  [ "$status" -eq 7 ]
+  [ -f "$BJ" ]
+  [ "$(_b '.pm_decision_brief.communication_status')" == "incomplete" ]
+}

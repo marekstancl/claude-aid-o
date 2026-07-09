@@ -925,8 +925,11 @@ against `defaults/schemas/` via `aid-protocol-validate.sh`). It aggregates a fix
 | **OPTIONAL** | `waiver-*.json` | surfaced in `waivers_applied[]`; **waived ≠ pass** |
 
 `release_ready` is `true` **iff** `blockers` is empty **and** `evidence_verified_at_head` is
-`true`. Fail-closed rules the aggregator holds (each with a red-green case in
-`scripts/tests/bats/test-release-policy.bats`):
+`true`. **E9 REQUIRED input checks are presence/freshness-only**: the aggregator verifies each
+file exists, is readable JSON, and matches its revision.head_sha (staleness detection). It does
+NOT read the content of fields like `semantic_review.status` (status == fail) or check verdict
+content — **content-verdict blocking is deferred to E10**. Fail-closed rules the aggregator holds
+(each with a red-green case in `scripts/tests/bats/test-release-policy.bats`):
 
 - An empty / whitespace-only / unparseable REQUIRED input is treated as absent (jq 1.6 edge
   case) — never a silent pass.

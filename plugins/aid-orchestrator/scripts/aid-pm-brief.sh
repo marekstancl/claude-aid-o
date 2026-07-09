@@ -77,9 +77,9 @@ usage() {
 # _is_json <file> — present, non-empty AND parseable JSON (fail-closed presence+parse gate).
 _is_json() {
   local f="$1"
-  [[ -s "$f" ]] || return 1
-  command -v jq >/dev/null 2>&1 || return 0
-  jq -e . "$f" >/dev/null 2>&1
+  [[ -s "$f" ]] || return 1                              # missing OR 0-byte → fail-closed (was -f: accepts empty)
+  command -v jq >/dev/null 2>&1 || return 0              # no jq → presence-only (unchanged)
+  [[ -n "$(jq -c . "$f" 2>/dev/null)" ]] && jq -e . "$f" >/dev/null 2>&1
 }
 
 # decision_complete <decision_file> — 0 iff release_decision is an object carrying release_ready

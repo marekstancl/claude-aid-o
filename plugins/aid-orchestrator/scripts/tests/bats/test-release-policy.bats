@@ -37,7 +37,7 @@
 #   11   stale HEAD → no MERGE                          SIMULATED→ "--at-head stale …" (head_match=false)
 #   12   forced waiver visible, no PASS rewrite         ADAPTED  → "dual: … writes a valid waiver" (Step 5)
 #  13-16 profile/IR/lens cadence                        N/A      → C2/E3 review-profile hooks (E10 promotion)
-#   17   unit pass, prod wiring fail → blocked          ADAPTED  → semantic-review-final fail → release_ready false
+#   17   unit pass, prod wiring fail → blocked          ADAPTED  → semantic-review-final presence/stale-blocking (E9); content-verdict blocking deferred to E10
 #   18   auto-merge eligible EPIC w/o PM brief          NEW (D11)→ "d11 [18] …" (pm_brief_status seam)
 #   19   per-EPIC release without Reporter              NEW (D11)→ "d11 [19] …" (not_applicable)
 #   20   plan-boundary w/o Reporter, NOT disabled       NEW (D11)→ "d11 [20] …" (missing → false)
