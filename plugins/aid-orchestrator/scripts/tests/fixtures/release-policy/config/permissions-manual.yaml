@@ -1,0 +1,4 @@
+# Fixture permissions.yaml (flat, aid-init form) — autonomous_mode false → merge_mode manual.
+autonomous_mode: false
+auto_commit: false
+auto_push: false

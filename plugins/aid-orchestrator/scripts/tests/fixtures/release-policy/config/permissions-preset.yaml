@@ -1,0 +1,10 @@
+# Fixture permissions.yaml (PRESET-model, defaults/policies form) — NO autonomous_mode key.
+# The aggregator must fail-closed to merge_mode manual when this shape lands at the flat
+# .aid-o/config/permissions.yaml path (it never reads .aid-o/config/policies/permissions.yaml).
+active_preset: "autonomous"
+presets:
+  autonomous:
+    description: "Max autonomy without destructive operations."
+    claude_code_permissions:
+      - "Read"
+      - "Bash(*)"
