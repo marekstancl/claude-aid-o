@@ -287,6 +287,42 @@ delete already-tracked files from disk or history — an actual `rm`/merge
 conflict resolution is a separate, more consequential step worth confirming
 was intentional.
 
+**C4 release-decision observability contract (PM-defined, 2026-07-09):** once
+P059 Phase 2 (AID E-059-2, C4 dual-run core) lands — and at EVERY release/
+plan-close observed after that — check these as hard expectations, not
+nice-to-haves. Each is a disk-observable check; a miss is a finding:
+
+1. `release-decision.json` exists in run evidence and contains ALL of:
+   `release_ready`, `merge_mode` (manual|auto|blocked), `pm_brief_required`,
+   `evidence_verified_at_head`, `reporter_status`, `reporter_reason`,
+   `summary_for_pm`. A missing field = finding (schema gap), not a skip.
+2. Auto-merge must not bypass the PM brief: if a merge commit exists and
+   `merge_mode: auto`, a machine-stored human-readable brief artifact
+   (pm-decision-brief) MUST also exist on disk. Auto-merge without a stored
+   brief = finding, even if the merge itself was correct.
+3. Reporter absence must not be silence: `reporter_status` must be exactly
+   one of `pass` / `failed` / `missing` / `not_applicable` (with
+   `reporter_reason`, e.g. `not_plan_boundary`). No field + no artifact +
+   no reason = finding. The probe's own blind spot (can't see chat) is
+   irrelevant here — the CONTRACT is that the status lives on disk.
+4. Post-merge evidence freshness: after the final merge commit, either
+   (a) evidence was re-verified at the new HEAD (fresh verification
+   artifact whose head_sha == post-merge HEAD), or (b) release-decision
+   says `evidence_verified_at_head: false` AND the merge is not presented
+   as "verified". Stale evidence + verified claim = false-green finding
+   (OBS-03 family).
+5. Public/private hygiene: `.aid-o/reports/` delivery/boundary reports must
+   NOT be committed git artifacts (local evidence only). Check
+   `git ls-files .aid-o/reports/`. Baseline 2026-07-09: WAN has 5 committed
+   (P039/P058×2/P060×2) — pre-existing practice this contract reverses;
+   tally recurrences after C4 lands.
+6. Simplifier — same rule as Reporter: it is a plan-boundary stage. If it
+   did not run at a plan-close, an explicit status must exist
+   (`not_applicable` for per-EPIC release / `missing` / `failed` / `pass`)
+   — silence = finding. Observed positive precedent: WAN P060 ran it with a
+   dedicated `verifier-output-cp4-simplifier-validation.md` re-verify;
+   that's the pattern to pin.
+
 **After each completed run:** update this Runbook section with anything that
 made the next round of monitoring more accurate — additional artifacts worth
 checking, a sharper definition of "significant state", recurring false
