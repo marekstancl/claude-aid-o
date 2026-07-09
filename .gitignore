@@ -40,6 +40,12 @@ _unzipped/
 # Public GitHub should contain plugin/runtime assets and plugin-facing docs in
 # plugin paths, not private planning material under docs/.
 docs/
+# EXCEPTION: the live-probe findings ledger must stay tracked — it was
+# accidentally caught by a merge-conflict "delete" resolution on 2026-07-08
+# specifically because it lost tracking here with no negation rule. Restored
+# 2026-07-09; do not remove this line without an explicit decision to stop
+# tracking findings history.
+!docs/plans/BACKLOG.md
 
 # AID workspace (created by /aid-init for dogfooding — not for distribution)
 .aid-o/
