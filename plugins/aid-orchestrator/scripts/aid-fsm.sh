@@ -21,6 +21,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${AID_PLUGIN_PATH:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
+# (B1: one substrate for the FSM compliance checks AND the C4 release aggregator).
+source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -915,40 +918,18 @@ fsm_eval_delivery_report_present() {
   local report="${project_root}/.aid-o/reports/${plan_id}-delivery.md"
   [[ -f "$report" ]] || { echo false; return 0; }
 
-  # Extract the YAML frontmatter (lines strictly between the 1st and 2nd '---',
-  # tolerating a leading HTML comment block) and read _test_evidence[].
-  local ev_paths
-  ev_paths=$(awk '/^---[[:space:]]*$/{c++; if(c==2) exit; next} c==1{print}' "$report" \
-    | yq -r '._test_evidence[]?' 2>/dev/null || true)
-  [[ -z "$ev_paths" ]] && { echo false; return 0; }
-
-  # >=1 referenced artifact must exist on disk under the run evidence dir.
-  # _test_evidence is author-controlled, so reject path-traversal (`..`) and
-  # absolute paths before the existence test — the check must not be satisfiable
-  # by pointing at an arbitrary host file (matters especially once promoted to
-  # blocking). Only paths that stay under the run evidence dir count.
-  local one_exists=false line
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    [[ "$line" == /* || "$line" == *..* ]] && continue
-    if [[ -f "${evidence_dir}/${line}" ]]; then one_exists=true; break; fi
-  done <<< "$ev_paths"
-
-  if $one_exists; then echo true; else echo false; fi
+  # _test_evidence[] validation lives in the shared lib (B1) so this FSM check and
+  # the C4 release aggregator read one substrate. Echoes true|false; the yq guard
+  # inside is defensive (this function already returned null above when yq is
+  # missing, so the external behavior here is byte-identical to the prior inline
+  # block: report present + >=1 in-tree _test_evidence path on disk → true, else false).
+  _aid_validate_test_evidence "$report" "$evidence_dir"
 }
 
 # ─── Helper: read toggle status from execution.yaml ──────────────────────────
-# Returns 0 (enabled) or 1 (disabled) based on the specified section in execution.yaml.
-# Usage: _aid_read_toggle "$exec_yaml" "simplifier" && enabled=true || enabled=false
-_aid_read_toggle() {
-  local exec_yaml="$1" section_name="$2"
-  [[ ! -f "$exec_yaml" ]] && return 0  # file missing → enabled by default
-  if grep -qP "^\s{0,4}${section_name}:\s*$" "$exec_yaml" && \
-     grep -A5 "${section_name}:" "$exec_yaml" | grep -qP '^\s+enabled:\s+false\s*$'; then
-    return 1
-  fi
-  return 0
-}
+# _aid_read_toggle is now provided by lib/aid-review-signals.sh (sourced at the
+# top of this file) — one substrate shared with the C4 release aggregator (B1).
+# Callers here (fsm_eval_simplifier_present, cmd_plan_close) are unchanged.
 
 # ─── E-046-2_3 Step 4: simplifier_report_present (plan-boundary measurement) ──
 # null  — plan boundary not reached (no ca-review-complete marker), OR
