@@ -12,6 +12,52 @@
 # Fixtures live under scripts/tests/fixtures/release-policy/ with NO .aid-o/ segment (the
 # `**/.aid-o/` .gitignore rule would silently untrack them) and are copied/constructed into
 # a mktemp .aid-o layout at runtime. A suite assertion verifies every fixture file is tracked.
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# Doc-1 §13.2 FULL DISPOSITION (17 review-instruction fixtures + 10 D11 rows 18-27)
+# Source table: `.aid-o/plans/P059-e9-c4-release-policy.md` Step 7 (rows 1-27).
+# Every Doc-1 fixture is accounted for — none dropped. Legend:
+#   ADAPTED         = the C4 aggregator expresses this fixture through a REQUIRED/audit/schema row.
+#   SIMULATED       = built inline (head_match/at-head branch), not a copied fixture.
+#   ADAPTED-ADVISORY= mapped, but non-blocking at C4 today (blocking deferred to E10).
+#   N/A / SKIP-REF  = out of the C4 aggregator's boundary; owned by another control layer.
+#
+#   Row  Fixture                                        Disposition (where it lives here)
+#   ───  ─────────────────────────────────────────────  ─────────────────────────────────────────
+#    1   missing delivery-gate → rejected               ADAPTED  → "REQUIRED removed: delivery-gate …"
+#    2   nested-missing fields → rejected               ADAPTED  → protocol field checks (Step 3 suite)
+#    3   missing behavior_trace                         N/A      → C2/E5 owns its own hooks (not C4)
+#    4   CP3 fail → fix loop not GATES                  SKIP-REF → C2/FSM checkpoint, outside C4
+#    5   CP4 pass w/o rerun → CP5 rejected              ADAPTED-ADVISORY → invalidation require_rerun
+#                                                                 advisory in release-decision (E10 blocks)
+#    6   Auditor High+score95 → blocked                 ADAPTED  → "profile-gating ACTIVE … audit … blocked"
+#    7   score60 no blockers → proceed+warning          ADAPTED  → healthy/advisory positive control
+#    8   Curator APPROVED → rejected                    ADAPTED  → schema/enum validation (Step 3 suite)
+#   9-10 CP6 prod/docs                                  SKIP-REF → fast-profile follow-up (D6)
+#   11   stale HEAD → no MERGE                          SIMULATED→ "--at-head stale …" (head_match=false)
+#   12   forced waiver visible, no PASS rewrite         ADAPTED  → "dual: … writes a valid waiver" (Step 5)
+#  13-16 profile/IR/lens cadence                        N/A      → C2/E3 review-profile hooks (E10 promotion)
+#   17   unit pass, prod wiring fail → blocked          ADAPTED  → semantic-review-final fail → release_ready false
+#   18   auto-merge eligible EPIC w/o PM brief          NEW (D11)→ "d11 [18] …" (pm_brief_status seam)
+#   19   per-EPIC release without Reporter              NEW (D11)→ "d11 [19] …" (not_applicable)
+#   20   plan-boundary w/o Reporter, NOT disabled       NEW (D11)→ "d11 [20] …" (missing → false)
+#   21   per-EPIC release without Simplifier            NEW (D11)→ "d11 [21] …" (not_applicable)
+#   22   plan-boundary w/o Simplifier, NOT disabled     NEW (D11)→ "d11 [22] …" (missing → false)
+#   23   stale evidence pack (--at-head mismatch)       NEW (D11)→ "d11 [23] …" (evs=fail, NOT unverifiable)
+#   24   force/waiver on Reporter/Simplifier blocker    NEW (D11)→ "d11 [24] waiver …" (waived != pass, via brief)
+#   25   plan-boundary w/o Reporter AND Simplifier      NEW (D11)→ "d11 [25] dual …" (both missing → mixed)
+#   26   review_profile as the SOLE C4 blocker          COVERED  → Step-5 "dual: … required_input (sole review_profile — DOMINANT)"
+#   27   C4 more lenient than legacy / same-cat multi   COVERED  → Step-5 "dual: … c4_permissive" + "dual: … mixed"
+#
+# The 5 N/A / SKIP-REF disposition rows (3, 4, 9-10, 13-16) are intentionally NOT expressed as
+# C4 aggregator tests — they are enforced by other control layers and referenced here (and row
+# by row in the table above) so no Doc-1 fixture is silently dropped:
+#   1. row 3      (missing behavior_trace)   → N/A: C2/E5 semantic-review owns its own hooks
+#   2. row 4      (CP3 fail → fix loop)       → SKIP-REF: C2/FSM CP3 checkpoint (aid-fsm.sh cp3_integration_precond)
+#   3. row 9      (CP6 prod)                  → SKIP-REF: CP6 fast-profile follow-up, deferred per D6
+#   4. row 10     (CP6 docs)                  → SKIP-REF: CP6 fast-profile follow-up, deferred per D6
+#   5. rows 13-16 (profile/IR/lens cadence)   → N/A: C2/E3 review-profile hooks; blocking promotion → E10
+# ═══════════════════════════════════════════════════════════════════════════════
 
 setup() {
   export TZ=UTC
@@ -22,6 +68,7 @@ setup() {
   AGG="$SCRIPTS/aid-release-policy.sh"
   FSM="$SCRIPTS/aid-fsm.sh"
   VALIDATE="$SCRIPTS/aid-protocol-validate.sh"
+  PMBRIEF="$SCRIPTS/aid-pm-brief.sh"
   FIX="$SCRIPTS/tests/fixtures/release-policy"
 
   EPIC="E-059-2_2"
@@ -879,4 +926,130 @@ EOF
   local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
   [ -n "$ev" ]
   [ "$(echo "$ev" | jq -r '.gate')" == "cp4_curator" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E-059-2_2 Step 7 — Doc-1 §13.2 D11 negative fixtures (rows 18-27).
+#
+# These exercise the D11 state model the aggregator (Step 4) + pm-brief (Step 6) added:
+# pm_brief_required/pm_brief_status, the Reporter/Simplifier 5-enum CONDITIONAL status,
+# evidence_verification_status fail-vs-unverifiable, and waived != pass through the brief.
+#
+# Rows 26-27 (required_input / c4_permissive / mixed divergence classes) are ALREADY
+# covered EXACTLY ONCE by the Step-5 `dual:` classifier unit tests above — they are NOT
+# re-implemented here (per the do-not-duplicate rule); the header disposition table maps
+# them. d11 [25] uses reporter+simplifier (a combo Step 5 does not cover) so it is new.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@test "d11 [18]: auto-merge-eligible + PM-brief write fails (--out-dir seam) → pm_brief_status failed, NEVER silently generated; merge_mode stays auto (informative)" {
+  _build_healthy
+  _run_agg
+  [ "$status" -eq 0 ]
+  # C4 ALWAYS requires a brief and starts pending — even for an auto-merge-ready decision.
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+  [ "$(_rd '.release_decision.merge_mode')" == "auto" ]
+  [ "$(_rd '.release_decision.pm_brief_required')" == "true" ]
+  [ "$(_rd '.release_decision.pm_brief_status')" == "pending" ]
+  # Force the brief write to fail: point --out-dir under a path whose parent is a FILE, so
+  # mkdir -p + the redirect both fail regardless of uid. Patch-back targets the (writable)
+  # evidence dir → pm_brief_status flips to failed, exit 6.
+  touch "$TEST_TMPDIR/notadir"
+  run bash "$PMBRIEF" "$EVID" --out-dir "$TEST_TMPDIR/notadir/sub"
+  [ "$status" -eq 6 ]
+  # Re-read the decision: the field moved to failed, NEVER silently to generated.
+  [ "$(_rd '.release_decision.pm_brief_status')" == "failed" ]
+  [ "$(_rd '.release_decision.pm_brief_required')" == "true" ]
+  # merge_mode is informative, not enforcement — it stays auto despite the un-generated brief.
+  [ "$(_rd '.release_decision.merge_mode')" == "auto" ]
+}
+
+@test "d11 [19]: per-EPIC (off-boundary) release without Reporter → reporter_status not_applicable + reason not_plan_boundary, release_ready unaffected" {
+  _build_healthy   # no ca-review-complete marker → off the plan boundary
+  _run_agg
+  [ "$(_rd '.release_decision.reporter_status')" == "not_applicable" ]
+  [ "$(_rd '.release_decision.reporter_reason')" == "not_plan_boundary" ]
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+  ! _has_blocker reporter
+}
+
+@test "d11 [20]: plan-boundary without Reporter (enabled, NOT disabled) → reporter_status missing → release_ready=false + blocker" {
+  _on_boundary_both_valid
+  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # simplifier stays valid → isolates reporter
+  _run_agg
+  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker reporter
+}
+
+@test "d11 [21]: per-EPIC (off-boundary) release without Simplifier → simplifier_status not_applicable + reason not_plan_boundary, release_ready unaffected" {
+  _build_healthy
+  _run_agg
+  [ "$(_rd '.release_decision.simplifier_status')" == "not_applicable" ]
+  [ "$(_rd '.release_decision.simplifier_reason')" == "not_plan_boundary" ]
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+  ! _has_blocker simplifier
+}
+
+@test "d11 [22]: plan-boundary without Simplifier (enabled, NOT disabled) → simplifier_status missing → release_ready=false + blocker" {
+  _on_boundary_both_valid
+  rm -f "$EVID/simplifier-report.md"   # reporter stays valid → isolates simplifier
+  _run_agg
+  [ "$(_rd '.release_decision.simplifier_status')" == "missing" ]
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker simplifier
+}
+
+@test "d11 [23]: stale evidence pack (--at-head mismatch) → evidence_verified_at_head=false + evidence_verification_status=fail (NOT unverifiable) → release_ready=false" {
+  _build_healthy
+  echo "v2" >> "$PROJ/README.md"
+  git -C "$PROJ" add README.md
+  git -C "$PROJ" commit -q -m second      # HEAD advances past pack_head → --at-head mismatch
+  _run_agg
+  [ "$(_rd '.release_decision.evidence_verified_at_head')" == "false" ]
+  # CP1 L1-B3: --at-head mismatch (like git-dirty) is a per-check FAIL, never unverifiable.
+  [ "$(_rd '.release_decision.evidence_verification_status')" == "fail" ]
+  [ "$(_rd '.release_decision.evidence_verification_status')" != "unverifiable" ]
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker verification_report
+}
+
+@test "d11 [24] waiver: force/waiver on a Reporter-missing blocker → waiver surfaced in release-decision.json AND pm-decision-brief.json; reporter_status stays missing (waived != pass)" {
+  _on_boundary_both_valid
+  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # reporter → missing (blocker)
+  # A PM waiver artifact sits in the evidence dir (the aggregator globs waiver-*.json).
+  cat > "$EVID/waiver-reporter.json" <<'EOF'
+{"schema_version":"aid-2.0","artifact_type":"waiver","waiver":{"visible":true,"reason":"PM waived the missing Reporter delivery report for this release (d11 fixture)."}}
+EOF
+  _run_agg
+  # waived != pass: the status is still missing and the blocker is still present…
+  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
+  _has_blocker reporter
+  # …but the waiver is visible in waivers_applied[].
+  jq -e '.release_decision.waivers_applied | index("waiver-reporter.json")' "$OUT" >/dev/null
+  # …and the brief (Step 6) echoes BOTH the waiver AND the still-missing reporter_status.
+  run bash "$PMBRIEF" "$EVID"
+  local brief="$EVID/pm-decision-brief.json"
+  [ -f "$brief" ]
+  [ "$(jq -r '.pm_decision_brief.reporter_status' "$brief")" == "missing" ]
+  jq -e '.pm_decision_brief.waivers_applied | index("waiver-reporter.json")' "$brief" >/dev/null
+}
+
+@test "d11 [25] dual: plan-boundary without Reporter AND Simplifier at once → both missing → release_ready=false + divergence_class=mixed (multi-blocker never undefined)" {
+  _on_boundary_both_valid
+  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"   # reporter → missing
+  rm -f "$EVID/simplifier-report.md"               # simplifier → missing
+  _run_agg
+  [ "$(_rd '.release_decision.reporter_status')" == "missing" ]
+  [ "$(_rd '.release_decision.simplifier_status')" == "missing" ]
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker reporter
+  _has_blocker simplifier
+  # Feed the REAL aggregator blocker set into the SAME classifier the FSM dual-run hook uses:
+  # 2+ C4 blockers → mixed, and NEVER empty/null (fail-closed multi-blocker case).
+  local bcount blk dc
+  bcount="$(_rd '.release_decision.blockers | length')"
+  blk="$(jq -r '.release_decision.blockers[].input_id' "$OUT")"
+  dc="$(_divclass false false "$bcount" "$blk")"
+  [ -n "$dc" ] && [ "$dc" != "null" ]
+  [ "$dc" == "mixed" ]
 }

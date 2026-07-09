@@ -116,9 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.52.0** (current) — E8 C3 Independent Audit (P057): risk-gated distrust-based `agents/auditor.md` C3 mode + legacy A-J compat, protocol-v2 `audit-report.json`/`audit-input-manifest.json`, `aid-audit-independence.sh` Codex capability detection, `c3-audit-policy.yaml`, fail-closed FSM done-advance hook, Curator now serial after C3 with content-ref sequencing guard, observe-only `invalidation-map.json` producer, behavioral red-green bats coverage
+- **v2.53.0** (current) — E9 C4 Release Policy (P059): deterministic `scripts/aid-release-policy.sh` release-decision aggregator (no LLM), `scripts/aid-pm-brief.sh` PM decision brief + patch-back, FSM `done-advance` dual-run observe hook with 8-value `divergence_class` taxonomy + `release_policy_preempted` + force→waiver, protocol-v2 `release_decision`/`pm_decision_brief`/`waiver` schemas, D11 release-decision state model with Reporter/Simplifier CONDITIONAL gating, `docs/extending-aid.md` C4+D11 reference, IMP-177 invalidation-map live caller
+- **v2.52.0** — E8 C3 Independent Audit (P057): risk-gated distrust-based `agents/auditor.md` C3 mode + legacy A-J compat, protocol-v2 `audit-report.json`/`audit-input-manifest.json`, `aid-audit-independence.sh` Codex capability detection, `c3-audit-policy.yaml`, fail-closed FSM done-advance hook, Curator now serial after C3 with content-ref sequencing guard, observe-only `invalidation-map.json` producer, behavioral red-green bats coverage
 - **v2.51.0** — per-step scoping (D2) + blocking Contract Validation Gate (D5): plan.json outputs/allowed_paths/AC scoped per step instead of broadcast, structural gate catches broadcast/AC-fragment/prose-path regressions before FSM init, `aid-plan-diff.sh` `## Success Criteria` parsing fix
-- **v2.50.1** — E7B existing_ui wiring: FSM step-local guard, envelope transport (plan→EPIC→plan.json), C2 lens schema, `/aid-do` redirect, 3 test harnesses
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
