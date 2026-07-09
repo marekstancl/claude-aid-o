@@ -1541,6 +1541,59 @@ If any of these three matter going forward, they need a different observation
 method (conversation-transcript review, or an explicit PM-side confirmation
 step) — recorded in the runbook as an explicit non-goal of disk-polling.
 
+### OBS-20260708-04 — recurrence #4 (2026-07-09, AID self-dogfood, update)
+
+Same `steps[].status` "pending"/never-updated gap now reproduces inside
+AID's own E-059-2_2 run (`R-E059-2`), not just VULCAN-observed runs.
+`fsm-state.yaml` still shows `current_step: 1`, all 5 `steps[1..5].status:
+pending`, `started_at/completed_at: null` at a point where Step 3
+(`3651c5e`) and Step 4 (`6e870e6`) commits are already landed on
+`task/E-059-2_2/main`. Confirms the increment path never touches `steps[]`
+in the tool's own dogfood use, not only in downstream consumer projects —
+raises confidence this is a core-path bug, not project-specific drift.
+
+### OBS-20260709-04 — Subagent committed live EPIC work directly to `main` under test-fixture git identity (self-recovered, root cause of the previously-flagged mystery "init" commit)
+
+**Observed in:** aid-orchestrator / E-059-2_2 (P059 EPIC 2, Step 4)
+**AID version:** current main / v2.52.0+
+**Observed at:** 2026-07-09
+**Status:** confirmed, resolved by implementer before this was reported — no residual impact
+**Severity:** high (process/branch-discipline control violation on a shared branch), impact realized: none (caught pre-push)
+**Class:** process control / branch discipline / agent-identity hygiene
+
+**What happened:** this is the resolution of the "mystery `a5d380a` init
+commit" flagged unresolved in the previous polling cycle. Commit `a5d380a`
+("init", author `Test <test@test.local>`, 2026-07-09 14:20Z) landed
+directly on `main` carrying the full Step 4 payload — `aid-release-policy.sh`
+(627 lines), the `aid-fsm.sh` B1 refactor, `test-release-policy.bats`, and
+12+ fixture files. This is *not* the bats test helper `_git_init_commit()`
+literally firing — that helper always runs inside a disposable `git init`
+sandbox producing only a 2-file `.gitignore`+`README.md` scaffold — so some
+other write path reused the same throwaway identity/commit-message
+convention while operating for real against the actual repo's `main`,
+bypassing `task/E-059-2_2/main` entirely. A follow-up commit `0c04eab`
+(proper "Step 4" message, still on `main`) landed at 14:53Z. Per the
+implementer's own note on the eventual `6e870e6`: *"Recovery note: rogue
+subagent committed this work as 'init' onto main; reassembled cleanly onto
+the EPIC branch on top of Step 3; main reset to Marek's 17e7e72."* —
+confirmed independently: `main` tip is clean at `17e7e72`+ with no
+`a5d380a`/`0c04eab` in its ancestry (both remain reachable only via reflog,
+`main@{1}`/`main@{2}`); `origin/main` unaffected (this was never pushed).
+
+**Why it matters:** whatever wrote `a5d380a` had write access to `main` and
+used a generic test identity instead of the EPIC branch + real author for
+production code — branch target *and* identity were both wrong at once.
+Self-corrected here because the implementer caught it pre-push, but the
+same slip landing on a branch that another agent had already based work on,
+or after a push, would be a genuinely destructive cross-agent incident, not
+a same-session recoverable one.
+
+**Likely fix:** identify the write path that lacks task-branch-context
+enforcement (candidate: a subagent/tool invoked without `cwd`/branch pinned
+to the EPIC worktree) and add a hard precondition — refuse any
+AID-orchestrated commit when `git symbolic-ref HEAD` doesn't match the
+run's declared `branch` in `fsm-state.yaml`.
+
 ## Positive control moments — 2026-07-08 late / 2026-07-09 additions
 
 - CP3 fix-loop on E-059-1_2 (IMP-177 EPIC) worked hard on its own subject:
@@ -1558,3 +1611,8 @@ step) — recorded in the runbook as an explicit non-goal of disk-polling.
 - AID E-059-1's own audit-report.md (health 92/100) found and evidenced
   OBS-20260708-03 itself, unprompted — the control system self-diagnosed its
   own flagship gap before the fix EPIC even started.
+- AID E-059-2_2 Step 4: implementer caught its own rogue commit-to-`main`
+  slip (OBS-20260709-04) before push, reset `main` cleanly, and reassembled
+  the work on the correct branch with a transparent recovery note in the
+  final commit message — self-correction worked, and disclosed itself
+  instead of quietly rewriting history unremarked.
