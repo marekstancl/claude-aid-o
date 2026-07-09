@@ -20,6 +20,7 @@ setup() {
   export AID_PLUGIN_PATH="$PLUGIN_ROOT"
   SCRIPTS="$PLUGIN_ROOT/scripts"
   AGG="$SCRIPTS/aid-release-policy.sh"
+  FSM="$SCRIPTS/aid-fsm.sh"
   VALIDATE="$SCRIPTS/aid-protocol-validate.sh"
   FIX="$SCRIPTS/tests/fixtures/release-policy"
 
@@ -540,4 +541,342 @@ EOF
     fi
   done < <(find "$FIX" -type f -print0)
   [ "$untracked" -eq 0 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E-059-2_2 Step 5 — C4 dual-run hook + preempted telemetry + force waiver.
+#
+# State is built INLINE (not under fixtures/release-policy/dual-*/): new fixture
+# FILES would fail the "every fixture is git-tracked" test above until committed,
+# and this task's git guard forbids staging/committing. Inline heredocs are the
+# self-contained equivalent (same convention as test-tiered-severity.bats).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── divergence_class taxonomy (pure-function unit tests) ─────────────────────
+# _divclass <match> <c4_ready> <bcount> <blockers> → prints the class.
+# Sourced in a clean `bash -c` subshell so aid-fsm.sh's `set -euo pipefail` never
+# leaks into the bats assertion shell. This is the AUTHORITATIVE 7-class coverage.
+_divclass() {
+  bash -c '
+    source "$1" >/dev/null 2>&1
+    _c4_divergence_class "$2" "$3" "$4" "$5"
+  ' _ "$SCRIPTS/aid-fsm.sh" "$1" "$2" "$3" "$4"
+}
+
+@test "dual: divergence_class=none when match=true (evaluated first)" {
+  [ "$(_divclass true true 0 '')" == "none" ]
+  # match=true dominates even with a blocker present (both-blocked agreement).
+  [ "$(_divclass true false 1 'review_profile')" == "none" ]
+}
+
+@test "dual: divergence_class=verification_only (sole verification_report blocker)" {
+  [ "$(_divclass false false 1 'verification_report')" == "verification_only" ]
+}
+
+@test "dual: divergence_class=reporter_missing (sole reporter blocker)" {
+  [ "$(_divclass false false 1 'reporter')" == "reporter_missing" ]
+}
+
+@test "dual: divergence_class=simplifier_missing (sole simplifier blocker)" {
+  [ "$(_divclass false false 1 'simplifier')" == "simplifier_missing" ]
+}
+
+@test "dual: divergence_class=required_input (sole review_profile — DOMINANT)" {
+  [ "$(_divclass false false 1 'review_profile')" == "required_input" ]
+}
+
+@test "dual: divergence_class=required_input (sole semantic_review_final blocker)" {
+  # Canonical literal is semantic_review_final (NOT semantic_review).
+  [ "$(_divclass false false 1 'semantic_review_final')" == "required_input" ]
+  [ "$(_divclass false false 1 'gates_report')" == "required_input" ]
+  [ "$(_divclass false false 1 'curator_report')" == "required_input" ]
+}
+
+@test "dual: divergence_class=c4_permissive (C4 ready, legacy blocked, no C4 blocker)" {
+  [ "$(_divclass false true 0 '')" == "c4_permissive" ]
+}
+
+@test "dual: divergence_class=mixed (2+ C4 blockers of any categories)" {
+  local blk; blk="$(printf 'review_profile\nreporter')"
+  [ "$(_divclass false false 2 "$blk")" == "mixed" ]
+  # same-category ×2 is still mixed
+  local blk2; blk2="$(printf 'review_profile\ngates_report')"
+  [ "$(_divclass false false 2 "$blk2")" == "mixed" ]
+}
+
+@test "dual: divergence_class=unclassified (sole non-category blocker — fail-closed)" {
+  # invalidation_map never blocks in practice, but if it ever were the sole id → unclassified.
+  [ "$(_divclass false false 1 'invalidation_map')" == "unclassified" ]
+  [ "$(_divclass false false 1 'some_unknown_id')" == "unclassified" ]
+}
+
+@test "dual: divergence_class=unclassified fail-closed (not-ready + EMPTY blockers)" {
+  # The aggregator never emits this combo, but the classifier must NOT return empty/null.
+  [ "$(_divclass false false 0 '')" == "unclassified" ]
+}
+
+@test "dual: EVERY (match,ready,bcount,blockers) combo yields a non-empty class in the enum" {
+  local valid=" none verification_only reporter_missing simplifier_missing required_input c4_permissive mixed unclassified "
+  local m r c blk out
+  for m in true false; do
+    for r in true false unknown; do
+      for c in 0 1 2; do
+        blk=""
+        [ "$c" == "1" ] && blk="review_profile"
+        [ "$c" == "2" ] && blk="$(printf 'review_profile\nreporter')"
+        out="$(_divclass "$m" "$r" "$c" "$blk")"
+        [ -n "$out" ]                              # never empty
+        [[ "$valid" == *" $out "* ]]               # always in the enum
+      done
+    done
+  done
+}
+
+# ─── FSM-level end-to-end: legacy-green project with the C4 pack ABSENT ────────
+# Builds a done-advance review→release state that passes ALL legacy checks
+# (agent_tool dispatch → provenance skipped; no check-severity.yaml → all advisory)
+# but has NO C4 evidence pack, so the aggregator returns release_ready=false and
+# the dual-run diverges from the legacy verdict (match=false).
+_fsm_setup_legacy_green() {
+  mkdir -p "$EVID/gates" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
+  touch "$PROJ/.aid-o/work/audit-log.jsonl"
+  cat > "$CFG/plugin.yaml" <<EOF
+plugin_path: "$PLUGIN_ROOT"
+dispatch_mode: agent_tool
+EOF
+  touch "$CFG/execution.yaml"
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-09T00:00:00Z","_command_log":[]}\n' \
+    > "$EVID/gates/gates_report.json"
+  echo "curator ran" > "$EVID/curator-report.md"
+  printf 'blocking_findings: false\n' > "$EVID/audit-report.md"
+  : > "$EVID/timeline.jsonl"
+  cat > "$EVID/fsm-state.yaml" <<EOF
+epic_id: ${EPIC}
+run_id: ${RUN}
+branch: task/${EPIC}/main
+state: DONE
+done_phase: review
+created_at: 2026-07-09T10:00:00Z
+total_steps: 3
+current_step: 3
+pm_decision: merge
+EOF
+  # Real git repo (.aid-o gitignored → evidence never dirties the tree; mirrors _build_healthy).
+  echo ".aid-o/" > "$PROJ/.gitignore"
+  echo "init" > "$PROJ/README.md"
+  git init -q -b main "$PROJ"
+  git -C "$PROJ" config user.email test@test.local
+  git -C "$PROJ" config user.name Test
+  git -C "$PROJ" add .gitignore README.md
+  git -C "$PROJ" commit -q -m init
+  cd "$PROJ"
+}
+
+@test "dual: done-advance emits release_policy_dual_run (observe → advances) with head_sha + non-empty divergence_class" {
+  _fsm_setup_legacy_green
+  local head; head="$(git -C "$PROJ" rev-parse HEAD)"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -eq 0 ]                                    # observe: transition unaffected by C4 divergence
+  grep -q '^done_phase: release' "$EVID/fsm-state.yaml"  # phase advanced
+  local ev; ev="$(grep '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.head_sha')" == "$head" ]     # head_sha anchor present + == HEAD
+  [ "$(echo "$ev" | jq -r '.match')" == "false" ]        # legacy green vs C4 blocked
+  local dc; dc="$(echo "$ev" | jq -r '.divergence_class')"
+  [ -n "$dc" ] && [ "$dc" != "null" ]                    # non-empty divergence_class
+  [ "$dc" == "mixed" ]                                   # C4 pack absent → many blockers → mixed
+  [ "$(echo "$ev" | jq -r '.result')" == "compared" ]
+}
+
+@test "dual: RELEASE_DECISION_POLICY=blocking → C4 release_ready=false blocks the transition (live blocking branch)" {
+  _fsm_setup_legacy_green
+  local pol="$TEST_TMPDIR/rdp-blocking.yaml"
+  printf 'version: 1\nenforcement: blocking\n' > "$pol"
+  run env RELEASE_DECISION_POLICY="$pol" bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -ne 0 ]                                    # C4 false blocks under enforcement:blocking
+  grep -q '^done_phase: review' "$EVID/fsm-state.yaml"   # transition did NOT advance
+  local ev; ev="$(grep '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.enforcement')" == "blocking" ]
+}
+
+@test "dual: hook runs AFTER all legacy checks — legacy-fail + C4-fail → match=true (both blocked)" {
+  _fsm_setup_legacy_green
+  # Make the legacy verdict FAIL: remove curator-report so the legacy curator check errors.
+  rm -f "$EVID/curator-report.md"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -ne 0 ]                                    # legacy blocked → transition fails
+  # The dual-run event was still emitted (hook runs before the final tally) and, because
+  # BOTH legacy and C4 are not-ready, the verdicts AGREE → match=true → divergence_class none.
+  local ev; ev="$(grep '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.match')" == "true" ]
+  [ "$(echo "$ev" | jq -r '.divergence_class')" == "none" ]
+  [ "$(echo "$ev" | jq -r '.legacy_ready')" == "false" ]
+}
+
+@test "dual: crash-guard — broken aggregator → result=crash event + done-advance STILL passes (set -e safe)" {
+  _fsm_setup_legacy_green
+  local broken="$TEST_TMPDIR/broken-aggregator.sh"
+  printf '#!/usr/bin/env bash\necho boom >&2\nexit 1\n' > "$broken"
+  run env AID_RELEASE_POLICY_BIN="$broken" bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -eq 0 ]                                    # crash MUST NOT abort done-advance
+  grep -q '^done_phase: release' "$EVID/fsm-state.yaml"
+  local ev; ev="$(grep '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl" | tail -1)"
+  [ "$(echo "$ev" | jq -r '.result')" == "crash" ]
+  [ -n "$(echo "$ev" | jq -r '.divergence_class')" ]     # non-empty even on crash
+  [ "$(echo "$ev" | jq -r '.divergence_class')" == "unclassified" ]
+}
+
+@test "dual: --force skips the dual-run hook (NO release_policy_dual_run) and writes a valid waiver" {
+  _fsm_setup_legacy_green
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml" \
+    --force --reason "PM approved release despite absent C4 evidence pack (dual-run test fixture)"
+  [ "$status" -eq 0 ]
+  grep -q '^done_phase: release' "$EVID/fsm-state.yaml"
+  # force bypasses the whole gauntlet → the dual-run hook is structurally unreached.
+  ! grep -q '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl"
+  # a protocol-v2 waiver artifact was written and validates against the Step-3 schema.
+  local wv; wv="$(ls "$EVID"/waiver-*.json 2>/dev/null | head -1)"
+  [ -n "$wv" ]
+  [ "$(jq -r '.artifact_type' "$wv")" == "waiver" ]
+  [ "$(jq -r '.waiver.visible' "$wv")" == "true" ]
+  [ "$(jq -r '.waiver.reason | length >= 20' "$wv")" == "true" ]
+  run bash "$VALIDATE" "$wv"
+  [ "$status" -eq 0 ]
+}
+
+@test "dual: force-written waiver is surfaced by the aggregator in waivers_applied[]" {
+  _fsm_setup_legacy_green
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml" \
+    --force --reason "PM approved release despite absent C4 evidence pack (dual-run test fixture)"
+  [ "$status" -eq 0 ]
+  local wv wvbase
+  wv="$(ls "$EVID"/waiver-*.json 2>/dev/null | head -1)"
+  [ -n "$wv" ]
+  wvbase="$(basename "$wv")"
+  # A follow-up aggregator run globs waiver-*.json → waivers_applied[] (Waived != pass).
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" AID_PROJECT_ROOT="$PROJ" bash "$AGG" "$EPIC" "$RUN" --out "$OUT"
+  [ "$status" -eq 0 ]
+  jq -e --arg w "$wvbase" '.release_decision.waivers_applied | index($w)' "$OUT" >/dev/null
+}
+
+# ─── release_policy_preempted (hard-exits that never reach the C4 slot) ────────
+
+@test "preempted: tiered_compliance blocking failure → release_policy_preempted gate=tiered_compliance (before exit 2)" {
+  # Blocking verifier_provenance (subagent + verifier output + EMPTY timeline → unverifiable).
+  mkdir -p "$EVID/gates" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
+  touch "$PROJ/.aid-o/work/audit-log.jsonl"
+  cat > "$CFG/plugin.yaml" <<EOF
+plugin_path: "$PLUGIN_ROOT"
+dispatch_mode: subagent
+EOF
+  touch "$CFG/execution.yaml"
+  cat > "$CFG/check-severity.yaml" <<EOF
+version: 1
+checks:
+  verifier_provenance: {severity: blocking, promoted_at: "2026-05-13", promoted_reason: "test"}
+EOF
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-09T00:00:00Z","_command_log":[]}\n' \
+    > "$EVID/gates/gates_report.json"
+  echo "curator ran" > "$EVID/curator-report.md"
+  printf 'blocking_findings: false\n' > "$EVID/audit-report.md"
+  : > "$EVID/timeline.jsonl"
+  printf 'classification: RUN\n' > "$EVID/step-1-verify.md"
+  cat > "$EVID/verifier-output-step-1.md" <<EOF
+_generated_by: aid-orchestrator:verifier@cp2-step-1
+_generated_at: 2025-01-01T00:00:00Z
+classification: RUN
+verdict: pass
+EOF
+  cat > "$EVID/fsm-state.yaml" <<EOF
+epic_id: ${EPIC}
+run_id: ${RUN}
+branch: task/${EPIC}/main
+state: DONE
+done_phase: review
+created_at: 2026-07-09T10:00:00Z
+total_steps: 3
+current_step: 3
+pm_decision: merge
+EOF
+  cd "$PROJ"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -eq 2 ]                                    # tiered-compliance exit 2 (before the C4 slot)
+  ! grep -q '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl"
+  local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.gate')" == "tiered_compliance" ]
+}
+
+@test "preempted: streamlined missing integration evidence → release_policy_preempted gate=streamlined_integration" {
+  mkdir -p "$EVID" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work"
+  touch "$PROJ/.aid-o/work/audit-log.jsonl"
+  : > "$EVID/timeline.jsonl"
+  # streamlined_mode true + none of the 3 integration-review files → integration check dies first.
+  cat > "$EVID/fsm-state.yaml" <<EOF
+epic_id: ${EPIC}
+run_id: ${RUN}
+branch: task/${EPIC}/main
+state: DONE
+done_phase: review
+created_at: 2026-07-09T10:00:00Z
+total_steps: 3
+current_step: 3
+pm_decision: merge
+streamlined_mode: true
+EOF
+  cd "$PROJ"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  ! grep -q '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl"
+  local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.gate')" == "streamlined_integration" ]
+}
+
+@test "preempted: cp4 curator-validation missing (prod touched) → release_policy_preempted gate=cp4_curator" {
+  # Legacy-green EXCEPT the curator touched a production path in base..HEAD with no CP4 review.
+  mkdir -p "$EVID/gates" "$CFG" "$PROJ/.aid-o/tasks" "$PROJ/.aid-o/work" "$PROJ/scripts"
+  touch "$PROJ/.aid-o/work/audit-log.jsonl"
+  cat > "$CFG/plugin.yaml" <<EOF
+plugin_path: "$PLUGIN_ROOT"
+dispatch_mode: agent_tool
+EOF
+  touch "$CFG/execution.yaml"
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-09T00:00:00Z","_command_log":[]}\n' \
+    > "$EVID/gates/gates_report.json"
+  echo "curator ran" > "$EVID/curator-report.md"
+  printf 'blocking_findings: false\n' > "$EVID/audit-report.md"
+  : > "$EVID/timeline.jsonl"
+  echo ".aid-o/" > "$PROJ/.gitignore"
+  git init -q -b main "$PROJ"
+  git -C "$PROJ" config user.email test@test.local
+  git -C "$PROJ" config user.name Test
+  echo "base" > "$PROJ/README.md"
+  git -C "$PROJ" add .gitignore README.md
+  git -C "$PROJ" commit -q -m base
+  local base; base="$(git -C "$PROJ" rev-parse HEAD)"
+  echo "echo prod" > "$PROJ/scripts/prod.sh"          # production-path change (matches default cp4 glob)
+  git -C "$PROJ" add scripts/prod.sh
+  git -C "$PROJ" commit -q -m "touch prod"
+  cat > "$EVID/fsm-state.yaml" <<EOF
+epic_id: ${EPIC}
+run_id: ${RUN}
+branch: task/${EPIC}/main
+state: DONE
+done_phase: review
+created_at: 2026-07-09T10:00:00Z
+base_commit: ${base}
+total_steps: 3
+current_step: 3
+pm_decision: merge
+EOF
+  cd "$PROJ"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -ne 0 ]                                   # cp4 die (before the C4 slot)
+  ! grep -q '"event":"release_policy_dual_run"' "$EVID/timeline.jsonl"
+  local ev; ev="$(grep '"event":"release_policy_preempted"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.gate')" == "cp4_curator" ]
 }

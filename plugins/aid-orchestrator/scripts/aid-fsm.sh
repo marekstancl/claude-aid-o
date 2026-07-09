@@ -434,6 +434,13 @@ fsm_check_cp4_curator_validation() {
     --touched-prod "$touched_prod" \
     --evidence-dir "$evidence_dir"
 
+  # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
+  # (caller `return 1` unreachable — helper dies internally). Observe telemetry
+  # (sampling-bias fix) before the hard-exit; no gate behavior change. project_root
+  # is param $2 of this function.
+  log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
+    gate="cp4_curator" \
+    head_sha="$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo unknown)"
   die "missing_cp4_curator_validation"
 }
 
@@ -471,6 +478,12 @@ fsm_check_streamlined_integration_review() {
     echo "      --blocked-checks 'streamlined_integration_review'" >&2
     fsm_emit_audit_log "streamlined_integration_review_fail" \
       --evidence-dir "$evidence_dir" --missing "${joined}"
+    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
+    # (the caller's `return 1` is unreachable — this helper dies internally). Observe
+    # telemetry (sampling-bias fix) before the hard-exit; no gate behavior change.
+    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
+      gate="streamlined_integration" \
+      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_integration_review"
   fi
   return 0
@@ -502,6 +515,12 @@ fsm_check_streamlined_abandoned() {
     echo "      --blocked-checks 'streamlined_abandoned'" >&2
     fsm_emit_audit_log "streamlined_abandoned_fail" \
       --evidence-dir "$evidence_dir" --event-count "$event_count"
+    # E-059-2_2 Step 5: this die() preempts the C4 dual-run slot in cmd_done_advance
+    # (caller `return 1` unreachable — helper dies internally). Observe telemetry
+    # (sampling-bias fix) before the hard-exit; no gate behavior change.
+    log_event "${evidence_dir}/timeline.jsonl" "release_policy_preempted" \
+      gate="streamlined_abandoned" \
+      head_sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     die "streamlined_abandoned"
   fi
   return 0
@@ -564,6 +583,60 @@ Then retry with --reason."
     --reason "$reason" --caller "$caller_cmd" --operator "$operator" \
     --blocked-checks-array "$blocked_checks" \
     --blocking-epic "$blocking_epic" --blocking-plan "$blocking_plan"
+
+  # E-059-2_2 Step 5: every --force writes a visible protocol-v2 waiver artifact so
+  # the C4 aggregator surfaces the override in waivers_applied[] and the PM surface
+  # never sees a silent bypass. Reason is already validated >=20 chars above, so the
+  # waiver.reason minLength (waiver.schema.json / aid-protocol-validate exit 17) holds.
+  # evidence_dir is read from caller scope; at the cmd_init plan-gate force site it may
+  # NOT be materialized yet (the arg loop runs before the dir is created), so mkdir -p
+  # first (empty-guard). Best-effort — a waiver write failure never aborts the force.
+  if [[ -n "${evidence_dir:-}" ]] && command -v jq >/dev/null 2>&1; then
+    mkdir -p "$evidence_dir" 2>/dev/null || true
+    local _wv_ts _wv_fname_ts _wv_transition _wv_file _wv_head _wv_top _wv_project _wv_check
+    _wv_ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    _wv_fname_ts=$(date -u '+%Y%m%dT%H%M%SZ')
+    _wv_transition=$(printf '%s-%s' "$from" "$to" | tr -c 'A-Za-z0-9._-' '_')
+    _wv_file="${evidence_dir}/waiver-${_wv_transition}-${_wv_fname_ts}.json"
+    _wv_head=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+    _wv_top=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+    _wv_project=$(basename "${_wv_top:-unknown}" 2>/dev/null || echo unknown)
+    [[ -z "$_wv_project" || "$_wv_project" == "." || "$_wv_project" == "/" ]] && _wv_project="${epic_id:-unknown}"
+    _wv_check="$blocked_checks"
+    [[ -z "$_wv_check" ]] && _wv_check="${caller_cmd}:${from}->${to}"
+
+    local _wv_payload _wv_hash _wv_json
+    _wv_payload=$(jq -n \
+      --arg wc "$_wv_check" --arg rs "$reason" --arg wb "$operator" --arg wa "$_wv_ts" \
+      '{waived_check:$wc, reason:$rs, waived_by:$wb, waived_at:$wa, scope:"run", visible:true}') || _wv_payload=""
+    if [[ -n "$_wv_payload" ]]; then
+      _wv_hash=$(printf '%s' "$_wv_payload" | jq -Sc . 2>/dev/null | sha256sum 2>/dev/null | cut -c1-64) \
+        || _wv_hash="0000000000000000000000000000000000000000000000000000000000000000"
+      _wv_json=$(jq -n \
+        --arg created_at "$_wv_ts" \
+        --arg project_id "${_wv_project:-unknown}" \
+        --arg epic_id "${epic_id:-unknown}" \
+        --arg run_id "${run_id:-unknown}" \
+        --arg head_sha "$_wv_head" \
+        --arg subject_hash "sha256:${_wv_hash:-0}" \
+        --argjson waiver "$_wv_payload" \
+        '{
+          schema_version: "aid-2.0",
+          artifact_type: "waiver",
+          producer: "aid-fsm.sh@force-override",
+          created_at: $created_at,
+          control_protocol: "aid-2.0",
+          identity: {project_id: $project_id, epic_id: $epic_id, run_id: $run_id, step_id: null},
+          subject: {subject_hash: $subject_hash},
+          revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+          status: "blocked",
+          verdict: {kind: "none", ready: false},
+          provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-fsm.sh"},
+          waiver: $waiver
+        }') || _wv_json=""
+      [[ -n "$_wv_json" ]] && { printf '%s\n' "$_wv_json" > "$_wv_file" 2>/dev/null || true; }
+    fi
+  fi
 }
 
 # Write a single entry to the cross-EPIC audit-log.jsonl (append-only).
@@ -2378,6 +2451,54 @@ cmd_set_field() {
 
 VALID_DONE_PHASES="review release"
 
+# ─── C4 dual-run divergence classifier (E-059-2_2 Step 5) ────────────────
+# _c4_divergence_class <match> <c4_ready> <blocker_count> <blocker_ids_newline_sep>
+# Maps a (match, C4 release_ready, C4 blocker-set) tuple onto the TOTAL 7-class
+# divergence taxonomy, evaluated in strict PRECEDENCE ORDER. MECE + fail-closed:
+# it ALWAYS prints exactly one non-empty class (never null/empty), so every
+# release_policy_dual_run event carries a divergence_class. Pure function (no
+# side effects) → unit-testable by sourcing aid-fsm.sh. blocker_ids are the
+# canonical .release_decision.blockers[].input_id literals emitted by
+# aid-release-policy.sh (note: semantic_review_final, not semantic_review).
+_c4_divergence_class() {
+  local match="$1" c4_ready="$2" bcount="$3" blockers="$4"
+  # Sanitize bcount → integer (aggregator always emits a number; guard anyway).
+  [[ "$bcount" =~ ^[0-9]+$ ]] || bcount=0
+
+  # 1. none — C4 and legacy agree. Evaluated FIRST.
+  [[ "$match" == "true" ]] && { printf 'none'; return 0; }
+
+  # 2-5. Sole-blocker classes (exactly one C4 blocker). Pure-bash extraction —
+  # no `grep | head` pipe (avoids the pipefail+SIGPIPE trap under set -euo pipefail;
+  # this function is called from a command substitution inside cmd_done_advance).
+  if [[ "$bcount" == "1" ]]; then
+    local sole="$blockers"
+    sole="${sole//$'\n'/}"   # single id → strip any surrounding newlines
+    sole="${sole// /}"       # and spaces (a canonical input_id has neither)
+    case "$sole" in
+      verification_report) printf 'verification_only';  return 0 ;;
+      reporter)            printf 'reporter_missing';   return 0 ;;
+      simplifier)          printf 'simplifier_missing'; return 0 ;;
+      review_profile|gates_report|plan_review|delivery_gate|semantic_review_final|acceptance_evidence|curator_report|audit_report)
+                           printf 'required_input';     return 0 ;;
+      *)                   printf 'unclassified';       return 0 ;;  # e.g. invalidation_map / unknown id
+    esac
+  fi
+
+  # 6. c4_permissive — C4 says ready, legacy blocked, no C4 blocker.
+  if [[ "$bcount" == "0" && "$c4_ready" == "true" ]]; then
+    printf 'c4_permissive'; return 0
+  fi
+
+  # 7. mixed — 2+ C4 blockers of any categories (incl. same category).
+  if [[ "$bcount" -ge 2 ]]; then
+    printf 'mixed'; return 0
+  fi
+
+  # 8. unclassified — FAIL-CLOSED catch-all (e.g. not-ready + empty blockers).
+  printf 'unclassified'; return 0
+}
+
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
   local force="false"
@@ -2671,6 +2792,12 @@ EOF
 
           [[ -f "$_timeline" ]] && log_event "$_timeline" "fsm_done_advance_blocked" \
             blocking_count="$_blocking_count" blocked_checks="$_blocking_names"
+
+          # E-059-2_2 Step 5: this hard-exit preempts the C4 dual-run slot below.
+          # Observe telemetry (sampling-bias fix) — no gate behavior change.
+          log_event "$_timeline" "release_policy_preempted" \
+            gate="tiered_compliance" \
+            head_sha="$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo unknown)"
 
           exit 2
         fi
@@ -3012,6 +3139,81 @@ EOF
         # blk == "false" → no blocking findings; passes silently.
       fi
       fi
+
+      # ─── C4 release-decision dual-run hook (E-059-2_2 Step 5) ───────────────
+      # Runs the C4 release aggregator (aid-release-policy.sh) HERE — after every
+      # legacy check above, so `errors` is the COMPLETE legacy verdict — and logs
+      # how the aggregator's release_ready compares to it. Observe-only by default
+      # (release-decision-policy.yaml enforcement: observe → transition unaffected).
+      #
+      # HARD GUARANTEE: an aggregator crash MUST NOT abort done-advance. The call
+      # uses the set -euo pipefail-safe `cmd || rc=$?` idiom (same as the aggregator's
+      # own evidence-verify call), so a non-zero exit is caught and only logs
+      # result=crash — the legacy `errors` tally alone then decides the transition.
+      # NOTE: --force takes the sibling branch above (whole gauntlet skipped), so a
+      # forced advance structurally NEVER reaches this hook / emits dual_run.
+      local _c4_timeline="${evidence_dir}/timeline.jsonl"
+      local _c4_head_sha _c4_legacy_errors="$errors" _c4_legacy_ready
+      _c4_head_sha=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "unknown")
+      [[ "$_c4_legacy_errors" -eq 0 ]] && _c4_legacy_ready="true" || _c4_legacy_ready="false"
+
+      # Resolve enforcement (fail-safe observe). RELEASE_DECISION_POLICY = test/CI seam.
+      local _rdp_enforcement="observe" _rdp_policy
+      _rdp_policy="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
+      if [[ -f "$_rdp_policy" ]] && command -v yq >/dev/null 2>&1; then
+        local _pol_rdp
+        _pol_rdp=$(yq e '.enforcement // "observe"' "$_rdp_policy" 2>/dev/null || echo "observe")
+        [[ "$_pol_rdp" == "blocking" ]] && _rdp_enforcement="blocking"
+      fi
+
+      # Run the aggregator GUARDED. AID_RELEASE_POLICY_BIN = test seam (default: shipped).
+      local _c4_bin _c4_out _c4_rc=0
+      _c4_bin="${AID_RELEASE_POLICY_BIN:-${SCRIPT_DIR}/aid-release-policy.sh}"
+      _c4_out=$(AID_PROJECT_ROOT="$project_root" bash "$_c4_bin" "$epic_id" "$run_id" 2>&1) || _c4_rc=$?
+
+      if [[ "$_c4_rc" -ne 0 ]]; then
+        # Aggregator crashed → observe only, NEVER block (could not obtain a verdict).
+        log_event "$_c4_timeline" "release_policy_dual_run" \
+          result="crash" match="false" divergence_class="unclassified" \
+          legacy_ready="$_c4_legacy_ready" enforcement="$_rdp_enforcement" \
+          exit_code="$_c4_rc" head_sha="$_c4_head_sha"
+      else
+        local _c4_rd="${evidence_dir}/release-decision.json"
+        local _c4_ready="unknown" _c4_bcount=0 _c4_blocker_ids=""
+        if [[ -f "$_c4_rd" ]] && command -v jq >/dev/null 2>&1; then
+          # Boolean-safe read: `.release_ready // "unknown"` is WRONG here — jq's //
+          # treats a literal `false` as empty, so a false verdict would misread as
+          # "unknown" (breaking match against a legacy false). Map the boolean explicitly.
+          _c4_ready=$(jq -r 'if .release_decision.release_ready == true then "true"
+                             elif .release_decision.release_ready == false then "false"
+                             else "unknown" end' "$_c4_rd" 2>/dev/null || echo "unknown")
+          _c4_bcount=$(jq -r '.release_decision.blockers | length' "$_c4_rd" 2>/dev/null || echo "0")
+          _c4_blocker_ids=$(jq -r '.release_decision.blockers[]?.input_id' "$_c4_rd" 2>/dev/null || echo "")
+        fi
+        local _c4_match="false"
+        [[ "$_c4_ready" == "$_c4_legacy_ready" ]] && _c4_match="true"
+        local _c4_divclass
+        _c4_divclass=$(_c4_divergence_class "$_c4_match" "$_c4_ready" "$_c4_bcount" "$_c4_blocker_ids")
+
+        log_event "$_c4_timeline" "release_policy_dual_run" \
+          result="compared" match="$_c4_match" divergence_class="$_c4_divclass" \
+          legacy_ready="$_c4_legacy_ready" c4_release_ready="$_c4_ready" \
+          legacy_errors="$_c4_legacy_errors" blocker_count="$_c4_bcount" \
+          enforcement="$_rdp_enforcement" head_sha="$_c4_head_sha"
+
+        # Divergence → alert (AID_TEST_MODE suppresses the real send inside try_telegram_alert).
+        if [[ "$_c4_match" == "false" ]]; then
+          try_telegram_alert "⚖️ ${epic_id}: C4 dual-run divergence (class=${_c4_divclass}, legacy_ready=${_c4_legacy_ready}, c4_ready=${_c4_ready}) — observe-mode telemetry."
+        fi
+
+        # Enforcement: observe → transition unaffected; blocking → a C4 false stops it.
+        if [[ "$_rdp_enforcement" == "blocking" && "$_c4_ready" == "false" ]]; then
+          echo "PRECONDITION FAIL: C4 release aggregator release_ready=false (enforcement=blocking)." >&2
+          echo "See ${_c4_rd} for the blocker list, or override with --force (PM-authorized, audited)." >&2
+          errors=$((errors + 1))
+        fi
+      fi
+      # ─── End C4 dual-run hook ───────────────────────────────────────────────
 
       if [[ $errors -gt 0 ]]; then
         local timeline

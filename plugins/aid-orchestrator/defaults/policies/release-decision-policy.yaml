@@ -1,0 +1,28 @@
+# =============================================================================
+# release-decision-policy.yaml — C4 release-decision dual-run enforcement toggle
+# =============================================================================
+# Read by the FSM done-advance review→release C4 dual-run hook
+# (scripts/aid-fsm.sh, grep: 'release_policy_dual_run'). Controls whether the
+# C4 release aggregator's release_ready verdict only *observes* the legacy
+# verdict or actively *blocks* the transition.
+#
+# NOT to be confused with defaults/policies/release-policy.yaml — that file is
+# the version-bump / release-registry config consumed by aid-release.sh. This
+# file governs the C4 (release controller) dual-run comparison only.
+#
+#   observe  → the hook runs aid-release-policy.sh, logs a release_policy_dual_run
+#              telemetry event (match / divergence_class / head_sha) comparing the
+#              C4 release_ready verdict to the COMPLETE legacy verdict, and lets the
+#              transition follow the legacy tally. The transition is UNAFFECTED.
+#              (default — staged-wake, mirrors the DG-07 / C3 observe rows.)
+#   blocking → additionally, a C4 release_ready=false blocks review→release
+#              (counts toward the done-advance error tally → exit 1). E10 path.
+#
+# Fail-safe: a missing or unreadable policy file, or missing yq, degrades to
+# observe (never blocks). An aggregator CRASH is always non-blocking regardless
+# of enforcement (the transition follows the legacy verdict, result=crash logged).
+#
+# Test/CI seam: RELEASE_DECISION_POLICY=<path> overrides this file's location.
+# =============================================================================
+version: 1
+enforcement: observe
