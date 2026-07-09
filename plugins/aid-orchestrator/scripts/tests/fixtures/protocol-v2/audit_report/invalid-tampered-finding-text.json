@@ -16,7 +16,7 @@
       "occurrence_id": "c3-finding-001",
       "severity": "medium",
       "area": "scripts/example.sh:42",
-      "finding": "Example finding text used only for fixture testing.",
+      "finding": "TAMPERED — this finding text was altered after the fingerprint above was computed.",
       "recommendation": "Example recommendation text used only for fixture testing."
     }
   ],

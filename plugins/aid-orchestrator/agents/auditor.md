@@ -110,12 +110,30 @@ Produce **both** artifacts from the same audit run, with equivalent content — 
 
 1. **`audit-report.json`** — the protocol-v2 envelope: `artifact_type: audit_report`,
    `schema_version: aid-2.0`, `findings[]` at the envelope **top level** (each with
-   `fingerprint`, `occurrence_id`, `severity`, and `action_owner` when severity is
-   `critical`/`high`), and a `.audit_report` payload key carrying `blocking_findings`,
-   `independence_level`, `provider`, `model`, `process_id`, `input_manifest_hash`. See
-   `defaults/schemas/audit-report.schema.json` for the authoritative shape — read it before
-   writing the file. Compute `input_manifest_hash` as the hash of the input manifest you were
-   given; it must equal `audit-input-manifest.json → .audit_input_manifest.input_hash`.
+   `fingerprint`, `occurrence_id`, `severity`, `action_owner` when severity is
+   `critical`/`high`, and — required for `fingerprint` to be checkable, see below —
+   `area`, `finding`, `recommendation`), and a `.audit_report` payload key carrying
+   `blocking_findings`, `independence_level`, `provider`, `model`, `process_id`,
+   `input_manifest_hash`. See `defaults/schemas/audit-report.schema.json` for the
+   authoritative shape — read it before writing the file. Compute `input_manifest_hash` as
+   the hash of the input manifest you were given; it must equal
+   `audit-input-manifest.json → .audit_input_manifest.input_hash`.
+
+   **Computing `fingerprint` per finding:** `audit_report` findings use a DIFFERENT formula
+   than other artifact types — do not hand-compute or invent a hash. C3 findings have no
+   `check_id`/`target_path`/`finding_class` (they're adversarial-review discoveries, not
+   deterministic check-against-target results), so the universal `fingerprint()` helper
+   doesn't apply. Instead, shell out to the type-specific helper for each finding:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-finding-fingerprint.sh" fingerprint_audit_report \
+     "<project_id>" "audit_report" "<occurrence_id>" "<severity>" "<area>" "<finding text>" "<recommendation text>"
+   ```
+   Run this once per finding, after you've settled on that finding's final `area`/`finding`/
+   `recommendation` text (the fingerprint binds to the exact strings you write — editing the
+   text after computing the fingerprint will make it fail `aid-protocol-validate.sh
+   --check-fingerprint`, which `aid-evidence-verify.sh` runs at release time). If `area` is
+   genuinely not applicable to a finding, pass an empty string explicitly (`""`) rather than
+   omitting the argument.
 2. **`audit-report.md`** — human-readable summary of the same findings, in the same Markdown
    shape as legacy mode's output (score/status table, top findings by severity, recommended
    actions — see "Output Format — Legacy Compat" below for the template). **This file's existence
@@ -145,10 +163,13 @@ Minimal envelope example:
   "provenance": {"dispatch_mode": "agent_tool", "generated_by_tool": "auditor-agent"},
   "findings": [
     {
-      "fingerprint": "sha256:<64hex>",
+      "fingerprint": "sha256:<64hex, from fingerprint_audit_report — see above>",
       "occurrence_id": "c3-{epic_id}-{n}",
       "severity": "critical|high|medium|low|info",
-      "action_owner": "implementer|reviewer|pm|gate-fixer"
+      "action_owner": "implementer|reviewer|pm|gate-fixer",
+      "area": "{file path or path:line the finding is about — \"\" if not applicable}",
+      "finding": "{what you found, in your own words}",
+      "recommendation": "{what should be done about it}"
     }
   ],
   "audit_report": {

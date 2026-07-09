@@ -14,7 +14,7 @@
     {
       "fingerprint": "sha256:17d7aecafd06eeec27245b7b6eebfa78eecdb12bd3b523f39e884d74cc49864b",
       "occurrence_id": "c3-finding-001",
-      "severity": "medium",
+      "severity": "low",
       "area": "scripts/example.sh:42",
       "finding": "Example finding text used only for fixture testing.",
       "recommendation": "Example recommendation text used only for fixture testing."

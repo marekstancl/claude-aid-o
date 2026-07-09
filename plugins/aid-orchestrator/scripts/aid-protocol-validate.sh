@@ -397,6 +397,15 @@ fi
 
 # ---------------------------------------------------------------------------
 # Step 13: fingerprint determinism (only if --check-fingerprint was provided)
+#
+# Two formulas, dispatched by artifact_type:
+#   - audit_report (C3): fingerprint_audit_report() over occurrence_id/severity/
+#     area/finding/recommendation — C3 findings are LLM-derived adversarial
+#     discoveries with no check_id/target_path/finding_class (those fields
+#     aren't in audit-report.schema.json). See aid-finding-fingerprint.sh for
+#     why the universal 5-field formula below doesn't apply to this type.
+#   - everything else: the universal fingerprint() formula
+#     (project_id/artifact_type/check_id/target_path/finding_class), unchanged.
 # ---------------------------------------------------------------------------
 if [[ "$CHECK_FINGERPRINT" -eq 1 ]]; then
   # Source the fingerprint helper
@@ -408,11 +417,21 @@ if [[ "$CHECK_FINGERPRINT" -eq 1 ]]; then
 
     for (( i=0; i<findings_count; i++ )); do
       stored_fp=$(jq -r --argjson i "$i" '.findings[$i].fingerprint // ""' "$ARTIFACT_FILE")
-      check_id=$(jq -r --argjson i "$i" '.findings[$i].check_id // ""' "$ARTIFACT_FILE")
-      target_path=$(jq -r --argjson i "$i" '.findings[$i].target_path // ""' "$ARTIFACT_FILE")
-      finding_class=$(jq -r --argjson i "$i" '.findings[$i].finding_class // ""' "$ARTIFACT_FILE")
 
-      computed_fp=$(fingerprint "$project_id" "$artifact_type" "$check_id" "$target_path" "$finding_class")
+      if [[ "$artifact_type" == "audit_report" ]]; then
+        occurrence_id_val=$(jq -r --argjson i "$i" '.findings[$i].occurrence_id // ""' "$ARTIFACT_FILE")
+        severity_val=$(jq -r --argjson i "$i" '.findings[$i].severity // ""' "$ARTIFACT_FILE")
+        area_val=$(jq -r --argjson i "$i" '.findings[$i].area // ""' "$ARTIFACT_FILE")
+        finding_val=$(jq -r --argjson i "$i" '.findings[$i].finding // ""' "$ARTIFACT_FILE")
+        recommendation_val=$(jq -r --argjson i "$i" '.findings[$i].recommendation // ""' "$ARTIFACT_FILE")
+        computed_fp=$(fingerprint_audit_report "$project_id" "$artifact_type" "$occurrence_id_val" "$severity_val" "$area_val" "$finding_val" "$recommendation_val")
+      else
+        check_id=$(jq -r --argjson i "$i" '.findings[$i].check_id // ""' "$ARTIFACT_FILE")
+        target_path=$(jq -r --argjson i "$i" '.findings[$i].target_path // ""' "$ARTIFACT_FILE")
+        finding_class=$(jq -r --argjson i "$i" '.findings[$i].finding_class // ""' "$ARTIFACT_FILE")
+        computed_fp=$(fingerprint "$project_id" "$artifact_type" "$check_id" "$target_path" "$finding_class")
+      fi
+
       if [[ "$computed_fp" != "$stored_fp" ]]; then
         echo "nondeterministic_fingerprint" >&2
         exit 13

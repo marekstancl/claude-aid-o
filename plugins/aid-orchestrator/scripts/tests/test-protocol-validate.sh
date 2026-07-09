@@ -267,6 +267,65 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# audit_report fingerprint formula (Step 13 — protocol hotfix, E-059-1_2
+# dogfooding discovery). audit_report findings have no check_id/target_path/
+# finding_class (not in the schema — they're LLM-derived C3 findings, not
+# deterministic check-against-target results), so the universal 5-field
+# fingerprint() formula never applied to them; --check-fingerprint against
+# ANY audit_report artifact — including this repo's own reference fixture —
+# unconditionally failed with nondeterministic_fingerprint before this fix.
+# fingerprint_audit_report() (aid-finding-fingerprint.sh) fixes this with a
+# type-specific formula over occurrence_id/severity/area/finding/recommendation.
+# ---------------------------------------------------------------------------
+if [[ -f "$c3_valid" ]]; then
+  run_test "audit_report/valid-c3-complete.json --check-fingerprint" 0 "$c3_valid" --check-fingerprint
+else
+  echo "FAIL [missing fixture]: audit_report/valid-c3-complete.json (--check-fingerprint)"
+  fail=$((fail + 1))
+fi
+
+# Empty/absent findings must not mask real tampering elsewhere in the suite —
+# this asserts the legitimate "nothing to check" skip still passes, so a
+# reader can tell it's an intentional no-op, not evidence the check works.
+c3_valid_empty="${c3_dir}/valid.json"
+if [[ -f "$c3_valid_empty" ]]; then
+  run_test "audit_report/valid.json --check-fingerprint (empty findings, legitimate skip)" 0 "$c3_valid_empty" --check-fingerprint
+else
+  echo "FAIL [missing fixture]: audit_report/valid.json (--check-fingerprint)"
+  fail=$((fail + 1))
+fi
+
+c3_tampered_finding="${c3_dir}/invalid-tampered-finding-text.json"
+if [[ -f "$c3_tampered_finding" ]]; then
+  run_test "audit_report/invalid-tampered-finding-text.json --check-fingerprint" 13 "$c3_tampered_finding" --check-fingerprint
+else
+  echo "FAIL [missing fixture]: audit_report/invalid-tampered-finding-text.json"
+  fail=$((fail + 1))
+fi
+
+c3_tampered_severity="${c3_dir}/invalid-tampered-severity.json"
+if [[ -f "$c3_tampered_severity" ]]; then
+  run_test "audit_report/invalid-tampered-severity.json --check-fingerprint" 13 "$c3_tampered_severity" --check-fingerprint
+else
+  echo "FAIL [missing fixture]: audit_report/invalid-tampered-severity.json"
+  fail=$((fail + 1))
+fi
+
+# Non-audit_report types must keep using the universal 5-field formula,
+# unaffected by the audit_report-specific branch above. This regresses
+# against the pre-existing _envelope/invalid-nondeterministic-fingerprint.json
+# fixture (artifact_type: plan_review) already exercised below in the envelope
+# loop — this second explicit assertion documents the intent at the point of
+# the fix, so the two don't silently drift apart.
+plan_review_tamper="${FIXTURES_DIR}/_envelope/invalid-nondeterministic-fingerprint.json"
+if [[ -f "$plan_review_tamper" ]]; then
+  run_test "_envelope/invalid-nondeterministic-fingerprint.json --check-fingerprint (non-audit_report, universal formula unchanged)" 13 "$plan_review_tamper" --check-fingerprint
+else
+  echo "FAIL [missing fixture]: _envelope/invalid-nondeterministic-fingerprint.json"
+  fail=$((fail + 1))
+fi
+
+# ---------------------------------------------------------------------------
 # Envelope negative fixtures (11 tests)
 # ---------------------------------------------------------------------------
 ENVELOPE_DIR="${FIXTURES_DIR}/_envelope"
