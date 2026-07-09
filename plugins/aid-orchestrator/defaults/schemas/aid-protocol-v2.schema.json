@@ -32,15 +32,18 @@
         "ui_fidelity",
         "semantic_review",
         "acceptance_evidence",
+        "consumption_proof",
         "audit_report",
         "audit_input_manifest",
         "release_decision",
         "pm_decision_brief",
         "curator",
         "delivery_report",
-        "verification_report"
+        "verification_report",
+        "invalidation_map",
+        "waiver"
       ],
-      "$comment": "enforced"
+      "$comment": "enforced — must stay in sync with VALID_ARTIFACT_TYPES in aid-protocol-validate.sh (test-protocol-validate.sh --consistency)"
     },
     "producer": {
       "type": "string",

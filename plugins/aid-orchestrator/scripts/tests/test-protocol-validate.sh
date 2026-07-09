@@ -326,6 +326,56 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# E-059-2 D11 payload-field fixtures (validator steps 15-18 — distinct exit codes).
+# These descend into the release_decision / waiver / pm_decision_brief payloads and
+# MUST be wired explicitly: the generic per-type loop above only knows exit 0 for
+# <type>/valid.json and exit 12 for <type>/invalid-missing-payload.json. The waiver
+# valid.json (exit 0) and invalid-missing-payload.json (exit 12) are already covered
+# by that loop; only the distinct-code negatives are wired here.
+# ---------------------------------------------------------------------------
+rd_dir="${FIXTURES_DIR}/release_decision"
+
+rd_missing_rr="${rd_dir}/invalid-missing-release-ready.json"
+if [[ -f "$rd_missing_rr" ]]; then
+  run_test "release_decision/invalid-missing-release-ready.json" 15 "$rd_missing_rr"
+else
+  echo "FAIL [missing fixture]: release_decision/invalid-missing-release-ready.json"
+  fail=$((fail + 1))
+fi
+
+rd_missing_d11="${rd_dir}/invalid-missing-d11-fields.json"
+if [[ -f "$rd_missing_d11" ]]; then
+  run_test "release_decision/invalid-missing-d11-fields.json" 16 "$rd_missing_d11"
+else
+  echo "FAIL [missing fixture]: release_decision/invalid-missing-d11-fields.json"
+  fail=$((fail + 1))
+fi
+
+rd_bad_merge="${rd_dir}/invalid-bad-merge-mode.json"
+if [[ -f "$rd_bad_merge" ]]; then
+  run_test "release_decision/invalid-bad-merge-mode.json" 16 "$rd_bad_merge"
+else
+  echo "FAIL [missing fixture]: release_decision/invalid-bad-merge-mode.json"
+  fail=$((fail + 1))
+fi
+
+waiver_short="${FIXTURES_DIR}/waiver/invalid-short-reason.json"
+if [[ -f "$waiver_short" ]]; then
+  run_test "waiver/invalid-short-reason.json" 17 "$waiver_short"
+else
+  echo "FAIL [missing fixture]: waiver/invalid-short-reason.json"
+  fail=$((fail + 1))
+fi
+
+brief_bad_status="${FIXTURES_DIR}/pm_decision_brief/invalid-bad-status.json"
+if [[ -f "$brief_bad_status" ]]; then
+  run_test "pm_decision_brief/invalid-bad-status.json" 18 "$brief_bad_status"
+else
+  echo "FAIL [missing fixture]: pm_decision_brief/invalid-bad-status.json"
+  fail=$((fail + 1))
+fi
+
+# ---------------------------------------------------------------------------
 # Envelope negative fixtures (11 tests)
 # ---------------------------------------------------------------------------
 ENVELOPE_DIR="${FIXTURES_DIR}/_envelope"

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/waiver.schema.json",
+  "title": "AID Protocol v2 — Waiver",
+  "$comment": "producer: C4/PM, consumers: [FSM, release_decision, PM brief, GUI]",
+  "description": "Artifact recording an explicit, visible waiver of a release blocker. A waiver is a governance record — never an empty rubber-stamp — so its reason must be substantive (>= 20 chars) and it is always visible.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "waiver",
+      "$comment": "enforced — must equal this type"
+    },
+    "waiver": {
+      "type": "object",
+      "$comment": "enforced — reason minLength (>= 20) is validated by aid-protocol-validate.sh (exit 17); payload-key presence is validated by step 12 (exit 12).",
+      "properties": {
+        "waived_check": {
+          "type": "string",
+          "description": "Identifier of the check/blocker being waived."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 20,
+          "$comment": "enforced (exit 17) — must be substantive"
+        },
+        "waived_by": {
+          "type": "string",
+          "description": "Identity that authorised the waiver."
+        },
+        "waived_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+          "description": "ISO-8601 UTC timestamp with Z suffix."
+        },
+        "scope": {
+          "enum": ["run", "epic"]
+        },
+        "visible": {
+          "const": true,
+          "description": "A waiver is always visible — it can never be hidden from the PM surface."
+        }
+      },
+      "required": ["waived_check", "reason", "waived_by", "waived_at", "scope", "visible"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["waiver"]
+}

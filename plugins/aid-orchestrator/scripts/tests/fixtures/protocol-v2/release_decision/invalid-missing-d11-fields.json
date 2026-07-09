@@ -1,6 +1,6 @@
 {
   "schema_version": "aid-2.0",
-  "artifact_type": "pm_decision_brief",
+  "artifact_type": "release_decision",
   "producer": "aid-test@1.0.0",
   "created_at": "2026-06-23T10:00:00Z",
   "control_protocol": "aid-2.0",
@@ -8,22 +8,26 @@
   "subject": {"subject_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001"},
   "revision": {"head_sha": "abc123def456", "head_is_current": true, "freshness": "current"},
   "status": "pass",
-  "verdict": {"kind": "none", "ready": false},
+  "verdict": {"kind": "release_ready", "ready": true},
   "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-test"},
-  "pm_decision_brief": {
-    "communication_status": "complete",
+  "release_decision": {
     "release_ready": true,
+    "decided_by": "C4",
+    "inputs": [
+      {"id": "review_profile", "artifact": "review-profile.json", "verdict": "pass", "reason": "profile hash matches head", "head_match": true}
+    ],
     "blockers": [],
     "waivers_applied": [],
-    "human_summary_path": "pm-summary.md",
+    "profile_hash_freshness": "evaluated",
     "merge_mode": "auto",
-    "evidence_verification_status": "pass",
+    "pm_brief_required": false,
+    "pm_brief_status": "generated",
     "evidence_verified_at_head": true,
-    "reporter_status": "pass",
+    "evidence_verification_status": "pass",
     "reporter_reason": "delivery report generated and verified at head",
     "simplifier_status": "not_applicable",
     "simplifier_reason": "no simplification pass configured for this run",
-    "summary_for_pm": "All gates green; release is ready to merge automatically.",
-    "delivered_summary_ref": "evidence/E-059-2/delivery-report.json"
+    "delivered_summary_ref": "evidence/E-059-2/delivery-report.json",
+    "summary_for_pm": "All gates green; release is ready to merge automatically."
   }
 }

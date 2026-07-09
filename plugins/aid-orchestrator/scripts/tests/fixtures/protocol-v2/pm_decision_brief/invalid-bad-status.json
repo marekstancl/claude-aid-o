@@ -11,7 +11,7 @@
   "verdict": {"kind": "none", "ready": false},
   "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-test"},
   "pm_decision_brief": {
-    "communication_status": "complete",
+    "communication_status": "partial",
     "release_ready": true,
     "blockers": [],
     "waivers_applied": [],

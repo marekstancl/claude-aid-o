@@ -3,7 +3,7 @@
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/release-decision.schema.json",
   "title": "AID Protocol v2 — ReleaseDecision",
   "$comment": "producer: C4, consumers: [FSM, PM brief, GUI]",
-  "description": "Artifact emitted by C4 (release controller) containing the final release readiness decision and references to all evidence inputs that contributed to it.",
+  "description": "Artifact emitted by C4 (release controller) carrying the final release-readiness decision, references to every evidence input that contributed to it, and the 11 explicit D11 state fields the FSM merge gate and PM brief read directly (never inferring state).",
   "type": "object",
   "allOf": [
     {
@@ -17,15 +17,148 @@
     },
     "release_decision": {
       "type": "object",
-      "$comment": "enforced — minimal payload; full schema defined in owning phase",
+      "$comment": "enforced — release_ready (exit 15) and the 11 D11 state fields (exit 16) are validated by aid-protocol-validate.sh; dual_run is OPTIONAL and FSM-patched in a later step.",
       "properties": {
         "release_ready": {
-          "type": "boolean"
+          "type": "boolean",
+          "$comment": "enforced (exit 15) — the FSM merge gate reads this directly"
+        },
+        "decided_by": {
+          "type": "string",
+          "description": "Identifier of the controller/agent that produced this decision."
         },
         "inputs": {
-          "type": "array"
+          "type": "array",
+          "description": "Every evidence input that contributed to the decision.",
+          "items": {
+            "type": "object",
+            "required": ["id", "artifact", "verdict", "reason", "head_match"],
+            "properties": {
+              "id": { "type": "string" },
+              "artifact": { "type": "string" },
+              "verdict": {
+                "enum": ["pass", "fail", "blocked", "unverifiable", "waived", "advisory"]
+              },
+              "reason": { "type": "string" },
+              "head_match": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "blockers": {
+          "type": "array",
+          "description": "Inputs that block release, keyed by canonical input_id.",
+          "items": {
+            "type": "object",
+            "required": ["input_id", "severity", "reason"],
+            "properties": {
+              "input_id": {
+                "enum": [
+                  "review_profile",
+                  "delivery_gate",
+                  "semantic_review_final",
+                  "acceptance_evidence",
+                  "gates_report",
+                  "curator_report",
+                  "plan_review",
+                  "verification_report",
+                  "audit_report",
+                  "invalidation_map",
+                  "reporter",
+                  "simplifier"
+                ]
+              },
+              "severity": { "type": "string" },
+              "reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "waivers_applied": {
+          "type": "array",
+          "description": "References to waiver artifacts applied to this decision.",
+          "items": { "type": "string" }
+        },
+        "profile_hash_freshness": {
+          "enum": ["evaluated", "not_evaluated", "mismatch"]
+        },
+        "dual_run": {
+          "type": "object",
+          "description": "OPTIONAL — C4 dual-run comparison against the legacy path. Present but NOT required; enforcement is FSM-patched in a later step.",
+          "$comment": "reference — not validated by aid-protocol-validate.sh in this phase",
+          "properties": {
+            "legacy_verdict": { "type": "string" },
+            "match": { "type": "boolean" },
+            "divergence_class": { "type": "string" }
+          }
+        },
+        "merge_mode": {
+          "enum": ["manual", "auto", "blocked"],
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "pm_brief_required": {
+          "type": "boolean",
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "pm_brief_status": {
+          "enum": ["pending", "generated", "failed", "incomplete"],
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "evidence_verified_at_head": {
+          "type": "boolean",
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "evidence_verification_status": {
+          "enum": ["pass", "fail", "unverifiable"],
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "reporter_status": {
+          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "reporter_reason": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "enforced (exit 16) — D11 non-empty string"
+        },
+        "simplifier_status": {
+          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "$comment": "enforced (exit 16) — D11"
+        },
+        "simplifier_reason": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "enforced (exit 16) — D11 non-empty string"
+        },
+        "delivered_summary_ref": {
+          "type": ["string", "null"],
+          "$comment": "enforced (exit 16) — D11 required-but-nullable: key must be present, value may be null"
+        },
+        "summary_for_pm": {
+          "type": "string",
+          "minLength": 1,
+          "$comment": "enforced (exit 16) — D11 non-empty string"
         }
-      }
+      },
+      "required": [
+        "release_ready",
+        "decided_by",
+        "inputs",
+        "blockers",
+        "waivers_applied",
+        "profile_hash_freshness",
+        "merge_mode",
+        "pm_brief_required",
+        "pm_brief_status",
+        "evidence_verified_at_head",
+        "evidence_verification_status",
+        "reporter_status",
+        "reporter_reason",
+        "simplifier_status",
+        "simplifier_reason",
+        "delivered_summary_ref",
+        "summary_for_pm"
+      ]
     }
   },
   "required": ["release_decision"]
