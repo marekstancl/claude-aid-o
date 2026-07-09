@@ -81,9 +81,9 @@ add_blocker() {
 # _is_json <file> — present AND parseable JSON (fail-closed presence+parse gate).
 _is_json() {
   local f="$1"
-  [[ -f "$f" ]] || return 1
-  command -v jq >/dev/null 2>&1 || return 0   # no jq → presence-only (best effort)
-  jq -e . "$f" >/dev/null 2>&1
+  [[ -s "$f" ]] || return 1                              # missing OR 0-byte → fail-closed (was -f: accepts empty)
+  command -v jq >/dev/null 2>&1 || return 0              # no jq → presence-only (unchanged)
+  [[ -n "$(jq -c . "$f" 2>/dev/null)" ]] && jq -e . "$f" >/dev/null 2>&1
 }
 
 # _artifact_head_match <file> — echoes true|false from .revision.head_sha vs CURRENT_HEAD.

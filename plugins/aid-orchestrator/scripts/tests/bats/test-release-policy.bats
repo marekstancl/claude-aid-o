@@ -189,6 +189,34 @@ _input_verdict() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.id=
   [ "$(_rd '.release_decision.evidence_verification_status')" == "fail" ]
 }
 
+# ─── REGRESSION: empty/whitespace-only REQUIRED inputs (fail-closed, jq 1.6 edge case) ─
+
+@test "REGRESSION: acceptance-evidence EMPTY (0-byte) → release_ready:false + blocker" {
+  _build_healthy
+  : > "$EVID/acceptance-evidence.json"    # truncate to 0 bytes
+  _run_agg
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker acceptance_evidence
+  [ "$(_input_verdict acceptance_evidence)" == "blocked" ]
+}
+
+@test "REGRESSION: acceptance-evidence WHITESPACE-ONLY → release_ready:false + blocker" {
+  _build_healthy
+  printf '\n' > "$EVID/acceptance-evidence.json"
+  _run_agg
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+  _has_blocker acceptance_evidence
+  [ "$(_input_verdict acceptance_evidence)" == "blocked" ]
+}
+
+@test "REGRESSION: healthy fixture still passes with fix (no over-rejection)" {
+  _build_healthy
+  _run_agg
+  [ "$status" -eq 0 ]
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+  [ "$(_rd '.release_decision.blockers | length')" -eq 0 ]
+}
+
 # ─── plan-review hop ─────────────────────────────────────────────────────────
 
 @test "plan-review hop: healthy plan_review verdict pass, reason cites resolved planref path" {
