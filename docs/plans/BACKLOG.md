@@ -1594,6 +1594,21 @@ to the EPIC worktree) and add a hard precondition — refuse any
 AID-orchestrated commit when `git symbolic-ref HEAD` doesn't match the
 run's declared `branch` in `fsm-state.yaml`.
 
+### OBS-20260709-05 — Dispatched implementer stalled in a confused wait-loop, no commit/no self-report; orchestrator took over manually (self-recovered, evidenced)
+
+**Observed in:** WAN / P061 / E-061-1_4 Step 4
+**AID version:** current WAN consumer plugin (v2.5x line)
+**Observed at:** 2026-07-09 (Step 4, ~13:00-13:06Z window per surrounding commits)
+**Status:** confirmed, resolved by orchestrator before this was reported — no residual impact, fully evidenced
+**Severity:** medium (control-loop reliability — an implementer can silently stop making progress with no automatic detection other than the orchestrator's own patience/attention)
+**Class:** process control / agent liveness
+
+**What happened:** per `steps/step_4_domain/output.md`: *"the dispatched implementer agent completed the code changes but stalled in a confused wait-loop instead of finishing (no commit, no self-report produced despite one resume attempt)."* The orchestrator itself took over: independently ran the full test suite (1524 unit + 20 integration passed), `ruff check` clean, spot-checked new file content quality and byte-identity of the extracted legacy output-format section against the pre-change file, then committed on the stalled agent's behalf (`13e0f0f`). Fully disclosed in the step's own evidence file and in `final_report.md`'s process notes — not discovered by digging, the pipeline documented its own recovery.
+
+**Why it matters:** this is the same failure shape as OBS-20260709-04 (AID's own rogue-commit incident) from the other side — an agent not doing what it's supposed to (there: wrong branch/identity; here: not finishing/reporting at all) with the ONLY safety net being the orchestrator's own judgment to notice and step in. There's no FSM precondition or timeout that flags "implementer accepted work, went silent, never committed" as a structural condition — it worked here because the orchestrator session stayed engaged, not because a control caught it. A future version where the orchestrator doesn't loop back before ending the session would leave Step 4 permanently stuck with code written but never committed or evidenced.
+
+**Likely fix:** treat "step dispatched, no commit + no step-output artifact within N attempts/timeout" as a first-class FSM precondition-fail class (distinct from `missing_verifier_output`), not just something the orchestrator happens to catch — give it a name and a timeline event so it's queryable across runs instead of only readable inside a step's prose output.md.
+
 ## Positive control moments — 2026-07-08 late / 2026-07-09 additions
 
 - CP3 fix-loop on E-059-1_2 (IMP-177 EPIC) worked hard on its own subject:
@@ -1616,3 +1631,8 @@ run's declared `branch` in `fsm-state.yaml`.
   the work on the correct branch with a transparent recovery note in the
   final commit message — self-correction worked, and disclosed itself
   instead of quietly rewriting history unremarked.
+- WAN E-061-1_4 Step 4 (OBS-20260709-05): a stalled implementer's takeover
+  by the orchestrator was fully evidenced, not papered over — independent
+  re-run of the full test suite, content spot-check, and byte-identity
+  verification before committing on the agent's behalf, with an honest
+  process note instead of a silent commit as if nothing happened.
