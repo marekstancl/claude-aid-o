@@ -1624,6 +1624,21 @@ run's declared `branch` in `fsm-state.yaml`.
 
 **Likely fix:** any queue entry with a `blocked_on: <branch/PR>`-style dependency should be re-validated against live git state (e.g. `git merge-base --is-ancestor <branch> main`) at least at EPIC-start time, not trusted as a static claim written once and never re-checked — same underlying principle as OBS-20260708-04's fix (state that can go stale needs an active revalidation path, not a write-once field).
 
+### OBS-20260709-07 — `plan_diff` gate's own exemption note names "P038+" as when it becomes required; we're on P059 and it's still `required: false` (plus: gate times out at 120s when actually run)
+
+**Observed in:** aid-orchestrator / E-059-2_2 GATES (self-host)
+**AID version:** current main, `.aid-o/config/execution.yaml`
+**Observed at:** 2026-07-09, GATES run 17:35-17:37Z
+**Status:** confirmed
+**Severity:** medium (same family as OBS-20260708-05 — advisory-exemption wallpaper — but here the exemption's own stated expiry condition has already passed)
+**Class:** false-green prevention / stale configuration
+
+**What happened:** `execution.yaml`'s `plan_diff` gate carries the note *"required=false for AID self-host: P037 plan predates plan-level AC convention; gate becomes meaningful for P038+."* This EPIC's plan is P059 — 21+ plans past the note's own stated threshold — yet `required: false` was never flipped. In this run's GATES pass, `plan_diff` was actually invoked (not skipped) and failed with exit 124 (timeout, `timeout_seconds: 120` in config) alongside `shell_pipeline_smoke` (already tracked, OBS-20260708-05) and two intentionally-permanent advisory gates (`ui_calibration_result`/`_signoff`, one-time E-056-2_3 calibration, correctly still advisory). `gates_complete overall: pass` regardless — 4 of 6 gates failed, only `bats_fsm`/`bats_all` genuinely passed.
+
+**Why it matters:** unlike the calibration gates, `plan_diff` was written with an explicit, checkable self-expiry condition ("P038+") and nobody re-checked it as plans advanced — the config drifted the same way `active.md`/`queue.yaml` did in OBS-20260709-06, just inside AID's own repo this time. Whether flipping it to `required: true` would even pass right now is unknown, since the gate currently just times out at 120s rather than completing — so there are two stacked issues: the stale exemption, and a functional timeout bug hiding behind it.
+
+**Likely fix:** (1) either bump `plan_diff` to `required: true` now that P059 satisfies the note's own condition, or update the note with a fresh justification/threshold if there's a reason it's still not ready; (2) separately investigate the 120s timeout — `aid-plan-diff.sh --plan {plan_path}` needs to actually complete before its required-ness can be judged. General pattern: any `required: false` note with a stated "becomes required at X" condition should be checked against reality at every plan boundary, not left to a human noticing by chance.
+
 ## Positive control moments — 2026-07-08 late / 2026-07-09 additions
 
 - CP3 fix-loop on E-059-1_2 (IMP-177 EPIC) worked hard on its own subject:
@@ -1651,3 +1666,11 @@ run's declared `branch` in `fsm-state.yaml`.
   re-run of the full test suite, content spot-check, and byte-identity
   verification before committing on the agent's behalf, with an honest
   process note instead of a silent commit as if nothing happened.
+- AID E-059-2_2 DONE review (Curator+Auditor, commit `23964c8`): caught two
+  real HIGH findings in the EPIC's own just-shipped code — IMP-194, the same
+  whitespace-only jq 1.6 bug class the aggregator had already been hardened
+  against in Step 4, present in the new sibling script `aid-pm-brief.sh`;
+  IMP-193, a documentation OVERCLAIM (test disposition + REQUIRED-inputs
+  table claimed content-blocking verification that isn't actually
+  implemented yet, deferred to E10) — corrected to match reality rather than
+  left to over-promise. Both fixed same-day, CP4 PASS.
