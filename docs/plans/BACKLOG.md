@@ -1609,6 +1609,21 @@ run's declared `branch` in `fsm-state.yaml`.
 
 **Likely fix:** treat "step dispatched, no commit + no step-output artifact within N attempts/timeout" as a first-class FSM precondition-fail class (distinct from `missing_verifier_output`), not just something the orchestrator happens to catch — give it a name and a timeline event so it's queryable across runs instead of only readable inside a step's prose output.md.
 
+### OBS-20260709-06 — active.md/queue.yaml claimed P059 "unmerged, awaiting PM MERGE decision" for 6+ hours after it was actually merged; wrongly gated a downstream EPIC's dependency
+
+**Observed in:** WAN / P059 + P061 (cross-plan bookkeeping) / discovered during E-061-1_4 DONE review
+**AID version:** current WAN consumer plugin
+**Observed at:** 2026-07-09 (P059 merged 10:38 UTC via `1ee536b`; drift discovered and fixed ~17:15 CEST, commit `40c5d12`, by Marek directly — not caught by any AID automation)
+**Status:** confirmed, fixed
+**Severity:** high (this is bookkeeping-staleness with a real, not merely cosmetic, downstream consequence)
+**Class:** evidence integrity / bookkeeping-staleness (same family as OBS-20260708-04's `steps[]` decoration, but here the stale field actively gated other work instead of just misdisplaying)
+
+**What happened:** P059 (E-058-6_6→E-059-2_2 chain) merged to `main` at 2026-07-09T10:38 UTC (`1ee536b`). `active.md`/`queue.yaml` were never synced afterward and kept declaring it "unmerged, awaiting PM MERGE decision" for 6+ hours. `E-061-2_4`'s queue entry carried a hard dependency on that merge (`ExtractedFieldsForm.tsx` collision with P059's own UI changes) — the queue entry's blocking condition was therefore stale too, and nothing detected this: no FSM precondition, no gate, no audit check cross-referenced "is the branch this queue entry is waiting on actually still unmerged" against real git state. It was caught by a human (Marek) reading closely during E-061-1_4's DONE review, not by the system.
+
+**Why it matters:** this is the bookkeeping-staleness class at its most consequential form observed so far — not a cosmetic "shows pending forever" defect (OBS-20260708-04) but a stale flag that could have kept a real EPIC (E-061-2_4) blocked indefinitely waiting on a merge that had already happened. If this hadn't been caught by chance during an unrelated review, E-061-2_4 might never have started.
+
+**Likely fix:** any queue entry with a `blocked_on: <branch/PR>`-style dependency should be re-validated against live git state (e.g. `git merge-base --is-ancestor <branch> main`) at least at EPIC-start time, not trusted as a static claim written once and never re-checked — same underlying principle as OBS-20260708-04's fix (state that can go stale needs an active revalidation path, not a write-once field).
+
 ## Positive control moments — 2026-07-08 late / 2026-07-09 additions
 
 - CP3 fix-loop on E-059-1_2 (IMP-177 EPIC) worked hard on its own subject:
