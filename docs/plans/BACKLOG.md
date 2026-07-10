@@ -1788,3 +1788,44 @@ re-verified there. Likely-fix reframed: close the bypass windows (marker
 provenance, format unification) rather than "add a presence gate"; per PM
 2026-07-10 decision, NOT as Curator-specific investment — covered by the C4
 input contract (item 8) + E11 inventory.
+
+## C4 release-decision.json — first live verification against the PM's 7-field contract (2026-07-10)
+
+E-059-2_2 merged to `main` (`2b4b5d3`, v2.53.0, pushed to origin) — the
+EPIC that built the entire C4 release-policy layer (Steps 1-7, this same
+day). Its own evidence pack produced a real, live `release-decision.json`
+(`.aid-o/work/evidence/E-059-2_2/R-E059-2/reporter/smoke/release-decision.json`,
+generated `2026-07-09T20:52:08Z`, `head_sha` matching `23964c8`,
+`freshness: current`) — checked field-by-field against the PM's original
+spec from this runbook:
+
+- `release_ready`: `false` ✓
+- `merge_mode`: `"blocked"` ✓ (fail-closed — evidence verification failed,
+  3 blockers, so it correctly did NOT default to permissive)
+- `pm_brief_required`: `true` ✓
+- `evidence_verified_at_head`: `false` (paired `evidence_verification_status:
+  "fail"`) ✓
+- `reporter_status` / `reporter_reason`: `"not_applicable"` /
+  `"not_plan_boundary"` ✓ (correct 5-state CONDITIONAL semantics — this
+  EPIC isn't the plan's boundary EPIC, so Reporter correctly doesn't apply)
+- `simplifier_status` / `simplifier_reason`: same pattern, same correct result
+- `summary_for_pm`: `"release_ready=false; evidence=fail;
+  reporter=not_applicable; simplifier=not_applicable; waivers=0;
+  blockers=3; merge_mode=blocked"` — exactly the flat, mechanical,
+  no-LLM template format specified
+
+All 7 required fields present, correctly typed, and semantically correct
+on the system's very first real invocation (not a test fixture — this ran
+against the EPIC's own actual evidence pack). `aid-pm-brief.sh` also fired
+successfully (`pm-decision-brief.json`, `pm_brief_status: "generated"`,
+same head_sha). The dual-run hook stayed observe-only as designed — C4's
+own "blocked" verdict didn't gate anything; legacy checks + PM-approved
+C3 audit (blocking findings observe-mode) decided the actual merge, and
+the merge commit itself documents that split clearly ("observe-only,
+legacy still decides").
+
+This is the strongest positive-control result observed this session: a
+system built and merged same-day produced a fully spec-compliant output
+on first contact with real data, with the fail-closed semantics (blocked
+merge_mode under failed evidence) working exactly as the PM's contract
+intended.
