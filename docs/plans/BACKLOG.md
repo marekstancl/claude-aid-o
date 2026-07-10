@@ -1639,6 +1639,8 @@ run's declared `branch` in `fsm-state.yaml`.
 
 **Likely fix:** (1) either bump `plan_diff` to `required: true` now that P059 satisfies the note's own condition, or update the note with a fresh justification/threshold if there's a reason it's still not ready; (2) separately investigate the 120s timeout — `aid-plan-diff.sh --plan {plan_path}` needs to actually complete before its required-ness can be judged. General pattern: any `required: false` note with a stated "becomes required at X" condition should be checked against reality at every plan boundary, not left to a human noticing by chance.
 
+**Update (2026-07-10):** the functional half is fixed — commit `8b9d88b` root-caused it: `aid-plan-diff.sh` ran each AC's `verification_pattern` via a bare unbounded `eval`, so one slow/hanging AC (e.g. a full multi-minute bats suite) wedged the whole plan-diff run. Now wrapped in `timeout "$AC_CMD_TIMEOUT" bash -c` (default 120s, matching the gate's own config), a timed-out AC records `verdict=absent, reason=timeout` instead of hanging, with a regression test added. Surfaced independently while preparing P060, not from this entry directly, but resolves exactly the mechanism described above. The stale `required: false` / "P038+" exemption-threshold question is still open — separate policy decision, not a bug.
+
 ## Positive control moments — 2026-07-08 late / 2026-07-09 additions
 
 - CP3 fix-loop on E-059-1_2 (IMP-177 EPIC) worked hard on its own subject:
