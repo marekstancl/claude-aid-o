@@ -843,18 +843,22 @@ fi
 # ===========================================================================
 # TEST F3: pipeline.md Curator dispatch is unconditional in §7 DONE.
 #          §5 GATES has the back-pointer "Transition to DONE: Curator,
-#          Auditor, CP4, and CP5 now execute in DONE state (§7)" and §7
-#          DONE has the "Parallel dispatch: Curator + Auditor" line.
+#          Auditor, CP4, and CP5 now execute in DONE state (§7)" and §7 DONE
+#          dispatches Curator in DONE. NOTE (E-057-2_2): dispatch is SERIAL
+#          ("Auditor (C3), then Curator (serial…)"), not parallel — Curator
+#          consumes audit-report.json (D5 sequencing). Accept either the serial
+#          form (current) or the legacy "Parallel dispatch" line for back-compat.
 # ===========================================================================
 run_test "F3: pipeline.md Curator dispatch is unconditional (§5 GATES → §7 DONE handoff)"
 
 if [[ -f "$PIPELINE_MD" ]]; then
   if grep -q 'Curator, Auditor.*now execute in DONE' "$PIPELINE_MD" 2>/dev/null &&
-     grep -q 'Parallel dispatch.*Curator.*Auditor' "$PIPELINE_MD" 2>/dev/null; then
-    pass "F3: pipeline.md §5→§7 Curator handoff + §7 parallel dispatch present"
+     { grep -qE 'Auditor.*then Curator|then Curator \(serial' "$PIPELINE_MD" 2>/dev/null ||
+       grep -q 'Parallel dispatch.*Curator.*Auditor' "$PIPELINE_MD" 2>/dev/null; }; then
+    pass "F3: pipeline.md §5→§7 Curator handoff + §7 Curator dispatch (serial or parallel) present"
   else
     fail "F3: unconditional Curator dispatch" \
-      "pipeline.md missing §5 'Curator, Auditor ... execute in DONE' back-pointer or §7 'Parallel dispatch: Curator + Auditor'"
+      "pipeline.md missing §5 'Curator, Auditor ... execute in DONE' back-pointer or §7 Curator dispatch (serial 'Auditor…then Curator' / legacy 'Parallel dispatch')"
   fi
 else
   fail "F3: pipeline.md exists" "not found: $PIPELINE_MD"
