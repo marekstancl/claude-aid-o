@@ -430,6 +430,18 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
    - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
    - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
+   - `22` (`range_undetermined`) — cp2 could not determine its diff range (no `step_commit` event in
+     timeline.jsonl AND no `base_commit` in fsm-state.yaml). **No output file is written** (no false SKIP
+     stub). Recovery: let the FSM emit a `step_commit` (it is logged automatically at each
+     `increment-step`) or ensure `base_commit` is set in fsm-state.yaml; or set `CP2_RANGE_POLICY=observe`
+     to fall back to `HEAD~1..HEAD` (emits a loud `cp2_range_fallback` event). **NEVER hand-craft the
+     output file** — that reintroduces the OBS-20260705-01 false-green.
+
+   **Range resolution (cp2, P060 Step 3 — OBS-20260705-01):** cp2 classifies from the STEP boundary,
+   not the last commit, so a production step with a bookkeeping commit on top is no longer false-green'd
+   `docs_only`. Order: (1) last `step_commit` event in timeline → `step_commit_sha..HEAD`; (2) else
+   `base_commit` from `evidence_dir/fsm-state.yaml` → `base_commit..HEAD` (fail-safe WIDER); (3) else
+   exit 22 (blocking) or loud `HEAD~1..HEAD` fallback (`CP2_RANGE_POLICY=observe`).
 
 2. **Verifier dispatch** (only for RUN/FAIL):
 
@@ -472,6 +484,12 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    - Rejects if verifier-output-step-N.md missing, or has empty/missing `_generated_by` or `_generated_at` (anti-fabrication).
    - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
    - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
+   - **Rejects if `checkpoint:` is set and ≠ `cp2`** (P060 Step 3 bypass guard, increment call-site ONLY):
+     a cp3/cp4-produced stub must not satisfy the per-step CP2 precondition. Absent `checkpoint` is
+     backward-compatible. The shared `fsm_check_verifier_output` stays checkpoint-agnostic so the cp3
+     consumers (EXECUTE→GATES) still accept `checkpoint: cp3`.
+   - **Produces a `step_commit` event** at the step-advance tail (`step_n`, `commit_sha=HEAD`) — the
+     boundary marker the next step's cp2 classify consumes for its diff range.
 
 4. **Repeated-fail telemetry**:
    - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.

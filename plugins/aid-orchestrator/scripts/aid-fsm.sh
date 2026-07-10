@@ -2361,10 +2361,28 @@ Reason: AID v3 Session B requires per-step verifier dispatch (CP2). The pre-filt
 
 Fix:
   1. bash \$AID_PLUGIN_PATH/scripts/aid-prefilter.sh classify ${step} ${evidence_dir}
-  2. Based on exit code: 0=skip (already done), 10=run code-review verifier, 20=run security verifier
+  2. Based on exit code: 0=skip (already done), 10=run code-review verifier, 20=run security verifier,
+     22=range_undetermined (emit step_commit/base_commit, or set CP2_RANGE_POLICY=observe)
   3. If RUN/FAIL, dispatch: subagent_type=aid-orchestrator:verifier with appropriate focus
      Verifier writes verdict + findings to ${verifier_output}
   4. Retry: aid-fsm.sh increment-step ${state_file}"
+      fi
+
+      # ── P060 Step 3: cp2 bypass guard (increment call-site ONLY) ──────────
+      # The shared fsm_check_verifier_output accepts ANY valid checkpoint
+      # (cp3/cp4 consumers at :409/:1566/:1583 legitimately carry checkpoint:
+      # cp3|cp4 per agents/verifier.md). Here — and ONLY here — the per-step CP2
+      # precondition must be satisfied by a cp2 output: a cp4-produced stub
+      # (checkpoint: cp4) or cp3 output must NOT count. Absent checkpoint =
+      # backward-compatible (older pre-filter outputs without the field).
+      local _cp2_checkpoint
+      _cp2_checkpoint=$(yaml_field "$verifier_output" checkpoint)
+      if [[ -n "$_cp2_checkpoint" && "$_cp2_checkpoint" != "cp2" ]]; then
+        _increment_fail wrong_checkpoint_stub \
+          "PRECONDITION FAIL: verifier-output-step-${step}.md carries checkpoint '${_cp2_checkpoint}', expected cp2." \
+          "File: ${verifier_output}" \
+          "A cp3/cp4-produced output must not satisfy the per-step CP2 increment precondition." \
+          "Fix: regenerate the step output via cp2: aid-prefilter.sh classify ${step} ${evidence_dir}"
       fi
     fi
 
@@ -2457,6 +2475,18 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   local tmp="${state_file}.tmp"
   sed "s/^current_step: .*/current_step: $((step + 1))/" "$state_file" > "$tmp"
   mv "$tmp" "$state_file"
+
+  # ── P060 Step 3: step_commit producer (OBS-20260705-01) ──────────────────
+  # Log the commit sha at THIS step boundary so the cp2 pre-filter can anchor
+  # its next-step diff range to the step (step_commit_sha..HEAD), not HEAD~1
+  # (which a bookkeeping commit on top would fool into a docs_only false-green).
+  # First introduces the step_commit event; aid-prefilter.sh cp2 consumes it.
+  local _step_timeline _step_commit_sha
+  _step_timeline=$(derive_timeline "$state_file") || true
+  _step_commit_sha=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+  [[ -n "$_step_timeline" ]] && log_event "$_step_timeline" "step_commit" \
+    step_n="$step" commit_sha="$_step_commit_sha"
+
   echo "$((step + 1))"
 }
 

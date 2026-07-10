@@ -7,7 +7,8 @@
 #   0  — SKIP (classify) or profile success
 #   10 — RUN   (standard code change; code-review verifier should be dispatched)
 #   20 — FAIL  (security-sensitive pattern detected; security verifier must be dispatched)
-#   22 — range_undetermined (profile: no --range and no base_commit in fsm-state.yaml)
+#   22 — range_undetermined (profile: no --range and no base_commit in fsm-state.yaml;
+#          classify cp2: no step_commit in timeline and no base_commit — blocking policy)
 #   1  — error (missing argument, file not found, yq error)
 #   2  — malformed rules file
 #
@@ -17,11 +18,16 @@
 #
 # --checkpoint flag (v2.35+):
 #   Controls the git diff range used for classification. Default (no flag) = cp2 behavior.
-#   cp2 — HEAD~1..HEAD (step diff, default, backward-compatible)
-#   cp3 — base_commit..HEAD (full EPIC diff; base_commit read from fsm-state.yaml if present,
+#   cp2 — step-boundary diff (P060 Step 3, OBS-20260705-01). Range resolution order:
+#          1. last step_commit event in timeline.jsonl → step_commit_sha..HEAD
+#          2. absent → base_commit from evidence_dir/fsm-state.yaml → base_commit..HEAD (wider, fail-safe)
+#          3. neither → exit 22 range_undetermined (blocking), NEVER a silent HEAD~1.
+#          Emergency valve CP2_RANGE_POLICY=observe|blocking (default blocking):
+#          observe = emit cp2_range_fallback event + LOUD stderr, then classify with HEAD~1..HEAD.
+#   cp3 — base_commit..HEAD (full EPIC diff; base_commit read from evidence_dir/fsm-state.yaml if present,
 #          falls back to git merge-base HEAD origin/main)
 #   cp4 — HEAD~1..HEAD (C+A applied changes are always the last commit)
-#   cp6 — HEAD~1..HEAD (advisory; same range as cp2, evaluated separately from FSM flow)
+#   cp6 — HEAD~1..HEAD (fast mode: no fsm-state/timeline by design; advisory, evaluated outside FSM flow)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -89,17 +95,60 @@ NOT the Python yq PyPI package (incompatible CLI)."
   local timeline="${evidence_dir}/timeline.jsonl"
   local output_file="${evidence_dir}/verifier-output-step-${step_n}.md"
 
-  # Resolve diff range based on checkpoint (v2.35+).
-  # cp2 (default): HEAD~1..HEAD — most recent step commit
+  # Resolve diff range based on checkpoint.
+  # cp2 (default): step-boundary diff (P060 Step 3, OBS-20260705-01). D6 order below.
   # cp3: base_commit..HEAD — full EPIC diff since run start
-  #      base_commit is read from fsm-state.yaml if present; falls back to
+  #      base_commit is read from evidence_dir/fsm-state.yaml if present; falls back to
   #      git merge-base HEAD origin/main (approximate when fsm-state unavailable)
   # cp4: HEAD~1..HEAD — curator/auditor changes are always the last commit
-  # cp6: HEAD~1..HEAD — advisory, same range as cp2
-  local diff_base="HEAD~1"
-  if [[ "$checkpoint" == "cp3" ]]; then
-    # Attempt to read base_commit from fsm-state.yaml in evidence parent dir
-    local fsm_state_file="${evidence_dir%/*}/fsm-state.yaml"
+  # cp6: HEAD~1..HEAD — fast mode: no fsm-state/timeline by design (advisory)
+  local diff_base="HEAD~1"  # cp4, cp6 (fast mode: no fsm-state by design) use this
+  if [[ "$checkpoint" == "cp2" ]]; then
+    # ── P060 Step 3: cp2 classifies from the STEP boundary, not the last commit ──
+    # OBS-20260705-01: a production step with a bookkeeping commit on top was
+    # false-green'd docs_only because HEAD~1..HEAD only saw the last commit.
+    # D6 resolution order (fail-safe WIDER, never a silent HEAD~1):
+    #   1. last step_commit event in timeline → step_commit_sha..HEAD
+    #   2. base_commit in evidence_dir/fsm-state.yaml → base_commit..HEAD
+    #   3. neither → exit 22 (blocking) OR loud HEAD~1 fallback (observe policy)
+    local cp2_policy="${CP2_RANGE_POLICY:-blocking}"
+    local step_commit_sha=""
+    if [[ -f "$timeline" ]] && command -v jq &>/dev/null; then
+      # LAST step_commit event's commit_sha (producer: aid-fsm.sh cmd_increment_step)
+      step_commit_sha=$(jq -r 'select(.event == "step_commit") | .commit_sha' "$timeline" 2>/dev/null | tail -n1 || echo "")
+    fi
+    if [[ -n "$step_commit_sha" && "$step_commit_sha" != "null" && "$step_commit_sha" != "unknown" ]]; then
+      diff_base="$step_commit_sha"
+    else
+      local base_commit=""
+      local fsm_state_file="${evidence_dir}/fsm-state.yaml"
+      if [[ -f "$fsm_state_file" ]] && command -v yq &>/dev/null; then
+        base_commit=$(yq -r '.base_commit // ""' "$fsm_state_file" 2>/dev/null || echo "")
+      fi
+      if [[ -n "$base_commit" && "$base_commit" != "null" ]]; then
+        diff_base="$base_commit"
+      elif [[ "$cp2_policy" == "observe" ]]; then
+        # Emergency valve: loud fallback to HEAD~1..HEAD, still classify (do not block).
+        diff_base="HEAD~1"
+        log_event "$timeline" "cp2_range_fallback" step="$step_n" \
+          reason="range_undetermined" policy="observe" fallback="HEAD~1..HEAD"
+        echo "WARNING [CP2_RANGE_POLICY=observe]: cp2 step $step_n range_undetermined \
+(no step_commit in timeline, no base_commit in fsm-state.yaml) — LOUD FALLBACK to \
+HEAD~1..HEAD. Classification may miss production changes hidden behind bookkeeping \
+commits (OBS-20260705-01). Emit step_commit/base_commit to restore step-boundary range." >&2
+      else
+        # blocking (default): no determinable range — refuse to classify, no SKIP stub.
+        log_event "$timeline" "cp2_range_undetermined" step="$step_n" policy="blocking"
+        echo "range_undetermined: cp2 step $step_n has no step_commit event in timeline.jsonl \
+and no base_commit in fsm-state.yaml. Emit step_commit (FSM increment) or base_commit, or set \
+CP2_RANGE_POLICY=observe to fall back to HEAD~1..HEAD. NEVER hand-craft the output file." >&2
+        exit 22
+      fi
+    fi
+  elif [[ "$checkpoint" == "cp3" ]]; then
+    # Attempt to read base_commit from fsm-state.yaml in the RUN dir (= evidence_dir).
+    # P060 Step 3 fix: fsm-state.yaml lives in evidence_dir, NOT the parent dir.
+    local fsm_state_file="${evidence_dir}/fsm-state.yaml"
     if [[ -f "$fsm_state_file" ]] && command -v yq &>/dev/null; then
       local base_commit
       base_commit=$(yq -r '.base_commit // ""' "$fsm_state_file" 2>/dev/null || echo "")
@@ -115,7 +164,7 @@ NOT the Python yq PyPI package (incompatible CLI)."
       log_warn "cp3: fsm-state.yaml not found; using merge-base approximation ($diff_base)"
     fi
   fi
-  # cp4 and cp6 use HEAD~1 (same as cp2 default)
+  # cp4 and cp6 use HEAD~1 (fast mode: no fsm-state by design)
 
   # Resolve diff using checkpoint-specific range
   local diff_files diff_content
