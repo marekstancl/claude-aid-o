@@ -159,3 +159,122 @@ YAML
   run jq -re '.overall' "$REPORT"
   [ "$output" == "fail" ]
 }
+
+# ─── P060 Step 2 F4 — plan.json ⇄ execution.yaml gate reconciliation ──────────
+# OBS-20260702-05: a gate declared in plan.json.gates[] but undefined in
+# execution.yaml must NOT silently disappear (F1: never runs, all-PASS). Four
+# scenarios: (a) direct runner reconciliation, (b) FSM end-to-end refusal,
+# (c) no-plan.json skip event, (d) manual-flow bypass enforcement marker.
+
+@test "run-all recon-a: plan.json declares gate undefined in execution.yaml → undefined_gate fail row + overall fail" {
+  # setup()'s EXEC_YAML defines alpha/beta only. plan.json declares 'ghost',
+  # which has no definition → reconciliation must emit an undefined_gate fail
+  # row and flip overall to fail. On the UNFIXED runner (--plan-json ignored)
+  # ghost is never flagged and overall stays pass (RED).
+  printf '{"gates":["alpha","ghost"]}\n' > "$TEST_PROJECT/plan.json"
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" \
+    --report-file "$REPORT" --plan-json "$TEST_PROJECT/plan.json"
+  [ "$status" -ne 0 ]
+  [ -f "$REPORT" ]
+  run jq -re '.gates.ghost.result' "$REPORT"
+  [ "$output" == "fail" ]
+  run jq -re '.gates.ghost.reason' "$REPORT"
+  [ "$output" == "undefined_gate" ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "fail" ]
+  # Reconciliation ran → top-level marker true
+  run jq -re '.plan_gates_reconciled' "$REPORT"
+  [ "$output" == "true" ]
+  # undefined_gate rows are NOT counted (counter-universe contract with Step 1):
+  # alpha+beta both processed, defined==processed, so no _integrity row fires.
+  run jq -e '.gates | has("_integrity") | not' "$REPORT"
+  [ "$status" -eq 0 ]
+  # Defined-and-declared gate alpha still ran normally
+  run jq -re '.gates.alpha.result' "$REPORT"
+  [ "$output" == "pass" ]
+  # revision.head_sha substrate present (Step 8) — key exists on the report
+  run jq -e 'has("revision") and (.revision | has("head_sha"))' "$REPORT"
+  [ "$status" -eq 0 ]
+}
+
+@test "run-all recon-b (FSM e2e): advance-to-gates refuses transition when plan.json declares undefined gate; undefined_gate row in FSM-written report" {
+  # Kills a lazy impl that patches the runner but not the FSM call-site: the
+  # report is written by the runner the FSM invoked, and the marker proves the
+  # call-site passed --plan-json.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  # execution.yaml defines only always_pass — NOT 'ghost'
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  printf '{"gates":["always_pass","ghost"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  # Refused: gates fail (undefined_gate) → runner nonzero → state stays EXECUTE
+  [ "$status" -ne 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ -f "$report" ]
+  run jq -re '.gates.ghost.reason' "$report"
+  [ "$output" == "undefined_gate" ]
+  run jq -re '.overall' "$report"
+  [ "$output" == "fail" ]
+  # Marker true → FSM call-site passed --plan-json
+  run jq -re '.plan_gates_reconciled' "$report"
+  [ "$output" == "true" ]
+}
+
+@test "run-all recon-c (FSM e2e): advance-to-gates without plan.json → plan_gates_reconciliation_skipped event + unchanged pass" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  # NO plan.json → reconciliation cannot run; behavior unchanged, marker absent/false
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "plan_gates_reconciliation_skipped"
+  # Marker false — runner invoked without --plan-json
+  run jq -re '.plan_gates_reconciled' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "false" ]
+}
+
+@test "run-all recon-d (enforcement): manual run-all WITHOUT --plan-json while plan.json exists → EXECUTE:GATES precondition fail (missing plan_gates_reconciled)" {
+  # The L1-B1 marker enforcement: a report produced by bypassing --plan-json
+  # while a plan.json exists lacks plan_gates_reconciled:true → the FSM-side
+  # assert in check_preconditions EXECUTE:GATES must refuse the transition.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" "$TEST_EVIDENCE_DIR/gates"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  # plan.json exists → reconciliation is REQUIRED
+  printf '{"gates":["always_pass"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  # Simulate a manual two-step run WITHOUT --plan-json (and without --state-file,
+  # per the documented manual flow that skips the state guard). Report gets
+  # _generated_by but LACKS plan_gates_reconciled:true.
+  "$RUN_GATES" run-all "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1
+  run jq -re '.plan_gates_reconciled' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "false" ]
+
+  # EXECUTE→GATES must refuse — marker missing while plan.json exists
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition EXECUTE GATES "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_gates_reconciled"* ]]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
+}

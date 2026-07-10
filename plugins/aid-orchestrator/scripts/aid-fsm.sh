@@ -1515,10 +1515,48 @@ Manual two-step alternative (debugging / crash recovery):
   bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
     \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
     --state-file ${state_file} \\
-    --report-file ${gates_report}
+    --report-file ${gates_report} \\
+    --plan-json \$AID_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/plan.json
   bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
 EOF
           return 1
+        fi
+
+        # P060 Step 2: reconciliation-marker enforcement (OBS-20260702-05).
+        # If plan.json exists, the gates_report MUST carry plan_gates_reconciled:true
+        # — proof the runner reconciled plan.json.gates[] against execution.yaml.
+        # A report produced by bypassing --plan-json (manual run-all without it
+        # while plan.json exists) lacks the marker → precondition fail. Skipped
+        # when plan.json is absent (nothing to reconcile). Inside the grandfather
+        # guard so pre-deploy EPICs are exempt.
+        if [[ -f "${evidence_dir}/plan.json" ]]; then
+          if [[ ! -f "$gates_report" ]] || ! jq -e '.plan_gates_reconciled == true' "$gates_report" >/dev/null 2>&1; then
+            _PRECONDITION_FAIL_REASON="gates_not_reconciled"
+            cat <<EOF >&2
+PRECONDITION FAIL: gates_report.json missing plan_gates_reconciled marker.
+
+Reason: plan.json exists, so the gates MUST be reconciled against execution.yaml.
+        A gate declared in plan.json.gates[] but undefined in execution.yaml
+        would otherwise silently never run and still report pass
+        (OBS-20260702-05). The plan_gates_reconciled:true marker proves the
+        runner ran with --plan-json.
+
+Recommended fix: re-run via the atomic command (passes --plan-json for you):
+
+  bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
+
+Manual two-step alternative — run-all WITH --plan-json:
+
+  rm ${gates_report}
+  bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \\
+    \$AID_PROJECT_ROOT/.aid-o/config/execution.yaml ${epic_id} ${run_id} \\
+    --state-file ${state_file} \\
+    --report-file ${gates_report} \\
+    --plan-json \$AID_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/${run_id}/plan.json
+  bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES ${state_file}
+EOF
+            return 1
+          fi
         fi
 
         # Session B CP3: verifier-output-cp3 preconditions (file presence + valid _generated_by)
@@ -2055,6 +2093,18 @@ cmd_advance_to_gates() {
     epic_id="$epic_id" run_id="$run_id" \
     execution_yaml="$execution_yaml" report_file="$report_file"
 
+  # P060 Step 2: pass plan.json so the runner reconciles plan.json.gates[]
+  # against execution.yaml (undefined_gate detection, OBS-20260702-05). If
+  # plan.json is absent, log plan_gates_reconciliation_skipped and invoke
+  # WITHOUT --plan-json (behavior unchanged — F4c).
+  local plan_json_arg=()
+  if [[ -f "${evidence_dir}/plan.json" ]]; then
+    plan_json_arg=(--plan-json "${evidence_dir}/plan.json")
+  else
+    [[ -n "$timeline" ]] && log_event "$timeline" "plan_gates_reconciliation_skipped" \
+      epic_id="$epic_id" run_id="$run_id" reason="plan_json_absent"
+  fi
+
   # Invoke runner with explicit FSM signal — Step 2 makes runner accept this.
   local rc=0
   AID_GATES_TRIGGERED_BY_FSM=1 \
@@ -2062,6 +2112,7 @@ cmd_advance_to_gates() {
       "$execution_yaml" "$epic_id" "$run_id" \
       --state-file "$state_file" \
       --report-file "$report_file" \
+      "${plan_json_arg[@]}" \
     || rc=$?
 
   if (( rc == 0 )); then

@@ -3,7 +3,7 @@
 #
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
-#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>]
+#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>] [--plan-json <path>]
 #
 # P032 Step 3 changes vs pre-Session-A:
 #   • execution.yaml parsing switched from awk regex to yq (mikefarah variant)
@@ -134,12 +134,13 @@ run_all_gates() {
     shift
   fi
 
-  # Parse optional flags: --state-file, --report-file
-  local state_file="" report_file=""
+  # Parse optional flags: --state-file, --report-file, --plan-json
+  local state_file="" report_file="" plan_json=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --state-file) state_file="$2"; shift 2 ;;
       --report-file) report_file="$2"; shift 2 ;;
+      --plan-json) plan_json="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -313,6 +314,38 @@ run_all_gates() {
     gates_json+="\"_integrity\":{\"result\":\"fail\",\"reason\":\"gate_count_mismatch\",\"defined\":${gate_count},\"processed\":${processed}}"
   fi
 
+  # ─── plan.json ⇄ execution.yaml gate reconciliation (P060 Step 2, OBS-20260702-05) ──
+  # A gate declared in plan.json.gates[] but NOT defined in execution.yaml would
+  # otherwise silently never run while overall reports pass (F1). For each such
+  # gate emit an explicit undefined_gate fail row and force overall=fail.
+  # Counter-universe contract (shared with the Step-1 _integrity assert above):
+  # these reconciliation rows are NOT defined gates — they MUST NOT increment
+  # `processed` and MUST NOT count toward `defined` (=gate_count). They only
+  # append to gates_json (respecting the `first` comma flag) and set overall.
+  local plan_gates_reconciled=false
+  if [[ -n "$plan_json" && -f "$plan_json" ]]; then
+    plan_gates_reconciled=true
+    # Defined gate keys from execution.yaml (mikefarah yq → JSON array).
+    local defined_keys_json
+    defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
+    # Declared gates from plan.json.gates[] (jq). Absent/empty → no rows emitted.
+    # Process substitution (not a pipe) keeps the loop in this shell so overall/
+    # first/gates_json mutations persist.
+    local declared_gate
+    while IFS= read -r declared_gate; do
+      [[ -z "$declared_gate" ]] && continue
+      # Defined in execution.yaml? (jq any over the keys array, --arg-safe.)
+      if jq -e --arg g "$declared_gate" 'any(.[]; . == $g)' <<< "$defined_keys_json" >/dev/null 2>&1; then
+        continue
+      fi
+      overall="fail"
+      log_event "$timeline_file" "gate_complete" gate="$declared_gate" result="fail" reason="undefined_gate"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${declared_gate}\":{\"gate\":\"${declared_gate}\",\"result\":\"fail\",\"reason\":\"undefined_gate\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"gate declared in plan.json but not defined in execution.yaml\",\"attempts\":0}"
+    done < <(jq -r '.gates // [] | .[]' "$plan_json" 2>/dev/null)
+  fi
+
   gates_json+="}"
 
   local completed_at
@@ -360,13 +393,27 @@ run_all_gates() {
     fi
   fi
 
+  # ─── revision.head_sha stamping (P060 Step 2, substrate for Step 8) ───────────
+  # gates_report today has no binding to the commit it evaluated. Stamp the HEAD
+  # SHA at report-write time. If git is unavailable/not a repo, set head_sha null
+  # (never fail the run over provenance metadata).
+  local head_sha revision_json
+  head_sha=$(git rev-parse HEAD 2>/dev/null || echo "")
+  if [[ -n "$head_sha" ]]; then
+    revision_json=$(jq -nc --arg h "$head_sha" '{head_sha:$h}')
+  else
+    revision_json='{"head_sha":null}'
+  fi
+
   report=$(jq --arg gen "$generated_by" \
               --arg ts  "$generated_at" \
               --argjson cl "$command_log_array" \
               --argjson cp "$covered_paths_json" \
               --argjson ccov "$changed_paths_covered" \
               --arg rel "$relevance" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel}' \
+              --argjson pgr "$plan_gates_reconciled" \
+              --argjson rev "$revision_json" \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev}' \
               <<< "$report")
 
   echo "$report"
