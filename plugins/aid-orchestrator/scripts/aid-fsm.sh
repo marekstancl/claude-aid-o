@@ -2095,6 +2095,17 @@ EOF
     log_event "$timeline" "fsm_init" epic_id="$epic_id" run_id="$run_id" total_steps="$total_steps" mode="$mode"
   fi
 
+  # ─── Queue dependency revalidation (P060 Step 7, NEW read path) ──────────
+  # OBS-20260709-06: revalidate this EPIC's queue depends_on against LIVE git so
+  # a stale "awaiting merge" flag can never hold a dependent EPIC blocked after
+  # its dep merged (branch deleted = the norm). This is the FIRST time aid-fsm.sh
+  # reads the queue; it is deliberately NON-FATAL to init — a blocked/unresolved
+  # dep is a queue-scheduling signal for the consumer (pipeline §12 / /aid-run
+  # pre-start), not an init failure. Missing queue / no entry / no deps = no-op.
+  if [[ -f .aid-o/config/queue.yaml ]]; then
+    queue_revalidate "$epic_id" ".aid-o/config/queue.yaml" "$timeline_path" >/dev/null 2>&1 || true
+  fi
+
   # Validate plan.json step content (warning only)
   local evidence_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
   local plan_json="${evidence_dir}/plan.json"
@@ -3863,6 +3874,321 @@ cmd_plan_close() {
   touch "${evidence_dir}/ca-review-complete"
 }
 
+# ─── Queue Dependency Revalidation (P060 Step 7) ─────────────────────────
+# OBS-20260709-06: a stale "awaiting merge" flag held a dependent EPIC blocked
+# after its dependency had actually merged (and its task branch was deleted —
+# the NORM). A human had to catch the false-BLOCK. This is the dual of the
+# bookkeeping-staleness class: a stale record producing a false NEGATIVE.
+#
+# The fix revalidates a queue entry's `depends_on` (the REAL schema field —
+# epic IDs, NOT a non-existent `blocked_on`) against LIVE git at start, with a
+# 4-output contract per dep (D8):
+#   1. dep branch exists + is-ancestor of main/HEAD → unblock
+#   2. dep branch exists + NOT ancestor            → blocked (correct)
+#   3. dep branch DELETED after merge (the norm)   → merged-detection fallback
+#   4. no signal at all                            → fail-loud
+#
+# New read path: aid-fsm.sh did not read the queue before this (cmd_init only
+# excluded queue.yaml from its dirty-tree guard). Registry: queue_dep_revalidation.
+
+# _queue_parse_to_json <file> — awk parser copied from aid-queue-add.sh
+# (lines ~104-211). The live dogfood .aid-o/config/queue.yaml is NOT
+# yq-parseable (mixed indentation: a top-level `- epic_id:` list with 2-space
+# keys, interleaved with a 4-space quoted block). This awk handles both the
+# inline `depends_on: ["E-xxx"]` and the multi-line YAML-list form, and emits a
+# JSON array of {epic_id,status,depends_on}. Invalid JSON out (jq -e fails) =
+# unparseable queue → the caller fail-louds with queue_parse_failed.
+_queue_parse_to_json() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    echo "[]"
+    return
+  fi
+
+  awk '
+    function close_entry() {
+      if (!in_entry) return
+      if (in_depends && !depends_closed) {
+        if (dep_count > 0) printf "]"
+        else printf "[]"
+      }
+      printf "}"
+    }
+
+    BEGIN {
+      entry_count = 0
+      in_entry = 0
+      in_depends = 0
+      depends_closed = 0
+      dep_count = 0
+      printf "["
+    }
+
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+
+    /^[[:space:]]*-[[:space:]]+epic_id:/ {
+      close_entry()
+      in_entry = 1
+      in_depends = 0
+      depends_closed = 0
+      dep_count = 0
+      entry_count++
+      if (entry_count > 1) printf ","
+
+      val = $0
+      sub(/^[[:space:]]*-[[:space:]]+epic_id:[[:space:]]*/, "", val)
+      gsub(/"/, "", val)
+      sub(/[[:space:]]*$/, "", val)
+      printf "{\"epic_id\":\"%s\"", val
+      next
+    }
+
+    in_entry && /^[[:space:]]+[a-z_]+:/ {
+      if (in_depends && !depends_closed) {
+        if (dep_count > 0) printf "]"
+        else printf "[]"
+        depends_closed = 1
+      }
+      in_depends = 0
+
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+
+      colon_pos = index(line, ":")
+      key = substr(line, 1, colon_pos - 1)
+      val = substr(line, colon_pos + 1)
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      gsub(/"/, "", val)
+
+      if (key == "status") {
+        printf ",\"status\":\"%s\"", val
+      } else if (key == "depends_on") {
+        printf ",\"depends_on\":"
+        in_depends = 1
+        depends_closed = 0
+        dep_count = 0
+
+        if (val ~ /\[/) {
+          inner = val
+          gsub(/[\[\]]/, "", inner)
+          gsub(/"/, "", inner)
+          sub(/^[[:space:]]+/, "", inner)
+          sub(/[[:space:]]+$/, "", inner)
+          if (inner == "") {
+            printf "[]"
+          } else {
+            printf "["
+            n = split(inner, items, ",")
+            for (i = 1; i <= n; i++) {
+              sub(/^[[:space:]]+/, "", items[i])
+              sub(/[[:space:]]+$/, "", items[i])
+              if (items[i] != "") {
+                if (dep_count > 0) printf ","
+                printf "\"%s\"", items[i]
+                dep_count++
+              }
+            }
+            printf "]"
+          }
+          depends_closed = 1
+          in_depends = 0
+        }
+      }
+      next
+    }
+
+    in_entry && in_depends && !depends_closed && /^[[:space:]]*-[[:space:]]/ {
+      val = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", val)
+      gsub(/"/, "", val)
+      sub(/[[:space:]]*$/, "", val)
+      if (dep_count == 0) printf "["
+      if (dep_count > 0) printf ","
+      printf "\"%s\"", val
+      dep_count++
+      next
+    }
+
+    END {
+      close_entry()
+      printf "]"
+    }
+  ' "$file"
+}
+
+# _queue_merge_target — echo the ref the dep branch should be an ancestor of.
+# Prefers main, then master, else HEAD (detached/CI checkout).
+_queue_merge_target() {
+  if git show-ref --verify --quiet refs/heads/main; then echo main
+  elif git show-ref --verify --quiet refs/heads/master; then echo master
+  else echo HEAD; fi
+}
+
+# _dep_evidence_state <dep> — echo "DONE" if ANY of the dep's evidence runs is
+# state: DONE, else the last-seen state, else empty. Never fails (find on a
+# missing dir yields nothing).
+_dep_evidence_state() {
+  local dep="$1" f st found=""
+  while IFS= read -r f; do
+    st=$(yaml_field "$f" state)
+    if [[ "$st" == "DONE" ]]; then echo "DONE"; return 0; fi
+    [[ -z "$found" && -n "$st" ]] && found="$st"
+  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  echo "$found"
+}
+
+# _dep_evidence_branch <dep> — echo the branch field from the dep's first
+# evidence fsm-state (D8 fallback for a dep whose branch did not follow the
+# task/<id>/main convention). Empty when no evidence.
+_dep_evidence_branch() {
+  local dep="$1" f br
+  while IFS= read -r f; do
+    br=$(yaml_field "$f" branch)
+    [[ -n "$br" ]] && { echo "$br"; return 0; }
+  done < <(find ".aid-o/work/evidence/${dep}" -name fsm-state.yaml 2>/dev/null)
+  echo ""
+}
+
+# _resolve_dep_branch <dep> — echo the LIVE branch to ancestor-check for a dep:
+# the task/<dep>/main convention if it exists, else the evidence fsm-state
+# branch field if that ref exists (never main/master — a legacy branch:main
+# would false-unblock). Empty = branch deleted (merged-detection path).
+_resolve_dep_branch() {
+  local dep="$1"
+  local conv="task/${dep}/main"
+  if git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
+  local ev; ev=$(_dep_evidence_branch "$dep")
+  if [[ -n "$ev" && "$ev" != "main" && "$ev" != "master" ]] \
+     && git show-ref --verify --quiet "refs/heads/${ev}"; then
+    echo "$ev"; return 0
+  fi
+  echo ""; return 0
+}
+
+# _revalidate_one_dep <dep> <queue_json> <timeline_path>
+# Implements the D8 4-output contract for a single dependency. Echoes exactly
+# one of: unblocked | blocked | failed. Emits the corresponding timeline event.
+# All git calls use the rc-capture pattern so a raw git fatal (128) NEVER
+# aborts under `set -e` — it falls through to merged-detection.
+_revalidate_one_dep() {
+  local dep="$1" queue_json="$2" timeline_path="$3"
+  local target; target=$(_queue_merge_target)
+  local branch; branch=$(_resolve_dep_branch "$dep")
+
+  if [[ -n "$branch" ]]; then
+    local rc=0
+    git merge-base --is-ancestor "$branch" "$target" >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+      0)  # output 1: branch exists + is ancestor → merged → unblock
+        log_event "$timeline_path" "queue_dep_revalidated" \
+          epic_id="$dep" resolution="ancestor" branch="$branch"
+        echo "unblocked"; return 0 ;;
+      1)  # output 2: branch exists + NOT ancestor → genuinely unmerged → blocked
+        log_event "$timeline_path" "queue_dep_blocked" \
+          epic_id="$dep" branch="$branch"
+        echo "blocked"; return 0 ;;
+      *)  # 128 = bad-ref/fatal → do NOT crash; fall through to merged-detection
+        : ;;
+    esac
+  fi
+
+  # output 3: branch deleted after merge (the NORM) → merged-detection fallback.
+  # Unblock if ANY signal says the dep is done.
+  local qstatus
+  qstatus=$(echo "$queue_json" | jq -r --arg d "$dep" \
+    '[.[] | select(.epic_id==$d) | .status] | .[0] // ""' 2>/dev/null)
+  if [[ "$qstatus" == "completed" ]]; then
+    log_event "$timeline_path" "queue_dep_revalidated" \
+      epic_id="$dep" resolution="merged_completed"
+    echo "unblocked"; return 0
+  fi
+
+  local evstate; evstate=$(_dep_evidence_state "$dep")
+  if [[ "$evstate" == "DONE" ]]; then
+    log_event "$timeline_path" "queue_dep_revalidated" \
+      epic_id="$dep" resolution="merged_done"
+    echo "unblocked"; return 0
+  fi
+
+  local hits
+  hits=$(git log --merges --grep="$dep" "$target" --oneline 2>/dev/null | head -1 || true)
+  if [[ -n "$hits" ]]; then
+    log_event "$timeline_path" "queue_dep_revalidated" \
+      epic_id="$dep" resolution="merged_log"
+    echo "unblocked"; return 0
+  fi
+
+  # output 4: no signal at all → fail-loud
+  log_event "$timeline_path" "queue_dep_unresolved" epic_id="$dep"
+  echo "failed"; return 1
+}
+
+# queue_revalidate <epic_id> [queue_file] [timeline_path]
+# Revalidate one queue entry's depends_on against live git. Echoes the overall
+# revalidated status: unblocked | blocked | failed | noop.
+#   - failed if ANY dep is unresolved (fail-loud) — return 1
+#   - blocked if ANY dep is genuinely unmerged (and none failed)
+#   - unblocked if all deps are merged
+#   - noop (no event) for: missing queue, no entry for this epic, or no deps
+# Missing-queue / no-entry are NEVER fail-loud (D8): they are a clean no-op.
+queue_revalidate() {
+  local epic_id="$1"
+  local queue_file="${2:-.aid-o/config/queue.yaml}"
+  local timeline_path="${3:-.aid-o/work/evidence/${epic_id}/queue-revalidate.jsonl}"
+
+  # scenario f: missing queue file → no-op, no event
+  [[ -f "$queue_file" ]] || { echo "noop"; return 0; }
+
+  local queue_json
+  queue_json=$(_queue_parse_to_json "$queue_file")
+  if ! echo "$queue_json" | jq -e . >/dev/null 2>&1; then
+    # scenario e: unparseable queue → fail-loud
+    mkdir -p "$(dirname "$timeline_path")"
+    log_event "$timeline_path" "queue_parse_failed" queue_file="$queue_file" epic_id="$epic_id"
+    echo "failed"; return 1
+  fi
+
+  # scenario f: no entry for this epic → no-op, no event
+  local present
+  present=$(echo "$queue_json" | jq -r --arg e "$epic_id" '[.[] | select(.epic_id==$e)] | length')
+  [[ "${present:-0}" -gt 0 ]] || { echo "noop"; return 0; }
+
+  # no depends_on → nothing to revalidate → no-op, no event
+  local deps
+  deps=$(echo "$queue_json" | jq -r --arg e "$epic_id" \
+    '.[] | select(.epic_id==$e) | (.depends_on // []) | .[]' 2>/dev/null)
+  [[ -n "$deps" ]] || { echo "noop"; return 0; }
+
+  mkdir -p "$(dirname "$timeline_path")"
+
+  local overall="unblocked" dep res
+  while IFS= read -r dep; do
+    [[ -n "$dep" ]] || continue
+    res=$(_revalidate_one_dep "$dep" "$queue_json" "$timeline_path") || true
+    case "$res" in
+      failed)    overall="failed"; break ;;
+      blocked)   [[ "$overall" != "failed" ]] && overall="blocked" ;;
+      unblocked) : ;;
+    esac
+  done <<< "$deps"
+
+  echo "$overall"
+  [[ "$overall" == "failed" ]] && return 1
+  return 0
+}
+
+# cmd_queue_revalidate — dispatch entrypoint: `aid-fsm.sh queue-revalidate <epic_id>`
+# Callable standalone by consumers (pipeline.md §12 queue pickup, /aid-run
+# pre-start) BEFORE respecting a blocked queue status. Prints the revalidated
+# status to stdout; exit 1 on fail-loud (unresolved dep / unparseable queue).
+cmd_queue_revalidate() {
+  local epic_id="${1:?Usage: aid-fsm.sh queue-revalidate <epic_id> [queue_file] [timeline_path]}"
+  shift
+  queue_revalidate "$epic_id" "$@"
+}
+
 # ─── Dispatch ───────────────────────────────────────────────────────────
 # BASH_SOURCE guard (v2.20.2 — IMP-followup, same pattern as aid-stage-log.sh:78):
 # only dispatch when invoked directly (`bash aid-fsm.sh <cmd>`). When sourced
@@ -3883,8 +4209,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     promote-check)              shift; cmd_promote_check "$@" ;;
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
+    queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|queue-revalidate> [args...]" >&2
       exit 1 ;;
   esac
 fi
