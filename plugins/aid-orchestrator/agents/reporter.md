@@ -100,7 +100,7 @@ The report frontmatter is the contract the FSM checks:
 ```yaml
 _generated_by: aid-orchestrator:reporter@{your_agent_id}
 _generated_at: "{ISO 8601}"
-Head: {git HEAD sha at generation}   # at-HEAD provenance (see below) — MUST be the full `git rev-parse HEAD`
+Head: {git HEAD sha at generation}   # at-HEAD provenance (see below) — the `git rev-parse HEAD` sha (full 40-char preferred; a ≥7-char abbreviated prefix is also accepted)
 plan_id: "{plan_id}"
 epics: ["{epic_id}", ...]
 test_outcome: pass | partial | no-runtime

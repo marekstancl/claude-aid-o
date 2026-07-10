@@ -306,6 +306,10 @@ fsm_check_cp3_freshness() {
   [[ ${#cp3_files[@]} -eq 0 ]] && return 0
 
   # Read Reviewed-Head from each CP3 file; missing on any → fail (F4g).
+  # P060 per-plan C+A: validate EACH file independently, not last-wins. If two CP3 files
+  # disagree on Reviewed-Head (e.g. a stale code-review + a fresh security output), the
+  # freshness verdict must NOT be driven by whichever was iterated last — an inconsistent
+  # review base is itself stale evidence → fail conservatively.
   local reviewed_head="" rh
   for f in "${cp3_files[@]}"; do
     rh=$(yaml_field "$f" "Reviewed-Head")
@@ -318,6 +322,14 @@ fsm_check_cp3_freshness() {
         "        cannot prove the review saw the current tree (OBS-20260702-03)." \
         "Fix: re-dispatch CP3 (both verifiers) so each writes 'Reviewed-Head: <sha>'." \
         "OR (PM-authorized, audited): rerun the transition with --force --reason '<why>'."
+      return $?
+    fi
+    if [[ -n "$reviewed_head" && "$rh" != "$reviewed_head" ]]; then
+      _cp3_freshness_route "$timeline" "$policy" "inconsistent_reviewed_head" \
+        "PRECONDITION FAIL: CP3 files disagree on Reviewed-Head (${reviewed_head} vs ${rh})." \
+        "Reason: the CP3 verifiers reviewed different HEADs — the review base is inconsistent," \
+        "        so the freshness verdict cannot be trusted (one output is stale)." \
+        "Fix: re-dispatch BOTH CP3 verifiers against the same current HEAD."
       return $?
     fi
     reviewed_head="$rh"
@@ -4139,8 +4151,12 @@ _revalidate_one_dep() {
     echo "unblocked"; return 0
   fi
 
-  local hits
-  hits=$(git log --merges --grep="$dep" "$target" --oneline 2>/dev/null | head -1 || true)
+  # P060 per-plan C+A: anchor the epic_id so a hierarchical sibling can't false-unblock
+  # (bare --grep="E-016-1" substring-matched "E-016-1_3"). -E with non-[alnum_] boundaries
+  # requires the id to appear as a whole token; epic_ids are controller-authored `E-<digits>...`
+  # (no regex metacharacters but `-`, which is literal in ERE), so this is safe from injection.
+  local hits _dep_re="(^|[^[:alnum:]_])${dep}([^[:alnum:]_]|\$)"
+  hits=$(git log --merges -E --grep="$_dep_re" "$target" --oneline 2>/dev/null | head -1 || true)
   if [[ -n "$hits" ]]; then
     log_event "$timeline_path" "queue_dep_revalidated" \
       epic_id="$dep" resolution="merged_log"

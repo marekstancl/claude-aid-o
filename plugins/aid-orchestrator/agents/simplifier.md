@@ -84,7 +84,7 @@ Write to `simplifier-report.md` in the run evidence dir, starting with the prove
 
 ```yaml
 _generated_by: aid-orchestrator:simplifier@{your_agent_id}
-Head: {git HEAD sha at generation}   # at-HEAD provenance — MUST be the full `git rev-parse HEAD`
+Head: {git HEAD sha at generation}   # at-HEAD provenance — the `git rev-parse HEAD` sha (full 40-char preferred; a ≥7-char abbreviated prefix is also accepted)
 simplifier_report:
   plan_id: "{plan_id}"
   baseline_commit: "{base_commit}"

@@ -955,7 +955,7 @@ enforcements:
     severity: blocking
     surface: "consumer/queue-pickup"
     status: active
-    description: "at EPIC start (queue pickup) each blocked_on dependency is re-checked via git merge-base --is-ancestor; a queue that cannot be parsed (queue_parse_failed) or an unresolved dependency (queue_dep_unresolved) fails loud, otherwise the revalidation result is advisory telemetry; closes OBS-20260709-06"
+    description: "at EPIC start (queue pickup) each depends_on dependency is re-checked via git merge-base --is-ancestor; a queue that cannot be parsed (queue_parse_failed) or an unresolved dependency (queue_dep_unresolved) fails loud, otherwise the revalidation result is advisory telemetry; closes OBS-20260709-06"
   - id: c4_head_match_policy
     type: 9
     source: "scripts/aid-release-policy.sh (grep: 'head_match')"

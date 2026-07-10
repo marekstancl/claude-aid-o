@@ -109,6 +109,10 @@ _artifact_head_match() {
   command -v jq >/dev/null 2>&1 || { echo '"unknown"'; return 0; }   # uncomputable → declared unknown
   hs="$(jq -r '.revision.head_sha // ""' "$f" 2>/dev/null)" || rc=$?
   { [[ $rc -ne 0 ]] || [[ -z "$hs" ]]; } && { echo '"unknown"'; return 0; }
+  # P060 per-plan C+A: validate the stamped sha is a hex object name BEFORE it reaches any
+  # git command (mirrors _markdown_head_match). A non-hex value is uncomputable → "unknown",
+  # never a git arg (defense-in-depth against a malformed/garbage revision.head_sha).
+  [[ "$hs" =~ ^[0-9a-fA-F]{7,40}$ ]] || { echo '"unknown"'; return 0; }
   if [[ "$mode" == "ancestry" ]]; then
     [[ -z "${CURRENT_HEAD:-}" ]] && { echo '"unknown"'; return 0; }
     if git -C "${PROJECT_ROOT:-.}" merge-base --is-ancestor "$hs" "$CURRENT_HEAD" 2>/dev/null; then
