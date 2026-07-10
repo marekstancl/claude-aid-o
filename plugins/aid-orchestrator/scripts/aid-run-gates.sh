@@ -66,7 +66,11 @@ run_gate() {
   start_ms=$(date +%s%3N)
 
   local output exit_code=0
-  output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" 2>&1) || exit_code=$?
+  # </dev/null: a stdin-consuming gate (ssh, cat, …) must NOT inherit the
+  # driver's stdin — in run_all_gates that stdin is the here-string of remaining
+  # gate names, and eating it silently starves every subsequent gate while
+  # overall still reports pass (OBS-20260708-07).
+  output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
   local end_ms
   end_ms=$(date +%s%3N)
@@ -186,6 +190,13 @@ run_all_gates() {
   local overall="pass"
   local gates_json="{"
   local first=true
+  # `processed` counts EXCLUSIVELY defined-gate result rows emitted below
+  # (pass/fail/skip). It is compared to gate_count (defined) after the loop:
+  # a mismatch means a gate row was silently lost → _integrity fail + overall
+  # fail (OBS-20260708-07). Reconciliation rows (undefined_gate, Step 2) and the
+  # _integrity row itself MUST NOT increment it. Use $((x+1)) not ((x++)) — the
+  # latter returns 0 on first use and trips set -e.
+  local processed=0
   declare -a command_log=()
 
   # Iterate gate names via yq (mikefarah)
@@ -195,6 +206,14 @@ run_all_gates() {
   while IFS= read -r gate_name; do
     [[ -z "$gate_name" ]] && continue
 
+    # Test-only fault injection (never set in production): drop a gate's
+    # iteration WITHOUT emitting a row or incrementing `processed`, simulating a
+    # silently-lost gate so the defined==processed integrity assert below can be
+    # exercised end-to-end (OBS-20260708-07 F4c).
+    if [[ -n "${AID_TEST_DROP_GATE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE}" ]]; then
+      continue
+    fi
+
     local cmd required max_retries timeout_s pass_criteria
     cmd=$(yq ".gates.\"${gate_name}\".command" "$execution_yaml")
     required=$(yq ".gates.\"${gate_name}\".required // false" "$execution_yaml")
@@ -203,7 +222,15 @@ run_all_gates() {
     pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
 
     if [[ -z "$cmd" || "$cmd" == "null" ]]; then
-      echo "WARN: gate '${gate_name}' has no command — skipping" >&2
+      # A null-command gate must leave an explicit skip row — never a bare
+      # `continue` (which loses the row and lets defined>rows slip through as a
+      # false pass). Counting it keeps defined==processed true by construction.
+      echo "WARN: gate '${gate_name}' has no command — recording skip (no_command)" >&2
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="skip" reason="no_command"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"skip\",\"reason\":\"no_command\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0}"
+      processed=$((processed+1))
       continue
     fi
 
@@ -216,6 +243,7 @@ run_all_gates() {
       $first || gates_json+=","
       first=false
       gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"fail\",\"exit_code\":1,\"duration_ms\":0,\"output\":\"unknown_placeholder\",\"attempts\":0}"
+      processed=$((processed+1))
       continue
     fi
 
@@ -250,6 +278,7 @@ run_all_gates() {
     $first || gates_json+=","
     first=false
     gates_json+="\"${gate_name}\":$(echo "$gate_result" | jq ". + {\"attempts\":${attempt}}")"
+    processed=$((processed+1))
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
     local exit_code dur_ms
@@ -267,6 +296,22 @@ run_all_gates() {
       overall="fail"
     fi
   done <<< "$gate_names"
+
+  # ─── defined==processed integrity assert (OBS-20260708-07) ──────────────
+  # `gate_count` (yq '.gates | length') is `defined`; `processed` is the number
+  # of defined-gate result rows actually emitted above. If they differ, a gate
+  # was silently lost (e.g. a stdin-consuming gate ate the here-string) and the
+  # run must NEVER be reported as green: emit an explicit _integrity row and
+  # force overall=fail. The row respects the `first` comma flag even when 0
+  # gates were processed, so the JSON stays valid. `_integrity` is diagnostic
+  # metadata — it does NOT count toward `processed` or `defined`.
+  if [[ "$processed" != "$gate_count" ]]; then
+    overall="fail"
+    log_event "$timeline_file" "gate_integrity_fail" defined="$gate_count" processed="$processed"
+    $first || gates_json+=","
+    first=false
+    gates_json+="\"_integrity\":{\"result\":\"fail\",\"reason\":\"gate_count_mismatch\",\"defined\":${gate_count},\"processed\":${processed}}"
+  fi
 
   gates_json+="}"
 

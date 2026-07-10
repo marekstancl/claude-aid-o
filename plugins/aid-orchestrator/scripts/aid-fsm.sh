@@ -1570,6 +1570,11 @@ EOF
           echo "PRECONDITION FAIL: gates overall=${overall}, must be 'pass' for DONE transition." >&2
           return 1
         }
+      else
+        # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
+        # and a missing verifier must block the DONE transition (OBS-20260708-07).
+        echo "PRECONDITION FAIL: jq required to verify gates overall but not found." >&2
+        return 1
       fi
       ;;
 
