@@ -40,7 +40,10 @@
                 "enum": ["pass", "fail", "blocked", "unverifiable", "waived", "advisory"]
               },
               "reason": { "type": "string" },
-              "head_match": { "type": "boolean" }
+              "head_match": {
+                "enum": [true, false, "unknown"],
+                "$comment": "E-060-2_2 Step 8 — at-HEAD basis is per-input (plan_review=ancestry, gates_report=direct compare, markdown=Head: provenance). An UNCOMPUTABLE basis is the JSON string \"unknown\" (NEVER a silent true); \"unknown\" never counts as at-head; only false blocks."
+              }
             },
             "additionalProperties": false
           }
@@ -81,6 +84,21 @@
         },
         "profile_hash_freshness": {
           "enum": ["evaluated", "not_evaluated", "mismatch"]
+        },
+        "waiver_findings": {
+          "type": "array",
+          "description": "E-060-2_2 Step 8 — per-waiver disposition. A waiver NEVER unblocks (release_ready calc unchanged, D11 *_status unchanged); it maps a waiver file to a canonical input_id and, if that input is blocked, flips ONLY that inputs[] row blocked→waived while the blocker line stays. A waiver with no canonical mapping, or mapping to a non-blocked input, is an orphan_waiver.",
+          "items": {
+            "type": "object",
+            "required": ["waiver", "mapped_input", "finding", "reason"],
+            "properties": {
+              "waiver": { "type": "string" },
+              "mapped_input": { "type": ["string", "null"] },
+              "finding": { "enum": ["applied", "orphan_waiver"] },
+              "reason": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
         },
         "dual_run": {
           "type": "object",

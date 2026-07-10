@@ -3570,6 +3570,33 @@ EOF
           legacy_errors="$_c4_legacy_errors" blocker_count="$_c4_bcount" \
           enforcement="$_rdp_enforcement" head_sha="$_c4_head_sha"
 
+        # E-060-2_2 Step 8 (contract 5): per-input at-HEAD telemetry. The aggregator is a pure,
+        # side-effect-free deterministic producer (no log_event) — the FSM dual-run hook is the
+        # NAMED emitter. After reading release-decision.json, emit one c4_head_match_divergence
+        # per head_match==false input (a stale artifact that must not look usable), and one
+        # c4_head_match_unknown per unknown-basis gating input (uncomputable at-HEAD — surfaced
+        # so it is never a silent true). Best-effort telemetry: never affects the transition.
+        if [[ -f "$_c4_rd" ]] && command -v jq >/dev/null 2>&1; then
+          local _hm_id _hm_val
+          while IFS=$'\t' read -r _hm_id _hm_val; do
+            [[ -z "$_hm_id" ]] && continue
+            if [[ "$_hm_val" == "false" ]]; then
+              log_event "$_c4_timeline" "c4_head_match_divergence" \
+                input_id="$_hm_id" head_match="false" head_sha="$_c4_head_sha" \
+                enforcement="$_rdp_enforcement"
+            else
+              log_event "$_c4_timeline" "c4_head_match_unknown" \
+                input_id="$_hm_id" head_match="unknown" head_sha="$_c4_head_sha" \
+                enforcement="$_rdp_enforcement"
+            fi
+          done < <(jq -r '
+            .release_decision.inputs[]?
+            | select( (.head_match == false)
+                      or (.head_match == "unknown" and .verdict != "advisory" and .verdict != "not_applicable") )
+            | [.id, (if .head_match == false then "false" else "unknown" end)] | @tsv' \
+            "$_c4_rd" 2>/dev/null)
+        fi
+
         # Divergence → alert (AID_TEST_MODE suppresses the real send inside try_telegram_alert).
         if [[ "$_c4_match" == "false" ]]; then
           try_telegram_alert "⚖️ ${epic_id}: C4 dual-run divergence (class=${_c4_divclass}, legacy_ready=${_c4_legacy_ready}, c4_ready=${_c4_ready}) — observe-mode telemetry."

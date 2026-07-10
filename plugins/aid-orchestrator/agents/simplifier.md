@@ -84,6 +84,7 @@ Write to `simplifier-report.md` in the run evidence dir, starting with the prove
 
 ```yaml
 _generated_by: aid-orchestrator:simplifier@{your_agent_id}
+Head: {git HEAD sha at generation}   # at-HEAD provenance — MUST be the full `git rev-parse HEAD`
 simplifier_report:
   plan_id: "{plan_id}"
   baseline_commit: "{base_commit}"
@@ -111,6 +112,13 @@ Doporučení: (jak naložit s odloženými L-položkami)
 
 If zero proposals: output `files_scanned: N`, empty `proposals: []`, and a one-line summary
 "nic k zjednodušení v tomto rozsahu". Do not fabricate proposals to look productive.
+
+**At-HEAD provenance (`Head:` line) — REQUIRED.** Emit a `Head: <sha>` line carrying the exact
+`git rev-parse HEAD` at generation time. `simplifier-report.md` lives in the gitignored run evidence
+dir, so this line is the C4 release aggregator's ONLY at-HEAD binding for it (mtime is never trusted).
+Matching sha → `head_match: true`; differing sha → `head_match: false` (stale → net-new release
+blocker); absent line → `head_match: "unknown"` (never at-head, surfaced in the PM brief). Always the
+live HEAD — never a fabricated or stale sha.
 
 ---
 

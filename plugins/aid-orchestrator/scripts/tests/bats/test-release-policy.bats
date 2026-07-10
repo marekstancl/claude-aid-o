@@ -158,6 +158,9 @@ _run_agg() {
 _rd() { jq -r "$1" "$OUT"; }
 _has_blocker() { jq -e --arg id "$1" '.release_decision.blockers | any(.input_id == $id)' "$OUT" >/dev/null; }
 _input_verdict() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.id==$id) | .verdict' "$OUT"; }
+# _input_head_match <id> — echoes the head_match value (true|false|unknown; jq -r strips the
+# JSON quotes off "unknown"). E-060-2_2 Step 8.
+_input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.id==$id) | .head_match' "$OUT"; }
 
 # ─── healthy ─────────────────────────────────────────────────────────────────
 
@@ -1052,4 +1055,150 @@ EOF
   dc="$(_divclass false false "$bcount" "$blk")"
   [ -n "$dc" ] && [ "$dc" != "null" ]
   [ "$dc" == "mixed" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# E-060-2_2 Step 8 — at-HEAD staleness must not let a stale artefact look usable.
+# F1: the class the E-059-2_2 merge review actually hit (head_match never blocked).
+# 9 F4 scenarios (a)-(i). Fixtures for the markdown-provenance and gates-stamp cases
+# are built INLINE (heredoc/append) — new fixture FILES would fail the "every fixture
+# is git-tracked" test until committed, and this task's git guard forbids committing.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# F4(a) — blocking red-green on an OUT-OF-PACK input (plan_review). evidence-verify does NOT
+# scan the plan c0 dir, so BEFORE Step 8 a stale plan-review is a genuine red (release_ready=true,
+# plan_review verdict=pass). The MANDATORY assert is the PER-INPUT row, never just release_ready.
+@test "F4(a) plan_review out-of-pack stale sha → per-input verdict blocked + blocker (NOT just release_ready)" {
+  _build_healthy
+  # A non-ancestor (foreign/rebased) sha in the GITIGNORED plan-review artifact.
+  _rewrite_head "$C0/plan-review.json" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  _run_agg
+  [ "$status" -eq 0 ]
+  # PER-INPUT assert (release_ready alone would mask the out-of-pack detection).
+  [ "$(_input_verdict plan_review)" == "blocked" ]
+  [ "$(_input_head_match plan_review)" == "false" ]
+  _has_blocker plan_review
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+}
+
+# F4(b) — the FSM dual-run hook is the NAMED emitter of the per-input divergence event.
+@test "F4(b) FSM dual-run hook emits c4_head_match_divergence per head_match=false input (observe)" {
+  _fsm_setup_legacy_green
+  local head; head="$(git -C "$PROJ" rev-parse HEAD)"
+  run bash "$FSM" done-advance review release "$EVID/fsm-state.yaml"
+  [ "$status" -eq 0 ]                                    # observe: transition unaffected
+  local rd="$EVID/release-decision.json"
+  [ -f "$rd" ]
+  [ "$(jq '[.release_decision.inputs[]|select(.head_match==false)]|length' "$rd")" -gt 0 ]
+  local ev; ev="$(grep '"event":"c4_head_match_divergence"' "$EVID/timeline.jsonl" | tail -1)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.head_sha')" == "$head" ]
+  [ -n "$(echo "$ev" | jq -r '.input_id')" ]
+}
+
+# F4(c) — our own markdown producer WITHOUT the `Head:` provenance line → unknown → the
+# MANDATORY pm-brief "At-HEAD verification warnings" line (never a silent true).
+@test "F4(c) markdown delivery report WITHOUT Head: provenance → head_match unknown + mandatory pm-brief warning line" {
+  _on_boundary_both_valid                               # valid fixtures carry no `Head:` line
+  _run_agg
+  [ "$(_input_head_match reporter)" == "unknown" ]
+  run bash "$PMBRIEF" "$EVID"
+  [ -f "$EVID/pm-summary.md" ]
+  grep -qi 'At-HEAD verification warnings' "$EVID/pm-summary.md"
+  grep -qi 'head_match could not be verified (unknown)' "$EVID/pm-summary.md"
+  grep -q 'reporter' "$EVID/pm-summary.md"
+}
+
+# F4(d) — a waiver mapped to a blocked input DOCUMENTS but never unblocks: the inputs[] row flips
+# blocked→waived, the blocker line STAYS, the D11 *_status stays, release_ready stays false.
+@test "F4(d) waiver mapped to a blocked input → row waived, blocker STAYS, release_ready false, D11 status unchanged" {
+  _on_boundary_both_valid
+  rm -f "$REPORTS/${REPORT_PLAN_ID}-delivery.md"         # reporter → missing → blocked
+  # The aggregator's waiver mapping reads only .waiver.waived_check (+ the filename), so the fixture
+  # carries no v2 envelope — that also keeps it out of aid-evidence-verify's v2-artifact scan, so
+  # the reporter blocker is the SOLE blocker and this isolates the waiver-never-unblocks semantics.
+  cat > "$EVID/waiver-reporter.json" <<'EOF'
+{"waiver":{"waived_check":"reporter","reason":"PM waived the missing Reporter delivery report for this release (F4d fixture).","waived_by":"pm","waived_at":"2026-07-10T00:00:00Z","scope":"run","visible":true}}
+EOF
+  _run_agg
+  [ "$(_input_verdict reporter)" == "waived" ]           # row blocked→waived
+  _has_blocker reporter                                  # blocker line STAYS
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]   # waiver NEVER unblocks
+  [ "$(jq -r '.release_decision.reporter_status' "$OUT")" == "missing" ]  # D11 status UNCHANGED
+  [ "$(jq -r '.release_decision.waiver_findings[]|select(.waiver=="waiver-reporter.json")|.finding' "$OUT")" == "applied" ]
+}
+
+# F4(e) — a waiver targeting a NON-blocked input is an orphan_waiver; verdicts unchanged.
+@test "F4(e) waiver on a non-blocked input → orphan_waiver finding, verdicts unchanged" {
+  _build_healthy                                         # gates_report is pass (healthy)
+  # Envelope-less waiver (see F4(d)): invisible to evidence-verify, mapped by the aggregator → the
+  # release stays healthy so this isolates "orphan waiver changes nothing".
+  cat > "$EVID/waiver-gates_report.json" <<'EOF'
+{"waiver":{"waived_check":"gates_report","reason":"PM waiver targeting a non-blocked input (F4e orphan fixture).","waived_by":"pm","waived_at":"2026-07-10T00:00:00Z","scope":"run","visible":true}}
+EOF
+  _run_agg
+  [ "$(_input_verdict gates_report)" == "pass" ]         # verdict UNCHANGED
+  [ "$(jq -r '.release_decision.waiver_findings[]|select(.waiver=="waiver-gates_report.json")|.finding' "$OUT")" == "orphan_waiver" ]
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+}
+
+# F4(f) — plan_review ANCESTRY basis (gitignored plan path, like the dogfood). A recorded head_sha
+# that is an ancestor of HEAD stays head_match true even after HEAD moves on with release commits;
+# a non-ancestor sha → false. A git-tracked fixture would mask exactly the L1-B3 bug.
+@test "F4(f) plan_review ancestor sha → head_match true after HEAD moves (release commits); non-ancestor → false blocked" {
+  _build_healthy                                         # plan-review head_sha == reviewed HEAD_SHA
+  echo "bump" >> "$PROJ/README.md"; git -C "$PROJ" add README.md; git -C "$PROJ" commit -q -m "release bump"
+  _run_agg
+  [ "$(_input_head_match plan_review)" == "true" ]       # ancestor → true even after HEAD moved
+  [ "$(_input_verdict plan_review)" == "pass" ]
+  # Foreign / rebased lineage (non-ancestor) → false → blocked.
+  _rewrite_head "$C0/plan-review.json" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  _run_agg
+  [ "$(_input_head_match plan_review)" == "false" ]
+  [ "$(_input_verdict plan_review)" == "blocked" ]
+  _has_blocker plan_review
+}
+
+# F4(g) — gates_report WITH a stamped stale head_sha (Step-2 runner stamp gone stale) → direct
+# compare false → blocked (out-of-pack net-new blocker).
+@test "F4(g) gates_report stamped with a stale head_sha → head_match false → blocked + blocker" {
+  _build_healthy
+  local tmp; tmp="$(mktemp)"
+  jq '.revision = {head_sha:"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", head_is_current:false, freshness:"stale"}' \
+    "$EVID/gates_report.json" > "$tmp" && mv "$tmp" "$EVID/gates_report.json"
+  _run_agg
+  [ "$(_input_head_match gates_report)" == "false" ]
+  [ "$(_input_verdict gates_report)" == "blocked" ]
+  _has_blocker gates_report
+  [ "$(_rd '.release_decision.release_ready')" == "false" ]
+}
+
+# F4(h) — a legacy gates_report with NO revision stamp → unknown → never blocks (uncomputable basis
+# is a declared unknown, not a silent true, but it does not manufacture a block either).
+@test "F4(h) gates_report without a revision stamp (legacy) → head_match unknown, never blocks" {
+  _build_healthy                                         # fixture gates_report.json has no revision
+  _run_agg
+  [ "$(_input_head_match gates_report)" == "unknown" ]
+  [ "$(_input_verdict gates_report)" == "pass" ]
+  ! _has_blocker gates_report
+  [ "$(_rd '.release_decision.release_ready')" == "true" ]
+}
+
+# F4(i) — positive provenance fixture: a markdown report WITH a `Head:` line → head_match computed
+# true/false (never unknown), end-to-end through the aid-release-policy.sh parsing.
+@test "F4(i) markdown delivery report WITH a Head: provenance line → head_match computed true/false (not unknown)" {
+  _on_boundary_both_valid
+  local rep="$REPORTS/${REPORT_PLAN_ID}-delivery.md"
+  # Matching provenance (appended at EOF; frontmatter/_test_evidence untouched) → true.
+  printf 'Head: %s\n' "$HEAD_SHA" >> "$rep"
+  _run_agg
+  [ "$(_input_head_match reporter)" == "true" ]
+  [ "$(_input_verdict reporter)" == "pass" ]
+  # Mismatching provenance → false → blocked (stale report must not look usable).
+  cp "$FIX/reports/P059-delivery-valid.md" "$rep"
+  printf 'Head: %s\n' "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" >> "$rep"
+  _run_agg
+  [ "$(_input_head_match reporter)" == "false" ]
+  [ "$(_input_verdict reporter)" == "blocked" ]
+  _has_blocker reporter
 }
