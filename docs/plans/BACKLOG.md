@@ -1674,3 +1674,117 @@ run's declared `branch` in `fsm-state.yaml`.
   table claimed content-blocking verification that isn't actually
   implemented yet, deferred to E10) — corrected to match reality rather than
   left to over-promise. Both fixed same-day, CP4 PASS.
+
+## Pre-E10 control hygiene block + E10/E11 de-duplication acceptance (PM directives 2026-07-10)
+
+Status: `scoped` (PM-approved direction; plan to be written via `/aid-plan` — will
+take the next AID plan number, shifting E10 kalibrace one number down). Grounding:
+all 8 items probe-backed (OBS ledger above); Curator fate + C4 input-contract
+claims independently verified 2026-07-10 (7-agent workflow: 5 readers over
+roadmap/extending-aid/C4-code/FSM/topology + 2 adversarial refuters, both key
+conclusions survived at high confidence).
+
+### E10/E11 de-duplication & speed acceptance — PM directive (binding for E10/E11 planning)
+
+The roadmap file (`docs/plans/AID-control-system-v2-roadmap.md`) is untracked
+since `df848ce`; this ledger carries the directive until the roadmap's successor
+location is settled. PM directive verbatim (2026-07-10):
+
+> Před E10/E11 doplň do roadmapy explicitní "de-duplication and speed
+> acceptance". C0-C4 nesmí být trvalá další vrstva. E11 musí obsahovat inventář
+> starých CP/Auditor/Curator/Reporter/Simplifier mechanismů s rozhodnutím:
+> remove, replace by C0-C4, keep as risk-gated, or keep as alias only. Součástí
+> E11 acceptance musí být porovnání dispatch count, wall-clock času a počtu LLM
+> review kroků před/po. Pokud se počet kontrol nesníží, E11 není hotové.
+
+Operationalized:
+1. **C0-C4 is not a permanent extra layer.** E11 is DONE only if the total
+   number of controls decreases vs the pre-v2 baseline.
+2. **E11 mechanism inventory (mandatory deliverable):** every legacy
+   CP/Auditor/Curator/Reporter/Simplifier mechanism gets an explicit
+   disposition — `remove` | `replace_by_c0c4` | `keep_risk_gated` |
+   `keep_alias_only` — grounded in E10 unique-detection data.
+3. **E11 acceptance metrics:** before/after comparison of (a) dispatch count
+   per EPIC, (b) wall-clock pipeline time, (c) number of LLM review steps.
+   No decrease in control count ⇒ E11 not done.
+4. **Curator anchor (verified 2026-07-10):** NO document commits to removing
+   the Curator role — committed state is `utility_only` / `authority: none`
+   (E0-approved control-topology) + FC-38 merge-authority removal deferred to
+   E9/C4, with the auto-approve consumers (gate-fixer/simplifier/pipeline.md
+   `recommended_disposition` contract) still untouched after P059. Curator's
+   role fate is decided by the E11 inventory above, not implicitly. FC-38
+   completion (neutralizing auto-approve merge-influence) belongs to E10
+   promotion, not to the hygiene block.
+
+### Pre-E10 hygiene block — approved 8-item shape + binding plan conditions
+
+Items (each probe-backed): (1) `aid-run-gates.sh` must not lose gates and
+report pass — stdin guard `</dev/null` in `run_gate` + assert processed ==
+defined count before emitting overall (OBS-20260708-07, P1); (2)
+`plan.json.gates[]` reconciled against execution.yaml — undefined declared
+gate → `result: fail, reason: undefined_gate` row, overall cannot pass
+(OBS-20260702-05); (3) CP3 evidence freshness vs HEAD with explicit policy
+for gate-fix/test-only commits, producer records reviewed head_sha first
+(OBS-20260702-03); (4) CP2 prefilter diff range from step boundary, never
+`HEAD~1..HEAD` (OBS-20260705-01; B-008 base-side explicitly OUT of scope);
+(5) runtime/cache preflight — plugin.json version + content-hash of scripts/
+vs cache; dogfood repo = hard stop + env override; consumer repos = record
+controller version into fsm-state/timeline (plugin-cache dogfood blocker +
+OBS-20260708-02; does NOT close IMP-179 agent-instruction staleness, which
+stays a separate E10 blocker); (6) commit-path guard — fixer `git add`
+restricted via per-step `allowed_paths` (P058 machinery) + branch guard:
+refuse orchestrated commit when `git symbolic-ref HEAD` ≠ fsm-state branch
+(OBS-20260709-01 + OBS-20260709-04); (7) queue dependency revalidation —
+`blocked_on` re-checked via `git merge-base --is-ancestor` at EPIC start
+(OBS-20260709-06); (8) **C4 input at-head hardening** — the release-decision
+input contract ALREADY EXISTS in `aid-release-policy.sh` (all 12 inputs get
+unconditional `{id, artifact, verdict, reason, head_match}` rows; missing
+required → blocked → `release_ready=false`; curator_report fully covered as
+profile-gated), so no new contract layer; close only the verified gaps:
+(a) `head_match` is telemetry-only — `_artifact_head_match` returns true when
+`revision.head_sha` is absent and `head_match=false` never blocks; make it
+consequential per policy (observe: divergence event; blocking: required input
+not at head → blocked); (b) at-head coverage holes — `plan-review.json`
+(plan c0 dir), reporter delivery report (`.aid-o/reports/`),
+`simplifier-report.md` sit outside the `aid-evidence-verify --at-head` pack;
+(c) `waived` inputs[] verdict is never emitted (waivers surface only as
+filenames in `waivers_applied[]`). Content-verdict blocking stays deferred to
+E10 by design.
+
+**Binding plan conditions (PM, 2026-07-10):**
+
+> Pre-E10 hygiene blok nesmí přidat novou trvalou kontrolní vrstvu. Každý bod
+> musí buď opravit existující false-green, nebo připravit odstranění legacy
+> duplicity v E11.
+
+Every item in the plan MUST state: (1) which concrete false-green it closes;
+(2) whether it is a temporary legacy fix or a C0-C4 target mechanism;
+(3) what it enables removing after E11; (4) a red-green test proving the
+pre-fix false-green passes and post-fix fails. The block is framed as cutover
+hygiene / de-dup enabler, not another review system — after completion it must
+be visible which legacy CP checks E11 can switch off or reduce.
+
+Explicitly deferred (PM): steps[]/task-frontmatter stamping (Cockpit
+read-model, not false-green), run_id reuse / rescope / transactional epic-gen
+(lifecycle cleanup), cross-repo CP3, shell_pipeline_smoke timeout (fix as
+perf/config bug outside the plan).
+
+### OBS-20260709-02 — correction (2026-07-10): FSM presence gates DO exist; incident took a bypass window
+
+Verified against `aid-fsm.sh` @ `23964c8` (task/E-059-2_2/main): plan-close
+REQUIRES `curator-report.md` (always-required loop, ~:3462 + :3477-3481, exit
+1) and done-advance review→release requires `curator-report.{yaml,md}`
+(~:2818-2822). The entry's "no FSM precondition caught it" is therefore not a
+missing gate on current AID main — the WAN incident must have used a bypass
+window: (a) `done-advance --force` skips the whole precondition gauntlet;
+(b) `ca-review-complete` marker can be hand-touched (the "Do NOT use touch"
+warning is text-only, unenforced) and the cross-plan init gate checks only
+marker + audit-report.md, never curator-report; (c) plan-close may simply
+never be invoked — only the NEXT plan's `cmd_init` trips over the missing
+marker, and only if audit-report.md exists; (d) format asymmetry —
+done-advance accepts `.yaml|.md` while plan-close checks only `.md`. Caveat:
+WAN runs a consumer plugin copy that may predate these gates — version not
+re-verified there. Likely-fix reframed: close the bypass windows (marker
+provenance, format unification) rather than "add a presence gate"; per PM
+2026-07-10 decision, NOT as Curator-specific investment — covered by the C4
+input contract (item 8) + E11 inventory.
