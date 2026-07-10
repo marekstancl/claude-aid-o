@@ -81,6 +81,15 @@ TIMELINE_FILE="${EVIDENCE_DIR}/timeline.jsonl"
 OUTPUT_FILE="${EVIDENCE_DIR}/plan-diff.json"
 GEN_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Per-AC command timeout (seconds). A hanging or pathologically slow AC
+# verification_pattern must not wedge the whole DONE-review — it is killed after
+# this budget and reported absent(reason=timeout). Override via
+# AID_PLAN_DIFF_AC_TIMEOUT for a plan with a legitimately long (but bounded) AC.
+# Default 120s is ample for grep/jq/git checks and small bats --filter subsets; a
+# full unbounded test suite inside a single AC is an anti-pattern — bound it or
+# raise this (added 2026-07-10; matches aid-run-gates.sh's per-gate timeout model).
+AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
+
 log_event "$TIMELINE_FILE" "plan_diff_start" plan="$PLAN" base_commit="$BASE_COMMIT" head_commit="$HEAD_COMMIT" || true
 
 # Extract AC section + parse verification_pattern blocks
@@ -203,11 +212,17 @@ run_pattern() {
   case "$type" in
     cmd)
       local actual_exit=0
-      # Sub-subshell isolates FATAL bash errors in AC cmds (set -u unbound-var
-      # expansion aborts are NOT catchable by || in the same shell) — a broken
-      # AC must yield a nonzero verdict, never kill the runner (PM fix 2026-07-08).
-      ( eval "$cmd" ) >/dev/null 2>&1 || actual_exit=$?
-      if [[ "$actual_exit" -eq "$expected_exit" ]]; then
+      # Per-AC timeout + process isolation. `timeout … bash -c` runs the AC cmd in
+      # a SEPARATE process so (a) a hanging or pathologically slow AC cannot wedge
+      # the whole DONE-review — timeout kills it after AC_CMD_TIMEOUT and we report
+      # absent(reason=timeout); and (b) FATAL bash errors (set -u unbound-var
+      # expansion aborts) stay contained in the child and remain catchable via the
+      # exit code — the guarantee the old ( eval ) sub-subshell gave, now also
+      # kill-able (PM fix 2026-07-08; per-AC timeout added 2026-07-10).
+      timeout "$AC_CMD_TIMEOUT" bash -c "$cmd" >/dev/null 2>&1 || actual_exit=$?
+      if [[ "$actual_exit" -eq 124 && "$expected_exit" -ne 124 ]]; then
+        verdict="absent"; evidence="timeout after ${AC_CMD_TIMEOUT}s (reason=timeout)"
+      elif [[ "$actual_exit" -eq "$expected_exit" ]]; then
         verdict="present"; evidence="exit=$actual_exit"
       else
         verdict="absent"; evidence="exit=$actual_exit (expected $expected_exit)"

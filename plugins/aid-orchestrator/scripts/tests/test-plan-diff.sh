@@ -124,6 +124,64 @@ echo "TEST: aid-plan-diff.sh over a '## Success Criteria' plan must find its ACs
 }
 
 echo ""
+echo "TEST: a hanging/slow AC command must be killed by the per-AC timeout → absent(reason=timeout), not wedge the run"
+{
+  HANG_PLAN="$TMPDIR_ROOT/hanging-ac-fixture-plan.md"
+  cat > "$HANG_PLAN" <<'PLANMD'
+---
+id: P-TEST-PLANDIFF-HANG
+status: draft
+---
+
+# Plan: hanging-AC per-AC timeout repro (test fixture)
+
+## Acceptance Criteria
+
+- [ ] AC1: A command that never returns must be killed by the per-AC timeout.
+```yaml
+type: cmd
+cmd: "sleep 999"
+expected_exit: 0
+```
+- [ ] AC2: A fast command after a hanging one must still be evaluated.
+```yaml
+type: cmd
+cmd: "true"
+expected_exit: 0
+```
+PLANMD
+
+  HANG_EVID="$TMPDIR_ROOT/hang-evidence"
+  mkdir -p "$HANG_EVID"
+
+  hang_t0=$(date +%s)
+  # AID_PLAN_DIFF_AC_TIMEOUT=2 keeps the test fast; the outer `timeout 30` is the
+  # safety net — if the per-AC timeout is absent, plan-diff itself wedges and trips it.
+  AID_PLAN_DIFF_AC_TIMEOUT=2 timeout 30 bash "$PLAN_DIFF" \
+    --plan "$HANG_PLAN" --evidence-dir "$HANG_EVID" --base-commit HEAD \
+    >"$TMPDIR_ROOT/hang-stdout.log" 2>"$TMPDIR_ROOT/hang-stderr.log"
+  hang_exit=$?
+  hang_t1=$(date +%s); hang_dur=$(( hang_t1 - hang_t0 ))
+
+  hang_json="$HANG_EVID/plan-diff.json"
+  if [[ "$hang_exit" -eq 124 ]]; then
+    _fail "plan-diff itself hung (>30s) on a 'sleep 999' AC — per-AC timeout not applied"
+  elif [[ ! -f "$hang_json" ]]; then
+    _fail "plan-diff produced no JSON for the hanging-AC fixture (exit=${hang_exit})"
+  else
+    hang_ac_count="$(jq -r '.ac_count // 0' "$hang_json" 2>/dev/null || echo 0)"
+    hang_v1="$(jq -r '.results[0].verdict // ""' "$hang_json" 2>/dev/null || echo "")"
+    hang_e1="$(jq -r '.results[0].evidence // ""' "$hang_json" 2>/dev/null || echo "")"
+    if [[ "$hang_ac_count" -ge 2 && ( "$hang_v1" == "absent" || "$hang_v1" == "fail" ) \
+          && "$hang_e1" == *timeout* && "$hang_dur" -lt 15 ]]; then
+      _pass "hanging AC → verdict=${hang_v1}, evidence='${hang_e1}', run finished in ${hang_dur}s (ac_count=${hang_ac_count})"
+    else
+      _fail "hanging AC not handled as timeout: ac_count=${hang_ac_count} verdict='${hang_v1}' evidence='${hang_e1}' dur=${hang_dur}s"
+    fi
+  fi
+}
+
+echo ""
 echo "=========================================="
 TOTAL=$(( PASS + FAIL ))
 echo "Results: ${PASS}/${TOTAL} passed"
