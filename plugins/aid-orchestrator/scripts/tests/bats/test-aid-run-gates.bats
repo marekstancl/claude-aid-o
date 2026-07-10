@@ -606,6 +606,160 @@ YAML
   [ ! -f "$REPORT" ]
 }
 
+# ─── P061 E1 Step 3 — plan-gate floor enforcement (plan_gate_profile_excluded) ─
+# plan.json.gates[] (Step 1) is a hard floor: the active gate profile (Step 2,
+# --profile) must never silently exclude a gate the PLAN itself declared
+# mandatory. profile_exclusion (Step 2) alone does NOT flip overall to fail —
+# a required:true gate excluded by the profile is treated like a skipped
+# required:false gate — so without this check the excluded-but-plan-required
+# gate could vanish from a run that still reports overall=pass. Design chosen:
+# (b) fail-loud (GATES:DONE precondition refuses with plan_gate_profile_excluded)
+# over (a) force-run, because aid-fsm.sh is a precondition checker, not a gate
+# executor — see step_3_backend/output.md for the full design rationale.
+
+@test "GATES:DONE plan-gate floor (CHECKPOINT 1): plan declares gates:[\"bats_all\"], active profile excludes it -> transition refused with plan_gate_profile_excluded" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  standard:
+    include: [always_pass]
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Produce a REAL gates_report.json via the actual runner: profile 'standard'
+  # excludes bats_all, which plan.json requires. overall stays "pass"
+  # (profile_excluded never fails the run by itself, per Step 2) — this is
+  # the exact silent-pass gap Step 3 closes.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == ["bats_all"]' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+
+  # GATES→DONE must refuse — a plan-required gate was excluded by the profile.
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_gate_profile_excluded"* ]]
+  [[ "$output" == *"bats_all"* ]]
+  # State never advanced past GATES
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_gate_profile_excluded" ]
+}
+
+@test "GATES:DONE plan-gate floor: plan-required gate INSIDE the active profile's include[] -> transition proceeds normally" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+gate_profiles:
+  standard:
+    include: [bats_all]
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -e '.excluded_gates == []' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "GATES:DONE plan-gate floor: no --profile used (legacy) -> excluded_gates empty, plan-gate floor is a no-op" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json"
+  [ "$status" -eq 0 ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "GATES:DONE plan-gate floor (CHECKPOINT 1 regression): malformed plan.json blocks transition with plan_json_malformed" {
+  # Regression test: if plan.json exists but is not valid JSON (truncated,
+  # corrupt, etc.), the jq --slurpfile command will fail. Before the fix,
+  # that failure was silently caught by || plan_gate_floor_violations=""
+  # and coerced to "[]" (no violations), silently passing the check.
+  # After the fix, malformed JSON must block the transition with a clear error.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+YAML
+
+  # Create a truncated/malformed plan.json (valid key but truncated value)
+  printf '{"gates":["bats_all"' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Run gates with the valid report (this will succeed because it only reads
+  # execution.yaml and has no gates_profile, so no exclusions)
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json"
+  [ "$status" -eq 0 ]
+
+  # GATES→DONE must refuse because plan.json is malformed/corrupt
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_json_malformed"* ]]
+  # State must stay GATES (never advanced)
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on timeline
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_json_malformed" ]
+}
+
 @test "run-all profile f (legacy regression): omitting --profile runs all gates unchanged even when gate_profiles is defined" {
   cat > "$EXEC_YAML" <<'YAML'
 gates:

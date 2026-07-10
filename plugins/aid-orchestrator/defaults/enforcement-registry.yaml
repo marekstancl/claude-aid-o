@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 281          # granular registry rows; recomputed via `.enforcements|length` after adding 2 P061 E1 Step 2 gate-profile rows (profile_selection, profile_exclusion; was 279 after E-060-2_2 Step 9). The 2 new rows carry no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
+  enforcements: 282          # granular registry rows; recomputed via `.enforcements|length` after adding P061 E1 Step 3's plan_gate_floor row (was 281 after Step 2's profile_selection/profile_exclusion). The new row carries no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
   mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
   mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
   verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
@@ -986,3 +986,12 @@ enforcements:
     status: active
     description: "a gate defined under execution.yaml.gates but not listed in the active --profile's include[] is not dispatched to run_gate at all (proven via elapsed time in the regression test, not just its result string) — it gets an explicit result: profile_excluded row (counted toward the defined==processed integrity contract, never silently dropped) and is recorded in gates_report.json.excluded_gates[]; a required:true gate excluded this way does NOT fail the run, same treatment as a skipped required:false gate"
     test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'run-all profile a')"
+  - id: plan_gate_floor
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'plan_gate_profile_excluded')"
+    instruction: "scripts/aid-run-gates.sh (grep: 'excluded_gates') producer"
+    severity: blocking
+    surface: "GATES:DONE precondition"
+    status: active
+    description: "P061 E1 Step 3: plan.json.gates[] (Step 1) is a hard floor at the GATES:DONE FSM precondition — profile_exclusion (above) alone does not fail overall, so without this check a plan-required gate excluded by --profile could vanish from a run reporting overall=pass; check_preconditions cross-references plan.json.gates[] against gates_report.json.excluded_gates[] and refuses the transition (fail-loud design, not a forced re-run) on any overlap, reason: plan_gate_profile_excluded; --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks; closes the profile/plan silent-exclusion gap"
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'plan_gate_profile_excluded')"

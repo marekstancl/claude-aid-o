@@ -1795,6 +1795,63 @@ EOF
           echo "PRECONDITION FAIL: gates overall=${overall}, must be 'pass' for DONE transition." >&2
           return 1
         }
+
+        # P061 E1 Step 3: plan-gate floor (plan_gate_profile_excluded). ─────────
+        # plan.json.gates[] (Step 1) is a hard floor: the active gate profile
+        # (Step 2, aid-run-gates.sh --profile) must never silently exclude a
+        # gate the PLAN itself declared mandatory. A profile-excluded gate
+        # does NOT flip gates_report.json.overall to fail (Step 2, by design —
+        # same treatment as a skipped required:false gate), so without this
+        # check a plan-required gate could vanish from a run that still
+        # reports overall=pass. Cross-reference plan.json.gates[] against
+        # gates_report.json.excluded_gates[] (both already read via the same
+        # --plan-json / gates_report.json wiring used by the EXECUTE:GATES
+        # reconciliation above) and fail loud on any overlap — design (b)
+        # fail-loud, chosen over force-running the gate here because aid-fsm.sh
+        # is a precondition checker, not a gate executor (that's
+        # aid-run-gates.sh's job); re-running gate logic here would duplicate
+        # it. Never a silent skip (AID-v3-principles.md §1).
+        local plan_json_file="${evidence_dir}/plan.json"
+        if [[ -f "$plan_json_file" ]]; then
+          local plan_gate_floor_violations
+          plan_gate_floor_violations=$(jq -n \
+            --slurpfile plan "$plan_json_file" \
+            --slurpfile rpt "$report" \
+            '(($plan[0].gates // []) as $pg
+              | ($rpt[0].excluded_gates // []) as $eg
+              | [$pg[] | select(. as $g | $eg | index($g) != null)])' 2>&1)
+          if [[ $? -ne 0 ]]; then
+            _PRECONDITION_FAIL_REASON="plan_json_malformed"
+            echo "PRECONDITION FAIL: plan_json_malformed — plan.json exists but is not valid JSON." >&2
+            echo "Error: $plan_gate_floor_violations" >&2
+            return 1
+          fi
+
+          if jq -e 'length > 0' <<< "$plan_gate_floor_violations" >/dev/null 2>&1; then
+            _PRECONDITION_FAIL_REASON="plan_gate_profile_excluded"
+            local violations_csv
+            violations_csv=$(jq -r 'join(", ")' <<< "$plan_gate_floor_violations" 2>/dev/null)
+            cat <<EOF >&2
+PRECONDITION FAIL: plan_gate_profile_excluded — plan-required gate(s) excluded by active profile: ${violations_csv}.
+
+Reason: plan.json.gates[] is a hard floor (P061 E1) — a gate the PLAN itself
+        declared mandatory must never be silently skipped just because the
+        active gate profile (--profile) excludes it. gates_report.json
+        recorded these gate(s) under excluded_gates[], which would otherwise
+        let the run report overall=pass while a plan-required gate never ran.
+
+Fix: widen the active profile's include[] in execution.yaml.gate_profiles to
+     cover: ${violations_csv}
+     then re-run gates:
+       bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
+      '<≥20 chars why excluding a plan-required gate is acceptable>'
+EOF
+            return 1
+          fi
+        fi
       else
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
         # and a missing verifier must block the DONE transition (OBS-20260708-07).
