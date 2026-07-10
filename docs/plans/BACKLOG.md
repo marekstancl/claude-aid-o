@@ -1606,6 +1606,20 @@ to the EPIC worktree) and add a hard precondition — refuse any
 AID-orchestrated commit when `git symbolic-ref HEAD` doesn't match the
 run's declared `branch` in `fsm-state.yaml`.
 
+**RESOLVED (2026-07-10):** formalized as a permanent, distributed feature —
+`plugins/aid-orchestrator/defaults/hooks/pre-commit` (P060 D7, EPIC 2 Step 6,
+`task/E-060-2_2/main`, still in progress at report time) is a sophisticated
+FSM-state-aware commit-scope + branch guard, cited by name in its own header
+comment: *"main is BLOCKED during EXECUTE/GATES (OBS-20260709-04: rogue
+commit on main)."* Discovers the active run, enforces state-appropriate
+allowed-paths (EXECUTE = current step's scope, GATES/DONE-review = union of
+all steps, DONE-release = version-file whitelist), fails open on missing
+tooling (never hard-blocks on absent jq/yq), and has a controller-side
+companion in `aid-fsm.sh` to catch `--no-verify` residue out-of-band. What
+was a temporary, manually-installed guard during E-059-2_2's own run is now
+a proper `/aid-init`-distributed plugin feature for every consumer project —
+the finding→fix→permanent-enforcement loop closed cleanly.
+
 ### OBS-20260709-05 — Dispatched implementer stalled in a confused wait-loop, no commit/no self-report; orchestrator took over manually (self-recovered, evidenced)
 
 **Observed in:** WAN / P061 / E-061-1_4 Step 4
