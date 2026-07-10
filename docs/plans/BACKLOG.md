@@ -1333,6 +1333,18 @@ Source: VULCAN `.aid-o/work/evidence/E-56-2_2/R-E56-2/curator-report.md`
 **PM directive: file as a standalone P1 plugin task**, not folded into another
 entry — root cause and fix direction are already fully specified.
 
+**RESOLVED (2026-07-10):** fixed exactly as recommended, commit `17a56c2`
+(P060 EPIC 1 Step 1, `task/E-060-1_2/main`) — `run_gate()` now redirects
+stdin from `/dev/null` (the actual stdin-starvation fix), a null-command
+gate emits an explicit skip row instead of a bare `continue`, and a
+post-loop `defined_gate_count == processed_gate_count` assert emits an
+`_integrity` fail row + `overall: fail` + nonzero exit on any silent row
+loss — the exact assertion VULCAN recommended. Bonus hardening in the same
+commit: `aid-fsm.sh`'s GATES:DONE precondition now fails loud when `jq` is
+missing (was a silent pass before). 3 new regression tests
+(`test-aid-run-gates.bats`, F4 scenarios: stdin, no_command, `_integrity`),
+verified red→green.
+
 ### OBS-20260709-01 — gate-fixer's git-add scope too broad, sweeps unrelated untracked files from other plans
 
 **Observed in:** WAN / P059 / E-059-2_2, commits `f1c25b1` → `41a034b`
