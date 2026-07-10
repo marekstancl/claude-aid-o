@@ -1903,3 +1903,30 @@ system built and merged same-day produced a fully spec-compliant output
 on first contact with real data, with the fail-closed semantics (blocked
 merge_mode under failed evidence) working exactly as the PM's contract
 intended.
+
+**Second confirmation (2026-07-10, E-060-2_2 merge, `4b51860`):** the C4
+dual-run hook fired again — this time on a genuinely *different* EPIC than
+the one that built it, the real test of whether it generalizes.
+`.aid-o/work/evidence/E-060-2_2/R-E060-2/release-decision.json`
+(`head_sha` matching `1fb6613`, `freshness: current`) — again all 7
+required fields present and correctly typed: `release_ready: false`,
+`merge_mode: "blocked"`, `pm_brief_required: true`, `pm_brief_status:
+"pending"`, `reporter_status`/`simplifier_status` both correctly
+`not_applicable`/`not_plan_boundary`, `summary_for_pm` in the same flat
+mechanical template. Notably `evidence_verified_at_head: true` this time
+(paired `evidence_verification_status: "pass"`) — the *opposite* of
+E-059-2_2's `false`/`fail` result, confirming the field genuinely reflects
+live evidence state rather than being a hardcoded stub. Two-for-two on
+real EPICs now.
+
+E-060-2_2 also landed a post-merge per-plan Curator+Auditor hardening pass
+(`d81ea2d`) worth noting: fixed a real `queue_revalidate` substring
+false-match risk (`E-016-1` could have matched `E-016-1_3` without proper
+regex boundaries), a `fsm_check_cp3_freshness` "last-wins" bug where a
+stale code-review + fresh security output would have silently passed, and
+hex-validated `head_sha` before shell use in `_artifact_head_match`
+(anti-injection). Used `--no-verify` for this commit with an honest,
+self-disclosed reason logged inline: the just-completed EPIC's own
+commit-guard version-whitelist would otherwise block these non-version
+files on `main` — and the implementer flagged that friction itself as a
+backlog item rather than silently working around it.
