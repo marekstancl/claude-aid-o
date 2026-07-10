@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.53.0] — 2026-07-09
+
+### Added
+- **C4 Release Policy aggregator (E9, P059)** — `scripts/aid-release-policy.sh` deterministically aggregates the evidence pack (REQUIRED / profile-gated / advisory / conditional / optional inputs) into a protocol-v2 `release-decision.json`, deriving `release_ready` + `blockers[]` with no LLM, and fails closed on empty/unparseable inputs, a followed `plan_ref` hop, and an `--at-head` evidence mismatch (classified `fail`, never `unverifiable`).
+- **PM decision brief generator** — `scripts/aid-pm-brief.sh` projects `release-decision.json` (and only that file) into a protocol-v2 `pm-decision-brief.json` plus a human `pm-summary.md`, echoing every review signal in full so an auto-merge is never silent, then patches `pm_brief_status` back into the decision.
+- **FSM dual-run release hook** — `aid-fsm.sh done-advance review→release` runs C4 alongside the legacy checks in observe mode, emitting a `release_policy_dual_run` timeline event with an 8-value never-empty `divergence_class` taxonomy, a `release_policy_preempted` event when a hard-exit legacy gate fires first, a crash-safe fallback, force→waiver artifact writing, and an opt-in `RELEASE_DECISION_POLICY: enforcement: blocking` branch.
+- **Protocol-v2 release artifacts** — `release_decision`, `pm_decision_brief`, and `waiver` schemas plus `aid-protocol-validate.sh` D11 field checks and a new `waiver` artifact type.
+- **D11 release-decision state model** — `release-decision.json` now carries `pm_brief_required`/`pm_brief_status`, `evidence_verified_at_head`/`evidence_verification_status`, the Reporter/Simplifier CONDITIONAL 5-enum status, `merge_mode`, `delivered_summary_ref`, and `summary_for_pm`, all echoed 1:1 into the PM brief.
+- **`scripts/lib/aid-review-signals.sh` shared substrate** — the Reporter/Simplifier enable-toggle + `_test_evidence` validation extracted so the C4 aggregator and the FSM compliance evaluators read identical signals.
+- **Invalidation-map live caller (IMP-177 C3 activation)** — the observe-only `invalidation-map.json` producer is now wired into the live gate-fixer dispatch flow (previously test-only), closing the C3-activation half of IMP-177.
+- **`docs/extending-aid.md` C4 + D11 contributor reference** — documents the release-policy aggregator, the dual-run hook, the D11 state model, and an explicit "What E9 core Does NOT Deliver" scope-honesty section (no structural merge-on-brief gate, observe-not-blocking default, IMP-179 subagent-cache staleness, IMP-191 fingerprint collision — all deferred).
+
+### Changed
+- **Reporter/Simplifier release gating is CONDITIONAL** — release readiness treats them as plan-boundary roles: `not_applicable` off the boundary, `disabled` when toggled off, `missing`→blocking on the boundary when enabled, `pass` when the artifact is present and valid.
+- **`test-release-policy.bats` full Doc-1 §13.2 disposition** — the release-policy suite maps all 17 review-instruction fixtures plus 10 D11 negative fixtures (rows 18-27, names carrying `dual`/`waiver`/`d11`), with the 5 N/A/SKIP-REF rows documented in the file header.
+
 ## [2.52.0] — 2026-07-08
 
 ### Added

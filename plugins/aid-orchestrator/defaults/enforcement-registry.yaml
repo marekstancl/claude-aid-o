@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 268          # granular registry rows; recomputed via `.enforcements|length` after adding invalidation_map_expected (E-059-1_2 Step 2, IMP-177; was 267 after Step 1's curator_content_ref_guard + review_profile_presence + c3_gate_enforcement_toggle; 264 before those)
-  mapped_with_verdict: 121   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 103 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); was 120 before curator_content_ref_guard (verdict: ALIGNED); the two new planned observe rows carry no verdict (match the DG-07 convention)
-  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by these rows)
-  verdict_distribution: {ALIGNED: 103, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
+  enforcements: 271          # granular registry rows; recomputed via `.enforcements|length` after adding release_policy_dual_run + release_policy_preempted + force_writes_waiver (E-059-2_2 Step 5; was 268 after E-059-1_2 Step 2's invalidation_map_expected)
+  mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
+  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
+  verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
 
 enforcements:
 
@@ -853,3 +853,40 @@ enforcements:
     deferred_until: "2026-12-31"
     description: "done-advance review→release: compares gate_fixer_fix_applied event count to invalidation_map_produced event count; when applied > produced, emit invalidation_map_expected_missing (observe by default; INVALIDATION_MAP_ENFORCEMENT=blocking seam makes it exit 2); detects when a fix was applied but its post-fix invalidation-map hook did not run (pipeline.md Invalidation-Map Post-Fix Hook); fail-closed: no timeline or no applied events ⇒ no-op"
     test: "scripts/tests/bats/test-c3-activation.bats"
+
+  # ── E-059-2_2: C4 release-decision dual-run — observe mode, blocking promotion E10 ──
+  # UMBRELLA NOTE: the divergence_class taxonomy (none / verification_only /
+  # reporter_missing / simplifier_missing / required_input / c4_permissive / mixed /
+  # unclassified — MECE + fail-closed, never null), the Reporter/Simplifier CONDITIONAL
+  # boundary-blocker, and the brief-dispatch guard are INTERNALS of the observe-mode
+  # release_policy_dual_run capability (promoted WHOLE in E10) — declared inside this
+  # row's description, NOT as separate rows (else the AC7 enforcement count drifts).
+  - id: release_policy_dual_run
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'C4 release-decision dual-run hook')"
+    instruction: "defaults/policies/release-decision-policy.yaml (enforcement key)"
+    severity: advisory
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "done-advance review→release runs the C4 aggregator (aid-release-policy.sh) just before the final legacy tally and logs release_policy_dual_run {match, divergence_class (7-class TOTAL taxonomy, never null), head_sha anchor} comparing C4 release_ready to the COMPLETE legacy verdict; observe by default (transition follows the legacy verdict, unaffected); RELEASE_DECISION_POLICY=blocking seam makes a C4 release_ready=false additionally block; crash-guarded (aggregator crash → result=crash, NEVER aborts done-advance); --force structurally skips the hook (whole gauntlet bypassed); blocking promotion E10"
+    test: "scripts/tests/bats/test-release-policy.bats"
+
+  - id: release_policy_preempted
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'release_policy_preempted')"
+    instruction: "docs/plans/AID-audit-2026-06 (E10 handoff — dual-run sampling-bias correction)"
+    severity: advisory
+    surface: internal-guard
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "observe telemetry emitted before the four UNCONDITIONAL hard-exits that preempt the C4 dual-run slot (gate=streamlined_integration|streamlined_abandoned|tiered_compliance|cp4_curator) so E10 can correct the dual-run for sampling bias (runs that die before reaching the C4 slot are otherwise invisible); the other 4 hard-exits (DG-07/E3/C3-presence/invalidation) are observe-by-default and do not exit in shipped E9, so they carry no preempted event — that is an E10 handoff item; no gate behavior change; blocking promotion E10"
+    test: "scripts/tests/bats/test-release-policy.bats"
+
+  - {id: force_writes_waiver, type: 4, source: "scripts/aid-fsm.sh (grep: 'every --force writes a visible protocol-v2 waiver')", instruction: "defaults/schemas/waiver.schema.json", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "fsm_handle_force_override writes a protocol-v2 waiver-<transition>-<ts>.json (payload waived_check/reason>=20/waived_by/waived_at/scope/visible:true) on EVERY --force across all 4 call sites (init plan-gate, transition, increment-step, done-advance); mkdir -p empty-guards the plan-gate site where the evidence dir may not be materialized yet; the C4 aggregator surfaces it in waivers_applied[] (Waived != pass); immediate structural guarantee — active, no TTL", test: "scripts/tests/bats/test-release-policy.bats"}

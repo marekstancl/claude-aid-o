@@ -21,6 +21,10 @@
 #  12  — missing type-specific payload key
 #  13  — nondeterministic fingerprint
 #  14  — missing required audit_report subfield (provider/model/process_id/input_manifest_hash)
+#  15  — release_decision missing release_ready (D11 core state field)
+#  16  — release_decision D11 state field missing or bad enum/type
+#  17  — waiver reason too short (< 20 chars)
+#  18  — pm_decision_brief bad communication_status enum
 
 set -euo pipefail
 
@@ -146,7 +150,7 @@ if [[ "$schema_version" != "aid-2.0" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: artifact_type enum (17 values)
+# Step 5: artifact_type enum (18 values)
 # ---------------------------------------------------------------------------
 VALID_ARTIFACT_TYPES=(
   plan_review
@@ -166,6 +170,7 @@ VALID_ARTIFACT_TYPES=(
   delivery_report
   verification_report
   invalidation_map
+  waiver
 )
 
 artifact_type=$(jq -r '.artifact_type' "$ARTIFACT_FILE")
@@ -365,6 +370,7 @@ TYPE_PAYLOAD_MAP[curator]="curator"
 TYPE_PAYLOAD_MAP[delivery_report]="delivery_report"
 TYPE_PAYLOAD_MAP[verification_report]="verification_report"
 TYPE_PAYLOAD_MAP[invalidation_map]="invalidation_map"
+TYPE_PAYLOAD_MAP[waiver]="waiver"
 
 payload_key="${TYPE_PAYLOAD_MAP[$artifact_type]:-}"
 if [[ -n "$payload_key" ]]; then
@@ -393,6 +399,112 @@ if [[ "$artifact_type" == "audit_report" ]]; then
       exit 14
     fi
   done
+fi
+
+# ---------------------------------------------------------------------------
+# Step 15: release_decision release_ready presence (E-059-2 D11 core state).
+# The release_decision payload MUST carry an explicit release_ready boolean —
+# the FSM's merge gate reads it directly. Step 12 only proved the .release_decision
+# key exists; this descends into the payload. Same Step-14 pattern, distinct code.
+# Only applies to artifact_type == release_decision.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "release_decision" ]]; then
+  release_ready_type=$(jq -r '.release_decision.release_ready | type' "$ARTIFACT_FILE")
+  if [[ "$release_ready_type" != "boolean" ]]; then
+    echo "missing_release_ready" >&2
+    exit 15
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 16: release_decision D11 explicit state fields (E-059-2). release-decision.json
+# must carry all 11 D11 fields with valid enums/types so the FSM merge gate and the PM
+# brief never infer state. dual_run is OPTIONAL (FSM-patched in a later step) and is
+# NOT checked here. Runs after Step 15 so a missing release_ready reports as exit 15.
+# Only applies to artifact_type == release_decision.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "release_decision" ]]; then
+  # 16a — presence of all 11 D11 fields (delivered_summary_ref is required-but-nullable,
+  # so presence is a has() check; its value may legitimately be null).
+  for d11_field in merge_mode pm_brief_required pm_brief_status evidence_verified_at_head \
+                   evidence_verification_status reporter_status reporter_reason \
+                   simplifier_status simplifier_reason delivered_summary_ref summary_for_pm; do
+    d11_present=$(jq -r --arg f "$d11_field" 'if (.release_decision | has($f)) then "yes" else "no" end' "$ARTIFACT_FILE")
+    if [[ "$d11_present" != "yes" ]]; then
+      echo "missing_d11_field:${d11_field}" >&2
+      exit 16
+    fi
+  done
+
+  # 16b — enum validation (single-value fields)
+  d11_merge_mode=$(jq -r '.release_decision.merge_mode // ""' "$ARTIFACT_FILE")
+  case "$d11_merge_mode" in manual|auto|blocked) ;; *) echo "bad_d11_enum:merge_mode" >&2; exit 16 ;; esac
+
+  d11_pm_brief_status=$(jq -r '.release_decision.pm_brief_status // ""' "$ARTIFACT_FILE")
+  case "$d11_pm_brief_status" in pending|generated|failed|incomplete) ;; *) echo "bad_d11_enum:pm_brief_status" >&2; exit 16 ;; esac
+
+  d11_evs=$(jq -r '.release_decision.evidence_verification_status // ""' "$ARTIFACT_FILE")
+  case "$d11_evs" in pass|fail|unverifiable) ;; *) echo "bad_d11_enum:evidence_verification_status" >&2; exit 16 ;; esac
+
+  # 16c — enum validation (reporter/simplifier share one enum)
+  for d11_status_field in reporter_status simplifier_status; do
+    d11_status_val=$(jq -r --arg f "$d11_status_field" '.release_decision[$f] // ""' "$ARTIFACT_FILE")
+    case "$d11_status_val" in
+      pass|fail|missing|not_applicable|disabled) ;;
+      *) echo "bad_d11_enum:${d11_status_field}" >&2; exit 16 ;;
+    esac
+  done
+
+  # 16d — boolean type validation
+  for d11_bool_field in pm_brief_required evidence_verified_at_head; do
+    d11_bool_type=$(jq -r --arg f "$d11_bool_field" '.release_decision[$f] | type' "$ARTIFACT_FILE")
+    if [[ "$d11_bool_type" != "boolean" ]]; then
+      echo "bad_d11_type:${d11_bool_field}" >&2
+      exit 16
+    fi
+  done
+
+  # 16e — non-empty string validation
+  for d11_str_field in reporter_reason simplifier_reason summary_for_pm; do
+    d11_str_ok=$(jq -r --arg f "$d11_str_field" 'if (.release_decision[$f] | type) == "string" and (.release_decision[$f] | length) > 0 then "yes" else "no" end' "$ARTIFACT_FILE")
+    if [[ "$d11_str_ok" != "yes" ]]; then
+      echo "bad_d11_type:${d11_str_field}" >&2
+      exit 16
+    fi
+  done
+
+  # 16f — delivered_summary_ref must be string or null (required-but-nullable)
+  d11_dsr_type=$(jq -r '.release_decision.delivered_summary_ref | type' "$ARTIFACT_FILE")
+  if [[ "$d11_dsr_type" != "string" && "$d11_dsr_type" != "null" ]]; then
+    echo "bad_d11_type:delivered_summary_ref" >&2
+    exit 16
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 17: waiver reason minimum length (E-059-2). A waiver is a visible governance
+# record; its reason must be substantive (>= 20 chars) so a waiver can never be an
+# empty rubber-stamp. Step 12 already proved .waiver exists. Only applies to waiver.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "waiver" ]]; then
+  waiver_reason_len=$(jq -r '(.waiver.reason // "") | length' "$ARTIFACT_FILE")
+  if [[ "$waiver_reason_len" -lt 20 ]]; then
+    echo "waiver_reason_too_short:len=${waiver_reason_len}" >&2
+    exit 17
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 18: pm_decision_brief communication_status enum (E-059-2). The brief must
+# declare an explicit communication_status so the PM surface never renders an
+# ambiguous state. Only applies to artifact_type == pm_decision_brief.
+# ---------------------------------------------------------------------------
+if [[ "$artifact_type" == "pm_decision_brief" ]]; then
+  brief_comm_status=$(jq -r '.pm_decision_brief.communication_status // ""' "$ARTIFACT_FILE")
+  case "$brief_comm_status" in
+    complete|incomplete) ;;
+    *) echo "bad_communication_status" >&2; exit 18 ;;
+  esac
 fi
 
 # ---------------------------------------------------------------------------

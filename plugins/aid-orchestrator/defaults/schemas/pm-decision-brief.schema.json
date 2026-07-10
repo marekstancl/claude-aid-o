@@ -3,7 +3,7 @@
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/pm-decision-brief.schema.json",
   "title": "AID Protocol v2 — PMDecisionBrief",
   "$comment": "producer: pm_brief generator, consumers: [PM, GUI]",
-  "description": "Artifact emitted by the PM brief generator summarising pipeline results in human-readable form for PM review. verdict.kind must be 'none' — decision authority belongs to the PM, not this artifact.",
+  "description": "Artifact emitted by the PM brief generator summarising pipeline results in human-readable form for PM review. verdict.kind must be 'none' — decision authority belongs to the PM, not this artifact. Echoes release_decision state (release_ready, blockers, waivers_applied, and the D11 fields) so the PM surface renders decided state, never inferred state.",
   "type": "object",
   "allOf": [
     {
@@ -17,15 +17,81 @@
     },
     "pm_decision_brief": {
       "type": "object",
-      "$comment": "enforced — minimal payload; verdict.kind must be 'none' (PM holds decision authority, not this artifact); full schema defined in owning phase",
+      "$comment": "enforced — communication_status enum is validated by aid-protocol-validate.sh (exit 18); verdict.kind must be 'none' (PM holds decision authority, not this artifact).",
       "properties": {
         "communication_status": {
-          "type": "string"
+          "enum": ["complete", "incomplete"],
+          "$comment": "enforced (exit 18)"
+        },
+        "release_ready": {
+          "type": "boolean",
+          "$comment": "echo of release_decision.release_ready"
         },
         "blockers": {
-          "type": "array"
+          "type": "array",
+          "$comment": "echo of release_decision.blockers"
+        },
+        "waivers_applied": {
+          "type": "array",
+          "$comment": "echo of release_decision.waivers_applied — NOT 'waivers'"
+        },
+        "human_summary_path": {
+          "type": "string",
+          "description": "Path to the rendered human-readable summary, e.g. 'pm-summary.md'."
+        },
+        "merge_mode": {
+          "enum": ["manual", "auto", "blocked"],
+          "$comment": "D11 echo"
+        },
+        "evidence_verification_status": {
+          "enum": ["pass", "fail", "unverifiable"],
+          "$comment": "D11 echo"
+        },
+        "evidence_verified_at_head": {
+          "type": "boolean",
+          "$comment": "D11 echo"
+        },
+        "reporter_status": {
+          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "$comment": "D11 echo"
+        },
+        "reporter_reason": {
+          "type": "string",
+          "$comment": "D11 echo"
+        },
+        "simplifier_status": {
+          "enum": ["pass", "fail", "missing", "not_applicable", "disabled"],
+          "$comment": "D11 echo"
+        },
+        "simplifier_reason": {
+          "type": "string",
+          "$comment": "D11 echo"
+        },
+        "summary_for_pm": {
+          "type": "string",
+          "$comment": "D11 echo"
+        },
+        "delivered_summary_ref": {
+          "type": ["string", "null"],
+          "$comment": "D11 echo — nullable"
         }
-      }
+      },
+      "required": [
+        "communication_status",
+        "release_ready",
+        "blockers",
+        "waivers_applied",
+        "human_summary_path",
+        "merge_mode",
+        "evidence_verification_status",
+        "evidence_verified_at_head",
+        "reporter_status",
+        "reporter_reason",
+        "simplifier_status",
+        "simplifier_reason",
+        "summary_for_pm",
+        "delivered_summary_ref"
+      ]
     }
   },
   "required": ["pm_decision_brief"]

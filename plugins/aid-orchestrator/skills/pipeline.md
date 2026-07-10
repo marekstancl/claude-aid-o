@@ -1194,6 +1194,14 @@ Options:
   ABORT — stop EPIC, no merge (/aid-stop)
 ```
 
+> **PM machine handoff (D11 — E9).** Independently of this human summary, once the FSM advances
+> review→release (step 13 below), a deterministic PM brief is generated from `release-decision.json`
+> (see **§7.6 PM Machine Handoff** below). The brief is generated after EVERY successful
+> `done-advance review→release`, **including `--auto` / FIRST AID mode** — the machine
+> `pm-decision-brief.json` + human `pm-summary.md` always land on disk (carrying the full
+> evidence/Reporter/Simplifier/waiver status) so an auto-merge is never silent. Honest limitation:
+> in E9 this is a convention, not a structural guarantee — see §7.6.
+
 12. **PM decides:**
     - **MERGE** → set `pm_decision`, advance sub-phase, continue to step 13
     - **FIX** → PM provides guidance → dispatch fixes → re-run steps 5-11
@@ -1205,6 +1213,70 @@ Options:
     ```
     Preconditions: `curator-report` exists, `audit-report` exists, `pm_decision=merge`.
     If any missing → script refuses (exit 1).
+
+### §7.6 PM Machine Handoff — release-decision → PM brief (D9 coexistence)
+
+The PM handoff is a two-artifact machine sequence produced at the review→release boundary. It is
+the new **canonical machine handoff** for a release decision; the older human artifacts coexist
+(see *Coexistence* below).
+
+**Topology sequence (produced in this order):**
+
+1. **`release-decision.json`** — the C4 aggregator (`aid-release-policy.sh`) emits the protocol-v2
+   `release_decision` artifact carrying `release_ready`, `blockers`, `waivers_applied`, and the D11
+   state fields (`merge_mode`, `evidence_verification_status`, `evidence_verified_at_head`,
+   `reporter_status`/reason, `simplifier_status`/reason, `summary_for_pm`, `delivered_summary_ref`,
+   `pm_brief_required`, `pm_brief_status`). In a live run this is produced by the FSM dual-run hook
+   during `done-advance review→release`.
+2. **`pm-decision-brief.json` + `pm-summary.md`** — `aid-pm-brief.sh <evidence_dir>` reads ONLY
+   `release-decision.json` (no sibling files — not `epic-summary.md`, not `final_report.md`) and
+   echoes its state into the protocol-v2 `pm_decision_brief` artifact plus a human `pm-summary.md`,
+   then patches `pm_brief_status` back into `release-decision.json`
+   (`generated`/`failed`/`incomplete`). Pure bash/jq, deterministic, no LLM.
+
+   ```bash
+   # Dispatch ONLY after a SUCCESSFUL done-advance (exit 0):
+   bash "$AID_PLUGIN_PATH/scripts/aid-pm-brief.sh" "$evidence_dir"
+   ```
+
+   **Brief dispatch is gated on a SUCCESSFUL done-advance (exit 0).** We never want a `generated`
+   brief that describes a non-zero-exit attempt. This is NOT "every failed attempt reaches C4" —
+   that is false: class-2 hard-exit blocks (tiered-compliance `exit 2`, streamlined-integration,
+   cp4-curator) preempt the transition BEFORE the C4 slot and emit `release_policy_preempted`
+   (observe-only telemetry in `aid-fsm.sh`), so no `release-decision.json` is produced for them.
+   After a fix + retry the brief is generated then — the retry either overwrites the existing
+   `release-decision.json` (class-1 blocks that reached the C4 slot) or creates the first one
+   (class-2 hard-exits).
+
+3. **(Deferred E10) `--validate` blocks MERGE.** `aid-pm-brief.sh --validate` already fails closed
+   when the brief does not faithfully echo the decision (catches over-optimism / tampering), but
+   wiring that verdict as a *merge precondition* is **explicitly deferred to E10** — see *Honest
+   limitation* below.
+
+**Coexistence (D9 narrowing).** `pm-decision-brief.json` / `pm-summary.md` are the new canonical
+machine handoff. The pre-existing PM outputs remain, unchanged, alongside it: `final_report.md`
+(per-run), `epic-summary.md` (`aid-epic-summary.sh`, same transition), and the Reporter
+`{plan_id}-delivery.md` (plan boundary). **Consolidating these into one surface is E11** — E9 adds
+the canonical machine handoff without removing anything, so nothing that reads the older artifacts
+breaks.
+
+**D11 — brief generated after every successful done-advance.** The brief is generated after EVERY
+successful `done-advance review→release`, **including `--auto` / FIRST AID mode**. The intent: an
+auto-merge is never silent — the machine brief and its human summary always exist on disk, carrying
+the full evidence/Reporter/Simplifier/waiver status even when the merge proceeds automatically.
+
+**⚠️ Honest limitation (CP1 L1-F2) — in E9 "auto-merge never silent" is a convention, NOT a
+structural guarantee.** Nothing structurally blocks a merge that lacks a brief: no FSM precondition
+consumes `pm_brief_required` or `merge_mode=auto` to gate the merge (`grep pm-brief
+scripts/aid-fsm.sh` = 0 hits). In `--auto` the orchestrator could theoretically skip the brief step
+and the merge would still proceed with `pm_brief_status: pending`. `pm_brief_required` is an E9
+**forward-compat** field. E9 delivers the *field + generator + patch-back* only; the *enforcement*
+("merge without a brief does not proceed" — item 3 above) is **E10**. This is deliberate phasing per
+[`AID-v3-principles.md`](../../../docs/plans/AID-v3-principles.md) §1 (*Detector without Enforcement
+is Decoration*): until the enforcement lands this is a detector, named as such — not omitted. A
+`pm_brief_status` that stays `pending` after a completed release transition is itself a finding (the
+live-probe C4 observability contract treats a missing brief on an auto-merge as a finding, not a
+skip).
 
 ### Sub-phase: `release`
 
@@ -1227,6 +1299,9 @@ evidence/{epic_id}/{run_id}/
   curator_resolve_report.json  # Curator proposals + actions
   simplifier-report.md         # Simplifier proposals (plan boundary)
   reporter/                    # Reporter test-evidence artifacts (plan boundary)
+  release-decision.json        # C4 release decision (protocol-v2 — §7.6)
+  pm-decision-brief.json       # PM machine handoff, echoes release-decision (protocol-v2 — §7.6)
+  pm-summary.md                # PM human summary, rendered from release-decision (§7.6)
 .aid-o/reports/{plan_id}-delivery.md   # Reporter delivery report (committed)
 ```
 
@@ -1638,7 +1713,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-07-09
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

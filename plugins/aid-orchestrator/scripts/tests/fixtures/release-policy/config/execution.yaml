@@ -1,0 +1,8 @@
+# Fixture execution.yaml — reporter + simplifier both enabled (default-on).
+simplifier:
+  enabled: true
+  model: opus
+reporter:
+  enabled: true
+  model: sonnet
+  report_dir: ".aid-o/reports"
