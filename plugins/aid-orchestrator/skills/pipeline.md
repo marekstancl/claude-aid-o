@@ -834,7 +834,8 @@ bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES "$STATE_FILE"
 
 Use `advance-to-gates` for new code; manual flow stays for edge-case operations.
 
-**`--plan-json` is required, not optional, when a `plan.json` exists.** The runner
+**`--plan-json` is required, not optional, when a `plan.json` exists.** Canonical
+invocation: `aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> --state-file <state> --report-file <report> --plan-json <evidence_dir>/plan.json`. The runner
 reconciles `plan.json.gates[]` against `execution.yaml` and writes a
 `plan_gates_reconciled: true` marker; the `EXECUTE→GATES` precondition refuses the
 transition if a report is produced by bypassing `--plan-json` while `plan.json`
