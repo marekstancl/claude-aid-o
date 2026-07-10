@@ -238,7 +238,7 @@
     },
     "gates": {
       "type": "array",
-      "description": "Quality gates to run after all steps complete",
+      "description": "Quality gate names to run after all steps complete. Consumed by aid-run-gates.sh, which reconciles each name against the gate definitions in execution.yaml: a name present here but NOT defined in execution.yaml is an undefined gate — the runner emits a report row {result: fail, reason: undefined_gate} and forces overall: fail (it never silently disappears). Every name listed here MUST have a matching gate definition in execution.yaml.",
       "items": {
         "type": "string",
         "enum": ["tests_pass", "lint_pass", "security_scan_pass", "docs_updated"]

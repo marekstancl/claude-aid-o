@@ -1,6 +1,6 @@
 # Agent: verifier
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-07-11
 
 You are an AID verifier agent. Your verification focus is determined by the `focus` field in your task input.
 
@@ -150,13 +150,24 @@ _generated_by: aid-orchestrator:verifier@{dispatch_label}
 _generated_at: YYYY-MM-DDTHH:MM:SSZ
 classification: FULL_REVIEW|RUN|FAIL|SKIP
 verdict: pass|fail|skip|pending
+Reviewed-Head: <sha>
 ```
+
+`Reviewed-Head:` is MANDATORY and canonical: it is the exact sha the diff you
+reviewed was generated against. Capture it at diff time with
+`git rev-parse HEAD` and record it verbatim at line-start. The FSM's
+`fsm_check_cp3_freshness` (aid-fsm.sh) reads it to refuse a STALE review as DONE
+evidence — if HEAD has moved past `Reviewed-Head` outside the narrow D4 exception
+(test/fixture/evidence-only churn with a `CP3-Freshness-Exception:` trailer), the
+GATES→DONE transition is blocked (OBS-20260702-03). Emit it for every checkpoint
+output, not only CP3.
 
 For CP2/CP6 SKIP: also emit `reason:` at line-start.
 
-All four top-level header fields (`_generated_by`, `_generated_at`, `classification`, `verdict`)
-MUST be at line start (no leading whitespace). The FSM uses `grep -q '^<field>:'` and
-`yaml_field` to validate them — misindented or nested fields are invisible to the check.
+All five top-level header fields (`_generated_by`, `_generated_at`, `classification`,
+`verdict`, `Reviewed-Head`) MUST be at line start (no leading whitespace). The FSM uses
+`grep -q '^<field>:'` and `yaml_field` to validate them — misindented or nested fields
+are invisible to the check.
 
 `fix_loop_eligible` is `true` when ALL Critical/High findings have `auto_fixable: true`.
 If any Critical/High finding is not auto-fixable (design issue, architecture problem),

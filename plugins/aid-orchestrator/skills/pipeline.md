@@ -430,6 +430,18 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    - `0` (SKIP) — verifier-output-step-N.md created with `classification: SKIP`; no further dispatch needed.
    - `10` (RUN) — caller dispatches verifier subagent with `focus=code-review`.
    - `20` (FAIL) — caller dispatches verifier subagent with `focus=security` (security keywords detected in diff).
+   - `22` (`range_undetermined`) — cp2 could not determine its diff range (no `step_commit` event in
+     timeline.jsonl AND no `base_commit` in fsm-state.yaml). **No output file is written** (no false SKIP
+     stub). Recovery: let the FSM emit a `step_commit` (it is logged automatically at each
+     `increment-step`) or ensure `base_commit` is set in fsm-state.yaml; or set `CP2_RANGE_POLICY=observe`
+     to fall back to `HEAD~1..HEAD` (emits a loud `cp2_range_fallback` event). **NEVER hand-craft the
+     output file** — that reintroduces the OBS-20260705-01 false-green.
+
+   **Range resolution (cp2, P060 Step 3 — OBS-20260705-01):** cp2 classifies from the STEP boundary,
+   not the last commit, so a production step with a bookkeeping commit on top is no longer false-green'd
+   `docs_only`. Order: (1) last `step_commit` event in timeline → `step_commit_sha..HEAD`; (2) else
+   `base_commit` from `evidence_dir/fsm-state.yaml` → `base_commit..HEAD` (fail-safe WIDER); (3) else
+   exit 22 (blocking) or loud `HEAD~1..HEAD` fallback (`CP2_RANGE_POLICY=observe`).
 
 2. **Verifier dispatch** (only for RUN/FAIL):
 
@@ -472,6 +484,12 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
    - Rejects if verifier-output-step-N.md missing, or has empty/missing `_generated_by` or `_generated_at` (anti-fabrication).
    - Rejects if `verdict: pending` (pre-filter classified RUN/FAIL but verifier never dispatched).
    - Rejects if plan.json sha256 hash differs from cmd_init-stamped hash (mid-EPIC tampering check).
+   - **Rejects if `checkpoint:` is set and ≠ `cp2`** (P060 Step 3 bypass guard, increment call-site ONLY):
+     a cp3/cp4-produced stub must not satisfy the per-step CP2 precondition. Absent `checkpoint` is
+     backward-compatible. The shared `fsm_check_verifier_output` stays checkpoint-agnostic so the cp3
+     consumers (EXECUTE→GATES) still accept `checkpoint: cp3`.
+   - **Produces a `step_commit` event** at the step-advance tail (`step_n`, `commit_sha=HEAD`) — the
+     boundary marker the next step's cp2 classify consumes for its diff range.
 
 4. **Repeated-fail telemetry**:
    - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.
@@ -598,12 +616,24 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    semantics as CP2 (last pair is authoritative).
 
 2. **Outputs** (each verifier writes its dedicated file):
-   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
-   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
+
+   **CP3 dispatch passes/requires `Reviewed-Head` explicitly.** Dispatch each CP3
+   verifier with the sha the full-EPIC diff was generated against, and each verifier
+   MUST record it as a line-start `Reviewed-Head: <sha>` field (see
+   `agents/verifier.md` §Output Format). This is the freshness anchor consumed at
+   GATES→DONE (P060 Step 4 / OBS-20260702-03): if HEAD later moves past that sha
+   outside the narrow D4 exception, the DONE transition is blocked (stale review).
 
 3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
    - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
    - NEW Session B: both CP3 output files must exist with valid `_generated_by` (file presence is AC target).
+   - P060 Step 4: each CP3 output must carry `Reviewed-Head: <sha>`. `fsm_check_cp3_freshness`
+     re-reads it at **GATES→DONE** (and again at `done-advance review→release`) and refuses a
+     STALE review as DONE evidence unless the D4 exception (test/fixture/evidence-only churn
+     WITH a `CP3-Freshness-Exception:` trailer) holds. Policy `CP3_FRESHNESS_POLICY` (default
+     blocking).
    - Verdicts are recorded but NOT a target — verdict is verdict (no Goodhart pressure to fake clean reviews).
 
 4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
@@ -706,7 +736,8 @@ When parallel is re-enabled (post Agent SDK migration):
 **Script:**
 ```
 aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
-  --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json
+  --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json \
+  --plan-json <evidence_dir>/plan.json
 ```
 
 `execution.yaml` defines gates (generated by `aid-epic-to-json.sh`). Each gate has:
@@ -794,13 +825,21 @@ between gates run and transition, the original two-step flow remains supported:
 # Step 1: Run gates (omit --state-file to skip state guard, OR use state==GATES)
 bash $AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all \
     "$EXECUTION_YAML" "$EPIC_ID" "$RUN_ID" \
-    --report-file "$REPORT_FILE"
+    --report-file "$REPORT_FILE" \
+    --plan-json "$EVIDENCE_DIR/plan.json"
 
 # Step 2: Transition to GATES (check_preconditions validates _generated_by)
 bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES "$STATE_FILE"
 ```
 
 Use `advance-to-gates` for new code; manual flow stays for edge-case operations.
+
+**`--plan-json` is required, not optional, when a `plan.json` exists.** The runner
+reconciles `plan.json.gates[]` against `execution.yaml` and writes a
+`plan_gates_reconciled: true` marker; the `EXECUTE→GATES` precondition refuses the
+transition if a report is produced by bypassing `--plan-json` while `plan.json`
+exists (a gate declared in the plan but undefined in `execution.yaml` would
+otherwise silently never run and still report pass — OBS-20260702-05).
 
 ---
 
@@ -1713,7 +1752,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-09
+**Last Updated:** 2026-07-11
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
