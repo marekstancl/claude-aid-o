@@ -477,3 +477,162 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"invalid gate name"* ]]
 }
+
+# ─── P061 E1 Step 2 — aid-run-gates.sh --profile flag, gate_profiles ─────────
+# parsing, profile_excluded reporting. A profile is a named include[]
+# whitelist of gate keys under execution.yaml.gate_profiles. Six scenarios:
+# (a) an excluded gate never actually runs (proven via elapsed time, not just
+# a result string — a broken impl that still executes the command but
+# discards its row would pass a naive assertion); (b) a required:false gate
+# still inside the profile's include[] runs normally; (c) a required:true
+# gate excluded by the profile does not fail the run; (d)/(e) fail-loud on
+# unknown profile / unknown gate inside include[]; (f) omitting --profile is
+# bit-identical to today even once gate_profiles exists in the file.
+
+@test "run-all profile a: gate excluded from active profile never runs (proven via elapsed time, not just its result string)" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  plan_diff:
+    command: "exit 0"
+    required: true
+  shell_pipeline_smoke:
+    command: "sleep 5"
+    required: true
+    timeout_seconds: 5
+  docs_updated:
+    command: "exit 0"
+    required: false
+
+gate_profiles:
+  standard:
+    include: [plan_diff, docs_updated]
+YAML
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile standard
+  end_ts=$(date +%s)
+  elapsed=$((end_ts - start_ts))
+  [ "$status" -eq 0 ]
+  # Must finish well under shell_pipeline_smoke's 5s timeout — proves it was
+  # never dispatched to run_gate at all (not just that its row got discarded).
+  [ "$elapsed" -lt 3 ]
+  run jq -re '.gates.shell_pipeline_smoke.result' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.shell_pipeline_smoke.reason' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -e '.excluded_gates == ["shell_pipeline_smoke"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$REPORT"
+  [ "$output" == "standard" ]
+  run jq -re '.profile_source' "$REPORT"
+  [ "$output" == "cli_flag" ]
+  run jq -re '.profile_reason' "$REPORT"
+  [ -n "$output" ]
+  # Included gates still ran and passed
+  run jq -re '.gates.plan_diff.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+}
+
+@test "run-all profile b: required:false gate inside the active profile's include[] still runs" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  standard:
+    include: [alpha, beta]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.alpha.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == []' "$REPORT"
+  [ "$status" -eq 0 ]
+}
+
+@test "run-all profile c: required:true gate excluded by the active profile does not fail the run" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  targeted:
+    include: [alpha]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile targeted
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -e '.excluded_gates == ["beta"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+}
+
+@test "run-all profile d: unknown --profile name fails loud before running any gate" {
+  # setup()'s EXEC_YAML (alpha/beta) has no gate_profiles block at all.
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile does-not-exist
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+  # Report must not have been written — validation happens before any gate runs
+  [ ! -f "$REPORT" ]
+}
+
+@test "run-all profile e: profile include[] referencing an undefined gate fails loud before running any gate" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  bogus:
+    include: [alpha, ghost]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ghost"* ]]
+  [ ! -f "$REPORT" ]
+}
+
+@test "run-all profile f (legacy regression): omitting --profile runs all gates unchanged even when gate_profiles is defined" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  standard:
+    include: [alpha]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 0 ]
+  # beta is NOT in 'standard's include[], but --profile was never passed —
+  # both gates run exactly as they would with no gate_profiles block at all.
+  run jq -re '.gates.alpha.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == []' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$REPORT"
+  [ "$output" == "null" ]
+  run jq -re '.profile_source' "$REPORT"
+  [ "$output" == "null" ]
+  run jq -re '.profile_reason' "$REPORT"
+  [ "$output" == "null" ]
+}
