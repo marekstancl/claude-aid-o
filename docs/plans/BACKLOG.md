@@ -1650,6 +1650,17 @@ the finding→fix→permanent-enforcement loop closed cleanly.
 
 **Likely fix:** any queue entry with a `blocked_on: <branch/PR>`-style dependency should be re-validated against live git state (e.g. `git merge-base --is-ancestor <branch> main`) at least at EPIC-start time, not trusted as a static claim written once and never re-checked — same underlying principle as OBS-20260708-04's fix (state that can go stale needs an active revalidation path, not a write-once field).
 
+**RESOLVED (2026-07-10):** fixed exactly as recommended, commit `d61de7c`
+(P060 D8, EPIC 2 Step 7, `task/E-060-2_2/main`) — new `aid-fsm.sh
+queue_revalidate <epic_id>` with a 4-outcome contract: branch-is-ancestor →
+unblock, not-ancestor → stays blocked, branch-deleted-after-merge →
+merged-detection (via queue status / evidence DONE / `git log --merges`
+grep), no-signal → fail-loud rather than silently trusting the stale
+field. `pipeline.md` §12 now requires the consumer to queue-revalidate
+before respecting a `blocked` status. 7+ new regression tests
+(`test-queue-revalidation.bats`). Third finding this session to go from
+observed → fixed → formally logged during the same live-probe window.
+
 ### OBS-20260709-07 — `plan_diff` gate's own exemption note names "P038+" as when it becomes required; we're on P059 and it's still `required: false` (plus: gate times out at 120s when actually run)
 
 **Observed in:** aid-orchestrator / E-059-2_2 GATES (self-host)
