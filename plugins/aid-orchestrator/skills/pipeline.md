@@ -616,12 +616,24 @@ After all steps complete, before `aid-fsm.sh transition EXECUTE GATES`:
    semantics as CP2 (last pair is authoritative).
 
 2. **Outputs** (each verifier writes its dedicated file):
-   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
-   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`
+   - `verifier-output-cp3-code-review.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
+   - `verifier-output-cp3-security.md` — verdict + findings, `_generated_by: aid-orchestrator:verifier@<agent_id>`, `_generated_at: <ISO 8601 UTC>`, `Reviewed-Head: <sha>`
+
+   **CP3 dispatch passes/requires `Reviewed-Head` explicitly.** Dispatch each CP3
+   verifier with the sha the full-EPIC diff was generated against, and each verifier
+   MUST record it as a line-start `Reviewed-Head: <sha>` field (see
+   `agents/verifier.md` §Output Format). This is the freshness anchor consumed at
+   GATES→DONE (P060 Step 4 / OBS-20260702-03): if HEAD later moves past that sha
+   outside the narrow D4 exception, the DONE transition is blocked (stale review).
 
 3. **FSM precondition** (`aid-fsm.sh transition EXECUTE GATES`):
    - Existing Session A check: `gates_report.json._generated_by` present (or grandfather skip).
    - NEW Session B: both CP3 output files must exist with valid `_generated_by` (file presence is AC target).
+   - P060 Step 4: each CP3 output must carry `Reviewed-Head: <sha>`. `fsm_check_cp3_freshness`
+     re-reads it at **GATES→DONE** (and again at `done-advance review→release`) and refuses a
+     STALE review as DONE evidence unless the D4 exception (test/fixture/evidence-only churn
+     WITH a `CP3-Freshness-Exception:` trailer) holds. Policy `CP3_FRESHNESS_POLICY` (default
+     blocking).
    - Verdicts are recorded but NOT a target — verdict is verdict (no Goodhart pressure to fake clean reviews).
 
 4. **Fix loop**: gate-fixer applies suggested fixes → re-dispatch CP3 (both verifiers in parallel again) → retry.
@@ -1740,7 +1752,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-11
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

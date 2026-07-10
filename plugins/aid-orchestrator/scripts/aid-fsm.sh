@@ -235,6 +235,177 @@ fsm_check_verifier_output() {
   return 0
 }
 
+# Route a CP3-freshness violation through the enforcement policy (P060 Step 4).
+# Emits cp3_freshness_would_block, then: blocking → print recovery, return 1;
+# observe → return 0 (logged, non-blocking). Sets _PRECONDITION_FAIL_REASON so
+# cmd_transition can group the failure in the timeline (like other preconditions).
+# Args: $1 timeline  $2 policy  $3 reason  $4.. stderr recovery lines.
+_cp3_freshness_route() {
+  local timeline="$1" policy="$2" reason="$3"; shift 3
+  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_would_block" \
+    reason="$reason" enforcement="$policy"
+  if [[ "$policy" == "blocking" ]]; then
+    _PRECONDITION_FAIL_REASON="cp3_stale_review"
+    printf '%s\n' "$@" >&2
+    return 1
+  fi
+  return 0
+}
+
+# fsm_check_cp3_freshness — P060 Step 4 (OBS-20260702-03), head-side twin of B-008.
+# Refuses a STALE CP3 review as DONE evidence. Each CP3 verifier-output records
+# `Reviewed-Head: <sha>` = the sha its diff was generated against (see
+# agents/verifier.md §Output Format producer contract). If HEAD has moved past
+# that sha, the review did not see the current tree — UNLESS the D4 narrow
+# exception holds:
+#   (a) path scope — every changed path is under */tests/*, */fixtures/*, or the
+#       CURRENT run's evidence dir, with verdict-bearing files EXCLUDED
+#       (verifier-output-*.md / gates_report.json / fsm-state.yaml are NEVER
+#       "bookkeeping", even under tests/); AND
+#   (b) explicit marking — every commit past the reviewed head carries a
+#       `CP3-Freshness-Exception: <reason>` git trailer.
+# On PASS-with-exception the disclosure event `cp3_freshness_exception` carries the
+# FULL changed-file list (E10 measures exception abuse; the residual "weakened test
+# slips through" risk is deliberate and MEASURED, not hidden).
+#
+# Policy CP3_FRESHNESS_POLICY (observe|blocking, default BLOCKING per D9 —
+# deliberately stricter than sibling observe defaults). observe → emit
+# cp3_freshness_would_block, do NOT block. Grandfather is keyed on
+# fsm_check_grandfather (run created_at < DEPLOY_DATE), NEVER a self-reported
+# _generated_at — a backdated file on a post-deploy run still fails.
+# Separate from the shared fsm_check_verifier_output (cp2/cp3/cp4). Enforcement
+# principle: AID-v3-principles.md §1.
+#
+# Args: <evidence_dir> <state_file> [project_root]. state_file is assigned to a
+# local so the fsm_check_grandfather call below reads it via dynamic scope.
+# Returns 0 (fresh / exception / observe / grandfathered / no-CP3-files),
+# 1 (blocking violation).
+fsm_check_cp3_freshness() {
+  local evidence_dir="$1"
+  local state_file="$2"
+  local project_root="${3:-$PWD}"
+  local timeline="${evidence_dir}/timeline.jsonl"
+
+  # Grandfather: pre-deploy runs are exempt (keyed on run created_at, not file).
+  if fsm_check_grandfather; then
+    return 0
+  fi
+
+  local policy="${CP3_FRESHNESS_POLICY:-blocking}"
+
+  # Collect existing CP3 verifier-output files. Absent files are the domain of
+  # the presence check (fsm_check_verifier_output at EXECUTE:GATES), not here.
+  local cp3_files=() f
+  for f in verifier-output-cp3-code-review.md verifier-output-cp3-security.md; do
+    [[ -f "${evidence_dir}/${f}" ]] && cp3_files+=("${evidence_dir}/${f}")
+  done
+  [[ ${#cp3_files[@]} -eq 0 ]] && return 0
+
+  # Read Reviewed-Head from each CP3 file; missing on any → fail (F4g).
+  local reviewed_head="" rh
+  for f in "${cp3_files[@]}"; do
+    rh=$(yaml_field "$f" "Reviewed-Head")
+    if [[ -z "$rh" ]]; then
+      _cp3_freshness_route "$timeline" "$policy" "missing_reviewed_head" \
+        "PRECONDITION FAIL: ${f##*/} has no 'Reviewed-Head:' line." \
+        "" \
+        "Reason: a CP3 verifier output must record the sha its diff was generated" \
+        "        against (agents/verifier.md §Output Format). Without it the FSM" \
+        "        cannot prove the review saw the current tree (OBS-20260702-03)." \
+        "Fix: re-dispatch CP3 (both verifiers) so each writes 'Reviewed-Head: <sha>'." \
+        "OR (PM-authorized, audited): rerun the transition with --force --reason '<why>'."
+      return $?
+    fi
+    reviewed_head="$rh"
+  done
+
+  local current_head
+  current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+  if [[ -z "$current_head" ]]; then
+    _cp3_freshness_route "$timeline" "$policy" "head_unresolved" \
+      "PRECONDITION FAIL: cannot resolve current git HEAD to verify CP3 freshness."
+    return $?
+  fi
+
+  # Fresh: reviewed head == current head.
+  [[ "$reviewed_head" == "$current_head" ]] && return 0
+
+  # reviewed_head must be a real, ancestor commit of HEAD; otherwise stale/diverged.
+  if ! git -C "$project_root" rev-parse --verify "${reviewed_head}^{commit}" >/dev/null 2>&1 \
+     || ! git -C "$project_root" merge-base --is-ancestor "$reviewed_head" "$current_head" 2>/dev/null; then
+    _cp3_freshness_route "$timeline" "$policy" "reviewed_head_not_ancestor" \
+      "PRECONDITION FAIL: CP3 Reviewed-Head ${reviewed_head} is not an ancestor of HEAD ${current_head}." \
+      "Fix: re-dispatch CP3 (both verifiers) against the current HEAD."
+    return $?
+  fi
+
+  # HEAD is ahead — apply the D4 narrow exception. -z + while-read handles
+  # spaces-in-names safely.
+  local changed_files=() p
+  while IFS= read -r -d '' p; do
+    changed_files+=("$p")
+  done < <(git -C "$project_root" diff --name-only -z "${reviewed_head}..${current_head}" 2>/dev/null)
+
+  # (a) path scope + verdict-bearing exclusion.
+  local violating="" base
+  if [[ ${#changed_files[@]} -gt 0 ]]; then
+    for p in "${changed_files[@]}"; do
+      base="${p##*/}"
+      # Verdict-bearing files are NEVER bookkeeping, even under tests/.
+      case "$base" in
+        verifier-output-*.md|gates_report.json|fsm-state.yaml)
+          violating="$p (verdict-bearing)"; break ;;
+      esac
+      case "$p" in
+        */tests/*|tests/*|*/fixtures/*|fixtures/*) : ;;   # test/fixture churn OK
+        "$evidence_dir"/*) : ;;                           # current run evidence OK
+        *) violating="$p (out-of-scope)"; break ;;
+      esac
+    done
+  fi
+
+  if [[ -n "$violating" ]]; then
+    _cp3_freshness_route "$timeline" "$policy" "path_out_of_scope" \
+      "PRECONDITION FAIL: commit(s) past reviewed CP3 head touch a non-exempt path: ${violating}." \
+      "" \
+      "Reason: the D4 CP3-freshness exception permits ONLY test/fixture/evidence" \
+      "        churn, and verdict-bearing files (verifier-output-*.md," \
+      "        gates_report.json, fsm-state.yaml) never qualify. A production" \
+      "        change past the reviewed head means CP3 never saw it (stale review)." \
+      "Fix: re-dispatch CP3 (both verifiers) against current HEAD, re-run gates," \
+      "     then retry the transition." \
+      "OR (PM-authorized override, audited): rerun with --force --reason '<≥20 chars>'."
+    return $?
+  fi
+
+  # (b) require the CP3-Freshness-Exception trailer on EVERY post-review commit.
+  local c missing_trailer="" tr
+  while IFS= read -r c; do
+    [[ -z "$c" ]] && continue
+    tr=$(git -C "$project_root" log -1 \
+      --format='%(trailers:key=CP3-Freshness-Exception,valueonly)' "$c" 2>/dev/null)
+    [[ -z "$tr" ]] && { missing_trailer="$c"; break; }
+  done < <(git -C "$project_root" rev-list "${reviewed_head}..${current_head}" 2>/dev/null)
+
+  if [[ -n "$missing_trailer" ]]; then
+    _cp3_freshness_route "$timeline" "$policy" "missing_exception_trailer" \
+      "PRECONDITION FAIL: commit ${missing_trailer} past the reviewed CP3 head lacks a" \
+      "        'CP3-Freshness-Exception: <reason>' git trailer (D4 condition b)." \
+      "Fix: annotate the commit(s) with the trailer, OR re-dispatch CP3 against HEAD."
+    return $?
+  fi
+
+  # PASS-with-exception: both D4 conditions hold. Disclose the FULL file list.
+  local files_csv=""
+  if [[ ${#changed_files[@]} -gt 0 ]]; then
+    files_csv=$(printf '%s,' "${changed_files[@]}"); files_csv="${files_csv%,}"
+  fi
+  [[ -n "$timeline" ]] && log_event "$timeline" "cp3_freshness_exception" \
+    reviewed_head="$reviewed_head" head="$current_head" \
+    changed_file_count="${#changed_files[@]}" changed_files="$files_csv"
+  return 0
+}
+
 # fsm_check_orphan_dispatches — Component B of P040 (Dispatch Lifecycle Enforcement Bundle).
 # Reads <evidence_dir>/pending-dispatches.jsonl and refuses transition if any
 # start event lacks matching complete within expected_duration_max (default 600s
@@ -1614,6 +1785,15 @@ EOF
         echo "PRECONDITION FAIL: jq required to verify gates overall but not found." >&2
         return 1
       fi
+
+      # P060 Step 4: CP3 review freshness (OBS-20260702-03). The probe lives HERE
+      # (GATES:DONE) — a stale CP3 review (HEAD moved past its Reviewed-Head) must
+      # not pass as DONE evidence unless the D4 narrow exception holds. Grandfather
+      # + policy handled inside; default BLOCKING (D9).
+      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$PWD"; then
+        _PRECONDITION_FAIL_REASON="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
+        return 1
+      fi
       ;;
 
     ESCALATION:EXECUTE|ESCALATION:GATES)
@@ -2899,6 +3079,16 @@ EOF
       # P040 Component C: CP4 enforcement (must run before existing curator-report check)
       if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then
         return 1  # die() already called inside
+      fi
+
+      # P060 Step 4: CP3 freshness re-check at review→release. The GATES:DONE probe
+      # is the primary gate, but CP4 / review-phase commits can land AFTER DONE and
+      # move HEAD past the reviewed CP3 head — this re-check catches that class.
+      # Grandfather + policy (default BLOCKING, D9) handled inside.
+      if ! fsm_check_cp3_freshness "$evidence_dir" "$state_file" "$project_root"; then
+        log_event "${evidence_dir}/timeline.jsonl" "fsm_done_advance_fail" \
+          check="cp3_freshness" reason="${_PRECONDITION_FAIL_REASON:-cp3_stale_review}"
+        return 1
       fi
 
       # Curator report must exist
