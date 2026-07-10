@@ -52,7 +52,7 @@ Transitions are **rejected** (exit 1) if evidence of completed work is missing:
 |---|---|
 | READY→EXECUTE | `plan.json` exists, `total_steps >= 1` |
 | EXECUTE→GATES | `current_step >= total_steps` |
-| GATES→DONE | `gates_report.json` with `overall: pass` |
+| GATES→DONE | `gates_report.json` with `overall: pass` (+ plan-gate floor: `plan.json.gates[]` vs `excluded_gates[]`, P061 E1 — see §5) |
 | ESCALATION→EXECUTE/GATES | `escalation_decision` field set |
 | `done-advance review→release` | `curator-report` exists, `audit-report` exists, `pm_decision=merge` |
 
@@ -747,6 +747,67 @@ aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
 
 **Enforcement:** `--state-file` ensures gates only run in GATES state. `--report-file` persists
 `gates_report.json` — required by `GATES→DONE` precondition. Without it, transition is rejected.
+
+### Gate Profiles (`--profile`, P061 E1)
+
+`aid-run-gates.sh run-all` accepts an optional `--profile <name>` flag that selects a named
+subset of gates to run for that invocation, sourced from
+`execution.yaml.gate_profiles.<name>.include[]` — a whitelist of gate keys:
+
+```bash
+aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> <timeline_file> \
+  --state-file <state_file> --report-file <evidence_dir>/gates/gates_report.json \
+  --plan-json <evidence_dir>/plan.json \
+  --profile <name>
+```
+
+- **Omitting `--profile` preserves pre-P061 behavior exactly** — every gate defined under
+  `execution.yaml.gates` runs, even once `gate_profiles` exists in `execution.yaml`. This is
+  the backward-compatibility contract.
+- **Gates excluded by the active profile** — a gate defined under `.gates` but NOT listed in
+  the profile's `include[]` — is never dispatched to `run_gate`. It gets an explicit
+  `result: "profile_excluded"` row instead (counted toward the defined==processed integrity
+  contract, never silently dropped). A `required: true` gate excluded this way does **not**
+  fail the run — same treatment as a skipped `required: false` gate.
+- **Fail-loud validation, upfront, before any gate runs:**
+  - Unknown `--profile <name>` (no such key under `execution.yaml.gate_profiles`) → exit 1.
+  - A profile's `include[]` names a gate not defined under `execution.yaml.gates` → exit 1.
+- **`profile_source` is always `"cli_flag"` in this EPIC** — `--profile` is a purely explicit,
+  manual CLI flag today, with no automatic selection. Profile auto-selection by risk/phase
+  (P061 EPIC 2), the targeted test selector (EPIC 3), self-host default profile activation
+  (EPIC 4), and `/aid-do` + release invocation (EPIC 5) are **not implemented yet**.
+
+`gates_report.json` gains four additive fields:
+
+| Field | Value when `--profile` used | Value when omitted |
+|-------|------------------------------|---------------------|
+| `profile` | profile name (string) | `null` |
+| `profile_source` | `"cli_flag"` | `null` |
+| `profile_reason` | `"explicit --profile flag"` | `null` |
+| `excluded_gates` | array of excluded gate keys | `[]` |
+
+### GATES→DONE Precondition
+
+Beyond `gates_report.json.overall == "pass"`, the `GATES→DONE` transition enforces a
+**plan-gate floor** (P061 E1 Step 3): if `plan.json.gates[]` declares a gate mandatory, that
+gate must never vanish from the run just because the active `--profile` excluded it. Profile
+exclusion alone does not flip `overall` to `fail` (by design — see above), so without this
+check a plan-required gate could disappear from a run that still reports `overall: pass`.
+`aid-fsm.sh` cross-references `plan.json.gates[]` against `gates_report.json.excluded_gates[]`
+— any overlap refuses the transition with reason `plan_gate_profile_excluded`.
+
+- **Unconditional** — this check fires on every `GATES→DONE` attempt, not opt-in, regardless
+  of whether `--profile` was used. It is a no-op when `excluded_gates[]` is empty.
+- **Fail-loud on a malformed `plan.json`** — if `plan.json` exists at `evidence_dir/plan.json`
+  but fails to parse as JSON, the transition is refused with reason `plan_json_malformed`
+  rather than being silently treated as "no gate requirements".
+- **Design: fail-loud, not force-run** — `aid-fsm.sh` is a precondition checker, not a gate
+  executor; it does not re-run the excluded gate itself (that would duplicate
+  `aid-run-gates.sh`'s job). The fix is to widen the profile's `include[]` in
+  `execution.yaml.gate_profiles` and re-run gates via `advance-to-gates`.
+- **Override** — same scoping as the sibling `GATES→DONE` checks (`overall`, CP3 freshness):
+  `aid-fsm.sh transition GATES DONE <state_file> --force --reason '<≥20 chars — PM-authorized
+  reason>'`. Logged as `fsm_force_override` per the usual audit trail (§1).
 
 **On gate failure (retries remaining):**
 0. Capture the pre-fix ref BEFORE dispatching the fixer: `pre_fix_ref="$(git rev-parse HEAD)"`.
@@ -1780,7 +1841,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-11
+**Last Updated:** 2026-07-10
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
