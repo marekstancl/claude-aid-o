@@ -24,6 +24,10 @@ source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 # Shared plan-boundary review signals — _aid_read_toggle + _aid_validate_test_evidence
 # (B1: one substrate for the FSM compliance checks AND the C4 release aggregator).
 source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
+# Controller plugin-cache staleness guard (P060 Step 5) — defines
+# run_cache_preflight. Sourced AFTER aid-stage-log.sh so log_event already
+# exists (the lib's re-source guard then skips, preserving aid-fsm.sh's die()).
+source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -1954,6 +1958,17 @@ cmd_init() {
   local timeline_path=".aid-o/work/evidence/${epic_id}/${run_id}/timeline.jsonl"
   mkdir -p "$(dirname "$timeline_path")"
 
+  # ─── PRE-FLIGHT: Plugin-cache staleness guard — HARD STOP (P060 Step 5) ──
+  # anchor: cache_preflight_init_hardstop
+  # Runs BEFORE any git mutation OR the fsm-state.yaml write below. On dogfood
+  # skew this aborts here so fsm-state.yaml is never created (scenario f). The
+  # state file does not exist yet, so consumer recording is deferred to the
+  # post-write call (anchor: cache_preflight_init_record). Covers plugin.json
+  # version + scripts/ tree ONLY — see aid-cache-preflight.sh honesty header.
+  if ! run_cache_preflight "$state_file" "$timeline_path"; then
+    exit 1
+  fi
+
   if is_worktree; then
     log_info "Worktree mode detected (git_dir under .git/worktrees/) — skipping branch enforcement"
   else
@@ -2062,6 +2077,15 @@ streamlined_mode: $streamlined
 started_at: "${_now_iso}"
 created_at: ${_now_iso}
 EOF
+
+  # ─── PRE-FLIGHT: cache staleness — consumer controller recording ─────────
+  # anchor: cache_preflight_init_record
+  # State file now exists. On a consumer's first preflight of this run this
+  # appends controller_version + controller_hash (scenario c). Dogfood-match
+  # runs already passed the hard-stop above and record nothing here. Appended
+  # here (before the steps[] block below) so scalar fields stay grouped and the
+  # steps[] sequence remains the trailing YAML node. Never blocks init.
+  run_cache_preflight "$state_file" "$timeline_path" || true
 
   # Audit trail
   local timeline
@@ -2352,6 +2376,20 @@ cmd_get_state() {
 cmd_verify_state() {
   local state_file="$1"
   [[ -f "$state_file" ]] || { echo '{"error":"state_file not found"}'; exit 1; }
+
+  # ─── PRE-FLIGHT: Plugin-cache staleness guard (P060 Step 5) ──────────────
+  # anchor: cache_preflight_verify_state
+  # verify-state runs on EVERY run start (pipeline.md); cmd_init does NOT re-run
+  # on resume, so this covers the resume path. HARD STOP on dogfood skew; on a
+  # consumer's first preflight of the run it records controller_version/hash,
+  # and on a changed-controller resume it warns via controller_skew_detected
+  # (non-blocking). Timeline is derived next to the state file (never stdout —
+  # the JSON payload below must stay clean).
+  local _cp_timeline
+  _cp_timeline="$(dirname "$state_file")/timeline.jsonl"
+  if ! run_cache_preflight "$state_file" "$_cp_timeline"; then
+    exit 1
+  fi
 
   local state epic_id run_id current_step total_steps
   state=$(yaml_field "$state_file" state)
