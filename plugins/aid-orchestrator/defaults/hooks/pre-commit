@@ -1,42 +1,205 @@
 #!/usr/bin/env bash
 # AID-ORCHESTRATOR-HOOK-START (do not edit this block manually)
-# AID Orchestrator — FSM guard pre-commit hook
-# Blocks commits on FSM-managed branches when DONE state review is incomplete.
+# AID Orchestrator — FSM commit-scope + branch guard pre-commit hook (P060 D7).
+#
+# Fires on ALL branches (including main). Discovers the active run by scanning
+# state files filtered to guard-active states (EXECUTE|GATES|DONE), matches by
+# branch, and enforces that staged files stay within the state-appropriate scope:
+#   EXECUTE      → current step's allowed_paths (plan.json) ∪ evidence dir
+#   GATES        → union of ALL steps' allowed_paths     ∪ evidence dir
+#   DONE/review  → union of ALL steps' allowed_paths     ∪ evidence dir
+#   DONE/release → version whitelist (project.yaml versioning) + both CHANGELOGs
+#                  ∪ evidence dir
+# main is BLOCKED during EXECUTE/GATES (OBS-20260709-04: rogue commit on main),
+# but NOT during DONE/review (OBS-20260702-06: discovery and blocking differ —
+# a DONE/review run is discovered on main yet not blocked there). --no-verify
+# residue is caught out-of-band by the controller-side companion in aid-fsm.sh
+# (commit_scope_violation event at step-advance).
+#
+# Fail-open philosophy: absent tooling (jq/yq) or unreadable config never
+# hard-blocks a commit — it warns, passes, and emits a disclosure event.
 
 _AID_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
 
-if [[ "$_AID_BRANCH" == task/* || "$_AID_BRANCH" == epic/* ]]; then
+# Collect staged files (NUL-delimited → handles spaces/newlines in paths).
+_AID_STAGED=()
+while IFS= read -r -d '' _f; do
+  _AID_STAGED+=("$_f")
+done < <(git diff --cached --name-only -z 2>/dev/null)
 
-  # Extract epic/task ID from branch name for targeted fsm-state.yaml lookup
-  _AID_BRANCH_ID=$(echo "$_AID_BRANCH" | cut -d'/' -f2)
-  _AID_STATE_FILE=""
+# Nothing staged → nothing to guard (also covers non-commit invocations).
+[[ ${#_AID_STAGED[@]} -eq 0 ]] && exit 0
 
-  # Find state.yaml or fsm-state.yaml matching the branch ID (search runs/ + evidence/)
-  for _AID_SEARCH_DIR in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
-    [[ -d "$_AID_SEARCH_DIR" ]] || continue
-    while IFS= read -r _f; do
-      if grep -q "epic_id: ${_AID_BRANCH_ID}" "$_f" 2>/dev/null; then
-        _AID_STATE_FILE="$_f"
-        break 2
-      fi
-    done < <(find "$_AID_SEARCH_DIR" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null)
+# _aid_emit <timeline> <event> [k=v ...] — best-effort JSONL disclosure event.
+# No lib dependency; never fails the commit.
+_aid_emit() {
+  local _tl="$1"; shift
+  [[ -n "$_tl" ]] || return 0
+  local _ev="$1"; shift
+  local _ts; _ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  local _json="{\"ts\":\"${_ts}\",\"event\":\"${_ev}\""
+  local _kv _k _v
+  for _kv in "$@"; do
+    _k="${_kv%%=*}"; _v="${_kv#*=}"
+    _v="${_v//\\/\\\\}"; _v="${_v//\"/\\\"}"
+    _json+=",\"${_k}\":\"${_v}\""
   done
+  _json+="}"
+  printf '%s\n' "$_json" >> "$_tl" 2>/dev/null || true
+}
 
-  if [[ -n "$_AID_STATE_FILE" ]]; then
-    _AID_FSM_STATE=$(grep '^state:' "$_AID_STATE_FILE" | awk '{print $2}')
-    _AID_DONE_PHASE=$(grep '^done_phase:' "$_AID_STATE_FILE" | awk '{print $2}')
+# _aid_in_scope <file> — true if <file> matches any entry of _AID_SCOPE[]
+# (exact path or directory-prefix match).
+_aid_in_scope() {
+  local _f="$1" _s
+  for _s in "${_AID_SCOPE[@]}"; do
+    [[ -z "$_s" ]] && continue
+    [[ "$_f" == "$_s" || "$_f" == "$_s"/* ]] && return 0
+  done
+  return 1
+}
 
-    if [[ "$_AID_FSM_STATE" == "DONE" && "$_AID_DONE_PHASE" != "release" ]]; then
-      echo "AID HOOK: Commit blocked — FSM is in DONE/${_AID_DONE_PHASE:-review}." >&2
-      echo "Run Curator + Auditor, then: aid-fsm.sh done-advance review release" >&2
-      exit 1
+# _aid_enforce_scope <label> — block the commit if any staged file falls outside
+# _AID_SCOPE[], printing the offending files and the permitted scope.
+_aid_enforce_scope() {
+  local _label="$1" _viol=() _f
+  for _f in "${_AID_STAGED[@]}"; do
+    _aid_in_scope "$_f" || _viol+=("$_f")
+  done
+  if [[ ${#_viol[@]} -gt 0 ]]; then
+    echo "AID HOOK: Commit blocked — staged file(s) outside ${_label} scope:" >&2
+    for _f in "${_viol[@]}"; do echo "  - $_f" >&2; done
+    echo "Permitted scope for this state:" >&2
+    for _f in "${_AID_SCOPE[@]}"; do echo "  + $_f" >&2; done
+    echo "Fix: unstage the out-of-scope file(s), or advance the FSM to the state that permits them." >&2
+    exit 1
+  fi
+}
+
+# _aid_run_scope_check <state_file> — build _AID_SCOPE for the run's state and
+# enforce it. Fail-open on absent jq/yq or unreadable config (warn + disclose).
+_aid_run_scope_check() {
+  local _sf="$1"
+  local _evd; _evd=$(dirname "$_sf")
+  local _tl="${_evd}/timeline.jsonl"
+  local _st _dp _cs _plan _paths _p
+  _st=$(grep '^state:' "$_sf" 2>/dev/null | awk '{print $2}')
+  _dp=$(grep '^done_phase:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+  _cs=$(grep '^current_step:' "$_sf" 2>/dev/null | awk '{print $2}')
+  _plan="${_evd}/plan.json"
+
+  # Evidence dir is always in scope.
+  _AID_SCOPE=("$_evd")
+
+  # DONE/release derives its whitelist from project.yaml versioning (needs yq),
+  # NOT from plan.json — handle it before the jq gate.
+  if [[ "$_st" == "DONE" && "$_dp" == "release" ]]; then
+    local _proj=".aid-o/config/project.yaml"
+    if ! command -v yq >/dev/null 2>&1 || [[ ! -r "$_proj" ]]; then
+      echo "AID HOOK: warning — versioning config unavailable (yq/project.yaml); passing commit." >&2
+      _aid_emit "$_tl" commit_guard_disclosure reason=versioning_absent state="$_st" done_phase="$_dp"
+      return 0
     fi
-
-    if [[ "$_AID_FSM_STATE" == "READY" ]]; then
-      echo "AID HOOK: Commit blocked — FSM is in READY (not yet executing)." >&2
-      exit 1
+    local _src
+    _src=$(yq -r '.versioning.source // ""' "$_proj" 2>/dev/null)
+    if [[ -z "$_src" || "$_src" == "null" ]]; then
+      echo "AID HOOK: warning — no versioning config in project.yaml; passing commit." >&2
+      _aid_emit "$_tl" commit_guard_disclosure reason=versioning_absent state="$_st" done_phase="$_dp"
+      return 0
     fi
+    # Whitelist = versioning.source ∪ versioning.files[].path ∪ both CHANGELOGs.
+    _AID_SCOPE+=("$_src")
+    _AID_SCOPE+=("CHANGELOG.md" "plugins/aid-orchestrator/CHANGELOG.md")
+    while IFS= read -r _p; do [[ -n "$_p" ]] && _AID_SCOPE+=("$_p"); done \
+      < <(yq -r '.versioning.files[].path' "$_proj" 2>/dev/null)
+    _aid_enforce_scope "DONE/release (version whitelist)"
+    return 0
   fi
 
+  # EXECUTE / GATES / DONE-review all derive scope from plan.json (needs jq).
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "AID HOOK: warning — jq not found; skipping commit-scope check." >&2
+    _aid_emit "$_tl" commit_guard_disclosure reason=jq_absent state="$_st" branch="$_AID_BRANCH"
+    return 0
+  fi
+  if [[ ! -r "$_plan" ]]; then
+    echo "AID HOOK: warning — plan.json unreadable; passing commit." >&2
+    _aid_emit "$_tl" commit_guard_disclosure reason=plan_unreadable state="$_st"
+    return 0
+  fi
+
+  local _label
+  case "$_st" in
+    EXECUTE)
+      _paths=$(jq -r --argjson i "${_cs:-0}" '.steps[$i].allowed_paths[]?' "$_plan" 2>/dev/null)
+      _label="EXECUTE step ${_cs}"
+      ;;
+    GATES)
+      _paths=$(jq -r '.steps[].allowed_paths[]?' "$_plan" 2>/dev/null)
+      _label="GATES (union of all steps)"
+      ;;
+    DONE)
+      # done_phase != release here → review.
+      _paths=$(jq -r '.steps[].allowed_paths[]?' "$_plan" 2>/dev/null)
+      _label="DONE/review (union of all steps)"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if [[ -z "$_paths" ]]; then
+    echo "AID HOOK: warning — empty allowed_paths for ${_label}; passing commit." >&2
+    _aid_emit "$_tl" commit_guard_disclosure reason=empty_allowed_paths state="$_st" step="${_cs}"
+    return 0
+  fi
+  while IFS= read -r _p; do [[ -n "$_p" ]] && _AID_SCOPE+=("$_p"); done <<< "$_paths"
+  _aid_enforce_scope "$_label"
+}
+
+# ── Discover the active run (guard-active states only) ───────────────────────
+_AID_STATE_FILE=""        # run whose branch == current branch (primary match)
+_AID_MAIN_ACTIVE=""       # an EXECUTE/GATES run on any branch (main-block source)
+_AID_MAIN_RELEASE=""      # a DONE/release run (main version-whitelist source)
+
+for _dir in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
+  [[ -d "$_dir" ]] || continue
+  while IFS= read -r _sf; do
+    _st=$(grep '^state:' "$_sf" 2>/dev/null | awk '{print $2}')
+    case "$_st" in EXECUTE|GATES|DONE) ;; *) continue ;; esac
+    _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]]; then
+      _AID_STATE_FILE="$_sf"
+      break 2
+    fi
+    if [[ "$_AID_BRANCH" == "main" ]]; then
+      _dp=$(grep '^done_phase:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      if [[ "$_st" == "EXECUTE" || "$_st" == "GATES" ]]; then
+        [[ -z "$_AID_MAIN_ACTIVE" ]] && _AID_MAIN_ACTIVE="$_sf"
+      elif [[ "$_st" == "DONE" && "$_dp" == "release" ]]; then
+        [[ -z "$_AID_MAIN_RELEASE" ]] && _AID_MAIN_RELEASE="$_sf"
+      fi
+    fi
+  done < <(find "$_dir" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null)
+done
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+if [[ -n "$_AID_STATE_FILE" ]]; then
+  # On the run's own branch → per-state scope check (covers task/epic AND a
+  # project that legitimately runs on main).
+  _aid_run_scope_check "$_AID_STATE_FILE"
+elif [[ "$_AID_BRANCH" == "main" && -n "$_AID_MAIN_ACTIVE" ]]; then
+  # Rogue commit on main while a run is mid-EXECUTE/GATES elsewhere (OBS-04).
+  _AID_ACT_STATE=$(grep '^state:' "$_AID_MAIN_ACTIVE" 2>/dev/null | awk '{print $2}')
+  echo "AID HOOK: Commit blocked — HEAD is 'main' while an active run is in ${_AID_ACT_STATE}." >&2
+  echo "Active run state file: ${_AID_MAIN_ACTIVE}" >&2
+  echo "Execution/gate commits belong on the run's task/epic branch, not main (OBS-20260709-04)." >&2
+  exit 1
+elif [[ "$_AID_BRANCH" == "main" && -n "$_AID_MAIN_RELEASE" ]]; then
+  # DONE/release merged to main → version-whitelist scope check (no main-block).
+  _aid_run_scope_check "$_AID_MAIN_RELEASE"
 fi
+# else: no active run governs this commit context → no-op pass.
+
+exit 0
 # AID-ORCHESTRATOR-HOOK-END

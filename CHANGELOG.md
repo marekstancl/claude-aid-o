@@ -3,6 +3,25 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.54.0] — 2026-07-10
+
+### Added
+- **Gate-count integrity guard** — `aid-run-gates.sh` asserts gates-defined equals gates-processed before emitting `overall`, forcing `overall=fail` plus a nonzero exit on any mismatch so a lost or skipped gate can no longer silently pass, with the FSM GATES:DONE precondition loud-failing when jq is missing.
+- **Undefined-gate reconciliation** — each `plan.json` gate is reconciled against `execution.yaml`, a declared-but-undefined gate emits a `result: fail / reason: undefined_gate` row that prevents `overall: pass`, and the FSM EXECUTE:GATES precondition requires a `plan_gates_reconciled` marker before advancing.
+- **CP2 step-range prefilter** — the prefilter derives its diff range from the step boundary instead of `HEAD~1..HEAD`, hard-exiting on an undetermined range with a `CP2_RANGE_POLICY=observe` seam that downgrades to a `cp2_range_fallback` event.
+- **CP3 head-freshness check** — GATES:DONE and done-advance compare the verifier-reviewed head against current HEAD and block on stale evidence by default, with a `CP3_FRESHNESS_POLICY=observe` seam and an explicit D4 exception event for allowed-scope gate-fix or test-only commits past the reviewed head.
+- **Runtime cache preflight (IMP-179 partial)** — `scripts/lib/aid-cache-preflight.sh` compares the plugin version and a content-hash of `scripts/` against the running plugin cache, hard-stopping on the dogfood repo and recording the controller version into fsm-state/timeline on consumer repos, closing the scripts/version half of the subagent-cache-staleness gap.
+- **Commit-path guard** — a `defaults/hooks/pre-commit` hook restricts orchestrated commits to the per-step `allowed_paths` and refuses when HEAD diverges from the fsm-state branch, with an FSM companion emitting `commit_scope_violation` telemetry and a `commit_guard_disclosure` event.
+- **Queue dependency revalidation** — each `blocked_on` dependency is re-checked via `git merge-base --is-ancestor` at EPIC start, failing loud on an unparseable queue or an unresolved dependency and otherwise recording advisory telemetry.
+- **C4 head-match policy hook** — the release aggregator makes `head_match` consequential, staying observe (`c4_head_match_divergence` / `c4_head_match_unknown` events) until an E10 promotion of `head_match_policy` to blocking.
+- **E11 enablement map** — `docs/plans/BACKLOG.md` records which legacy CP mechanisms each P060 step makes removable or cutover-ready, plus the mandatory K4×K8 binding tying `head_match_policy: blocking` promotion to removal of the CP3 freshness branch.
+
+### Changed
+- **Enforcement registry** — 8 P060 rows added (271 to 279 total), covering the new gate-integrity, prefilter, freshness, cache-preflight, commit-path, queue, and C4 head-match mechanisms with their observe/blocking posture and OBS-ledger closures.
+
+### Fixed
+- **False-green and stale-evidence pipeline gaps** — closes the OBS-ledger family where a lost gate, an undefined gate, a wrong prefilter range, stale reviewer evidence, a stale plugin cache, an out-of-scope or wrong-branch commit, and an unrevalidated queue dependency could each pass the pipeline undetected.
+
 ## [2.53.0] — 2026-07-09
 
 ### Added

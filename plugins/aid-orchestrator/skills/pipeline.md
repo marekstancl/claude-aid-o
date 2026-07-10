@@ -834,7 +834,8 @@ bash $AID_PLUGIN_PATH/scripts/aid-fsm.sh transition EXECUTE GATES "$STATE_FILE"
 
 Use `advance-to-gates` for new code; manual flow stays for edge-case operations.
 
-**`--plan-json` is required, not optional, when a `plan.json` exists.** The runner
+**`--plan-json` is required, not optional, when a `plan.json` exists.** Canonical
+invocation: `aid-run-gates.sh run-all <execution.yaml> <epic_id> <run_id> --state-file <state> --report-file <report> --plan-json <evidence_dir>/plan.json`. The runner
 reconciles `plan.json.gates[]` against `execution.yaml` and writes a
 `plan_gates_reconciled: true` marker; the `EXECUTE→GATES` precondition refuses the
 transition if a report is produced by bypassing `--plan-json` while `plan.json`
@@ -1616,6 +1617,33 @@ Validates EPIC file, checks for duplicates, runs Kahn's cycle detection, appends
 
 **Eligibility:** READY (deps completed) | WAITING (deps in progress) | BLOCKED (deps failed)
 Only READY entries are eligible for pickup.
+
+**Dependency revalidation before respecting a blocked/waiting status (P060, OBS-20260709-06):**
+A queue entry's `depends_on` (the real schema field — epic IDs) is revalidated against
+**live git** before any consumer treats the entry as blocked. This closes the false-BLOCK
+dual of bookkeeping staleness: a stale "awaiting merge" flag once held a dependent EPIC
+blocked long after its dependency had merged (and its task branch was deleted — the norm),
+and a human had to catch it.
+
+- **Consumer contract:** BEFORE respecting a blocked/waiting status at queue pickup — and at
+  `/aid-run` pre-start, before honoring a blocked queue entry — call:
+  ```bash
+  aid-fsm.sh queue-revalidate <epic_id>   # → unblocked | blocked | failed | noop
+  ```
+  Respect the *revalidated* verdict, not the stored flag. `unblocked` → eligible; `blocked` →
+  a genuinely-unmerged dep, keep waiting; `failed` (fail-loud) → stop and surface to PM;
+  `noop` → nothing to revalidate (missing queue / no entry / no deps), fall through to the
+  stored status.
+- **4-output logic per dep (D8):** (1) dep branch exists + is-ancestor of main/HEAD → unblock
+  (`queue_dep_revalidated`); (2) branch exists + NOT ancestor → blocked (correct — dep not
+  merged); (3) branch **deleted after merge (the norm)** → merged-detection: unblock if the
+  dep's queue `status: completed`, OR its evidence fsm-state is DONE, OR `git log --merges
+  --grep` shows it reachable from main; (4) no signal at all → fail-loud (`queue_dep_unresolved`).
+  Unparseable queue → `queue_parse_failed` fail-loud.
+- **Also wired at init:** `aid-fsm.sh init` runs the same revalidation as a non-fatal new read
+  path (a blocked/unresolved dep is a scheduling signal, not an init failure). During a live
+  dogfood run the controller may execute a *cached* aid-fsm.sh that predates this — so the
+  consumer call above is the enforcement surface, not init alone.
 
 **Priority order:** critical > high > medium > low; within same priority: FIFO (added_at).
 

@@ -23,6 +23,19 @@
 # of enforcement (the transition follows the legacy verdict, result=crash logged).
 #
 # Test/CI seam: RELEASE_DECISION_POLICY=<path> overrides this file's location.
+#
+# head_match_policy (E-060-2_2 Step 8) — governs the per-input at-HEAD staleness signal
+# (the `c4_head_match_policy` enforcement, registered in the enforcement registry). SEPARATE
+# from `enforcement` above (which is the release_ready dual-run toggle).
+#
+#   observe  → the aggregator already downgrades a stale OUT-OF-PACK input (gates_report,
+#              plan_review, reporter/simplifier delivery reports) with head_match==false to a
+#              `blocked` inputs[] row + blocker (net-new, deterministic in the artifact), and the
+#              FSM hook emits c4_head_match_divergence / c4_head_match_unknown telemetry. An
+#              `unknown` basis NEVER counts as at-head but does not block; it is surfaced in the
+#              PM brief's "At-HEAD verification warnings" section. (default until E10.)
+#   blocking → reserved for E10: promote the head_match signal into a transition-level hard fail.
 # =============================================================================
 version: 1
 enforcement: observe
+head_match_policy: observe

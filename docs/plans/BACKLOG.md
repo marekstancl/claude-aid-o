@@ -1808,6 +1808,41 @@ read-model, not false-green), run_id reuse / rescope / transactional epic-gen
 (lifecycle cleanup), cross-repo CP3, shell_pipeline_smoke timeout (fix as
 perf/config bug outside the plan).
 
+### E11 enablement
+
+What the P060 hygiene block (E-060-2_2) makes removable/cutover-ready in E11.
+Each anchor names the legacy mechanism, the P060 step that hardened or replaced
+it, and the E11 disposition. This is the concrete input to the mandatory E11
+mechanism inventory (`remove` | `replace_by_c0c4` | `keep_risk_gated` |
+`keep_alias_only`) above.
+
+- **CP3 markdown freshness branch ← Step 4** — the CP3 head-freshness check
+  (`cp3_head_freshness`, observe) is a temporary legacy guard. Removable in E11,
+  replaced by C4 at-head evidence verification + C2. Disposition target:
+  `replace_by_c0c4`.
+- **cp2 prefilter mode ← E11 cutover** — the CP2 step-range prefilter
+  (`cp2_step_range`, observe with `CP2_RANGE_POLICY`) stays as the interim
+  diff-scoping guard until the E11 cutover decides whether C0/C2 subsume it.
+  Disposition target: `replace_by_c0c4` or `keep_risk_gated` (E10 data decides).
+- **manual cache verify/snapshot workflow ← Step 5** — the runtime cache-preflight
+  (`cache_preflight`, dogfood hard-stop / consumer warn) replaces the manual
+  "verify plugin cache / snapshot before run" workflow; the manual step is
+  removable in E11 once preflight is trusted. Disposition target: `remove`.
+- **OBS-01 family probe tracking ← Step 6** — the OBS-20260709-01/04 commit-scope
+  probes are closed by `commit_path_guard`; E11 retires the OBS-01-family probe
+  tracking entries once the guard has a clean E10 observation window.
+  Disposition target: `remove`.
+
+**K4×K8 (E10-window) binding — MANDATORY, decided in E10 calibration:**
+`head_match_policy: blocking` (promoting `c4_head_match_policy` from observe) may
+be promoted ONLY simultaneously with (or after) removing the CP3 freshness branch
+(Step 4), OR C4 must take over the D4 exception (an allowed-scope commit past pack
+head keeps `head_match` true via a disclosure event) — otherwise, in the
+transition window, the *same* D4-permitted gate-fix commit would pass CP3 (D4
+exception) yet make C4's `head_match==false` and block, structurally cancelling
+the PM speed valve. The decision belongs to E10 calibration and this map names it
+so it is not lost.
+
 ### OBS-20260709-02 — correction (2026-07-10): FSM presence gates DO exist; incident took a bypass window
 
 Verified against `aid-fsm.sh` @ `23964c8` (task/E-059-2_2/main): plan-close

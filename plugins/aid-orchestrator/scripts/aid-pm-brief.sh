@@ -217,6 +217,19 @@ build_brief_md() {
           "- **Reporter:** " + (($r.reporter_status // "unknown") | tostring) + " — " + (($r.reporter_reason // "") | tostring),
           "- **Simplifier:** " + (($r.simplifier_status // "unknown") | tostring) + " — " + (($r.simplifier_reason // "") | tostring),
           "",
+          "## At-HEAD verification warnings",
+          ""
+        ]
+      + (( ($r.inputs // [])
+           | map(select((.head_match == "unknown")
+                        and (.verdict != "advisory") and (.verdict != "not_applicable"))) ) as $unk
+         | if ($unk | length) == 0 then [ "_All gating inputs verified at HEAD (no unknown head_match)._" ]
+           else ($unk | map("- **" + ((.id // "?") | tostring)
+                             + "** — head_match could not be verified (unknown): "
+                             + ((.reason // "") | tostring)))
+           end)
+      + [
+          "",
           "## Blockers",
           ""
         ]

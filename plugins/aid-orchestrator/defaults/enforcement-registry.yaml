@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 271          # granular registry rows; recomputed via `.enforcements|length` after adding release_policy_dual_run + release_policy_preempted + force_writes_waiver (E-059-2_2 Step 5; was 268 after E-059-1_2 Step 2's invalidation_map_expected)
+  enforcements: 279          # granular registry rows; recomputed via `.enforcements|length` after adding 8 P060 false-green/stale-evidence rows (E-060-2_2 Step 9; was 271 after E-059-2_2 Step 5). The 8 new rows carry no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
   mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
   mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
   verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
@@ -890,3 +890,81 @@ enforcements:
     test: "scripts/tests/bats/test-release-policy.bats"
 
   - {id: force_writes_waiver, type: 4, source: "scripts/aid-fsm.sh (grep: 'every --force writes a visible protocol-v2 waiver')", instruction: "defaults/schemas/waiver.schema.json", severity: advisory, surface: internal-guard, status: active, verdict: ALIGNED, description: "fsm_handle_force_override writes a protocol-v2 waiver-<transition>-<ts>.json (payload waived_check/reason>=20/waived_by/waived_at/scope/visible:true) on EVERY --force across all 4 call sites (init plan-gate, transition, increment-step, done-advance); mkdir -p empty-guards the plan-gate site where the evidence dir may not be materialized yet; the C4 aggregator surfaces it in waivers_applied[] (Waived != pass); immediate structural guarantee — active, no TTL", test: "scripts/tests/bats/test-release-policy.bats"}
+
+  # ── E-060-2_2: P060 false-green / stale-evidence hardening (8 rows) ──────────
+  # Eight OBS-ledger-backed fixes shipped in P060 EPIC 1+2. Rows 1,2,6,7 are hard
+  # structural/blocking (active). Rows 3,4,5 are observe-gated mechanisms that are
+  # active but downgrade to telemetry under their *_POLICY seam. Row 8
+  # (c4_head_match_policy) is planned/observe until E10 promotion. Per the DG-07
+  # convention above these rows carry NO verdict field.
+  - id: gates_count_integrity
+    type: 4
+    source: "scripts/aid-run-gates.sh (grep: '_integrity')"
+    instruction: "scripts/aid-fsm.sh GATES:DONE jq loud-fail (defined==processed)"
+    severity: blocking
+    surface: "gates-runner + FSM-precondition"
+    status: active
+    description: "out-of-band hard-fail: aid-run-gates.sh asserts gates-defined == gates-processed before emitting overall; a mismatch forces overall=fail + nonzero exit so a lost/skipped gate can no longer silently pass, and the FSM GATES:DONE precondition loud-fails when jq is missing (precondition fail, never a silent pass); closes OBS-20260708-07"
+  - id: undefined_gate_reconciliation
+    type: 4
+    source: "scripts/aid-run-gates.sh (grep: 'undefined_gate')"
+    instruction: "scripts/aid-fsm.sh EXECUTE:GATES plan_gates_reconciled marker"
+    severity: blocking
+    surface: "gates-runner + FSM-precondition"
+    status: active
+    description: "each plan.json gate is reconciled against execution.yaml; a declared gate with no definition emits a result: fail / reason: undefined_gate row so overall cannot pass, and the FSM EXECUTE:GATES precondition requires the plan_gates_reconciled marker before advancing; closes OBS-20260702-05"
+  - id: cp2_step_range
+    type: 5
+    source: "scripts/aid-prefilter.sh (grep: 'range_undetermined')"
+    instruction: "scripts/aid-fsm.sh (grep: 'step_commit') producer"
+    severity: blocking
+    surface: "CP2/prefilter"
+    enforcement: observe
+    status: active
+    description: "CP2 prefilter derives its diff range from the step boundary (never HEAD~1..HEAD); an undetermined range hard-exits 22 by default while CP2_RANGE_POLICY=observe downgrades to a cp2_range_fallback event and the transition continues; both events are named — the blocking exit-22 path and the would_block/observe cp2_range_fallback event; closes OBS-20260705-01"
+  - id: cp3_head_freshness
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'fsm_check_cp3_freshness')"
+    instruction: "agents/verifier.md (grep: 'Reviewed-Head:') producer"
+    severity: blocking
+    surface: "GATES:DONE + done-advance precondition"
+    enforcement: observe
+    status: active
+    description: "GATES:DONE + done-advance compares the verifier-reviewed head_sha (producer records Reviewed-Head: first) against current HEAD; stale evidence blocks by default while CP3_FRESHNESS_POLICY=observe downgrades; both events are named — cp3_freshness_would_block (observe) and the cp3_freshness_exception D4 event (allowed-scope gate-fix/test-only commit past the reviewed head); closes OBS-20260702-03"
+  - id: cache_preflight
+    type: 1
+    source: "scripts/lib/aid-cache-preflight.sh"
+    instruction: "scripts/aid-fsm.sh cmd_init / cmd_verify_state"
+    severity: blocking
+    surface: "runtime-preflight"
+    enforcement: observe
+    status: active
+    description: "cmd_init/cmd_verify_state compare plugin.json version + a content-hash of scripts/ against the running plugin cache; on the dogfood repo a skew is a hard stop (AID_CACHE_PREFLIGHT_OVERRIDE seam) while consumer repos only record the controller version into fsm-state/timeline and warn; closes IMP-179 partially (scripts/ + version skew only — agent-instruction staleness stays open)"
+  - id: commit_path_guard
+    type: 8
+    source: "defaults/hooks/pre-commit"
+    instruction: "scripts/aid-fsm.sh (grep: 'commit_scope_violation') companion"
+    severity: blocking
+    surface: "commit-time + step-advance"
+    status: active
+    description: "the pre-commit hook restricts an orchestrated commit to the per-step allowed_paths (P058 machinery) and refuses when git symbolic-ref HEAD != the fsm-state branch (blocking at commit time); the FSM companion emits commit_scope_violation advisory-telemetry at step-advance plus a commit_guard_disclosure event; closes OBS-20260709-01 + OBS-20260709-04"
+  - id: queue_dep_revalidation
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'queue_revalidate')"
+    instruction: n/a
+    severity: blocking
+    surface: "consumer/queue-pickup"
+    status: active
+    description: "at EPIC start (queue pickup) each blocked_on dependency is re-checked via git merge-base --is-ancestor; a queue that cannot be parsed (queue_parse_failed) or an unresolved dependency (queue_dep_unresolved) fails loud, otherwise the revalidation result is advisory telemetry; closes OBS-20260709-06"
+  - id: c4_head_match_policy
+    type: 9
+    source: "scripts/aid-release-policy.sh (grep: 'head_match')"
+    instruction: "scripts/aid-fsm.sh dual-run hook (grep: 'c4_head_match_divergence')"
+    severity: blocking
+    surface: "C4-release-decision"
+    enforcement: observe
+    status: planned
+    deadline: "2026-12-31"
+    promotion_phase: E10
+    deferred_until: "2026-12-31"
+    description: "the C4 aggregator makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until E10 it stays observe and emits c4_head_match_divergence (input not at pack head) and c4_head_match_unknown (revision.head_sha absent, cannot verify) without gating; blocking promotion E10"

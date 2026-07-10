@@ -100,12 +100,21 @@ The report frontmatter is the contract the FSM checks:
 ```yaml
 _generated_by: aid-orchestrator:reporter@{your_agent_id}
 _generated_at: "{ISO 8601}"
+Head: {git HEAD sha at generation}   # at-HEAD provenance (see below) — MUST be the full `git rev-parse HEAD`
 plan_id: "{plan_id}"
 epics: ["{epic_id}", ...]
 test_outcome: pass | partial | no-runtime
 _test_evidence:
   - "reporter/{artifact-file}"   # ≥1, each MUST exist on disk
 ```
+
+**At-HEAD provenance (`Head:` line) — REQUIRED.** Emit a `Head: <sha>` line carrying the exact
+`git rev-parse HEAD` at generation time. This is the C4 release aggregator's ONLY at-HEAD binding
+for the delivery report: the report lives under `.aid-o/reports/` which is gitignored, so a git-log
+binding is impossible and mtime is never trusted. If the `Head:` line is present and its sha matches
+the release HEAD, the aggregator records `head_match: true`; if it differs, `head_match: false` (the
+report is stale → a net-new release blocker); if the line is ABSENT, `head_match: "unknown"` (never
+counts as at-head, surfaced in the PM brief). Never fabricate or copy a stale sha — always the live HEAD.
 
 ### Boundary Manifest (committed, CI-readable)
 

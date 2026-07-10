@@ -46,6 +46,7 @@ source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
 INPUTS_JSON="[]"
 BLOCKERS_JSON="[]"
 WAIVERS_JSON="[]"
+WAIVER_FINDINGS_JSON="[]"   # E-060-2_2 Step 8 — per-waiver disposition (applied | orphan_waiver)
 
 # Reporter / Simplifier CONDITIONAL results (set by compute_reporter/compute_simplifier)
 REPORTER_STATUS="not_applicable"
@@ -59,7 +60,11 @@ SIMPLIFIER_ARTIFACT="simplifier-report.md"
 # Small deterministic helpers
 # ---------------------------------------------------------------------------
 
-# add_input <id> <artifact> <verdict> <reason> <head_match(true|false)>
+# add_input <id> <artifact> <verdict> <reason> <head_match>
+# head_match (5th arg) is a JSON-ENCODED value — `true`, `false`, or the quoted JSON string
+# `"unknown"` (E-060-2_2 Step 8). It is passed via --argjson, so a bare `unknown` would crash
+# jq: callers MUST pass either a bare boolean or `'"unknown"'`. The head_match helpers below
+# already echo the JSON-encoded form (true | false | "unknown").
 # jq -n (null input) — the row is built purely from --arg/--argjson; without -n jq would
 # block reading stdin.
 add_input() {
@@ -86,15 +91,68 @@ _is_json() {
   [[ -n "$(jq -c . "$f" 2>/dev/null)" ]] && jq -e . "$f" >/dev/null 2>&1
 }
 
-# _artifact_head_match <file> — echoes true|false from .revision.head_sha vs CURRENT_HEAD.
-# Missing file → false; no revision.head_sha (n/a) → true (do not penalise non-v2 artifacts).
+# _artifact_head_match <file> [mode] — echoes the JSON-encoded at-HEAD basis: true | false | "unknown".
+# E-060-2_2 Step 8 — the per-input comparison basis (contract 2). An UNCOMPUTABLE basis is ALWAYS
+# the declared string "unknown", NEVER a silent true (the pre-Step-8 default `→true` is the class
+# L1-B3 bug where a stale/unstamped artifact looked usable).
+#   mode=direct   (default): .revision.head_sha == CURRENT_HEAD → true; present-but-differs → false;
+#                            no stamp → "unknown" (e.g. a legacy gates_report the Step-2 runner
+#                            never stamped — cannot be judged, so declare unknown).
+#   mode=ancestry (plan_review): .revision.head_sha is an ANCESTOR of CURRENT_HEAD → true (a
+#                            plan-time artifact is stale by construction; correct lineage → basis
+#                            met, and it STAYS true after HEAD moves on with release commits);
+#                            non-ancestor (rebase / foreign branch) → false; no stamp → "unknown".
+# Missing file → false (a required-but-absent artifact is definitively not at-HEAD).
 _artifact_head_match() {
-  local f="$1" hs rc=0
+  local f="$1" mode="${2:-direct}" hs rc=0
   [[ -f "$f" ]] || { echo false; return 0; }
-  command -v jq >/dev/null 2>&1 || { echo true; return 0; }
+  command -v jq >/dev/null 2>&1 || { echo '"unknown"'; return 0; }   # uncomputable → declared unknown
   hs="$(jq -r '.revision.head_sha // ""' "$f" 2>/dev/null)" || rc=$?
-  { [[ $rc -ne 0 ]] || [[ -z "$hs" ]]; } && { echo true; return 0; }
-  [[ "$hs" == "${CURRENT_HEAD:-}" ]] && echo true || echo false
+  { [[ $rc -ne 0 ]] || [[ -z "$hs" ]]; } && { echo '"unknown"'; return 0; }
+  if [[ "$mode" == "ancestry" ]]; then
+    [[ -z "${CURRENT_HEAD:-}" ]] && { echo '"unknown"'; return 0; }
+    if git -C "${PROJECT_ROOT:-.}" merge-base --is-ancestor "$hs" "$CURRENT_HEAD" 2>/dev/null; then
+      echo true
+    else
+      echo false
+    fi
+    return 0
+  fi
+  # direct
+  [[ -z "${CURRENT_HEAD:-}" ]] && { echo '"unknown"'; return 0; }
+  [[ "$hs" == "${CURRENT_HEAD}" ]] && echo true || echo false
+}
+
+# _markdown_head_match <file> — at-HEAD basis for our OWN markdown producers (reporter delivery
+# report, simplifier-report.md), which have NO JSON `revision` block. E-060-2_2 Step 8 contract 3:
+# mtime is NEVER a basis; the binding is the producer provenance line `Head: <sha>`. sha matches
+# CURRENT_HEAD (full or as a prefix) → true; present-but-differs → false; NO provenance line → the
+# declared string "unknown" (git-log binding is impossible — .aid-o/reports/ is gitignored).
+_markdown_head_match() {
+  local f="$1" sha=""
+  [[ -f "$f" ]] || { echo '"unknown"'; return 0; }
+  sha="$(grep -iE '^[[:space:]]*Head:[[:space:]]*[0-9a-fA-F]{7,40}([[:space:]]|$)' "$f" 2>/dev/null \
+        | head -1 | sed -E 's/^[[:space:]]*[Hh][Ee][Aa][Dd]:[[:space:]]*//; s/[[:space:]].*$//')" || sha=""
+  [[ -z "$sha" ]] && { echo '"unknown"'; return 0; }
+  [[ -z "${CURRENT_HEAD:-}" ]] && { echo '"unknown"'; return 0; }
+  # Accept an abbreviated sha (>=7) that is a prefix of the full CURRENT_HEAD, or an exact match.
+  if [[ "$CURRENT_HEAD" == "$sha" || ( "${#sha}" -ge 7 && "$CURRENT_HEAD" == "$sha"* ) ]]; then
+    echo true
+  else
+    echo false
+  fi
+}
+
+# _is_canonical_input <id> — membership test for the 12 canonical release-decision input ids
+# (mirrors the blockers.input_id enum in release-decision.schema.json). Used by the waiver→input
+# mapping (contract 6).
+_is_canonical_input() {
+  case "$1" in
+    review_profile|delivery_gate|semantic_review_final|acceptance_evidence|gates_report|\
+curator_report|plan_review|verification_report|audit_report|invalidation_map|reporter|simplifier)
+      return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # check_required_present <id> <blocker_id> <file> — REQUIRED file rows.
@@ -402,7 +460,17 @@ main() {
     gates_report_path="${EVIDENCE_DIR}/gates/gates_report.json"
   fi
   if [[ -n "$gates_report_path" ]] && _is_json "$gates_report_path"; then
-    add_input gates_report "gates_report.json" "pass" "present at ${gates_report_path#"${EVIDENCE_DIR}/"}" "$(_artifact_head_match "$gates_report_path")"
+    # gates_report is OUT of evidence-verify's --at-head coverage (contract 1), so a stale stamp
+    # is a NET-NEW blocker here: direct compare of the Step-2-stamped .revision.head_sha vs HEAD.
+    # No stamp (legacy report) → "unknown" → never blocks (surfaced to the PM brief instead).
+    local gates_hm
+    gates_hm="$(_artifact_head_match "$gates_report_path" direct)"
+    if [[ "$gates_hm" == "false" ]]; then
+      add_input gates_report "gates_report.json" "blocked" "gates_report.json stale: revision.head_sha != HEAD (out-of-pack; not covered by --at-head verification)" false
+      add_blocker gates_report "blocking" "gates_report.json stale (head_match=false): recorded head_sha != current HEAD"
+    else
+      add_input gates_report "gates_report.json" "pass" "present at ${gates_report_path#"${EVIDENCE_DIR}/"}" "$gates_hm"
+    fi
   else
     add_input gates_report "gates_report.json" "blocked" "gates_report.json missing (checked root and gates/ subdir)" false
     add_blocker gates_report "blocking" "gates_report.json missing (checked root and gates/ subdir)"
@@ -422,13 +490,25 @@ main() {
     if _is_json "$plan_review_file"; then
       plan_review_ok=true
       plan_review_reason="present at .aid-o/work/evidence/${planref_id}/c0/plan-review.json"
-      plan_review_hm="$(_artifact_head_match "$plan_review_file")"
+      # ANCESTRY basis (contract 2): a plan-time artifact is stale by construction, so a direct
+      # equality check would block EVERY EPIC once HEAD moves. Instead its OWN recorded head_sha
+      # must be an ANCESTOR of HEAD (correct lineage). Ancestor → true (stays true through release
+      # commits); non-ancestor (rebase/foreign branch) → false; no stamp → "unknown".
+      plan_review_hm="$(_artifact_head_match "$plan_review_file" ancestry)"
     else
       plan_review_reason="plan-review.json missing at .aid-o/work/evidence/${planref_id}/c0/"
     fi
   fi
   if [[ "$plan_review_ok" == "true" ]]; then
-    add_input plan_review "plan-review.json" "pass" "$plan_review_reason" "$plan_review_hm"
+    if [[ "$plan_review_hm" == "false" ]]; then
+      # Present but NOT in HEAD's ancestry → stale/foreign lineage. plan_review is out of
+      # evidence-verify coverage (contract 1), so this is a NET-NEW blocker (the F1 class the
+      # E-059-2_2 merge review actually hit).
+      add_input plan_review "plan-review.json" "blocked" "${plan_review_reason} but STALE: recorded revision.head_sha is not an ancestor of HEAD (rebase/foreign lineage)" false
+      add_blocker plan_review "blocking" "plan-review.json stale (head_match=false): recorded head_sha not in HEAD's ancestry"
+    else
+      add_input plan_review "plan-review.json" "pass" "$plan_review_reason" "$plan_review_hm"
+    fi
   else
     add_input plan_review "plan-review.json" "blocked" "$plan_review_reason" false
     add_blocker plan_review "blocking" "$plan_review_reason"
@@ -460,20 +540,95 @@ main() {
   # --- Reporter / Simplifier CONDITIONAL ---
   compute_reporter
   compute_simplifier
-  add_input reporter    "$REPORTER_ARTIFACT"    "$(_status_to_verdict "$REPORTER_STATUS")"    "$REPORTER_REASON"    "$(_status_headmatch "$REPORTER_STATUS")"
-  add_input simplifier  "$SIMPLIFIER_ARTIFACT"  "$(_status_to_verdict "$SIMPLIFIER_STATUS")"  "$SIMPLIFIER_REASON"  "$(_status_headmatch "$SIMPLIFIER_STATUS")"
+
+  # head_match for our own markdown producers (contract 3): when the CONDITIONAL status is `pass`
+  # the report is present+valid, so its at-HEAD basis is the `Head: <sha>` provenance line
+  # (mtime NEVER). No provenance → "unknown" (never blocks). For non-pass statuses the status
+  # itself drives the row/blocker, so keep the mechanical status→head_match mapping.
+  local reporter_hm simplifier_hm reporter_verdict simplifier_verdict
+  local reporter_reason_final="$REPORTER_REASON" simplifier_reason_final="$SIMPLIFIER_REASON"
+  reporter_verdict="$(_status_to_verdict "$REPORTER_STATUS")"
+  simplifier_verdict="$(_status_to_verdict "$SIMPLIFIER_STATUS")"
+  if [[ "$REPORTER_STATUS" == "pass" ]]; then
+    reporter_hm="$(_markdown_head_match "${PROJECT_ROOT}/${REPORTER_ARTIFACT}")"
+  else
+    reporter_hm="$(_status_headmatch "$REPORTER_STATUS")"
+  fi
+  if [[ "$SIMPLIFIER_STATUS" == "pass" ]]; then
+    simplifier_hm="$(_markdown_head_match "${EVIDENCE_DIR}/simplifier-report.md")"
+  else
+    simplifier_hm="$(_status_headmatch "$SIMPLIFIER_STATUS")"
+  fi
+
+  # NET-NEW stale blocking (contract 1): a report that is present+valid (status pass) but provably
+  # stale (provenance Head != HEAD → head_match false) must NOT look usable. "unknown" never blocks.
+  if [[ "$REPORTER_STATUS" == "pass" && "$reporter_hm" == "false" ]]; then
+    reporter_verdict="blocked"
+    reporter_reason_final="${REPORTER_REASON}; but STALE: delivery-report provenance Head != HEAD (out-of-pack; not covered by --at-head verification)"
+  fi
+  if [[ "$SIMPLIFIER_STATUS" == "pass" && "$simplifier_hm" == "false" ]]; then
+    simplifier_verdict="blocked"
+    simplifier_reason_final="${SIMPLIFIER_REASON}; but STALE: simplifier-report.md provenance Head != HEAD (out-of-pack; not covered by --at-head verification)"
+  fi
+
+  add_input reporter    "$REPORTER_ARTIFACT"    "$reporter_verdict"    "$reporter_reason_final"    "$reporter_hm"
+  add_input simplifier  "$SIMPLIFIER_ARTIFACT"  "$simplifier_verdict"  "$simplifier_reason_final"  "$simplifier_hm"
   case "$REPORTER_STATUS" in
     missing|fail) add_blocker reporter "blocking" "reporter ${REPORTER_STATUS}: ${REPORTER_REASON}" ;;
+    pass) [[ "$reporter_hm" == "false" ]] && add_blocker reporter "blocking" "reporter delivery report stale (head_match=false): provenance Head != HEAD" ;;
   esac
   case "$SIMPLIFIER_STATUS" in
     missing|fail) add_blocker simplifier "blocking" "simplifier ${SIMPLIFIER_STATUS}: ${SIMPLIFIER_REASON}" ;;
+    pass) [[ "$simplifier_hm" == "false" ]] && add_blocker simplifier "blocking" "simplifier-report.md stale (head_match=false): provenance Head != HEAD" ;;
   esac
 
-  # --- waivers (OPTIONAL) → waivers_applied[] ---
+  # --- waivers (OPTIONAL) → waivers_applied[] + waiver→input mapping (contract 6) ---
+  # A waiver NEVER unblocks: the release_ready tally below reads BLOCKERS_JSON, which the waiver
+  # loop never touches, so a mapped blocked→waived flip on the inputs[] ROW leaves the blocker
+  # (and release_ready, and the D11 *_status fields) UNCHANGED. The waiver only DOCUMENTS.
   local wf
   for wf in "${EVIDENCE_DIR}"/waiver-*.json; do
     [[ -f "$wf" ]] || continue
-    WAIVERS_JSON="$(jq -cn --argjson arr "$WAIVERS_JSON" --arg w "$(basename "$wf")" '$arr + [$w]')"
+    local wbase; wbase="$(basename "$wf")"
+    WAIVERS_JSON="$(jq -cn --argjson arr "$WAIVERS_JSON" --arg w "$wbase" '$arr + [$w]')"
+
+    # Resolve the canonical input_id: payload .waiver.waived_check first, then the filename
+    # fallback waiver-<input_id>.json.
+    local wc="" fromfile="" mapped=""
+    if _is_json "$wf"; then
+      wc="$(jq -r '.waiver.waived_check // .waiver.scope // ""' "$wf" 2>/dev/null || echo "")"
+    fi
+    fromfile="${wbase#waiver-}"; fromfile="${fromfile%.json}"
+    if _is_canonical_input "$wc"; then
+      mapped="$wc"
+    elif _is_canonical_input "$fromfile"; then
+      mapped="$fromfile"
+    fi
+
+    local finding="orphan_waiver" freason=""
+    if [[ -n "$mapped" ]]; then
+      local cur_verdict
+      cur_verdict="$(jq -r --arg id "$mapped" 'first(.[] | select(.id==$id) | .verdict) // "absent"' <<<"$INPUTS_JSON" 2>/dev/null)" || cur_verdict="absent"
+      if [[ "$cur_verdict" == "blocked" ]]; then
+        # blocked → waived on the inputs[] ROW ONLY (blocker line stays; release_ready unchanged).
+        INPUTS_JSON="$(jq -c --arg id "$mapped" --arg w "$wbase" '
+          map(if .id == $id and .verdict == "blocked"
+              then .verdict = "waived"
+                 | .reason = (.reason + " [waived by " + $w + "; blocker retained — a waiver documents, it does not unblock]")
+              else . end)' <<<"$INPUTS_JSON")"
+        finding="applied"
+        freason="waiver mapped to blocked input '${mapped}'; inputs[] row blocked->waived, blocker retained, release_ready unchanged"
+      else
+        finding="orphan_waiver"
+        freason="waiver maps to input '${mapped}' but it is not blocked (verdict=${cur_verdict}); no verdict change"
+      fi
+    else
+      finding="orphan_waiver"
+      freason="waiver '${wbase}' has no canonical input mapping (waived_check='${wc}'); no verdict change"
+    fi
+    WAIVER_FINDINGS_JSON="$(jq -cn --argjson arr "$WAIVER_FINDINGS_JSON" \
+      --arg w "$wbase" --arg m "$mapped" --arg f "$finding" --arg r "$freason" \
+      '$arr + [{waiver:$w, mapped_input:(if $m=="" then null else $m end), finding:$f, reason:$r}]')"
   done
   local waiver_count
   waiver_count="$(jq 'length' <<<"$WAIVERS_JSON")"
@@ -540,6 +695,7 @@ main() {
     --argjson inputs "$INPUTS_JSON" \
     --argjson blockers "$BLOCKERS_JSON" \
     --argjson waivers "$WAIVERS_JSON" \
+    --argjson waiver_findings "$WAIVER_FINDINGS_JSON" \
     --arg profile_hash_freshness "$profile_hash_freshness" \
     --arg merge_mode "$merge_mode" \
     --argjson pm_brief_required true \
@@ -558,6 +714,7 @@ main() {
       inputs: $inputs,
       blockers: $blockers,
       waivers_applied: $waivers,
+      waiver_findings: $waiver_findings,
       profile_hash_freshness: $profile_hash_freshness,
       merge_mode: $merge_mode,
       pm_brief_required: $pm_brief_required,
