@@ -2705,6 +2705,50 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   [[ -n "$_step_timeline" ]] && log_event "$_step_timeline" "step_commit" \
     step_n="$step" commit_sha="$_step_commit_sha"
 
+  # ── P060 Step 6: commit_scope_violation companion (D7c, OBS-20260709-01/04) ─
+  # --no-verify bypasses the pre-commit hook, so re-check scope out-of-band at
+  # each step boundary. Diff the range actually committed during the step just
+  # completed (prev_step_commit..HEAD) against that step's scope (allowed_paths
+  # ∪ evidence dir) and emit a telemetry event for any out-of-scope file. The
+  # prev step_commit is read from the timeline (the boundary BEFORE the one we
+  # just appended, i.e. the second-to-last step_commit event); it falls back to
+  # base_commit for the first step. This is NON-BLOCKING telemetry — never fails
+  # the increment; skips silently when jq/plan.json/timeline are unavailable.
+  if [[ -n "$_step_timeline" && -f "$_step_timeline" ]] \
+     && command -v jq >/dev/null 2>&1 && [[ -f "${evidence_dir}/plan.json" ]]; then
+    local _prev_sc
+    _prev_sc=$(jq -rs '[.[] | select(.event == "step_commit")]
+      | if length >= 2 then .[-2].commit_sha else "" end' "$_step_timeline" 2>/dev/null)
+    if [[ -z "$_prev_sc" || "$_prev_sc" == "null" ]]; then
+      _prev_sc=$(yaml_field "$state_file" base_commit)
+    fi
+    if [[ -n "$_prev_sc" && "$_prev_sc" != "unknown" ]]; then
+      local -a _scope_paths=("$evidence_dir")
+      local _sp _cf _inscope
+      while IFS= read -r _sp; do
+        [[ -n "$_sp" ]] && _scope_paths+=("$_sp")
+      done < <(jq -r --argjson i "$step" '.steps[$i].allowed_paths[]?' \
+                 "${evidence_dir}/plan.json" 2>/dev/null)
+      local -a _violations=()
+      while IFS= read -r -d '' _cf; do
+        [[ -z "$_cf" ]] && continue
+        _inscope=0
+        for _sp in "${_scope_paths[@]}"; do
+          [[ -z "$_sp" ]] && continue
+          if [[ "$_cf" == "$_sp" || "$_cf" == "$_sp"/* ]]; then _inscope=1; break; fi
+        done
+        (( _inscope )) || _violations+=("$_cf")
+      done < <(git diff --name-only -z "${_prev_sc}..HEAD" 2>/dev/null)
+      if [[ ${#_violations[@]} -gt 0 ]]; then
+        local _viol_csv
+        _viol_csv=$(printf '%s,' "${_violations[@]}"); _viol_csv="${_viol_csv%,}"
+        log_event "$_step_timeline" "commit_scope_violation" \
+          step_n="$step" range="${_prev_sc}..HEAD" \
+          out_of_scope_count="${#_violations[@]}" files="$_viol_csv"
+      fi
+    fi
+  fi
+
   echo "$((step + 1))"
 }
 

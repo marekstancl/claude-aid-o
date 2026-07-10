@@ -331,7 +331,12 @@ After workspace creation (and on every re-run), install or update both git hooks
 3. **Logic:**
    - If target does NOT exist → copy template, `chmod +x`
    - If target exists AND contains `AID-ORCHESTRATOR-HOOK-START` → replace block between START/END markers with new version (upgrade)
-   - If target exists WITHOUT marker → append template content to end of file (coexistence)
+   - If target exists WITHOUT marker → **REPLACE** the file with the template (do NOT append).
+     The template ends with `exit 0` (unconditional pass on non-guarded contexts); appending the
+     marker block *after* an existing hook's `exit 0` would make it dead code that never runs — the
+     scope/branch guard would silently never fire. When no marker block is present, treat the existing
+     hook as non-AID and overwrite it with the template (back it up first if the project asks). Only the
+     marker-present path is an in-place block upgrade.
    - **Then ensure the shebang (every path):** if line 1 of the target is not `#!`,
      prepend `#!/usr/bin/env bash` as line 1. The marker block lives *below* the shebang,
      so the upgrade path above does not restore it on its own — this retrofits hooks
@@ -344,11 +349,29 @@ After workspace creation (and on every re-run), install or update both git hooks
 Hook installation:
   [INSTALLED] .git/hooks/pre-commit — AID FSM guard (new)
   [UPGRADED]  .git/hooks/pre-commit — AID FSM guard (updated block)
-  [APPENDED]  .git/hooks/pre-commit — AID FSM guard (added to existing hook)
+  [REPLACED]  .git/hooks/pre-commit — AID FSM guard (non-AID hook overwritten)
   [SKIPPED]   No .git/ directory found
 ```
 
-**What the hook does:** On `task/*` and `epic/*` branches, checks FSM state. Blocks commits in DONE/review (Curator+Auditor not yet run) and READY (execution not started). All other branches pass unconditionally.
+**What the hook does (P060 D7):** Fires on **all** branches — including `main`. It discovers the
+active run by scanning state files filtered to guard-active states (`EXECUTE`, `GATES`, `DONE`),
+matches by branch, and enforces that staged files stay within the state-appropriate scope:
+
+- **EXECUTE** → the current step's `allowed_paths` (from `plan.json`) ∪ the run's evidence dir.
+- **GATES** → the union of ALL steps' `allowed_paths` ∪ evidence dir (gate-fix reaches wider).
+- **DONE/review** → union of ALL steps' `allowed_paths` ∪ evidence dir (documented Curator/Auditor
+  auto-fix commits legitimately touch step files).
+- **DONE/release** → a version whitelist derived at runtime from `project.yaml` `versioning`
+  (`source` + `files[].path`) ∪ both CHANGELOGs ∪ evidence dir.
+
+**`main`-guard is NEW template behavior.** Previously "all other branches pass unconditionally";
+now a rogue commit on `main` while a run is mid-`EXECUTE`/`GATES` is **blocked** (OBS-20260709-04).
+`main` is NOT blocked during `DONE/review` (OBS-20260702-06 — the run is still *discovered* on `main`,
+it is just not *blocked* there). Commits made with `--no-verify` bypass this hook, but the
+controller-side companion in `aid-fsm.sh` re-checks the same scope at each step boundary and emits a
+`commit_scope_violation` telemetry event that cannot be evaded. **Fail-open:** absent tooling
+(`jq`/`yq`) or unreadable config warns, passes, and emits a `commit_guard_disclosure` event rather
+than hard-blocking.
 
 ### pre-push (version bump check)
 
