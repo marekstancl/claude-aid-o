@@ -278,3 +278,202 @@ YAML
   [[ "$output" == *"plan_gates_reconciled"* ]]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
+
+# ─── P061 E1 Step 1 — gates-enum fix: plan.json.gates[] must carry arbitrary ──
+# gate names, not just the old hardcoded 4-value list (tests_pass, lint_pass,
+# security_scan_pass, docs_updated). Two bugs fixed together:
+#   1. aid-epic-to-json.sh's DoD Gates extraction filter silently dropped any
+#      gate name outside that fixed list (no error, no output row) — verified
+#      here via a fixture EPIC.md declaring "bats_all" (never in the old list).
+#   2. The post-hoc validation jq's gate check was a dead no-op
+#      (`[valid_gates[] | select(. == .)]` compares each value to itself, so
+#      it's always non-empty regardless of input) — verified here by feeding
+#      an actually-malformed gate name and confirming aid-epic-to-json.sh now
+#      fails loud instead of silently accepting it.
+
+@test "epic-to-json gates roundtrip: DoD Gates name outside old fixed 4-value list survives into plan.json.gates[]" {
+  local epic_to_json="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
+  local schema="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
+  local epic="$TEST_TMPDIR/E-TEST-901-1_1-gates-roundtrip.md"
+  local out_dir="$TEST_TMPDIR/out-roundtrip"
+  mkdir -p "$out_dir"
+  cat > "$epic" <<'EOF'
+---
+status: active
+plan_ref: plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md
+plan_epics_total: 1
+runs_total: 1
+runs_completed: 0
+---
+
+# EPIC: E-TEST-901-1_1 --- Gates Roundtrip
+
+## Context
+
+Fixture EPIC for the gates-enum roundtrip regression (P061 E1 Step 1).
+
+## Goal
+
+Prove a DoD Gates name outside the old hardcoded 4-value list survives
+extraction into plan.json.gates[].
+
+## Scope
+
+### Allowed files/paths
+- `src/core/module.py`
+
+### Forbidden zones
+- <!-- none -->
+
+## Artifacts
+
+- Create: `src/core/module.py`
+
+## Constraints
+
+- none
+
+## DoD Gates
+
+- bats_all
+
+## Acceptance Criteria
+
+- [ ] [backend] Module loads without errors
+
+## Dependencies
+
+### Internal (same plan)
+<!-- none -->
+
+### External (other plans/EPICs)
+<!-- none -->
+
+### Queue Implications
+depends_on: []
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | Implement the core module with basic data structures. | --- | --- |
+
+## Run Breakdown
+
+### Run 1: Phase 1
+**Goal:** Gates roundtrip fixture.
+**Deliverables:** n/a
+
+## Hints
+
+- expected_steps: 1
+- complexity: low
+- parallelism_potential: low
+
+## Notes
+
+<!-- Auto-generated fixture for test-aid-run-gates.bats (P061 E1 Step 1) -->
+EOF
+
+  run "$epic_to_json" --epic "$epic" --schema "$schema" --output-dir "$out_dir"
+  [ "$status" -eq 0 ]
+  local plan_json
+  plan_json="$(echo "$output" | jq -r '.plan_json // ""')"
+  [ -n "$plan_json" ]
+  [ -f "$plan_json" ]
+  # "bats_all" is NOT in the old hardcoded 4-value list — on the unfixed
+  # extraction filter it would be silently dropped and gates[] would be [].
+  run jq -e '.gates == ["bats_all"]' "$plan_json"
+  [ "$status" -eq 0 ]
+}
+
+@test "epic-to-json gates validation: malformed gate name is rejected fail-loud (dead no-op fixed)" {
+  # Proves the post-hoc validation jq's gate check is no longer a dead no-op
+  # (`select(. == .)` always true). A gate name containing a space/colon is
+  # not a well-formed identifier and must fail conversion, not pass silently.
+  local epic_to_json="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
+  local schema="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
+  local epic="$TEST_TMPDIR/E-TEST-902-1_1-gates-invalid.md"
+  local out_dir="$TEST_TMPDIR/out-invalid"
+  mkdir -p "$out_dir"
+  cat > "$epic" <<'EOF'
+---
+status: active
+plan_ref: plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md
+plan_epics_total: 1
+runs_total: 1
+runs_completed: 0
+---
+
+# EPIC: E-TEST-902-1_1 --- Gates Invalid
+
+## Context
+
+Fixture EPIC for the gates-validation dead-no-op regression (P061 E1 Step 1).
+
+## Goal
+
+Prove a structurally malformed DoD Gates name is rejected fail-loud.
+
+## Scope
+
+### Allowed files/paths
+- `src/core/module.py`
+
+### Forbidden zones
+- <!-- none -->
+
+## Artifacts
+
+- Create: `src/core/module.py`
+
+## Constraints
+
+- none
+
+## DoD Gates
+
+- not a valid gate: name
+
+## Acceptance Criteria
+
+- [ ] [backend] Module loads without errors
+
+## Dependencies
+
+### Internal (same plan)
+<!-- none -->
+
+### External (other plans/EPICs)
+<!-- none -->
+
+### Queue Implications
+depends_on: []
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | Implement the core module with basic data structures. | --- | --- |
+
+## Run Breakdown
+
+### Run 1: Phase 1
+**Goal:** Gates invalid-name fixture.
+**Deliverables:** n/a
+
+## Hints
+
+- expected_steps: 1
+- complexity: low
+- parallelism_potential: low
+
+## Notes
+
+<!-- Auto-generated fixture for test-aid-run-gates.bats (P061 E1 Step 1) -->
+EOF
+
+  run "$epic_to_json" --epic "$epic" --schema "$schema" --output-dir "$out_dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid gate name"* ]]
+}
