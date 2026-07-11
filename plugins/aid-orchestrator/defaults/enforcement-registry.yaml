@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 282          # granular registry rows; recomputed via `.enforcements|length` after adding P061 E1 Step 3's plan_gate_floor row (was 281 after Step 2's profile_selection/profile_exclusion). The new row carries no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
+  enforcements: 283          # granular registry rows; recomputed via `.enforcements|length` after adding P061 E2 Step 2's risk_upgrade row (was 282 after E1 Step 3's plan_gate_floor). The new row carries no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
   mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
   mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
   verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
@@ -995,3 +995,12 @@ enforcements:
     status: active
     description: "P061 E1 Step 3: plan.json.gates[] (Step 1) is a hard floor at the GATES:DONE FSM precondition — profile_exclusion (above) alone does not fail overall, so without this check a plan-required gate excluded by --profile could vanish from a run reporting overall=pass; check_preconditions cross-references plan.json.gates[] against gates_report.json.excluded_gates[] and refuses the transition (fail-loud design, not a forced re-run) on any overlap, reason: plan_gate_profile_excluded; --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks; closes the profile/plan silent-exclusion gap"
     test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'plan_gate_profile_excluded')"
+  - id: risk_upgrade
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'risk_profile_below_required|risk_profile_unresolvable')"
+    instruction: "scripts/lib/aid-gate-profile.sh (grep: 'gate_profile_resolve') producer"
+    severity: blocking
+    surface: "GATES:DONE precondition"
+    status: active
+    description: "P061 E2 Step 2 (\"Step 8\"): D4 — a high-risk changed path (aid-fsm.sh, aid-run-gates.sh, aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*, defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile for this EPIC's diff, and the GATES:DONE precondition VERIFIES AND ENFORCES that floor, not just recommends it (AID-v3-principles.md §1 — Detector without Enforcement is Decoration, the P026/WAN anchor). check_preconditions recomputes the risk-required profile at transition time (via the Step 1 shared resolver, gate_profile_resolve, against this run's actual base_commit..HEAD diff) — it does NOT trust advance-to-gates' earlier auto-resolve suggestion, because gates could have been re-run manually with a weaker --profile afterward. Two blocking outcomes: (1) Compares ranks via gate_profile_rank; active < required refuses the transition with reason risk_profile_below_required (e.g. active='quick' < required='full'). (2) If active profile name is unrecognized (not in the canonical 5: quick/targeted/standard/full/release) and required is high-risk (> quick), refuses the transition with reason risk_profile_unresolvable — fail-closed, because we cannot verify the active profile meets the requirement (E-061-2_6 Step 2 fix). A missing gates_report.json.profile field (no --profile ever used — legacy execution.yaml without gate_profiles, D9) is a no-op, matching pre-P061 behavior exactly. advance-to-gates itself auto-resolves and passes --profile <resolved> to aid-run-gates.sh, but ONLY when the resolved name is an actual key under execution.yaml.gate_profiles (same D9 legacy guard) — an explicit --profile from advance-to-gates' own caller always wins over auto-resolve. --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks"
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'CHECKPOINT 2|unrecognized.*profile')"
