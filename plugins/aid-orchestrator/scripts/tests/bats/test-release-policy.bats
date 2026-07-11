@@ -63,9 +63,9 @@ setup() {
   export TZ=UTC
   export AID_TEST_MODE=1
   # Test-cost fix (2026-07-11): stub the real aid-evidence-verify.sh --at-head subprocess
-  # (~9s/call against a real fixture) to a fixed "pass" for every test by default. The 3
+  # (~9s/call against a real fixture) to a fixed "pass" for every test by default. The 4
   # tests that specifically exercise verification's OWN behavior (real healthy pass, real
-  # dirty-tree fail, real stale-HEAD fail) `unset` this locally before calling _run_agg so
+  # dirty-tree fail, real stale-HEAD fail x2) `unset` this locally before calling _run_agg so
   # they still drive the genuine subprocess end-to-end. See aid-release-policy.sh's
   # run_verification_input() for the seam this activates (double-gated on AID_TEST_MODE).
   export AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass
