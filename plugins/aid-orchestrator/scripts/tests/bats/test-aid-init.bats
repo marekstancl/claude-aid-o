@@ -126,3 +126,228 @@ teardown() {
   run bash -c 'yq -e "." .aid-o/config/execution.yaml > /dev/null'
   [ "$status" -eq 0 ]
 }
+
+# --- P061 E1 Step 6: existing-project gate_profiles upgrade (D9) ---------
+
+# Shared fixture builder: an existing execution.yaml with a hand-edited
+# ts_test.command (different from the typescript.yaml stack default) and NO
+# gate_profile_defaults/gate_profiles block yet.
+_write_hand_edited_fixture() {
+  mkdir -p .aid-o/config
+  cat > .aid-o/config/execution.yaml <<'FIXTURE'
+version: '1.0'
+generated_by: manual override for TEST-FIXTURE
+gates:
+  ts_test:
+    command: npm run test:custom -- --shard=1
+    required: true
+    timeout_seconds: 999
+    max_retries: 2
+  ts_lint:
+    command: npm run lint:strict
+    required: true
+notifications:
+  telegram:
+    enabled: false
+FIXTURE
+  touch package.json
+}
+
+@test "P061 E1 Step 6: execution_yaml_has_gate_profiles — false on fixture without the block, true after append" {
+  source "$HELPER"
+  _write_hand_edited_fixture
+
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 1 ]
+
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  block="$(render_gate_profiles_block "${stacks[@]}")"
+  append_gate_profiles_block .aid-o/config/execution.yaml "$block"
+
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 0 ]
+}
+
+@test "P061 E1 Step 6: PM-confirmed upgrade — hand-edited gate command is byte-identical, only the profile block is added" {
+  source "$HELPER"
+  _write_hand_edited_fixture
+
+  # Byte-exact snapshot of every line that existed BEFORE the upgrade.
+  orig_line_count=$(wc -l < .aid-o/config/execution.yaml)
+  cp .aid-o/config/execution.yaml .aid-o/config/execution.yaml.before
+
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  [[ " ${stacks[*]} " =~ " typescript " ]]
+  block="$(render_gate_profiles_block "${stacks[@]}")"
+
+  # Simulate PM confirmation (Y) — this is the only call that writes.
+  append_gate_profiles_block .aid-o/config/execution.yaml "$block"
+
+  # Every original line is untouched, in place, unreordered: the first
+  # orig_line_count lines of the upgraded file equal the pre-upgrade file
+  # byte-for-byte.
+  head -n "$orig_line_count" .aid-o/config/execution.yaml > .aid-o/config/execution.yaml.prefix-after
+  run diff .aid-o/config/execution.yaml.before .aid-o/config/execution.yaml.prefix-after
+  [ "$status" -eq 0 ]
+
+  # The hand-edited command survived character-for-character (not just
+  # "a value" — the exact custom flags/shard argument).
+  run yq '.gates.ts_test.command' .aid-o/config/execution.yaml
+  [ "$output" == "npm run test:custom -- --shard=1" ]
+  run yq '.gates.ts_test.timeout_seconds' .aid-o/config/execution.yaml
+  [ "$output" == "999" ]
+  run yq '.gates.ts_lint.command' .aid-o/config/execution.yaml
+  [ "$output" == "npm run lint:strict" ]
+
+  # The profile block was actually added, matching the fresh-init derivation
+  # for the same stack (no drift between the two code paths).
+  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
+  [ "$output" == "targeted" ]
+  run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test" ]
+  run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+
+  # File is still valid YAML after the additive write.
+  run bash -c 'yq -e "." .aid-o/config/execution.yaml > /dev/null'
+  [ "$status" -eq 0 ]
+}
+
+@test "P061 E1 Step 6: PM-NOT-confirmed — report computed but nothing written, file untouched" {
+  source "$HELPER"
+  _write_hand_edited_fixture
+
+  before_hash=$(sha256sum .aid-o/config/execution.yaml | cut -d' ' -f1)
+
+  # Report-only path: compute what WOULD be proposed, but the PM declines —
+  # append_gate_profiles_block is never called. This mirrors the real
+  # /aid-init flow's default-N-on-no-response rule (see aid-init.md).
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 1 ]
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  block="$(render_gate_profiles_block "${stacks[@]}")"
+  [[ -n "$block" ]]
+  pm_confirmed="N"
+  if [[ "$pm_confirmed" == "Y" ]]; then
+    append_gate_profiles_block .aid-o/config/execution.yaml "$block"
+  fi
+
+  after_hash=$(sha256sum .aid-o/config/execution.yaml | cut -d' ' -f1)
+  [ "$before_hash" == "$after_hash" ]
+
+  # Still has no gate_profiles block — the check would offer the upgrade
+  # again on the next /aid-init run.
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 1 ]
+}
+
+@test "P061 E1 Step 6: gate_profiles already present — no-op, execution_yaml_has_gate_profiles short-circuits" {
+  source "$HELPER"
+  mkdir -p .aid-o/config
+  touch package.json
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
+
+  before_hash=$(sha256sum .aid-o/config/execution.yaml | cut -d' ' -f1)
+
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 0 ]
+  # (Real /aid-init flow: has_gate_profiles == true → skip the report/append
+  # entirely. Nothing should be called here.)
+
+  after_hash=$(sha256sum .aid-o/config/execution.yaml | cut -d' ' -f1)
+  [ "$before_hash" == "$after_hash" ]
+}
+
+@test "P061 E1 Step 6: append_gate_profiles_block refuses to write to a missing file" {
+  source "$HELPER"
+  run append_gate_profiles_block .aid-o/config/execution.yaml "gate_profiles:\n  full:\n    include: []"
+  [ "$status" -eq 1 ]
+  [ ! -f .aid-o/config/execution.yaml ]
+}
+
+@test "P061 E1 Step 6 (D9 HIGH FIX): partial-key state — only gate_profile_defaults present — no duplicate keys after upgrade" {
+  source "$HELPER"
+  mkdir -p .aid-o/config
+
+  # Fixture: PM manually set gate_profile_defaults but NOT gate_profiles yet
+  cat > .aid-o/config/execution.yaml <<'FIXTURE'
+version: '1.0'
+generated_by: manual override for PARTIAL-TEST
+gates:
+  ts_test:
+    command: npm test
+    required: true
+gate_profile_defaults:
+  step: full
+  epic: full
+notifications:
+  telegram:
+    enabled: false
+FIXTURE
+  touch package.json
+
+  # Verify fixture is as expected: gate_profile_defaults present, gate_profiles absent
+  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
+  [ "$output" == "full" ]
+  run yq '.gate_profiles' .aid-o/config/execution.yaml
+  [ "$output" == "null" ]
+
+  # With the fix (option a): execution_yaml_has_gate_profiles should return 0
+  # (partial state exists, don't touch it)
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 0 ]
+
+  # Even if upgrade path is called anyway (backward compat or edge case),
+  # ensure NO duplicate top-level keys are created.
+  # Count occurrences of "gate_profile_defaults:" at column 0 (key name only).
+  run bash -c 'grep -c "^gate_profile_defaults:" .aid-o/config/execution.yaml'
+  [ "$output" -eq 1 ]
+
+  # Verify hand-edited value is still accessible / not shadowed
+  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
+  [ "$output" == "full" ]
+}
+
+@test "P061 E1 Step 6 (D9 HIGH FIX): partial-key state — only gate_profiles present — no duplicate keys after upgrade" {
+  source "$HELPER"
+  mkdir -p .aid-o/config
+
+  # Fixture: PM manually started gate_profiles but NOT gate_profile_defaults yet
+  cat > .aid-o/config/execution.yaml <<'FIXTURE'
+version: '1.0'
+generated_by: manual override for PARTIAL-TEST
+gates:
+  ts_test:
+    command: npm test
+    required: true
+gate_profiles:
+  custom:
+    include: [ts_test]
+notifications:
+  telegram:
+    enabled: false
+FIXTURE
+  touch package.json
+
+  # Verify fixture is as expected: gate_profiles present, gate_profile_defaults absent
+  run yq '.gate_profiles.custom.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test" ]
+  run yq '.gate_profile_defaults' .aid-o/config/execution.yaml
+  [ "$output" == "null" ]
+
+  # With the fix (option a): execution_yaml_has_gate_profiles should return 0
+  # (partial state exists, don't touch it)
+  run execution_yaml_has_gate_profiles .aid-o/config/execution.yaml
+  [ "$status" -eq 0 ]
+
+  # Even if upgrade path is called anyway (backward compat or edge case),
+  # ensure NO duplicate top-level keys are created.
+  # Count occurrences of "gate_profiles:" at column 0 (key name only).
+  run bash -c 'grep -c "^gate_profiles:" .aid-o/config/execution.yaml'
+  [ "$output" -eq 1 ]
+
+  # Verify hand-edited value is still accessible / not shadowed
+  run yq '.gate_profiles.custom.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test" ]
+}

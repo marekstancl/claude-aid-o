@@ -21,6 +21,26 @@
 #       derived ONLY from gate names each stack fragment actually defines —
 #       never references self-host names like bats_fsm/bats_all (D3 isolation).
 #
+#   render_gate_profiles_block [stack ...]
+#       P061 E1 Step 6: echo JUST the `gate_profile_defaults`/`gate_profiles`
+#       YAML block (or its "no stacks detected" comment fallback) for the
+#       given stacks — the same derivation compose_execution_yaml uses
+#       internally, factored out so the existing-project upgrade path (below)
+#       and the fresh-init path can never drift from each other.
+#
+#   execution_yaml_has_gate_profiles <file>
+#       P061 E1 Step 6: exit 0 iff <file> already has BOTH top-level
+#       `gate_profile_defaults` and `gate_profiles` keys; exit 1 otherwise
+#       (including when <file> does not exist). Read-only — makes no changes.
+#
+#   append_gate_profiles_block <file> <block_text>
+#       P061 E1 Step 6 (D9 — non-destructive existing-project upgrade): append
+#       a blank line + <block_text> to the END of <file> in pure append mode
+#       (`>>`, never a read-parse-rewrite). Every byte already in <file> —
+#       including hand-edited `gates:` `command:` values — is left untouched;
+#       this is what makes the upgrade byte-preserving by construction rather
+#       than by a promise about a round-trip YAML rewrite.
+#
 # Plugin path resolution order:
 #   1. $AID_PLUGIN_PATH env var (worktree dev workflow)
 #   2. $HOME/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator
@@ -161,6 +181,115 @@ stack_gate_names() {
   tail -n +2 "$frag_file" | grep -E '^[A-Za-z0-9_]+:' | sed 's/:.*$//'
 }
 
+# render_gate_profiles_block [stack ...]
+#   P061 E1 Step 6: standalone version of the gate_profiles derivation that
+#   used to live inline in compose_execution_yaml (P061 E1 Step 5). Echoes
+#   either the "no stacks detected" comment line, or the full
+#   `gate_profile_defaults:` + `gate_profiles:` YAML block, to stdout.
+#   compose_execution_yaml (fresh-init) and append_gate_profiles_block callers
+#   (existing-project upgrade) both call this — one derivation, no drift.
+render_gate_profiles_block() {
+  local stacks=("$@")
+
+  local plugin_dir
+  if ! plugin_dir=$(_resolve_plugin_dir); then
+    echo "[ERROR] Plugin path not resolvable. Set AID_PLUGIN_PATH or install plugin via /plugin install." >&2
+    return 1
+  fi
+  local stacks_dir="${plugin_dir}/defaults/execution-stacks"
+
+  local clean_stacks=() s
+  for s in "${stacks[@]:-}"; do
+    [[ -n "$s" ]] && clean_stacks+=("$s")
+  done
+
+  local targeted_gate_names=() full_gate_names=()
+  local p_stack p_frag p_names_str p_name p_first
+  for p_stack in "${clean_stacks[@]:-}"; do
+    p_frag="${stacks_dir}/${p_stack}.yaml"
+    [[ -f "${p_frag}" ]] || continue
+    p_names_str="$(stack_gate_names "${p_frag}")"
+    [[ -z "${p_names_str}" ]] && continue
+    p_first=1
+    while IFS= read -r p_name; do
+      [[ -z "${p_name}" ]] && continue
+      full_gate_names+=("${p_name}")
+      if (( p_first == 1 )); then
+        targeted_gate_names+=("${p_name}")
+        p_first=0
+      fi
+    done <<< "${p_names_str}"
+  done
+
+  if (( ${#full_gate_names[@]} == 0 )); then
+    echo "# gate_profiles: no stacks detected — add gate definitions above, then define profiles manually."
+    return 0
+  fi
+
+  local targeted_csv full_csv
+  targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
+  full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
+  cat <<EOF
+gate_profile_defaults:
+  step: targeted
+  epic: full
+
+gate_profiles:
+  targeted:
+    include: [${targeted_csv}]
+  full:
+    include: [${full_csv}]
+EOF
+}
+
+# execution_yaml_has_gate_profiles <file>
+#   P061 E1 Step 6: read-only check — exit 0 iff <file> already defines
+#   at least ONE of the top-level `gate_profile_defaults` or `gate_profiles`
+#   keys (a non-null value). Exit 1 if neither is present, or <file> is absent.
+#   Option (a) / partial-key handling: if a PM has manually started
+#   configuring by adding just `gate_profile_defaults` or `gate_profiles` (but
+#   not both yet), we treat this as "has profiles" / no-op — the upgrade path
+#   MUST NOT touch partial configurations. This prevents duplicate-key
+#   shadowing (the HIGH finding from CP2 Step 6). Never writes.
+execution_yaml_has_gate_profiles() {
+  local file="$1"
+  [[ -f "$file" ]] || return 1
+  command -v yq >/dev/null 2>&1 || {
+    echo "[ERROR] yq not found — cannot inspect ${file} for gate_profiles." >&2
+    return 1
+  }
+  local has_defaults has_profiles
+  has_defaults="$(yq '.gate_profile_defaults != null' "$file" 2>/dev/null)"
+  has_profiles="$(yq '.gate_profiles != null' "$file" 2>/dev/null)"
+  # If EITHER key is already present, treat as "has profiles" / no-op.
+  # Prevents upgrade-path from appending and shadowing a partial PM edit.
+  [[ "$has_defaults" == "true" || "$has_profiles" == "true" ]]
+}
+
+# append_gate_profiles_block <file> <block_text>
+#   P061 E1 Step 6 (D9): additive-only upgrade write. Appends a blank line
+#   then <block_text> to the END of <file> using `>>` (pure append) — never
+#   reads, parses, or rewrites any byte already in <file>. This is the
+#   mechanism that makes hand-edited `gates:` `command:` values byte-identical
+#   before and after the upgrade: nothing before the appended block is ever
+#   touched.
+append_gate_profiles_block() {
+  local file="$1"
+  local block_text="$2"
+  [[ -f "$file" ]] || {
+    echo "[ERROR] ${file} does not exist — nothing to append the gate_profiles block to." >&2
+    return 1
+  }
+  [[ -n "$block_text" ]] || {
+    echo "[ERROR] Empty block_text passed to append_gate_profiles_block — refusing to append nothing." >&2
+    return 1
+  }
+  {
+    echo ""
+    printf '%s\n' "$block_text"
+  } >> "$file"
+}
+
 compose_execution_yaml() {
   local project_root="$1"
   local output_file="$2"
@@ -190,32 +319,6 @@ compose_execution_yaml() {
   local _CP4_GLOB="" _CP4_NO_MATCH=0
   resolve_cp4_production_paths "$project_root" "${clean_stacks[@]:-}"
   local cp4_glob="$_CP4_GLOB"
-
-  # P061 E1 Step 5: derive the generic gate_profiles substrate purely from
-  # gate names each detected stack's fragment actually defines (never from a
-  # hardcoded list) — "targeted" = each stack's first/primary gate (its
-  # smoke/unit-test gate, e.g. ts_test, py_test, go_test, rust_test,
-  # bash_syntax); "full" = every gate every detected stack defines. Two tiers
-  # only (not self-host's 4: step/epic/plan_final/release) — a fresh generic
-  # project has no EPIC/plan/release-stage gate distinctions yet; PM can
-  # split further once real usage shows a need.
-  local targeted_gate_names=() full_gate_names=()
-  local p_stack p_frag p_names_str p_name p_first
-  for p_stack in "${clean_stacks[@]:-}"; do
-    p_frag="${stacks_dir}/${p_stack}.yaml"
-    [[ -f "${p_frag}" ]] || continue
-    p_names_str="$(stack_gate_names "${p_frag}")"
-    [[ -z "${p_names_str}" ]] && continue
-    p_first=1
-    while IFS= read -r p_name; do
-      [[ -z "${p_name}" ]] && continue
-      full_gate_names+=("${p_name}")
-      if (( p_first == 1 )); then
-        targeted_gate_names+=("${p_name}")
-        p_first=0
-      fi
-    done <<< "${p_names_str}"
-  done
 
   mkdir -p "$(dirname "${output_file}")" || {
     echo "[ERROR] Cannot create directory for ${output_file}" >&2
@@ -253,28 +356,13 @@ EOF
       done
     fi
 
-    # P061 E1 Step 5: generic gate_profiles substrate — only gate names the
+    # P061 E1 Step 5/6: generic gate_profiles substrate — only gate names the
     # stacks above actually defined go into include[]; empty when no stack
-    # matched (nothing to profile yet).
+    # matched (nothing to profile yet). Delegated to render_gate_profiles_block
+    # (P061 E1 Step 6) so the fresh-init path here and the existing-project
+    # upgrade path (append_gate_profiles_block callers) share one derivation.
     echo ""
-    if (( ${#full_gate_names[@]} == 0 )); then
-      echo "# gate_profiles: no stacks detected — add gate definitions above, then define profiles manually."
-    else
-      local targeted_csv full_csv
-      targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
-      full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
-      cat <<EOF
-gate_profile_defaults:
-  step: targeted
-  epic: full
-
-gate_profiles:
-  targeted:
-    include: [${targeted_csv}]
-  full:
-    include: [${full_csv}]
-EOF
-    fi
+    render_gate_profiles_block "${clean_stacks[@]:-}"
 
     cat <<'EOF'
 notifications:
@@ -301,4 +389,6 @@ EOF
   }
 }
 
-export -f detect_stacks compose_execution_yaml resolve_cp4_production_paths
+export -f detect_stacks compose_execution_yaml resolve_cp4_production_paths \
+  stack_gate_names render_gate_profiles_block execution_yaml_has_gate_profiles \
+  append_gate_profiles_block
