@@ -62,6 +62,13 @@
 setup() {
   export TZ=UTC
   export AID_TEST_MODE=1
+  # Test-cost fix (2026-07-11): stub the real aid-evidence-verify.sh --at-head subprocess
+  # (~9s/call against a real fixture) to a fixed "pass" for every test by default. The 3
+  # tests that specifically exercise verification's OWN behavior (real healthy pass, real
+  # dirty-tree fail, real stale-HEAD fail) `unset` this locally before calling _run_agg so
+  # they still drive the genuine subprocess end-to-end. See aid-release-policy.sh's
+  # run_verification_input() for the seam this activates (double-gated on AID_TEST_MODE).
+  export AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass
   PLUGIN_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"   # .../plugins/aid-orchestrator
   export AID_PLUGIN_PATH="$PLUGIN_ROOT"
   SCRIPTS="$PLUGIN_ROOT/scripts"
@@ -165,6 +172,9 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 # ─── healthy ─────────────────────────────────────────────────────────────────
 
 @test "healthy fixture (real git-init) → release_ready:true, merge_mode auto, evidence pass" {
+  # REAL E2E anchor (not stubbed) — proves the actual aid-evidence-verify.sh --at-head
+  # subprocess genuinely returns pass for a well-formed healthy fixture.
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
   _build_healthy
   _run_agg
   [ "$status" -eq 0 ]
@@ -232,6 +242,8 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 }
 
 @test "REQUIRED broken: verification (dirty tree) → false + blocker verification_report + evs fail" {
+  # REAL E2E anchor (not stubbed) — proves the actual subprocess detects a dirty tree.
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
   _build_healthy
   echo "dirty" > "$PROJ/untracked.txt"     # untracked, not under .aid-o → git_clean fail
   _run_agg
@@ -334,6 +346,8 @@ _input_head_match() { jq -r --arg id "$1" '.release_decision.inputs[] | select(.
 # ─── --at-head stale ─────────────────────────────────────────────────────────
 
 @test "--at-head stale (pack_head reachable but != HEAD) → evah false + evs fail + blocked" {
+  # REAL E2E anchor (not stubbed) — proves the actual subprocess detects a stale HEAD.
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
   _build_healthy
   echo "v2" >> "$PROJ/README.md"
   git -C "$PROJ" add README.md
@@ -1003,6 +1017,9 @@ EOF
 }
 
 @test "d11 [23]: stale evidence pack (--at-head mismatch) → evidence_verified_at_head=false + evidence_verification_status=fail (NOT unverifiable) → release_ready=false" {
+  # REAL E2E anchor (not stubbed) — CP1 L1-B3 regression: proves the actual subprocess
+  # maps a stale HEAD to fail, never unverifiable.
+  unset AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB
   _build_healthy
   echo "v2" >> "$PROJ/README.md"
   git -C "$PROJ" add README.md
