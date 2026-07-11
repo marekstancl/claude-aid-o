@@ -1930,3 +1930,71 @@ self-disclosed reason logged inline: the just-completed EPIC's own
 commit-guard version-whitelist would otherwise block these non-version
 files on `main` — and the implementer flagged that friction itself as a
 backlog item rather than silently working around it.
+
+### OBS-20260711-01 - D4's CP3-Freshness-Exception has no equivalent for GATES/evidence-pack staleness; will block merges once C4 enforces
+
+**Observed in:** aid-orchestrator / P061 / E-061-1_6 / R-E061-1 (AID's own
+gate_profiles/plan-gate-floor EPIC)
+**AID version:** v2.54.0 (current, controller_hash `b7b10852…`)
+**Observed at:** 2026-07-11
+**Status:** confirmed (Curator-proposed fix auto-approved, not yet applied)
+**Severity:** medium
+**Class:** false-green prevention / checkpoint ownership (C4 readiness gap)
+
+**What happened:** E-061-1_6 reached GATES→DONE cleanly (6/6 steps,
+`final_report.md` claims "overall: pass"). One genuinely cosmetic trailing
+commit (`25bff3e`, comment-count fix only) landed after CP3 review and was
+correctly exempted from CP3 re-dispatch via the existing D4
+`CP3-Freshness-Exception` trailer mechanism. The EPIC's own C3 Auditor
+(dispatched at HEAD `25bff3e`) then independently re-ran
+`aid-release-policy.sh` **unstubbed** against the real evidence pack and
+found `gates_report.json` (stamped `revision.head_sha=9ec4844`, one commit
+behind HEAD) is stale: `aid-evidence-verify.sh --at-head` reports the pack
+out-of-pack, so the real C4 aggregator computes `verification_report: fail`
+/ `gates_report: blocked` — directly contradicting `final_report.md`'s
+clean "overall: pass" narrative. Root cause: `fsm_check_cp3_freshness`
+(`aid-fsm.sh`) only recognizes the D4 trailer for **CP3 review** staleness;
+`aid-evidence-verify.sh` has zero awareness of that trailer at all, so a
+verified-cosmetic trailing commit that correctly skips CP3 re-review still
+leaves the separate GATES/evidence-pack artifact flagged stale against the
+same commit.
+
+**Why it matters:** Currently non-blocking only because
+`RELEASE_DECISION_POLICY=observe` (C4 dual-run hasn't started enforcing
+yet) — but this EPIC has now demonstrated, on live evidence, the exact
+failure pattern that WILL trip a real merge block the moment C4 moves to
+enforcing mode: any EPIC with a legitimately-exempted trailing commit will
+compute `merge_mode: blocked` even though nothing substantive changed.
+That's the C4 system blocking correctly-shipped work over its own coverage
+gap — the inverse failure of every prior "false green" finding in this
+backlog, but still a false signal. The system caught this on itself,
+independently, before it ever reached production enforcement — a genuine
+positive-control result for the live-probe's whole premise, worth pinning
+alongside the OBS-20260709 C4 verifications.
+
+**Disposition (self-resolving, not yet applied):** Curator converted this
+into **IMP-201** (`aid-orchestrator` internal backlog, `.aid-o/work/backlog.md`,
+not this ledger) proposing a bounded extension of the existing D4 pattern
+to `aid-evidence-verify.sh`/`aid-release-policy.sh`, auto-approved under
+this project's Tier2 `curator_auto_rules` (`standards`+`M` effort →
+`approve`). Not yet applied at time of writing — EPIC is still
+`done_phase: review`, unmerged. Two adjacent Auditor findings from the same
+run, also converted to proposals: **IMP-202** (`final_report.md`'s Scope
+Corrections section undercounts `timeline.jsonl` events 5-vs-6, prospective
+generation-fix only, Tier1 auto-approved) and a 4th confirming occurrence
+of the pre-existing **IMP-182** (`audit-input-manifest.json`'s `input_hash`
+still not independently re-derivable by any formula in-repo — unchanged
+`high`/`L`/`always_defer`, no escalation, 4th EPIC to hit it).
+
+**Reproduction:** `.aid-o/work/evidence/E-061-1_6/R-E061-1/audit-report.md`
+Finding 1; cross-check `gates_report.json`'s `revision.head_sha` (`9ec4844`)
+against `git log -1 --format=%H task/E-061-1_6/main` (`25bff3e`); re-run
+`aid-evidence-verify.sh --at-head` directly against the run to reproduce
+the `fail`/`blocked` verdict live.
+
+**Likely fix:** extend an explicit freshness-exception mechanism to
+`aid-evidence-verify.sh`/`aid-release-policy.sh` analogous to D4's CP3
+trailer, so a verified-cosmetic trailing commit doesn't leave GATES
+evidence flagged stale once `RELEASE_DECISION_POLICY` moves off `observe`.
+Track whether IMP-201 actually gets applied before this EPIC (or the P062
+family) reaches a live C4-enforcing merge.
