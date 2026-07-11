@@ -1998,3 +1998,57 @@ trailer, so a verified-cosmetic trailing commit doesn't leave GATES
 evidence flagged stale once `RELEASE_DECISION_POLICY` moves off `observe`.
 Track whether IMP-201 actually gets applied before this EPIC (or the P062
 family) reaches a live C4-enforcing merge.
+
+### OBS-20260711-02 - CP2 review scope (unit + targeted integration) misses full e2e directory; a deliberate behavior change left a stale, now-incorrect e2e assertion undetected for one full step
+
+**Observed in:** WAN / P062 / E-062-2_3 (Step 3 → caught during Step 4)
+**AID version:** v2.54.0
+**Observed at:** 2026-07-11
+**Status:** confirmed (self-caught same EPIC, fixed same day, no prod impact)
+**Severity:** medium
+**Class:** false-green prevention / review coverage (CP2 scope narrower than
+risk surface)
+
+**What happened:** Step 3 of E-062-2_3 (`3742454`) deliberately changed
+routing behavior: a confirm batch with exactly one delivery point (single
+OM) now attaches a supplier SoD document even without an EAN match
+("single-OM fallback"), since the target is unambiguous. Step 3's CP2
+code-review ran `tests/unit/` plus the new targeted
+`tests/integration/test_sod_attach.py` — it never ran `tests/e2e/`, so it
+never noticed that a pre-existing P042-era e2e test
+(`test_doc_routing_e2e.py::test_doc_routing_smlouva_unmatched`) asserted
+exactly the OLD (now-superseded) behavior for precisely this single-OM
+scenario. CP2 passed Step 3 clean; the stale assertion sat undetected
+through the whole step. It only surfaced because Step 4's e2e-role
+implementer ran the *full* `tests/e2e/` directory for its own capstone
+test and hit the failure — initially mis-read as possible flakiness,
+correctly re-diagnosed as a deterministic regression before being fixed
+(`017cce5`, same-day) and logged (`3a31660`, **IMP-195**).
+
+**Why it matters:** This is the same family as OBS-20260702-05/OBS-20260705-01
+(declared/expected control resolves to a no-op or narrower-than-intended
+scope, everything still reports green) but on a new axis: CP2's own scope
+selection (unit + *targeted* integration, not the full suite) is a
+judgment call made per-step, and nothing forces "full e2e" for steps that
+touch shared routing/attach logic even when a deliberate behavior change
+is exactly the kind of edit most likely to invalidate an existing e2e
+assertion elsewhere in the tree. The implementer's own process
+recommendation (recorded in IMP-195) is correct but currently exists only
+as backlog prose, not an enforced rule — nothing stops the next step that
+touches `erp_write.py`/`doc_routing.py` from repeating exactly this gap.
+Positive notes: caught same EPIC (before merge, before any release
+decision), self-diagnosed correctly on the second look, fixed same day,
+and the fix + backlog note both landed same session — the whole loop
+closed within about two hours of the original step landing.
+
+**Reproduction:** `git show 3742454 --stat` (Step 3, no `tests/e2e/` path
+touched) vs `git show 636ac08` (Step 4, adds `tests/e2e/` capstone) vs
+`git show 017cce5` (the fix, `tests/e2e/test_doc_routing_e2e.py` only);
+`.aid-o/work/backlog.md` IMP-195 for the full narrative.
+
+**Likely fix:** make "does this step touch `wan/connectors/erp_write.py`
+or `wan/connectors/doc_routing.py` (or equivalent routing/attach-layer
+paths)?" a mechanical CP2 scope-selection rule that adds `tests/e2e/` to
+the required run, rather than leaving it to per-step implementer judgment
+— same shape of fix as every other "declared control, no enforcement"
+finding in this backlog (Principle #1).
