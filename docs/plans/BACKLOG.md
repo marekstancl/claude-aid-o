@@ -2165,3 +2165,93 @@ artifacts, and have whichever dispatch step writes this file resolve its
 output path from the run's evidence-dir variable rather than a
 cwd-relative default that silently falls back to the process's working
 directory when unset.
+
+### OBS-20260711-05 - Release automation misattributes a pre-written `[Unreleased]` CHANGELOG entry to the PREVIOUS release's header; same bug still live and unfixed in README.md Roadmap on current main
+
+**Observed in:** aid-orchestrator / P061 EPIC 1/6 release cut (v2.55.0)
+**AID version:** v2.54.0 → v2.55.0 (self-host release of the tool itself)
+**Observed at:** 2026-07-11
+**Status:** confirmed — CHANGELOG.md instance fixed same day (doc-only
+patch); **README.md instance CONFIRMED STILL PRESENT on current main HEAD**
+**Severity:** high
+**Class:** release-integrity / version-registry drift (self-host tooling
+bug, not a consumer-facing AID Control System defect, but breaks this
+project's own documented single-source-of-truth guarantee)
+
+**What happened:** This project's `scripts/aid-release.sh` had a
+pre-written `## [Unreleased] — pending P061 EPIC1 release` section in
+`CHANGELOG.md` (the real content for the release about to be cut) sitting
+above the still-correctly-labeled `## [2.54.0] — 2026-07-10` section (the
+real, previously-released P060/E-060-2_2 content). `update_changelog()`'s
+header detector (`grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1`)
+only recognizes numeric `## [X.Y.Z]` headers — `[Unreleased]` doesn't
+match, so it skipped straight past the real pending entry and found
+`2.54.0` (the OLD, correctly-labeled release) as "the" header. Since
+`2.54.0 == CURRENT` (the version being bumped from), the script's
+existing-header-rename branch fired: `sed -i "s/## \[2.54.0\].*/##
+[2.55.0] — $TODAY/"` — renaming P060's real header to `2.55.0` **without
+touching the content beneath it**, so `2.55.0` briefly pointed at P060's
+bullet list while the actual new P061-EPIC1 content sat unpromoted under
+`[Unreleased]`. Caught and hand-fixed same day (commit `a506a87`,
+doc-only, `[2.54.0]` restored as P060's real entry, a proper `[2.55.0]`
+entry written with P061 EPIC1's actual shipped content).
+
+**The identical failure mode independently hit `README.md`'s Roadmap
+section via a separate code path, and it is NOT fixed** — confirmed live
+on current `main` (`4bcc86a`) at time of observation. `aid-release.sh`'s
+README updater does a blind global substitution:
+`sed -i "s/v$CURRENT/v$NEW_VERSION/g" "$readme"` — it finds the literal
+string `v2.54.0` anywhere in the file (the Roadmap's `- **v2.54.0**
+(current) — P060 false-green / stale-evidence hardening (E-060-2_2): ...`
+line) and renames just the version token to `v2.55.0`, **leaving the
+entire P060/E-060-2_2 description text attached under the new number**.
+This is not merely "not yet updated" — it is actively wrong: `README.md`
+right now claims `v2.55.0 (current)` is "P060 false-green / stale-evidence
+hardening (E-060-2_2)", which is what `v2.54.0` actually shipped; the real
+`v2.55.0` (gate_profiles substrate + plan-gate floor, D8/D9) has no
+Roadmap entry at all, and the CLAUDE.md-mandated "add a new line, move the
+previous version down, keep 3 most recent" step never happened.
+
+**Why it matters:** This is the project's OWN release tooling breaking the
+OWN documented invariant (`CLAUDE.md` §"Single Source of Truth" +
+"README Roadmap Update", both explicit, both violated). Comments in
+`aid-release.sh` (lines 120-131, "IMP-093 fix... prevents the 3x-observed
+bug where a pre-written CHANGELOG entry... was treated as the [current]
+one") show this exact CLASS of misattribution has already recurred at
+least 3 times and been patched narrowly each time — but only for the case
+where the pre-written entry already carries the literal new version
+number. The very common `[Unreleased]` convention (not literal-version
+pre-writing) was never covered by that fix, so this is effectively the
+**4th occurrence** of the same root defect, wearing a different trigger.
+Consequence if unfixed: every future release cut that follows the
+`[Unreleased]`-heading convention will corrupt the CHANGELOG (now guarded
+only by manual review, since the automation itself doesn't detect it) and
+silently mislabel the README Roadmap (not guarded by anything — no manual
+catch happened here). E-061-2_6 (EPIC 2/6 of this same plan) has already
+started; the next release cut is a live re-trigger risk.
+
+**Reproduction:** `git show a506a87 -- CHANGELOG.md` (the fix diff, shows
+the before/after misattribution); `sed -n '110,120p' README.md` on current
+`main` (still shows `v2.55.0 (current)` with `v2.54.0`'s real description);
+`git show 6e5113e -- README.md` (the original blind-sed commit); root
+cause at `plugins/aid-orchestrator/scripts/aid-release.sh` lines ~138
+(`CHANGELOG_HEADER` numeric-only grep), ~199-229 (`update_changelog()`
+three-branch logic, no `[Unreleased]` recognition), ~351-359 (README
+updater, unconditional `sed -i s/v$CURRENT/v$NEW_VERSION/g`).
+
+**Likely fix:** (a) `update_changelog()` gains a fourth, first-checked
+branch: if the file contains a literal `## [Unreleased]` section (any
+suffix text), treat that as the pending entry — rename ONLY that header
+to `## [$NEW_VERSION] — $TODAY`, leave every numeric header below it
+untouched. (b) The README updater must stop doing a blind version-token
+substitution and instead: detect the existing top Roadmap line, move its
+*exact current text* down to become the new second-from-top entry, and
+insert a genuinely new top line for `$NEW_VERSION` (content TBD by
+PM/agent, same "fill in" pattern `update_changelog()` already uses for its
+prepend branch) — mirroring the CHANGELOG fix's shape. (c) Given this is a
+4th occurrence of the same defect class, consider a post-release
+self-check step (`aid-release.sh --verify` or equivalent) that asserts the
+CHANGELOG/README content under the new version header textually overlaps
+with the actual `git diff $LAST_TAG..HEAD` shipped changes, catching a
+misattribution mechanically instead of relying on a human noticing a
+wrong changelog paragraph.
