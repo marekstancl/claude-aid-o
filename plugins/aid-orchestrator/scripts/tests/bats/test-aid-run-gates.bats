@@ -760,6 +760,59 @@ YAML
   [ "$output" == "plan_json_malformed" ]
 }
 
+@test "GATES:DONE plan-gate floor (E-061-1_6 CP3 regression): plan.json.gates as object (not array) blocks transition with plan_json_malformed" {
+  # Regression test (E-061-1_6 CP3 security finding 1): if plan.json.gates
+  # is a JSON object instead of an array (syntactically valid JSON, but
+  # schema-non-compliant), the original jq expression silently produced []
+  # ("no violations") because $pg[] over an object yields its VALUES, not
+  # keys, so the gate-name string matching never succeeded. This violated
+  # the step's "Never a silent skip" design principle. After the fix,
+  # non-array .gates must fail closed via the same plan_json_malformed path
+  # used for parse errors.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+
+  # Create a plan.json with gates as an object (not an array) — schema violation.
+  # This is syntactically valid JSON but violates plan.schema.json which requires
+  # gates to be {"type":"array","items":{"type":"string"}}.
+  printf '{"gates":{"tests_pass":true}}' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Manually create a gates_report.json with an excluded gate (the scenario
+  # this check is designed to catch: profile-excluded gate that is plan-required).
+  # Use the passing execution.yaml fixture to generate the report.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  # Add a gate_profiles block with a profile that excludes tests_pass
+  cat >> "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YAML'
+gate_profiles:
+  limited:
+    include: [always_pass]
+YAML
+  run "$RUN_GATES" run-all "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile limited
+  [ "$status" -eq 0 ]
+  # Verify the report has tests_pass excluded (not in the limited profile)
+  run jq -e '.excluded_gates | index("tests_pass") != null' "$TEST_EVIDENCE_DIR/gates/gates_report.json" 2>/dev/null
+  # Note: tests_pass is NOT defined in the fixture, so it won't appear in excluded_gates.
+  # That's OK — what matters is: the PLAN claims to require tests_pass (via malformed plan.json),
+  # and the FSM's type-checking will now catch the malformed .gates shape.
+
+  # GATES→DONE must refuse — the type-check in the jq expression now catches
+  # the non-array .gates and treats it as malformed JSON (via error())
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_json_malformed"* ]]
+  # State must stay GATES (never advanced)
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on timeline
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_json_malformed" ]
+}
+
 @test "run-all profile f (legacy regression): omitting --profile runs all gates unchanged even when gate_profiles is defined" {
   cat > "$EXEC_YAML" <<'YAML'
 gates:

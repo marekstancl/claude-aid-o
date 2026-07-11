@@ -1811,13 +1811,19 @@ EOF
         # is a precondition checker, not a gate executor (that's
         # aid-run-gates.sh's job); re-running gate logic here would duplicate
         # it. Never a silent skip (AID-v3-principles.md §1).
+        # E-061-1_6 CP3 security: .gates must be validated as an array (not
+        # an object or other type) before iteration. A type-confused shape
+        # (e.g. object instead of array) silently produces [] even when a
+        # plan-required gate is excluded — fail closed via the existing
+        # plan_json_malformed path when .gates is not an array.
         local plan_json_file="${evidence_dir}/plan.json"
         if [[ -f "$plan_json_file" ]]; then
           local plan_gate_floor_violations
           plan_gate_floor_violations=$(jq -n \
             --slurpfile plan "$plan_json_file" \
             --slurpfile rpt "$report" \
-            '(($plan[0].gates // []) as $pg
+            '(($plan[0].gates // []) as $pg_raw
+              | ($pg_raw | if type == "array" then . else error("plan.json.gates must be an array, got \(type)") end) as $pg
               | ($rpt[0].excluded_gates // []) as $eg
               | [$pg[] | select(. as $g | $eg | index($g) != null)])' 2>&1)
           if [[ $? -ne 0 ]]; then
