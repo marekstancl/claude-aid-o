@@ -16,7 +16,10 @@
 #
 #   compose_execution_yaml <project_root> <output_file> [stack ...]
 #       Render execution.yaml at <output_file> from per-stack template
-#       fragments under defaults/execution-stacks/<stack>.yaml.
+#       fragments under defaults/execution-stacks/<stack>.yaml. Also emits a
+#       generic `gate_profile_defaults`/`gate_profiles` block (P061 E1 Step 5)
+#       derived ONLY from gate names each stack fragment actually defines —
+#       never references self-host names like bats_fsm/bats_all (D3 isolation).
 #
 # Plugin path resolution order:
 #   1. $AID_PLUGIN_PATH env var (worktree dev workflow)
@@ -137,6 +140,27 @@ resolve_cp4_production_paths() {
   return 0
 }
 
+# stack_gate_names <frag_file>
+#   P061 E1 Step 5: echo the top-level gate names (one per line, in file
+#   order) a stack's execution-stacks/<stack>.yaml fragment actually defines,
+#   by reading the file itself rather than hardcoding a per-stack name list.
+#   This keeps the generic gate_profiles substrate self-updating if a stack
+#   fragment ever adds/renames/removes a gate (GEN-007 — no ad-hoc drift).
+#   Fragment shape (see defaults/execution-stacks/*.yaml):
+#     gates:
+#     ts_test:
+#       command: "..."
+#       required_when: "..."
+#     ts_lint:
+#       ...
+#   i.e. after the first "gates:" line, gate names are the flush-left
+#   "<name>:" keys (their command/required_when lines are indented).
+stack_gate_names() {
+  local frag_file="$1"
+  [[ -f "$frag_file" ]] || return 0
+  tail -n +2 "$frag_file" | grep -E '^[A-Za-z0-9_]+:' | sed 's/:.*$//'
+}
+
 compose_execution_yaml() {
   local project_root="$1"
   local output_file="$2"
@@ -166,6 +190,32 @@ compose_execution_yaml() {
   local _CP4_GLOB="" _CP4_NO_MATCH=0
   resolve_cp4_production_paths "$project_root" "${clean_stacks[@]:-}"
   local cp4_glob="$_CP4_GLOB"
+
+  # P061 E1 Step 5: derive the generic gate_profiles substrate purely from
+  # gate names each detected stack's fragment actually defines (never from a
+  # hardcoded list) — "targeted" = each stack's first/primary gate (its
+  # smoke/unit-test gate, e.g. ts_test, py_test, go_test, rust_test,
+  # bash_syntax); "full" = every gate every detected stack defines. Two tiers
+  # only (not self-host's 4: step/epic/plan_final/release) — a fresh generic
+  # project has no EPIC/plan/release-stage gate distinctions yet; PM can
+  # split further once real usage shows a need.
+  local targeted_gate_names=() full_gate_names=()
+  local p_stack p_frag p_names_str p_name p_first
+  for p_stack in "${clean_stacks[@]:-}"; do
+    p_frag="${stacks_dir}/${p_stack}.yaml"
+    [[ -f "${p_frag}" ]] || continue
+    p_names_str="$(stack_gate_names "${p_frag}")"
+    [[ -z "${p_names_str}" ]] && continue
+    p_first=1
+    while IFS= read -r p_name; do
+      [[ -z "${p_name}" ]] && continue
+      full_gate_names+=("${p_name}")
+      if (( p_first == 1 )); then
+        targeted_gate_names+=("${p_name}")
+        p_first=0
+      fi
+    done <<< "${p_names_str}"
+  done
 
   mkdir -p "$(dirname "${output_file}")" || {
     echo "[ERROR] Cannot create directory for ${output_file}" >&2
@@ -201,6 +251,29 @@ EOF
         tail -n +2 "${frag}" | sed 's/^/  /'
         echo
       done
+    fi
+
+    # P061 E1 Step 5: generic gate_profiles substrate — only gate names the
+    # stacks above actually defined go into include[]; empty when no stack
+    # matched (nothing to profile yet).
+    echo ""
+    if (( ${#full_gate_names[@]} == 0 )); then
+      echo "# gate_profiles: no stacks detected — add gate definitions above, then define profiles manually."
+    else
+      local targeted_csv full_csv
+      targeted_csv="$(IFS=', '; echo "${targeted_gate_names[*]}")"
+      full_csv="$(IFS=', '; echo "${full_gate_names[*]}")"
+      cat <<EOF
+gate_profile_defaults:
+  step: targeted
+  epic: full
+
+gate_profiles:
+  targeted:
+    include: [${targeted_csv}]
+  full:
+    include: [${full_csv}]
+EOF
     fi
 
     cat <<'EOF'

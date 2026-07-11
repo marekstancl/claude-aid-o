@@ -83,3 +83,46 @@ teardown() {
   ts_line=$(grep -n '# === Typescript' .aid-o/config/execution.yaml | head -1 | cut -d: -f1)
   [ "$python_line" -lt "$ts_line" ]
 }
+
+@test "P061 E1 Step 5: TypeScript fixture — execution.yaml has generic gate_profiles block, no self-host gate names" {
+  touch package.json
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  [[ " ${stacks[*]} " =~ " typescript " ]]
+
+  mkdir -p .aid-o/config
+  compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
+
+  # gate_profile_defaults + gate_profiles block present, structurally correct
+  # (same key names aid-run-gates.sh --profile / aid-fsm.sh plan-gate floor expect).
+  run yq '.gate_profile_defaults.step' .aid-o/config/execution.yaml
+  [ "$output" == "targeted" ]
+  run yq '.gate_profile_defaults.epic' .aid-o/config/execution.yaml
+  [ "$output" == "full" ]
+
+  # Profiles reference ONLY gate names the TypeScript stack fragment itself
+  # defines (ts_test/ts_lint/ts_type_check) — never self-host bats_* names.
+  run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test" ]
+  run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
+  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+
+  # D3 consumer isolation (negative control): the composed file must never
+  # contain self-host-only gate names, anywhere.
+  run bash -c '! grep -qE "\bbats_fsm\b|\bbats_all\b|\bshell_pipeline_smoke\b" .aid-o/config/execution.yaml'
+  [ "$status" -eq 0 ]
+}
+
+@test "P061 E1 Step 5: zero stacks detected — no gate_profiles block, execution.yaml still valid YAML" {
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  [ "${#stacks[@]}" -eq 0 ]
+
+  mkdir -p .aid-o/config
+  compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
+
+  run yq -e '.gate_profiles' .aid-o/config/execution.yaml
+  [ "$status" -ne 0 ] || [ "$output" == "null" ]
+  run bash -c 'yq -e "." .aid-o/config/execution.yaml > /dev/null'
+  [ "$status" -eq 0 ]
+}
