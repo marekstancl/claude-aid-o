@@ -369,9 +369,44 @@ compute_simplifier() {
 # Sets VERIFICATION_VERDICT (pass|fail|unverifiable) and VERIFICATION_REASON.
 # NEVER crashes: tool exit 2/10/20 → unverifiable+reason; per-check fail → fail (git-dirty
 # and --at-head mismatch are `fail`, NOT unverifiable); per-check unverifiable → unverifiable.
+#
+# TEST-ONLY STUB SEAM (added to fix test-cost blocker during P061 EPIC1 GATES, 2026-07-11):
+# the real `aid-evidence-verify.sh --at-head` subprocess costs ~9s per call against a
+# non-trivial fixture (real git init + real artifact hashing), which made
+# test-release-policy.bats's 78 tests (57 of which build a "healthy" real fixture purely to
+# reach a release_ready:true baseline for UNRELATED assertions) take 5-15+ minutes. This seam
+# lets bats short-circuit that subprocess call for tests that don't examine verification's own
+# behavior. It is double-gated (AID_TEST_MODE=1 AND the stub var set) so it can NEVER activate
+# outside a test harness that has explicitly opted in on both counts, and an invalid stub value
+# fails loud rather than silently mapping to a pass. Production/default behavior (both unset) is
+# byte-for-byte unchanged from before this seam existed — the real subprocess call below is
+# untouched.
 run_verification_input() {
   VERIFICATION_VERDICT="unverifiable"
   VERIFICATION_REASON="verifier_tool_error harness_unavailable"
+
+  if [[ "${AID_TEST_MODE:-}" == "1" && -n "${AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB:-}" ]]; then
+    case "${AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB}" in
+      pass)
+        VERIFICATION_VERDICT="pass"
+        VERIFICATION_REASON="all evidence checks passed at HEAD (stubbed: AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass, AID_TEST_MODE)"
+        ;;
+      fail)
+        VERIFICATION_VERDICT="fail"
+        VERIFICATION_REASON="one or more evidence checks failed at HEAD (stubbed: AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=fail, AID_TEST_MODE)"
+        ;;
+      unverifiable)
+        VERIFICATION_VERDICT="unverifiable"
+        VERIFICATION_REASON="one or more evidence checks unverifiable (stubbed: AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=unverifiable, AID_TEST_MODE)"
+        ;;
+      *)
+        echo "aid-release-policy: invalid AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB value: '${AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB}' (must be pass|fail|unverifiable)" >&2
+        exit 2
+        ;;
+    esac
+    return 0
+  fi
+
   [[ -f "$EVIDENCE_VERIFY" ]] || return 0
 
   local vr_tmp="" vr_exit=0 worst=""

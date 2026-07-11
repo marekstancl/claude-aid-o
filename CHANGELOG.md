@@ -3,6 +3,24 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.55.0] — 2026-07-11
+
+P061 EPIC 1/6 (gate profile substrát + plan-gate floor): gates-enum unlock, `aid-run-gates.sh
+--profile`, `aid-fsm.sh` plan-gate floor (`plan_gate_profile_excluded`), generic `gate_profiles`
+substrate for new/existing projects, plus a mid-flight test-cost hotfix.
+
+### Added
+- **`--profile <name>` flag (`aid-run-gates.sh`)** — activates a named profile (`gate_profiles.<name>.include[]` from `execution.yaml`); gates outside it get `profile_excluded` (don't run, don't fail `overall`). New report fields: `profile`/`profile_source`/`profile_reason`/`excluded_gates`. Omitting `--profile` preserves prior behavior exactly.
+- **Plan-gate floor (`aid-fsm.sh` GATES:DONE)** — cross-references `plan.json.gates[]` against `gates_report.json.excluded_gates[]`; any overlap blocks the transition with `plan_gate_profile_excluded` (never a silent skip). Malformed or wrong-shaped `plan.json.gates` (object instead of array) also fails loud (`plan_json_malformed`).
+- **Gates-enum unlock (`plan.schema.json` + `aid-epic-to-json.sh`)** — `plan.json.gates[]` can now carry any gate name (was hardcoded to a 4-value enum); a previously dead validation no-op (`select(. == .)`, always true) now genuinely rejects malformed gate names.
+- **Generic `gate_profiles` substrate for new projects (`/aid-init`)** — `compose_execution_yaml` emits a `gate_profile_defaults`/`gate_profiles` block per detected stack, using only that stack's own gate names, never self-host names (D3 consumer isolation).
+- **Non-destructive existing-project upgrade (D9)** — `/aid-init` on a project with its own `.aid-o/config/execution.yaml` detects missing profile keys, reports the proposed block, and appends it only after explicit PM confirmation; pure-append implementation makes byte-preservation of hand-edited gate commands structural.
+- **Release-policy surface-rule bootstrap check** — `scripts/tests/release-policy-surface-check.sh` (+ `test-release-policy-surface-check.bats`, 7 scenarios) gives P061's Bootstrap Fast Lane a small, explicit, testable rule for when the ~4-5 min `test-release-policy.bats` integration suite is required at step-level targeted testing (only when the diff touches release-policy surface) versus skippable for unrelated steps. Fail-safe default (no paths given) runs the suite. Does NOT change the EPIC-boundary/release-boundary requirement — `bats_all` still runs unconditionally there per D8.
+
+### Fixed
+- **`test-release-policy.bats` test-cost blocker** — the suite's 78 tests each ran the real `aid-evidence-verify.sh --at-head` subprocess (~9s/call against a real fixture), pushing the file past 5 minutes and blocking `bats_all` (and by extension this EPIC's own GATES phase) within its configured timeout. Added a double-gated test-only stub seam (`AID_TEST_MODE=1` AND `AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass|fail|unverifiable`) to `aid-release-policy.sh`'s `run_verification_input()` so branch/logic tests can skip the subprocess; 4 tests (healthy real-pass, dirty-tree real-fail, stale-HEAD real-fail ×2) explicitly `unset` the stub and keep exercising the genuine subprocess end-to-end. Production/default behavior (both env vars unset) is unchanged — the real subprocess call is untouched. Suite time: ~18s/test (timing out past 300s+ overall, unreliable) → 4.6s/test for stubbed tests, ~4m50s reliable total for the full 78-test file.
+- **`bats_all` gate timeout** — `.aid-o/config/execution.yaml`'s `bats_all` gate timeout raised from 1200s to 2400s to give the full suite (441 tests across ~30 files) realistic headroom; self-host config only, not shipped to consumer projects (D3).
+
 ## [2.54.0] — 2026-07-10
 
 ### Added

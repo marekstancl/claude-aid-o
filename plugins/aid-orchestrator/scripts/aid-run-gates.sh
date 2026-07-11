@@ -3,7 +3,22 @@
 #
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
-#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>] [--plan-json <path>]
+#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>] [--plan-json <path>] [--profile <name>]
+#
+# P061 E1 Step 2 changes:
+#   • --profile <name> selects a named subset of gates to run, from
+#     execution.yaml.gate_profiles.<name>.include[] (a whitelist of gate
+#     keys). Gates defined under execution.yaml.gates but NOT in the active
+#     profile's include[] are NOT run — they get an explicit
+#     `profile_excluded` result row instead of being silently omitted, and
+#     never affect `overall` (same treatment as a skipped required:false
+#     gate). Omitting --profile preserves today's behavior exactly: all
+#     defined gates run, even if gate_profiles exists in execution.yaml.
+#   • Unknown --profile name, or a profile include[] entry that isn't a key
+#     under execution.yaml.gates, is fail-loud (exit != 0) BEFORE any gate
+#     runs.
+#   • gates_report.json gains: profile, profile_source, profile_reason,
+#     excluded_gates[] (additive; null/[] when --profile isn't passed).
 #
 # P032 Step 3 changes vs pre-Session-A:
 #   • execution.yaml parsing switched from awk regex to yq (mikefarah variant)
@@ -134,13 +149,14 @@ run_all_gates() {
     shift
   fi
 
-  # Parse optional flags: --state-file, --report-file, --plan-json
-  local state_file="" report_file="" plan_json=""
+  # Parse optional flags: --state-file, --report-file, --plan-json, --profile
+  local state_file="" report_file="" plan_json="" profile=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --state-file) state_file="$2"; shift 2 ;;
       --report-file) report_file="$2"; shift 2 ;;
       --plan-json) plan_json="$2"; shift 2 ;;
+      --profile) profile="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -148,6 +164,45 @@ run_all_gates() {
   [[ -f "$execution_yaml" ]] || { echo "ERROR: execution_yaml not found: $execution_yaml" >&2; exit 1; }
 
   require_yq_mikefarah
+
+  # ─── Gate profile resolution (P061 E1 Step 2) ──────────────────────────
+  # A profile is a named include[] whitelist of gate keys under
+  # execution.yaml.gate_profiles. --profile <name> activates exactly one
+  # profile for THIS run (auto-selection by risk/phase is a later EPIC —
+  # for this step profile_source is always "cli_flag"). Omitting --profile
+  # leaves `profile`/`include_gates_json` empty and every check below is
+  # skipped, so legacy execution.yaml files (with or without a
+  # `gate_profiles` block) behave EXACTLY as before — this is the
+  # backward-compatibility contract.
+  #
+  # Both fail-loud cases are validated upfront, before any gate runs:
+  #   1. --profile <name> where <name> is not a key under gate_profiles.
+  #   2. A profile's include[] lists a gate not defined under .gates.
+  local profile_source="null" profile_reason="null"
+  local include_gates_json="[]"
+  if [[ -n "$profile" ]]; then
+    local profile_def
+    profile_def=$(yq ".gate_profiles.\"${profile}\"" "$execution_yaml")
+    if [[ -z "$profile_def" || "$profile_def" == "null" ]]; then
+      echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — no such key under gate_profiles in ${execution_yaml}" >&2
+      exit 1
+    fi
+
+    include_gates_json=$(yq -o=json ".gate_profiles.\"${profile}\".include // []" "$execution_yaml" | tr -d '\n ')
+    local profile_defined_keys_json
+    profile_defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
+    local inc_gate
+    while IFS= read -r inc_gate; do
+      [[ -z "$inc_gate" ]] && continue
+      if ! jq -e --arg g "$inc_gate" 'any(.[]; . == $g)' <<< "$profile_defined_keys_json" >/dev/null 2>&1; then
+        echo "ERROR: aid-run-gates.sh: gate profile '${profile}' includes undefined gate '${inc_gate}' (not present under execution.yaml.gates)" >&2
+        exit 1
+      fi
+    done < <(jq -r '.[]' <<< "$include_gates_json")
+
+    profile_source="cli_flag"
+    profile_reason="explicit --profile flag"
+  fi
 
   # FSM state check: refuse to run if state is not GATES, UNLESS caller is
   # cmd_advance_to_gates (signaled via AID_GATES_TRIGGERED_BY_FSM=1, P035 Step 2).
@@ -199,6 +254,9 @@ run_all_gates() {
   # latter returns 0 on first use and trips set -e.
   local processed=0
   declare -a command_log=()
+  # Gate keys excluded by the active profile (P061 E1 Step 2). Populated
+  # only when --profile is set; stays empty otherwise.
+  declare -a excluded_gates=()
 
   # Iterate gate names via yq (mikefarah)
   local gate_names
@@ -212,6 +270,24 @@ run_all_gates() {
     # silently-lost gate so the defined==processed integrity assert below can be
     # exercised end-to-end (OBS-20260708-07 F4c).
     if [[ -n "${AID_TEST_DROP_GATE:-}" && "$gate_name" == "${AID_TEST_DROP_GATE}" ]]; then
+      continue
+    fi
+
+    # ─── Gate-profile exclusion (P061 E1 Step 2) ──────────────────────
+    # A gate defined in execution.yaml but not listed in the active
+    # profile's include[] is never run — but it must never be silently
+    # dropped either (same defined==processed contract as the no_command
+    # skip row above): emit an explicit profile_excluded row, count it
+    # toward `processed`, and record it in excluded_gates. A required:true
+    # gate excluded this way does NOT fail the run — same treatment as a
+    # skipped required:false gate below.
+    if [[ -n "$profile" ]] && ! jq -e --arg g "$gate_name" 'any(.[]; . == $g)' <<< "$include_gates_json" >/dev/null 2>&1; then
+      log_event "$timeline_file" "gate_complete" gate="$gate_name" result="profile_excluded" reason="profile_excluded" profile="$profile"
+      $first || gates_json+=","
+      first=false
+      gates_json+="\"${gate_name}\":{\"gate\":\"${gate_name}\",\"result\":\"profile_excluded\",\"reason\":\"profile_excluded\",\"exit_code\":0,\"duration_ms\":0,\"output\":\"\",\"attempts\":0}"
+      processed=$((processed+1))
+      excluded_gates+=("$gate_name")
       continue
     fi
 
@@ -405,6 +481,23 @@ run_all_gates() {
     revision_json='{"head_sha":null}'
   fi
 
+  # ─── gate profile fields (P061 E1 Step 2) ──────────────────────────────
+  # profile/profile_source/profile_reason stay JSON null when --profile
+  # wasn't passed (legacy-compat: field present, value absent-equivalent).
+  # excluded_gates is always an array, empty when no gate was excluded.
+  local profile_val_json="null" profile_source_val_json="null" profile_reason_val_json="null"
+  if [[ -n "$profile" ]]; then
+    profile_val_json=$(jq -nc --arg v "$profile" '$v')
+    profile_source_val_json=$(jq -nc --arg v "$profile_source" '$v')
+    profile_reason_val_json=$(jq -nc --arg v "$profile_reason" '$v')
+  fi
+  local excluded_gates_json
+  if (( ${#excluded_gates[@]} == 0 )); then
+    excluded_gates_json="[]"
+  else
+    excluded_gates_json=$(printf '%s\n' "${excluded_gates[@]}" | jq -R . | jq -s '.')
+  fi
+
   report=$(jq --arg gen "$generated_by" \
               --arg ts  "$generated_at" \
               --argjson cl "$command_log_array" \
@@ -413,7 +506,11 @@ run_all_gates() {
               --arg rel "$relevance" \
               --argjson pgr "$plan_gates_reconciled" \
               --argjson rev "$revision_json" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev}' \
+              --argjson prof "$profile_val_json" \
+              --argjson profsrc "$profile_source_val_json" \
+              --argjson profreason "$profile_reason_val_json" \
+              --argjson excl "$excluded_gates_json" \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl}' \
               <<< "$report")
 
   echo "$report"

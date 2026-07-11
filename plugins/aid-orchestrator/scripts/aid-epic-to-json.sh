@@ -863,23 +863,25 @@ done
 # =============================================================================
 # Step 11: Extract DoD Gates
 # =============================================================================
+# Gate names are NOT filtered against a fixed list here — plan.schema.json's
+# gates[] accepts any non-empty string (P061 E1 Step 1: the old hardcoded
+# 4-value list silently dropped every self-host/per-project gate name, making
+# them untestable). Every non-empty, trimmed name found under "## DoD Gates"
+# is passed through to gates_json. The authoritative check is dynamic and
+# happens later: aid-run-gates.sh reconciles each declared name against the
+# gate definitions in execution.yaml and fails loud (undefined_gate) if a
+# declared gate has no matching definition there. Step 14 below still rejects
+# structurally malformed gate names (empty / non-identifier-like) fail-loud
+# at conversion time, before that dynamic reconciliation ever runs.
 gates_raw="$(extract_section "$epic" "DoD Gates")"
 gates_json="[]"
-valid_gates="tests_pass lint_pass security_scan_pass docs_updated"
 
 while IFS= read -r line; do
   line="$(echo "$line" | sed 's/\r$//')"
   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
     gate="$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//; s/[[:space:]]*$//')"
     [[ -z "$gate" ]] && continue
-    # Validate gate is in the enum
-    is_valid=0
-    for vg in $valid_gates; do
-      [[ "$vg" == "$gate" ]] && is_valid=1
-    done
-    if [[ "$is_valid" -eq 1 ]]; then
-      gates_json="$(echo "$gates_json" | jq --arg g "$gate" '. + [$g]')"
-    fi
+    gates_json="$(echo "$gates_json" | jq --arg g "$gate" '. + [$g]')"
   fi
 done <<< "$gates_raw"
 
@@ -942,10 +944,18 @@ rm -rf "${__pj_tmp}"
 #   - dependencies[].before and .after reference existing step IDs
 #   - parallel_groups items have minItems 2
 #   - analysis_groups required fields and patterns
+#   - gates[] items are well-formed identifiers (no fixed enum — see
+#     plan.schema.json; the actual gate-existence check is dynamic, done by
+#     aid-run-gates.sh against execution.yaml at run time)
 # =============================================================================
 validation_errors="$(echo "$plan_json" | jq -r '
   def valid_roles: ["architect","domain","backend","frontend","qa","security","observability","docs-writer","release","e2e"];
-  def valid_gates: ["tests_pass","lint_pass","security_scan_pass","docs_updated"];
+  # NOTE: gates[] intentionally has NO fixed enum (see plan.schema.json) —
+  # any project/self-host gate name is valid here. This only checks the name
+  # is a well-formed identifier (non-empty, starts alpha, alnum/_/- after);
+  # whether the name actually maps to a gate defined in execution.yaml is a
+  # dynamic reconciliation done later by aid-run-gates.sh, not here.
+  def valid_gate_name($g): ($g | type) == "string" and ($g | test("^[A-Za-z][A-Za-z0-9_-]*$"));
 
   . as $root |
   [
@@ -992,9 +1002,11 @@ validation_errors="$(echo "$plan_json" | jq -r '
       )
     ),
 
-    # Gates validation
-    (.gates // [] | .[] |
-      if ([valid_gates[] | select(. == .)] | length) == 0 then "invalid gate: \(.)" else empty end
+    # Gates validation — well-formed identifier check only (see valid_gate_name
+    # above); this used to be a dead no-op (`select(. == .)` always true).
+    (.gates // [] | to_entries[] |
+      .value as $gate | .key as $idx |
+      if (valid_gate_name($gate) | not) then "gates[\($idx)] invalid gate name: \($gate)" else empty end
     )
   ] | if length > 0 then join("; ") else empty end
 ')"

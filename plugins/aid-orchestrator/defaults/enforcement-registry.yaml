@@ -42,7 +42,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 279          # granular registry rows; recomputed via `.enforcements|length` after adding 8 P060 false-green/stale-evidence rows (E-060-2_2 Step 9; was 271 after E-059-2_2 Step 5). The 8 new rows carry no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
+  enforcements: 282          # granular registry rows; recomputed via `.enforcements|length` after adding P061 E1 Step 3's plan_gate_floor row (was 281 after Step 2's profile_selection/profile_exclusion). The new row carries no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
   mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
   mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
   verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
@@ -968,3 +968,30 @@ enforcements:
     promotion_phase: E10
     deferred_until: "2026-12-31"
     description: "the C4 aggregator makes head_match consequential: an out-of-pack required input with head_match==false is classified blocking (release_ready=false) once head_match_policy is promoted from observe; until E10 it stays observe and emits c4_head_match_divergence (input not at pack head) and c4_head_match_unknown (revision.head_sha absent, cannot verify) without gating; blocking promotion E10"
+  - id: profile_selection
+    type: 4
+    source: "scripts/aid-run-gates.sh (grep: 'Gate profile resolution')"
+    instruction: n/a
+    severity: blocking
+    surface: "gates-runner"
+    status: active
+    description: "aid-run-gates.sh --profile <name> selects execution.yaml.gate_profiles.<name>.include[] as the whitelist of gate keys to run this invocation; validated upfront before any gate runs — an unknown profile name, or an include[] entry not present under execution.yaml.gates, is fail-loud (exit != 0). Omitting --profile preserves pre-P061 behavior exactly (all defined gates run), even once gate_profiles exists in execution.yaml — auto-selection by risk/phase is a later EPIC, this step is CLI-flag-only (profile_source always cli_flag)"
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'run-all profile d')"
+  - id: profile_exclusion
+    type: 4
+    source: "scripts/aid-run-gates.sh (grep: 'Gate-profile exclusion')"
+    instruction: n/a
+    severity: advisory
+    surface: "gates-runner"
+    status: active
+    description: "a gate defined under execution.yaml.gates but not listed in the active --profile's include[] is not dispatched to run_gate at all (proven via elapsed time in the regression test, not just its result string) — it gets an explicit result: profile_excluded row (counted toward the defined==processed integrity contract, never silently dropped) and is recorded in gates_report.json.excluded_gates[]; a required:true gate excluded this way does NOT fail the run, same treatment as a skipped required:false gate"
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'run-all profile a')"
+  - id: plan_gate_floor
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: 'plan_gate_profile_excluded')"
+    instruction: "scripts/aid-run-gates.sh (grep: 'excluded_gates') producer"
+    severity: blocking
+    surface: "GATES:DONE precondition"
+    status: active
+    description: "P061 E1 Step 3: plan.json.gates[] (Step 1) is a hard floor at the GATES:DONE FSM precondition — profile_exclusion (above) alone does not fail overall, so without this check a plan-required gate excluded by --profile could vanish from a run reporting overall=pass; check_preconditions cross-references plan.json.gates[] against gates_report.json.excluded_gates[] and refuses the transition (fail-loud design, not a forced re-run) on any overlap, reason: plan_gate_profile_excluded; --force + reason>=20 chars remains the only override, same as sibling GATES:DONE checks; closes the profile/plan silent-exclusion gap"
+    test: "scripts/tests/bats/test-aid-run-gates.bats (grep: 'plan_gate_profile_excluded')"

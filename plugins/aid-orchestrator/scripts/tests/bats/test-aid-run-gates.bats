@@ -278,3 +278,568 @@ YAML
   [[ "$output" == *"plan_gates_reconciled"* ]]
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
+
+# ─── P061 E1 Step 1 — gates-enum fix: plan.json.gates[] must carry arbitrary ──
+# gate names, not just the old hardcoded 4-value list (tests_pass, lint_pass,
+# security_scan_pass, docs_updated). Two bugs fixed together:
+#   1. aid-epic-to-json.sh's DoD Gates extraction filter silently dropped any
+#      gate name outside that fixed list (no error, no output row) — verified
+#      here via a fixture EPIC.md declaring "bats_all" (never in the old list).
+#   2. The post-hoc validation jq's gate check was a dead no-op
+#      (`[valid_gates[] | select(. == .)]` compares each value to itself, so
+#      it's always non-empty regardless of input) — verified here by feeding
+#      an actually-malformed gate name and confirming aid-epic-to-json.sh now
+#      fails loud instead of silently accepting it.
+
+@test "epic-to-json gates roundtrip: DoD Gates name outside old fixed 4-value list survives into plan.json.gates[]" {
+  local epic_to_json="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
+  local schema="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
+  local epic="$TEST_TMPDIR/E-TEST-901-1_1-gates-roundtrip.md"
+  local out_dir="$TEST_TMPDIR/out-roundtrip"
+  mkdir -p "$out_dir"
+  cat > "$epic" <<'EOF'
+---
+status: active
+plan_ref: plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md
+plan_epics_total: 1
+runs_total: 1
+runs_completed: 0
+---
+
+# EPIC: E-TEST-901-1_1 --- Gates Roundtrip
+
+## Context
+
+Fixture EPIC for the gates-enum roundtrip regression (P061 E1 Step 1).
+
+## Goal
+
+Prove a DoD Gates name outside the old hardcoded 4-value list survives
+extraction into plan.json.gates[].
+
+## Scope
+
+### Allowed files/paths
+- `src/core/module.py`
+
+### Forbidden zones
+- <!-- none -->
+
+## Artifacts
+
+- Create: `src/core/module.py`
+
+## Constraints
+
+- none
+
+## DoD Gates
+
+- bats_all
+
+## Acceptance Criteria
+
+- [ ] [backend] Module loads without errors
+
+## Dependencies
+
+### Internal (same plan)
+<!-- none -->
+
+### External (other plans/EPICs)
+<!-- none -->
+
+### Queue Implications
+depends_on: []
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | Implement the core module with basic data structures. | --- | --- |
+
+## Run Breakdown
+
+### Run 1: Phase 1
+**Goal:** Gates roundtrip fixture.
+**Deliverables:** n/a
+
+## Hints
+
+- expected_steps: 1
+- complexity: low
+- parallelism_potential: low
+
+## Notes
+
+<!-- Auto-generated fixture for test-aid-run-gates.bats (P061 E1 Step 1) -->
+EOF
+
+  run "$epic_to_json" --epic "$epic" --schema "$schema" --output-dir "$out_dir"
+  [ "$status" -eq 0 ]
+  local plan_json
+  plan_json="$(echo "$output" | jq -r '.plan_json // ""')"
+  [ -n "$plan_json" ]
+  [ -f "$plan_json" ]
+  # "bats_all" is NOT in the old hardcoded 4-value list — on the unfixed
+  # extraction filter it would be silently dropped and gates[] would be [].
+  run jq -e '.gates == ["bats_all"]' "$plan_json"
+  [ "$status" -eq 0 ]
+}
+
+@test "epic-to-json gates validation: malformed gate name is rejected fail-loud (dead no-op fixed)" {
+  # Proves the post-hoc validation jq's gate check is no longer a dead no-op
+  # (`select(. == .)` always true). A gate name containing a space/colon is
+  # not a well-formed identifier and must fail conversion, not pass silently.
+  local epic_to_json="$AID_PLUGIN_PATH/scripts/aid-epic-to-json.sh"
+  local schema="$AID_PLUGIN_PATH/defaults/templates/plan.schema.json"
+  local epic="$TEST_TMPDIR/E-TEST-902-1_1-gates-invalid.md"
+  local out_dir="$TEST_TMPDIR/out-invalid"
+  mkdir -p "$out_dir"
+  cat > "$epic" <<'EOF'
+---
+status: active
+plan_ref: plugins/aid-orchestrator/scripts/tests/fixtures/minimal-plan.md
+plan_epics_total: 1
+runs_total: 1
+runs_completed: 0
+---
+
+# EPIC: E-TEST-902-1_1 --- Gates Invalid
+
+## Context
+
+Fixture EPIC for the gates-validation dead-no-op regression (P061 E1 Step 1).
+
+## Goal
+
+Prove a structurally malformed DoD Gates name is rejected fail-loud.
+
+## Scope
+
+### Allowed files/paths
+- `src/core/module.py`
+
+### Forbidden zones
+- <!-- none -->
+
+## Artifacts
+
+- Create: `src/core/module.py`
+
+## Constraints
+
+- none
+
+## DoD Gates
+
+- not a valid gate: name
+
+## Acceptance Criteria
+
+- [ ] [backend] Module loads without errors
+
+## Dependencies
+
+### Internal (same plan)
+<!-- none -->
+
+### External (other plans/EPICs)
+<!-- none -->
+
+### Queue Implications
+depends_on: []
+
+## Steps (Role Pipeline)
+
+| # | Role | Objective | Depends On | Parallel Group |
+|---|------|-----------|------------|----------------|
+| 1 | backend | Implement the core module with basic data structures. | --- | --- |
+
+## Run Breakdown
+
+### Run 1: Phase 1
+**Goal:** Gates invalid-name fixture.
+**Deliverables:** n/a
+
+## Hints
+
+- expected_steps: 1
+- complexity: low
+- parallelism_potential: low
+
+## Notes
+
+<!-- Auto-generated fixture for test-aid-run-gates.bats (P061 E1 Step 1) -->
+EOF
+
+  run "$epic_to_json" --epic "$epic" --schema "$schema" --output-dir "$out_dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"invalid gate name"* ]]
+}
+
+# ─── P061 E1 Step 2 — aid-run-gates.sh --profile flag, gate_profiles ─────────
+# parsing, profile_excluded reporting. A profile is a named include[]
+# whitelist of gate keys under execution.yaml.gate_profiles. Six scenarios:
+# (a) an excluded gate never actually runs (proven via elapsed time, not just
+# a result string — a broken impl that still executes the command but
+# discards its row would pass a naive assertion); (b) a required:false gate
+# still inside the profile's include[] runs normally; (c) a required:true
+# gate excluded by the profile does not fail the run; (d)/(e) fail-loud on
+# unknown profile / unknown gate inside include[]; (f) omitting --profile is
+# bit-identical to today even once gate_profiles exists in the file.
+
+@test "run-all profile a: gate excluded from active profile never runs (proven via elapsed time, not just its result string)" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  plan_diff:
+    command: "exit 0"
+    required: true
+  shell_pipeline_smoke:
+    command: "sleep 5"
+    required: true
+    timeout_seconds: 5
+  docs_updated:
+    command: "exit 0"
+    required: false
+
+gate_profiles:
+  standard:
+    include: [plan_diff, docs_updated]
+YAML
+  local start_ts end_ts elapsed
+  start_ts=$(date +%s)
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile standard
+  end_ts=$(date +%s)
+  elapsed=$((end_ts - start_ts))
+  [ "$status" -eq 0 ]
+  # Must finish well under shell_pipeline_smoke's 5s timeout — proves it was
+  # never dispatched to run_gate at all (not just that its row got discarded).
+  [ "$elapsed" -lt 3 ]
+  run jq -re '.gates.shell_pipeline_smoke.result' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -re '.gates.shell_pipeline_smoke.reason' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -e '.excluded_gates == ["shell_pipeline_smoke"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$REPORT"
+  [ "$output" == "standard" ]
+  run jq -re '.profile_source' "$REPORT"
+  [ "$output" == "cli_flag" ]
+  run jq -re '.profile_reason' "$REPORT"
+  [ -n "$output" ]
+  # Included gates still ran and passed
+  run jq -re '.gates.plan_diff.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+}
+
+@test "run-all profile b: required:false gate inside the active profile's include[] still runs" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  standard:
+    include: [alpha, beta]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.alpha.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == []' "$REPORT"
+  [ "$status" -eq 0 ]
+}
+
+@test "run-all profile c: required:true gate excluded by the active profile does not fail the run" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  targeted:
+    include: [alpha]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile targeted
+  [ "$status" -eq 0 ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "profile_excluded" ]
+  run jq -e '.excluded_gates == ["beta"]' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "pass" ]
+}
+
+@test "run-all profile d: unknown --profile name fails loud before running any gate" {
+  # setup()'s EXEC_YAML (alpha/beta) has no gate_profiles block at all.
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile does-not-exist
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+  # Report must not have been written — validation happens before any gate runs
+  [ ! -f "$REPORT" ]
+}
+
+@test "run-all profile e: profile include[] referencing an undefined gate fails loud before running any gate" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  bogus:
+    include: [alpha, ghost]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" --profile bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"ghost"* ]]
+  [ ! -f "$REPORT" ]
+}
+
+# ─── P061 E1 Step 3 — plan-gate floor enforcement (plan_gate_profile_excluded) ─
+# plan.json.gates[] (Step 1) is a hard floor: the active gate profile (Step 2,
+# --profile) must never silently exclude a gate the PLAN itself declared
+# mandatory. profile_exclusion (Step 2) alone does NOT flip overall to fail —
+# a required:true gate excluded by the profile is treated like a skipped
+# required:false gate — so without this check the excluded-but-plan-required
+# gate could vanish from a run that still reports overall=pass. Design chosen:
+# (b) fail-loud (GATES:DONE precondition refuses with plan_gate_profile_excluded)
+# over (a) force-run, because aid-fsm.sh is a precondition checker, not a gate
+# executor — see step_3_backend/output.md for the full design rationale.
+
+@test "GATES:DONE plan-gate floor (CHECKPOINT 1): plan declares gates:[\"bats_all\"], active profile excludes it -> transition refused with plan_gate_profile_excluded" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  standard:
+    include: [always_pass]
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Produce a REAL gates_report.json via the actual runner: profile 'standard'
+  # excludes bats_all, which plan.json requires. overall stays "pass"
+  # (profile_excluded never fails the run by itself, per Step 2) — this is
+  # the exact silent-pass gap Step 3 closes.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == ["bats_all"]' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+
+  # GATES→DONE must refuse — a plan-required gate was excluded by the profile.
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_gate_profile_excluded"* ]]
+  [[ "$output" == *"bats_all"* ]]
+  # State never advanced past GATES
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_gate_profile_excluded" ]
+}
+
+@test "GATES:DONE plan-gate floor: plan-required gate INSIDE the active profile's include[] -> transition proceeds normally" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+gate_profiles:
+  standard:
+    include: [bats_all]
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json" --profile standard
+  [ "$status" -eq 0 ]
+  run jq -e '.excluded_gates == []' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "GATES:DONE plan-gate floor: no --profile used (legacy) -> excluded_gates empty, plan-gate floor is a no-op" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+YAML
+  printf '{"gates":["bats_all"]}\n' > "$TEST_EVIDENCE_DIR/plan.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json"
+  [ "$status" -eq 0 ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "GATES:DONE plan-gate floor (CHECKPOINT 1 regression): malformed plan.json blocks transition with plan_json_malformed" {
+  # Regression test: if plan.json exists but is not valid JSON (truncated,
+  # corrupt, etc.), the jq --slurpfile command will fail. Before the fix,
+  # that failure was silently caught by || plan_gate_floor_violations=""
+  # and coerced to "[]" (no violations), silently passing the check.
+  # After the fix, malformed JSON must block the transition with a clear error.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  bats_all:
+    command: "true"
+    required: true
+YAML
+
+  # Create a truncated/malformed plan.json (valid key but truncated value)
+  printf '{"gates":["bats_all"' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Run gates with the valid report (this will succeed because it only reads
+  # execution.yaml and has no gates_profile, so no exclusions)
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" \
+    --plan-json "$TEST_EVIDENCE_DIR/plan.json"
+  [ "$status" -eq 0 ]
+
+  # GATES→DONE must refuse because plan.json is malformed/corrupt
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_json_malformed"* ]]
+  # State must stay GATES (never advanced)
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on timeline
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_json_malformed" ]
+}
+
+@test "GATES:DONE plan-gate floor (E-061-1_6 CP3 regression): plan.json.gates as object (not array) blocks transition with plan_json_malformed" {
+  # Regression test (E-061-1_6 CP3 security finding 1): if plan.json.gates
+  # is a JSON object instead of an array (syntactically valid JSON, but
+  # schema-non-compliant), the original jq expression silently produced []
+  # ("no violations") because $pg[] over an object yields its VALUES, not
+  # keys, so the gate-name string matching never succeeded. This violated
+  # the step's "Never a silent skip" design principle. After the fix,
+  # non-array .gates must fail closed via the same plan_json_malformed path
+  # used for parse errors.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  seed_test_state_files "GATES" "5" "5" "E-X" "R-1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+
+  # Create a plan.json with gates as an object (not an array) — schema violation.
+  # This is syntactically valid JSON but violates plan.schema.json which requires
+  # gates to be {"type":"array","items":{"type":"string"}}.
+  printf '{"gates":{"tests_pass":true}}' > "$TEST_EVIDENCE_DIR/plan.json"
+
+  # Manually create a gates_report.json with an excluded gate (the scenario
+  # this check is designed to catch: profile-excluded gate that is plan-required).
+  # Use the passing execution.yaml fixture to generate the report.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  # Add a gate_profiles block with a profile that excludes tests_pass
+  cat >> "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YAML'
+gate_profiles:
+  limited:
+    include: [always_pass]
+YAML
+  run "$RUN_GATES" run-all "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile limited
+  [ "$status" -eq 0 ]
+  # Verify the report has tests_pass excluded (not in the limited profile)
+  run jq -e '.excluded_gates | index("tests_pass") != null' "$TEST_EVIDENCE_DIR/gates/gates_report.json" 2>/dev/null
+  # Note: tests_pass is NOT defined in the fixture, so it won't appear in excluded_gates.
+  # That's OK — what matters is: the PLAN claims to require tests_pass (via malformed plan.json),
+  # and the FSM's type-checking will now catch the malformed .gates shape.
+
+  # GATES→DONE must refuse — the type-check in the jq expression now catches
+  # the non-array .gates and treats it as malformed JSON (via error())
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_json_malformed"* ]]
+  # State must stay GATES (never advanced)
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on timeline
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "plan_json_malformed" ]
+}
+
+@test "run-all profile f (legacy regression): omitting --profile runs all gates unchanged even when gate_profiles is defined" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 0"
+    required: false
+gate_profiles:
+  standard:
+    include: [alpha]
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -eq 0 ]
+  # beta is NOT in 'standard's include[], but --profile was never passed —
+  # both gates run exactly as they would with no gate_profiles block at all.
+  run jq -re '.gates.alpha.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.beta.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -e '.excluded_gates == []' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$REPORT"
+  [ "$output" == "null" ]
+  run jq -re '.profile_source' "$REPORT"
+  [ "$output" == "null" ]
+  run jq -re '.profile_reason' "$REPORT"
+  [ "$output" == "null" ]
+}
