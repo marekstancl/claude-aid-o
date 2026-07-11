@@ -2555,7 +2555,7 @@ cmd_advance_to_gates() {
     _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
     rm -f "$_gp_paths_file"
 
-    _gp_defined=$(yq ".gate_profiles.\"${_gp_resolved}\"" "$execution_yaml" 2>/dev/null || echo "")
+    _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
     if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
       profile_arg=(--profile "$_gp_resolved")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \

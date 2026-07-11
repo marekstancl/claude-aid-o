@@ -1098,3 +1098,58 @@ YAML
   run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
   [ "$output" == "risk_profile_unresolvable" ]
 }
+
+# ─── P061 E-061-2_6: Regression test for yq expression injection (security fix) ──
+# Vulnerability: unescaped ${profile} in yq expression allowed attacker-supplied
+# yq operators (// alternation, # comments) to inject a fabricated profile with
+# attacker-controlled gate whitelist, bypassing the profile-selection mechanism.
+# Fix: replaced `.gate_profiles.\"${profile}\"` with `.gate_profiles[strenv(PROFILE)]`
+# so profile names are always treated as literal keys, never parsed as yq expressions.
+# Regression test: confirm injection payload is rejected (unknown profile) not accepted.
+@test "run-all: yq injection payload in --profile is rejected (unknown profile)" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  test_gate:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  real_profile:
+    include: [test_gate]
+YAML
+  # Inject yq alternation operator in profile name: when vulnerability exists,
+  # yq expression becomes `.gate_profiles."<injected>" // ["test_gate"]` which
+  # falls through to the attacker-supplied literal array, making the runner believe
+  # test_gate is in a real profile even though "injected" is not a real key.
+  # After the fix, the profile name is a literal string key lookup, and the
+  # injection payload is treated as a non-existent profile name → fail loud.
+  local injection_payload='nonexistent" // ["test_gate"] #'
+
+  # Must fail with exit code 1 and unknown profile error message
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --profile "$injection_payload"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+  [[ "$output" == *"no such key"* || "$output" == *"ERROR"* ]]
+}
+
+@test "run-all: yq injection with comment terminator in --profile is rejected" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 1"
+    required: true
+gate_profiles:
+  safe_profile:
+    include: [alpha]
+YAML
+  # Alternative injection: comment terminator to suppress latter part of yq.
+  # Payload attempts to close string and comment out the rest of the yq expression.
+  local injection_payload='safe_profile") .include = []; #'
+
+  # Must fail (unknown profile), NOT pass with beta excluded by injection.
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --profile "$injection_payload"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+}

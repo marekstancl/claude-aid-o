@@ -182,13 +182,13 @@ run_all_gates() {
   local include_gates_json="[]"
   if [[ -n "$profile" ]]; then
     local profile_def
-    profile_def=$(yq ".gate_profiles.\"${profile}\"" "$execution_yaml")
+    profile_def=$(PROFILE="$profile" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml")
     if [[ -z "$profile_def" || "$profile_def" == "null" ]]; then
       echo "ERROR: aid-run-gates.sh: unknown gate profile '${profile}' — no such key under gate_profiles in ${execution_yaml}" >&2
       exit 1
     fi
 
-    include_gates_json=$(yq -o=json ".gate_profiles.\"${profile}\".include // []" "$execution_yaml" | tr -d '\n ')
+    include_gates_json=$(PROFILE="$profile" yq -o=json '.gate_profiles[strenv(PROFILE)].include // []' "$execution_yaml" | tr -d '\n ')
     local profile_defined_keys_json
     profile_defined_keys_json=$(yq -o=json '.gates | keys' "$execution_yaml" | tr -d '\n ')
     local inc_gate
