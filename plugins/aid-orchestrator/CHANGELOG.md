@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ### Added
 - **Release-policy surface-rule bootstrap check** — `scripts/tests/release-policy-surface-check.sh` (+ `test-release-policy-surface-check.bats`, 7 scenarios) gives P061's Bootstrap Fast Lane a small, explicit, testable rule for when the ~4-5 min `test-release-policy.bats` integration suite is required at step-level targeted testing (only when the diff touches release-policy surface: `aid-release-policy.sh`, its own bats file, `aid-evidence-verify.sh`, `defaults/schemas/release*`/`aid-protocol-v2.schema.json`, or `tests/fixtures/release-policy/**`) versus skippable for unrelated steps. Fail-safe default (no paths given) runs the suite. Does NOT change the EPIC-boundary/release-boundary requirement — `bats_all` still runs unconditionally there per D8. Manual bootstrap convention pending P061 EPIC 3's `aid-select-tests.sh`, which should absorb this logic rather than duplicate it.
 
-## [2.54.0] — 2026-07-10
+## [2.55.0] — 2026-07-11
 
 ### Added
 - **Gate-count integrity guard** — `aid-run-gates.sh` asserts gates-defined equals gates-processed before emitting `overall`, forcing `overall=fail` plus a nonzero exit on any mismatch so a lost or skipped gate can no longer silently pass, with the FSM GATES:DONE precondition loud-failing when jq is missing.
