@@ -2052,3 +2052,116 @@ paths)?" a mechanical CP2 scope-selection rule that adds `tests/e2e/` to
 the required run, rather than leaving it to per-step implementer judgment
 — same shape of fix as every other "declared control, no enforcement"
 finding in this backlog (Principle #1).
+
+### OBS-20260711-03 - commit_scope_violation companion (D7c) false-positives on unresolved `{rev}` migration-filename template — first live firing, immediately wrong
+
+**Observed in:** WAN / P062 / E-062-3_3 / R-E062-3, step 0
+**AID version:** v2.54.0
+**Observed at:** 2026-07-11
+**Status:** confirmed (non-blocking telemetry, no impact today)
+**Severity:** medium
+**Class:** false-positive / evidence integrity (signal-fatigue risk)
+
+**What happened:** Step 0's plan.json declares
+`allowed_paths: ["wan/db/enums.py", "wan/db/models.py",
+"migrations/versions/{rev}_add_request_type.py",
+"tests/unit/test_request_type_model.py"]` — the migration entry is a
+literal unresolved template (`{rev}` is meant to become the real Alembic
+revision id, e.g. `042`, but nothing in the plan→epic generation pipeline
+ever substitutes it). The implementer, correctly following Alembic
+convention, created the real file at
+`migrations/versions/042_add_request_type.py`. At step-advance, the new
+`commit_scope_violation` companion (`aid-fsm.sh` ~2794-2831, introduced
+this plan's predecessor cycle per D7c/OBS-20260709-01/04, this is its
+**first live firing on real data**) does a literal string-equality/prefix
+check (`[[ "$_cf" == "$_sp" || "$_cf" == "$_sp"/* ]]`) with no glob/pattern
+expansion — `migrations/versions/042_add_request_type.py` never equals or
+prefix-matches the literal string `migrations/versions/{rev}_add_request_type.py`,
+so the check fires `commit_scope_violation` with `out_of_scope_count: 1`
+for a file that is, by construction, exactly what the step was asked to
+produce. The CP2 verifier (LLM judgment, not the mechanical check)
+correctly recognized the file as in-scope ("`git show --stat 686f216`:
+... All within allowed paths") — the mechanical companion and the human/LLM
+reviewer disagree, and the mechanical one is wrong.
+
+**Why it matters:** The companion is explicitly documented as
+"NON-BLOCKING telemetry — never fails the increment," so there is zero
+impact today (confirmed: `current_step` advanced normally, CP2 dispatched
+and passed). But this is a *systematic* false-positive, not a one-off:
+every plan that declares a new Alembic migration via the `{rev}` template
+convention (a documented, presumably common pattern for "create exactly
+one new migration file, revision TBD") will trigger this exact violation
+on that step, every time. A telemetry signal that fires wrongly on every
+qualifying step trains reviewers to skim past `commit_scope_violation`
+events without checking them — the same signal-fatigue mechanism as
+OBS-20260708-05 (permanently-failing advisory gate), now on a brand-new,
+otherwise-promising out-of-band scope guard that exists specifically to
+catch `--no-verify` bypasses of the pre-commit hook (a real, serious class
+of risk this backlog has tracked since OBS-20260702-06). A guard that
+cries wolf on its very first live commit undermines exactly the case it
+was built for.
+
+**Reproduction:** `.aid-o/work/evidence/E-062-3_3/R-E062-3/timeline.jsonl`
+event `commit_scope_violation` (`step_n: 0`, `files:
+migrations/versions/042_add_request_type.py`); compare against
+`plan.json`'s `.steps[0].allowed_paths` (literal `{rev}` string) and the
+step's `verifier-output-step-1.md` scope-check section (independently
+concludes in-scope). Source: `aid-fsm.sh` grep `commit_scope_violation`.
+
+**Likely fix:** either (a) resolve `{rev}`-style templates to a glob
+(`migrations/versions/*_add_request_type.py`) at plan.json generation
+time, or (b) have the companion's path-match step treat a `{placeholder}`
+segment in an `allowed_paths` entry as a wildcard before the literal
+comparison. Either way, false-positives on a brand-new anti-bypass guard
+should be fixed before the guard has fired enough times to become
+background noise.
+
+### OBS-20260711-04 - CP2 verifier output written to repo root instead of canonical evidence directory (new instance of the OBS-02/OBS-11 evidence-path-duality family, this time missing the evidence dir entirely)
+
+**Observed in:** WAN / P062 / E-062-3_3 / R-E062-3, step 0
+**AID version:** v2.54.0
+**Observed at:** 2026-07-11
+**Status:** confirmed (untracked, not yet committed)
+**Severity:** low
+**Class:** evidence integrity / UX indexing (same family as OBS-20260702-02,
+OBS-20260702-11, OBS-20260706-01)
+
+**What happened:** The Step 0 CP2 code-review output landed as
+`verifier-output-step-1.md` at the **repository root** (`/opt/eco/projects/wan/verifier-output-step-1.md`,
+untracked, `git status` shows `??`) instead of the canonical
+`.aid-o/work/evidence/E-062-3_3/R-E062-3/verifier-output-step-1.md`. The
+content itself is correct and complete (`_generated_by`, `Reviewed-Head`
+matching `686f216`, `verdict: pass`) — this is a pure file-placement miss,
+not a content problem. The step's OTHER two evidence artifacts for the
+same step (`step-0-verify.md`, and the plan/timeline/fsm-state files) all
+correctly landed in the canonical run directory, so the miss is specific
+to this one file/dispatch, not a systemic path misconfiguration for the
+whole run.
+
+**Why it matters:** Same class as OBS-20260702-02 (run.md path duality)
+and OBS-20260706-01 (gates_report.json two paths), and adjacent to
+OBS-20260702-11 (1-based/0-based numbering drift, also visible here:
+`verifier-output-step-1.md` for what the canonical dir calls
+`step-0-verify.md` — the same step, two numbering conventions, now also
+two directories) — but this instance is a step further: not "two
+locations for the same logical artifact," but "the artifact isn't in
+ANY blessed location at all." Since it's untracked, it currently poses no
+git-history risk, but if a future commit's broad `git add` sweeps it up
+(a pattern already seen elsewhere in this backlog, e.g. the P059 window's
+gate-fixer broad-add incident) it would land a stray root-level file in
+the repo permanently. More immediately: any consumer reading
+"canonical evidence for E-062-3_3 step 0" from `.aid-o/work/evidence/...`
+alone would see `step-0-verify.md` but miss this CP2 output entirely
+unless they also know to check the repo root.
+
+**Reproduction:** `git status --short` in the WAN repo shows
+`?? verifier-output-step-1.md` at top level; compare
+`.aid-o/work/evidence/E-062-3_3/R-E062-3/` contents (has `step-0-verify.md`,
+lacks `verifier-output-step-1.md`).
+
+**Likely fix:** same as OBS-20260702-11's recommendation — pin one
+canonical numbering AND one canonical directory for all verifier-output
+artifacts, and have whichever dispatch step writes this file resolve its
+output path from the run's evidence-dir variable rather than a
+cwd-relative default that silently falls back to the process's working
+directory when unset.
