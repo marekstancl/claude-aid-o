@@ -1564,6 +1564,30 @@ pending`, `started_at/completed_at: null` at a point where Step 3
 in the tool's own dogfood use, not only in downstream consumer projects —
 raises confidence this is a core-path bug, not project-specific drift.
 
+**FIX IMPLEMENTED (2026-07-12), PENDING MERGE:** commit `0be5e6f` on branch
+`fix/plan-close-consistency` (not yet merged to `main` at time of writing —
+PM-commissioned plan-close-consistency fix, reviewed and CP2-passed, held
+for PM's own verification before merge per explicit instruction). Root
+cause confirmed exactly as diagnosed: `cmd_increment_step()` only bumped
+the `current_step` scalar via `sed`, never touching `steps[]`. Fix: after
+the existing `current_step` update, `increment-step` now also writes
+`steps[$step].status = "completed"` + `.completed_at` (ISO 8601 UTC) via
+`yq`, backfills `started_at` only if it was still `null`, and emits a new
+`step_status_synced` timeline event (every fsm-state mutation is evented).
+Guards gracefully when `steps[]` is absent (legacy fsm-state.yaml) — the
+authoritative `current_step` update is never put at risk. 4 new bats
+tests (happy path, exact this-OBS symptom reproduction with zero
+remaining `pending` steps, timeline event field verification, legacy-
+format handling); `test-aid-fsm.bats` 74/74 (70 existing + 4 new), zero
+regressions. CP2 review independently fuzzed 7 adversarial fixtures
+(off-by-one index check across a 3-step fixture, malformed `steps[]`,
+duplicate `id` fields) with no corruption found. Same fix branch also adds
+a broader mechanical plan-close self-check (`aid-plan-close-check.sh`,
+commit `6b9fc3a`) covering report-tracking/head-freshness/queue-active
+staleness as a related but separate deliverable — see that commit's own
+message for scope; it does NOT resolve IMP-201 or IMP-202 (different
+artifacts/mechanisms, tracked separately in `.aid-o/work/backlog.md`).
+
 ### OBS-20260709-04 — Subagent committed live EPIC work directly to `main` under test-fixture git identity (self-recovered, root cause of the previously-flagged mystery "init" commit)
 
 **Observed in:** aid-orchestrator / E-059-2_2 (P059 EPIC 2, Step 4)
