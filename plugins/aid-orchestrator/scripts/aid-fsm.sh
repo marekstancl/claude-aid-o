@@ -4178,6 +4178,28 @@ cmd_plan_close() {
     exit 1
   fi
 
+  # Mechanical plan-close self-check (aid-plan-close-check.sh) — replaces the
+  # PM's repeated manual audits (stale/untracked reports, DONE-but-pending
+  # fsm-state, stale queue/active.md) with a hard gate here. --auto-annotate
+  # only lets the script's own Check 2 fix the safe docs-only-stale-report
+  # case; it is not a general cleanup pass. A failure here blocks
+  # ca-review-complete exactly like a missing report above.
+  #
+  # Gated on reporter_enabled: aid-plan-close-check.sh's Check 1 unconditionally
+  # requires the delivery report to exist (it has no concept of the reporter
+  # toggle above), so running it when reporter.enabled:false would turn a
+  # deliberately-skipped report into a hard block — breaking the toggle this
+  # function already honors a few lines up. Same skip convention as that toggle.
+  if [[ "$reporter_enabled" == "false" ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check" rationale="reporter.enabled:false in execution.yaml (no delivery report to check)"
+  else
+    if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" --auto-annotate; then
+      echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
+      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+      exit 1
+    fi
+  fi
+
   touch "${evidence_dir}/ca-review-complete"
 }
 
