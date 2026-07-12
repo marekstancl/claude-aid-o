@@ -128,8 +128,70 @@ reporter:
 YAML
   rm -f "$TMP/.aid-o/reports/P046-delivery.md"
   # curator + audit + simplifier present, delivery-report absent. reporter
-  # disabled also skips aid-plan-close-check.sh entirely (it has no concept
-  # of this toggle and would otherwise hard-fail on the missing report).
+  # disabled passes --skip-delivery-report to aid-plan-close-check.sh — only
+  # the missing-delivery-report requirement is relaxed; the script still
+  # runs and still evaluates Checks 2-4 (nothing to flag here: no evidence
+  # dir, no queue.yaml).
+  run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"
+  [ "$status" -eq 0 ]
+  [ -f "$TMP/ca-review-complete" ]
+}
+
+# ── Tests 7b-7e: reporter.enabled:false must narrow (not widen) the skip ──
+# aid-plan-close-check.sh's Checks 2-4 are unrelated to the delivery report
+# and must keep running/blocking even when reporter is disabled.
+
+@test "plan-close: reporter disabled + fsm-state DONE-but-pending -> still FAILS (Check 3 unaffected)" {
+  cat > "$TMP/.aid-o/config/execution.yaml" << 'YAML'
+reporter:
+  enabled: false
+YAML
+  rm -f "$TMP/.aid-o/reports/P046-delivery.md"
+  mkdir -p "$TMP/.aid-o/work/evidence/E-046-2_3/R-test"
+  cat > "$TMP/.aid-o/work/evidence/E-046-2_3/R-test/fsm-state.yaml" <<'YAML'
+epic_id: E-046-2_3
+run_id: R-test
+state: DONE
+current_step: 2
+total_steps: 2
+steps:
+  - id: 1
+    status: completed
+  - id: 2
+    status: pending
+YAML
+  run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"
+  [ "$status" -ne 0 ]
+  [ ! -f "$TMP/ca-review-complete" ]
+}
+
+@test "plan-close: reporter disabled + queue.yaml claims blocked but branch merged -> still FAILS (Check 4 unaffected)" {
+  cat > "$TMP/.aid-o/config/execution.yaml" << 'YAML'
+reporter:
+  enabled: false
+YAML
+  rm -f "$TMP/.aid-o/reports/P046-delivery.md"
+  # A branch for E-046-2_3 that IS an ancestor of current HEAD (merged), but
+  # queue.yaml still claims it's blocked/waiting-for-merge — the classic
+  # stale-queue drift Check 4 exists to catch.
+  git -C "$TMP" branch task/E-046-2_3/main HEAD
+  cat > "$TMP/.aid-o/config/queue.yaml" <<'YAML'
+- epic_id: E-046-2_3
+  path: p
+  status: blocked
+  depends_on: []
+YAML
+  run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"
+  [ "$status" -ne 0 ]
+  [ ! -f "$TMP/ca-review-complete" ]
+}
+
+@test "plan-close: reporter disabled + otherwise clean state -> PASS, marker created" {
+  cat > "$TMP/.aid-o/config/execution.yaml" << 'YAML'
+reporter:
+  enabled: false
+YAML
+  rm -f "$TMP/.aid-o/reports/P046-delivery.md"
   run bash "$AID_FSM" plan-close "$EPIC_ID" "$TMP" "$TMP"
   [ "$status" -eq 0 ]
   [ -f "$TMP/ca-review-complete" ]

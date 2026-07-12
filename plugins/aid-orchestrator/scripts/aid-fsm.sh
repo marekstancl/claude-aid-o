@@ -4185,19 +4185,21 @@ cmd_plan_close() {
   # case; it is not a general cleanup pass. A failure here blocks
   # ca-review-complete exactly like a missing report above.
   #
-  # Gated on reporter_enabled: aid-plan-close-check.sh's Check 1 unconditionally
-  # requires the delivery report to exist (it has no concept of the reporter
-  # toggle above), so running it when reporter.enabled:false would turn a
-  # deliberately-skipped report into a hard block — breaking the toggle this
-  # function already honors a few lines up. Same skip convention as that toggle.
+  # The checker ALWAYS runs, even when reporter.enabled:false — skipping it
+  # entirely would also skip Checks 2-4 (Head freshness, fsm-state DONE-
+  # pending, queue/active revalidation), none of which have anything to do
+  # with the delivery report. Only the delivery-report existence requirement
+  # (Check 1) is relaxed via --skip-delivery-report, matching the toggle this
+  # function already honors a few lines up without widening the skip.
+  local -a _plan_close_check_flags=(--auto-annotate)
   if [[ "$reporter_enabled" == "false" ]]; then
-    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check" rationale="reporter.enabled:false in execution.yaml (no delivery report to check)"
-  else
-    if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" --auto-annotate; then
-      echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
-      echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
-      exit 1
-    fi
+    _plan_close_check_flags+=(--skip-delivery-report)
+    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-delivery-report" rationale="reporter.enabled:false in execution.yaml (delivery-report existence only; Checks 2-4 still run)"
+  fi
+  if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
+    echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
+    echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
+    exit 1
   fi
 
   touch "${evidence_dir}/ca-review-complete"

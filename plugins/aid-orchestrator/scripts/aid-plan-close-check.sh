@@ -60,12 +60,20 @@ DOCS_ONLY_ALLOW_RE='(^|/)README($|\.)|\.md$|(^|/)CHANGELOG($|\.)|^\.aid-o/work/b
 
 usage() {
   cat >&2 <<'EOF'
-Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotate]
+Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotate] [--skip-delivery-report]
 
-  <plan_id>          e.g. P062
-  --project-root     project root containing .aid-o/ (default: cwd)
-  --auto-annotate    Check 2 only: rewrite a stale-but-docs-only report's
-                     frontmatter (Head_at_generation + Head + Head_note)
+  <plan_id>              e.g. P062
+  --project-root         project root containing .aid-o/ (default: cwd)
+  --auto-annotate        Check 2 only: rewrite a stale-but-docs-only report's
+                         frontmatter (Head_at_generation + Head + Head_note)
+  --skip-delivery-report Caller has reporter.enabled:false — a missing
+                         delivery/boundary report is expected and must NOT
+                         fail Check 1. Only the report-existence requirement
+                         is relaxed; Check 1 still validates tracking/
+                         freshness for a report that DOES exist on disk, and
+                         Checks 2-4 (Head freshness, fsm-state DONE-pending,
+                         queue/active revalidation) are UNAFFECTED — this
+                         flag never widens into skipping the whole script.
 EOF
   exit 2
 }
@@ -73,11 +81,13 @@ EOF
 PLAN_ID=""
 PROJECT_ROOT="$(pwd)"
 AUTO_ANNOTATE=0
+SKIP_DELIVERY_REPORT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) [[ $# -ge 2 ]] || usage; PROJECT_ROOT="$2"; shift 2 ;;
     --auto-annotate) AUTO_ANNOTATE=1; shift ;;
+    --skip-delivery-report) SKIP_DELIVERY_REPORT=1; shift ;;
     -h|--help) usage ;;
     -*) echo "Unknown flag: $1" >&2; usage ;;
     *)
@@ -159,7 +169,11 @@ check1_report_tracking() {
   for f in "$delivery" "$boundary"; do
     if [[ ! -f "$f" ]]; then
       if [[ "$f" == "$delivery" ]]; then
-        _fail "check1" "$f does not exist — report never generated (report_storage: ${REPORT_STORAGE_MODE})"
+        if [[ "$SKIP_DELIVERY_REPORT" -eq 1 ]]; then
+          _info "check1" "$f does not exist — reporter.enabled:false (--skip-delivery-report), not a blocker"
+        else
+          _fail "check1" "$f does not exist — report never generated (report_storage: ${REPORT_STORAGE_MODE})"
+        fi
       else
         _info "check1" "$f not present (boundary report optional) — report_storage: ${REPORT_STORAGE_MODE}"
       fi
