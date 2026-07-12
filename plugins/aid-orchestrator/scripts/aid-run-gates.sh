@@ -414,6 +414,29 @@ run_all_gates() {
       fi
 
       [[ "$r" == "pass" || "$r" == "skip" ]] && break
+
+      # ─── Repeated-timeout policy block (P063 Step 3) ───────────────────
+      # Reached ONLY when the current attempt already failed/timed out (the
+      # pass/skip break above already returned for a passing attempt — a
+      # gate whose CURRENT attempt just passed NEVER reaches this check,
+      # which is what makes AC10 hold) AND the loop is about to decide
+      # whether to consume another attempt. `timeout_s` is the gate's
+      # currently-configured timeout, read once before this loop began.
+      # gate_baseline_policy_check compares the last 3 recorded samples
+      # (already including the one gate_baseline_update just wrote above for
+      # THIS attempt) — "block" iff all 3 are censored (timeout) AND each
+      # sample's OWN recorded timeout_seconds >= the current config, so a
+      # timeout streak recorded under a since-raised timeout never blocks a
+      # fresh attempt under the new, longer timeout (AC6 fixture b).
+      if [[ "$(gate_baseline_policy_check "$gate_name" "$timeout_s")" == "block" ]]; then
+        gate_baseline_mark_policy_block "$gate_name" "increase_timeout_or_background" || true
+        # result stays the UNCHANGED literal "fail" (never a new value) —
+        # reason/recommendation are purely additive fields describing WHY no
+        # further attempt was made.
+        gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
+        break
+      fi
+
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
 

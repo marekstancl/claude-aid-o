@@ -392,6 +392,68 @@ PLAN
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
 }
 
+# ─── P063 Step 3 (AC11): GATES:EXECUTE repeated-timeout policy block ────────
+# Real 3-consecutive-timeout policy block via the actual aid-run-gates.sh
+# code path (not hand-written JSON): seed 3 prior timeout samples in the
+# gate-runtime-baseline file, then run one more attempt that also times out
+# under the same currently-configured timeout, exactly like
+# test-aid-run-gates.bats' AC6a fixture — this produces a REAL
+# gates_report.json with runtime_baseline.retryable:false.
+
+@test "AC11: GATES:EXECUTE refused when a gate is retryable:false (real timeout_policy_block); GATES:ESCALATION and --force still work" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+
+  local exec_yaml="$TEST_TMPDIR/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  flaky_gate:
+    command: "sleep 2"
+    required: true
+    timeout_seconds: 1
+    max_retries: 2
+YAML
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
+
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "false" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.operator_action' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "increase_timeout_or_background" ]
+
+  # Fixture A: GATES:EXECUTE is REFUSED, message names gate + operator_action.
+  local state_a="$TEST_TMPDIR/state-a.yaml"
+  write_post_deploy_state_yaml "$state_a"
+  sed -i 's/^state: .*/state: GATES/' "$state_a"
+  run "$FSM" transition GATES EXECUTE "$state_a"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"flaky_gate"* ]]
+  [[ "$output" == *"increase_timeout_or_background"* ]]
+  [ "$(grep '^state:' "$state_a" | awk '{print $2}')" = "GATES" ]
+
+  # Fixture B: GATES:ESCALATION for the SAME evidence dir still succeeds
+  # normally — this precondition only ever guards GATES:EXECUTE.
+  local state_b="$TEST_TMPDIR/state-b.yaml"
+  write_post_deploy_state_yaml "$state_b"
+  sed -i 's/^state: .*/state: GATES/' "$state_b"
+  run "$FSM" transition GATES ESCALATION "$state_b"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state_b" | awk '{print $2}')" = "ESCALATION" ]
+
+  # Fixture C: --force --reason overrides the refusal, same as every sibling
+  # precondition.
+  local state_c="$TEST_TMPDIR/state-c.yaml"
+  write_post_deploy_state_yaml "$state_c"
+  sed -i 's/^state: .*/state: GATES/' "$state_c"
+  run "$FSM" transition GATES EXECUTE "$state_c" --force --reason "PM-authorized override — manually verified flaky_gate timeout is safe to retry"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state_c" | awk '{print $2}')" = "EXECUTE" ]
+}
+
 # ─── P040 Step 2: orphan dispatch reconciliation backstop (4 assertions) ─────
 
 # Helper: seed the increment-step happy-path preconditions for step 3

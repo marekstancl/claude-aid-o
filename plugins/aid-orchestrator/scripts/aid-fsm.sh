@@ -1998,8 +1998,50 @@ EOF
       }
       ;;
 
+    GATES:EXECUTE)
+      # P063 Step 3: repeated-timeout policy block precondition. A gate that
+      # aid-run-gates.sh's retry loop marked retryable:false (via
+      # gate_baseline_mark_policy_block, after 3+ consecutive timeouts each
+      # recorded at >= the currently-configured timeout_seconds — see
+      # gate_baseline_policy_check in aid-gate-runtime-baseline.sh) has
+      # nothing for gate-fixer to act on: the gate never got a chance to run
+      # to completion, so re-entering EXECUTE to "fix" it is pointless.
+      # Refuse the transition so the orchestrator routes to GATES:ESCALATION
+      # instead (AID-v3-principles.md §1 — a gates_report.json field nobody
+      # reads before retrying anyway is decoration, not enforcement).
+      local gates_report="${evidence_dir}/gates/gates_report.json"
+      if [[ -f "$gates_report" ]] && command -v jq &>/dev/null; then
+        local blocked_gate
+        blocked_gate=$(jq -r '(.gates // {}) | to_entries[] | select(.value.runtime_baseline.retryable == false) | .key' "$gates_report" 2>/dev/null | head -1)
+        if [[ -n "$blocked_gate" ]]; then
+          local blocked_action
+          blocked_action=$(jq -r --arg g "$blocked_gate" '.gates[$g].runtime_baseline.operator_action // "unknown"' "$gates_report" 2>/dev/null)
+          _PRECONDITION_FAIL_REASON="timeout_policy_block"
+          cat <<EOF >&2
+PRECONDITION FAIL: gate '${blocked_gate}' is retryable:false (timeout_policy_block) — refusing GATES→EXECUTE.
+
+Reason: gate '${blocked_gate}' has already timed out repeatedly at the currently
+        configured timeout_seconds (see gates_report.json.gates.${blocked_gate}.runtime_baseline)
+        — gate-fixer has nothing to act on since the gate never runs to
+        completion. Recommended operator action: ${blocked_action}.
+
+Fix: address the blocking gate directly (${blocked_action}: e.g. raise
+     execution.yaml.gates.${blocked_gate}.timeout_seconds, or switch it to a
+     background run mode), re-run gates, then retry — OR route this run to
+     GATES:ESCALATION instead of retrying EXECUTE:
+       aid-fsm.sh transition GATES ESCALATION ${state_file}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh transition GATES EXECUTE ${state_file} --force --reason \\
+      '<≥20 chars why re-entering EXECUTE for this gate is acceptable>'
+EOF
+          return 1
+        fi
+      fi
+      ;;
+
     # Failure/retry paths — always allowed
-    EXECUTE:ESCALATION|GATES:ESCALATION|GATES:EXECUTE) : ;;
+    EXECUTE:ESCALATION|GATES:ESCALATION) : ;;
 
     # ERROR transitions — always allowed
     *:ERROR) : ;;

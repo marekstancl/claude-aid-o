@@ -817,6 +817,19 @@ check a plan-required gate could disappear from a run that still reports `overal
 4. **Invalidation-Map call site 3/5:** run the **Invalidation-Map Post-Fix Hook** (§13, observe-only)
    with `fix_ref=gates-<gate>-attempt<K>`.
 
+**Repeated-timeout policy block (P063 Step 3):** step 2 above (`aid-fsm.sh transition GATES
+EXECUTE`) can now be refused. If `aid-run-gates.sh`'s retry loop already saw the gate time out
+3+ times in a row, each at a timeout at least as large as the currently-configured
+`timeout_seconds` (`gate_baseline_policy_check`, P063 Step 1), it stops retrying instead of
+burning another attempt and marks the gate `retryable:false` with an `operator_action`
+(`gate_baseline_mark_policy_block`). A policy-blocked gate has nothing for gate-fixer to act
+on — the gate never ran to completion, so there is no failure output to fix, only a timeout
+setting to change. Re-entering EXECUTE for it is pointless, so the `GATES→EXECUTE` FSM
+precondition now refuses that specific transition (naming the blocking gate and its
+`operator_action`) and the orchestrator should route straight to `GATES:ESCALATION` instead —
+see "On gate failure (max_attempts exhausted)" below. `--force --reason '<≥20 chars>'` remains
+the escape hatch, same as every sibling precondition.
+
 **On gate failure (max_attempts exhausted):**
 `aid-fsm.sh transition GATES ESCALATION <state_file>`
 
@@ -1841,7 +1854,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-12
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
