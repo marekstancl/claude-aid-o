@@ -255,8 +255,9 @@ EOF
 
 # ─── Bonus coverage: policy_result/retryable/operator_action write-ordering ──
 # (Not its own numbered AC, but directly required by the plan's write-ordering
-# contract: gate_baseline_update must NEVER set these three fields itself.)
-@test "gate_baseline_update never touches policy_result/retryable/operator_action" {
+# contract: gate_baseline_update must NEVER set these three fields to an
+# ACTIVE BLOCK itself — only gate_baseline_mark_policy_block may do that.)
+@test "gate_baseline_update never sets an active policy block for the CURRENT attempt it just recorded" {
   gate_baseline_update "gate_m" "tpl" "resolved" 124 500000 60
   gate_baseline_update "gate_m" "tpl" "resolved" 124 500000 60
   gate_baseline_update "gate_m" "tpl" "resolved" 124 500000 60
@@ -282,12 +283,89 @@ EOF
   [ "$output" = "false" ]
   run yq '.gates.gate_m.operator_action' "$AID_GATE_BASELINE_FILE"
   [ "$output" = "increase_timeout_or_background" ]
+}
 
-  # A subsequent gate_baseline_update call (e.g. a later, unrelated run) still
-  # must not stomp on the policy fields gate_baseline_mark_policy_block set.
-  gate_baseline_update "gate_m" "tpl" "resolved" 0 1000 60
-  run yq '.gates.gate_m.policy_result' "$AID_GATE_BASELINE_FILE"
-  [ "$output" = "timeout_policy_block" ]
-  run yq '.gates.gate_m.retryable' "$AID_GATE_BASELINE_FILE"
+# ─── E-063-1_1 REOPEN (PM finding, HIGH) ────────────────────────────────────
+# A policy block is RUN-SCOPED state describing whether a block is CURRENTLY
+# active — never a permanent label. It must clear the instant the SAME gate's
+# next attempt is recorded (pass, unrelated unrecovered failure, or a
+# fingerprint reset), not persist forever once set.
+#
+# This is the actual reopened bug: gate_baseline_update used to carry
+# policy_result/retryable/operator_action forward UNCONDITIONALLY from
+# $existing, so a gate that already recovered still reported retryable:false
+# and could permanently refuse aid-fsm.sh's GATES->EXECUTE transition
+# (aid-fsm.sh ~line 2015) because of a completely unrelated, already-resolved
+# historical block. The OLD (buggy) version of this exact test asserted the
+# opposite ("must not stomp on the policy fields") — that assertion was the
+# bug's contract, not a spec; it is corrected here.
+
+@test "gate_baseline_update clears a prior policy block once the SAME gate's next attempt passes" {
+  gate_baseline_update "gate_n" "tpl" "resolved" 124 500000 60
+  gate_baseline_update "gate_n" "tpl" "resolved" 124 500000 60
+  gate_baseline_update "gate_n" "tpl" "resolved" 124 500000 60
+  run gate_baseline_policy_check "gate_n" 60 3
+  [ "$output" = "block" ]
+  gate_baseline_mark_policy_block "gate_n" "increase_timeout_or_background"
+  run yq '.gates.gate_n.retryable' "$AID_GATE_BASELINE_FILE"
   [ "$output" = "false" ]
+
+  # The gate's very next recorded attempt is a PASS (same command_template,
+  # same timeout — no fingerprint reset in play here).
+  gate_baseline_update "gate_n" "tpl" "resolved" 0 1000 60
+
+  run yq '.gates.gate_n.policy_result' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "none" ]
+  run yq '.gates.gate_n.retryable' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "true" ]
+  run yq '.gates.gate_n.operator_action' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "null" ]
+
+  # History is NOT erased — the timeout trail stays in recent_samples.
+  run yq '.gates.gate_n.recent_samples | length' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "4" ]
+  run yq '.gates.gate_n.recent_samples[0].censored' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "true" ]
+}
+
+@test "gate_baseline_update clears a prior policy block even when the next attempt fails again for an unrelated reason" {
+  gate_baseline_update "gate_o" "tpl" "resolved" 124 500000 60
+  gate_baseline_update "gate_o" "tpl" "resolved" 124 500000 60
+  gate_baseline_update "gate_o" "tpl" "resolved" 124 500000 60
+  gate_baseline_mark_policy_block "gate_o" "increase_timeout_or_background"
+  run yq '.gates.gate_o.retryable' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "false" ]
+
+  # Next attempt is a real (non-timeout) failure — exit 1, not 124. Nothing
+  # re-triggers the policy check here; only gate_baseline_update's own
+  # reset-on-every-call behavior is under test.
+  gate_baseline_update "gate_o" "tpl" "resolved" 1 2000 60
+
+  run yq '.gates.gate_o.policy_result' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "none" ]
+  run yq '.gates.gate_o.retryable' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "true" ]
+  run yq '.gates.gate_o.operator_action' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "null" ]
+}
+
+@test "gate_baseline_update clears a prior policy block on a command_template edit (fingerprint reset)" {
+  gate_baseline_update "gate_p" "tpl-v1" "resolved-v1" 124 500000 60
+  gate_baseline_update "gate_p" "tpl-v1" "resolved-v1" 124 500000 60
+  gate_baseline_update "gate_p" "tpl-v1" "resolved-v1" 124 500000 60
+  gate_baseline_mark_policy_block "gate_p" "increase_timeout_or_background"
+  run yq '.gates.gate_p.retryable' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "false" ]
+
+  # command_template edited -> fingerprint reset -> fresh series, fresh state.
+  gate_baseline_update "gate_p" "tpl-v2-EDITED" "resolved-v2" 0 1000 60
+
+  run yq '.gates.gate_p.samples_count' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "1" ]  # series really did reset
+  run yq '.gates.gate_p.policy_result' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "none" ]
+  run yq '.gates.gate_p.retryable' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "true" ]
+  run yq '.gates.gate_p.operator_action' "$AID_GATE_BASELINE_FILE"
+  [ "$output" = "null" ]
 }

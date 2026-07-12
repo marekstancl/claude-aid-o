@@ -392,9 +392,24 @@ gate_baseline_update() {
     [[ -n "$run_mode_rec" ]] && run_mode_rec_json="\"$run_mode_rec\""
 
     # Build the final entry. policy_result/retryable/operator_action are
-    # CARRIED OVER unchanged from any existing entry (defaulted "none"/true/
-    # null for a brand-new one) — this function NEVER sets them; that is
-    # gate_baseline_mark_policy_block's job alone (write-ordering contract).
+    # RUN-SCOPED STATE, not a permanent label — they describe whether a
+    # policy block is CURRENTLY active, not whether one ever happened. Every
+    # gate_baseline_update call (i.e. every new attempt, per aid-run-gates.sh's
+    # per-attempt call site) therefore RESETS them unconditionally to their
+    # cleared defaults ("none"/true/null), regardless of what $existing carried.
+    # gate_baseline_mark_policy_block is the ONLY function that ever flips them
+    # to an active block — it runs strictly AFTER this function within the
+    # same attempt's processing (aid-run-gates.sh: gate_baseline_update first,
+    # then gate_baseline_policy_check against the just-written samples, then
+    # gate_baseline_mark_policy_block only if that check says "block"). This
+    # is what makes a past block clear itself the moment a gate's own next
+    # attempt runs — on a pass, on a command_template edit (fingerprint reset,
+    # handled the same way since $reset no longer matters for these three
+    # fields), or on a raised timeout_seconds that stops re-triggering the
+    # policy check. History is NOT lost: recent_samples (the censored/timeout
+    # trail) is untouched here and only cleared by an actual fingerprint reset,
+    # so a past block remains reconstructable from the sample window even
+    # though the live retryable/policy_result flags move on.
     local entry_json
     entry_json=$(jq -nc \
       --arg fingerprint "$fingerprint" \
@@ -425,12 +440,12 @@ gate_baseline_update() {
         last_duration_ms: $duration_ms,
         last_exit_code: $exit_code,
         last_attempt_result: $last_attempt_result,
-        policy_result: ($existing.policy_result // "none"),
+        policy_result: "none",
         last_timeout_seconds: $timeout_seconds,
         timeout_recommended_seconds: $timeout_recommended_seconds,
         run_mode_recommended: $run_mode_recommended,
-        retryable: (if ($existing == null) then true elif ($existing.retryable == null) then true else $existing.retryable end),
-        operator_action: ($existing.operator_action // null),
+        retryable: true,
+        operator_action: null,
         last_updated: $now,
         series_reset_at: (if $reset then $now else ($existing.series_reset_at // null) end)
       }')
