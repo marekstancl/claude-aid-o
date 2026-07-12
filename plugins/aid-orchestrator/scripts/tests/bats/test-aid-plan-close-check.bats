@@ -473,3 +473,92 @@ BASH
   run grep -c "^Head_note:" "$file"
   [ "$output" -eq 1 ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════
+# Regression tests for yq injection fix (strenv + environment variables)
+# ═══════════════════════════════════════════════════════════════════════
+
+@test "(9a) --auto-annotate with commit subject containing double quote -> exits 0, valid frontmatter" {
+  write_passing_delivery_report "P612"
+
+  echo "update" >> "$TEST_PROJECT_ROOT/README.md"
+  git -C "$TEST_PROJECT_ROOT" add README.md
+  # Commit subject with a double quote - this would cause yq lexer error
+  # if the subject text were interpolated directly into the yq expression
+  git -C "$TEST_PROJECT_ROOT" commit -q -m 'docs: subject with " quote'
+
+  run "$SCRIPT" P612 --project-root "$TEST_PROJECT_ROOT" --auto-annotate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS"*"auto-annotated"* ]]
+
+  local file="$TEST_PROJECT_ROOT/.aid-o/reports/P612-delivery.md"
+  [ -f "$file" ]
+
+  # Verify the frontmatter is valid YAML by checking it parses
+  run yq -r '.Head' "$file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "" ]]
+
+  # Verify all expected fields are present
+  run grep -c "^Head_at_generation:" "$file"
+  [ "$output" -eq 1 ]
+  run grep -c "^Head_note:" "$file"
+  [ "$output" -eq 1 ]
+  run grep -c "^_header_corrected_at:" "$file"
+  [ "$output" -eq 1 ]
+}
+
+@test "(9b) --auto-annotate with commit subject containing backslash -> exits 0, valid frontmatter" {
+  write_passing_delivery_report "P613"
+
+  echo "update" >> "$TEST_PROJECT_ROOT/README.md"
+  git -C "$TEST_PROJECT_ROOT" add README.md
+  # Commit subject with a backslash - another metacharacter that would
+  # break yq if interpolated directly into the expression string
+  git -C "$TEST_PROJECT_ROOT" commit -q -m 'docs: fix path C:\Users\test'
+
+  run "$SCRIPT" P613 --project-root "$TEST_PROJECT_ROOT" --auto-annotate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS"*"auto-annotated"* ]]
+
+  local file="$TEST_PROJECT_ROOT/.aid-o/reports/P613-delivery.md"
+  [ -f "$file" ]
+
+  # Verify the frontmatter is valid YAML
+  run yq -r '.Head' "$file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "" ]]
+
+  # Verify all expected fields are present
+  run grep -c "^Head_at_generation:" "$file"
+  [ "$output" -eq 1 ]
+  run grep -c "^Head_note:" "$file"
+  [ "$output" -eq 1 ]
+}
+
+@test "(9c) --auto-annotate with normal commit subject (no special chars) still works" {
+  write_passing_delivery_report "P614"
+
+  echo "update" >> "$TEST_PROJECT_ROOT/README.md"
+  git -C "$TEST_PROJECT_ROOT" add README.md
+  # Normal commit subject without any special characters
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "docs: update readme"
+
+  run "$SCRIPT" P614 --project-root "$TEST_PROJECT_ROOT" --auto-annotate
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS"*"auto-annotated"* ]]
+
+  local file="$TEST_PROJECT_ROOT/.aid-o/reports/P614-delivery.md"
+  [ -f "$file" ]
+
+  # Verify the frontmatter is valid YAML
+  run yq -r '.Head' "$file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != "" ]]
+
+  # Verify all expected fields are present
+  run grep -c "^Head_at_generation:" "$file"
+  [ "$output" -eq 1 ]
+  run grep -c "^Head_note:" "$file"
+  [ "$output" -eq 1 ]
+}

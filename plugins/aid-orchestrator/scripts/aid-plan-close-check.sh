@@ -213,6 +213,11 @@ _yq_frontmatter_field() {
 # call twice in a row for the SAME (old_head, new_head) pair — the second
 # call's caller never invokes this because Check 2's Head==current-HEAD
 # branch short-circuits before reaching auto-annotate.
+#
+# SECURITY: All runtime values (note with commit subjects) are passed via
+# environment variables + yq's strenv() to prevent yq expression injection
+# from special characters in free-form text (e.g., commit subjects with
+# quotes, backslashes, or other shell metacharacters).
 _auto_annotate_report() {
   local file="$1" old_head="$2" new_head="$3"
   local commit_summary
@@ -239,9 +244,18 @@ _auto_annotate_report() {
   # appended after existing keys by yq — since Head already exists earlier
   # in the file, this reproduces the exact WAN P062-delivery.md field order
   # (Head, Head_at_generation, Head_note, ...).
-  yq -i \
-    ".Head = \"${new_head}\" | .Head_at_generation = \"${old_head}\" | .Head_note = \"${note}\" | ._header_corrected_at = \"${now}\"" \
-    "$fm_file"
+  # Pass all values via environment variables + strenv() to safely escape
+  # special characters in runtime text (commit subjects, etc.).
+  HEAD_VALUE="$new_head" \
+  HEAD_AT_GENERATION="$old_head" \
+  HEAD_NOTE="$note" \
+  HEADER_CORRECTED_AT="$now" \
+  yq -i '
+    .Head = strenv(HEAD_VALUE) |
+    .Head_at_generation = strenv(HEAD_AT_GENERATION) |
+    .Head_note = strenv(HEAD_NOTE) |
+    ._header_corrected_at = strenv(HEADER_CORRECTED_AT)
+  ' "$fm_file"
 
   local tmp_out; tmp_out=$(mktemp)
   {
