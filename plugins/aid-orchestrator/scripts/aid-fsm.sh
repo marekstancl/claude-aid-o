@@ -28,6 +28,11 @@ source "${SCRIPT_DIR}/lib/aid-review-signals.sh"
 # run_cache_preflight. Sourced AFTER aid-stage-log.sh so log_event already
 # exists (the lib's re-source guard then skips, preserving aid-fsm.sh's die()).
 source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
+# Shared gate-profile risk-classification resolver (P061 E2 Step 1) — defines
+# gate_profile_resolve / gate_profile_rank / gate_profile_max. Used by both
+# cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
+# GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
+source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -1858,6 +1863,114 @@ EOF
             return 1
           fi
         fi
+
+        # P061 E2 Step 2 ("Step 8"): risk-upgrade FSM enforcement (D4). ───────
+        # plan_gate_floor (above) guards "did the plan's own required gates
+        # survive the active profile". THIS check guards a different gap: the
+        # active profile ITSELF (gates_report.json.profile, whatever --profile
+        # aid-run-gates.sh was actually invoked with for this run) must be no
+        # weaker than the RISK-REQUIRED profile the shared resolver (Step 1,
+        # aid-gate-profile.sh) computes from this run's actual base_commit..HEAD
+        # diff. Recomputed HERE (not trusted from advance-to-gates' earlier
+        # auto-resolve) because the gates could have been (re-)run manually
+        # with a different/weaker --profile after auto-resolve last ran —
+        # trusting the resolver's own SUGGESTION at run-time would make this a
+        # detector, not enforcement (AID-v3-principles.md §1). A missing
+        # `profile` field means no --profile was ever passed for this run
+        # (legacy execution.yaml without gate_profiles, or a project that
+        # hasn't opted in) — D9: behaves exactly like today, no-op (every
+        # defined gate already ran, nothing weaker to catch).
+        local active_profile
+        active_profile=$(jq -r '.profile // empty' "$report" 2>/dev/null)
+        if [[ -n "$active_profile" ]]; then
+          local risk_base_commit required_profile=""
+          risk_base_commit=$(yaml_field "$state_file" base_commit)
+          if [[ -n "$risk_base_commit" ]]; then
+            local _gp_paths_file
+            _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
+            git -C "$PWD" diff --name-only "${risk_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
+            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+            rm -f "$_gp_paths_file"
+          fi
+          # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
+          # stays "" — conservative no-op, same fallback fsm_check_cp4_curator_validation
+          # uses; we cannot prove a floor we cannot compute, never guess or fail loud on it.
+
+          if [[ -n "$required_profile" ]]; then
+            local active_rank required_rank
+            if active_rank=$(gate_profile_rank "$active_profile" 2>/dev/null) \
+               && required_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
+              if (( active_rank < required_rank )); then
+                _PRECONDITION_FAIL_REASON="risk_profile_below_required"
+                cat <<EOF >&2
+PRECONDITION FAIL: risk_profile_below_required — active gate profile '${active_profile}' (rank ${active_rank}) is weaker than the risk-required profile '${required_profile}' (rank ${required_rank}) for this EPIC's actual diff (${risk_base_commit}..HEAD).
+
+Reason: D4 (P061) — a high-risk changed path (e.g. aid-fsm.sh, aid-run-gates.sh,
+        aid-release-policy.sh, aid-evidence-verify.sh, defaults/schemas/*,
+        defaults/policies/*, agents/*.md) upgrades the REQUIRED gate profile
+        for this run. This precondition VERIFIES and ENFORCES that floor at
+        GATES:DONE — it does not just recommend it (a detector without
+        enforcement is decoration, AID-v3-principles.md §1).
+
+Fix: re-run gates so the recorded profile is >= '${required_profile}':
+       bash \$AID_PLUGIN_PATH/scripts/aid-fsm.sh advance-to-gates ${state_file}
+     (auto-resolves the risk-required profile for you), or explicitly:
+       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
+      '<≥20 chars why completing under a weaker profile is acceptable>'
+EOF
+                return 1
+              fi
+            else
+              # Active profile name isn't one of the 5 known ranks (a custom
+              # project-defined gate_profiles key) — cannot compare, cannot
+              # enforce. For high-risk diffs, this is a blocking failure
+              # (fail-closed: we cannot verify the active profile is sufficient).
+              # For low-risk diffs, non-blocking telemetry only.
+              local req_rank
+              if req_rank=$(gate_profile_rank "$required_profile" 2>/dev/null); then
+                if (( req_rank > 0 )); then
+                  # Required profile is above 'quick' (high-risk) — must fail
+                  # because we cannot verify an unrecognized active profile meets it.
+                  _PRECONDITION_FAIL_REASON="risk_profile_unresolvable"
+                  cat <<EOF >&2
+PRECONDITION FAIL: risk_profile_unresolvable — the recorded active gate profile '${active_profile}' is not recognized (not in the canonical profile ranks: quick/targeted/standard/full/release). The risk-required profile for this EPIC's diff is '${required_profile}' (rank ${req_rank}), which is above 'quick' — we cannot verify that an unrecognized profile name meets this requirement.
+
+Reason: D4 (P061) — a high-risk changed path upgrades the REQUIRED gate profile
+        for this run. This precondition VERIFIES and ENFORCES that floor at
+        GATES:DONE — it does not just recommend it (a detector without
+        enforcement is decoration, AID-v3-principles.md §1).
+
+Fix: Either extend your execution.yaml.gate_profiles to define '${active_profile}' with a documented rank, or re-run gates with a recognized profile name:
+       bash \$AID_PLUGIN_PATH/scripts/aid-run-gates.sh run-all ... --profile ${required_profile}
+
+OR (PM-authorized override, audited):
+  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
+      '<≥20 chars why using an unrecognized profile is acceptable>'
+EOF
+                  return 1
+                else
+                  # Required profile is 'quick' — low-risk, unrecognized active
+                  # profile is acceptable. Non-blocking telemetry only.
+                  fsm_emit_audit_log "risk_profile_rank_unresolvable" \
+                    --evidence-dir "$evidence_dir" \
+                    --active-profile "$active_profile" \
+                    --required-profile "$required_profile"
+                fi
+              else
+                # required_profile rank lookup itself failed — should not happen
+                # (we computed required_profile ourselves from the resolver), but
+                # fall back to non-blocking telemetry as a safety measure.
+                fsm_emit_audit_log "risk_profile_rank_unresolvable" \
+                  --evidence-dir "$evidence_dir" \
+                  --active-profile "$active_profile" \
+                  --required-profile "$required_profile"
+              fi
+            fi
+          fi
+        fi
       else
         # Fail loud, never silent-pass: without jq we cannot verify overall==pass,
         # and a missing verifier must block the DONE transition (OBS-20260708-07).
@@ -2104,9 +2217,16 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # preserves the original behaviour of ignoring untracked files; no pathspec is
   # given so the whole repo is scanned regardless of cwd, matching the original
   # `git diff` semantics.
+  #
+  # .aid-o/work/audit-log.jsonl is excluded for the same reason: it is an
+  # append-only FSM audit artefact, and `init --force` itself writes the
+  # fsm_force_override entry to it (via fsm_handle_force_override, above)
+  # before this guard runs. In projects where it is tracked, an unexcluded
+  # guard would make `init --force` dirty its own tree and then fail on that
+  # same change on the very next invocation.
   local _dirty
   _dirty="$(git status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$' || true)"
+    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$' || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review
@@ -2343,6 +2463,20 @@ cmd_transition() {
 # state at EXECUTE (never modified).
 cmd_advance_to_gates() {
   local state_file="${1:?state_file required}"
+  shift
+  # Optional --profile <name>: an EXPLICIT profile passed by advance-to-gates'
+  # own caller (e.g. a future PM/pipeline override) always wins over auto-
+  # resolve below — same "manual override is authoritative" convention Step 1
+  # already established for AID_GATE_PROFILE_OVERRIDE. Auto-resolve only fires
+  # when the caller did NOT specify one (P061 E2 Step 2 / "Step 8" design
+  # decision — see block below for the full rationale).
+  local explicit_profile=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --profile) explicit_profile="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
   [[ ! -f "$state_file" ]] && { echo "ERROR: state file not found: $state_file" >&2; exit 1; }
 
   local epic_id run_id current_state current_step total_steps evidence_dir timeline
@@ -2395,6 +2529,50 @@ cmd_advance_to_gates() {
       epic_id="$epic_id" run_id="$run_id" reason="plan_json_absent"
   fi
 
+  # ─── P061 E2 Step 2 ("Step 8"): gate-profile auto-resolve ─────────────────
+  # DESIGN DECISION: advance-to-gates ALWAYS resolves a profile — either the
+  # caller's explicit --profile (wins outright, no resolver call at all) or,
+  # when none was given, the Step 1 shared resolver (aid-gate-profile.sh's
+  # gate_profile_resolve) run against THIS run's base_commit..HEAD diff. The
+  # resolved name is only actually passed to aid-run-gates.sh as --profile
+  # when it is a key under execution.yaml.gate_profiles — this is the D9
+  # legacy-preservation guard: a project that has never defined gate_profiles
+  # (the overwhelming majority today, INCLUDING this plugin's own
+  # execution.yaml at the time of writing) must keep running every defined
+  # gate exactly as before. Without this guard, auto-resolve would hand
+  # aid-run-gates.sh a --profile name with no matching gate_profiles key,
+  # which is a hard, fail-loud error there (P061 E1 Step 2) — i.e. it would
+  # BREAK every project that hasn't opted in, including the very EPIC that
+  # produced this code. An explicit caller --profile is passed through
+  # unconditionally instead: the caller asked for it by name, so an unknown
+  # key is the caller's own mistake and should fail loud (same as calling
+  # aid-run-gates.sh directly with a bad --profile).
+  local profile_arg=()
+  if [[ -n "$explicit_profile" ]]; then
+    profile_arg=(--profile "$explicit_profile")
+    [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
+      profile="$explicit_profile" source="explicit_caller"
+  else
+    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined
+    _gp_base_commit=$(yaml_field "$state_file" base_commit)
+    _gp_paths_file=$(mktemp -t aid-gate-profile-paths.XXXXXX)
+    if [[ -n "$_gp_base_commit" ]]; then
+      git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
+    fi
+    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+    rm -f "$_gp_paths_file"
+
+    _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
+    if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
+      profile_arg=(--profile "$_gp_resolved")
+      [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
+        profile="$_gp_resolved" source="auto_resolved"
+    else
+      [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_auto_resolve_skipped" \
+        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles"
+    fi
+  fi
+
   # Invoke runner with explicit FSM signal — Step 2 makes runner accept this.
   local rc=0
   AID_GATES_TRIGGERED_BY_FSM=1 \
@@ -2403,6 +2581,7 @@ cmd_advance_to_gates() {
       --state-file "$state_file" \
       --report-file "$report_file" \
       "${plan_json_arg[@]}" \
+      "${profile_arg[@]}" \
     || rc=$?
 
   if (( rc == 0 )); then
@@ -2800,7 +2979,17 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   # remains the authoritative progress signal either way, so a legacy
   # fsm-state.yaml predating P040 Component E (no steps[] block) — or any
   # other steps[$step] miss — must not crash increment-step.
-  if command -v yq >/dev/null 2>&1 && yq -e ".steps[${step}]" "$state_file" >/dev/null 2>&1; then
+  #
+  # SECURITY (CP3 re-review, E-061-2_6): $step is interpolated into three yq
+  # expressions below. yaml_field never validates current_step is numeric, so
+  # an operator/tooling bug that sets it to e.g. "0,1" (still valid in the
+  # $((step + 1)) arithmetic above, AND valid as yq multi-index syntax) could
+  # forge multiple steps[] entries to status:completed in one call — the same
+  # yq-expression-injection class as the --profile and --auto-annotate fixes
+  # elsewhere in this file. The numeric guard below closes it: a non-digit
+  # current_step skips this best-effort block entirely (matching its own
+  # "must not crash" design), same as the legacy-no-steps[] case already did.
+  if [[ "$step" =~ ^[0-9]+$ ]] && command -v yq >/dev/null 2>&1 && yq -e ".steps[${step}]" "$state_file" >/dev/null 2>&1; then
     local _sync_completed_at _sync_started _sync_expr
     _sync_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     _sync_started=$(yq -r ".steps[${step}].started_at" "$state_file" 2>/dev/null || echo "null")
@@ -3996,6 +4185,30 @@ cmd_plan_close() {
   fi
 
   if [[ "$missing" -ne 0 ]]; then
+    exit 1
+  fi
+
+  # Mechanical plan-close self-check (aid-plan-close-check.sh) — replaces the
+  # PM's repeated manual audits (stale/untracked reports, DONE-but-pending
+  # fsm-state, stale queue/active.md) with a hard gate here. --auto-annotate
+  # only lets the script's own Check 2 fix the safe docs-only-stale-report
+  # case; it is not a general cleanup pass. A failure here blocks
+  # ca-review-complete exactly like a missing report above.
+  #
+  # The checker ALWAYS runs, even when reporter.enabled:false — skipping it
+  # entirely would also skip Checks 2-4 (Head freshness, fsm-state DONE-
+  # pending, queue/active revalidation), none of which have anything to do
+  # with the delivery report. Only the delivery-report existence requirement
+  # (Check 1) is relaxed via --skip-delivery-report, matching the toggle this
+  # function already honors a few lines up without widening the skip.
+  local -a _plan_close_check_flags=(--auto-annotate)
+  if [[ "$reporter_enabled" == "false" ]]; then
+    _plan_close_check_flags+=(--skip-delivery-report)
+    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-delivery-report" rationale="reporter.enabled:false in execution.yaml (delivery-report existence only; Checks 2-4 still run)"
+  fi
+  if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
+    echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
+    echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
     exit 1
   fi
 

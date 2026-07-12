@@ -95,6 +95,42 @@ YAML
   [[ "$output" =~ "Uncommitted changes present" ]]
 }
 
+@test "PRE-FLIGHT: init --force self-writes tracked audit-log.jsonl → does NOT block itself (end-to-end repro)" {
+  mkdir -p .aid-o/work
+  echo '{"event":"seed"}' > .aid-o/work/audit-log.jsonl
+  git add .aid-o/work/audit-log.jsonl
+  git commit -q -m "track audit log"
+  # Real repro: --force writes fsm_force_override to audit-log.jsonl (via
+  # fsm_handle_force_override → fsm_emit_audit_log) DURING this same
+  # invocation, before the clean-tree guard runs later in cmd_init.
+  run "$FSM" init $(build_default_init_args E-test) --force --reason "reproducing audit-log.jsonl self-write dirty-tree bug end-to-end"
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+  # Confirm the self-write actually happened (guards against a no-op fixture).
+  git diff --stat HEAD -- .aid-o/work/audit-log.jsonl | grep -q "audit-log.jsonl"
+}
+
+@test "PRE-FLIGHT: tracked .aid-o/config/queue.yaml dirty → does NOT block (existing exclusion, regression)" {
+  mkdir -p .aid-o/config
+  echo "queue: []" > .aid-o/config/queue.yaml
+  git add .aid-o/config/queue.yaml
+  git commit -q -m "track queue"
+  echo "queue: [updated]" > .aid-o/config/queue.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT: dirty tree with an ordinary tracked file (not queue.yaml/audit-log.jsonl) → still blocked" {
+  echo "some real code change" >> .gitkeep
+  git add .gitkeep
+  git commit -q -m "track gitkeep change baseline"
+  echo "another change" >> .gitkeep
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "Uncommitted changes present" ]]
+}
+
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {
@@ -1529,6 +1565,47 @@ EOF
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
+}
+
+@test "increment-step: forged current_step (yq multi-index injection, e.g. '0,1') does NOT forge steps[] completion (CP3 security finding)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cat > "$state_file" <<EOF
+epic_id: E-test
+run_id: R-test
+state: EXECUTE
+current_step: "0,1"
+total_steps: 2
+mode: manual
+branch: task/E-test/main
+base_commit: HEAD
+gate_retries: 0
+escalation_count: 0
+started_at: "$now"
+created_at: $now
+steps:
+  - id: 1
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+  - id: 2
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+EOF
+  # current_step is a forged multi-index string, not a plain integer — both
+  # bash's $((step + 1)) arithmetic AND yq's ".steps[0,1]" would otherwise
+  # accept it (comma is valid in both contexts). --force bypasses the
+  # unrelated CP2 verifier-output precondition so this reaches the steps[]
+  # sync block under test.
+  run "$FSM" increment-step "$state_file" --force --reason "CP3 security regression: forged current_step must not sync steps[]"
+  # steps[1] (id: 2) must NOT be forged to completed — the numeric guard
+  # must skip the sync block entirely for a non-digit current_step.
+  [ "$(yq '.steps[1].status' "$state_file")" = "pending" ]
+  [ "$(yq '.steps[0].status' "$state_file")" = "pending" ]
+  ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
 }
 
 @test "increment-step: steps[] absent (legacy fsm-state.yaml) → current_step still bumps, no crash" {

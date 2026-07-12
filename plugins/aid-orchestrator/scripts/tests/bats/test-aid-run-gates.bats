@@ -843,3 +843,313 @@ YAML
   run jq -re '.profile_reason' "$REPORT"
   [ "$output" == "null" ]
 }
+
+# ─── P061 E2 Step 2 ("Step 8") — FSM risk-upgrade enforcement (D4) ───────────
+# The active gate profile ACTUALLY recorded on gates_report.json.profile must
+# be >= the risk-required profile computed by the Step 1 shared resolver
+# (aid-gate-profile.sh's gate_profile_resolve) against this run's actual
+# base_commit..HEAD diff — the GATES:DONE precondition VERIFIES and ENFORCES
+# this floor (D4), it does not just let the resolver's own earlier suggestion
+# go unchecked (AID-v3-principles.md §1: detector without enforcement is
+# decoration).
+
+@test "GATES:DONE risk-upgrade (CHECKPOINT 2): diff touches aid-fsm.sh -> resolver requires 'full'; active profile 'quick' -> precondition FAILS with risk_profile_below_required" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  # Simulate this EPIC's own diff touching aid-fsm.sh (high-risk path per
+  # aid-gate-profile.sh's classification rules) between base_commit and HEAD.
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  quick:
+    include: []
+  full:
+    include: [always_pass]
+YAML
+
+  # Active profile recorded is 'quick' — too weak for a high-risk diff.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile quick
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "quick" ]
+  run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "pass" ]
+
+  # GATES→DONE must refuse — the risk-required profile for this diff is 'full'.
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_below_required"* ]]
+  [[ "$output" == *"'quick'"* ]]
+  [[ "$output" == *"'full'"* ]]
+  # State never advanced past GATES
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "risk_profile_below_required" ]
+}
+
+@test "GATES:DONE risk-upgrade: diff touches aid-fsm.sh -> active profile 'full' (== required) -> transition proceeds normally" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  full:
+    include: [always_pass]
+YAML
+
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile full
+  [ "$status" -eq 0 ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "GATES:DONE risk-upgrade: no --profile used (legacy, D9) -> profile field absent -> no-op even for a high-risk diff" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  # High-risk diff (aid-fsm.sh touched) but the run never used --profile at all
+  # (execution.yaml has no gate_profiles block) — D9: behaves exactly like
+  # today, every defined gate already ran, nothing weaker to enforce against.
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  setup_passing_execution_yaml "$exec_yaml"
+
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "null" ]
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "advance-to-gates auto-resolve (FSM e2e): diff touches aid-fsm.sh + gate_profiles.full defined -> runner invoked with --profile full automatically (no explicit --profile from caller)" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  full:
+    include: [always_pass]
+YAML
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "full" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_profile_selected"
+}
+
+@test "advance-to-gates auto-resolve (legacy regression, D9): diff touches aid-fsm.sh but gate_profiles is NOT defined -> --profile never passed, all gates run unchanged" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  # Same high-risk diff as above, but this project's execution.yaml has never
+  # opted into gate_profiles at all — the overwhelming majority case today.
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "EXECUTE" "5" "5" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-code-review.md"
+  write_valid_verifier_output "$TEST_EVIDENCE_DIR/verifier-output-cp3-security.md"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  setup_passing_execution_yaml "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" advance-to-gates "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "null" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "gate_profile_auto_resolve_skipped"
+}
+
+@test "GATES:DONE risk-upgrade regression: unrecognized/custom profile name 'ci-fast' on high-risk diff (aid-fsm.sh) -> precondition FAILS with risk_profile_unresolvable" {
+  # E-061-2_6 Step 2 fix: when an active profile name is not in the canonical 5
+  # (quick/targeted/standard/full/release) and the required profile is high-risk
+  # (> quick), the precondition must FAIL, not silently pass.
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  local FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  local base; base=$(git rev-parse HEAD)
+
+  # Simulate high-risk diff touching aid-fsm.sh
+  mkdir -p plugins/aid-orchestrator/scripts
+  echo "fsm change" > plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git add plugins/aid-orchestrator/scripts/aid-fsm.sh
+  git commit -q -m "touch aid-fsm.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  local exec_yaml="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  always_pass:
+    command: "true"
+    required: true
+gate_profiles:
+  ci-fast:
+    include: []
+  full:
+    include: [always_pass]
+YAML
+
+  # Active profile is the custom 'ci-fast' (not in canonical 5 ranks)
+  # which excludes all gates, so overall=pass even though nothing ran.
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" --profile ci-fast
+  [ "$status" -eq 0 ]
+  run jq -re '.profile' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "ci-fast" ]
+  run jq -re '.overall' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "pass" ]
+
+  # GATES→DONE must FAIL — the required profile for this diff is 'full' (high-risk),
+  # but the active profile 'ci-fast' is unrecognized (not in the rank table), so we
+  # cannot verify it meets the requirement. This must be fail-closed, not silent pass.
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_unresolvable"* ]]
+  [[ "$output" == *"ci-fast"* ]]
+  [[ "$output" == *"full"* ]]
+  # State never advanced past GATES
+  [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "GATES" ]
+  # Reason surfaced on the timeline via cmd_transition's generic precondition logger
+  run jq -rse 'last(.[] | select(.event=="fsm_precondition_fail")).reason' "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  [ "$output" == "risk_profile_unresolvable" ]
+}
+
+# ─── P061 E-061-2_6: Regression test for yq expression injection (security fix) ──
+# Vulnerability: unescaped ${profile} in yq expression allowed attacker-supplied
+# yq operators (// alternation, # comments) to inject a fabricated profile with
+# attacker-controlled gate whitelist, bypassing the profile-selection mechanism.
+# Fix: replaced `.gate_profiles.\"${profile}\"` with `.gate_profiles[strenv(PROFILE)]`
+# so profile names are always treated as literal keys, never parsed as yq expressions.
+# Regression test: confirm injection payload is rejected (unknown profile) not accepted.
+@test "run-all: yq injection payload in --profile is rejected (unknown profile)" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  test_gate:
+    command: "exit 0"
+    required: true
+gate_profiles:
+  real_profile:
+    include: [test_gate]
+YAML
+  # Inject yq alternation operator in profile name: when vulnerability exists,
+  # yq expression becomes `.gate_profiles."<injected>" // ["test_gate"]` which
+  # falls through to the attacker-supplied literal array, making the runner believe
+  # test_gate is in a real profile even though "injected" is not a real key.
+  # After the fix, the profile name is a literal string key lookup, and the
+  # injection payload is treated as a non-existent profile name → fail loud.
+  local injection_payload='nonexistent" // ["test_gate"] #'
+
+  # Must fail with exit code 1 and unknown profile error message
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --profile "$injection_payload"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+  [[ "$output" == *"no such key"* || "$output" == *"ERROR"* ]]
+}
+
+@test "run-all: yq injection with comment terminator in --profile is rejected" {
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  alpha:
+    command: "exit 0"
+    required: true
+  beta:
+    command: "exit 1"
+    required: true
+gate_profiles:
+  safe_profile:
+    include: [alpha]
+YAML
+  # Alternative injection: comment terminator to suppress latter part of yq.
+  # Payload attempts to close string and comment out the rest of the yq expression.
+  local injection_payload='safe_profile") .include = []; #'
+
+  # Must fail (unknown profile), NOT pass with beta excluded by injection.
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --profile "$injection_payload"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown gate profile"* ]]
+}
