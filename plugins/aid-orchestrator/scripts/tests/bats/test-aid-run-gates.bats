@@ -1475,3 +1475,148 @@ YAML
   run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
   [ "$output" == "none" ]
 }
+
+# ─── P061 EPIC 3 Step 10 — targeted_tests gate wiring (execution.yaml) ───────
+# Verifies the targeted_tests gate registered in the real
+# .aid-o/config/execution.yaml is (a) findable/runnable by aid-run-gates.sh at
+# all, (b) NOT activated in any self-host gate_profiles.*.include[] yet (D3/D1
+# — EPIC 4 territory), and (c) propagates aid-select-tests.sh's real
+# pass/fail/unverifiable-as-fail result into gates_report.json end-to-end
+# (CHECKPOINT 3), not just via a direct selector invocation.
+
+@test "execution.yaml: targeted_tests gate is defined and not included in any gate_profiles (D3/D1 boundary)" {
+  local repo_exec_yaml
+  repo_exec_yaml="$(cd "$BATS_TEST_DIRNAME/../../../../.." && pwd)/.aid-o/config/execution.yaml"
+  [ -f "$repo_exec_yaml" ]
+  run yq -e '.gates.targeted_tests.command' "$repo_exec_yaml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *aid-select-tests.sh* ]]
+  # No gate_profiles include[] anywhere lists targeted_tests. Covers both
+  # today's reality (no gate_profiles key at all yet in this file) and,
+  # defensively, a future gate_profiles block that forgets the boundary.
+  # yq -o=json + jq (not yq's own `any(...)`, which isn't valid yq-expression
+  # syntax) mirrors the exact yq-then-jq convention aid-run-gates.sh itself
+  # already uses for gate_profiles introspection (see its
+  # profile_defined_keys_json line).
+  run bash -c "yq -o=json '.gate_profiles // {}' '$repo_exec_yaml' | jq '[.[] | .include[]?] | any(. == \"targeted_tests\")'"
+  [ "$status" -eq 0 ]
+  [ "$output" == "false" ]
+}
+
+# stub_bash_gate <relpath> <exit_code> — fast bash test stub written under
+# STUB_ROOT. Mirrors test-aid-select-tests.bats's own stub_bash; kept local
+# to this file since bash functions aren't shared across separate .bats files.
+stub_bash_gate() {
+  local relpath="$1" code="${2:-0}"
+  mkdir -p "$STUB_ROOT/$(dirname "$relpath")"
+  cat > "$STUB_ROOT/$relpath" <<EOF
+#!/usr/bin/env bash
+exit ${code}
+EOF
+  chmod +x "$STUB_ROOT/$relpath"
+}
+
+# commit_gate_change <file> — append a line to <file> (relative to the
+# current git CWD) and commit it. Mirrors test-aid-select-tests.bats's own
+# commit_change.
+commit_gate_change() {
+  local file="$1"
+  mkdir -p "$(dirname "$file")"
+  echo "changed" >> "$file"
+  git add -A
+  git commit -q -m "touch $file"
+}
+
+@test "run-all targeted_tests gate (CHECKPOINT 3 via gate runner): diff touching ONLY aid-plan-diff.sh -> gates_report.json.gates.targeted_tests reflects only test-plan-diff.sh" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  local base; base=$(git rev-parse HEAD)
+
+  # Real production paths under the fixture repo's own plugins/aid-orchestrator/
+  # tree — aid-select-tests.sh's classification logic (map_path_to_tests) is
+  # always the real hardcoded mapping; only WHERE it executes the mapped test
+  # file from is redirected (AID_SELECT_TESTS_PLUGIN_ROOT), the same isolation
+  # seam test-aid-select-tests.bats already uses, for speed + determinism
+  # instead of running the real (multi-minute) suites.
+  mkdir -p plugins/aid-orchestrator/scripts
+  STUB_ROOT="$TEST_TMPDIR/stub-plugin-root"
+  export AID_SELECT_TESTS_PLUGIN_ROOT="$STUB_ROOT"
+  mkdir -p "$STUB_ROOT/scripts/tests"
+  stub_bash_gate "scripts/tests/test-plan-diff.sh" 0
+
+  commit_gate_change "plugins/aid-orchestrator/scripts/aid-plan-diff.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<YAML
+gates:
+  targeted_tests:
+    command: "$AID_PLUGIN_PATH/scripts/aid-select-tests.sh --base {base_commit}"
+    required: false
+    timeout_seconds: 60
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ "$status" -eq 0 ]
+
+  run jq -re '.gates.targeted_tests.result' "$report"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.targeted_tests.exit_code' "$report"
+  [ "$output" == "0" ]
+  # The gate's captured output is the selector's own JSON summary (run_gate
+  # captures stdout+stderr) — assert it names ONLY test-plan-diff.sh, proving
+  # the CHECKPOINT 3 selection reached gates_report.json end-to-end, not just
+  # a direct aid-select-tests.sh invocation.
+  run jq -re '.gates.targeted_tests.output' "$report"
+  [[ "$output" == *"test-plan-diff.sh"* ]]
+  [[ "$output" != *"test-aid-fsm"* ]]
+  [[ "$output" != *"test-release-policy"* ]]
+
+  unset AID_SELECT_TESTS_PLUGIN_ROOT
+}
+
+@test "run-all targeted_tests gate: unknown production path (D-selector-1 unverifiable) surfaces as plain gate result 'fail' — no new result value" {
+  [[ -n "${TEST_TMPDIR:-}" ]] && rm -rf "$TEST_TMPDIR"
+  setup_test_evidence_dir E-X R-1
+  local base; base=$(git rev-parse HEAD)
+
+  mkdir -p plugins/aid-orchestrator/scripts
+  STUB_ROOT="$TEST_TMPDIR/stub-plugin-root"
+  export AID_SELECT_TESTS_PLUGIN_ROOT="$STUB_ROOT"
+  mkdir -p "$STUB_ROOT/scripts/tests"
+
+  # A path inside the production surface (scripts/) with no Initial-mapping
+  # entry -> aid-select-tests.sh exits 3 (unverifiable). aid-run-gates.sh
+  # needs zero changes to treat this as a fail: any non-zero exit is a fail
+  # (run_gate: result="fail" whenever exit_code -ne 0) — confirming
+  # D-selector-1 without a new "unverifiable" result value anywhere.
+  commit_gate_change "plugins/aid-orchestrator/scripts/aid-brand-new-unmapped-script.sh"
+
+  seed_test_state_files "GATES" "1" "1" "E-X" "R-1"
+  echo "base_commit: $base" >> "$TEST_EVIDENCE_DIR/fsm-state.yaml"
+
+  local exec_yaml="$TEST_PROJECT_ROOT/exec.yaml"
+  cat > "$exec_yaml" <<YAML
+gates:
+  targeted_tests:
+    command: "$AID_PLUGIN_PATH/scripts/aid-select-tests.sh --base {base_commit}"
+    required: false
+    timeout_seconds: 60
+YAML
+
+  local report="$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  run "$RUN_GATES" run-all "$exec_yaml" "E-X" "R-1" \
+    --state-file "$TEST_EVIDENCE_DIR/fsm-state.yaml" --report-file "$report"
+  [ "$status" -eq 0 ]
+
+  run jq -re '.gates.targeted_tests.result' "$report"
+  [ "$output" == "fail" ]
+  run jq -re '.gates.targeted_tests.exit_code' "$report"
+  [ "$output" == "3" ]
+
+  unset AID_SELECT_TESTS_PLUGIN_ROOT
+}
