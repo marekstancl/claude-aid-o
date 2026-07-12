@@ -2224,9 +2224,19 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # before this guard runs. In projects where it is tracked, an unexcluded
   # guard would make `init --force` dirty its own tree and then fail on that
   # same change on the very next invocation.
+  #
+  # .aid-o/metrics/gate-runtime-baselines.yaml (+ its .lock sidecar) get the
+  # same treatment (P063 Step 2): the gitignore/.git-info-exclude backfill
+  # (aid-run-gates.sh's aid_gate_baseline_ensure_gitignored) is the PRIMARY
+  # defense against these files ever showing up as tracked, but this guard is
+  # defense-in-depth, independent of whether that bootstrap succeeded in a
+  # given clone — a project where either file is unusually git-tracked must
+  # still not have its own runtime metrics writes block `init`. Same
+  # single-file, non-glob scoping as the two entries above (never a
+  # directory-wide glob).
   local _dirty
   _dirty="$(git status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$' || true)"
+    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$' || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review

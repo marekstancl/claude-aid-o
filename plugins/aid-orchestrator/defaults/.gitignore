@@ -20,3 +20,10 @@
 
 # lib/ui-fidelity node_modules
 lib/ui-fidelity/node_modules/
+
+# Gate runtime baselines (P063) — local performance telemetry, not versioned.
+# Already-initialized existing projects get this backfilled automatically
+# into .git/info/exclude (see aid-gate-runtime-baseline.sh's
+# gate_baseline_ensure_gitignored) — this entry only benefits brand-new
+# projects created via /aid-init after this line shipped.
+.aid-o/metrics/
