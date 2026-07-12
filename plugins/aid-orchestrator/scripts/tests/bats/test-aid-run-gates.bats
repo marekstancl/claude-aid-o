@@ -515,7 +515,15 @@ YAML
   [ "$status" -eq 0 ]
   # Must finish well under shell_pipeline_smoke's 5s timeout — proves it was
   # never dispatched to run_gate at all (not just that its row got discarded).
-  [ "$elapsed" -lt 3 ]
+  # Threshold widened 3->5s (P063 Step 2): every included gate now also pays
+  # a per-attempt gate_baseline_update write + a gate_baseline_report_json
+  # read (yq/jq subprocess overhead, ~0.3-0.7s/gate on this fixture's 2
+  # included gates) — a real, expected fixed cost of this EPIC, not a
+  # regression this test is meant to catch. The distinguishing signal stays
+  # intact: if shell_pipeline_smoke actually ran, elapsed would be >=5s (its
+  # own sleep+timeout) plus this same per-gate overhead, i.e. comfortably
+  # over this threshold either way.
+  [ "$elapsed" -lt 5 ]
   run jq -re '.gates.shell_pipeline_smoke.result' "$REPORT"
   [ "$output" == "profile_excluded" ]
   run jq -re '.gates.shell_pipeline_smoke.reason' "$REPORT"
@@ -1152,4 +1160,72 @@ YAML
   run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --profile "$injection_payload"
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown gate profile"* ]]
+}
+
+# ─── P063 Step 2 (AC8): gates_report.json additive-only fields ─────────────
+# gate_baseline_update (per-attempt) + the runtime_baseline merge into each
+# gate's aggregate row must be PURELY ADDITIVE: every key present in a
+# PRE-P063-style report (the shape shipped through P061 EPIC 1/6, the last
+# version before this EPIC) stays present, unchanged in kind, in a POST-P063
+# report from the same gate run.
+#
+# TODO(Step 3): AC8's other half — "a policy-blocked required:true gate
+# produces overall==fail" — depends on Step 3's repeated-timeout FSM
+# precondition / policy-block mechanism, which does not exist yet as of this
+# step. That half is intentionally NOT tested here; add it once Step 3 lands
+# gate_baseline_mark_policy_block's wiring into a real fail-the-run path.
+@test "AC8: gates_report.json gains only additive fields — every pre-P063 top-level and per-gate key survives unchanged" {
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ -f "$REPORT" ]
+
+  # Pre-P063 top-level key set (P061 EPIC 1/6 shape). New keys are allowed to
+  # exist ALONGSIDE this set — the assertion is "this subset survives", not
+  # "the set is exactly this". (`all(generator; cond)` evaluates `cond` with
+  # `.` bound to each generated value, NOT the original input — bind the
+  # object to $obj first so `has($k)` checks the right thing.)
+  run jq -e '
+    . as $obj
+    | (["epic_id","run_id","overall","completed_at","gates","_generated_by",
+      "_generated_at","_command_log","covered_paths","changed_paths_covered",
+      "relevance","plan_gates_reconciled","revision","profile",
+      "profile_source","profile_reason","excluded_gates"]) as $pre
+    | all($pre[]; . as $k | $obj | has($k))
+  ' "$REPORT"
+  [ "$status" -eq 0 ]
+
+  # Pre-P063 per-gate key set, for a gate that actually ran the retry loop
+  # (not a profile_excluded/skip/undefined_gate row — those are separate,
+  # unaffected shapes built at different call sites, out of scope here).
+  run jq -e '
+    .gates.alpha as $g
+    | (["gate","result","exit_code","duration_ms","output","attempts"]) as $pre
+    | all($pre[]; . as $k | $g | has($k))
+  ' "$REPORT"
+  [ "$status" -eq 0 ]
+
+  # Pre-existing values keep their original kind (not just "key present with
+  # a null/placeholder value" — a value-swap would technically pass a bare
+  # has() check while still silently breaking every existing consumer).
+  run jq -e '.gates.alpha.result == "pass" and (.gates.alpha.exit_code|type) == "number" and (.gates.alpha.duration_ms|type) == "number" and (.gates.alpha.attempts|type) == "number"' "$REPORT"
+  [ "$status" -eq 0 ]
+
+  # The new ADDITIVE field: runtime_baseline, a well-formed object carrying
+  # gate_baseline_report_json's documented keys — additive alongside, never
+  # replacing, any pre-existing key above.
+  run jq -e '.gates.alpha | has("runtime_baseline") and (.runtime_baseline | type) == "object"' "$REPORT"
+  [ "$status" -eq 0 ]
+  run jq -e '
+    .gates.alpha.runtime_baseline as $rb
+    | (["samples_count","non_censored_samples_count","p95_ms",
+        "timeout_recommended_seconds","run_mode_recommended","data_sufficient",
+        "last_attempt_result","policy_result","retryable","operator_action"]) as $pre
+    | all($pre[]; . as $k | $rb | has($k))
+  ' "$REPORT"
+  [ "$status" -eq 0 ]
+
+  # And it reflects a REAL sample from this very run (not a stub/empty
+  # placeholder) — proves the per-attempt gate_baseline_update wiring
+  # actually fired, not just that the merge key exists.
+  run jq -e '.gates.alpha.runtime_baseline.samples_count >= 1 and .gates.alpha.runtime_baseline.last_attempt_result == "pass"' "$REPORT"
+  [ "$status" -eq 0 ]
 }

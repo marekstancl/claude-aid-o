@@ -131,6 +131,47 @@ YAML
   [[ "$output" =~ "Uncommitted changes present" ]]
 }
 
+# ─── P063 Step 2 (AC7): gate-runtime-baseline metrics file exclusions ────
+# Defense-in-depth alongside the gitignore/.git-info-exclude backfill
+# (gate_baseline_ensure_gitignored): even in a project where the baseline
+# YAML (or its .lock sidecar) is UNUSUALLY git-tracked, `init` must not
+# block on it — independent of whether that bootstrap succeeded in this
+# clone. Same single-file, non-glob scoping as the queue.yaml/audit-log.jsonl
+# exclusions above.
+
+@test "PRE-FLIGHT (AC7a): tracked .aid-o/metrics/gate-runtime-baselines.yaml dirty → does NOT block" {
+  mkdir -p .aid-o/metrics
+  echo "gates: {}" > .aid-o/metrics/gate-runtime-baselines.yaml
+  git add .aid-o/metrics/gate-runtime-baselines.yaml
+  git commit -q -m "track baseline yaml (unusual, but must not block init)"
+  echo "gates: {updated: true}" > .aid-o/metrics/gate-runtime-baselines.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT (AC7a2): tracked .aid-o/metrics/gate-runtime-baselines.yaml.lock dirty → does NOT block" {
+  mkdir -p .aid-o/metrics
+  touch .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  git add .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  git commit -q -m "track baseline lock sidecar (unusual, but must not block init)"
+  echo "lock-noise" >> .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT (AC7 regression): dirty tree under .aid-o/metrics/ but NOT the exact baseline filename → still blocked" {
+  mkdir -p .aid-o/metrics
+  echo "unrelated" > .aid-o/metrics/some-other-file.yaml
+  git add .aid-o/metrics/some-other-file.yaml
+  git commit -q -m "track unrelated metrics file baseline"
+  echo "changed" >> .aid-o/metrics/some-other-file.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "Uncommitted changes present" ]]
+}
+
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {
