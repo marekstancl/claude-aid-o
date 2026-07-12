@@ -918,6 +918,17 @@ Keeping many EPIC branches unmerged increases stale evidence and merge conflict 
 Update `pipeline.md`, DONE summaries, and any prompt text so agents stop asking this
 as an architectural decision during every multi-EPIC plan.
 
+**Concrete occurrence (2026-07-12):** P061 EPIC 2 (`E-061-2_6`) went through
+Auditor+Curator DONE review and merged to `main` (`446d937`) without ever
+running `aid-fsm.sh plan-close` — no Simplifier dispatch, no plan-level
+`.aid-o/reports/P061-delivery.md`, so `ca-review-complete` was never written
+for that run. This silently blocked the UNRELATED plan P063's own
+`aid-fsm.sh init` via the cross-plan DONE gate (`aid-plan-to-epic.sh`
+message: "Plan P061 has unreviewed Curator/Auditor findings"). Bypassed via
+`--force --reason` to unblock P063 immediately (PM-authorized, time
+pressure); P061 EPIC 2's own plan-close (Simplifier + delivery report +
+`aid-fsm.sh plan-close E-061-2_6 ...`) is still owed and not yet done.
+
 **Open questions:** Are there plan types where per-Plan merge is still required?
 If yes, make it an explicit plan flag rather than the default interpretation.
 

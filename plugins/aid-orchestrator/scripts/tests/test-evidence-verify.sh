@@ -522,6 +522,89 @@ test_self_validate_with_findings() {
 }
 
 # ---------------------------------------------------------------------------
+# T15: waiver-mixed — E-063-1_1 reopen fix. A pack with ONE current derived
+# artifact (delivery-gate.json, head_sha == current HEAD) PLUS ONE immutable
+# historical waiver (head_sha == an ANCESTOR commit, not current HEAD) must
+# verify as a whole under --at-head: the waiver must never be required to
+# equal current HEAD (that would mean rewriting frozen history), but it must
+# still be schema-valid and its recorded head_sha must be a real, reachable
+# ancestor of current HEAD. All derived (non-waiver) artifacts still must be
+# current-HEAD-fresh — unweakened.
+# ---------------------------------------------------------------------------
+test_waiver_mixed() {
+  local repo="$SCRATCHPAD/repo-waiver-mixed"
+  local historical_head current_head
+
+  # Commit 1 — this becomes the waiver's frozen, historical HEAD.
+  git init -q "$repo"
+  git -C "$repo" config user.email "test@test.com"
+  git -C "$repo" config user.name "Test"
+  echo ".aid-o/" > "$repo/.gitignore"
+  echo "v1" > "$repo/README.md"
+  git -C "$repo" add .gitignore README.md
+  git -C "$repo" commit -q -m "first (waiver's recorded head)"
+  historical_head=$(git -C "$repo" rev-parse HEAD)
+
+  # Commit 2 — HEAD moves forward; this is where the derived artifact + the
+  # verification run itself both live.
+  echo "v2" >> "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -q -m "second (current HEAD)"
+  current_head=$(git -C "$repo" rev-parse HEAD)
+
+  local ev_dir="$repo/.aid-o/work/evidence/E-test/waiver-mixed"
+  mkdir -p "$ev_dir"
+  for src in "$FIXTURES_DIR/waiver-mixed/"*.json; do
+    local dst="$ev_dir/$(basename "$src")"
+    sed -e "s/__PACK_HEAD__/$current_head/g" \
+        -e "s/__HISTORICAL_HEAD__/$historical_head/g" \
+        "$src" > "$dst"
+  done
+
+  # --at-head: the derived artifact is fresh (== current_head); the waiver is
+  # an ancestor, not equal — must still verify overall.
+  local out="$SCRATCHPAD/vr-waiver-mixed.json"
+  local exit_code=0
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "waiver-mixed" --at-head --out "$out" 2>/dev/null || exit_code=$?
+
+  assert_check_status "T15/artifact_head_freshness" "$out" "artifact_head_freshness" "pass"
+  assert_check_status "T15/protocol_validate"       "$out" "protocol_validate"       "pass"
+  assert_json_field    "T15/verified"               "$out" ".verification_report.summary.verified" "true"
+  if [[ "$exit_code" -eq 0 ]]; then
+    _pass "T15/exit-0"
+  else
+    _fail "T15/exit-0 (expected exit 0, got $exit_code)"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# T16: waiver-mixed regression guard — if the waiver's recorded head_sha is
+# NOT a real ancestor of current HEAD (a falsified/forged waiver, or one from
+# an unrelated/rebased history), the pack must still fail. Proves the fix
+# didn't just blanket-exempt every waiver from freshness scrutiny.
+# ---------------------------------------------------------------------------
+test_waiver_forged_ancestor() {
+  local repo="$SCRATCHPAD/repo-waiver-forged"
+  local current_head
+  current_head=$(setup_git_repo "$repo")
+
+  local ev_dir="$repo/.aid-o/work/evidence/E-test/waiver-forged"
+  mkdir -p "$ev_dir"
+  # delivery-gate.json: genuinely current.
+  sed "s/__PACK_HEAD__/$current_head/g" \
+    "$FIXTURES_DIR/waiver-mixed/delivery-gate.json" > "$ev_dir/delivery-gate.json"
+  # waiver: head_sha is all-zeros — not a real commit anywhere.
+  sed "s/__HISTORICAL_HEAD__/0000000000000000000000000000000000000000/g" \
+    "$FIXTURES_DIR/waiver-mixed/waiver-historical.json" > "$ev_dir/waiver-historical.json"
+
+  local out="$SCRATCHPAD/vr-waiver-forged.json"
+  AID_PROJECT_ROOT="$repo" bash "$VERIFIER" "E-test" "waiver-forged" --out "$out" 2>/dev/null || true
+
+  assert_check_status "T16/artifact_head_freshness" "$out" "artifact_head_freshness" "fail"
+  assert_json_field    "T16/verified"               "$out" ".verification_report.summary.verified" "false"
+}
+
+# ---------------------------------------------------------------------------
 # T14: golden sample validation
 # ---------------------------------------------------------------------------
 test_golden_sample() {
@@ -565,6 +648,8 @@ main() {
   test_validator_missing_runtime
   test_self_validate
   test_self_validate_with_findings
+  test_waiver_mixed
+  test_waiver_forged_ancestor
   test_golden_sample
 
   echo ""

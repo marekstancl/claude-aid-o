@@ -43,8 +43,49 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-stage-log.sh
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
+# shellcheck source=lib/aid-gate-runtime-baseline.sh
+source "${SCRIPT_DIR}/lib/aid-gate-runtime-baseline.sh"
+# shellcheck source=lib/aid-gitignore-backfill.sh
+source "${SCRIPT_DIR}/lib/aid-gitignore-backfill.sh"
 
 PLUGIN_VERSION="${PLUGIN_VERSION:-v2.16.0}"
+
+# ─── Gate runtime baseline gitignore bootstrap (P063 Step 2) ────────────────
+# Lazy, idempotent, LOCAL-ONLY: if `.aid-o/metrics/` (the gate runtime
+# baseline library's data directory — owned by aid-gate-runtime-baseline.sh,
+# Step 1) is not ALREADY excluded from git in this clone — whether via a
+# brand-new project's shipped/tracked `.gitignore` or a previous run of this
+# very function — add it (and its `.lock` glob) to `.git/info/exclude`
+# (never the tracked `.gitignore`). Uses the exact same
+# `git check-ignore -q <probe>` technique aid-plan-close-check.sh's Check 1
+# uses for its own per-project gitignored-vs-committed detection.
+#
+# Lives HERE (not inside aid-gate-runtime-baseline.sh) because this plugin's
+# own P063 EPIC plan.json scopes that library file to Step 1 only — Step 2
+# integrates it without modifying it, calling only its already-published
+# gate_baseline_update/gate_baseline_report_json/gate_baseline_show functions.
+#
+# Deliberately a no-op whenever AID_GATE_BASELINE_FILE is set — that env var
+# is aid-gate-runtime-baseline.sh's own documented test-isolation seam (its
+# bats suite points it at an isolated tmp file "without requiring a git
+# checkout"); if a caller has opted into that isolation, this bootstrap must
+# never write into the REAL clone's `.git/info/exclude` as a side effect.
+# Also a no-op when git is unavailable or CWD isn't inside a git working
+# tree — fails open, matching every public function in the two libraries
+# this depends on.
+aid_gate_baseline_ensure_gitignored() {
+  [[ -n "${AID_GATE_BASELINE_FILE:-}" ]] && return 0
+  command -v git >/dev/null 2>&1 || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  # Already excluded (tracked .gitignore OR a prior .git/info/exclude
+  # backfill) — nothing to do.
+  git check-ignore -q ".aid-o/metrics/__aid_gate_baseline_probe__" 2>/dev/null && return 0
+
+  gitignore_exclude_append ".git/info/exclude" ".aid-o/metrics/"
+  gitignore_exclude_append ".git/info/exclude" ".aid-o/metrics/*.lock"
+  return 0
+}
 
 # Phase 2 (P037) — resolve {token} placeholders in gate commands via bash parameter expansion.
 # Recognized tokens: {plan_path}, {epic_id}, {run_id}, {base_commit}.
@@ -165,6 +206,11 @@ run_all_gates() {
 
   require_yq_mikefarah
 
+  # One-time-per-clone lazy bootstrap (P063 Step 2) — see
+  # aid_gate_baseline_ensure_gitignored above. Called once per run (not per
+  # gate/attempt): idempotent, and there's nothing gate-specific about it.
+  aid_gate_baseline_ensure_gitignored
+
   # ─── Gate profile resolution (P061 E1 Step 2) ──────────────────────────
   # A profile is a named include[] whitelist of gate keys under
   # execution.yaml.gate_profiles. --profile <name> activates exactly one
@@ -257,6 +303,13 @@ run_all_gates() {
   # Gate keys excluded by the active profile (P061 E1 Step 2). Populated
   # only when --profile is set; stays empty otherwise.
   declare -a excluded_gates=()
+  # Gates whose runtime baseline (P063 Step 2) already has enough data
+  # (non_censored_samples_count >= 5) to be worth a human-readable summary
+  # line after the run — populated inline at merge time below (reusing the
+  # runtime_baseline_json already fetched there) so the post-loop summary
+  # never re-queries gates that were profile_excluded/skipped/never run this
+  # round, and never re-fetches the same gate's baseline twice.
+  declare -a baseline_summary_gates=()
 
   # Iterate gate names via yq (mikefarah)
   local gate_names
@@ -343,7 +396,47 @@ run_all_gates() {
         gate_result=$(echo "$gate_result" | jq '.result = "skip"')
         r="skip"
       fi
+
+      # ─── Gate runtime baseline sample (P063 Step 2) ────────────────────
+      # One sample per ATTEMPT (not per gate) — a retried gate's earlier
+      # failed/timed-out attempts are real duration data too. Deliberately
+      # excludes "skip" (both the no_command-less path above, which never
+      # reaches here, and this exit-2/pass_criteria convention above): a
+      # skip never really executed the gate's intended work, so it is not a
+      # meaningful timing sample. Never allowed to fail the run — a metrics
+      # write is never load-bearing for gate pass/fail.
+      if [[ "$r" != "skip" ]]; then
+        local baseline_exit_code baseline_duration_ms
+        baseline_exit_code=$(echo "$gate_result" | jq -r '.exit_code')
+        baseline_duration_ms=$(echo "$gate_result" | jq -r '.duration_ms')
+        gate_baseline_update "$gate_name" "$cmd" "$resolved_cmd" \
+          "$baseline_exit_code" "$baseline_duration_ms" "$timeout_s" || true
+      fi
+
       [[ "$r" == "pass" || "$r" == "skip" ]] && break
+
+      # ─── Repeated-timeout policy block (P063 Step 3) ───────────────────
+      # Reached ONLY when the current attempt already failed/timed out (the
+      # pass/skip break above already returned for a passing attempt — a
+      # gate whose CURRENT attempt just passed NEVER reaches this check,
+      # which is what makes AC10 hold) AND the loop is about to decide
+      # whether to consume another attempt. `timeout_s` is the gate's
+      # currently-configured timeout, read once before this loop began.
+      # gate_baseline_policy_check compares the last 3 recorded samples
+      # (already including the one gate_baseline_update just wrote above for
+      # THIS attempt) — "block" iff all 3 are censored (timeout) AND each
+      # sample's OWN recorded timeout_seconds >= the current config, so a
+      # timeout streak recorded under a since-raised timeout never blocks a
+      # fresh attempt under the new, longer timeout (AC6 fixture b).
+      if [[ "$(gate_baseline_policy_check "$gate_name" "$timeout_s")" == "block" ]]; then
+        gate_baseline_mark_policy_block "$gate_name" "increase_timeout_or_background" || true
+        # result stays the UNCHANGED literal "fail" (never a new value) —
+        # reason/recommendation are purely additive fields describing WHY no
+        # further attempt was made.
+        gate_result=$(echo "$gate_result" | jq '.result = "fail" | .reason = "timeout_policy_block" | .recommendation = "increase_timeout_or_background"')
+        break
+      fi
+
       [[ $attempt -le $max_retries ]] && echo "Gate ${gate_name} failed (attempt ${attempt}/${max_retries}), retrying..." >&2
     done
 
@@ -351,10 +444,19 @@ run_all_gates() {
     final_result=$(echo "$gate_result" | jq -r '.result')
     log_event "$timeline_file" "gate_complete" gate="$gate_name" result="$final_result" attempt="$attempt"
 
-    # Add to gates JSON aggregate
+    # Add to gates JSON aggregate. `runtime_baseline` (P063 Step 2) is purely
+    # additive — gate_baseline_report_json always returns a valid JSON object
+    # (a zeroed/null-filled one when there's no entry yet or yq/jq is
+    # missing), never a bare `null`, so this merge never removes/renames any
+    # existing key.
+    local runtime_baseline_json runtime_baseline_nc
+    runtime_baseline_json=$(gate_baseline_report_json "$gate_name" 2>/dev/null)
+    [[ -z "$runtime_baseline_json" ]] && runtime_baseline_json='null'
+    runtime_baseline_nc=$(jq -r '.non_censored_samples_count // 0' <<<"$runtime_baseline_json" 2>/dev/null)
+    [[ "$runtime_baseline_nc" =~ ^[0-9]+$ ]] && (( runtime_baseline_nc >= 5 )) && baseline_summary_gates+=("$gate_name")
     $first || gates_json+=","
     first=false
-    gates_json+="\"${gate_name}\":$(echo "$gate_result" | jq ". + {\"attempts\":${attempt}}")"
+    gates_json+="\"${gate_name}\":$(echo "$gate_result" | jq --argjson rb "$runtime_baseline_json" ". + {\"attempts\":${attempt}, \"runtime_baseline\": \$rb}")"
     processed=$((processed+1))
 
     # ─── command_log entry (P032 Step 3 provenance) ──────────────────
@@ -529,6 +631,23 @@ run_all_gates() {
   local total_duration=$((SECONDS - run_start))
   log_event "$timeline_file" "gate_runner_complete" \
     report_path="$report_path" overall="$overall" duration_sec="$total_duration"
+
+  # ─── Gate runtime baseline summary (P063 Step 2) ───────────────────────
+  # Human-readable, one line per gate whose baseline has "enough data to
+  # trust" (non_censored_samples_count >= 5 — matches
+  # gate_baseline_recommend_run_mode's own threshold). `baseline_summary_gates`
+  # was populated inline at merge time above (reusing the runtime_baseline
+  # JSON already fetched there for THIS run's gates only — never a second
+  # full re-scan of every defined gate, which would re-pay yq/jq subprocess
+  # cost for profile_excluded/skipped/never-run gates for no benefit).
+  # Printed to stderr only — stdout carries exactly the final JSON `report`
+  # line consumed by callers/tests (`run-all ... | jq`).
+  if (( ${#baseline_summary_gates[@]} > 0 )); then
+    local baseline_summary_gate
+    for baseline_summary_gate in "${baseline_summary_gates[@]}"; do
+      gate_baseline_show "$baseline_summary_gate" >&2
+    done
+  fi
 
   [[ "$overall" == "pass" ]] && return 0 || return 1
 }

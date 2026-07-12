@@ -131,6 +131,47 @@ YAML
   [[ "$output" =~ "Uncommitted changes present" ]]
 }
 
+# ─── P063 Step 2 (AC7): gate-runtime-baseline metrics file exclusions ────
+# Defense-in-depth alongside the gitignore/.git-info-exclude backfill
+# (gate_baseline_ensure_gitignored): even in a project where the baseline
+# YAML (or its .lock sidecar) is UNUSUALLY git-tracked, `init` must not
+# block on it — independent of whether that bootstrap succeeded in this
+# clone. Same single-file, non-glob scoping as the queue.yaml/audit-log.jsonl
+# exclusions above.
+
+@test "PRE-FLIGHT (AC7a): tracked .aid-o/metrics/gate-runtime-baselines.yaml dirty → does NOT block" {
+  mkdir -p .aid-o/metrics
+  echo "gates: {}" > .aid-o/metrics/gate-runtime-baselines.yaml
+  git add .aid-o/metrics/gate-runtime-baselines.yaml
+  git commit -q -m "track baseline yaml (unusual, but must not block init)"
+  echo "gates: {updated: true}" > .aid-o/metrics/gate-runtime-baselines.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT (AC7a2): tracked .aid-o/metrics/gate-runtime-baselines.yaml.lock dirty → does NOT block" {
+  mkdir -p .aid-o/metrics
+  touch .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  git add .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  git commit -q -m "track baseline lock sidecar (unusual, but must not block init)"
+  echo "lock-noise" >> .aid-o/metrics/gate-runtime-baselines.yaml.lock
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT (AC7 regression): dirty tree under .aid-o/metrics/ but NOT the exact baseline filename → still blocked" {
+  mkdir -p .aid-o/metrics
+  echo "unrelated" > .aid-o/metrics/some-other-file.yaml
+  git add .aid-o/metrics/some-other-file.yaml
+  git commit -q -m "track unrelated metrics file baseline"
+  echo "changed" >> .aid-o/metrics/some-other-file.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "Uncommitted changes present" ]]
+}
+
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {
@@ -349,6 +390,127 @@ PLAN
   [[ "$output" == *"verifier-output-cp3-code-review.md missing"* ]]
   # State stayed EXECUTE because cmd_transition didn't commit
   [ "$(grep '^state:' "$TEST_EVIDENCE_DIR/fsm-state.yaml" | awk '{print $2}')" = "EXECUTE" ]
+}
+
+# ─── P063 Step 3 (AC11): GATES:EXECUTE repeated-timeout policy block ────────
+# Real 3-consecutive-timeout policy block via the actual aid-run-gates.sh
+# code path (not hand-written JSON): seed 3 prior timeout samples in the
+# gate-runtime-baseline file, then run one more attempt that also times out
+# under the same currently-configured timeout, exactly like
+# test-aid-run-gates.bats' AC6a fixture — this produces a REAL
+# gates_report.json with runtime_baseline.retryable:false.
+
+@test "AC11: GATES:EXECUTE refused when a gate is retryable:false (real timeout_policy_block); GATES:ESCALATION and --force still work" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+
+  local exec_yaml="$TEST_TMPDIR/exec.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  flaky_gate:
+    command: "sleep 2"
+    required: true
+    timeout_seconds: 1
+    max_retries: 2
+YAML
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
+
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "false" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.operator_action' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "increase_timeout_or_background" ]
+
+  # Fixture A: GATES:EXECUTE is REFUSED, message names gate + operator_action.
+  local state_a="$TEST_TMPDIR/state-a.yaml"
+  write_post_deploy_state_yaml "$state_a"
+  sed -i 's/^state: .*/state: GATES/' "$state_a"
+  run "$FSM" transition GATES EXECUTE "$state_a"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"flaky_gate"* ]]
+  [[ "$output" == *"increase_timeout_or_background"* ]]
+  [ "$(grep '^state:' "$state_a" | awk '{print $2}')" = "GATES" ]
+
+  # Fixture B: GATES:ESCALATION for the SAME evidence dir still succeeds
+  # normally — this precondition only ever guards GATES:EXECUTE.
+  local state_b="$TEST_TMPDIR/state-b.yaml"
+  write_post_deploy_state_yaml "$state_b"
+  sed -i 's/^state: .*/state: GATES/' "$state_b"
+  run "$FSM" transition GATES ESCALATION "$state_b"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state_b" | awk '{print $2}')" = "ESCALATION" ]
+
+  # Fixture C: --force --reason overrides the refusal, same as every sibling
+  # precondition.
+  local state_c="$TEST_TMPDIR/state-c.yaml"
+  write_post_deploy_state_yaml "$state_c"
+  sed -i 's/^state: .*/state: GATES/' "$state_c"
+  run "$FSM" transition GATES EXECUTE "$state_c" --force --reason "PM-authorized override — manually verified flaky_gate timeout is safe to retry"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state_c" | awk '{print $2}')" = "EXECUTE" ]
+}
+
+# ─── E-063-1_1 REOPEN (PM finding, HIGH) ────────────────────────────────────
+# AC11 above proves the block CORRECTLY refuses GATES:EXECUTE while it is
+# still active. This test proves the other half the PM's manual review found
+# missing: once that SAME gate later recovers, the block must be gone — and
+# a DIFFERENT gate's own real, current failure must still be visible and
+# actionable via a normal GATES:EXECUTE retry, never masked by the first
+# gate's already-resolved history. Under the pre-fix code this transition
+# was refused forever (flaky_gate's retryable:false never cleared), even
+# though the actual remaining problem — other_gate — has nothing to do with
+# the old timeout streak and gate-fixer could otherwise address it directly.
+@test "E-063-1_1 reopen: GATES:EXECUTE proceeds once a previously-blocked gate recovers, even while a DIFFERENT gate currently fails" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
+
+  # Confirm the block is REAL (established via mark-policy-block, not just
+  # raw seeded samples) before proceeding.
+  run bash "$LIB" report-json flaky_gate
+  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
+
+  # A LATER gates run: flaky_gate now passes; other_gate fails for a reason
+  # completely unrelated to flaky_gate's old timeout streak.
+  local exec_yaml="$TEST_TMPDIR/exec-reopen.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  flaky_gate:
+    command: "exit 0"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+  other_gate:
+    command: "exit 1"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+YAML
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
+
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "true" ]
+  run jq -re '.gates.other_gate.result' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "fail" ]
+
+  # The actual proof: GATES:EXECUTE must proceed WITHOUT --force. gate-fixer
+  # needs to retry EXECUTE to address other_gate's real, current failure —
+  # flaky_gate's already-resolved history must not stand in the way.
+  local state="$TEST_TMPDIR/state-reopen.yaml"
+  write_post_deploy_state_yaml "$state"
+  sed -i 's/^state: .*/state: GATES/' "$state"
+  run "$FSM" transition GATES EXECUTE "$state"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state" | awk '{print $2}')" = "EXECUTE" ]
 }
 
 # ─── P040 Step 2: orphan dispatch reconciliation backstop (4 assertions) ─────
