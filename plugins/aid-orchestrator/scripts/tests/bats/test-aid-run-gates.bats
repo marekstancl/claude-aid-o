@@ -1485,20 +1485,41 @@ YAML
 # (CHECKPOINT 3), not just via a direct selector invocation.
 
 @test "execution.yaml: targeted_tests gate is defined and not included in any gate_profiles (D3/D1 boundary)" {
-  local repo_exec_yaml
-  repo_exec_yaml="$(cd "$BATS_TEST_DIRNAME/../../../../.." && pwd)/.aid-o/config/execution.yaml"
-  [ -f "$repo_exec_yaml" ]
-  run yq -e '.gates.targeted_tests.command' "$repo_exec_yaml"
+  # Use an isolated fixture instead of reading the machine-local live repo file
+  # (.aid-o/ is gitignored and missing on fresh checkouts / in CI).
+  # Pattern: same as the two sibling tests added right below this one, and as
+  # every other test in this suite that touches execution.yaml (setup_passing_execution_yaml fixture).
+  local exec_yaml="$TEST_PROJECT/exec-fixture-targeted-tests.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  targeted_tests:
+    command: "plugins/aid-orchestrator/scripts/aid-select-tests.sh --base {base_commit}"
+    required: false
+    type: deterministic
+  always_pass:
+    command: "true"
+    required: false
+
+gate_profiles:
+  standard:
+    include: [always_pass]
+  quick:
+    include: []
+YAML
+
+  # targeted_tests gate must be defined
+  run yq -e '.gates.targeted_tests.command' "$exec_yaml"
   [ "$status" -eq 0 ]
   [[ "$output" == *aid-select-tests.sh* ]]
+
   # No gate_profiles include[] anywhere lists targeted_tests. Covers both
-  # today's reality (no gate_profiles key at all yet in this file) and,
-  # defensively, a future gate_profiles block that forgets the boundary.
-  # yq -o=json + jq (not yq's own `any(...)`, which isn't valid yq-expression
-  # syntax) mirrors the exact yq-then-jq convention aid-run-gates.sh itself
-  # already uses for gate_profiles introspection (see its
+  # today's reality (profiles defined but targeted_tests excluded, as in this
+  # fixture) and the boundary between Step 10 (define gate) and EPIC 4 (activate
+  # in profiles). yq -o=json + jq (not yq's own `any(...)`, which isn't valid
+  # yq-expression syntax) mirrors the exact yq-then-jq convention aid-run-gates.sh
+  # itself already uses for gate_profiles introspection (see its
   # profile_defined_keys_json line).
-  run bash -c "yq -o=json '.gate_profiles // {}' '$repo_exec_yaml' | jq '[.[] | .include[]?] | any(. == \"targeted_tests\")'"
+  run bash -c "yq -o=json '.gate_profiles // {}' '$exec_yaml' | jq '[.[] | .include[]?] | any(. == \"targeted_tests\")'"
   [ "$status" -eq 0 ]
   [ "$output" == "false" ]
 }
