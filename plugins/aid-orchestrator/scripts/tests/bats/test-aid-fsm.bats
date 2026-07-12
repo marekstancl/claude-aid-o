@@ -454,6 +454,65 @@ YAML
   [ "$(grep '^state:' "$state_c" | awk '{print $2}')" = "EXECUTE" ]
 }
 
+# ─── E-063-1_1 REOPEN (PM finding, HIGH) ────────────────────────────────────
+# AC11 above proves the block CORRECTLY refuses GATES:EXECUTE while it is
+# still active. This test proves the other half the PM's manual review found
+# missing: once that SAME gate later recovers, the block must be gone — and
+# a DIFFERENT gate's own real, current failure must still be visible and
+# actionable via a normal GATES:EXECUTE retry, never masked by the first
+# gate's already-resolved history. Under the pre-fix code this transition
+# was refused forever (flaky_gate's retryable:false never cleared), even
+# though the actual remaining problem — other_gate — has nothing to do with
+# the old timeout streak and gate-fixer could otherwise address it directly.
+@test "E-063-1_1 reopen: GATES:EXECUTE proceeds once a previously-blocked gate recovers, even while a DIFFERENT gate currently fails" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
+
+  # Confirm the block is REAL (established via mark-policy-block, not just
+  # raw seeded samples) before proceeding.
+  run bash "$LIB" report-json flaky_gate
+  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
+
+  # A LATER gates run: flaky_gate now passes; other_gate fails for a reason
+  # completely unrelated to flaky_gate's old timeout streak.
+  local exec_yaml="$TEST_TMPDIR/exec-reopen.yaml"
+  cat > "$exec_yaml" <<'YAML'
+gates:
+  flaky_gate:
+    command: "exit 0"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+  other_gate:
+    command: "exit 1"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+YAML
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  RUN_GATES="$AID_PLUGIN_PATH/scripts/aid-run-gates.sh"
+  "$RUN_GATES" run-all "$exec_yaml" E-test R-test \
+    --report-file "$TEST_EVIDENCE_DIR/gates/gates_report.json" >/dev/null 2>&1 || true
+
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "true" ]
+  run jq -re '.gates.other_gate.result' "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+  [ "$output" == "fail" ]
+
+  # The actual proof: GATES:EXECUTE must proceed WITHOUT --force. gate-fixer
+  # needs to retry EXECUTE to address other_gate's real, current failure —
+  # flaky_gate's already-resolved history must not stand in the way.
+  local state="$TEST_TMPDIR/state-reopen.yaml"
+  write_post_deploy_state_yaml "$state"
+  sed -i 's/^state: .*/state: GATES/' "$state"
+  run "$FSM" transition GATES EXECUTE "$state"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state" | awk '{print $2}')" = "EXECUTE" ]
+}
+
 # ─── P040 Step 2: orphan dispatch reconciliation backstop (4 assertions) ─────
 
 # Helper: seed the increment-step happy-path preconditions for step 3

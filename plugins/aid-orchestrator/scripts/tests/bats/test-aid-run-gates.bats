@@ -1351,3 +1351,127 @@ YAML
   run jq -re '.overall' "$REPORT"
   [ "$output" == "pass" ]
 }
+
+# ─── E-063-1_1 REOPEN (PM finding, HIGH) — real policy block must clear ─────
+# AC10 above seeds raw samples via `LIB update` but never calls
+# `LIB mark-policy-block`, so it never actually exercised the bug: a gate
+# whose policy_result/retryable were genuinely flipped to an active block
+# (via gate_baseline_mark_policy_block, the real code path aid-run-gates.sh
+# Step 3 uses) NEVER cleared again, even once the gate itself recovered.
+# These 3 tests establish a REAL block first, then prove it clears exactly
+# where the PM's remediation instruction requires: a later passing attempt
+# (while a DIFFERENT gate's own unrelated failure stays correctly reported,
+# unaffected), a command_template edit, and a raised timeout_seconds.
+
+@test "E-063-1_1 reopen: a gate previously policy-blocked then later PASSING clears retryable, while a DIFFERENT currently-failing gate is unaffected" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
+
+  # Confirm the block is REAL before proceeding (not just a raw sample seed).
+  run bash "$LIB" report-json flaky_gate
+  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
+  [ "$(echo "$output" | jq -r '.policy_result')" == "timeout_policy_block" ]
+
+  # A LATER gates run: flaky_gate now passes quickly; a DIFFERENT gate,
+  # other_gate, fails for a completely unrelated reason. Under the pre-fix
+  # code, flaky_gate's stale retryable:false would still be carried forward
+  # here even though this run's own attempt for it just passed.
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  flaky_gate:
+    command: "exit 0"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+  other_gate:
+    command: "exit 1"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ -f "$REPORT" ]
+
+  run jq -re '.gates.flaky_gate.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
+  [ "$output" == "true" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
+  [ "$output" == "none" ]
+  run jq -e '.gates.flaky_gate | has("reason") | not' "$REPORT"
+  [ "$status" -eq 0 ]
+
+  # other_gate's own unrelated failure is still correctly reported — never
+  # masked, suppressed, or itself turned into a policy block by flaky_gate's
+  # unrelated history.
+  run jq -re '.gates.other_gate.result' "$REPORT"
+  [ "$output" == "fail" ]
+  run jq -re '.gates.other_gate.runtime_baseline.policy_result' "$REPORT"
+  [ "$output" == "none" ]
+  run jq -re '.overall' "$REPORT"
+  [ "$output" == "fail" ]  # other_gate's real, unrelated failure still flips overall
+}
+
+@test "E-063-1_1 reopen: command_template edit on a previously policy-blocked gate clears the block" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
+
+  run bash "$LIB" report-json flaky_gate
+  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
+
+  # SAME gate name, EDITED command (fingerprint reset).
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  flaky_gate:
+    command: "exit 0 # edited"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ -f "$REPORT" ]
+
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
+  [ "$output" == "true" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
+  [ "$output" == "none" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.samples_count' "$REPORT"
+  [ "$output" == "1" ]  # series really reset, not blended with the old block's samples
+}
+
+@test "E-063-1_1 reopen: raising timeout_seconds on a previously policy-blocked gate clears the block" {
+  LIB="$AID_PLUGIN_PATH/scripts/lib/aid-gate-runtime-baseline.sh"
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" update flaky_gate "sleep 2" "sleep 2" 124 1000 1
+  bash "$LIB" mark-policy-block flaky_gate "increase_timeout_or_background"
+
+  run bash "$LIB" report-json flaky_gate
+  [ "$(echo "$output" | jq -r '.retryable')" == "false" ]
+
+  # SAME command_template (no fingerprint reset) — timeout_seconds RAISED so
+  # the gate now genuinely finishes inside the new timeout.
+  cat > "$EXEC_YAML" <<'YAML'
+gates:
+  flaky_gate:
+    command: "sleep 2"
+    required: true
+    timeout_seconds: 5
+    max_retries: 0
+YAML
+  run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ -f "$REPORT" ]
+
+  run jq -re '.gates.flaky_gate.result' "$REPORT"
+  [ "$output" == "pass" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.retryable' "$REPORT"
+  [ "$output" == "true" ]
+  run jq -re '.gates.flaky_gate.runtime_baseline.policy_result' "$REPORT"
+  [ "$output" == "none" ]
+}
