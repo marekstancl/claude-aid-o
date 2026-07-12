@@ -95,6 +95,42 @@ YAML
   [[ "$output" =~ "Uncommitted changes present" ]]
 }
 
+@test "PRE-FLIGHT: init --force self-writes tracked audit-log.jsonl → does NOT block itself (end-to-end repro)" {
+  mkdir -p .aid-o/work
+  echo '{"event":"seed"}' > .aid-o/work/audit-log.jsonl
+  git add .aid-o/work/audit-log.jsonl
+  git commit -q -m "track audit log"
+  # Real repro: --force writes fsm_force_override to audit-log.jsonl (via
+  # fsm_handle_force_override → fsm_emit_audit_log) DURING this same
+  # invocation, before the clean-tree guard runs later in cmd_init.
+  run "$FSM" init $(build_default_init_args E-test) --force --reason "reproducing audit-log.jsonl self-write dirty-tree bug end-to-end"
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+  # Confirm the self-write actually happened (guards against a no-op fixture).
+  git diff --stat HEAD -- .aid-o/work/audit-log.jsonl | grep -q "audit-log.jsonl"
+}
+
+@test "PRE-FLIGHT: tracked .aid-o/config/queue.yaml dirty → does NOT block (existing exclusion, regression)" {
+  mkdir -p .aid-o/config
+  echo "queue: []" > .aid-o/config/queue.yaml
+  git add .aid-o/config/queue.yaml
+  git commit -q -m "track queue"
+  echo "queue: [updated]" > .aid-o/config/queue.yaml
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -eq 0 ]
+  [[ ! "$output" =~ "Uncommitted changes present" ]]
+}
+
+@test "PRE-FLIGHT: dirty tree with an ordinary tracked file (not queue.yaml/audit-log.jsonl) → still blocked" {
+  echo "some real code change" >> .gitkeep
+  git add .gitkeep
+  git commit -q -m "track gitkeep change baseline"
+  echo "another change" >> .gitkeep
+  run "$FSM" init $(build_default_init_args E-test)
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "Uncommitted changes present" ]]
+}
+
 # ─── Step 3: EXECUTE→GATES precondition + grandfather (3 assertions) ─────
 
 @test "EXECUTE→GATES: missing _generated_by (post-deploy) → hard fail" {

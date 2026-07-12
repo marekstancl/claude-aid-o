@@ -2217,9 +2217,16 @@ Then retry: aid-fsm.sh init ${epic_id} ..."
   # preserves the original behaviour of ignoring untracked files; no pathspec is
   # given so the whole repo is scanned regardless of cwd, matching the original
   # `git diff` semantics.
+  #
+  # .aid-o/work/audit-log.jsonl is excluded for the same reason: it is an
+  # append-only FSM audit artefact, and `init --force` itself writes the
+  # fsm_force_override entry to it (via fsm_handle_force_override, above)
+  # before this guard runs. In projects where it is tracked, an unexcluded
+  # guard would make `init --force` dirty its own tree and then fail on that
+  # same change on the very next invocation.
   local _dirty
   _dirty="$(git status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/config/queue\.yaml$' || true)"
+    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$' || true)"
   if [[ -n "$_dirty" ]]; then
     die "Uncommitted changes present. Commit or stash before init:
        git status   # review
