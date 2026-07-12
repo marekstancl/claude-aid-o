@@ -1564,6 +1564,30 @@ pending`, `started_at/completed_at: null` at a point where Step 3
 in the tool's own dogfood use, not only in downstream consumer projects —
 raises confidence this is a core-path bug, not project-specific drift.
 
+**FIX IMPLEMENTED (2026-07-12), PENDING MERGE:** commit `0be5e6f` on branch
+`fix/plan-close-consistency` (not yet merged to `main` at time of writing —
+PM-commissioned plan-close-consistency fix, reviewed and CP2-passed, held
+for PM's own verification before merge per explicit instruction). Root
+cause confirmed exactly as diagnosed: `cmd_increment_step()` only bumped
+the `current_step` scalar via `sed`, never touching `steps[]`. Fix: after
+the existing `current_step` update, `increment-step` now also writes
+`steps[$step].status = "completed"` + `.completed_at` (ISO 8601 UTC) via
+`yq`, backfills `started_at` only if it was still `null`, and emits a new
+`step_status_synced` timeline event (every fsm-state mutation is evented).
+Guards gracefully when `steps[]` is absent (legacy fsm-state.yaml) — the
+authoritative `current_step` update is never put at risk. 4 new bats
+tests (happy path, exact this-OBS symptom reproduction with zero
+remaining `pending` steps, timeline event field verification, legacy-
+format handling); `test-aid-fsm.bats` 74/74 (70 existing + 4 new), zero
+regressions. CP2 review independently fuzzed 7 adversarial fixtures
+(off-by-one index check across a 3-step fixture, malformed `steps[]`,
+duplicate `id` fields) with no corruption found. Same fix branch also adds
+a broader mechanical plan-close self-check (`aid-plan-close-check.sh`,
+commit `6b9fc3a`) covering report-tracking/head-freshness/queue-active
+staleness as a related but separate deliverable — see that commit's own
+message for scope; it does NOT resolve IMP-201 or IMP-202 (different
+artifacts/mechanisms, tracked separately in `.aid-o/work/backlog.md`).
+
 ### OBS-20260709-04 — Subagent committed live EPIC work directly to `main` under test-fixture git identity (self-recovered, root cause of the previously-flagged mystery "init" commit)
 
 **Observed in:** aid-orchestrator / E-059-2_2 (P059 EPIC 2, Step 4)
@@ -2165,3 +2189,181 @@ artifacts, and have whichever dispatch step writes this file resolve its
 output path from the run's evidence-dir variable rather than a
 cwd-relative default that silently falls back to the process's working
 directory when unset.
+
+### OBS-20260711-05 - Release automation misattributes a pre-written `[Unreleased]` CHANGELOG entry to the PREVIOUS release's header; same bug still live and unfixed in README.md Roadmap on current main
+
+**Observed in:** aid-orchestrator / P061 EPIC 1/6 release cut (v2.55.0)
+**AID version:** v2.54.0 → v2.55.0 (self-host release of the tool itself)
+**Observed at:** 2026-07-11
+**Status:** confirmed — CHANGELOG.md instance fixed same day (doc-only
+patch); **README.md instance CONFIRMED STILL PRESENT on current main HEAD**
+**Severity:** high
+**Class:** release-integrity / version-registry drift (self-host tooling
+bug, not a consumer-facing AID Control System defect, but breaks this
+project's own documented single-source-of-truth guarantee)
+
+**What happened:** This project's `scripts/aid-release.sh` had a
+pre-written `## [Unreleased] — pending P061 EPIC1 release` section in
+`CHANGELOG.md` (the real content for the release about to be cut) sitting
+above the still-correctly-labeled `## [2.54.0] — 2026-07-10` section (the
+real, previously-released P060/E-060-2_2 content). `update_changelog()`'s
+header detector (`grep -oP '## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1`)
+only recognizes numeric `## [X.Y.Z]` headers — `[Unreleased]` doesn't
+match, so it skipped straight past the real pending entry and found
+`2.54.0` (the OLD, correctly-labeled release) as "the" header. Since
+`2.54.0 == CURRENT` (the version being bumped from), the script's
+existing-header-rename branch fired: `sed -i "s/## \[2.54.0\].*/##
+[2.55.0] — $TODAY/"` — renaming P060's real header to `2.55.0` **without
+touching the content beneath it**, so `2.55.0` briefly pointed at P060's
+bullet list while the actual new P061-EPIC1 content sat unpromoted under
+`[Unreleased]`. Caught and hand-fixed same day (commit `a506a87`,
+doc-only, `[2.54.0]` restored as P060's real entry, a proper `[2.55.0]`
+entry written with P061 EPIC1's actual shipped content).
+
+**The identical failure mode independently hit `README.md`'s Roadmap
+section via a separate code path, and it is NOT fixed** — confirmed live
+on current `main` (`4bcc86a`) at time of observation. `aid-release.sh`'s
+README updater does a blind global substitution:
+`sed -i "s/v$CURRENT/v$NEW_VERSION/g" "$readme"` — it finds the literal
+string `v2.54.0` anywhere in the file (the Roadmap's `- **v2.54.0**
+(current) — P060 false-green / stale-evidence hardening (E-060-2_2): ...`
+line) and renames just the version token to `v2.55.0`, **leaving the
+entire P060/E-060-2_2 description text attached under the new number**.
+This is not merely "not yet updated" — it is actively wrong: `README.md`
+right now claims `v2.55.0 (current)` is "P060 false-green / stale-evidence
+hardening (E-060-2_2)", which is what `v2.54.0` actually shipped; the real
+`v2.55.0` (gate_profiles substrate + plan-gate floor, D8/D9) has no
+Roadmap entry at all, and the CLAUDE.md-mandated "add a new line, move the
+previous version down, keep 3 most recent" step never happened.
+
+**Why it matters:** This is the project's OWN release tooling breaking the
+OWN documented invariant (`CLAUDE.md` §"Single Source of Truth" +
+"README Roadmap Update", both explicit, both violated). Comments in
+`aid-release.sh` (lines 120-131, "IMP-093 fix... prevents the 3x-observed
+bug where a pre-written CHANGELOG entry... was treated as the [current]
+one") show this exact CLASS of misattribution has already recurred at
+least 3 times and been patched narrowly each time — but only for the case
+where the pre-written entry already carries the literal new version
+number. The very common `[Unreleased]` convention (not literal-version
+pre-writing) was never covered by that fix, so this is effectively the
+**4th occurrence** of the same root defect, wearing a different trigger.
+Consequence if unfixed: every future release cut that follows the
+`[Unreleased]`-heading convention will corrupt the CHANGELOG (now guarded
+only by manual review, since the automation itself doesn't detect it) and
+silently mislabel the README Roadmap (not guarded by anything — no manual
+catch happened here). E-061-2_6 (EPIC 2/6 of this same plan) has already
+started; the next release cut is a live re-trigger risk.
+
+**Reproduction:** `git show a506a87 -- CHANGELOG.md` (the fix diff, shows
+the before/after misattribution); `sed -n '110,120p' README.md` on current
+`main` (still shows `v2.55.0 (current)` with `v2.54.0`'s real description);
+`git show 6e5113e -- README.md` (the original blind-sed commit); root
+cause at `plugins/aid-orchestrator/scripts/aid-release.sh` lines ~138
+(`CHANGELOG_HEADER` numeric-only grep), ~199-229 (`update_changelog()`
+three-branch logic, no `[Unreleased]` recognition), ~351-359 (README
+updater, unconditional `sed -i s/v$CURRENT/v$NEW_VERSION/g`).
+
+**Likely fix:** (a) `update_changelog()` gains a fourth, first-checked
+branch: if the file contains a literal `## [Unreleased]` section (any
+suffix text), treat that as the pending entry — rename ONLY that header
+to `## [$NEW_VERSION] — $TODAY`, leave every numeric header below it
+untouched. (b) The README updater must stop doing a blind version-token
+substitution and instead: detect the existing top Roadmap line, move its
+*exact current text* down to become the new second-from-top entry, and
+insert a genuinely new top line for `$NEW_VERSION` (content TBD by
+PM/agent, same "fill in" pattern `update_changelog()` already uses for its
+prepend branch) — mirroring the CHANGELOG fix's shape. (c) Given this is a
+4th occurrence of the same defect class, consider a post-release
+self-check step (`aid-release.sh --verify` or equivalent) that asserts the
+CHANGELOG/README content under the new version header textually overlaps
+with the actual `git diff $LAST_TAG..HEAD` shipped changes, catching a
+misattribution mechanically instead of relying on a human noticing a
+wrong changelog paragraph.
+
+**Update (2026-07-11, same day):** README.md instance hand-fixed
+(`4c4eb54` on side branch `fix/plan-close-consistency`, 1 commit ahead of
+`main` at time of writing, not yet merged back) — v2.55.0 restored with
+P061 EPIC1's real content, v2.54.0 re-added with P060's real content,
+explicitly citing this OBS entry and explicitly re-confirming the root
+cause in `aid-release.sh` is still open (doc-only patch, matching this
+entry's own recommendation). **Historical confirmation this is a chronic,
+recurring defect, not a one-off:** `git branch -vv` surfaces
+`task/E-042-1_1/main`'s tip commit `a2f37a5 fix: update README tagline to
+v2.29.0 (aid-release.sh missed the header)` — the exact same
+README-tagline desync was hand-patched once before, at v2.29.0, long
+before this session. Combined with the 3 prior IMP-093 CHANGELOG fixes
+already referenced in `aid-release.sh`'s own comments, this defect class
+has now been manually patched at least 5 times across the project's
+history (3× CHANGELOG/IMP-093, 1× README tagline/v2.29.0, 1× this
+session's CHANGELOG+README pair) without the root cause ever being fixed
+in the script itself. Status: CHANGELOG + this specific README instance
+both resolved; **root cause still open, will recur at the next release
+cut using the `[Unreleased]` convention.**
+
+### OBS-20260711-06 - CP3 security review under-rated a real profile-selection-bypass vulnerability as MEDIUM/data-exfiltration-only; PM's own independent reproduction found it fully defeats the plan-gate floor mechanism
+
+**Observed in:** aid-orchestrator / P061 EPIC 2/6 / E-061-2_6 / R-E061-2
+**AID version:** v2.55.0-dev (self-host, mid-EPIC)
+**Observed at:** 2026-07-11
+**Status:** confirmed — fully fixed same day (`89f80e0`), logging as a
+review-calibration finding, not an open defect
+**Severity:** medium (as a process/calibration finding; the underlying
+vulnerability itself was HIGH — full bypass of the plan-gate floor)
+**Class:** review-calibration / false-negative-adjacent (detector fired,
+but under-rated impact — a new sub-class of the false-green family: not
+"no detector" or "detector out of scope," but "detector correctly
+triggered, severity assessment wrong")
+
+**What happened:** `aid-run-gates.sh`'s new `--profile` flag (E-061-1_6/
+E-061-2_6, the gate_profiles/plan-gate-floor substrate this whole plan
+exists to build) resolves `.gate_profiles."${profile}"` via `yq` using
+unescaped string interpolation of the user-supplied `--profile` value.
+CP3's own security review caught the unescaped interpolation and rated it
+**MEDIUM, data-exfiltration-only**. The PM independently reproduced a
+worse outcome: a crafted `--profile` value using yq's `//` alternation
+operator (`nonexistent" // ["test_gate"] #`) makes the failed lookup fall
+through to an **attacker-supplied literal `include[]` array**, letting an
+unrecognized profile name silently behave as a real one with
+attacker-chosen gate exclusions while `gates_report.json` still reports
+`overall: pass`. That is not data exfiltration — it is a complete bypass
+of the exact protection (plan-gate floor / profile-based gate exclusion)
+this plan exists to build, from the single flag surface most directly
+exposed to CLI/automation input.
+
+**Why it matters:** The review layer worked in the sense that CP3 found
+*something* real at this exact interpolation site — but its own severity
+call (MEDIUM/data-exfil) would not have blocked merge or triggered urgent
+same-day escalation on its own; it took the PM's own hands-on
+reproduction to establish the true blast radius (a security-control
+bypass, not an info leak) and escalate accordingly. This is the mirror
+image of OBS-20260711-01/03 (detector exists but doesn't cover enough
+ground) — here the detector covered the right ground but miscalibrated
+what it found. Worth tracking as a distinct pattern: automated CP3
+security review's severity heuristics may need a specific check for
+"does this injection let an attacker supply a *replacement value* the
+system then trusts as legitimate config" (structural bypass) vs. generic
+injection-implies-leak defaults.
+
+**Positive to pin:** once escalated, the fix was fast, correct, and
+independently re-verified beyond the PM's own PoC — switched all 3
+interpolation sites (2 in `aid-run-gates.sh`, 1 in `aid-fsm.sh`) from
+string interpolation to yq's `strenv()` with the value passed via
+environment variable (profile name never parsed as part of the yq
+expression), added 2 regression tests reproducing the exact PoC + a
+variant, and the fixer re-verified with 5 additional attacker-constructed
+payloads beyond the PM's own before committing — not just trusting its
+own claim. `test-aid-run-gates.bats` 31/31, `test-aid-fsm.bats` 70/70,
+`test-aid-gate-profile.bats` 30/30, zero regressions. Same-day
+catch-to-fix cycle on a genuinely high-impact vulnerability, in code that
+had not yet reached `main`.
+
+**Reproduction:** `git show 89f80e0` (the fix + full PM's PoC description
+in the commit message); the vulnerable pre-fix interpolation sites were
+`aid-run-gates.sh`'s `.gate_profiles."${profile}"` yq lookups (×2) and
+`aid-fsm.sh`'s gate-profile validation (×1).
+
+**Likely fix:** none needed — already fixed. Recommend folding "does a
+crafted value change what the system treats as trusted config, not just
+what it can read" into CP3's security-review checklist for any future
+`--profile`/name-driven config lookups, so this class of impact is rated
+correctly on first pass rather than requiring PM escalation to surface.

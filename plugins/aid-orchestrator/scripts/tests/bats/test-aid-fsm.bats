@@ -1395,3 +1395,149 @@ JSON
   [[ "$output" == *"C3 independent audit block"* ]]
   [[ "$output" == *"precondition(s) failed"* ]]
 }
+
+# ─── OBS-20260708-04: increment-step syncs steps[] array (4 assertions) ──────
+# fsm_init's header comment declares steps[] "single source of truth", but
+# cmd_increment_step historically only ever bumped the current_step scalar —
+# steps[] entries stayed status: pending forever, even on fully DONE runs
+# (VULCAN B-142 ×2, AID's own E-059-2_2 self-dogfood run; live-repro anchor:
+# E-061-2_6/R-E061-2/fsm-state.yaml, both steps pending post-merge).
+
+# Helper: fsm-state.yaml with an explicit steps[] array (P040 Component E
+# shape) sized so steps[3] exists — current_step: 3, total_steps: 4. steps[0-2]
+# are pre-completed (prior steps already advanced); steps[3] is the pending
+# step under test for this increment-step call.
+write_state_with_steps_array() {
+  local state_file="$1"
+  local epic_id="${2:-E-test}"
+  local run_id="${3:-R-test}"
+  local branch="${4:-task/${epic_id}/main}"
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$(dirname "$state_file")"
+  cat > "$state_file" <<EOF
+epic_id: $epic_id
+run_id: $run_id
+state: EXECUTE
+current_step: 3
+total_steps: 4
+mode: manual
+branch: $branch
+base_commit: HEAD
+gate_retries: 0
+escalation_count: 0
+started_at: "$now"
+created_at: $now
+steps:
+  - id: 1
+    name: ""
+    status: completed
+    started_at: "$now"
+    completed_at: "$now"
+  - id: 2
+    name: ""
+    status: completed
+    started_at: "$now"
+    completed_at: "$now"
+  - id: 3
+    name: ""
+    status: completed
+    started_at: "$now"
+    completed_at: "$now"
+  - id: 4
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+EOF
+}
+
+# Helper: satisfy the increment-step CP2 preconditions for the given step N
+# (valid step-N-verify.md + valid non-pending verifier-output-step-N.md).
+_obs20260708_seed_cp2() {
+  local step="$1"
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-${step}-verify.md" "$step"
+  printf '_generated_by: aid-orchestrator:verifier@abc123\n_generated_at: 2026-06-18T10:00:00Z\nclassification: RUN\nverdict: pass\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-${step}.md"
+}
+
+@test "increment-step: pending steps[3] becomes completed with a valid ISO 8601 completed_at" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_state_with_steps_array "$state_file"
+  _obs20260708_seed_cp2 3
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(yq '.steps[3].status' "$state_file")" = "completed" ]
+  local completed_at
+  completed_at=$(yq '.steps[3].completed_at' "$state_file")
+  [[ "$completed_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+  # started_at was null pre-increment → backfilled to the same completed_at,
+  # never left null on an otherwise-completed step.
+  [ "$(yq '.steps[3].started_at' "$state_file")" = "$completed_at" ]
+}
+
+@test "increment-step: two-step run leaves no steps[] entry pending (DONE-epic regression guard)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cat > "$state_file" <<EOF
+epic_id: E-test
+run_id: R-test
+state: EXECUTE
+current_step: 0
+total_steps: 2
+mode: manual
+branch: task/E-test/main
+base_commit: HEAD
+gate_retries: 0
+escalation_count: 0
+started_at: "$now"
+created_at: $now
+steps:
+  - id: 1
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+  - id: 2
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+EOF
+  _obs20260708_seed_cp2 0
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+
+  _obs20260708_seed_cp2 1
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+
+  [ "$(yq '.steps[0].status' "$state_file")" = "completed" ]
+  [ "$(yq '.steps[1].status' "$state_file")" = "completed" ]
+  # OBS-20260708-04's exact symptom: a DONE (fully-advanced) epic must not
+  # show any steps[] entry stuck at status: pending.
+  local pending_count
+  pending_count=$(yq '[.steps[] | select(.status == "pending")] | length' "$state_file")
+  [ "$pending_count" = "0" ]
+}
+
+@test "increment-step: emits step_status_synced timeline event" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_state_with_steps_array "$state_file"
+  _obs20260708_seed_cp2 3
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
+}
+
+@test "increment-step: steps[] absent (legacy fsm-state.yaml) → current_step still bumps, no crash" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _p040_seed_increment_preconditions "$state_file"   # write_post_deploy_state_yaml has NO steps[] block
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+  # steps[] sync guard skipped gracefully — no crash, no sync event emitted.
+  ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
+}
