@@ -2979,7 +2979,17 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   # remains the authoritative progress signal either way, so a legacy
   # fsm-state.yaml predating P040 Component E (no steps[] block) — or any
   # other steps[$step] miss — must not crash increment-step.
-  if command -v yq >/dev/null 2>&1 && yq -e ".steps[${step}]" "$state_file" >/dev/null 2>&1; then
+  #
+  # SECURITY (CP3 re-review, E-061-2_6): $step is interpolated into three yq
+  # expressions below. yaml_field never validates current_step is numeric, so
+  # an operator/tooling bug that sets it to e.g. "0,1" (still valid in the
+  # $((step + 1)) arithmetic above, AND valid as yq multi-index syntax) could
+  # forge multiple steps[] entries to status:completed in one call — the same
+  # yq-expression-injection class as the --profile and --auto-annotate fixes
+  # elsewhere in this file. The numeric guard below closes it: a non-digit
+  # current_step skips this best-effort block entirely (matching its own
+  # "must not crash" design), same as the legacy-no-steps[] case already did.
+  if [[ "$step" =~ ^[0-9]+$ ]] && command -v yq >/dev/null 2>&1 && yq -e ".steps[${step}]" "$state_file" >/dev/null 2>&1; then
     local _sync_completed_at _sync_started _sync_expr
     _sync_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     _sync_started=$(yq -r ".steps[${step}].started_at" "$state_file" 2>/dev/null || echo "null")

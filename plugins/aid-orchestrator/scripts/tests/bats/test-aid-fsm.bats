@@ -1567,6 +1567,47 @@ EOF
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
 }
 
+@test "increment-step: forged current_step (yq multi-index injection, e.g. '0,1') does NOT forge steps[] completion (CP3 security finding)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  local now; now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  cat > "$state_file" <<EOF
+epic_id: E-test
+run_id: R-test
+state: EXECUTE
+current_step: "0,1"
+total_steps: 2
+mode: manual
+branch: task/E-test/main
+base_commit: HEAD
+gate_retries: 0
+escalation_count: 0
+started_at: "$now"
+created_at: $now
+steps:
+  - id: 1
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+  - id: 2
+    name: ""
+    status: pending
+    started_at: null
+    completed_at: null
+EOF
+  # current_step is a forged multi-index string, not a plain integer — both
+  # bash's $((step + 1)) arithmetic AND yq's ".steps[0,1]" would otherwise
+  # accept it (comma is valid in both contexts). --force bypasses the
+  # unrelated CP2 verifier-output precondition so this reaches the steps[]
+  # sync block under test.
+  run "$FSM" increment-step "$state_file" --force --reason "CP3 security regression: forged current_step must not sync steps[]"
+  # steps[1] (id: 2) must NOT be forged to completed — the numeric guard
+  # must skip the sync block entirely for a non-digit current_step.
+  [ "$(yq '.steps[1].status' "$state_file")" = "pending" ]
+  [ "$(yq '.steps[0].status' "$state_file")" = "pending" ]
+  ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
+}
+
 @test "increment-step: steps[] absent (legacy fsm-state.yaml) → current_step still bumps, no crash" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"   # write_post_deploy_state_yaml has NO steps[] block
