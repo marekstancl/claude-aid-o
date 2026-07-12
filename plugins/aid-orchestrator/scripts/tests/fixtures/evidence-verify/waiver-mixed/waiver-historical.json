@@ -1,0 +1,21 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "waiver",
+  "producer": "aid-fsm.sh@force-override",
+  "created_at": "2026-07-12T10:55:24Z",
+  "control_protocol": "aid-2.0",
+  "identity": {"project_id": "test-project", "epic_id": "E-test", "run_id": "waiver-mixed", "step_id": null},
+  "subject": {"subject_hash": "sha256:fcd0f7687dd31b097ebb1ef7a6d0bec5e7a526805fb45e949580f21a2852fe6b"},
+  "revision": {"head_sha": "__HISTORICAL_HEAD__", "head_is_current": true, "freshness": "current"},
+  "status": "blocked",
+  "verdict": {"kind": "none", "ready": false},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-fsm.sh"},
+  "waiver": {
+    "waived_check": "init:plan-gate->skip",
+    "reason": "PM-authorized bypass for test fixture — simulates a historical --force override waiver whose recorded HEAD predates the pack's current derived artifacts.",
+    "waived_by": "test-fixture",
+    "waived_at": "2026-07-12T10:55:24Z",
+    "scope": "run",
+    "visible": true
+  }
+}

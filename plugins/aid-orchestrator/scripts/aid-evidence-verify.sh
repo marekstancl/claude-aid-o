@@ -317,9 +317,74 @@ run_freshness_check() {
     return
   }
 
-  # Collect head_sha from each v2 artifact
-  local seen_heads=()
+  # Partition into waiver vs non-waiver v2 artifacts (E-063-1_1 reopen fix).
+  # A waiver (artifact_type == "waiver") is an immutable historical governance
+  # record — aid-fsm.sh writes it once, at the moment of a PM-authorized
+  # --force override, and its revision.head_sha is frozen to THAT moment
+  # forever. Rewriting a waiver's head_sha on every later verification run
+  # would falsify history (the whole point of a waiver is "this happened,
+  # here, then" — not "this is still true now"). So a waiver:
+  #   - is NEVER included in the "all artifacts share one pack_head" set below
+  #     (a stale waiver must not make an otherwise-fresh pack look
+  #     inconsistent, and a fresh pack must not force the waiver to lie about
+  #     its own recorded head)
+  #   - is NEVER required to equal CURRENT_HEAD, even under --at-head
+  #   - IS still required to carry a real, git-reachable ancestor-of-HEAD
+  #     head_sha — a waiver "recording" a HEAD that doesn't exist or isn't in
+  #     this branch's history is exactly the kind of falsification-detection
+  #     this check exists for.
+  # All OTHER (derived) v2 artifacts keep the pre-existing strict contract
+  # completely unchanged: single shared pack_head, == CURRENT_HEAD under
+  # --at-head.
+  local -a non_waiver_artifacts=() waiver_artifacts=()
   for artifact in "${V2_ARTIFACTS[@]}"; do
+    local atype
+    atype=$(jq -r '.artifact_type // ""' "$artifact" 2>/dev/null)
+    if [[ "$atype" == "waiver" ]]; then
+      waiver_artifacts+=("$artifact")
+    else
+      non_waiver_artifacts+=("$artifact")
+    fi
+  done
+
+  # --- Waiver artifacts: independent ancestor-of-HEAD check, never freshness-vs-HEAD ---
+  for artifact in "${waiver_artifacts[@]+"${waiver_artifacts[@]}"}"; do
+    local w_head
+    w_head=$(jq -r '.revision.head_sha // ""' "$artifact" 2>/dev/null)
+    if [[ -z "$w_head" ]]; then
+      CHECK_artifact_head_freshness_STATUS="fail"
+      CHECK_artifact_head_freshness_DETAIL="waiver artifact missing revision.head_sha"
+      CHECK_artifact_head_freshness_EVIDENCE="artifact: $artifact"
+      return
+    fi
+    if ! git -C "$ROOT" cat-file -e "${w_head}^{commit}" 2>/dev/null; then
+      CHECK_artifact_head_freshness_STATUS="fail"
+      CHECK_artifact_head_freshness_DETAIL="waiver's recorded head_sha is not a known commit object"
+      CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_a_commit, artifact: $(basename "$artifact"), head_sha: $w_head"
+      return
+    fi
+    if ! git -C "$ROOT" merge-base --is-ancestor "$w_head" HEAD 2>/dev/null; then
+      CHECK_artifact_head_freshness_STATUS="fail"
+      CHECK_artifact_head_freshness_DETAIL="waiver's recorded head_sha is not an ancestor of current HEAD"
+      CHECK_artifact_head_freshness_EVIDENCE="reason: waiver_head_not_ancestor, artifact: $(basename "$artifact"), head_sha: $w_head, current_head: $CURRENT_HEAD"
+      return
+    fi
+    # Deliberately NO check against CURRENT_HEAD equality here, even in
+    # --at-head mode — see comment above. Schema/content validation of the
+    # waiver itself still happens in run_protocol_checks (protocol_validate).
+  done
+
+  if [[ "${#non_waiver_artifacts[@]}" -eq 0 ]]; then
+    # Only waiver(s) in this pack — nothing left to reconcile against a
+    # shared pack_head; the waiver(s) already passed their own ancestor check.
+    CHECK_artifact_head_freshness_STATUS="pass"
+    CHECK_artifact_head_freshness_DETAIL="only waiver artifact(s) present — all passed ancestor-of-HEAD check"
+    return
+  fi
+
+  # Collect head_sha from each NON-WAIVER v2 artifact only.
+  local seen_heads=()
+  for artifact in "${non_waiver_artifacts[@]}"; do
     local head_sha
     head_sha=$(jq -r '.revision.head_sha // ""' "$artifact" 2>/dev/null)
     if [[ -z "$head_sha" ]]; then
@@ -341,7 +406,7 @@ run_freshness_check() {
     fi
   done
 
-  # All artifacts must share one single pack_head
+  # All non-waiver artifacts must share one single pack_head
   if [[ "${#seen_heads[@]}" -gt 1 ]]; then
     CHECK_artifact_head_freshness_STATUS="fail"
     CHECK_artifact_head_freshness_DETAIL="artifacts have inconsistent head_sha values"
@@ -432,9 +497,24 @@ run_protocol_checks() {
     local artifact_name
     artifact_name="$(basename "$artifact")"
 
+    local artifact_atype
+    artifact_atype=$(jq -r '.artifact_type // ""' "$artifact" 2>/dev/null)
+
     # --- protocol_validate ---
+    # E-063-1_1 reopen fix: a waiver's revision.head_sha is an intentionally
+    # frozen historical value (see run_freshness_check above) — it is never
+    # supposed to equal "the current head", so aid-protocol-validate.sh's
+    # generic Step 11 (head_sha == current-head ? head_is_current must be
+    # true/"current" : must be false/"stale") does not apply to it. Passing
+    # --current-head for a waiver would fail every historical waiver forever
+    # (exit 11) purely for correctly recording its own history. Every OTHER
+    # protocol-v2 check (envelope, schema_version, artifact_type enum,
+    # waiver-reason-length, etc.) still runs unchanged — only the
+    # --current-head flag is withheld for this one artifact_type. Freshness/
+    # ancestry for waivers is instead verified directly in
+    # run_freshness_check (schema + real, reachable ancestor-of-HEAD).
     local pv_exit pv_status pv_detail pv_evidence
-    if [[ -n "$head_arg" ]]; then
+    if [[ -n "$head_arg" && "$artifact_atype" != "waiver" ]]; then
       bash "$VALIDATOR" "$artifact" --current-head "$head_arg" 2>/dev/null
       pv_exit=$?
     else
