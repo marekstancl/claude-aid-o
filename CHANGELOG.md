@@ -3,6 +3,22 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.56.0] — 2026-07-12
+
+P063 "Gate Runtime Baselines" (4 steps): AID runs gates against static,
+human-guessed `timeout_seconds` values that never update as reality drifts.
+This EPIC gives gates a real, self-updating runtime history — a percentile
+library, live recording, a repeated-timeout enforcement hook, and a CLI to
+read it back.
+
+### Added
+- **Gate runtime baseline library (`scripts/lib/aid-gate-runtime-baseline.sh`)** — records each gate run's duration/exit-code/timeout as a FIFO-windowed sample series (max 20, keyed by `gate_name`, reset on command-template fingerprint change), computes p50/p90/p95/max via nearest-rank percentiles over non-censored (non-timeout) samples only, and derives `timeout_recommended_seconds`/`run_mode_recommended` (background above a 10-minute p95) once enough real samples exist — atomic flock+tmpfile+validate writes, fail-open on any yq/jq error so a metrics write never blocks the real gate result.
+- **`aid-run-gates.sh` integration + lazy gitignore backfill** — every gate run now feeds `gate_baseline_update`, and a one-time-per-clone `.git/info/exclude` backfill (`scripts/lib/aid-gitignore-backfill.sh`) keeps `.aid-o/metrics/` out of version control for existing projects that initialized before this EPIC (new projects already get it via shipped `defaults/.gitignore`).
+- **Repeated-timeout policy block (`gate_timeout_policy_block`)** — `gate_baseline_policy_check` flags a gate whose last 3 recorded samples were ALL timeouts at/above its currently-configured `timeout_seconds`; a new `aid-fsm.sh` GATES:EXECUTE precondition refuses to keep retrying that gate (`retryable:false` + `operator_action`), closing the gap where that verdict was previously only a report field nobody read (AID-v3-principles.md §1 — Detector without Enforcement is Decoration).
+- **`aid-gate-runtime-report.sh` CLI** — `[--project-root <path>] [gate_name]` reads Step 1's library directly (never re-deriving its percentile/formatting logic) to print one gate's p95/timeout/run-mode summary plus a data-sufficiency note, or every gate with recorded data when no gate name is given; project-root resolution follows the same resolve-then-`cd` idiom as `aid-plan-close-check.sh`.
+- **`gate_runtime_baseline_advisory` enforcement-registry row** — documents the CLI as an advisory (non-blocking, non-FSM) reporting surface, distinct from Step 3's blocking `gate_timeout_policy_block` row.
+- **`scripts/tests/verify-version-files.sh`** — dedicated checker for this project's 8-canonical-version-file release convention: asserts all 8 locations agree on one version, that it differs from the pre-release baseline, and that both `CHANGELOG.md` files mention it.
+
 ## [2.55.0] — 2026-07-11
 
 P061 EPIC 1/6 (gate profile substrát + plan-gate floor): gates-enum unlock, `aid-run-gates.sh
