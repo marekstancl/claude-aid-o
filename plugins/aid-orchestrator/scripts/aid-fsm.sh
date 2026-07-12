@@ -2791,6 +2791,32 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   [[ -n "$_step_timeline" ]] && log_event "$_step_timeline" "step_commit" \
     step_n="$step" commit_sha="$_step_commit_sha"
 
+  # ── OBS-20260708-04: steps[] array sync (single-source-of-truth drift) ────
+  # fsm_init's header comment declares steps[] "single source of truth", but
+  # historically only the current_step scalar (updated above, unconditionally)
+  # was ever touched on increment — steps[] entries stayed status: pending
+  # forever, even on fully DONE runs (VULCAN B-142 ×2, AID's own E-059-2_2
+  # self-dogfood run). This block is additive/best-effort: current_step
+  # remains the authoritative progress signal either way, so a legacy
+  # fsm-state.yaml predating P040 Component E (no steps[] block) — or any
+  # other steps[$step] miss — must not crash increment-step.
+  if command -v yq >/dev/null 2>&1 && yq -e ".steps[${step}]" "$state_file" >/dev/null 2>&1; then
+    local _sync_completed_at _sync_started _sync_expr
+    _sync_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _sync_started=$(yq -r ".steps[${step}].started_at" "$state_file" 2>/dev/null || echo "null")
+    _sync_expr=".steps[${step}].status = \"completed\" | .steps[${step}].completed_at = \"${_sync_completed_at}\""
+    # Backfill started_at only if it was never set — documents "known finished
+    # by this time, exact start wasn't separately tracked" rather than leaving
+    # started_at: null on an otherwise-completed step (internally inconsistent).
+    if [[ "$_sync_started" == "null" ]]; then
+      _sync_expr="${_sync_expr} | .steps[${step}].started_at = \"${_sync_completed_at}\""
+    fi
+    if yq -i "$_sync_expr" "$state_file" 2>/dev/null; then
+      [[ -n "$_step_timeline" ]] && log_event "$_step_timeline" "step_status_synced" \
+        step_n="$step" status="completed" completed_at="$_sync_completed_at"
+    fi
+  fi
+
   # ── P060 Step 6: commit_scope_violation companion (D7c, OBS-20260709-01/04) ─
   # --no-verify bypasses the pre-commit hook, so re-check scope out-of-band at
   # each step boundary. Diff the range actually committed during the step just
