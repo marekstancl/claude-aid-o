@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.57.1] — 2026-07-13
+
+### Fixed
+- **`aid-gate-runtime-baseline.sh` flaky `series_reset_at` on fast/CI runners** — `gate_baseline_update` and `gate_baseline_mark_policy_block` stamped `series_reset_at` with second-only precision; two calls landing in the same wall-clock second (routine on a fast machine or a GitHub Actions runner) produced an identical timestamp, spuriously failing `test-aid-gate-runtime-baseline.bats`'s AC3 regression ("command-template fingerprint change resets the series"). Added millisecond precision. Pre-existing flake, confirmed present on the CI run immediately prior to this fix; verified clean across 4 repeated local runs after the fix.
+
 ## [2.57.0] — 2026-07-12
 
 ### Added
