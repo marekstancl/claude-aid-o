@@ -792,6 +792,14 @@ Then retry with --reason."
   local timeline="${evidence_dir}/timeline.jsonl"
   local operator="${USER:-unknown}"
 
+  # At init-time the arg-parse loop reaches --force BEFORE cmd_init mkdir's the
+  # evidence dir, so without this the fsm_force_override timeline event would be
+  # written into a nonexistent directory and silently lost (the audit-log +
+  # waiver survive because they mkdir first). Best-effort; a mkdir failure never
+  # aborts the force. For non-init callers (transition/increment/done-advance)
+  # the dir already exists, so this is a harmless no-op.
+  [[ -n "$timeline" ]] && mkdir -p "$(dirname "$timeline")" 2>/dev/null || true
+
   [[ -n "$timeline" ]] && log_event "$timeline" "fsm_force_override" \
     from="$from" to="$to" reason="$reason" \
     caller="$caller_cmd" operator="$operator" \

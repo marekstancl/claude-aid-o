@@ -5,13 +5,23 @@
 # Usage:
 #   ./aid-json-to-run.sh \
 #     --plan-json <path> --run-template <path> --epic <path> \
-#     --output-dir <path> --run-id <R-xxx> [--streamlined]
+#     --output-dir <path> --run-id <R-xxx> [--streamlined] \
+#     [--force-init-reason "<>=20-char why>"]
 #
 # --streamlined (optional, default off): forwarded to `aid-fsm.sh init` in
 # Step 18 so the auto-initialized FSM state carries streamlined_mode: true
 # (P040 Component D). This is a SEPARATE dimension from execution mode (which
 # stays positional "full"); without this flag /aid-run --streamlined would
 # silently produce a full-mode run (CP3 gap fix).
+#
+# --force-init-reason (optional, default off): PM-authorized, audited override
+# forwarded as `--force --reason` to `aid-fsm.sh init` in Step 18. Waives ONLY
+# the plan-level DONE gate (the false-positive cross-plan ca-review-complete
+# precondition raised when a DIFFERENT plan is intentionally in progress). All
+# other init checks (branch enforcement, clean-worktree, jq, duplicate-state)
+# still run and are NOT masked. cmd_init enforces reason >=20 chars and records
+# the override to timeline + audit log + waiver. Invocation-scoped CLI flag (not
+# an exported env var) so it cannot leak into unrelated inits.
 #
 # Reads plan.json (steps, dependencies, gates, budget) and the EPIC file
 # (Goal, Context, Scope), then assembles a complete run.md matching the
@@ -38,15 +48,17 @@ epic=""
 output_dir=""
 run_id=""
 streamlined=false   # P040 Component D activation flag (CP3 gap fix); forwarded to aid-fsm.sh init in Step 18
+force_init_reason="" # PM-authorized, audited cross-plan force-init reason; forwarded to aid-fsm.sh init in Step 18 (invocation-scoped, no env export)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan-json)     plan_json_path="$2";  shift 2 ;;
-    --run-template)  run_template="$2";    shift 2 ;;
-    --epic)          epic="$2";            shift 2 ;;
-    --output-dir)    output_dir="$2";      shift 2 ;;
-    --run-id)        run_id="$2";          shift 2 ;;
-    --streamlined)   streamlined=true;     shift 1 ;;
+    --plan-json)        plan_json_path="$2";  shift 2 ;;
+    --run-template)     run_template="$2";    shift 2 ;;
+    --epic)             epic="$2";            shift 2 ;;
+    --output-dir)       output_dir="$2";      shift 2 ;;
+    --run-id)           run_id="$2";          shift 2 ;;
+    --streamlined)      streamlined=true;     shift 1 ;;
+    --force-init-reason) force_init_reason="$2"; shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -649,19 +661,37 @@ if [[ ! -f "$fsm_state_file" ]]; then
   # streamlined_mode: true, independent of the positional execution `mode`
   # (which stays "full"). Without this, /aid-run --streamlined silently
   # produced a full-mode run (CP3 activation gap).
+  # PM-authorized, audited cross-plan force-init passthrough (opt-in via the
+  # explicit --force-init-reason CLI flag; invocation-scoped, NOT an exported
+  # env var, so it cannot leak into unrelated inits). When set (>=20 chars,
+  # enforced by cmd_init/fsm_handle_force_override), forward the SANCTIONED
+  # `--force --reason` to cmd_init. This waives ONLY the plan-level DONE gate
+  # (false-positive cross-plan ca-review-complete precondition when a different
+  # plan is intentionally in progress). All other init checks (branch
+  # enforcement, clean-worktree, jq, duplicate-state) still run and are NOT
+  # masked. The FSM writes the override to timeline (fsm_force_override) + audit
+  # log + waiver artifact, so every forwarded init is forensically recorded.
+  # Default empty => identical prior behavior (no bypass).
+  fsm_force_args=()
+  if [[ -n "$force_init_reason" ]]; then
+    echo "P040 Component E: --force-init-reason set — forwarding SANCTIONED --force to FSM init (cross-plan DONE gate waived, audited). Reason: ${force_init_reason}" >&2
+    fsm_force_args=(--force --reason "${force_init_reason}")
+  fi
   if [[ "$streamlined" == "true" ]]; then
     bash "${SCRIPT_DIR}/aid-fsm.sh" init \
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
       ${fsm_plan_path:+--plan "$fsm_plan_path"} \
+      "${fsm_force_args[@]}" \
       --streamlined
   else
     bash "${SCRIPT_DIR}/aid-fsm.sh" init \
       "$epic_id" "$run_id" "$step_count" "$fsm_mode" \
       "$fsm_branch" "$fsm_base_commit" \
       "$fsm_state_file" \
-      ${fsm_plan_path:+--plan "$fsm_plan_path"}
+      ${fsm_plan_path:+--plan "$fsm_plan_path"} \
+      "${fsm_force_args[@]}"
   fi
   fsm_after_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if [[ -n "$fsm_branch" && "$fsm_branch" != "HEAD" && "$fsm_after_branch" != "$fsm_branch" ]]; then

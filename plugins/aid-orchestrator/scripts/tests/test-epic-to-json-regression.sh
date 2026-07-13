@@ -21,6 +21,7 @@ GOLDEN_DIR="$SCRIPT_DIR/fixtures/epic-to-json-golden"
 FIXTURE_MINIMAL="$SCRIPT_DIR/fixtures/E-TEST-001-1_1-minimal-test-plan.md"
 FIXTURE_CYCLE="$SCRIPT_DIR/fixtures/E-TEST-003-1_1-circular-deps.md"
 FIXTURE_STEP_SCOPING="$SCRIPT_DIR/fixtures/E-TEST-005-1_1-step-scoping-repro.md"
+FIXTURE_VERB_STRIP="$SCRIPT_DIR/fixtures/E-TEST-006-1_1-test-rewrite-verbs.md"
 
 TMPDIR_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_ROOT"' EXIT
@@ -52,6 +53,10 @@ if [[ ! -f "$FIXTURE_CYCLE" ]]; then
 fi
 if [[ ! -f "$FIXTURE_STEP_SCOPING" ]]; then
   echo "ERROR: Step-scoping repro fixture not found: $FIXTURE_STEP_SCOPING" >&2
+  exit 1
+fi
+if [[ ! -f "$FIXTURE_VERB_STRIP" ]]; then
+  echo "ERROR: Verb-strip fixture not found: $FIXTURE_VERB_STRIP" >&2
   exit 1
 fi
 
@@ -285,6 +290,45 @@ echo "TEST: T5 — Per-step scoping repro (E-TEST-005)"
       _pass "T5d — multi-path Files entry preserved as two separate allowed_paths entries"
     else
       _fail "T5d — multi-path Files entry NOT preserved as two separate paths (root_idx=$has_root_changelog, plugin_idx=$has_plugin_changelog)"
+    fi
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# T6 — Files-verb strip (v2.57.2): Create/Modify/Test/Rewrite all strip to
+# bare path-like allowed_paths entries. Before v2.57.2 only Create/Modify were
+# stripped, so Test:/Rewrite: entries survived as non-path-like blobs and broke
+# the pipeline allowed_paths_shape contract.
+# ---------------------------------------------------------------------------
+echo "TEST: T6 — Files-verb strip (Create/Modify/Test/Rewrite) (E-TEST-006)"
+{
+  t6_out="$TMPDIR_ROOT/t6"
+  mkdir -p "$t6_out"
+  t6_plan="$(run_on_fixture "$FIXTURE_VERB_STRIP" "$t6_out")"
+
+  if [[ -z "$t6_plan" || ! -f "$t6_plan" ]]; then
+    _fail "T6a — aid-epic-to-json.sh failed on verb-strip fixture"
+    _fail "T6b — aid-epic-to-json.sh failed on verb-strip fixture"
+  else
+    # T6a: NO allowed_paths entry may retain a Files verb label. Any residual
+    # "Test:"/"Rewrite:"/"Create:"/"Modify:" prefix means the strip missed it.
+    labelled="$(jq -r '
+      [.steps[].allowed_paths[]] | unique | .[]
+      | select(test("^(Create|Modify|Test|Rewrite):"))
+    ' "$t6_plan")"
+    if [[ -z "$labelled" ]]; then
+      _pass "T6a — no allowed_paths entry retains a Create/Modify/Test/Rewrite label"
+    else
+      _fail "T6a — allowed_paths retain verb labels: $(echo "$labelled" | tr '\n' '|')"
+    fi
+
+    # T6b: the Test:- and Rewrite:-labelled paths must appear as bare paths.
+    has_test_path="$(jq -r '[.steps[].allowed_paths[]] | index("tests/test_module.py")' "$t6_plan")"
+    has_rewrite_path="$(jq -r '[.steps[].allowed_paths[]] | index("src/core/legacy.py")' "$t6_plan")"
+    if [[ "$has_test_path" != "null" && "$has_rewrite_path" != "null" ]]; then
+      _pass "T6b — Test:/Rewrite: paths present as bare paths (tests/test_module.py, src/core/legacy.py)"
+    else
+      _fail "T6b — Test:/Rewrite: bare paths missing (test_idx=$has_test_path, rewrite_idx=$has_rewrite_path)"
     fi
   fi
 }
