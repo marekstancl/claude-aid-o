@@ -623,3 +623,118 @@ PLANMD
   run jq -e '.plan_review.structural_checks[] | select(.id == "contract_validation") | .status == "unverifiable"' "$c0_dir/plan-review.json"
   [ "$status" -eq 0 ]
 }
+
+# ─── v2.58.0 IMP-232 per_step_scoping precision (R1-R7) ─────────────────────
+# Legitimate same-file sequential refinement must PASS; only a genuine
+# broadcast (both fields identical, no honored per-step blocks) or a
+# generator that ignores/degenerates the authoritative blocks must FAIL.
+
+@test "per_step_scoping R1: same allowed_paths + distinct outputs + per-step blocks -> PASS" {
+  local epic="$TEST_TMPDIR/r1.md" pj="$TEST_TMPDIR/r1.json"
+  cat > "$epic" <<'MD'
+<!-- step-1: files=["Modify: `shared.py`"]; ac=["feature A"] -->
+<!-- step-2: files=["Modify: `shared.py`"]; ac=["feature B"] -->
+MD
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R1-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Modify: `shared.py` -- feature A"],"allowed_paths":["shared.py"],"acceptance_criteria":["feature A"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Modify: `shared.py` -- feature B"],"allowed_paths":["shared.py"],"acceptance_criteria":["feature B"]}
+]}
+JSON
+  run "$GATE" "$pj" "$epic"
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "pass"'
+}
+
+@test "per_step_scoping R2: 3 steps same allowed_paths, honored blocks, distinct outputs -> PASS" {
+  local epic="$TEST_TMPDIR/r2.md" pj="$TEST_TMPDIR/r2.json"
+  cat > "$epic" <<'MD'
+<!-- step-1: files=["Modify: `svc.sh`"]; ac=["dispatch"] -->
+<!-- step-2: files=["Modify: `svc.sh`"]; ac=["validate"] -->
+<!-- step-3: files=["Modify: `svc.sh`"]; ac=["verify"] -->
+MD
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R2-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Modify: `svc.sh` -- add dispatch"],"allowed_paths":["svc.sh"],"acceptance_criteria":["dispatch"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Modify: `svc.sh` -- add validate"],"allowed_paths":["svc.sh"],"acceptance_criteria":["validate"]},
+  {"id":"step_3_backend","role":"backend","outputs":["Modify: `svc.sh` -- add verify"],"allowed_paths":["svc.sh"],"acceptance_criteria":["verify"]}
+]}
+JSON
+  run "$GATE" "$pj" "$epic"
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "pass"'
+}
+
+@test "per_step_scoping R3: generated allowed_paths conflict with explicit block -> FAIL" {
+  local epic="$TEST_TMPDIR/r3.md" pj="$TEST_TMPDIR/r3.json"
+  cat > "$epic" <<'MD'
+<!-- step-1: files=["Modify: `a.py`"]; ac=["a"] -->
+<!-- step-2: files=["Modify: `b.py`"]; ac=["b"] -->
+MD
+  # generator "ignored" the blocks and broadcast both files to every step
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R3-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Modify: `a.py`"],"allowed_paths":["a.py","b.py"],"acceptance_criteria":["a"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Modify: `b.py`"],"allowed_paths":["a.py","b.py"],"acceptance_criteria":["b"]}
+]}
+JSON
+  run "$GATE" "$pj" "$epic"
+  [ "$status" -ne 0 ]
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "fail"'
+  echo "$output" | jq -e '[.violations[]|select(startswith("per_step_scoping"))]|length > 0'
+}
+
+@test "per_step_scoping R4: legacy (no blocks), identical outputs AND allowed_paths -> FAIL" {
+  local pj="$TEST_TMPDIR/r4.json"
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R4-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Create: `a.py`"],"allowed_paths":["a.py"],"acceptance_criteria":["a"]},
+  {"id":"step_2_qa","role":"qa","outputs":["Create: `a.py`"],"allowed_paths":["a.py"],"acceptance_criteria":["a"]}
+]}
+JSON
+  run "$GATE" "$pj"
+  [ "$status" -ne 0 ]
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "fail"'
+}
+
+@test "per_step_scoping R5: legacy (no blocks), same allowed_paths but DISTINCT outputs -> PASS (the P065-class fix)" {
+  local pj="$TEST_TMPDIR/r5.json"
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R5-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Modify: `svc.sh` -- dispatch"],"allowed_paths":["svc.sh"],"acceptance_criteria":["dispatch"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Modify: `svc.sh` -- verify"],"allowed_paths":["svc.sh"],"acceptance_criteria":["verify"]}
+]}
+JSON
+  run "$GATE" "$pj"
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "pass"'
+}
+
+@test "per_step_scoping R6: P057/P058 broadcast reproduction stays FAIL" {
+  local pj="$TEST_TMPDIR/r6.json"
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R6-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Create: `x.py`","Create: `y.py`"],"allowed_paths":["x.py","y.py"],"acceptance_criteria":["x"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Create: `x.py`","Create: `y.py`"],"allowed_paths":["x.py","y.py"],"acceptance_criteria":["y"]},
+  {"id":"step_3_backend","role":"backend","outputs":["Create: `x.py`","Create: `y.py`"],"allowed_paths":["x.py","y.py"],"acceptance_criteria":["z"]}
+]}
+JSON
+  run "$GATE" "$pj"
+  [ "$status" -ne 0 ]
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "fail"'
+}
+
+@test "per_step_scoping R7: explicit per-step blocks themselves degenerately broadcast -> FAIL" {
+  local epic="$TEST_TMPDIR/r7.md" pj="$TEST_TMPDIR/r7.json"
+  cat > "$epic" <<'MD'
+<!-- step-1: files=["Modify: `shared.py`"]; ac=["same"] -->
+<!-- step-2: files=["Modify: `shared.py`"]; ac=["same"] -->
+MD
+  # blocks honored (gen == block) BUT identical files AND identical outputs
+  cat > "$pj" <<'JSON'
+{ "epic_id":"E-R7-1_1","version":1,"dependencies":[],"steps":[
+  {"id":"step_1_backend","role":"backend","outputs":["Modify: `shared.py`"],"allowed_paths":["shared.py"],"acceptance_criteria":["same"]},
+  {"id":"step_2_backend","role":"backend","outputs":["Modify: `shared.py`"],"allowed_paths":["shared.py"],"acceptance_criteria":["same"]}
+]}
+JSON
+  run "$GATE" "$pj" "$epic"
+  [ "$status" -ne 0 ]
+  echo "$output" | jq -e '[.checks[]|select(.id=="per_step_scoping")][0].status == "fail"'
+}

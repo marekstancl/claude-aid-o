@@ -20,6 +20,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"  # _aid_parse_scoping_line, _aid_split_path_entry, _aid_allowed_paths_from_files_json (shared with gates/aid-contract-validate.sh, v2.58.0 IMP-232)
 check_prerequisites
 
 # =============================================================================
@@ -494,133 +495,6 @@ _aid_append_ac_items() {
   done
 }
 
-# =============================================================================
-# _aid_parse_scoping_line — split a per-step scoping HTML-comment line into
-# its files=[...] and ac=[...] JSON-array substrings (D2).
-#
-# Shape (frozen by aid-plan-to-epic.sh / E-TEST-005 fixture, P058 Step 2):
-#   <!-- step-N: files=["Create: `path` — desc", ...]; ac=["AC text", ...] -->
-#
-# Both files=/ac= values are `jq -R -s -c` compact JSON arrays of strings. A
-# literal ";" or "|" inside a string value is NOT JSON-escaped, so this
-# function anchors the split on the literal boundary "]; ac=[" (the files
-# array's closing bracket immediately followed by the ac array's opening
-# bracket) rather than the first "|" or ";" found anywhere in the line —
-# that boundary is far less likely to appear inside prose/AC text than a
-# bare ";" or "|" alone (verified against the E-TEST-005 fixture, whose
-# qa-step AC deliberately embeds a literal "|" and whose backend-step AC
-# deliberately embeds a literal, non-sentinel-encoded "-->").
-#
-# Args: $1 = raw matched line (e.g. from `grep "<!-- step-N: files="`)
-#       $2 = step number N (used only to build the fixed prefix to strip)
-# Output (stdout, on success): 2 lines — files-JSON then ac-JSON.
-# Returns: 1 if the line does not match the expected shape (caller must
-#          treat this as "no block for this step" and fall back to broadcast).
-# =============================================================================
-_aid_parse_scoping_line() {
-  local line="$1"
-  local step_n="$2"
-  local prefix="<!-- step-${step_n}: files="
-
-  [[ "$line" == "$prefix"* ]] || return 1
-  local body="${line#"$prefix"}"
-
-  [[ "$body" == *" -->" ]] || return 1
-  body="${body% -->}"
-
-  [[ "$body" == *"]; ac=["* ]] || return 1
-  # Anchor on the LAST occurrence of "; ac=[", not the first: a files[] value
-  # can itself contain that literal substring (e.g. prose describing this
-  # very block syntax — this is exactly what happens when P058's own plan
-  # text is regenerated through this parser, a real self-consistency
-  # failure caught during Step 5). `%` (shortest-suffix removal) and `##`
-  # (longest-prefix removal) both anchor on the rightmost match, unlike the
-  # previous `%%`/`#` pairing which anchored on the leftmost (first) one.
-  local files_part="${body%; ac=[*}"
-  local ac_part="${body##*; ac=}"
-
-  printf '%s\n%s\n' "$files_part" "$ac_part"
-}
-
-# =============================================================================
-# _aid_split_path_entry — D4 cleaner for a single RAW Files bullet (label
-# already stripped). PORTED from scripts/aid-plan-to-epic.sh's function of
-# the same name — aid-epic-to-json.sh does not source that script (only
-# lib/common.sh is shared between the two CLI entry points), so this exact
-# algorithm is reimplemented here rather than called cross-script. See the
-# source function's comment for the full rationale; summary:
-#   - The path declaration always sits immediately after the "Create:"/
-#     "Modify:" label, as ONE backtick-wrapped span, or several joined by
-#     literal " + `" (the "`a.md` + `b.md`" dual-file convention).
-#   - Anything else (a "(...)" parenthetical, an em-dash/"--" description, or
-#     any other backtick span later in a prose-heavy bullet) stops the run
-#     and is discarded as prose, not consumed as a path.
-#   - No leading backtick span found -> fall back to stripping the entry
-#     after the first "--"/em-dash separator, then removing stray backticks.
-#
-# Args: $1 = one RAW Files bullet with the "Create:"/"Modify:" label already
-#            stripped (e.g. "`CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` (identical)")
-# Output (stdout): one cleaned path per line (may be more than one line).
-# =============================================================================
-_aid_split_path_entry() {
-  local entry="$1"
-  local rest="$entry"
-  local candidate found_backtick_path=0 first_span=1
-
-  while true; do
-    if [[ "$first_span" -eq 1 ]]; then
-      [[ "$rest" == '`'* ]] || break
-    else
-      [[ "$rest" == ' + `'* ]] || break
-      rest="${rest# + }"
-    fi
-    rest="${rest#\`}"           # drop the opening backtick
-    candidate="${rest%%\`*}"    # everything up to the next backtick
-    rest="${rest#*\`}"          # drop through the closing backtick
-    if [[ -n "$candidate" && "$candidate" != *[[:space:]]* ]]; then
-      printf '%s\n' "$candidate"
-      found_backtick_path=1
-      first_span=0
-    else
-      break
-    fi
-  done
-
-  if [[ "$found_backtick_path" -eq 0 ]]; then
-    local fallback="$entry"
-    fallback="${fallback%%--[[:space:]]*}"
-    fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
-    fallback="${fallback//\`/}"
-    fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
-  fi
-}
-
-# =============================================================================
-# _aid_allowed_paths_from_files_json — derive a step's cleaned allowed_paths
-# JSON array from its RAW files[] JSON array (per D2/D4: outputs = files
-# verbatim, allowed_paths = cleaned path(s) from the SAME files entries).
-# Strips the "Create:"/"Modify:" label from each entry, then runs the
-# remainder through _aid_split_path_entry (handles the multi-path
-# "`a` + `b`" join and drops trailing prose). Order-preserving de-dup.
-# Args: $1 = compact JSON array of RAW files[] strings.
-# Output (stdout): compact JSON array of cleaned path strings.
-# =============================================================================
-_aid_allowed_paths_from_files_json() {
-  local files_json="$1"
-  local out_json="[]"
-  local n idx entry stripped p
-  n="$(echo "$files_json" | jq 'length')"
-  for (( idx=0; idx<n; idx++ )); do
-    entry="$(echo "$files_json" | jq -r --argjson i "$idx" '.[$i]')"
-    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
-    while IFS= read -r p; do
-      [[ -z "$p" ]] && continue
-      out_json="$(echo "$out_json" | jq --arg p "$p" 'if index($p) then . else . + [$p] end')"
-    done < <(_aid_split_path_entry "$stripped")
-  done
-  echo "$out_json"
-}
 
 # Extract Scope sections
 scope_allowed_raw="$(extract_subsection "$epic" "Scope" "Allowed files/paths")"
