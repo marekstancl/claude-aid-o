@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.57.0] — 2026-07-12
+
+### Added
+- **Targeted Test Selector (P061 EPIC 3/6)** — `aid-select-tests.sh` maps changed paths to their corresponding test file(s) via a fixed Initial mapping and runs the union of them for real (not just a suggested command), replacing "run everything always" with deterministic, targeted coverage ahead of any self-host gate weakening (EPIC 4). Unknown production paths fail loud with a specific reason string (D-selector-1) rather than a silent skip. Registered as the `targeted_tests` gate definition in `execution.yaml` — defined only, not yet activated in any self-host `gate_profiles` (activation is EPIC 4, D1/D3).
+
+### Fixed
+- **`aid-select-tests.sh` CLI parser** — `--base`/`--paths-file`/`--evidence-file` now validate that a value actually follows the flag, returning the documented `exit 10` input-validation error instead of crashing with an unbound-variable error under `set -u` (e.g. `aid-select-tests.sh --base` with no argument).
+- **Pre-commit commit-scope guard, main-fallback governance** — replaced an implicit, non-deterministic scan of every historical evidence directory with a single, explicit, FSM-managed active-run pointer. The old scan let a merged EPIC from weeks earlier (found: E-052-1_1) silently continue restricting every commit on `main` to its own stale version whitelist, with the specific historical EPIC selected depending on filesystem traversal order. `aid-fsm.sh`'s `cmd_init` now writes `.aid-o/work/active-run-pointer.json` on every run start — a single slot, always overwritten by the next run's init, self-expiring by construction. `defaults/hooks/pre-commit`'s main-fallback checks (the EXECUTE/GATES rogue-commit block and the DONE/release version whitelist) now read only this pointer, re-reading the pointed-to run's live state on every commit, and fail open on any invalid pointer (missing, malformed, or referencing a state file that no longer exists). The exact-branch-match path (a run governing its own task/epic branch) is unaffected — branch names are unique by construction and were never the buggy part. Consumer projects pick up the fixed hook on their next `/aid-init` refresh.
+
 ## [2.56.0] — 2026-07-12
 
 P063 "Gate Runtime Baselines" (4 steps): AID runs gates against static,
