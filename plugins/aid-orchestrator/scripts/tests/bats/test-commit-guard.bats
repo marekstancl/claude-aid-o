@@ -119,6 +119,17 @@ _write_state_at() {
   } > "$sf"
 }
 
+# _write_pointer <state_file> — writes the active-run pointer JSON directly
+# (bypassing aid-fsm.sh's cmd_init for test isolation/speed), matching the
+# schema `write_active_run_pointer()` produces.
+_write_pointer() {
+  local sf="$1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  jq -n --arg sf "$sf" \
+    '{state_file: $sf, epic_id: "E-test", run_id: "R-test", written_at: "2026-01-01T00:00:00Z"}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/active-run-pointer.json"
+}
+
 # _farm_excluding <cmd> — a PATH dir with every tool the hook needs EXCEPT <cmd>,
 # used to simulate absent tooling (jq) without touching the real environment.
 _farm_excluding() {
@@ -148,6 +159,11 @@ _farm_excluding() {
   # Setup leaves us on main; the run's branch is the task branch (not main).
   _write_plan
   _write_state EXECUTE task/E-test/main "" 1
+  # OBS-20260712-01: main-fallback governance now requires the active-run
+  # pointer (see (m) below for the dedicated pointer-lifecycle test) — a real
+  # `aid-fsm.sh init` always writes one, so a genuinely active run reaches
+  # this hook exactly as it did before the fix.
+  _write_pointer "$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _stage src/b.txt
   run bash "$HOOK"
   [ "$status" -eq 1 ]
@@ -273,40 +289,83 @@ _farm_excluding() {
   [ "$status" -eq 0 ]
 }
 
-# ─── (j) OBS-20260712-01 regression: a stale DONE/release run on a TASK
-#     branch (not main) must never restrict a plain commit on main ─────────────
-@test "j: a stale DONE/release run declared on a task branch does not limit a plain commit on main" {
-  # Simulates E-052-1_1: merged, DONE/release, weeks old, branch: task/.../main
-  # (not main itself). Stays checked out on main (no git checkout).
-  _write_state DONE task/E-old/main release 1
+# ─── (j) OBS-20260712-01 regression: a run superseded by a LATER init's
+#     active-run pointer must never restrict a plain commit on main, however
+#     long its own DONE/release evidence directory survives on disk ──────────
+@test "j: a stale DONE/release run no longer referenced by the active-run pointer does not limit a plain commit on main" {
+  # Simulates E-052-1_1: merged, DONE/release, weeks old — a LATER run's init
+  # overwrote the pointer, so E-old is no longer "the" active run at all.
+  local old_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-old/R-old"
+  _write_state_at "$old_dir" DONE task/E-old/main release
+  local new_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-new/R-new"
+  _write_state_at "$new_dir" DONE task/E-new/main review   # supersedes E-old; doesn't itself govern main
+  _write_pointer "$new_dir/fsm-state.yaml"
   _stage src/anything.txt
   run bash "$HOOK"
   [ "$status" -eq 0 ]
 }
 
-# ─── (k) order-independence + ambiguity: two runs both explicitly declare
-#     branch: main in DONE/release → treated as ambiguous, never "pick one" ───
-@test "k: two runs both declaring branch:main in DONE/release is ambiguous — passes, does not enforce either scope" {
-  _write_project_versioning
-  _write_state DONE main release 1
-  _write_state_at "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-other/R-other" DONE main release
-  # A file that would FAIL either run's version whitelist if one were picked.
-  _stage src/rogue.txt
+# ─── (k) same OBS-20260712-01 class, EXECUTE/GATES side: an abandoned run
+#     superseded by a later init must not block main forever either ──────────
+@test "k: a stale abandoned EXECUTE run no longer referenced by the active-run pointer does not block a plain commit on main" {
+  local old_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-old/R-old"
+  _write_state_at "$old_dir" EXECUTE task/E-old/main
+  local new_dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-new/R-new"
+  _write_state_at "$new_dir" DONE task/E-new/main review
+  _write_pointer "$new_dir/fsm-state.yaml"
+  _stage src/anything.txt
   run bash "$HOOK"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"ambiguous"* ]]
 }
 
-# ─── (l) a run explicitly declared on branch:main still enforces the
-#     version whitelist on main (the fix narrows the match, doesn't remove it) ─
-@test "l: a DONE/release run explicitly declared on branch:main still enforces the version whitelist" {
+# ─── (l) current active-run pointer, DONE/release → still enforces the
+#     version whitelist (the fix narrows discovery, doesn't remove enforcement) ─
+@test "l: current active-run pointer in DONE/release still enforces the version whitelist" {
   _write_project_versioning
-  _write_state DONE main release 1
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-cur/R-cur"
+  _write_state_at "$dir" DONE task/E-cur/main release
+  _write_pointer "$dir/fsm-state.yaml"
   _stage src/rogue.txt
   run bash "$HOOK"
   [ "$status" -eq 1 ]
   [[ "$output" == *"DONE/release"* ]]
   [[ "$output" == *"src/rogue.txt"* ]]
+}
+
+# ─── (m) current active-run pointer, EXECUTE → still blocks a rogue commit
+#     on main (OBS-20260709-04 protection fully preserved) ───────────────────
+@test "m: current active-run pointer in EXECUTE still blocks a rogue commit on main" {
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-cur/R-cur"
+  _write_state_at "$dir" EXECUTE task/E-cur/main
+  _write_pointer "$dir/fsm-state.yaml"
+  _stage src/anything.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"HEAD is 'main'"* ]]
+}
+
+# ─── (n) invalid pointer variants → fail open, never a new way to block ──────
+@test "n: pointer referencing a missing state_file fails open (passes)" {
+  _write_pointer "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-ghost/R-ghost/fsm-state.yaml"   # never created
+  _stage src/anything.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "n: malformed pointer JSON fails open (passes)" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  echo "{not valid json" > "$TEST_PROJECT_ROOT/.aid-o/work/active-run-pointer.json"
+  _stage src/anything.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+@test "n: pointer with no state_file field fails open (passes)" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+  echo '{"epic_id":"E-x"}' > "$TEST_PROJECT_ROOT/.aid-o/work/active-run-pointer.json"
+  _stage src/anything.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
 }
 
 # ─── (i) companion: --no-verify bypass → commit_scope_violation at advance ────

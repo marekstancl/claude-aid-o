@@ -103,6 +103,34 @@ derive_timeline() {
   fi
 }
 
+# active_run_pointer_path — canonical location of the single "which run
+# currently governs main" pointer (OBS-20260712-01 hotfix). Consumed by
+# defaults/hooks/pre-commit's commit-scope guard for its two main-fallback
+# checks (EXECUTE/GATES rogue-commit block, DONE/release version whitelist)
+# — a historical evidence directory must never act as an IMPLICIT pointer to
+# "the" active run; this file is the only EXPLICIT one.
+active_run_pointer_path() {
+  echo ".aid-o/work/active-run-pointer.json"
+}
+
+# write_active_run_pointer <state_file> — (re)points the single active-run
+# slot at this run. Called once, at the very end of cmd_init. Single global
+# slot, always OVERWRITTEN by the next run's init — self-expiring by
+# construction (a run superseded by a newer init can never re-emerge as "the"
+# active run again, however long its own evidence directory survives on
+# disk). Best-effort: a write failure here must never block init itself.
+write_active_run_pointer() {
+  local state_file="$1"
+  local ptr; ptr=$(active_run_pointer_path)
+  local epic_id run_id
+  epic_id=$(yaml_field "$state_file" epic_id)
+  run_id=$(yaml_field "$state_file" run_id)
+  local now; now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  mkdir -p "$(dirname "$ptr")" 2>/dev/null || true
+  jq -n --arg sf "$state_file" --arg e "$epic_id" --arg r "$run_id" --arg t "$now" \
+    '{state_file: $sf, epic_id: $e, run_id: $r, written_at: $t}' > "$ptr" 2>/dev/null || true
+}
+
 # True if the working tree is a git worktree (git_dir under .git/worktrees/).
 # Used by PRE-FLIGHT branch enforcement to skip auto-checkout in worktree mode
 # where the caller (e.g., superpowers:using-git-worktrees) controls the branch.
@@ -2405,6 +2433,10 @@ except: pass
       echo "    completed_at: null"
     done
   } >> "$state_file"
+
+  # OBS-20260712-01 hotfix: this run becomes the sole explicit pointer the
+  # commit-scope guard consults for main-fallback governance. Never fails init.
+  write_active_run_pointer "$state_file"
 
   echo "Initialized state: READY" >&2
 }

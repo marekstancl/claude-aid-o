@@ -2,9 +2,15 @@
 # AID-ORCHESTRATOR-HOOK-START (do not edit this block manually)
 # AID Orchestrator — FSM commit-scope + branch guard pre-commit hook (P060 D7).
 #
-# Fires on ALL branches (including main). Discovers the active run by scanning
-# state files filtered to guard-active states (EXECUTE|GATES|DONE), matches by
-# branch, and enforces that staged files stay within the state-appropriate scope:
+# Fires on ALL branches (including main). On a run's OWN task/epic branch, it
+# discovers that run by an exact `branch:` match across guard-active states
+# (EXECUTE|GATES|DONE — scanning is safe here, branch names are unique by
+# construction). On `main`, main-fallback governance (rogue-commit block +
+# DONE/release version whitelist) instead reads ONE explicit, FSM-managed
+# pointer (`.aid-o/work/active-run-pointer.json`, written by `aid-fsm.sh`'s
+# `cmd_init`) rather than scanning historical evidence directories — see
+# OBS-20260712-01 below. Either way, staged files must stay within the
+# state-appropriate scope:
 #   EXECUTE      → current step's allowed_paths (plan.json) ∪ evidence dir
 #   GATES        → union of ALL steps' allowed_paths     ∪ evidence dir
 #   DONE/review  → union of ALL steps' allowed_paths     ∪ evidence dir
@@ -157,33 +163,14 @@ _aid_run_scope_check() {
   _aid_enforce_scope "$_label"
 }
 
-# ── Discover the active run (guard-active states only) ───────────────────────
+# ── Discover the run governing THIS branch (exact match) ──────────────────
 #
-# OBS-20260712-01 (E-052-1_1 false positive): a run merged and DONE for weeks
-# permanently blocked plain commits on main to a stale version whitelist,
-# because the old scan below picked whichever DONE/release state find(1)
-# happened to return FIRST across every evidence dir ever created — with no
-# check that the run was still current, and a non-deterministic pick order.
-# A historical evidence directory must never act as an IMPLICIT pointer to
-# "the" active run. Two changes fix this:
-#   1. All state-file paths are sorted before scanning, so the outcome never
-#      depends on find(1)'s incidental filesystem traversal order.
-#   2. The DONE/release main-fallback (_AID_MAIN_RELEASE) now requires the
-#      run's OWN `branch:` field to explicitly say "main" — an intentional,
-#      already-present self-declaration (task/epic branches, the overwhelming
-#      majority of runs, say `branch: task/{epic}/main` and can never match
-#      this by accident). If more than one such run exists, that is
-#      ambiguous, not "pick one" — pass with a disclosure instead of
-#      enforcing a possibly-wrong scope.
-# The EXECUTE/GATES rogue-commit block (_AID_MAIN_ACTIVE, OBS-20260709-04)
-# intentionally still matches ANY branch — that IS its job (catch a commit
-# that landed on main while the real work is mid-flight on a task branch) —
-# it only gains the determinism fix (1), not the branch-declaration fix (2).
-_AID_STATE_FILE=""        # run whose branch == current branch (primary match)
-_AID_MAIN_ACTIVE=""       # an EXECUTE/GATES run on any branch (main-block source)
-_AID_MAIN_RELEASE=""      # a DONE/release run that EXPLICITLY declares branch: main
-_AID_MAIN_RELEASE_AMBIGUOUS=0
-
+# A run declared on a task/epic branch matches ONLY that exact branch name —
+# unique by construction (one epic ↔ one branch) — so taking the first
+# (sorted) match is safe: two different runs can never legitimately share a
+# branch name. All state-file paths are sorted before scanning purely so the
+# outcome never depends on find(1)'s incidental filesystem traversal order.
+_AID_STATE_FILE=""
 _AID_ALL_STATE_FILES=()
 for _dir in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
   [[ -d "$_dir" ]] || continue
@@ -191,37 +178,56 @@ for _dir in ".aid-o/work/runs/" ".aid-o/work/evidence/"; do
     _AID_ALL_STATE_FILES+=("$_sf")
   done < <(find "$_dir" \( -name "state.yaml" -o -name "fsm-state.yaml" \) 2>/dev/null | sort)
 done
-
 for _sf in "${_AID_ALL_STATE_FILES[@]}"; do
   _st=$(grep '^state:' "$_sf" 2>/dev/null | awk '{print $2}')
   case "$_st" in EXECUTE|GATES|DONE) ;; *) continue ;; esac
   _br=$(grep '^branch:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
-
-  # A run declared on a task/epic branch matches ONLY that exact branch name
-  # — unique by construction (one epic ↔ one branch), so first-sorted-match is
-  # safe here. A run declared on branch:main is deliberately EXCLUDED from
-  # this shortcut and always flows into the main-governance tracking below —
-  # otherwise the first branch:main state found would silently win via this
-  # exact-match `break` before a second one could ever be recognized as
-  # ambiguous, reintroducing the exact bug this fix removes, just relocated.
-  if [[ "$_br" != "main" && -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]]; then
+  if [[ -n "$_AID_BRANCH" && "$_br" == "$_AID_BRANCH" ]]; then
     _AID_STATE_FILE="$_sf"
     break
   fi
+done
 
-  [[ "$_AID_BRANCH" == "main" ]] || continue
-
-  _dp=$(grep '^done_phase:' "$_sf" 2>/dev/null | awk '{print $2}' | tr -d '"')
-  if [[ "$_st" == "EXECUTE" || "$_st" == "GATES" ]]; then
-    [[ -z "$_AID_MAIN_ACTIVE" ]] && _AID_MAIN_ACTIVE="$_sf"
-  elif [[ "$_st" == "DONE" && "$_dp" == "release" && "$_br" == "main" ]]; then
-    if [[ -z "$_AID_MAIN_RELEASE" ]]; then
-      _AID_MAIN_RELEASE="$_sf"
-    else
-      _AID_MAIN_RELEASE_AMBIGUOUS=1
+# ── Active-run pointer for MAIN-governance fallback (OBS-20260712-01) ──────
+#
+# E-052-1_1 false positive: a run merged and DONE for weeks permanently
+# blocked plain commits on main to its own stale version whitelist, because
+# the old scan here picked whichever DONE/release state find(1) happened to
+# return FIRST across every evidence directory ever created — no check that
+# the run was still current, non-deterministic pick order. A historical
+# evidence directory must never act as an IMPLICIT pointer to "the" active
+# run for main-governance purposes (unlike the exact-branch-match above,
+# which is inherently precise and untouched by this fix).
+#
+# Fix: main-fallback governance now reads ONE explicit, FSM-managed pointer
+# (`aid-fsm.sh`'s `write_active_run_pointer`, called once at the end of every
+# `cmd_init`) instead of scanning. The pointer is a single global slot,
+# always overwritten by the NEXT run's init — self-expiring by construction:
+# a run superseded by a newer init can never re-emerge as "the" active run
+# again, however long its own evidence directory survives on disk. Runs
+# created before this mechanism existed (no pointer entry at all) simply
+# never govern main via this path — fail-open, matching "no active run".
+#
+# Fail-open on anything not exactly right: missing pointer file, unreadable,
+# malformed JSON, absent jq, or a state_file the pointer references that no
+# longer exists/is unreadable. An invalid pointer must never itself become a
+# new way to accidentally block unrelated commits.
+_AID_MAIN_ACTIVE=""       # pointer's run, if currently EXECUTE/GATES (main-block source)
+_AID_MAIN_RELEASE=""      # pointer's run, if currently DONE/release (main version-whitelist)
+if [[ "$_AID_BRANCH" == "main" ]] && command -v jq >/dev/null 2>&1; then
+  _AID_PTR=".aid-o/work/active-run-pointer.json"
+  if [[ -r "$_AID_PTR" ]]; then
+    _AID_PTR_SF=$(jq -r '.state_file // empty' "$_AID_PTR" 2>/dev/null)
+    if [[ -n "$_AID_PTR_SF" && -r "$_AID_PTR_SF" ]]; then
+      _AID_PTR_ST=$(grep '^state:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}')
+      _AID_PTR_DP=$(grep '^done_phase:' "$_AID_PTR_SF" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      case "$_AID_PTR_ST" in
+        EXECUTE|GATES) _AID_MAIN_ACTIVE="$_AID_PTR_SF" ;;
+        DONE) [[ "$_AID_PTR_DP" == "release" ]] && _AID_MAIN_RELEASE="$_AID_PTR_SF" ;;
+      esac
     fi
   fi
-done
+fi
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 if [[ -n "$_AID_STATE_FILE" ]]; then
@@ -235,12 +241,11 @@ elif [[ "$_AID_BRANCH" == "main" && -n "$_AID_MAIN_ACTIVE" ]]; then
   echo "Active run state file: ${_AID_MAIN_ACTIVE}" >&2
   echo "Execution/gate commits belong on the run's task/epic branch, not main (OBS-20260709-04)." >&2
   exit 1
-elif [[ "$_AID_BRANCH" == "main" && "$_AID_MAIN_RELEASE_AMBIGUOUS" -eq 1 ]]; then
-  echo "AID HOOK: warning — multiple DONE/release runs explicitly declare branch: main; ambiguous, passing commit." >&2
 elif [[ "$_AID_BRANCH" == "main" && -n "$_AID_MAIN_RELEASE" ]]; then
-  # DONE/release explicitly declared on branch:main → version-whitelist scope
+  # The active-run pointer's run is DONE/release → version-whitelist scope
   # check (no main-block). Task/epic-branch runs never reach here (they only
-  # ever govern their OWN branch via _AID_STATE_FILE above).
+  # ever govern their OWN branch via _AID_STATE_FILE above; a run that never
+  # went through `aid-fsm.sh init`'s pointer write never reaches here either).
   _aid_run_scope_check "$_AID_MAIN_RELEASE"
 fi
 # else: no active run governs this commit context → no-op pass.
