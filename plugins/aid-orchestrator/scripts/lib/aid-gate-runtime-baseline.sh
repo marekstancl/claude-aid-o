@@ -313,7 +313,7 @@ gate_baseline_update() {
     doc_json=$(_gbr_read_doc_json_writer "$file")
 
     local now
-    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    now=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 
     local existing_entry
     existing_entry=$(jq -c --arg gn "$gate_name" '.gates[$gn] // null' <<<"$doc_json" 2>/dev/null)
@@ -550,7 +550,7 @@ gate_baseline_mark_policy_block() {
     fi
 
     local now
-    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    now=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 
     local updated_doc
     updated_doc=$(jq -c \
