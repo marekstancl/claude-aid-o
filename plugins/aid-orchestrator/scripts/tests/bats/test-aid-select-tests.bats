@@ -338,3 +338,21 @@ commit_change() {
   run "$SELECTOR" --base "not-a-real-ref-0000"
   [ "$status" -eq 10 ]
 }
+
+@test "CLI: --base with no value is a usage error (exit 10), not an unbound-variable crash" {
+  run "$SELECTOR" --base
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"--base requires a value"* ]]
+}
+
+@test "CLI: --paths-file with no value is a usage error (exit 10), not an unbound-variable crash" {
+  run "$SELECTOR" --paths-file
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"--paths-file requires a value"* ]]
+}
+
+@test "CLI: --evidence-file with no value is a usage error (exit 10), not an unbound-variable crash" {
+  run "$SELECTOR" --base "$BASE_SHA" --evidence-file
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"--evidence-file requires a value"* ]]
+}
