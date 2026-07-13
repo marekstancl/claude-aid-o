@@ -1049,4 +1049,59 @@ Per Principle #1 (a detector is not enforcement), E9 core delivers the C4 **mech
 
 ---
 
-**Last Updated:** 2026-07-09
+## Plan-level closure (IMP-232, v2.58.0)
+
+Canonical, evidence-anchored, PUBLIC-SAFE plan lifecycle. Source of truth is the
+validated evidence bundle (git merges + review reports + evidence); the git-tracked
+`.aid-lifecycle/` artifacts are the durable materialization that survives a clean
+clone and the eco-dev↔eco-prod mirror.
+
+- **Library:** `scripts/lib/aid-lifecycle.sh` (sourced by `aid-fsm.sh` for the D1
+  init gate; and by the `aid-lifecycle.sh` CLI). Key functions:
+  `aid_repo_id` (stable UUID, immutable after first creation),
+  `aid_plan_closure_state` (state resolver),
+  `aid_lifecycle_parse_legacy_epics` (STRICT `**EPIC N:**`/`**EPIC N / Backlog:**`
+  grammar; anything else ⇒ `legacy-unverifiable`),
+  `aid_lifecycle_plan_close`, `aid_lifecycle_plan_reconcile`,
+  `aid_lifecycle_bind_delivery` (strict historical binding),
+  `aid_lifecycle_validate_artifact` (schema + public-safe gate).
+- **CLI:** `scripts/aid-lifecycle.sh` — `repo-id | state | declared | parse-legacy |
+  validate | publicsafe | plan-close | plan-reconcile | target-branch`.
+- **Artifacts (git-tracked, public-safe):** `.aid-lifecycle/repo-identity.yaml`,
+  `.aid-lifecycle/manifests/P<NN>.yaml`, `.aid-lifecycle/receipts/P<NN>.yaml`.
+  Schemas: `defaults/schemas/plan-lifecycle-{identity,manifest,receipt}.schema.json`
+  (`additionalProperties:false`). The **public-safe contract is binding**: these files
+  carry ONLY technical fields (repo/plan/EPIC IDs, state, delivery/review SHAs,
+  normalized verdict, blocker count, schema/tool version, timestamps, hashes) — NEVER
+  report bodies, findings text, prompts, agent output, absolute/local paths, secrets,
+  PII, customer names, or free-form waiver reasons. `aid_lifecycle_validate_artifact`
+  MUST pass (schema + secret/abs-path/free-text-key net) before any artifact is committed.
+
+### Enforcement registered (per AID-v3-principles §1 — Detector needs Enforcement)
+
+| Enforcement | Mechanism | Surface |
+|-------------|-----------|---------|
+| Dependency-scoped init gate (D1) | `aid-fsm.sh cmd_init` — hard-fail on a structured `depends_on_plans` target whose derived state ≠ `closed` (both former cross-plan regions removed); `--force`-overridable + audited | `init` PRECONDITION FAIL |
+| `closed` requires committed+reachable receipt | `aid_lifecycle_receipt_durable` (`git cat-file` on `target_branch`); a staged/uncommitted receipt is `closing_pending_commit`, never `closed` | state resolver |
+| Required-only denominator + strict legacy grammar | `aid_lifecycle_parse_legacy_epics` (ambiguous ⇒ `legacy-unverifiable`, never a guess); backlog EPICs recorded but excluded from closing | resolver / reconcile |
+| `delivered` needs provenance-bound merge | `aid_lifecycle_bind_delivery` — unambiguous merge reachable from `target_branch` + reviewed-head ancestor + accepted audit; a well-named merge alone never closes | reconcile |
+| Public-safe artifact gate | `aid_lifecycle_validate_artifact` before every `.aid-lifecycle/` commit | plan-close / reconcile |
+| per_step_scoping authoritative-block-first | `gates/aid-contract-validate.sh` Check 1 (shared `lib/aid-scoping.sh`); R1-R7 | contract gate |
+
+### Known boundaries
+
+- **Two-phase delivery has no new FSM hook.** Phase-1 reviewed-head provenance is the
+  existing `audit-report.json` in gitignored evidence; Phase-2 (bind `delivery_sha` +
+  commit the git-tracked manifest/receipt) happens ONLY in the orchestration-layer
+  `plan-close`/`plan-reconcile` commands, so the FSM never commits or dirties the tree.
+- **`ca-review-complete` marker is not removed** — the new closure model supersedes it
+  as the D1 source of truth, but the legacy per-EPIC marker (written by
+  `aid-fsm.sh cmd_plan_close`) still exists for backward-compatible consumers during
+  the transition; readers of closure state use the receipt-first resolver.
+- **Squash/rebase delivery workflows** weaken the historical binding's merge-topology
+  assumption; the receipt's durable per-EPIC provenance is the fallback, and an
+  unverifiable binding yields `legacy-unverifiable` rather than a guess.
+
+---
+
+**Last Updated:** 2026-07-13

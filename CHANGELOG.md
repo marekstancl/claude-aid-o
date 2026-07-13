@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.58.0] — 2026-07-13
+
+### Added
+- **Canonical plan-level closure (IMP-232)** — a durable, evidence-anchored, PUBLIC-SAFE lifecycle model that replaces the scattered, gitignored per-EPIC `ca-review-complete` markers as the source of truth for "is this plan done?". Git-tracked `.aid-lifecycle/` artifacts (a stable repo-identity UUID, per-plan manifests, and closure receipts) survive a clean clone and the eco-dev↔eco-prod mirror, while all detailed evidence stays in gitignored `.aid-o/`. States: `active` / `delivered-but-unreconciled` / `closing_pending_commit` / `closed` / `legacy-unverifiable`, with a required-only denominator (backlog EPICs never block closing). `aid-lifecycle.sh` exposes read-only queries + artifact validation; `plan-close` (forward path) and `plan-reconcile` (`--dry-run`/`--apply`, legacy migration) are the mutating, metadata-only, fail-closed operations. A binding public-safe contract (JSON-Schema `additionalProperties:false` + a value/secret/abs-path/free-text-key net) gates every artifact before it is committed, so the tracked receipts carry only technical fields — never report bodies, findings, prompts, absolute paths, secrets, PII, or waiver reasons. `delivered` requires an unambiguous merge reachable from the configured `target_branch` bound to the EPIC via reviewed-head provenance (a well-named merge alone never closes a plan); a missing/ambiguous binding is `legacy-unverifiable`, never a guess.
+- **Dependency-scoped init gate (D1)** — an independent plan's state NEVER hard-blocks another plan's `init`. The old global cross-plan `ca-review-complete` precondition (which blocked P065 because P061 was mid-flight) is removed. A hard block now occurs ONLY when the initializing plan declares a structured `depends_on_plans` target that is not closed (still `--force`-overridable and audited); legacy prose `depends_on` is advisory-only. A single actionable init advisory summarizes delivered-but-unreconciled plans (CI-suppressible), never per-EPIC. Branch-enforcement, clean-worktree, duplicate-state, and rogue-commit guards are unchanged.
+
+### Changed
+- **`per_step_scoping` gate precision** — a multi-step EPIC whose steps legitimately refine the SAME file(s) in sequence (distinct outputs) is no longer mis-flagged as the P057/P058 broadcast bug. The check is now authoritative-block-first: when the EPIC declares explicit per-step scope blocks, each generated step's `allowed_paths` must equal what its own block declares (via a shared `lib/aid-scoping.sh` cleaner, so the generator and the gate can't drift); degenerate blocks (identical files AND outputs) still fail (R7); and legacy inputs without per-step blocks fail only when BOTH `outputs` AND `allowed_paths` are identical across all steps. The genuine broadcast bug still fails.
+
+### Fixed
+- **`test-run-gates` cwd-isolation flake** — the gate-runner tests wrote their runtime `gate-runtime-baselines.yaml` into the shared `tests/` cwd, so an accumulated baseline could make `run-all` return non-zero and flake the whole suite (reproduced on a clean tree). The suite now runs from a throwaway isolated cwd.
+
 ## [2.57.2] — 2026-07-13
 
 ### Added
