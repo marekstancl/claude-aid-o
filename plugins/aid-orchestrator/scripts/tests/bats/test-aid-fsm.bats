@@ -1088,9 +1088,12 @@ EOF
   [ "$(yq -r '.streamlined_mode' "$state_file")" = "false" ]
 }
 
-# ─── E-046-1_3 Step 1: Cross-plan E-→P gate (4 assertions) ──────────────────
-# Regression for the `grep -oP '^P\d+'` dead pattern that never matched E-NNN
-# IDs → cross-plan gate silently skipped. Fixed by BASH_REMATCH[1] pattern.
+# ─── D1 (IMP-232 v2.58.0): dependency-scoped init gate ──────────────────────
+# The old global cross-plan ca-review-complete hard-block is REMOVED: an
+# independent plan's state NEVER blocks another plan's init. A hard block occurs
+# ONLY when THIS plan declares a STRUCTURED depends_on_plans target that is not
+# closed (skippable via the sanctioned --force override). These replace the four
+# old cross-plan-gate assertions.
 
 # Helper: create a completed EPIC evidence dir with DONE+review state.
 _seed_done_epic() {
@@ -1110,32 +1113,59 @@ EOF
   fi
 }
 
-@test "cross-plan gate: E-045 done+audit → blocks E-046 init without ca-review-complete" {
+# Helper: structured lifecycle manifest declaring depends_on_plans.
+_seed_manifest() {
+  local plan_id="$1" deps_yaml="$2"   # deps_yaml e.g. "[P045]" or "[]"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
+  cat > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${plan_id}.yaml" <<EOF
+schema_version: aid-lifecycle-1.0
+repo_id: test
+plan_id: ${plan_id}
+declared_epics:
+  - {id: E-${plan_id#P}-1_1, scope: required}
+depends_on_plans: ${deps_yaml}
+EOF
+}
+
+# Helper: committed closed receipt (=> aid_plan_closure_state == closed).
+_seed_closed_receipt() {
+  local plan_id="$1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/receipts"
+  cat > "$TEST_PROJECT_ROOT/.aid-lifecycle/receipts/${plan_id}.yaml" <<EOF
+schema_version: aid-lifecycle-receipt-1.0
+repo_id: test
+plan_id: ${plan_id}
+plan_manifest_sha: sha256:abc
+state: closed
+EOF
+  git -C "$TEST_PROJECT_ROOT" add ".aid-lifecycle/receipts/${plan_id}.yaml" >/dev/null 2>&1
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "closed receipt ${plan_id}"
+}
+
+@test "D1: an independent plan is NOT blocked by another plan's done+audit (decoupled)" {
+  # P045 EPIC done+audit, no ca-review-complete; P046 declares no deps -> must init.
   _seed_done_epic "E-045-1_3" "R-E045-1"
-  # No ca-review-complete → gate must block
+  run "$FSM" init $(build_default_init_args "E-046-1_1")
+  [ "$status" -eq 0 ]
+}
+
+@test "D1: init BLOCKS when a structured depends_on_plans target is not closed" {
+  _seed_manifest "P046" "[P045]"    # P045 has no receipt => not closed
   run "$FSM" init $(build_default_init_args "E-046-1_1")
   [ "$status" -ne 0 ]
-  [[ "$output" == *"P045 has unreviewed"* ]]
+  [[ "$output" == *"depends_on_plans: P045"* ]]
 }
 
-@test "cross-plan gate: E-045 done+audit+ca-review-complete → E-046 init succeeds" {
-  _seed_done_epic "E-045-1_3" "R-E045-1"
-  touch "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-045-1_3/R-E045-1/ca-review-complete"
+@test "D1: init SUCCEEDS when the depends_on_plans target is closed" {
+  _seed_manifest "P046" "[P045]"
+  _seed_closed_receipt "P045"
   run "$FSM" init $(build_default_init_args "E-046-1_1")
   [ "$status" -eq 0 ]
 }
 
-@test "cross-plan gate: same-plan E-046 sibling done+audit → no cross-plan block" {
-  # E-046-1_2 done (same P046) → init E-046-1_3 must succeed without ca-review-complete
-  _seed_done_epic "E-046-1_2" "R-E046-2"
-  run "$FSM" init $(build_default_init_args "E-046-1_3")
-  [ "$status" -eq 0 ]
-}
-
-@test "cross-plan gate: done EPIC without audit-report → gate skips (no block)" {
-  # done_phase: review but no audit-report.md → gate condition not triggered
-  _seed_done_epic "E-045-1_3" "R-E045-1" "false"
-  run "$FSM" init $(build_default_init_args "E-046-1_1")
+@test "D1: --force overrides the depends_on_plans block (audited)" {
+  _seed_manifest "P046" "[P045]"    # P045 not closed
+  run "$FSM" init $(build_default_init_args "E-046-1_1") --force --reason "P045 need not close first for this independent scaffolding step"
   [ "$status" -eq 0 ]
 }
 

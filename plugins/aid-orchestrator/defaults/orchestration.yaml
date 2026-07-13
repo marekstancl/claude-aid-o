@@ -116,3 +116,9 @@ release:
 # CLAUDE.md. A parallel `skill_conflicts:` block here was read by NOTHING (the old "Used by
 # /aid-setup" comment was false) and drifted in structure, so it was removed 2026-06-03 (AID-052)
 # to single-source it. Edit the conflict list in skills/setup/claude-md.md.
+
+# ─── Lifecycle (IMP-232 v2.58.0) ──────────────────────────────────────────
+# Canonical plan-level closure. target_branch is the integration branch the
+# closure "committed + reachable" checks resolve against (never hardcoded 'main').
+lifecycle:
+  target_branch: main

@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AID plan-lifecycle repo identity (IMP-232 v2.58.0)",
+  "description": "Git-tracked stable repo UUID so plan IDs are repo-local (AID P061 != WAN P061). Immutable after first creation; copied by clone and by the eco-dev<->eco-prod mirror.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repo_id"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "repo_id": { "type": "string", "minLength": 1 }
+  }
+}

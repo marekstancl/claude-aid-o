@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test-force-init-passthrough.sh — PM-authorized, audited cross-plan force-init
+# test-force-init-passthrough.sh — PM-authorized, audited force-init override
 #
-# Covers the v2.57.2 sanctioned override that waives ONLY the plan-level DONE
-# gate (the false-positive cross-plan ca-review-complete precondition raised
-# when a DIFFERENT plan is intentionally in progress):
+# Covers the v2.57.2 sanctioned override. NOTE: IMP-232 (v2.58.0) removed the old
+# global cross-plan ca-review-complete gate (D1) — an independent plan no longer
+# blocks another. The only init hard-block --force now waives is a STRUCTURED
+# depends_on_plans target that is not closed, so the fixtures declare P900 with an
+# unclosed dependency on P901:
 #
 #   FSM level (aid-fsm.sh init):
-#     F1  without --force → cross-plan gate still BLOCKS
+#     F1  without --force → depends_on gate still BLOCKS
 #     F2  with a valid (>=20 char) --force --reason → init PASSES
 #     F3  a fsm_force_override timeline event is written with the SAME reason
 #     F4  the cross-EPIC audit-log gets a fsm_force_override entry, same reason
@@ -16,12 +18,11 @@
 #     F7  other init checks stay ACTIVE under --force (dirty tree still blocks)
 #
 #   Pipeline flag plumbing (aid-json-to-run.sh --force-init-reason):
-#     E1  WITHOUT the flag, a cross-plan-blocked init fails the run generation
+#     E1  WITHOUT the flag, a depends_on-blocked init fails the run generation
 #     E2  WITH a valid --force-init-reason, run generation succeeds
 #
 # Each test runs in its own throwaway git repo so the real repo's .aid-o/ and
-# branch state are never touched. The cross-plan gate only fires for numeric
-# plan ids, so the fixtures use P900 (under test) blocked by P901 (prior).
+# branch state are never touched.
 #
 # Exit codes: 0=all passed, 1=one or more tests failed
 # =============================================================================
@@ -79,16 +80,20 @@ fresh_repo_with_prior() {
     echo seed > .gitkeep
     git add -A
     git commit -q -m seed
-    local pdir=".aid-o/work/evidence/E-901-1_1/R-901-1"
-    mkdir -p "$pdir"
-    {
-      echo "epic_id: E-901-1_1"
-      echo "run_id: R-901-1"
-      echo "state: DONE"
-      echo "done_phase: review"
-    } > "$pdir/fsm-state.yaml"
-    echo "# audit report (P901) — unreviewed" > "$pdir/audit-report.md"
-    # Intentionally NO ca-review-complete marker: this is the blocking condition.
+    # D1 (IMP-232 v2.58.0): the under-test plan P900 declares a STRUCTURED
+    # dependency on P901, which is not closed (no receipt) -> init is hard-blocked
+    # unless the sanctioned --force override is supplied. (The old global
+    # cross-plan ca-review-complete gate was removed; independent plans no longer
+    # block each other, only a declared unclosed dependency does.)
+    mkdir -p .aid-lifecycle/manifests
+    cat > .aid-lifecycle/manifests/P900.yaml <<'YML'
+schema_version: aid-lifecycle-1.0
+repo_id: test
+plan_id: P900
+declared_epics:
+  - {id: E-900-1_1, scope: required}
+depends_on_plans: [P901]
+YML
   )
   echo "$d"
 }
@@ -101,7 +106,7 @@ EVID_REL=".aid-o/work/evidence/${UNDER_TEST_EPIC}/${UNDER_TEST_RUN}"
 # ===========================================================================
 # F1: without --force, the cross-plan gate BLOCKS init
 # ===========================================================================
-echo "TEST: F1 — cross-plan gate blocks init without --force"
+echo "TEST: F1 — depends_on gate blocks init without --force"
 {
   repo="$(fresh_repo_with_prior)"
   ec=0
@@ -206,7 +211,7 @@ echo "TEST: E1/E2 — aid-json-to-run.sh --force-init-reason plumbing"
       --epic "$MINIMAL_EPIC" --output-dir "$out_dir" --run-id "$UNDER_TEST_RUN" \
       >/dev/null 2>&1 ) || ec=$?
   if [[ "$ec" -ne 0 && ! -f "$repo/$STATE_REL" ]]; then
-    _pass "E1 — json-to-run without flag is blocked by cross-plan gate (exit $ec)"
+    _pass "E1 — json-to-run without flag is blocked by depends_on gate (exit $ec)"
   else
     _fail "E1 — expected block; got exit=$ec, state_exists=$([[ -f "$repo/$STATE_REL" ]] && echo yes || echo no)"
   fi

@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AID plan-lifecycle manifest (IMP-232 v2.58.0)",
+  "description": "Git-tracked, PUBLIC-SAFE durable denominator + structured deps + delivery provenance for a plan. Technical receipt fields only — no report bodies, findings, prompts, absolute paths, secrets, PII, or waiver reasons.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repo_id", "plan_id", "declared_epics"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "repo_id": { "type": "string", "minLength": 1 },
+    "plan_id": { "type": "string", "pattern": "^P[0-9]+$" },
+    "source_plan_sha": { "type": "string" },
+    "target_branch": { "type": "string" },
+    "declared_epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "scope"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^E-[0-9]+-[0-9]+_[0-9]+$" },
+          "scope": { "enum": ["required", "backlog"] }
+        }
+      }
+    },
+    "depends_on_plans": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^P[0-9]+$" }
+    },
+    "deliveries": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reviewed_sha": { "type": "string" },
+          "reviewed_verdict": { "type": "string" },
+          "unresolved_blockers": { "type": "integer", "minimum": 0 },
+          "delivery_sha": { "type": "string" },
+          "merged_tree": { "type": "string" },
+          "bound_at": { "type": "string" }
+        }
+      }
+    },
+    "created_at": { "type": "string" },
+    "aid_version": { "type": "string" }
+  }
+}

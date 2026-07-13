@@ -33,6 +33,7 @@ source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
 # cmd_advance_to_gates (auto-resolve, this EPIC's Step 2 / "Step 8") and the
 # GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
 source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
+source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"  # IMP-232 v2.58.0 — canonical plan-level closure + D1 cross-plan gate
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -2112,26 +2113,24 @@ cmd_init() {
         streamlined=true
         ;;
       --force)
-        # Pre-scan: find which prior plan's gate would have been blocking,
-        # so the audit record names it (E-046-2_3 Step 3 enrichment).
+        # D1 (IMP-232 v2.58.0): the old global cross-plan ca-review pre-scan is
+        # obsolete — the only init hard-block --force now waives is a STRUCTURED
+        # depends_on_plans target that is not closed. Name it in the audit record
+        # if present (else the override is recorded without a named blocker).
         local _bepic="" _bplan=""
         local _cur_plan_num=""
         [[ "$epic_id" =~ ^E-([0-9]+) ]] && _cur_plan_num="${BASH_REMATCH[1]}"
         local _cur_plan_prefix="P${_cur_plan_num}"
-        while IFS= read -r _ps; do
-          local _pe _ppn _pp _pdp _pd
-          _pe=$(yaml_field "$_ps" epic_id)
-          _ppn=""
-          [[ "$_pe" =~ ^E-([0-9]+) ]] && _ppn="${BASH_REMATCH[1]}"
-          _pp="P${_ppn}"
-          _pdp=$(yaml_field "$_ps" done_phase)
-          _pd=$(dirname "$_ps")
-          if [[ -n "$_pp" && "$_pp" != "$_cur_plan_prefix" && "$_pdp" == "review" ]]; then
-            if [[ -f "${_pd}/audit-report.md" && ! -f "${_pd}/ca-review-complete" ]]; then
-              _bepic="$_pe"; _bplan="$_pp"; break
-            fi
+        if [[ -n "$_cur_plan_num" ]]; then
+          local _mf _d
+          _mf="$(aid_manifest_path "$_cur_plan_prefix" ".")"
+          if [[ -f "$_mf" ]]; then
+            while IFS= read -r _d; do
+              [[ -z "$_d" || "$_d" == "null" ]] && continue
+              if [[ "$(aid_plan_closure_state "$_d" ".")" != "closed" ]]; then _bplan="$_d"; break; fi
+            done < <(yq -r '.depends_on_plans[]' "$_mf" 2>/dev/null)
           fi
-        done < <(find .aid-o/work/evidence -name "fsm-state.yaml" 2>/dev/null)
+        fi
         # Forwards ${@:i+1}; callers must pass --plan before --force when both present
         # (fsm_handle_force_override consumes remaining args as reason payload).
         fsm_handle_force_override "plan-gate" "skip" "$state_file" "init" "${@:$((i+1))}" \
@@ -2166,45 +2165,64 @@ cmd_init() {
     exit 1
   fi
 
-  # Plan-level DONE gate: block cross-plan init if previous plan has unreviewed C+A findings
-  if [[ "$force" != "true" && -d ".aid-o/work/evidence" ]]; then
-    local current_plan_num current_plan_prefix
-    current_plan_num=""
-    [[ "$epic_id" =~ ^E-([0-9]+) ]] && current_plan_num="${BASH_REMATCH[1]}"
-    current_plan_prefix=""
-    [[ -n "$current_plan_num" ]] && current_plan_prefix="P${current_plan_num}"
+  # ── D1 (IMP-232 v2.58.0): dependency-scoped init gate + advisory ──────────
+  # An independent plan's state NEVER hard-blocks another plan's init. A hard
+  # block occurs ONLY when THIS plan declares a STRUCTURED depends_on_plans
+  # target that is not `closed`. Legacy prose `depends_on:` is advisory-only.
+  # Separately, a single actionable advisory summarizes unreconciled plans
+  # (suppressed in CI). This replaces the old global cross-plan ca-review-complete
+  # hard-block that coupled every independent plan (the root of the P065 pain).
+  local _cur_plan_num _cur_plan=""
+  _cur_plan_num=""
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] && _cur_plan_num="${BASH_REMATCH[1]}"
+  [[ -n "$_cur_plan_num" ]] && _cur_plan="P${_cur_plan_num}"
 
-    if [[ -n "$current_plan_prefix" ]]; then
-      while IFS= read -r prev_state; do
-        local prev_epic prev_plan prev_done_phase prev_dir prev_plan_num
-        prev_epic=$(yaml_field "$prev_state" epic_id)
-        prev_plan_num=""
-        [[ "$prev_epic" =~ ^E-([0-9]+) ]] && prev_plan_num="${BASH_REMATCH[1]}"
-        prev_plan=""
-        [[ -n "$prev_plan_num" ]] && prev_plan="P${prev_plan_num}"
-        prev_done_phase=$(yaml_field "$prev_state" done_phase)
-        prev_dir=$(dirname "$prev_state")
-
-        # Only check EPICs from DIFFERENT completed plans
-        if [[ -n "$prev_plan" && "$prev_plan" != "$current_plan_prefix" && "$prev_done_phase" == "review" ]]; then
-          if [[ -f "${prev_dir}/audit-report.md" && ! -f "${prev_dir}/ca-review-complete" ]]; then
-            echo "PRECONDITION FAIL: Plan $prev_plan has unreviewed Curator/Auditor findings." >&2
-            echo "EPIC $prev_epic: audit-report exists but ca-review-complete marker missing." >&2
-            echo "Review findings, apply S+M+L fixes, then run:" >&2
-            echo "  aid-fsm.sh plan-close ${prev_epic} ${prev_dir} <project_root>" >&2
-            echo "(Do NOT use touch — plan-close verifies all required reports are present.)" >&2
-            local timeline
-            timeline=$(derive_timeline "$state_file") || true
-            [[ -n "$timeline" ]] && log_event "$timeline" "fsm_init_blocked" reason="unreviewed_ca" blocking_epic="$prev_epic" blocking_plan="$prev_plan"
-            exit 1
-          fi
+  # Hard block: structured depends_on_plans with an unclosed target (skippable
+  # via the sanctioned --force override).
+  if [[ "$force" != "true" && -n "$_cur_plan" ]]; then
+    local _manifest _dep _dep_state
+    _manifest="$(aid_manifest_path "$_cur_plan" ".")"
+    if [[ -f "$_manifest" ]]; then
+      while IFS= read -r _dep; do
+        [[ -z "$_dep" || "$_dep" == "null" ]] && continue
+        _dep_state="$(aid_plan_closure_state "$_dep" ".")"
+        if [[ "$_dep_state" != "closed" ]]; then
+          echo "PRECONDITION FAIL: ${_cur_plan} declares depends_on_plans: ${_dep}, which is not closed (state: ${_dep_state})." >&2
+          echo "Close ${_dep} first (all required EPICs delivered + review-accepted), or override (audited):" >&2
+          echo "  aid-fsm.sh init ${epic_id} ... --force --reason '<why ${_dep} need not be closed first>'" >&2
+          local timeline
+          timeline=$(derive_timeline "$state_file") || true
+          [[ -n "$timeline" ]] && log_event "$timeline" "fsm_init_blocked" reason="depends_on_unclosed" blocking_plan="$_dep"
+          exit 1
         fi
-      done < <(find .aid-o/work/evidence -name "fsm-state.yaml" 2>/dev/null)
+      done < <(yq -r '.depends_on_plans[]' "$_manifest" 2>/dev/null)
     fi
   fi
 
+  # Advisory (non-blocking): ONE actionable summary of plans that are delivered
+  # but not yet reconciled, plus a count of legacy-unverifiable plans. Suppressed
+  # in machine/CI mode. Never per-EPIC, never a hard block.
+  if [[ -z "${AID_CI:-}" && "${AID_QUIET:-}" != "1" && -d ".aid-o/plans" ]]; then
+    local _pf _pid _pstate _unrec="" _legacy_n=0
+    while IFS= read -r _pf; do
+      _pid="$(basename "$_pf" | sed -E 's/^(P[0-9]+)-.*/\1/')"
+      [[ "$_pid" =~ ^P[0-9]+$ ]] || continue
+      [[ "$_pid" == "$_cur_plan" ]] && continue
+      _pstate="$(aid_plan_closure_state "$_pid" "." 2>/dev/null || echo unknown)"
+      case "$_pstate" in
+        delivered-but-unreconciled) _unrec+=" ${_pid}";;
+        legacy-unverifiable)        _legacy_n=$((_legacy_n+1));;
+      esac
+    done < <(ls .aid-o/plans/P*-*.md 2>/dev/null)
+    if [[ -n "$_unrec" ]]; then
+      echo "ADVISORY: plan(s) delivered but not reconciled:${_unrec}. Reconcile with:" >&2
+      echo "  aid-fsm.sh plan-reconcile <PNN> --apply" >&2
+    fi
+    [[ "$_legacy_n" -gt 0 ]] && echo "ADVISORY: ${_legacy_n} plan(s) in legacy-unverifiable state (see plan-reconcile --dry-run)." >&2
+  fi
+
   if [[ "$force" == "true" ]]; then
-    echo "WARNING: --force used, skipping plan-level DONE gate check" >&2
+    echo "WARNING: --force used, skipping the depends_on_plans init gate (D1). Branch/clean-worktree/duplicate-state guards still apply." >&2
   fi
 
   # ─── PRE-FLIGHT: Branch Enforcement (P032 Step 2) ────────────────────
