@@ -184,6 +184,259 @@ aid_lifecycle_parse_legacy_epics() {
   return 0
 }
 
+# ── Receipt build + commit (receipt-first, isolated, fail-closed) ────────────
+# aid_lifecycle_build_receipt <plan_id> <root> — emit the closure receipt YAML to
+# stdout, built from the manifest's declared_epics + deliveries. Includes ALL
+# declared EPICs (required + backlog) for provenance honesty, but closing only
+# depends on the REQUIRED set (verified by the caller).
+aid_lifecycle_build_receipt() {
+  local plan_id="$1" root="${2:-.}"
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+  [[ -f "$manifest" ]] || return 1
+  local repo_id tb mhash
+  repo_id="$(yq -r '.repo_id // ""' "$manifest")"
+  tb="$(aid_target_branch)"
+  # plan_manifest_sha covers the identity/denominator keys only (§3.3):
+  # exclude deliveries + any closure block so binding/closing never churns it.
+  mhash="sha256:$(yq -o=json '{"schema_version":.schema_version,"repo_id":.repo_id,"plan_id":.plan_id,"source_plan_sha":.source_plan_sha,"declared_epics":.declared_epics,"depends_on_plans":.depends_on_plans}' "$manifest" 2>/dev/null | jq -cS . 2>/dev/null | sha256sum | cut -c1-64)"
+  {
+    echo "schema_version: aid-lifecycle-receipt-1.0"
+    echo "repo_id: ${repo_id}"
+    echo "plan_id: ${plan_id}"
+    echo "plan_manifest_sha: ${mhash}"
+    echo "state: closed"
+    echo "target_branch: ${tb}"
+    echo "aid_version: ${AID_LIFECYCLE_VERSION:-2.58.0}"
+    echo "epics:"
+    local eid scope
+    while read -r eid scope; do
+      [[ -z "$eid" ]] && continue
+      local dsha rsha verdict blockers
+      dsha="$(yq -r ".deliveries.\"${eid}\".delivery_sha // \"\"" "$manifest")"
+      rsha="$(yq -r ".deliveries.\"${eid}\".reviewed_sha // \"\"" "$manifest")"
+      verdict="$(yq -r ".deliveries.\"${eid}\".reviewed_verdict // \"\"" "$manifest")"
+      blockers="$(yq -r ".deliveries.\"${eid}\".unresolved_blockers // 0" "$manifest")"
+      echo "  - epic_id: ${eid}"
+      [[ -n "$dsha" && "$dsha" != "null" ]] && echo "    delivery_sha: ${dsha}"
+      [[ -n "$rsha" && "$rsha" != "null" ]] && echo "    reviewed_sha: ${rsha}"
+      [[ -n "$verdict" && "$verdict" != "null" ]] && echo "    verdict: ${verdict}"
+      echo "    unresolved_blocker_count: ${blockers:-0}"
+    done < <(aid_lifecycle_declared_epics "$plan_id" "$root")
+  }
+}
+
+# aid_lifecycle_commit_receipt <plan_id> <root> — write the receipt to the work
+# tree, validate (schema + public-safe) BEFORE committing, then commit ONLY the
+# receipt path via `git commit -- <path>` (git's internal temp index; the user's
+# real index is never touched). Returns 0 iff the receipt is committed + reachable
+# from target_branch. On validation failure NOTHING is committed (fail-closed).
+aid_lifecycle_commit_receipt() {
+  local plan_id="$1" root="${2:-.}"
+  local relpath=".aid-lifecycle/receipts/${plan_id}.yaml"
+  local receipt="${root}/${relpath}"
+  mkdir -p "$(dirname "$receipt")"
+  local tmp; tmp="$(mktemp)"
+  aid_lifecycle_build_receipt "$plan_id" "$root" > "$tmp" || { rm -f "$tmp"; return 1; }
+  # Validate BEFORE writing into the tree (fail-closed: no partial closed state).
+  if ! aid_lifecycle_validate_artifact "$tmp" "plan-lifecycle-receipt.schema.json"; then
+    rm -f "$tmp"; return 1
+  fi
+  mv "$tmp" "$receipt"
+  # Commit ONLY the receipt path (pathspec commit — other staged/working changes
+  # are untouched). Idempotent: if the receipt is already committed identically,
+  # `git commit` is a no-op and we fall through to the durability check. Recovery
+  # from an interrupted prior run (untracked/staged receipt) just re-runs this.
+  ( cd "$root" && git add -- "$relpath" >/dev/null 2>&1 \
+      && { git commit -q -m "closure: receipt for ${plan_id}" -- "$relpath" >/dev/null 2>&1 || true; } )
+  # `closed` iff the receipt is committed AND reachable from target_branch. A
+  # plan-close run on a non-target branch (or a failed commit) yields
+  # closing_pending_commit here (durability check fails), never a false closed.
+  aid_lifecycle_receipt_durable "$plan_id" "$root"
+}
+
+# aid_lifecycle_plan_close <plan_id> <root> — forward-path close. Requires the
+# manifest to show EVERY required EPIC delivered + reviewed-accepted; then writes
+# + commits the receipt (=> closed). Fail-closed: any missing predicate => no
+# receipt, non-zero.
+aid_lifecycle_plan_close() {
+  local plan_id="$1" root="${2:-.}"
+  local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
+  case "$st" in
+    closed) echo "already closed" >&2; return 0 ;;
+    not_found) echo "plan-close: ${plan_id} not found" >&2; return 3 ;;
+    legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; return 1 ;;
+    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; return 1 ;;
+  esac
+  # delivered-but-unreconciled or closing_pending_commit -> write/commit receipt.
+  aid_lifecycle_commit_receipt "$plan_id" "$root" || { echo "plan-close: receipt not committed/reachable for ${plan_id}" >&2; return 1; }
+  echo "closed ${plan_id}"
+}
+
+# ── Legacy reconciliation (metadata-only; never fabricates) ──────────────────
+# aid_lifecycle_ensure_manifest <plan_id> <root> — create + commit a git-tracked
+# manifest from the STRICT legacy parse if none exists. NEVER edits the prose
+# plan. Returns 0 (present/created), 2 (ambiguous => legacy-unverifiable),
+# 3 (plan not found).
+aid_lifecycle_ensure_manifest() {
+  local plan_id="$1" root="${2:-.}"
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+  [[ -f "$manifest" ]] && return 0
+  local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
+  [[ -z "$plan_file" ]] && return 3
+  local parsed rc=0
+  parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
+  [[ "$rc" -ne 0 ]] && return 2
+  local repo_id; repo_id="$(aid_repo_id "$root")"
+  local spsha="sha256:$(sha256sum "$plan_file" 2>/dev/null | cut -c1-64)"
+  mkdir -p "$(dirname "$manifest")"
+  {
+    echo "schema_version: aid-lifecycle-1.0"
+    echo "repo_id: ${repo_id}"
+    echo "plan_id: ${plan_id}"
+    echo "source_plan_sha: ${spsha}"
+    echo "declared_epics:"
+    local eid scope
+    while read -r eid scope; do
+      [[ -z "$eid" ]] && continue
+      echo "  - {id: ${eid}, scope: ${scope}}"
+    done <<< "$parsed"
+    echo "depends_on_plans: []"
+  } > "$manifest"
+  # Validate + commit the new tracked manifest (public-safe).
+  aid_lifecycle_validate_artifact "$manifest" "plan-lifecycle-manifest.schema.json" || { rm -f "$manifest"; return 2; }
+  ( cd "$root" && git add -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 \
+      && { git commit -q -m "lifecycle: manifest for ${plan_id} (legacy reconcile)" -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || true; } )
+  return 0
+}
+
+# _aid_lc_epic_reviewed_head <epic_id> <root> — reviewed head SHA from the EPIC's
+# audit provenance (gitignored evidence). Empty if no provenance (=> unverifiable).
+_aid_lc_epic_reviewed_head() {
+  local epic_id="$1" root="${2:-.}"
+  local rep
+  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
+  [[ -z "$rep" ]] && return 0
+  jq -r '.revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
+}
+
+# _aid_lc_epic_accepted <epic_id> <root> — audit verdict accepted (0 blocking
+# findings). Requires the audit-report.json to exist with blocking_findings==false/0.
+_aid_lc_epic_accepted() {
+  local epic_id="$1" root="${2:-.}"
+  local rep
+  rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
+  [[ -z "$rep" ]] && return 1
+  local bf
+  bf="$(jq -r '.blocking_findings // empty' "$rep" 2>/dev/null || true)"
+  [[ "$bf" == "false" || "$bf" == "0" || -z "$bf" ]]
+}
+
+# _aid_lc_find_delivery_merge <epic_id> <root> — echo an UNAMBIGUOUS merge SHA on
+# target_branch bound to this EPIC, or "" (none) / "AMBIGUOUS". A commit message
+# only LOCATES candidates; binding is confirmed by the caller against provenance.
+_aid_lc_find_delivery_merge() {
+  local epic_id="$1" root="${2:-.}" tb; tb="$(aid_target_branch)"
+  local shas n
+  shas="$(git -C "$root" log "$tb" --merges --grep "merge: ${epic_id}" --pretty=%H 2>/dev/null || true)"
+  n="$(printf '%s' "$shas" | grep -c . || true)"
+  if [[ "$n" -eq 0 ]]; then echo ""; return 0; fi
+  if [[ "$n" -gt 1 ]]; then echo "AMBIGUOUS"; return 0; fi
+  printf '%s' "$shas"
+}
+
+# _aid_lc_can_bind <epic_id> <root> — READ-ONLY strict historical bind check (no
+# manifest, no writes). Echoes "<merge_sha> <reviewed_sha>" on success. Returns
+# 0 (bindable), 1 (not delivered), 2 (ambiguous / missing reviewed-head provenance
+# => unverifiable, never a guess).
+_aid_lc_can_bind() {
+  local epic_id="$1" root="${2:-.}"
+  local merge; merge="$(_aid_lc_find_delivery_merge "$epic_id" "$root")"
+  [[ "$merge" == "AMBIGUOUS" ]] && return 2
+  [[ -z "$merge" ]] && return 1
+  local rhead; rhead="$(_aid_lc_epic_reviewed_head "$epic_id" "$root")"
+  [[ -z "$rhead" ]] && return 2
+  git -C "$root" merge-base --is-ancestor "$rhead" "$merge" 2>/dev/null || return 1
+  _aid_lc_epic_accepted "$epic_id" "$root" || return 1
+  echo "${merge} ${rhead}"
+  return 0
+}
+
+# aid_lifecycle_bind_delivery <plan_id> <epic_id> <root> — WRITE a verified
+# historical delivery binding into the manifest (metadata-only). Returns 0 bound,
+# 1 not delivered, 2 unverifiable.
+aid_lifecycle_bind_delivery() {
+  local plan_id="$1" epic_id="$2" root="${3:-.}"
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+  [[ -f "$manifest" ]] || return 1
+  local out rc=0; out="$(_aid_lc_can_bind "$epic_id" "$root")" || rc=$?
+  [[ "$rc" -ne 0 ]] && return "$rc"
+  local merge="${out%% *}" rhead="${out##* }"
+  ( cd "$root"
+    yq -i ".deliveries.\"${epic_id}\".delivery_sha = \"${merge}\" |
+           .deliveries.\"${epic_id}\".reviewed_sha = \"${rhead}\" |
+           .deliveries.\"${epic_id}\".reviewed_verdict = \"pass\" |
+           .deliveries.\"${epic_id}\".unresolved_blockers = 0" \
+      ".aid-lifecycle/manifests/${plan_id}.yaml" )
+  return 0
+}
+
+# aid_lifecycle_plan_reconcile <plan_id> <root> <apply(true|false)>
+# Metadata-only: ensures the manifest, attempts a strict historical bind for each
+# REQUIRED EPIC, then classifies. --apply commits the manifest updates and, if all
+# required are delivered+accepted, writes the closure receipt. Prints the derived
+# state + a per-EPIC evidence line. NEVER edits the plan, fabricates a report, or
+# closes an in-progress plan.
+aid_lifecycle_plan_reconcile() {
+  local plan_id="$1" root="${2:-.}" apply="${3:-false}"
+  local pf mf
+  pf="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
+  mf="$(aid_manifest_path "$plan_id" "$root")"
+  if [[ -z "$pf" && ! -f "$mf" ]]; then echo "state: not_found"; return 0; fi
+
+  # Declared set (manifest if present, else strict legacy parse) — READ-ONLY.
+  local declared drc=0
+  declared="$(aid_lifecycle_declared_epics "$plan_id" "$root")" || drc=$?
+  if [[ "$drc" -eq 2 ]]; then echo "state: legacy-unverifiable (ambiguous EPIC declaration)"; return 0; fi
+  if [[ "$drc" -eq 3 ]]; then echo "state: not_found"; return 0; fi
+
+  # --apply first materializes the tracked manifest (metadata-only, never edits
+  # the plan). Dry-run touches NOTHING on disk.
+  if [[ "$apply" == "true" ]]; then aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || true; fi
+
+  # Classify each REQUIRED EPIC read-only; --apply also records verified bindings.
+  local eid scope all_required_ok=true saw_unverifiable=false
+  while read -r eid scope; do
+    [[ -z "$eid" ]] && continue
+    if [[ "$scope" != "required" ]]; then echo "  ${eid}: ${scope} (excluded from denominator)"; continue; fi
+    # already recorded in the manifest?
+    if _aid_lc_delivered "$plan_id" "$eid" "$root" && _aid_lc_reviewed_accepted "$plan_id" "$eid" "$root"; then
+      echo "  ${eid}: required delivered+accepted"; continue
+    fi
+    local crc=0; _aid_lc_can_bind "$eid" "$root" >/dev/null 2>&1 || crc=$?
+    case "$crc" in
+      0) echo "  ${eid}: required delivered+accepted (bindable from evidence)"
+         [[ "$apply" == "true" ]] && aid_lifecycle_bind_delivery "$plan_id" "$eid" "$root" >/dev/null 2>&1 || true ;;
+      2) echo "  ${eid}: required UNVERIFIABLE (ambiguous merge / missing reviewed-head provenance)"; all_required_ok=false; saw_unverifiable=true ;;
+      *) echo "  ${eid}: required NOT delivered"; all_required_ok=false ;;
+    esac
+  done <<< "$declared"
+
+  if [[ "$apply" == "true" ]]; then
+    ( cd "$root" && git add -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 \
+        && { git commit -q -m "lifecycle: delivery bindings for ${plan_id} (reconcile)" -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || true; } )
+    local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
+    if [[ "$st" == "delivered-but-unreconciled" ]]; then
+      aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1 && st="closed"
+    fi
+    echo "state: ${st}"
+  else
+    # Dry-run: derive the would-be state without touching disk.
+    if [[ "$all_required_ok" == "true" ]]; then echo "state: delivered-but-unreconciled (would close on --apply)"
+    elif [[ "$saw_unverifiable" == "true" ]]; then echo "state: active (some required EPICs unverifiable — see above)"
+    else echo "state: active"; fi
+  fi
+}
+
 # ── Convenience: does a plan even exist here? (for not_found result) ──────────
 # aid_lifecycle_plan_file <plan_id> [root] — echo the .aid-o plan file path if a
 # single match exists, else empty. (Active plans live in gitignored .aid-o/plans/.)

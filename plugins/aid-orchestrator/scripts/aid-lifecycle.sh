@@ -38,6 +38,12 @@ case "$cmd" in
                  aid_lifecycle_validate_artifact "$1" "$2" && echo "OK: $1 valid + public-safe" ;;
   publicsafe)    [[ -n "${1:-}" ]] || { echo "usage: publicsafe <yaml>" >&2; exit 1; }
                  aid_lifecycle_publicsafe_check "$1" && echo "OK: $1 public-safe" ;;
+  plan-close)    [[ -n "${1:-}" ]] || { echo "usage: plan-close <plan_id> [root]" >&2; exit 1; }
+                 aid_lifecycle_plan_close "$1" "${2:-.}" ; exit $? ;;
+  plan-reconcile) [[ -n "${1:-}" ]] || { echo "usage: plan-reconcile <plan_id> [--dry-run|--apply] [root]" >&2; exit 1; }
+                 pid="$1"; shift; apply=false; root="."
+                 for a in "$@"; do case "$a" in --apply) apply=true ;; --dry-run) apply=false ;; *) root="$a" ;; esac; done
+                 aid_lifecycle_plan_reconcile "$pid" "$root" "$apply" ;;
   ""|-h|--help)  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)             echo "unknown command: $cmd (see --help)" >&2; exit 1 ;;
 esac
