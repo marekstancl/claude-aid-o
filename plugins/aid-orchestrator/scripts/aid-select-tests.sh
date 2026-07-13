@@ -102,9 +102,15 @@ PATHS_FILE=""
 EVIDENCE_FILE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --base) BASE_REF="$2"; shift 2 ;;
-    --paths-file) PATHS_FILE="$2"; shift 2 ;;
-    --evidence-file) EVIDENCE_FILE="$2"; shift 2 ;;
+    --base)
+      [[ $# -lt 2 ]] && { echo "ERROR: --base requires a value" >&2; usage; exit 10; }
+      BASE_REF="$2"; shift 2 ;;
+    --paths-file)
+      [[ $# -lt 2 ]] && { echo "ERROR: --paths-file requires a value" >&2; usage; exit 10; }
+      PATHS_FILE="$2"; shift 2 ;;
+    --evidence-file)
+      [[ $# -lt 2 ]] && { echo "ERROR: --evidence-file requires a value" >&2; usage; exit 10; }
+      EVIDENCE_FILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; usage; exit 10 ;;
   esac
