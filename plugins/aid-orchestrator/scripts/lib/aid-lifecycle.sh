@@ -103,16 +103,19 @@ aid_lifecycle_schema_dir() { echo "${_AID_LC_LIB_DIR}/../../defaults/schemas"; }
 
 # aid_lifecycle_schema_validate <yaml_file> <schema_basename>
 # Converts the YAML artifact to JSON and validates it against the given schema
-# (additionalProperties:false rejects unknown fields). Requires python3 +
-# jsonschema; if unavailable, returns 0 (best-effort — the publicsafe value/key
-# net still runs independently). Exit 1 on a real schema violation.
+# (additionalProperties:false rejects unknown fields). The public-safe contract
+# is BINDING, so the validator is required: if python3/jsonschema is unavailable
+# this FAILS CLOSED (exit 1) rather than silently passing an unvalidated artifact
+# destined for a public-safe git commit. Exit 1 on a real schema violation.
 aid_lifecycle_schema_validate() {
   local yaml_f="$1" schema_base="$2"
   local schema_f; schema_f="$(aid_lifecycle_schema_dir)/${schema_base}"
   [[ -f "$yaml_f" ]] || { echo "schema: file not found: $yaml_f" >&2; return 1; }
   [[ -f "$schema_f" ]] || { echo "schema: schema not found: $schema_f" >&2; return 1; }
-  command -v python3 >/dev/null 2>&1 || return 0
-  python3 -c 'import jsonschema' >/dev/null 2>&1 || return 0
+  if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import jsonschema' >/dev/null 2>&1; then
+    echo "schema: validator unavailable (python3 + jsonschema required to validate lifecycle artifacts before commit)" >&2
+    return 1
+  fi
   yq -o=json '.' "$yaml_f" 2>/dev/null | python3 -c '
 import sys, json, jsonschema
 schema = json.load(open(sys.argv[1]))
@@ -327,8 +330,13 @@ _aid_lc_epic_accepted() {
   rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
   [[ -z "$rep" ]] && return 1
   local bf
-  bf="$(jq -r '.blocking_findings // empty' "$rep" 2>/dev/null || true)"
-  [[ "$bf" == "false" || "$bf" == "0" || -z "$bf" ]]
+  # NB: read the field DIRECTLY (no `// empty` — jq's `//` treats false as empty,
+  # which would conflate an explicit false verdict with an omitted one). Absent =>
+  # jq emits "null" => not accepted.
+  bf="$(jq -r '.blocking_findings' "$rep" 2>/dev/null || true)"
+  # Fail-closed: only an EXPLICIT false/0 verdict is accepted. Absent ("null"),
+  # true, or any nonzero count => not accepted (=> plan stays active, never closed).
+  [[ "$bf" == "false" || "$bf" == "0" ]]
 }
 
 # _aid_lc_find_delivery_merge <epic_id> <root> — echo an UNAMBIGUOUS merge SHA on

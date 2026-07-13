@@ -112,6 +112,20 @@ YML
   [ ! -f r/.aid-lifecycle/receipts/P810.yaml ]
 }
 
+@test "reconcile: audit report OMITTING blocking_findings is NOT accepted -> active (fail-closed)" {
+  _repo r; mkdir -p r/.aid-o/plans
+  printf '**EPIC 1: a (Steps 1-1)**\n' > r/.aid-o/plans/P760-x.md
+  ( cd r; git checkout -q -b task/e; echo w>f; git add -A; git commit -q -m w
+    rhead="$(git rev-parse HEAD)"; git checkout -q main
+    git merge -q --no-ff task/e -m "merge: E-760-1_1 — done"
+    ev=".aid-o/work/evidence/E-760-1_1/R-1"; mkdir -p "$ev"
+    # valid ancestor head_sha but NO blocking_findings verdict
+    printf '{"revision":{"head_sha":"%s"}}\n' "$rhead" > "$ev/audit-report.json" )
+  run "$CLI" plan-reconcile P760 --apply r
+  [ "$("$CLI" state P760 r)" = "active" ]
+  [ ! -f r/.aid-lifecycle/receipts/P760.yaml ]
+}
+
 @test "reconcile: absent plan -> not_found (no synthetic state)" {
   _repo r
   run "$CLI" plan-reconcile P064 --apply r
