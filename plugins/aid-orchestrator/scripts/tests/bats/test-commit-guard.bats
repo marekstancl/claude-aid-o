@@ -99,6 +99,26 @@ _stage() {
   git add "$f"
 }
 
+# _write_state_at <evidence_dir> <state> <branch> [done_phase]
+#   Writes a minimal fsm-state.yaml directly under an ARBITRARY evidence dir
+#   (unlike _write_state, which always targets $TEST_EVIDENCE_DIR) — used to
+#   simulate a SECOND, independent historical run alongside the primary one.
+_write_state_at() {
+  local dir="$1" state="$2" branch="$3" done_phase="${4:-}"
+  mkdir -p "$dir"
+  local sf="$dir/fsm-state.yaml"
+  {
+    echo "epic_id: E-other"
+    echo "run_id: R-other"
+    echo "state: $state"
+    echo "current_step: 1"
+    echo "total_steps: 1"
+    echo "branch: $branch"
+    echo "base_commit: $(git rev-parse HEAD)"
+    if [[ -n "$done_phase" ]]; then echo "done_phase: $done_phase"; fi
+  } > "$sf"
+}
+
 # _farm_excluding <cmd> — a PATH dir with every tool the hook needs EXCEPT <cmd>,
 # used to simulate absent tooling (jq) without touching the real environment.
 _farm_excluding() {
@@ -251,6 +271,42 @@ _farm_excluding() {
   _stage src/b.txt
   run bash "$HOOK"
   [ "$status" -eq 0 ]
+}
+
+# ─── (j) OBS-20260712-01 regression: a stale DONE/release run on a TASK
+#     branch (not main) must never restrict a plain commit on main ─────────────
+@test "j: a stale DONE/release run declared on a task branch does not limit a plain commit on main" {
+  # Simulates E-052-1_1: merged, DONE/release, weeks old, branch: task/.../main
+  # (not main itself). Stays checked out on main (no git checkout).
+  _write_state DONE task/E-old/main release 1
+  _stage src/anything.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+}
+
+# ─── (k) order-independence + ambiguity: two runs both explicitly declare
+#     branch: main in DONE/release → treated as ambiguous, never "pick one" ───
+@test "k: two runs both declaring branch:main in DONE/release is ambiguous — passes, does not enforce either scope" {
+  _write_project_versioning
+  _write_state DONE main release 1
+  _write_state_at "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-other/R-other" DONE main release
+  # A file that would FAIL either run's version whitelist if one were picked.
+  _stage src/rogue.txt
+  run bash "$HOOK"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ambiguous"* ]]
+}
+
+# ─── (l) a run explicitly declared on branch:main still enforces the
+#     version whitelist on main (the fix narrows the match, doesn't remove it) ─
+@test "l: a DONE/release run explicitly declared on branch:main still enforces the version whitelist" {
+  _write_project_versioning
+  _write_state DONE main release 1
+  _stage src/rogue.txt
+  run bash "$HOOK"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"DONE/release"* ]]
+  [[ "$output" == *"src/rogue.txt"* ]]
 }
 
 # ─── (i) companion: --no-verify bypass → commit_scope_violation at advance ────
