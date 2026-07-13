@@ -11,12 +11,21 @@
 # Checks (all three always run; `checks[]` in the JSON output carries one
 # entry per check regardless of pass/fail):
 #
-#   per_step_scoping    — multi-step plan (>1 step) where EVERY step's
-#                         `outputs` array OR EVERY step's `allowed_paths`
-#                         array is byte-identical (broadcast from an
-#                         EPIC-level flat section instead of being derived
-#                         per-step) -> fail. A mere partial overlap is NOT a
-#                         violation; only full identity across ALL steps is.
+#   per_step_scoping    — authoritative-block-first (v2.58.0 IMP-232). If the
+#                         EPIC.md declares explicit per-step scope blocks for
+#                         ALL steps, they are authoritative: each generated
+#                         step's `allowed_paths` must equal the cleaned paths
+#                         its own block declares (re-derived via the shared
+#                         lib/aid-scoping.sh cleaner) — a mismatch -> fail; and
+#                         blocks that are themselves degenerately broadcast
+#                         (every step's files AND outputs identical) -> fail
+#                         (R7). For legacy inputs WITHOUT per-step blocks,
+#                         hard-fail ONLY when BOTH `outputs` AND `allowed_paths`
+#                         are byte-identical across all steps — a single-field
+#                         match is legitimate sequential same-file refinement
+#                         (distinct outputs), not a broadcast. The genuine
+#                         P057/P058 broadcast bug (both fields broadcast, no
+#                         honored blocks) still fails.
 #
 #   ac_no_fragments     — PRIMARILY a count check: each step's
 #                         acceptance_criteria array length must equal the
@@ -59,6 +68,12 @@
 # Requirements: bash 4.0+, jq, awk, sed, grep
 set -euo pipefail
 
+# Shared per-step scoping cleaner (single source of truth with aid-epic-to-json.sh)
+# — used by the block-authoritative per_step_scoping check below. v2.58.0 IMP-232.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/aid-scoping.sh
+source "${SCRIPT_DIR}/../lib/aid-scoping.sh"
+
 PLAN_JSON="${1:?plan_json_path required}"
 EPIC_MD="${2:-}"
 
@@ -87,18 +102,94 @@ _add_check() {
 }
 
 # ===========================================================================
-# Check 1: per_step_scoping
+# Check 1: per_step_scoping (v2.58.0 IMP-232 — authoritative-block-first)
 # ===========================================================================
+# Legitimate multi-step EPICs often refine the SAME file(s) in sequence (e.g.
+# dispatch -> validate -> verify, all in one script). Byte-identical
+# allowed_paths across steps is therefore NOT proof of the P057/P058
+# broadcast bug on its own. The rules:
+#   1. If the EPIC.md carries explicit per-step scope blocks for ALL steps
+#      (`<!-- step-N: files=[...]; ac=[...] -->`), those blocks are AUTHORITATIVE:
+#      each generated step's allowed_paths MUST equal the cleaned paths its own
+#      block declares (via the shared lib cleaner) — a mismatch means the
+#      generator ignored the block (a real defect) -> FAIL.
+#   2. R7 guard: blocks that are THEMSELVES degenerately broadcast — every
+#      step's block files byte-identical AND every step's outputs identical —
+#      do NOT auto-pass (source-level broadcast masquerading as per-step blocks)
+#      -> FAIL.
+#   3. Legacy inputs with NO authoritative blocks: hard-fail ONLY when BOTH
+#      outputs AND allowed_paths are byte-identical across all steps. A single-
+#      field match is legitimate sequential refinement -> PASS.
+#   4. The genuine P057/P058 broadcast bug (broadcasts BOTH fields, no honored
+#      per-step blocks) still FAILs via rule 1 (mismatch) or rule 3 (both equal).
+# Two-independent-stages assumption: aid-plan-to-epic.sh emits the blocks;
+# aid-epic-to-json.sh derives allowed_paths from them. This gate re-derives with
+# the SAME lib so rule 1 is a real cross-check, not a tautology.
 ps_status="pass"
 ps_detail="single-step plan or all steps distinctly scoped — nothing broadcast"
 
 if [[ "$STEP_COUNT" -gt 1 ]]; then
   unique_outputs="$(jq '[.steps[].outputs // []] | unique | length' "$PLAN_JSON")"
   unique_allowed="$(jq '[.steps[].allowed_paths // []] | unique | length' "$PLAN_JSON")"
-  if [[ "$unique_outputs" -eq 1 || "$unique_allowed" -eq 1 ]]; then
-    ps_status="fail"
-    ps_detail="all ${STEP_COUNT} steps share identical outputs and/or allowed_paths (broadcast, not per-step): outputs_unique=${unique_outputs} allowed_paths_unique=${unique_allowed}"
-    VIOLATIONS+=("per_step_scoping: ${ps_detail}")
+
+  # Are authoritative per-step blocks present + parseable for EVERY step?
+  blocks_present="true"
+  if [[ -z "$EPIC_MD" || ! -f "$EPIC_MD" ]]; then
+    blocks_present="false"
+  else
+    for (( s=1; s<=STEP_COUNT; s++ )); do
+      _bl="$(grep -m1 -F "<!-- step-${s}: files=" "$EPIC_MD" 2>/dev/null || true)"
+      if [[ -z "$_bl" ]] || ! _aid_parse_scoping_line "$_bl" "$s" >/dev/null 2>&1; then
+        blocks_present="false"; break
+      fi
+    done
+  fi
+
+  if [[ "$blocks_present" == "true" ]]; then
+    # Rule 1: each step's generated allowed_paths must equal its block's cleaned
+    # paths (order-insensitive). Also collect normalized block-files to test R7.
+    _conflict=""
+    _first_block_files=""
+    _all_blocks_identical="true"
+    for (( s=1; s<=STEP_COUNT; s++ )); do
+      _bl="$(grep -m1 -F "<!-- step-${s}: files=" "$EPIC_MD")"
+      _files_json="$(_aid_parse_scoping_line "$_bl" "$s" | head -1)"
+      _block_allowed="$(_aid_allowed_paths_from_files_json "$_files_json")"
+      _block_sorted="$(jq -cS 'sort' <<< "$_block_allowed" 2>/dev/null || echo '[]')"
+      _gen_sorted="$(jq -cS '(.steps['"$((s-1))"'].allowed_paths // []) | sort' "$PLAN_JSON" 2>/dev/null || echo '[]')"
+      if [[ "$_block_sorted" != "$_gen_sorted" ]]; then
+        _conflict="step ${s}: generated allowed_paths ${_gen_sorted} != block-declared ${_block_sorted}"
+        break
+      fi
+      _norm_files="$(jq -cS 'sort' <<< "$_files_json" 2>/dev/null || echo '[]')"
+      if [[ -z "$_first_block_files" ]]; then
+        _first_block_files="$_norm_files"
+      elif [[ "$_norm_files" != "$_first_block_files" ]]; then
+        _all_blocks_identical="false"
+      fi
+    done
+
+    if [[ -n "$_conflict" ]]; then
+      ps_status="fail"
+      ps_detail="generated allowed_paths conflict with the explicit per-step block ($_conflict) — generator did not honor the authoritative block"
+      VIOLATIONS+=("per_step_scoping: ${ps_detail}")
+    elif [[ "$_all_blocks_identical" == "true" && "$unique_outputs" -eq 1 ]]; then
+      # R7: blocks themselves degenerately broadcast (identical files AND outputs)
+      ps_status="fail"
+      ps_detail="explicit per-step blocks are degenerately broadcast — every step's block files AND outputs are identical (source-level broadcast): outputs_unique=${unique_outputs}"
+      VIOLATIONS+=("per_step_scoping: ${ps_detail}")
+    else
+      ps_detail="per-step blocks present + honored; identical allowed_paths across steps is legitimate (non-degenerate blocks / distinct outputs): outputs_unique=${unique_outputs} allowed_paths_unique=${unique_allowed}"
+    fi
+  else
+    # Rule 3: legacy (no authoritative blocks) — fail only if BOTH identical.
+    if [[ "$unique_outputs" -eq 1 && "$unique_allowed" -eq 1 ]]; then
+      ps_status="fail"
+      ps_detail="legacy (no per-step blocks): all ${STEP_COUNT} steps share identical outputs AND allowed_paths (broadcast): outputs_unique=${unique_outputs} allowed_paths_unique=${unique_allowed}"
+      VIOLATIONS+=("per_step_scoping: ${ps_detail}")
+    else
+      ps_detail="legacy (no per-step blocks): steps differ in outputs and/or allowed_paths — not a broadcast: outputs_unique=${unique_outputs} allowed_paths_unique=${unique_allowed}"
+    fi
   fi
 fi
 _add_check "per_step_scoping" "$ps_status" "$ps_detail"

@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AID plan-lifecycle closure receipt (IMP-232 v2.58.0)",
+  "description": "Git-tracked, PUBLIC-SAFE permanent record that a plan's required EPICs were delivered + review-accepted. Technical fields only — no report bodies, findings text, prompts, absolute/local paths, secrets, PII, or free-form waiver reasons (waivers are hash/id refs only).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repo_id", "plan_id", "plan_manifest_sha", "state"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "repo_id": { "type": "string", "minLength": 1 },
+    "plan_id": { "type": "string", "pattern": "^P[0-9]+$" },
+    "plan_manifest_sha": { "type": "string" },
+    "state": { "enum": ["closed", "delivered-but-unreconciled", "legacy-unverifiable", "closing_pending_commit"] },
+    "target_branch": { "type": "string" },
+    "finalized_at": { "type": "string" },
+    "aid_version": { "type": "string" },
+    "epics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["epic_id"],
+        "properties": {
+          "epic_id": { "type": "string", "pattern": "^E-[0-9]+-[0-9]+_[0-9]+$" },
+          "delivery_sha": { "type": "string" },
+          "reviewed_sha": { "type": "string" },
+          "verdict": { "type": "string" },
+          "unresolved_blocker_count": { "type": "integer", "minimum": 0 },
+          "waivers": { "type": "array", "items": { "type": "string" } },
+          "report_hashes": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "review_profile": { "type": "string" },
+          "report_schema_version": { "type": "string" }
+        }
+      }
+    }
+  }
+}
