@@ -38,14 +38,16 @@ queue_mode="chain"
 plugin_dir=""
 custom_depends=""
 streamlined=false   # P040 Component D passthrough → aid-json-to-run.sh → aid-fsm.sh init (CP3 gap fix)
+force_init_reason="" # PM-authorized, audited cross-plan force-init reason → aid-json-to-run.sh → aid-fsm.sh init (waives ONLY the false-positive cross-plan ca-review-complete precondition)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)        plan="$2";           shift 2 ;;
-    --queue-mode)  queue_mode="$2";     shift 2 ;;
-    --plugin-dir)  plugin_dir="$2";     shift 2 ;;
-    --depends-on)  custom_depends="$2"; shift 2 ;;
-    --streamlined) streamlined=true;    shift 1 ;;
+    --plan)         plan="$2";           shift 2 ;;
+    --queue-mode)   queue_mode="$2";     shift 2 ;;
+    --plugin-dir)   plugin_dir="$2";     shift 2 ;;
+    --depends-on)   custom_depends="$2"; shift 2 ;;
+    --streamlined)  streamlined=true;    shift 1 ;;
+    --force-init-reason) force_init_reason="$2"; shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -385,22 +387,16 @@ for phase in $(seq 1 "$total_phases"); do
   run_output_dir=".aid-o/work/runs/${run_id}"
   mkdir -p "$run_output_dir" 2>/dev/null || true
 
-  if [[ "$streamlined" == "true" ]]; then
-    run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \
-      --plan-json "$plan_json_path" \
-      --run-template "$run_template" \
-      --epic "$epic_path" \
-      --output-dir "$run_output_dir" \
-      --run-id "$run_id" \
-      --streamlined)"
-  else
-    run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" \
-      --plan-json "$plan_json_path" \
-      --run-template "$run_template" \
-      --epic "$epic_path" \
-      --output-dir "$run_output_dir" \
-      --run-id "$run_id")"
-  fi
+  json_to_run_args=(
+    --plan-json "$plan_json_path"
+    --run-template "$run_template"
+    --epic "$epic_path"
+    --output-dir "$run_output_dir"
+    --run-id "$run_id"
+  )
+  [[ "$streamlined" == "true" ]] && json_to_run_args+=(--streamlined)
+  [[ -n "$force_init_reason" ]] && json_to_run_args+=(--force-init-reason "$force_init_reason")
+  run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" "${json_to_run_args[@]}")"
 
   # -------------------------------------------------------------------------
   # Phase N.d: Determine depends_on for queue entry

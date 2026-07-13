@@ -613,7 +613,7 @@ _aid_allowed_paths_from_files_json() {
   n="$(echo "$files_json" | jq 'length')"
   for (( idx=0; idx<n; idx++ )); do
     entry="$(echo "$files_json" | jq -r --argjson i "$idx" '.[$i]')"
-    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify):[[:space:]]*//')"
+    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
     while IFS= read -r p; do
       [[ -z "$p" ]] && continue
       out_json="$(echo "$out_json" | jq --arg p "$p" 'if index($p) then . else . + [$p] end')"

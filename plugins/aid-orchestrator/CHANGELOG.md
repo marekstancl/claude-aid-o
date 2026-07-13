@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.57.2] — 2026-07-13
+
+### Added
+- **Audited cross-plan force-init passthrough (`--force-init-reason`)** — `aid-json-to-run.sh` and `aid-auto-pipeline.sh` gain an explicit, invocation-scoped `--force-init-reason "<why>"` flag that forwards the sanctioned `aid-fsm.sh init --force --reason` override to the FSM. It waives ONLY the plan-level DONE gate (the false-positive cross-plan `ca-review-complete` precondition raised when a different plan is intentionally in progress); all other init checks (branch enforcement, clean-worktree, duplicate-state) still run and are not masked. The FSM enforces a ≥20-char reason and records the override to the run timeline, the cross-EPIC audit log, and a waiver artifact. It is a CLI flag rather than an env var, so it cannot leak into unrelated inits.
+
+### Fixed
+- **`aid-epic-to-json.sh` Files-verb parser dropped `Test:`/`Rewrite:` labels into `allowed_paths`** — the label-strip step only removed `Create:`/`Modify:` prefixes, so a Files entry using the plan-template-sanctioned `Test:` or `Rewrite:` verb kept its label and produced a non-path-like `allowed_paths` entry (still carrying the `Test:`/`Rewrite:` prefix), breaking the pipeline `allowed_paths_shape` contract. All four verbs are now stripped.
+- **`fsm_force_override` timeline event lost at `init` time** — the arg-parse loop reached `--force` before `cmd_init` created the evidence directory, so the timeline event was written into a nonexistent directory and silently dropped (the audit log and waiver survived because they `mkdir` first). The override is now recorded on all three surfaces (timeline + audit log + waiver).
+
 ## [2.57.1] — 2026-07-13
 
 ### Fixed
