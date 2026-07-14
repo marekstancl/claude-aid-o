@@ -246,6 +246,26 @@ The `## Implementation Steps` section replaces the old `## High-Level Steps` tab
 - Modify: `exact/path/to/existing-file.ts` (lines ~{start}-{end}) — {what changes and why}
 - Test: `tests/exact/path/to/test-file.spec.ts` — {what behavior this tests}
 
+**Files-entry grammar (enforced — `aid-plan-lint.sh` runs at plan write time AND as a
+hard pre-flight in `aid-plan-to-epic.sh`; a violation stops generation with the exact
+line).** Each Files bullet MUST be exactly:
+
+```
+- <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [— prose]
+```
+
+- The path(s) come FIRST, each in backticks, immediately after the `Verb:` label.
+- Multiple files in one bullet ONLY via an explicit `` + `` between backtick paths.
+- The only parenthetical allowed before the `—` is a `(lines ~N-M)` range; put every
+  other note AFTER the `—`.
+
+NEVER (these are why plans used to blow up mid-generation):
+- ❌ bold-wrap the bullet: `- **Modify: \`x\` …**` (the `**` breaks label parsing)
+- ❌ start a bullet with a parenthetical: `- (note about something …)`
+- ❌ a prose-only entry with no backtick path: `- Modify: the remaining version files`
+- ❌ a word before the first backtick: `- Test: extend \`x\` (or …)`
+- ❌ split the verb and its path across two lines (the path is silently dropped)
+
 **Architecture Context:**
 {How this step fits into the overall architecture. Which components it touches,
 which data flows it implements or modifies. Reference the Architecture section.}

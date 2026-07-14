@@ -19,6 +19,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+# Shared per-step scoping helpers (single source of truth with aid-epic-to-json.sh,
+# gates/aid-contract-validate.sh and aid-plan-lint.sh) — provides the ONE Files-block
+# bullet extractor (_aid_extract_files_bullets) + path cleaner (_aid_split_path_entry).
+# shellcheck source=lib/aid-scoping.sh
+source "${SCRIPT_DIR}/lib/aid-scoping.sh"
 check_prerequisites
 
 # ---------------------------------------------------------------------------
@@ -78,6 +83,26 @@ while IFS='=' read -r key val; do
 done <<< "$frontmatter"
 
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
+
+# ---------------------------------------------------------------------------
+# Step 1a: Files-shape preflight (v2.58.3) — fail FAST on malformed **Files:**
+# entries, listing the WHOLE plan's violations at once, BEFORE any EPIC file is
+# written or the plan counter is bumped. Previously such entries only surfaced
+# phase-by-phase in the generation-time D5 allowed_paths_shape gate (a plan could
+# fail at phase 5 after phases 1-4 were already scaffolded). aid-plan-lint.sh
+# shares the SAME extractor + cleaner + shape predicate as that gate via
+# lib/aid-scoping.sh, so a plan that passes the lint provably passes the gate.
+# ERROR-tier (gate-breaking) always blocks; STRICT-tier blocks only lifecycle_strict
+# plans (legacy plans get one advisory printout on phase 1).
+# set -e-safe capture: a non-zero lint must NOT abort at the assignment itself (that
+# would skip the diagnostics + error_exit below and exit a bare 1 with no output).
+_lint_out="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)" && _lint_rc=0 || _lint_rc=$?
+if [[ "$_lint_rc" -ne 0 ]]; then
+  printf '%s\n' "$_lint_out" >&2
+  error_exit "Plan Files-shape lint failed for $plan (fix the entries above). Caught pre-generation so it never fails mid-split." 7
+elif [[ "$phase" -eq 1 && -n "$_lint_out" ]]; then
+  printf '%s\n' "$_lint_out" >&2
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1b: CP1-deep evidence gate (high-risk plans only)
@@ -519,39 +544,12 @@ strip_cross_phase_deps() {
 #        "`CHANGELOG.md` + `plugins/aid-orchestrator/CHANGELOG.md` (identical)")
 #
 # Output (stdout): one cleaned path per line (may be more than one line)
-_aid_split_path_entry() {
-  local entry="$1"
-  local rest="$entry"
-  local candidate found_backtick_path=0 first_span=1
-
-  while true; do
-    if [[ "$first_span" -eq 1 ]]; then
-      [[ "$rest" == '`'* ]] || break
-    else
-      [[ "$rest" == ' + `'* ]] || break
-      rest="${rest# + }"
-    fi
-    rest="${rest#\`}"           # drop the opening backtick
-    candidate="${rest%%\`*}"    # everything up to the next backtick
-    rest="${rest#*\`}"          # drop through the closing backtick
-    if [[ -n "$candidate" && "$candidate" != *[[:space:]]* ]]; then
-      printf '%s\n' "$candidate"
-      found_backtick_path=1
-      first_span=0
-    else
-      break
-    fi
-  done
-
-  if [[ "$found_backtick_path" -eq 0 ]]; then
-    local fallback="$entry"
-    fallback="${fallback%%--[[:space:]]*}"
-    fallback="$(printf '%s' "$fallback" | sed 's/[[:space:]]*\xe2\x80\x94[[:space:]].*//')"
-    fallback="${fallback//\`/}"
-    fallback="$(printf '%s' "$fallback" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-    [[ -n "$fallback" ]] && printf '%s\n' "$fallback"
-  fi
-}
+#
+# v2.58.3: the executable copy that used to live here has been REMOVED — the real
+# `_aid_split_path_entry` now comes from the single source of truth `lib/aid-scoping.sh`
+# (sourced at the top of this script). aid-epic-to-json.sh + gates/aid-contract-
+# validate.sh + aid-plan-lint.sh all use that same one, so there is no longer a
+# reimplemented copy to drift from.
 
 # Collect per-step data
 steps_table_rows=""
@@ -712,27 +710,15 @@ for sn in "${phase_steps[@]}"; do
   # section stays on the indentation-agnostic extraction above, unchanged,
   # to avoid regressing existing goldens). A Files entry sometimes carries
   # further-INDENTED sub-bullets that elaborate on a single top-level
-  # "Create:"/"Modify:" bullet (e.g. this very plan's own Step 2/4/5/6 Files
-  # sections use indented "**SPLIT multi-path bullet:** ..." elaboration
-  # under one Modify: line) — those are prose continuation, not separate
-  # files, and must NOT be surfaced as their own files[] array entry (a
-  # later per-step allowed_paths derivation would otherwise try to clean
-  # them into a "path" and fail the D5 allowed_paths_shape check — caught
-  # during Step 5's self-consistency regen of this very plan). Only a
-  # bullet with NO leading whitespace before its "-" is a real, distinct
-  # Files entry.
-  step_artifacts_top_level="$(echo "$step_content" | awk '
-    BEGIN { in_files = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
-      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
-      if (in_files && $0 ~ /^-[[:space:]]/) {
-        sub(/^-[[:space:]]*/, "", $0)
-        if ($0 != "") print "- " $0
-      }
-    }
-  ')"
+  # "Create:"/"Modify:" bullet — those are prose continuation, not separate
+  # files, and must NOT be surfaced as their own files[] array entry. Only a
+  # bullet with NO leading whitespace before its "-" is a real, distinct entry.
+  #
+  # v2.58.3: this is now the SHARED extractor _aid_extract_files_bullets (single
+  # source of truth in lib/aid-scoping.sh, byte-identical to the awk it replaces),
+  # so aid-plan-lint.sh sees exactly the same "which lines are Files entries" as
+  # this generator — they cannot disagree on indented sub-bullets or Test: entries.
+  step_artifacts_top_level="$(printf '%s\n' "$step_content" | _aid_extract_files_bullets)"
 
   # Extract files (Create/Modify paths) for the flattened `## Scope >
   # Allowed files/paths` section — UNCHANGED from before this step. D4's

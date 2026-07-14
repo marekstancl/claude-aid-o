@@ -99,6 +99,21 @@ Delegate to `skills/plan-writing.md` (Mode A — Post-Brainstorming).
 Pass all approved sections. Plan written to `.aid-o/plans/P{NNN}-{topic}.md`.
 Output: `=== Step 8/9: Document ===`
 
+**Files-shape lint (automatic — run BEFORE CP1, immediately after the plan is
+written).** This is early feedback, not the enforcement of record: the hard
+gate is the deterministic pre-flight inside `aid-plan-to-epic.sh` (which CANNOT
+be skipped). Run:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"
+```
+
+If it exits non-zero (ERROR-tier, or STRICT-tier on a `lifecycle_strict` plan),
+fix the exact Files entries it names — per the grammar in `skills/plan-writing.md`
+— and re-run until it passes, BEFORE proceeding to CP1. Do not hand a plan with
+blocking Files-shape violations to CP1 or to EPIC generation. CP1 (Step 9) then
+INCLUDES the lint's output in its review context but does not replace it.
+
 ### Step 9: Plan Quality Review (CP1)
 Dispatch verifier with `docs-review` focus on the written plan file.
 Present findings to PM with full context (no auto-fix — design decisions).
@@ -286,6 +301,12 @@ Write an exhaustive implementation plan from specification or topic.
 6. **Plan assembly** — write section by section per `skills/plan-writing.md` template
 7. **Quality gates** — Forbidden Phrase Detection + Completeness Gate (24 checks: 16 original + #17 + 17a-e + #18 + #19)
 8. **Write file** — write to `.aid-o/plans/P{NNN}-{topic}.md`, delete interim doc
+8a. **Files-shape lint (automatic, before CP1)** — run
+    `bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" ".aid-o/plans/P{NNN}-{topic}.md"`.
+    On a non-zero exit, fix the exact Files entries it names (per the grammar in
+    `skills/plan-writing.md`) and re-run until it passes, BEFORE CP1. Early
+    feedback only — the hard gate is the deterministic pre-flight in
+    `aid-plan-to-epic.sh`, which cannot be skipped.
 9. **Plan Quality Review (CP1)** — dispatch verifier with `docs-review` focus
    on the written plan file. **Identical to Mode: Brainstorm Step 9** —
    perform the codebase grounding pass (mandatory), include the EVIDENCE
