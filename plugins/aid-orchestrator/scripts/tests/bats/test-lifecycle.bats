@@ -106,14 +106,27 @@ declared_epics:
   - {id: E-900-1_1, scope: required}
 depends_on_plans: []
 deliveries:
-  E-900-1_1: {reviewed_verdict: pass, unresolved_blockers: 0, delivery_sha: d1}
+  E-900-1_1: {delivery: delivered, review: accepted, unresolved_blockers: 0, delivery_sha: d1}
 YML
   run "$CLI" state P900 .
   [ "$output" = "delivered-but-unreconciled" ]
 }
 
 @test "state: staged receipt (uncommitted) => closing_pending_commit; committed => closed" {
-  mkdir -p .aid-lifecycle/receipts
+  # a CLOSABLE plan (manifest, all required delivered+accepted) is a precondition
+  # for an uncommitted receipt to read as closing_pending_commit (a stale receipt
+  # on a non-closable plan is ignored, not treated as pending).
+  mkdir -p .aid-lifecycle/manifests .aid-lifecycle/receipts
+  cat > .aid-lifecycle/manifests/P900.yaml <<'YML'
+schema_version: aid-lifecycle-1.0
+repo_id: t
+plan_id: P900
+declared_epics:
+  - {id: E-900-1_1, scope: required}
+depends_on_plans: []
+deliveries:
+  E-900-1_1: {delivery: delivered, delivery_sha: d1, review: accepted, unresolved_blockers: 0}
+YML
   cat > .aid-lifecycle/receipts/P900.yaml <<'YML'
 schema_version: aid-lifecycle-receipt-1.0
 repo_id: t
@@ -140,7 +153,7 @@ declared_epics:
   - {id: E-900-2_2, scope: backlog}
 depends_on_plans: []
 deliveries:
-  E-900-1_2: {reviewed_verdict: pass, unresolved_blockers: 0, delivery_sha: d1}
+  E-900-1_2: {delivery: delivered, review: accepted, unresolved_blockers: 0, delivery_sha: d1}
 YML
   run "$CLI" state P900 .
   [ "$output" = "delivered-but-unreconciled" ]

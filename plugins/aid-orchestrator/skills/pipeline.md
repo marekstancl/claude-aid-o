@@ -1399,6 +1399,20 @@ skip).
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
 15. **Branch merge:** `git merge task/{epic_id}/main --no-ff -m "feat: complete EPIC {epic_id}"`
     → delete run branch
+15a. **Record delivery (IMP-232 v2.58.1 — post-merge, on the target branch):**
+    ```bash
+    bash {plugin_path}/scripts/aid-fsm.sh plan-record-delivery {epic_id} {project_root}
+    ```
+    This is the single, named post-merge hook. Run it IMMEDIATELY after step 15,
+    on the target branch. It records THIS EPIC's delivery SHA + review provenance
+    into the git-tracked lifecycle manifest (isolated index — your staged/working
+    changes are untouched), and if this was the last **required** EPIC now
+    delivered + review-accepted, it writes the closure receipt and the plan becomes
+    `closed`. Metadata-only; never edits the plan or the merge. A merged EPIC whose
+    historical review is unverifiable is recorded `delivery: delivered, review:
+    unverifiable` — the plan stays `active`, never falsely closed. (Pre-merge
+    `plan-close` at step 9 only verifies reviews + keeps the `ca-review-complete`
+    marker; it does NOT write a delivery SHA or a tracked commit on the task branch.)
 16. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
     Metrics stored to Qdrant (`aid-orchestration-log`) or fallback JSONL.
 

@@ -40,7 +40,7 @@ declared_epics:
   - {id: E-${pid#P}-1_1, scope: required}
 depends_on_plans: []
 deliveries:
-  E-${pid#P}-1_1: {reviewed_sha: aaa, reviewed_verdict: pass, unresolved_blockers: 0, delivery_sha: d1}
+  E-${pid#P}-1_1: {reviewed_sha: aaa, delivery: delivered, review: accepted, unresolved_blockers: 0, delivery_sha: d1}
 YML
 }
 
@@ -150,16 +150,21 @@ YML
   [ "$("$CLI" state P900 r)" = "closed" ]
 }
 
-@test "interrupt AFTER git add (staged receipt): recovery (re-run) commits it, ends clean+closed" {
+@test "collision: a user-staged lifecycle path is REFUSED (not clobbered), with a clear error" {
+  # AID never stages a lifecycle path in the real index (it uses an isolated
+  # index), so a staged lifecycle path can only be the user's. The op must refuse
+  # fail-closed and leave the user's staged blob untouched.
   _repo r; _manifest_delivered r P900
   mkdir -p r/.aid-lifecycle/receipts
-  ( cd r && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_build_receipt P900 . > .aid-lifecycle/receipts/P900.yaml && git add -- .aid-lifecycle/receipts/P900.yaml )
-  # recovery: plan-close is idempotent -> commits the staged receipt
+  ( cd r && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_build_receipt P900 . > .aid-lifecycle/receipts/P900.yaml \
+      && printf '\n# USER EDIT\n' >> .aid-lifecycle/receipts/P900.yaml && git add -- .aid-lifecycle/receipts/P900.yaml )
+  local staged_before; staged_before="$(cd r && git rev-parse :.aid-lifecycle/receipts/P900.yaml)"
   run "$CLI" plan-close P900 r
-  [ "$status" -eq 0 ]
-  [ "$("$CLI" state P900 r)" = "closed" ]
-  run bash -c "cd r && git status --porcelain --untracked-files=no"
-  [ -z "$output" ]
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"staged"* ]]                          # clear error mentioning the staged collision
+  # the user's staged blob is byte-identical (not clobbered)
+  [ "$(cd r && git rev-parse :.aid-lifecycle/receipts/P900.yaml)" = "$staged_before" ]
+  [ "$("$CLI" state P900 r)" != "closed" ]
 }
 
 @test "plan-close leaves OTHER working changes untouched (pathspec commit)" {
