@@ -30,6 +30,13 @@ Thumbs.db
 evidence/
 !evidence/.gitkeep
 
+# P065 Step 1: committed, sanitized real-Codex capture sample — this is a small,
+# fixed, deliberately-tracked grounding artifact (not a runtime evidence dump),
+# but the generic `evidence/` rule above blindly matches any dir named
+# `evidence` anywhere in the tree, including this one. Re-include it.
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/**
+
 # Development workspace (session logs, active work, internal docs)
 workspace/
 
