@@ -63,7 +63,7 @@
 # Exit codes: 0 = normal (valid-family / invalid_json / no_stream),
 #             1 = rate_limited / failure, 2 = unknown FAKE_CODEX_MODE.
 # =============================================================================
-set -uo pipefail
+set -euo pipefail
 
 # ── --version short-circuit (before mode logic, matches real codex) ──────────
 for _a in "$@"; do
