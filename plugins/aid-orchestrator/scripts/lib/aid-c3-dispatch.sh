@@ -114,6 +114,24 @@ _sha256_str() {
   printf '%s' "$1" | sha256sum | awk '{print $1}'
 }
 
+# _path_is_within <root> <candidate>  — true iff <candidate> (relative or
+# absolute) resolves to somewhere INSIDE <root>. Uses `realpath -m` so it
+# works for not-yet-existing/deleted paths (a changed-path entry for a
+# deleted file must still validate). CP3 security finding: AID_CHANGED_PATHS
+# entries and AID_PLAN_AC_FILE both become citable evidence in the manifest
+# (allowlist[]/input_hash and the Codex brief respectively) — an unvalidated
+# "../../etc/passwd"-style or absolute entry would hash and expose real
+# out-of-repo file content. Every path from either source MUST pass this
+# check before being read or recorded.
+_path_is_within() {
+  local root="$1" candidate="$2" resolved
+  resolved="$(realpath -m -- "$candidate" 2>/dev/null)" || return 1
+  case "$resolved" in
+    "$root"|"$root"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ===========================================================================
 # cmd_build_manifest <evidence_dir> <base_sha> <head_sha> <risk_profile>
 # ===========================================================================
@@ -207,6 +225,8 @@ cmd_build_manifest() {
   if [[ -n "${AID_PLAN_AC_FILE:-}" ]]; then
     [[ -f "$AID_PLAN_AC_FILE" && -r "$AID_PLAN_AC_FILE" ]] \
       || _fail "AID_PLAN_AC_FILE set but unreadable: $AID_PLAN_AC_FILE"
+    _path_is_within "$repo_root" "$AID_PLAN_AC_FILE" \
+      || _fail "AID_PLAN_AC_FILE escapes the repo (path traversal / absolute path rejected): $AID_PLAN_AC_FILE"
     cat "$AID_PLAN_AC_FILE" > "$c3_dir/bundle-plan-ac.md" \
       || _fail "cannot write bundle-plan-ac.md from $AID_PLAN_AC_FILE"
   elif [[ -f "$evidence_dir/final_report.md" ]]; then
@@ -278,6 +298,8 @@ cmd_build_manifest() {
   if [[ -n "${AID_CHANGED_PATHS:-}" && -f "$AID_CHANGED_PATHS" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -z "$line" ]] && continue
+      _path_is_within "$repo_root" "$repo_root/$line" \
+        || _fail "AID_CHANGED_PATHS entry escapes the repo (path traversal / absolute path rejected): $line"
       allow_arr+=("$line")
       read_path["$line"]="$repo_root/$line"
     done < "$AID_CHANGED_PATHS"

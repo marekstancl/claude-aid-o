@@ -114,7 +114,7 @@ build_findings() { # $1 = include_action_owner (1|0) on the high finding
       {severity:"high",area:"correctness",
        finding:"Cross-provider review found a possibly unchecked error path in the changed code.",
        recommendation:"Add an explicit error branch and a covering test.",
-       action_owner:"backend"},
+       action_owner:"implementer"},
       {severity:"medium",area:"maintainability",
        finding:"Naming in the touched module could be clearer.",
        recommendation:"Rename for clarity in a follow-up."}
