@@ -373,10 +373,29 @@ aid_lifecycle_plan_close() {
 }
 
 # ── Legacy reconciliation (metadata-only; never fabricates) ──────────────────
+# _aid_lc_frontmatter_depends <plan_file> — echo the plan's structured
+# depends_on_plans entries (one per line), or nothing. Reads ONLY the YAML
+# frontmatter (the block bounded by the first two `---` fences); a plan without
+# frontmatter or without the key yields empty. Tolerates leading blank lines before
+# the opening fence so a stray blank line can never silently drop a declared
+# dependency (a D1 gate fail-OPEN). mikefarah-yq safe (`// []`, not the jq-ism `[]?`).
+_aid_lc_frontmatter_depends() {
+  local pf="$1"
+  [[ -f "$pf" ]] || return 0
+  awk '
+    !started && /^[[:space:]]*$/ { next }                 # skip leading blank lines
+    !started && /^---[[:space:]]*$/ { started=1; infm=1; next }  # opening fence
+    !started { exit }                                     # first non-blank line is not a fence => no frontmatter
+    infm && /^---[[:space:]]*$/ { exit }                  # closing fence
+    infm { print }
+  ' "$pf" 2>/dev/null \
+    | yq -r '.depends_on_plans // [] | .[]' 2>/dev/null || true
+}
+
 # aid_lifecycle_ensure_manifest <plan_id> <root> — create + commit a git-tracked
 # manifest from the STRICT legacy parse if none exists. NEVER edits the prose
 # plan. Returns 0 (present/created), 2 (ambiguous => legacy-unverifiable),
-# 3 (plan not found).
+# 3 (plan not found), 4 (user collision on the manifest path), 5 (commit not durable).
 aid_lifecycle_ensure_manifest() {
   local plan_id="$1" root="${2:-.}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
@@ -398,7 +417,14 @@ aid_lifecycle_ensure_manifest() {
   [[ "$rc" -ne 0 ]] && return 2
   local repo_id; repo_id="$(aid_repo_id "$root")"
   local spsha="sha256:$(sha256sum "$plan_file" 2>/dev/null | cut -c1-64)"
+  # Structured dependencies from the plan frontmatter (D1): a real `depends_on_plans`
+  # is written into the tracked manifest so the init gate can actually block on it
+  # via the normal path (legacy plans without frontmatter => empty, unchanged).
+  local deps; deps="$(_aid_lc_frontmatter_depends "$plan_file")"
   mkdir -p "$(dirname "$manifest")"
+  # Build to a TEMP first (never write straight over the worktree path), so an
+  # existing UNTRACKED manifest can be guarded exactly like the receipt path.
+  local tmp; tmp="$(mktemp)"
   {
     echo "schema_version: aid-lifecycle-1.0"
     echo "repo_id: ${repo_id}"
@@ -410,12 +436,31 @@ aid_lifecycle_ensure_manifest() {
       [[ -z "$eid" ]] && continue
       echo "  - {id: ${eid}, scope: ${scope}}"
     done <<< "$parsed"
-    echo "depends_on_plans: []"
-  } > "$manifest"
-  # Validate (public-safe) then commit the identity + manifest TOGETHER so the
-  # repo identity is durable from the moment the plan gets a manifest (survives a
-  # clean clone). Isolated commit — the user's index is never touched.
-  aid_lifecycle_validate_artifact "$manifest" "plan-lifecycle-manifest.schema.json" || { rm -f "$manifest"; return 2; }
+    if [[ -z "$deps" ]]; then
+      echo "depends_on_plans: []"
+    else
+      echo "depends_on_plans:"
+      local d; while read -r d; do [[ -n "$d" ]] && echo "  - ${d}"; done <<< "$deps"
+    fi
+  } > "$tmp"
+  # Validate (public-safe) BEFORE placing the file into the worktree.
+  aid_lifecycle_validate_artifact "$tmp" "plan-lifecycle-manifest.schema.json" || { rm -f "$tmp"; return 2; }
+  # Untracked-collision guard (mirror of aid_lifecycle_commit_receipt): a manifest
+  # already on disk that is NOT tracked is EITHER our own interrupted-run artifact
+  # (byte-identical to the canonical one => safe to recover) OR a foreign user file
+  # (differs => refuse, never clobber). A tracked+modified manifest is already
+  # refused by the entry precheck above; this guards only the untracked case.
+  if [[ -f "$manifest" ]] && ! git -C "$root" ls-files --error-unmatch -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1; then
+    if ! cmp -s "$manifest" "$tmp"; then
+      rm -f "$tmp"
+      echo "lifecycle: refusing — an untracked manifest .aid-lifecycle/manifests/${plan_id}.yaml differs from the canonical manifest (user collision; remove or reconcile it — AID will not overwrite it)" >&2
+      return 4
+    fi
+  fi
+  mv "$tmp" "$manifest"
+  # Commit the identity + manifest TOGETHER so the repo identity is durable from the
+  # moment the plan gets a manifest (survives a clean clone). Isolated commit — the
+  # user's index is never touched.
   # Fail-closed: the manifest+identity MUST land as a durable commit. A commit
   # failure returns non-zero (never a silent "ensured") so the caller can stop.
   _aid_lc_isolated_commit "$root" "lifecycle: manifest + identity for ${plan_id}" \
@@ -574,11 +619,20 @@ aid_lifecycle_plan_reconcile() {
     if ! _aid_lc_isolated_commit "$root" "lifecycle: delivery bindings for ${plan_id} (reconcile)" ".aid-lifecycle/manifests/${plan_id}.yaml"; then
       echo "state: reconcile — delivery bindings NOT committed (recoverable — re-run --apply)"; return 5
     fi
-    local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
+    local st rcv_rc=0; st="$(aid_plan_closure_state "$plan_id" "$root")"
     if [[ "$st" == "delivered-but-unreconciled" || "$st" == "closing_pending_commit" ]]; then
-      aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1 && st="closed"
+      if aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1; then st="closed"; else rcv_rc=5; fi
     fi
     echo "state: ${st}"
+    # A receipt-commit failure must NOT be reported as success: propagate non-zero
+    # (the stdout state line stays honest — never "closed" when the receipt failed).
+    # NB: a proper if/fi (not `[[ ]] && { }`) so a clean run returns 0, not the
+    # falsy exit status of the test when rcv_rc==0.
+    if [[ "$rcv_rc" -ne 0 ]]; then
+      echo "reconcile: closure receipt NOT committed for ${plan_id} (recoverable — re-run --apply)" >&2
+      return 5
+    fi
+    return 0
   else
     # Dry-run: derive the would-be state without touching disk.
     if [[ "$all_required_ok" == "true" ]]; then echo "state: delivered-but-unreconciled (would close on --apply)"
@@ -625,12 +679,24 @@ aid_lifecycle_record_delivery() {
   if ! _aid_lc_isolated_commit "$root" "lifecycle: delivery ${epic_id} (post-merge)" ".aid-lifecycle/manifests/${plan_id}.yaml"; then
     echo "record-delivery ${epic_id}: manifest binding not committed (recoverable — re-run on ${plan_id})" >&2; return 5
   fi
-  local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
+  local st rcv_rc=0; st="$(aid_plan_closure_state "$plan_id" "$root")"
   if [[ "$st" == "delivered-but-unreconciled" || "$st" == "closing_pending_commit" ]]; then
-    aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1 && st="$(aid_plan_closure_state "$plan_id" "$root")"
+    if aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1; then
+      st="$(aid_plan_closure_state "$plan_id" "$root")"
+    else
+      rcv_rc=5
+    fi
   fi
   local dtag; case "$brc" in 0) dtag="delivered";; 2) dtag="unverifiable";; *) dtag="not-delivered";; esac
   echo "record-delivery ${epic_id}: delivery=${dtag} plan=${plan_id} state=${st}"
+  # A receipt-commit failure on the last required EPIC must NOT return success —
+  # the state line above stays honest (never "closed"), and we surface non-zero so
+  # automation does not treat an unfinished closure as done.
+  if [[ "$rcv_rc" -ne 0 ]]; then
+    echo "record-delivery ${epic_id}: closure receipt NOT committed for ${plan_id} (recoverable — re-run on ${plan_id})" >&2
+    return 5
+  fi
+  return 0
 }
 
 # ── Convenience: does a plan even exist here? (for not_found result) ──────────

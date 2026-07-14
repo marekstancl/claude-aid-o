@@ -16,6 +16,11 @@ lifecycle_strict: true   # IMP-232 plan-level closure. When true, the pipeline
                          # scaffold time (fail-closed on ambiguous EPIC grammar).
                          # New plans are strict by default. Legacy plans without
                          # this flag proceed under a loud, audited migration.
+depends_on_plans: []     # IMP-232 D1 dependency gate. List the plan IDs this plan
+                         # HARD-depends on, e.g. [P061]. Each listed plan must be
+                         # `closed` before this plan's EPICs can init (override:
+                         # aid-fsm.sh init … --force --reason '<why>'). Written into
+                         # the tracked manifest at scaffold; empty = no hard deps.
 ---
 
 # Plan: {Title}

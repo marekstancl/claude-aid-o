@@ -256,6 +256,43 @@ _user_index_fp() { ( cd "$1" && { git diff --cached --name-status; echo "--"; gi
   [ "$status" -eq 0 ]                                                 # durable
 }
 
+# ── v2.58.2 hotfix regressions ──────────────────────────────────────────────
+# Fix #1: the MANIFEST gets the same untracked-collision protection as the receipt.
+@test "E2E hotfix: a DIFFERING untracked manifest is refused by ensure_manifest, not clobbered" {
+  _repo r; mkdir -p r/.aid-o/plans r/.aid-lifecycle/manifests
+  printf '**EPIC 1: a (Steps 1-1)**\n' > r/.aid-o/plans/P860-x.md
+  # a foreign untracked manifest already sits on disk (NOT ours)
+  ( cd r && printf 'schema_version: aid-lifecycle-1.0\nplan_id: P860\n# USER HAND-CRAFTED\n' > .aid-lifecycle/manifests/P860.yaml )
+  local before; before="$(sha256sum r/.aid-lifecycle/manifests/P860.yaml | cut -d' ' -f1)"
+  run bash -c "cd r && source \"$LIB\" && aid_lifecycle_ensure_manifest P860 ."
+  [ "$status" -ne 0 ]                                                 # refused, not overwritten
+  [[ "$output" == *"differs from the canonical manifest"* ]]
+  [ "$(sha256sum r/.aid-lifecycle/manifests/P860.yaml | cut -d' ' -f1)" = "$before" ]   # byte-identical (not clobbered)
+  run bash -c "cd r && git cat-file -e main:.aid-lifecycle/manifests/P860.yaml"
+  [ "$status" -ne 0 ]                                                 # nothing committed
+}
+
+# Fix #2: a receipt-commit failure on the last required EPIC must NOT report success.
+@test "E2E hotfix: a receipt-commit failure makes record-delivery return non-zero (never a false success)" {
+  _repo r; mkdir -p r/.aid-o/plans
+  printf '**EPIC 1: a (Steps 1-1)**\n' > r/.aid-o/plans/P850-x.md
+  ( cd r && source "$LIB" && aid_lifecycle_ensure_manifest P850 . )
+  _merge_epic r E-850-1_1 accepted
+  # git shim: fail ONLY the receipt commit-tree, let the manifest-binding commit succeed
+  local realgit; realgit="$(command -v git)"
+  mkdir -p "$TEST_DIR/binshim"
+  cat > "$TEST_DIR/binshim/git" <<SHIM
+#!/usr/bin/env bash
+if [[ "\$1" == "commit-tree" && "\$*" == *"receipt"* ]]; then exit 1; fi
+exec "$realgit" "\$@"
+SHIM
+  chmod +x "$TEST_DIR/binshim/git"
+  run env PATH="$TEST_DIR/binshim:$PATH" "$FSM" plan-record-delivery E-850-1_1 r
+  [ "$status" -ne 0 ]                                                 # NOT a false success
+  [[ "$output" == *"receipt NOT committed"* ]]
+  [ "$("$FSM" plan-state P850 r)" != "closed" ]                      # honestly not closed
+}
+
 # ── real scaffold path (runs the actual pipeline, not a grep) ────────────────
 _mkplan() { # <root> <epic-declaration-body> [strict]
   mkdir -p "$1/.aid-o/plans"

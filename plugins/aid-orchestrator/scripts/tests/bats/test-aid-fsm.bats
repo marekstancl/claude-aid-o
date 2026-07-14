@@ -1169,6 +1169,45 @@ EOF
   [ "$status" -eq 0 ]
 }
 
+# v2.58.2 hotfix #3: a real dependency declared in the plan FRONTMATTER (not a
+# hand-seeded manifest) must propagate into the tracked manifest via ensure_manifest
+# and then actually block init end-to-end.
+@test "D1: a frontmatter depends_on_plans is written into the manifest by ensure_manifest and blocks init end-to-end" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/plans/P046-x.md" <<'PLAN'
+---
+id: P046
+type: regular
+lifecycle_strict: true
+depends_on_plans: [P045]
+---
+# Plan: P046
+**EPIC 1: work (Steps 1-1)**
+PLAN
+  # scaffold path: ensure_manifest must carry the frontmatter dep into the manifest
+  ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P046 . )
+  run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P046.yaml"
+  [[ "$output" == *"P045"* ]]                       # dep reached the manifest via the NORMAL path
+  # and init hard-blocks because P045 is not closed (D1 reads the tracked manifest)
+  run "$FSM" init $(build_default_init_args "E-046-1_1")
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"depends_on_plans: P045"* ]]
+}
+
+# v2.58.2 audit hardening: a stray leading blank line before the `---` fence must
+# NOT silently drop the dependency (that would be a D1 gate fail-OPEN).
+@test "D1: a leading blank line before the frontmatter fence still propagates depends_on_plans (no fail-open)" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  printf '\n\n---\nid: P047\ntype: regular\ndepends_on_plans: [P045]\n---\n# Plan: P047\n**EPIC 1: work (Steps 1-1)**\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/plans/P047-x.md"
+  ( cd "$TEST_PROJECT_ROOT" && source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_ensure_manifest P047 . )
+  run yq -r '.depends_on_plans[]' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P047.yaml"
+  [[ "$output" == *"P045"* ]]                       # dependency survived the leading blank line
+  run "$FSM" init $(build_default_init_args "E-047-1_1")
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"depends_on_plans: P045"* ]]
+}
+
 # ─── E-046-1_3 Step 2: _generated_at required in CP2 verifier output ─────────
 # Regression for the missing check: empty/absent _generated_at was accepted before.
 

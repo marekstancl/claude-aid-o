@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.58.2] — 2026-07-14
+
+### Fixed
+- **Untracked manifest is no longer overwritten (parity with the receipt guard)** — `aid_lifecycle_ensure_manifest` previously wrote the manifest straight over the worktree path, so a foreign untracked `.aid-lifecycle/manifests/P<NN>.yaml` could be clobbered (the receipt path already guarded this, the manifest did not). The manifest is now built into a temp file first; an existing untracked manifest is re-committed ONLY when it is byte-identical to the freshly-generated canonical one (our own interrupted-run artifact), and a differing untracked manifest is refused fail-closed (rc 4), never overwritten.
+- **Receipt-commit failure no longer returns success** — after the last required EPIC, both `record-delivery` and `plan-reconcile --apply` attempted the closure-receipt commit but, on failure, continued to the status echo and exited 0. The derived state never lied as `closed`, but automation received a false success while the closure receipt was not durable. A receipt-commit failure now propagates a non-zero return (rc 5) while the stdout state line stays honest. (Includes a fix to a bash `[[ … ]] && { … }`-as-last-statement gotcha that made a clean `plan-reconcile --apply` return 1.)
+- **D1 dependencies are expressible on the normal path** — a plan can now declare `depends_on_plans:` in its frontmatter (added to the plan template) and `ensure_manifest` writes it into the tracked manifest at scaffold, so the D1 init gate actually hard-blocks on an unclosed structured dependency without a hand-crafted manifest. Legacy plans without frontmatter get an empty list, unchanged. Frontmatter extraction is mikefarah-yq safe (`// []`, not the jq-ism `[]?`) and tolerates leading blank lines before the opening `---` fence, so a stray blank line can never silently drop a declared dependency (a D1 gate fail-open).
+
 ## [2.58.1] — 2026-07-14
 
 ### Fixed
