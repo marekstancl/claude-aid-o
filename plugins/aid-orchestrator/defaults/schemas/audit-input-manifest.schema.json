@@ -40,6 +40,32 @@
           "type": "string",
           "enum": ["context_only", "cross_model", "cross_provider"],
           "$comment": "authoritative source: c3-audit-policy.yaml risk_profiles.<profile>.required_independence_level (D8)"
+        },
+        "base_sha": {
+          "type": "string",
+          "$comment": "P065 E-065-1_7: base commit of the reviewed change range (Step 2 emits it at runtime; formalised here, NOT required)"
+        },
+        "head_sha": {
+          "type": "string",
+          "$comment": "P065 E-065-1_7: head commit of the reviewed change range (Step 2 emits it at runtime; formalised here, NOT required)"
+        },
+        "codex_brief_files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256", "size"],
+            "properties": {
+              "path": {"type": "string", "$comment": "evidence-dir-relative path (c3/<name>)"},
+              "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "size": {"type": "number"}
+            }
+          },
+          "$comment": "P065 E-065-1_7: the sealed Codex brief files (c3/*) Codex is GIVEN — distinct from allowlist[] (what C3 may CITE). Step 2 emits it at runtime; formalised here, NOT required"
+        },
+        "codex_brief_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "P065 E-065-1_7: canonical sha256 over {base_sha,head_sha,codex_brief_files,required_independence_level}; Codex echoes this (NOT input_hash). Step 2 emits it at runtime; formalised here, NOT required"
         }
       }
     }

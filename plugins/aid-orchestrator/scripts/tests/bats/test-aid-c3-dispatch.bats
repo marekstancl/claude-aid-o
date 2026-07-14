@@ -598,3 +598,358 @@ EOF
   done
   [ ! -f "$marker" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 4 (backend) — Output contracts
+#
+# Additive only: never touches the Step-2/Step-3 tests above. Exercises the
+# files authored in Step 4:
+#   - scripts/aid-protocol-validate.sh   (extended Step-14 audit_report loop)
+#   - defaults/schemas/c3-codex-response.schema.json
+#   - defaults/schemas/audit-input-manifest.schema.json  (new provenance fields)
+#   - defaults/prompts/c3-audit-prompt-v1.md + scripts/lib/aid-render-prompt.sh
+#
+# JSON-Schema tests use python3 + jsonschema (Draft 2020-12) — the SAME idiom
+# aid-lifecycle.sh uses to validate lifecycle artifacts; they skip cleanly when
+# it is unavailable rather than false-failing on a machine without it.
+# ═══════════════════════════════════════════════════════════════════════════
+
+RESP_SCHEMA_REL="defaults/schemas/c3-codex-response.schema.json"
+MANIFEST_SCHEMA_REL="defaults/schemas/audit-input-manifest.schema.json"
+RENDER_REL="scripts/lib/aid-render-prompt.sh"
+PROMPT_REL="defaults/prompts/c3-audit-prompt-v1.md"
+
+# Shared constants for the audit_report validator tests.
+_IMH="sha256:2222222222222222222222222222222222222222222222222222222222222222"
+_RH40="1234567890abcdef1234567890abcdef12345678"
+
+_have_jsonschema() {
+  command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema' >/dev/null 2>&1
+}
+
+# _schema_validate <schema_file> <instance_file> — exit 0 valid, 1 invalid.
+_schema_validate() {
+  python3 - "$1" "$2" <<'PY'
+import sys, json
+from jsonschema.validators import Draft202012Validator
+schema = json.load(open(sys.argv[1]))
+inst = json.load(open(sys.argv[2]))
+sys.exit(1 if list(Draft202012Validator(schema).iter_errors(inst)) else 0)
+PY
+}
+
+# _write_audit_report <path> <audit_report_inner_json>
+#   Full protocol-v2 envelope + the given .audit_report inner object.
+_write_audit_report() {
+  local path="$1" inner="$2"
+  cat > "$path" <<JSON
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_report",
+  "producer": "test",
+  "created_at": "2026-07-14T00:00:00Z",
+  "control_protocol": "aid-2.0",
+  "identity": {"project_id": "p"},
+  "subject": {"subject_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001"},
+  "revision": {"head_sha": "abc"},
+  "status": "pass",
+  "verdict": {"kind": "none"},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "t"},
+  "audit_report": ${inner}
+}
+JSON
+}
+
+_write_min_template() {
+  cat > "$1" <<'EOF'
+---
+template_id: min
+template_version: v1
+variables: [only]
+---
+Value: {{only}}
+EOF
+}
+
+_write_full_prompt_vars() {
+  cat > "$1" <<'JSON'
+{
+  "plan_path": ".aid-o/plans/P065.md",
+  "plan_sha256": "sha256:deadbeef",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "head_sha": "2222222222222222222222222222222222222222",
+  "input_manifest_path": "audit-input-manifest.json",
+  "input_manifest_hash": "sha256:abc",
+  "codex_brief_hash": "sha256:def",
+  "bundle_diff_path": "c3/bundle-diff.patch",
+  "bundle_scope_path": "c3/bundle-scope.txt",
+  "acceptance_criteria_path": "c3/bundle-plan-ac.md",
+  "review_profile_path": "c3/bundle-review-profile.json",
+  "evidence_paths": "final_report.md, gates_report.json",
+  "output_schema_path": "defaults/schemas/c3-codex-response.schema.json",
+  "allowed_recheck_commands": "[]",
+  "verification_budget": "max_commands=10 max_seconds=120"
+}
+JSON
+}
+
+# ─── AC1: aid-protocol-validate.sh Step-14 provenance fields ────────────────
+
+@test "step4/AC1: audit_report WITHOUT reviewed_head fails Step 14 (exit 14)" {
+  _write_audit_report "$TEST_TMPDIR/ar.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"cross_model\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ar.json"
+  [ "$status" -eq 14 ]
+  [[ "$output" == *"missing_audit_report_field:reviewed_head"* ]]
+}
+
+@test "step4/AC1: audit_report WITH valid 40-hex reviewed_head + all required passes (exit 0)" {
+  _write_audit_report "$TEST_TMPDIR/ar.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"cross_model\",\"reviewed_head\":\"$_RH40\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ar.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "step4/AC1: audit_report missing required_independence_level fails (exit 14)" {
+  _write_audit_report "$TEST_TMPDIR/ar.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"reviewed_head\":\"$_RH40\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ar.json"
+  [ "$status" -eq 14 ]
+  [[ "$output" == *"missing_audit_report_field:required_independence_level"* ]]
+}
+
+@test "step4/AC1: bad required_independence_level enum fails (exit 14)" {
+  _write_audit_report "$TEST_TMPDIR/ar.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"bogus\",\"reviewed_head\":\"$_RH40\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ar.json"
+  [ "$status" -eq 14 ]
+  [[ "$output" == *"bad_audit_report_enum:required_independence_level"* ]]
+}
+
+@test "step4/AC1: bad OPTIONAL independence_level enum fails when present (exit 14)" {
+  _write_audit_report "$TEST_TMPDIR/ar.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"cross_model\",\"independence_level\":\"nope\",\"reviewed_head\":\"$_RH40\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ar.json"
+  [ "$status" -eq 14 ]
+  [[ "$output" == *"bad_audit_report_enum:independence_level"* ]]
+}
+
+@test "step4/AC1: advisory non-boolean fails (exit 14); advisory boolean passes (exit 0)" {
+  _write_audit_report "$TEST_TMPDIR/bad.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"cross_model\",\"reviewed_head\":\"$_RH40\",\"advisory\":\"yes\"}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/bad.json"
+  [ "$status" -eq 14 ]
+  [[ "$output" == *"bad_audit_report_type:advisory"* ]]
+  _write_audit_report "$TEST_TMPDIR/ok.json" \
+    "{\"provider\":\"a\",\"model\":\"m\",\"process_id\":\"p\",\"input_manifest_hash\":\"$_IMH\",\"required_independence_level\":\"cross_model\",\"reviewed_head\":\"$_RH40\",\"advisory\":true}"
+  run bash "$VALIDATE" "$TEST_TMPDIR/ok.json"
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC2: c3-codex-response.schema.json ─────────────────────────────────────
+
+@test "step4/AC2: response schema accepts a valid response" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  cat > "$TEST_TMPDIR/resp.json" <<'JSON'
+{
+  "reviewed_head": "1234567890abcdef1234567890abcdef12345678",
+  "codex_brief_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "review_status": "findings",
+  "blocking_findings": true,
+  "findings": [
+    {"severity":"high","area":"scripts/x.sh:1","finding":"f","recommendation":"r","action_owner":"implementer"}
+  ]
+}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/resp.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "step4/AC2: response schema rejects a high finding missing action_owner" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  cat > "$TEST_TMPDIR/resp.json" <<'JSON'
+{
+  "reviewed_head": "1234567890abcdef1234567890abcdef12345678",
+  "codex_brief_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "review_status": "findings",
+  "blocking_findings": true,
+  "findings": [
+    {"severity":"high","area":"scripts/x.sh:1","finding":"f","recommendation":"r"}
+  ]
+}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/resp.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step4/AC2: response schema rejects a top-level process_id (additionalProperties:false)" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  cat > "$TEST_TMPDIR/resp.json" <<'JSON'
+{
+  "reviewed_head": "1234567890abcdef1234567890abcdef12345678",
+  "codex_brief_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "review_status": "pass",
+  "blocking_findings": false,
+  "findings": [],
+  "process_id": "leaked-by-model"
+}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/resp.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step4/AC2: unverifiable REQUIRES unverifiable_reasons; the field is forbidden otherwise" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  # unverifiable WITHOUT reasons → reject
+  cat > "$TEST_TMPDIR/u1.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"unverifiable","blocking_findings":false,"findings":[]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/u1.json"
+  [ "$status" -ne 0 ]
+  # unverifiable WITH reasons → accept
+  cat > "$TEST_TMPDIR/u2.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"unverifiable","blocking_findings":false,"findings":[],"unverifiable_reasons":["no gate artifact at reviewed HEAD"]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/u2.json"
+  [ "$status" -eq 0 ]
+  # reasons present on a NON-unverifiable status → reject
+  cat > "$TEST_TMPDIR/u3.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"pass","blocking_findings":false,"findings":[],"unverifiable_reasons":["x"]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/u3.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step4/AC2: pass forbids findings/blocking; findings-status requires >=1 finding" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  # pass WITH a finding → reject
+  cat > "$TEST_TMPDIR/p1.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"pass","blocking_findings":false,"findings":[{"severity":"low","area":"x","finding":"f","recommendation":"r"}]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/p1.json"
+  [ "$status" -ne 0 ]
+  # pass WITH blocking_findings:true → reject
+  cat > "$TEST_TMPDIR/p1b.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"pass","blocking_findings":true,"findings":[]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/p1b.json"
+  [ "$status" -ne 0 ]
+  # findings-status with an empty findings array → reject
+  cat > "$TEST_TMPDIR/p2.json" <<'JSON'
+{"reviewed_head":"1234567890abcdef1234567890abcdef12345678","codex_brief_hash":"sha256:2222222222222222222222222222222222222222222222222222222222222222","review_status":"findings","blocking_findings":false,"findings":[]}
+JSON
+  run _schema_validate "$AID_PLUGIN_PATH/$RESP_SCHEMA_REL" "$TEST_TMPDIR/p2.json"
+  [ "$status" -ne 0 ]
+}
+
+# ─── AC3: audit-input-manifest.schema.json (new provenance fields) ──────────
+
+@test "step4/AC3: REAL build-manifest output validates against audit-input-manifest.schema.json" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  _build high
+  [ "$status" -eq 0 ]
+  run _schema_validate "$AID_PLUGIN_PATH/$MANIFEST_SCHEMA_REL" "$MANIFEST"
+  [ "$status" -eq 0 ]
+  # the new provenance fields are actually present in that manifest
+  run jq -e '.audit_input_manifest | has("base_sha") and has("head_sha") and has("codex_brief_files") and has("codex_brief_hash")' "$MANIFEST"
+  [ "$status" -eq 0 ]
+}
+
+@test "step4/AC3: legacy audit_input_manifest fixture still validates (back-compat)" {
+  _have_jsonschema || skip "python3 + jsonschema unavailable"
+  run _schema_validate "$AID_PLUGIN_PATH/$MANIFEST_SCHEMA_REL" \
+    "$AID_PLUGIN_PATH/scripts/tests/fixtures/protocol-v2/audit_input_manifest/valid.json"
+  [ "$status" -eq 0 ]
+}
+
+# ─── Prompt template + renderer (aid-render-prompt.sh) ──────────────────────
+
+@test "step4/render: real c3-audit-prompt-v1.md renders with a full var set (no residual, provenance emitted)" {
+  _write_full_prompt_vars "$TEST_TMPDIR/vars.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" \
+    --template "$AID_PLUGIN_PATH/$PROMPT_REL" \
+    --vars-json "$TEST_TMPDIR/vars.json" \
+    --output "$TEST_TMPDIR/rendered.md"
+  [ "$status" -eq 0 ]
+  # provenance JSON on stdout carries template_id + both sha256 hashes
+  echo "$output" | jq -e '.template_id=="c3-audit-prompt" and (.template_sha256|test("^sha256:[0-9a-f]{64}$")) and (.rendered_prompt_sha256|test("^sha256:[0-9a-f]{64}$"))'
+  # no residual placeholder; head_sha substituted; frontmatter stripped
+  ! grep -qE '\{\{' "$TEST_TMPDIR/rendered.md"
+  grep -q "2222222222222222222222222222222222222222" "$TEST_TMPDIR/rendered.md"
+  ! grep -q "template_id: c3-audit-prompt" "$TEST_TMPDIR/rendered.md"
+}
+
+@test "step4/render: deterministic — identical inputs reproduce rendered_prompt_sha256 + byte-identical output" {
+  _write_full_prompt_vars "$TEST_TMPDIR/vars.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$AID_PLUGIN_PATH/$PROMPT_REL" --vars-json "$TEST_TMPDIR/vars.json" --output "$TEST_TMPDIR/r1.md"
+  [ "$status" -eq 0 ]
+  local h1; h1="$(echo "$output" | jq -r .rendered_prompt_sha256)"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$AID_PLUGIN_PATH/$PROMPT_REL" --vars-json "$TEST_TMPDIR/vars.json" --output "$TEST_TMPDIR/r2.md"
+  [ "$status" -eq 0 ]
+  local h2; h2="$(echo "$output" | jq -r .rendered_prompt_sha256)"
+  [ "$h1" = "$h2" ]
+  cmp -s "$TEST_TMPDIR/r1.md" "$TEST_TMPDIR/r2.md"
+}
+
+@test "step4/render: substitution is LITERAL (no eval / no shell expansion of values)" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  jq -n '{only: "L1 $(echo PWNED) `id` ${HOME} & | ; > <"}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -eq 0 ]
+  grep -qF 'Value: L1 $(echo PWNED) `id` ${HOME} & | ; > <' "$TEST_TMPDIR/out.md"
+}
+
+@test "step4/render: fails closed when a declared variable is MISSING from vars-json (no output written)" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  echo '{}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MISSING"* ]]
+  [ ! -f "$TEST_TMPDIR/out.md" ]
+}
+
+@test "step4/render: fails closed on an UNKNOWN (undeclared) variable in vars-json" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  jq -n '{only:"x", extra:"y"}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+}
+
+@test "step4/render: fails closed on a non-string value" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  jq -n '{only: 42}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"string"* ]]
+}
+
+@test "step4/render: fails closed when a value contains the placeholder opener {{ (injection guard)" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  jq -n '{only: "danger {{only}}"}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "step4/render: fails closed on an UNDECLARED {{placeholder}} in the template body (no output written)" {
+  cat > "$TEST_TMPDIR/bad.md" <<'EOF'
+---
+template_id: bad
+template_version: v1
+variables: [only]
+---
+{{only}} and {{ghost}}
+EOF
+  jq -n '{only:"x"}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/bad.md" --vars-json "$TEST_TMPDIR/v.json" --output "$TEST_TMPDIR/out.md"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"undeclared placeholder"* ]]
+  [ ! -f "$TEST_TMPDIR/out.md" ]
+}
+
+@test "step4/render: missing --output flag → usage error (exit 1)" {
+  _write_min_template "$TEST_TMPDIR/min.md"
+  jq -n '{only:"x"}' > "$TEST_TMPDIR/v.json"
+  run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json"
+  [ "$status" -ne 0 ]
+}

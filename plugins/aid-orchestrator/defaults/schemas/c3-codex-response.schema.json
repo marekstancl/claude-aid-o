@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/c3-codex-response.schema.json",
+  "title": "AID P065 — C3 Codex Raw Response",
+  "$comment": "producer: Codex CLI (a DIFFERENT-provider process), consumer: aid-c3-dispatch.sh `verify` (a LATER EPIC). This is the RAW last-message Codex emits, BEFORE the bridge normalizes it into an audit_report artifact. Codex echoes `codex_brief_hash` (the sealed-brief hash it was given), NOT `input_manifest_hash` — that binding is bridge-filled during normalize. Top-level provenance keys (provider/model/process_id/input_manifest_hash) are added by the orchestrator and are FORBIDDEN here (additionalProperties:false). ⚠️ H1 TENSION (Step 1 empirical, codex-stream-sample/fields.md §`--output-schema empirical behavior`): the real Codex `--output-schema` flag forwards a schema to OpenAI as a strict structured-output response_format that REJECTS `if`/`then`/`else` with HTTP 400 ('if' is not permitted). THIS schema needs if/then for its conditional rules (status↔findings, unverifiable_reasons presence, action_owner-on-blocker), so it CANNOT be passed via --output-schema as-is. The conditional rules are load-bearing for post-hoc bridge validation and MUST NOT be dropped. A later EPIC that wires --output-schema must either NOT pass this schema, or split a permissive if/then-free subset for --output-schema while keeping THIS full schema as the trusted bridge-side validator. Do not weaken this schema to make it --output-schema-safe.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviewed_head", "codex_brief_hash", "review_status", "blocking_findings", "findings"],
+  "properties": {
+    "reviewed_head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "$comment": "the commit Codex reviewed; MUST equal the brief's head_sha (40-hex git sha)."
+    },
+    "codex_brief_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "$comment": "verbatim echo of the sealed-brief hash Codex was given. NOT input_manifest_hash (bridge-filled)."
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["pass", "findings", "unverifiable"]
+    },
+    "unverifiable_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "$comment": "how the model reports 'no evidence' without inventing a field; conditionally required (see allOf)."
+    },
+    "blocking_findings": {
+      "type": "boolean",
+      "$comment": "Codex asserts this; the bridge cross-checks blocking_findings == (∃ crit/high finding) in jq — JSON-Schema cannot express that cross-field arithmetic."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "area", "finding", "recommendation"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+          "area": {"type": "string", "minLength": 1},
+          "finding": {"type": "string", "minLength": 1},
+          "recommendation": {"type": "string", "minLength": 1},
+          "action_owner": {"type": "string", "enum": ["implementer", "reviewer", "pm", "gate-fixer"]}
+        },
+        "allOf": [
+          {
+            "$comment": "action_owner is REQUIRED when severity is critical or high; optional (but still enum-constrained) otherwise.",
+            "if": {
+              "required": ["severity"],
+              "properties": {"severity": {"enum": ["critical", "high"]}}
+            },
+            "then": {"required": ["action_owner"]}
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "unverifiable ⇒ unverifiable_reasons required (non-empty); forbidden otherwise.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "unverifiable"}}
+      },
+      "then": {"required": ["unverifiable_reasons"]},
+      "else": {"not": {"required": ["unverifiable_reasons"]}}
+    },
+    {
+      "$comment": "pass ⇒ no findings AND blocking_findings must be false.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "pass"}}
+      },
+      "then": {
+        "properties": {
+          "findings": {"maxItems": 0},
+          "blocking_findings": {"const": false}
+        }
+      }
+    },
+    {
+      "$comment": "findings ⇒ at least one finding.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "findings"}}
+      },
+      "then": {"properties": {"findings": {"minItems": 1}}}
+    }
+  ]
+}
