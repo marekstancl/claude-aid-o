@@ -3,6 +3,11 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.58.4] — 2026-07-14
+
+### Fixed
+- **CI `bash-tests` SIGPIPE flake in `test-regression.sh`** — the CI job had been failing for several releases on the F1 check `echo "$done_section" | grep -q 'C+A Execution Model'`. `done_section` is the whole ~36 KB §7 DONE of `pipeline.md`; `grep -q` exits on the first match and closes the pipe, so `echo` takes a `SIGPIPE` (141) and — under the suite's `set -uo pipefail` — the pipeline returns non-zero, flipping the `if` to false and falsely reporting the (present) section as missing. Reproduced locally at ~1-in-5 runs, deterministic on the CI runner. Fixed by feeding grep via a here-string (`grep -q PATTERN <<< "$var"`) so there is no early-exiting pipe reader; applied to all eight `echo "$var" | grep` sites in that suite. Other suites share the pattern only on small (sub-pipe-buffer) variables that cannot trigger the race, so they were left unchanged.
+
 ## [2.58.3] — 2026-07-14
 
 ### Added
