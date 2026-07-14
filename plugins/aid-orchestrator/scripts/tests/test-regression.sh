@@ -211,9 +211,9 @@ if [[ -d "$epic_dir" ]]; then
   while IFS= read -r epic_file; do
     frontmatter="$(awk 'BEGIN{f=0} /^---/{f++; if(f==2) exit; next} f==1{print}' "$epic_file" 2>/dev/null)"
     missing=""
-    echo "$frontmatter" | grep -q "^status:"           || missing="${missing} status"
-    echo "$frontmatter" | grep -q "^plan_ref:"         || missing="${missing} plan_ref"
-    echo "$frontmatter" | grep -q "^plan_epics_total:" || missing="${missing} plan_epics_total"
+    grep -q "^status:" <<< "$frontmatter"           || missing="${missing} status"
+    grep -q "^plan_ref:" <<< "$frontmatter"         || missing="${missing} plan_ref"
+    grep -q "^plan_epics_total:" <<< "$frontmatter" || missing="${missing} plan_epics_total"
 
     if [[ -n "$missing" ]]; then
       missing_fields_report="${missing_fields_report} [$(basename "$epic_file"):$missing]"
@@ -450,9 +450,9 @@ if [[ -d "$RUNS_DIR" ]]; then
 
     frontmatter="$(awk 'BEGIN{f=0} /^---/{f++; if(f==2) exit; next} f==1{print}' "$run_md" 2>/dev/null)"
     missing=""
-    echo "$frontmatter" | grep -q "^id:"          || missing="${missing} id"
-    echo "$frontmatter" | grep -q "^epic_id:"     || missing="${missing} epic_id"
-    echo "$frontmatter" | grep -q "^orchestrated:" || missing="${missing} orchestrated"
+    grep -q "^id:" <<< "$frontmatter"          || missing="${missing} id"
+    grep -q "^epic_id:" <<< "$frontmatter"     || missing="${missing} epic_id"
+    grep -q "^orchestrated:" <<< "$frontmatter" || missing="${missing} orchestrated"
 
     # Verify orchestrated is true (not just present)
     if [[ -z "$missing" ]]; then
@@ -654,7 +654,7 @@ if [[ -f "$QUEUE_FILE" ]]; then
     non_empty_deps="$(echo "$depends_on_lines" \
       | grep -Ev "depends_on:[[:space:]]*\[\]" \
       | grep -Ev "depends_on:[[:space:]]*$" || true)"
-    non_empty_count="$(echo "$non_empty_deps" | grep -c "depends_on" || echo "0")"
+    non_empty_count="$(grep -c "depends_on" <<< "$non_empty_deps" || echo "0")"
 
     # With 3 phases in chain mode, entries 2 and 3 should have depends_on set
     if [[ "$non_empty_count" -ge 2 ]]; then
@@ -802,7 +802,7 @@ if [[ -f "$PIPELINE_MD" ]]; then
     found{print}
   ' "$PIPELINE_MD" 2>/dev/null)"
 
-  if echo "$done_section" | grep -q 'C+A Execution Model'; then
+  if grep -q 'C+A Execution Model' <<< "$done_section"; then
     pass "F1: pipeline.md §7 DONE contains C+A Execution Model"
   else
     fail "F1: C+A Execution Model in §7 DONE" \
