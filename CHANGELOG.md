@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.58.3] — 2026-07-14
+
+### Added
+- **Plan-time Files-shape lint (`aid-plan-lint.sh`)** — malformed `**Files:**` entries are now caught when the plan is written, not phase-by-phase during EPIC generation. A plan whose Files entries would break the generation-time D5 `allowed_paths_shape` gate (a bold-wrapped bullet, a parenthetical-only bullet, a prose-only entry, a word before the backtick path, or a verb+path split across two lines) is rejected up front, with the exact `plan.md:line` and the canonical grammar to fix it. The lint runs at two points: automatically in `/aid-plan` right after the plan is written (early feedback, before CP1), and — the enforcement of record — as a deterministic hard pre-flight inside `aid-plan-to-epic.sh` that fail-fasts before any EPIC file is written or the plan counter is bumped, so it cannot be skipped the way an agent instruction can. Two-tier severity: ERROR (the shared cleaner yields no path or a bad-shape path — WILL break the gate) always blocks; STRICT (cleaner-OK but non-canonical) blocks `lifecycle_strict` plans and is a loud advisory for legacy plans, so already-working plans are never suddenly globally blocked.
+
+### Changed
+- **Single source of truth for Files parsing** — the lint, the generator (`aid-plan-to-epic.sh`), the JSON deriver (`aid-epic-to-json.sh`) and the D5 gate (`aid-contract-validate.sh`) now all share ONE extractor (`_aid_extract_files_bullets`), ONE path cleaner (`_aid_split_path_entry`) and ONE shape predicate (`_aid_path_shape_ok`) in `lib/aid-scoping.sh`. `aid-plan-to-epic.sh`'s own duplicated copy of the cleaner and its inline Files-extraction awk were removed and replaced by the shared functions (verified byte-identical generation), and the gate's inline shape check now calls the shared predicate. An integration test proves a lint-clean plan flows clean through `plan-to-epic → epic-to-json → contract gate`, so the lint and the generator provably cannot have a different reality.
+- **Plan Files-entry grammar is documented + enforced** — `skills/plan-writing.md` now states the canonical Files grammar (`- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]`) with explicit NEVER rules, and `commands/aid-plan.md` runs the lint before CP1 in both brainstorm and write modes.
+
 ## [2.58.2] — 2026-07-14
 
 ### Fixed

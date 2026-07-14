@@ -378,7 +378,9 @@ for (( i=0; i<STEP_COUNT; i++ )); do
   n_paths="$(jq "(.steps[$i].allowed_paths // []) | length" "$PLAN_JSON")"
   for (( j=0; j<n_paths; j++ )); do
     p="$(jq -r ".steps[$i].allowed_paths[$j]" "$PLAN_JSON")"
-    if [[ "$p" =~ [[:space:]] || "$p" == *"("* || "$p" == *")"* ]]; then
+    # Shared shape predicate (single source of truth with aid-plan-lint.sh) — a
+    # plan that passes the lint provably passes here.
+    if ! _aid_path_shape_ok "$p"; then
       aps_status="fail"
       aps_issues+=("${step_id}.allowed_paths[${j}]=\"${p}\"")
     fi
