@@ -68,21 +68,51 @@ trap cleanup EXIT
 # Scrub committed evidence: absolute $HOME/temp paths -> placeholders, local
 # username -> <USER>, token-shaped strings -> <REDACTED_TOKEN>. Order matters:
 # longer/more specific paths first so they win over their prefixes.
+#
+# CP2 finding #3 (low): the values below are spliced into the PATTERN side of
+# a `#`-delimited `sed -E` command, not the replacement side — escape the ERE
+# metacharacter class (incl. `#`, our delimiter) that actually matters there,
+# not the replacement-side `/`+`&` idiom the previous version used.
+_escape_ere_pattern() {
+  sed -e 's/[.[\*^$()+?{}|#\\]/\\&/g'
+}
+
 sanitize() {
   local home_esc tmp_esc work_esc user
   user="$(id -un 2>/dev/null || echo user)"
-  home_esc="$(printf '%s' "${HOME:-/nonexistent}" | sed -e 's/[\/&]/\\&/g')"
-  tmp_esc="$(printf '%s' "${TMPDIR:-/tmp}" | sed -e 's#/*$##' -e 's/[\/&]/\\&/g')"
-  work_esc="$(printf '%s' "$WORK" | sed -e 's/[\/&]/\\&/g')"
+  home_esc="$(printf '%s' "${HOME:-/nonexistent}" | _escape_ere_pattern)"
+  tmp_esc="$(printf '%s' "${TMPDIR:-/tmp}" | sed -e 's#/*$##' | _escape_ere_pattern)"
+  work_esc="$(printf '%s' "$WORK" | _escape_ere_pattern)"
   sed -E \
     -e "s#${work_esc}#<TMP>#g" \
     -e "s#${tmp_esc}/[A-Za-z0-9._-]+#<TMP>#g" \
     -e "s#${home_esc}#<HOME>#g" \
     -e "s#/(home|Users)/${user}#<HOME>#g" \
     -e "s#\\b${user}\\b#<USER>#g" \
-    -e 's#sk-[A-Za-z0-9_-]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#ghp_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#sk[-_](live|test)?[A-Za-z0-9_-]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#gh[ps]_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#gho_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#ghu_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#github_pat_[A-Za-z0-9_]{16,}#<REDACTED_TOKEN>#g' \
+    -e 's#AKIA[0-9A-Z]{16}#<REDACTED_TOKEN>#g' \
+    -e 's#xox[baprs]-[A-Za-z0-9-]{10,}#<REDACTED_TOKEN>#g' \
+    -e 's#-----BEGIN [A-Z ]*PRIVATE KEY-----.*-----END [A-Z ]*PRIVATE KEY-----#<REDACTED_PRIVATE_KEY>#g' \
+    -e 's#([Aa]uthorization:[[:space:]]*Bearer[[:space:]]+)[A-Za-z0-9._~+/=-]+#\1<REDACTED_TOKEN>#g' \
     -e 's#eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+#<REDACTED_JWT>#g'
+}
+
+# CP2 finding #1 (high): "sanitize and hope" -> "sanitize and verify". Hard
+# post-write self-check: abort (non-zero, leave nothing committed-worthy) if
+# any leak signature survives sanitization, instead of trusting prose in
+# fields.md as the only assurance.
+_verify_no_leaks() {
+  local file="$1" user
+  user="$(id -un 2>/dev/null || echo user)"
+  if grep -qE "${HOME:-/nonexistent}|/(home|Users)/${user}|\\b${user}\\b|sk[-_](live|test)?[A-Za-z0-9_-]{16,}|gh[ps]_[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{16,}|ghu_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+" "$file" 2>/dev/null; then
+    echo "SANITIZE_LEAK_DETECTED: residual secret/path signature found in ${file} after sanitization — refusing to leave it in place" >&2
+    return 1
+  fi
+  return 0
 }
 
 # Offline self-test: scrub stdin and exit. Lets tests / maintainers verify the
@@ -198,6 +228,10 @@ jq -rs 'map(select(.type=="item.completed" and .item.type=="agent_message"))|las
 # ---- Write sanitized primary stream sample ----------------------------------
 mkdir -p "$EVIDENCE_DIR"
 sanitize < "${WORK}/run1.jsonl" > "${EVIDENCE_DIR}/events.jsonl"
+if ! _verify_no_leaks "${EVIDENCE_DIR}/events.jsonl"; then
+  rm -f "${EVIDENCE_DIR}/events.jsonl"
+  exit 4
+fi
 
 echo "OK: session-id (run1=${sid1}, run2=${sid2}), completion event, and event"
 echo "    sequence are present and STABLE across two runs."
