@@ -53,10 +53,35 @@ setup() {
 
   MANIFEST="$TEST_EVIDENCE_DIR/audit-input-manifest.json"
   export MANIFEST
+
+  # ── Step 3 (qa): fake-codex CLI fixture on PATH ─────────────────────────────
+  # Prepend the fixture dir so `codex` resolves to our deterministic stub even
+  # when a real codex is installed (fixture wins). teardown() restores PATH.
+  # None of the Step-2 build-manifest tests invoke `codex`, so this is inert for
+  # them; it only shadows a `codex` binary, never git/jq/bash.
+  FAKE_CODEX_DIR="$(cd "$BATS_TEST_DIRNAME/../fixtures/fake-codex" && pwd)"
+  export FAKE_CODEX_DIR
+  ORIGINAL_PATH="$PATH"
+  export ORIGINAL_PATH
+  PATH="$FAKE_CODEX_DIR:$PATH"
+  export PATH
+  # Deterministic provenance the fixture echoes in `valid` mode. HEAD_SHA is a
+  # real 40-hex sha from this fixture's git setup above (not repo git state that
+  # the stub itself ever reads — the stub never runs git).
+  export FAKE_CODEX_EXPECT_HEAD="$HEAD_SHA"
+  export FAKE_CODEX_EXPECT_MANIFEST_HASH="sha256:$(printf 'fake-brief' | sha256sum | cut -d' ' -f1)"
+  FC_LAST="$TEST_TMPDIR/fc-last-message.txt"
+  export FC_LAST
+  FC_STREAM="$TEST_TMPDIR/fc-stream.jsonl"
+  export FC_STREAM
 }
 
 teardown() {
   unset AID_CHANGED_PATHS AID_PLAN_AC_FILE C3_AUDIT_POLICY
+  # Step 3 (qa): restore PATH and clear fixture env so nothing leaks across tests.
+  PATH="${ORIGINAL_PATH:-$PATH}"
+  export PATH
+  unset FAKE_CODEX_MODE FAKE_CODEX_EXPECT_HEAD FAKE_CODEX_EXPECT_MANIFEST_HASH FAKE_CODEX_THREAD_ID
   teardown_test_evidence_dir
 }
 
@@ -373,4 +398,203 @@ YAML
   run bash "$DISPATCH" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"build-manifest"* ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 3 (qa) — fake-codex CLI fixture harness
+#
+# Additive only: exercises scripts/tests/fixtures/fake-codex/codex, the
+# deterministic stub of the real `codex` CLI. setup() prepends it to PATH;
+# these tests never touch the Step-2 build-manifest tests above.
+# Grounding: scripts/tests/e2e/evidence/codex-stream-sample/fields.md.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _fc_codex <mode> [extra positional args…] — invoke the PATH-resolved `codex`
+# stub in <mode>. Captures the --json stream into $output and $FC_STREAM, and
+# the last-message into $FC_LAST. Uses the deterministic FAKE_CODEX_EXPECT_*
+# exported by setup(). After the call, $status = the stub's exit code.
+_fc_codex() {
+  local mode="$1"; shift || true
+  FAKE_CODEX_MODE="$mode" run codex exec --json --skip-git-repo-check --ephemeral \
+    --cd "$TEST_PROJECT_ROOT" --sandbox read-only -m gpt-5.5 \
+    --output-schema /dev/null \
+    --output-last-message "$FC_LAST" "$@" "Review the C3 brief and report."
+  printf '%s\n' "$output" > "$FC_STREAM"
+}
+
+# _fc_events_valid <stream_file> — echo "true"/"false" per fields.md's 4-condition
+# events_valid definition (thread.started-first w/ UUID, turn.completed-last, no
+# error line, ≥1 agent_message).
+_fc_events_valid() {
+  jq -rs '
+    (.[0].type=="thread.started")                                                as $c1a
+    | ((.[0].thread_id // "")|length>0)                                          as $c1b
+    | (.[-1].type=="turn.completed")                                             as $c2
+    | ((map(select(.type=="error"))|length)==0)                                  as $c3
+    | ((map(select(.type=="item.completed" and .item.type=="agent_message"))|length)>0) as $c4
+    | ($c1a and $c1b and $c2 and $c3 and $c4)
+  ' "$1"
+}
+
+# ─── AC3: setup() resolves `codex` to the fixture ───────────────────────────
+
+@test "step3/AC3: setup() resolves codex --version to fake-codex 0.0.0 (fixture wins on PATH)" {
+  run codex --version
+  [ "$status" -eq 0 ]
+  [ "$output" = "fake-codex 0.0.0" ]
+  # the resolved binary is the prepended fixture, not any real codex
+  run command -v codex
+  [ "$output" = "$FAKE_CODEX_DIR/codex" ]
+}
+
+# ─── AC1: valid-mode stream matches fields.md event vocabulary/ordering ──────
+
+@test "step3/AC1: valid stream — session id + completion event present, correct vocabulary/order" {
+  _fc_codex valid
+  [ "$status" -eq 0 ]
+  # first line = thread.started carrying a non-empty UUID-shaped session id
+  run jq -rs '.[0].type' "$FC_STREAM"
+  [ "$output" = "thread.started" ]
+  run jq -rs '.[0].thread_id' "$FC_STREAM"
+  [[ "$output" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+  # turn.started present
+  run jq -rs 'any(.[]; .type=="turn.started")' "$FC_STREAM"
+  [ "$output" = "true" ]
+  # last line = turn.completed (the completion event) with 4 integer usage keys
+  run jq -rs '.[-1].type' "$FC_STREAM"
+  [ "$output" = "turn.completed" ]
+  run jq -rs '.[-1].usage | [.input_tokens,.cached_input_tokens,.output_tokens,.reasoning_output_tokens] | map(type=="number") | all' "$FC_STREAM"
+  [ "$output" = "true" ]
+  # every emitted line is valid JSONL
+  run jq -e -c . "$FC_STREAM"
+  [ "$status" -eq 0 ]
+}
+
+@test "step3/AC1: valid stream — session id + usage resolve via the exact fields.md jq paths" {
+  _fc_codex valid
+  run jq -r 'select(.type=="thread.started")|.thread_id' "$FC_STREAM"
+  [ -n "$output" ]
+  run jq -c 'select(.type=="turn.completed")|.usage' "$FC_STREAM"
+  [[ "$output" == *'"input_tokens"'* ]]
+}
+
+@test "step3/AC1: final answer is the LAST agent_message and is schema-shaped JSON" {
+  _fc_codex valid
+  local final
+  final=$(jq -rs 'map(select(.type=="item.completed" and .item.type=="agent_message"))|last|.item.text' "$FC_STREAM")
+  # parses as JSON and carries the informal c3-codex-response shape
+  echo "$final" | jq -e '.reviewed_head and .codex_brief_hash and .review_status and (.blocking_findings|type=="boolean") and (.findings|type=="array")'
+  # in valid mode reviewed_head / codex_brief_hash echo the EXPECT_* envs
+  [ "$(echo "$final" | jq -r .reviewed_head)" = "$FAKE_CODEX_EXPECT_HEAD" ]
+  [ "$(echo "$final" | jq -r .codex_brief_hash)" = "$FAKE_CODEX_EXPECT_MANIFEST_HASH" ]
+  # ≥1 high-severity finding carries action_owner
+  echo "$final" | jq -e '[.findings[]|select(.severity=="high" and .action_owner)]|length>0'
+}
+
+@test "step3/AC1: valid stream passes the events_valid 4-condition check" {
+  _fc_codex valid
+  [ "$(_fc_events_valid "$FC_STREAM")" = "true" ]
+}
+
+# ─── AC2: each FAKE_CODEX_MODE → intended last-message + exit ────────────────
+
+@test "step3/AC2 valid: exit 0, last-message is JSON echoing EXPECT_*" {
+  _fc_codex valid
+  [ "$status" -eq 0 ]
+  run jq -r .reviewed_head "$FC_LAST"
+  [ "$output" = "$FAKE_CODEX_EXPECT_HEAD" ]
+  run jq -r .codex_brief_hash "$FC_LAST"
+  [ "$output" = "$FAKE_CODEX_EXPECT_MANIFEST_HASH" ]
+}
+
+@test "step3/AC2 invalid_json: exit 0, last-message unparseable, stream lines still valid" {
+  _fc_codex invalid_json
+  [ "$status" -eq 0 ]
+  run jq -e . "$FC_LAST"          # last-message is malformed JSON
+  [ "$status" -ne 0 ]
+  run jq -e -c . "$FC_STREAM"     # yet each stream LINE is valid JSONL
+  [ "$status" -eq 0 ]
+}
+
+@test "step3/AC2 hash_mismatch: head OK, codex_brief_hash != EXPECT (still sha256-shaped)" {
+  _fc_codex hash_mismatch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .reviewed_head "$FC_LAST")" = "$FAKE_CODEX_EXPECT_HEAD" ]
+  local h
+  h=$(jq -r .codex_brief_hash "$FC_LAST")
+  [ "$h" != "$FAKE_CODEX_EXPECT_MANIFEST_HASH" ]
+  [[ "$h" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+@test "step3/AC2 head_mismatch: hash OK, reviewed_head != EXPECT (still 40-hex)" {
+  _fc_codex head_mismatch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .codex_brief_hash "$FC_LAST")" = "$FAKE_CODEX_EXPECT_MANIFEST_HASH" ]
+  local rh
+  rh=$(jq -r .reviewed_head "$FC_LAST")
+  [ "$rh" != "$FAKE_CODEX_EXPECT_HEAD" ]
+  [[ "$rh" =~ ^[0-9a-f]{40}$ ]]
+}
+
+@test "step3/AC2 missing_action_owner: exit 0, a high-severity finding lacks action_owner" {
+  _fc_codex missing_action_owner
+  [ "$status" -eq 0 ]
+  run jq -e '[.findings[]|select(.severity=="high" and (has("action_owner")|not))]|length>0' "$FC_LAST"
+  [ "$status" -eq 0 ]
+}
+
+@test "step3/AC2 no_stream: exit 0 but events_valid fails (last line != turn.completed)" {
+  _fc_codex no_stream
+  [ "$status" -eq 0 ]
+  [ "$(_fc_events_valid "$FC_STREAM")" = "false" ]
+  run jq -rs '.[-1].type' "$FC_STREAM"
+  [ "$output" != "turn.completed" ]
+}
+
+@test "step3/AC2 rate_limited: exit 1, error + turn.failed with rate-limit signature" {
+  _fc_codex rate_limited
+  [ "$status" -eq 1 ]
+  run jq -rs 'map(.type)|contains(["error"]) and contains(["turn.failed"])' "$FC_STREAM"
+  [ "$output" = "true" ]
+  grep -q "rate_limit_exceeded" "$FC_STREAM"
+}
+
+@test "step3/AC2 timeout: mode hangs — a timeout wrapper kills it (exit 124), never waited on directly" {
+  FAKE_CODEX_MODE=timeout run timeout 2 codex exec --json "prompt"
+  [ "$status" -eq 124 ]
+}
+
+@test "step3/AC2 unknown mode → exit 2 (fail-closed)" {
+  FAKE_CODEX_MODE=definitely-not-a-mode run codex exec --json "prompt"
+  [ "$status" -eq 2 ]
+}
+
+@test "step3/AC2 valid with UNSET EXPECT_* → loud sentinel (never silent pass)" {
+  unset FAKE_CODEX_EXPECT_HEAD FAKE_CODEX_EXPECT_MANIFEST_HASH
+  FAKE_CODEX_MODE=valid run codex exec --json --output-last-message "$FC_LAST" "prompt"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .reviewed_head "$FC_LAST")" = "UNSET_SENTINEL_BAD_VALUE" ]
+  [ "$(jq -r .codex_brief_hash "$FC_LAST")" = "UNSET_SENTINEL_BAD_VALUE" ]
+}
+
+# ─── AC2: the fixture NEVER runs git ────────────────────────────────────────
+
+@test "step3/AC2: fixture never invokes git (tripwire across all non-hang modes)" {
+  local tripdir="$TEST_TMPDIR/git-tripwire"
+  mkdir -p "$tripdir"
+  local marker="$TEST_TMPDIR/git-was-called.marker"
+  cat > "$tripdir/git" <<EOF
+#!/usr/bin/env bash
+echo called >> "$marker"
+exit 99
+EOF
+  chmod +x "$tripdir/git"
+  # tripdir first, then the fixture dir (from setup): `codex` still resolves to
+  # the fixture, but ANY git call the fixture might make would hit the tripwire.
+  local m
+  for m in valid invalid_json hash_mismatch head_mismatch missing_action_owner no_stream rate_limited; do
+    PATH="$tripdir:$PATH" FAKE_CODEX_MODE="$m" run codex exec --json \
+      --cd "$TEST_PROJECT_ROOT" --output-last-message "$FC_LAST" "prompt"
+  done
+  [ ! -f "$marker" ]
 }

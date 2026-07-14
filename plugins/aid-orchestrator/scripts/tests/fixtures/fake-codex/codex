@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+# =============================================================================
+# fake-codex — deterministic stub of the real `codex` CLI, for C3 bridge tests
+# =============================================================================
+# P065 E-065-1_7 Step 3 (qa). Substitutes the ONE external seam (the real Codex
+# CLI) so the later C3 dispatch/normalize/verify EPICs are deterministically
+# testable without real Codex, real network, or any git state.
+#
+# It reproduces the REAL `codex exec --json` stream shape captured in Step 1 —
+#   scripts/tests/e2e/evidence/codex-stream-sample/{events.jsonl,fields.md}
+# — NOT an invented shape. Event vocabulary / ordering / field nesting mirror
+# fields.md §"Stream shape" and §"Error path" exactly, so tests exercise the
+# real parser paths (see fields.md §"Parser field map" for the jq contracts).
+#
+# HARD CONTRACT: this fixture NEVER runs `git` and NEVER reads repo git state.
+# Everything it needs is supplied via environment (below), so it is fully
+# deterministic and independent of the working tree it is invoked in.
+#
+# ── Environment inputs ──────────────────────────────────────────────────────
+#   FAKE_CODEX_MODE               which behavior to emit (default: valid). Modes:
+#       valid                schema-SHAPED last-message + a well-formed stream
+#                            (thread.started → turn.started → preamble
+#                            agent_message → final agent_message → turn.completed).
+#                            reviewed_head / codex_brief_hash echo the EXPECT_*
+#                            envs; ≥1 high-severity finding carries action_owner.
+#       invalid_json         well-formed stream, but the FINAL agent_message text
+#                            is malformed JSON (drives the fromjson-fail path).
+#       timeout              `sleep 3600` — represents a hang. A TEST INVOKING
+#                            THIS MODE MUST WRAP IT IN A `timeout` WRAPPER
+#                            (e.g. `timeout 5 codex ...`); the fixture will not
+#                            return on its own in any reasonable test window.
+#       rate_limited         rate-limit-signature error + turn.failed, exit 1
+#                            (mirrors fields.md §"Error path"; status 429 blob).
+#       hash_mismatch        valid-shaped, but codex_brief_hash is deliberately
+#                            WRONG vs FAKE_CODEX_EXPECT_MANIFEST_HASH (head OK).
+#       head_mismatch        valid-shaped, but reviewed_head is deliberately
+#                            WRONG vs FAKE_CODEX_EXPECT_HEAD (hash OK).
+#       no_stream            well-formed JSONL lines, but the STREAM fails the
+#                            events_valid check (last line is NOT turn.completed).
+#       missing_action_owner valid-shaped, but a high-severity finding has NO
+#                            action_owner (drives normalize/validate reject).
+#   FAKE_CODEX_EXPECT_HEAD           expected reviewed HEAD (a git sha string).
+#   FAKE_CODEX_EXPECT_MANIFEST_HASH  expected codex_brief_hash (sha256:<64hex>).
+#   FAKE_CODEX_THREAD_ID             optional override for the emitted session id
+#                                    (default: a fixed UUIDv7-shaped constant).
+#
+#   valid-family mode with an UNSET FAKE_CODEX_EXPECT_* → the corresponding field
+#   is written as the loud sentinel "UNSET_SENTINEL_BAD_VALUE" so a mis-wired
+#   test fails LOUDLY downstream instead of silently "passing" as if correct.
+#
+# ── Accepted CLI surface (mimics real codex; most flags accepted & ignored) ──
+#   --version                    → prints "fake-codex 0.0.0", exit 0 (wins over
+#                                  any real codex because setup() prepends us).
+#   --output-last-message <file> → the final answer text is ALSO written here.
+#   -o <file>                    → alias for --output-last-message.
+#   --output-schema <file>       → accepted and IGNORED (real Codex forwards it
+#                                  to the backend as model-help; validation is
+#                                  the bridge's job, not this stub's — fields.md
+#                                  §"--output-schema empirical behavior").
+#   --cd <dir> / -m|--model <m> / -c <cfg> / --sandbox <s> / --json /
+#   --ephemeral / --skip-git-repo-check / exec / <prompt> → accepted & ignored.
+#
+# Exit codes: 0 = normal (valid-family / invalid_json / no_stream),
+#             1 = rate_limited / failure, 2 = unknown FAKE_CODEX_MODE.
+# =============================================================================
+set -uo pipefail
+
+# ── --version short-circuit (before mode logic, matches real codex) ──────────
+for _a in "$@"; do
+  if [ "$_a" = "--version" ]; then
+    printf 'fake-codex 0.0.0\n'
+    exit 0
+  fi
+done
+
+# ── Parse args: capture --output-last-message, accept+ignore everything else ─
+LAST_MSG_FILE=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output-last-message|-o)
+      LAST_MSG_FILE="${2:-}"; shift; [ "$#" -gt 0 ] && shift ;;
+    --output-schema|--cd|-m|--model|-c|--sandbox)
+      # flag + value: consume both, ignore
+      shift; [ "$#" -gt 0 ] && shift ;;
+    *)
+      # boolean flags (--json/--ephemeral/--skip-git-repo-check), the `exec`
+      # subcommand, the prompt positional, and any unknown flag: ignore
+      shift ;;
+  esac
+done
+
+MODE="${FAKE_CODEX_MODE:-valid}"
+THREAD_ID="${FAKE_CODEX_THREAD_ID:-019f0000-0000-7000-8000-0000000feed0}"
+
+# ── Emitters (each prints exactly one JSONL line; mirror fields.md shapes) ────
+emit_thread_started() { jq -nc --arg tid "$THREAD_ID" '{type:"thread.started",thread_id:$tid}'; }
+emit_turn_started()   { printf '%s\n' '{"type":"turn.started"}'; }
+emit_agent_message()  { # $1 = item id, $2 = text
+  jq -nc --arg id "$1" --arg text "$2" \
+    '{type:"item.completed",item:{id:$id,type:"agent_message",text:$text}}'; }
+emit_turn_completed() {
+  printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1234,"cached_input_tokens":0,"output_tokens":88,"reasoning_output_tokens":0}}'; }
+
+write_last_message() { # $1 = text; write only when a target file was requested
+  [ -n "$LAST_MSG_FILE" ] && printf '%s\n' "$1" > "$LAST_MSG_FILE"
+  return 0
+}
+
+# ── Build the schema-SHAPED C3 report (informal shape — the real schema is a
+#    LATER EPIC; fields per the plan Data Model description) ───────────────────
+build_findings() { # $1 = include_action_owner (1|0) on the high finding
+  if [ "$1" = "1" ]; then
+    jq -nc '[
+      {severity:"high",area:"correctness",
+       finding:"Cross-provider review found a possibly unchecked error path in the changed code.",
+       recommendation:"Add an explicit error branch and a covering test.",
+       action_owner:"backend"},
+      {severity:"medium",area:"maintainability",
+       finding:"Naming in the touched module could be clearer.",
+       recommendation:"Rename for clarity in a follow-up."}
+    ]'
+  else
+    # high-severity finding WITHOUT action_owner (missing_action_owner mode)
+    jq -nc '[
+      {severity:"high",area:"correctness",
+       finding:"Cross-provider review found a possibly unchecked error path in the changed code.",
+       recommendation:"Add an explicit error branch and a covering test."}
+    ]'
+  fi
+}
+
+build_report() { # $1 head, $2 hash, $3 status, $4 blocking(json bool), $5 findings(json)
+  jq -nc \
+    --arg head "$1" --arg hash "$2" --arg status "$3" \
+    --argjson blocking "$4" --argjson findings "$5" \
+    '{reviewed_head:$head,
+      codex_brief_hash:$hash,
+      review_status:$status,
+      blocking_findings:$blocking,
+      findings:$findings}'
+}
+
+# flip_value <expected> <kind:head|hash> — return a correctly-SHAPED value that
+# is GUARANTEED different from <expected> (single hex-digit flip). With an unset
+# expected, return an obviously-wrong but well-shaped sentinel.
+flip_value() {
+  local v="$1" kind="$2"
+  if [ -z "$v" ]; then
+    case "$kind" in
+      head) printf '%s\n' "0000000000000000000000000000000000000000" ;;   # 40 hex
+      hash) printf '%s\n' "sha256:0000000000000000000000000000000000000000000000000000000000000000" ;;
+    esac
+    return 0
+  fi
+  local prefix="" hex="$v"
+  case "$v" in sha256:*) prefix="sha256:"; hex="${v#sha256:}" ;; esac
+  local first="${hex:0:1}" rest="${hex:1}" flipped
+  case "$first" in 0) flipped="1" ;; *) flipped="0" ;; esac
+  printf '%s%s%s\n' "$prefix" "$flipped" "$rest"
+}
+
+case "$MODE" in
+  valid|hash_mismatch|head_mismatch|missing_action_owner)
+    head="${FAKE_CODEX_EXPECT_HEAD:-UNSET_SENTINEL_BAD_VALUE}"
+    hash="${FAKE_CODEX_EXPECT_MANIFEST_HASH:-UNSET_SENTINEL_BAD_VALUE}"
+    incl_owner=1
+    case "$MODE" in
+      head_mismatch) head="$(flip_value "${FAKE_CODEX_EXPECT_HEAD:-}" head)" ;;
+      hash_mismatch) hash="$(flip_value "${FAKE_CODEX_EXPECT_MANIFEST_HASH:-}" hash)" ;;
+      missing_action_owner) incl_owner=0 ;;
+    esac
+    findings="$(build_findings "$incl_owner")"
+    report="$(build_report "$head" "$hash" "findings" "true" "$findings")"
+    emit_thread_started
+    emit_turn_started
+    emit_agent_message "item_pre" "I'll review the C3 brief (diff, scope, plan-AC, review-profile) and report."
+    emit_agent_message "item_final" "$report"
+    emit_turn_completed
+    write_last_message "$report"
+    exit 0
+    ;;
+
+  invalid_json)
+    head="${FAKE_CODEX_EXPECT_HEAD:-UNSET_SENTINEL_BAD_VALUE}"
+    # Deliberately malformed JSON as the FINAL answer text. The stream LINES stay
+    # valid JSONL (the malformed content is a properly-escaped string value), so
+    # events_valid still passes — only fromjson on .item.text fails.
+    malformed='{"reviewed_head": "'"$head"'", "codex_brief_hash": NOT_QUOTED_BROKEN, "review_status": "findings", "findings": [ }'
+    emit_thread_started
+    emit_turn_started
+    emit_agent_message "item_pre" "I'll review the C3 brief and report."
+    emit_agent_message "item_final" "$malformed"
+    emit_turn_completed
+    write_last_message "$malformed"
+    exit 0
+    ;;
+
+  no_stream)
+    # Well-formed JSONL lines, but the STREAM fails events_valid: the last line
+    # is NOT turn.completed (no terminal success event). fields.md §"events_valid"
+    # condition (2) is violated; conditions (1),(3),(4) still hold, so a test can
+    # pinpoint the terminal-event failure. The last-message is still written so
+    # the defect is isolated to the stream (not the report body).
+    head="${FAKE_CODEX_EXPECT_HEAD:-UNSET_SENTINEL_BAD_VALUE}"
+    hash="${FAKE_CODEX_EXPECT_MANIFEST_HASH:-UNSET_SENTINEL_BAD_VALUE}"
+    findings="$(build_findings 1)"
+    report="$(build_report "$head" "$hash" "findings" "true" "$findings")"
+    emit_thread_started
+    emit_turn_started
+    emit_agent_message "item_final" "$report"
+    # NO turn.completed line → events_valid FAILS.
+    write_last_message "$report"
+    exit 0
+    ;;
+
+  rate_limited)
+    # fields.md §"Error path": error line + turn.failed, exit 1. Rate-limit
+    # signature (status 429 / rate_limit_exceeded) is carried in the stringified
+    # blob, matching the real backend's error.message shape.
+    blob='{"status":429,"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for gpt-5.5 on requests. Please try again later."}}'
+    emit_thread_started
+    emit_turn_started
+    jq -nc --arg m "$blob" '{type:"error",message:$m}'
+    jq -nc --arg m "$blob" '{type:"turn.failed",error:{message:$m}}'
+    exit 1
+    ;;
+
+  timeout)
+    # Represents a hang. Tests MUST wrap this mode in a `timeout` wrapper; the
+    # fixture intentionally does not return within any reasonable test window.
+    sleep 3600
+    exit 0
+    ;;
+
+  *)
+    printf 'fake-codex: unknown FAKE_CODEX_MODE=%s\n' "$MODE" >&2
+    exit 2
+    ;;
+esac
