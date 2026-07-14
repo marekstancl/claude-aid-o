@@ -163,8 +163,11 @@ _build() {
 
 @test "AC2: editing a brief file changes codex_brief_hash but NOT input_hash" {
   # Drive the plan-ac brief content via AID_PLAN_AC_FILE (a brief input, not an
-  # allowlisted changed-source path).
-  local plan="$TEST_TMPDIR/plan-ac.md"
+  # allowlisted changed-source path). Must live INSIDE the repo (TEST_PROJECT_ROOT,
+  # not the outer TEST_TMPDIR) — real usage always points at an in-repo plan file
+  # (e.g. .aid-o/plans/*.md), and build-manifest's _path_is_within containment
+  # check correctly rejects anything outside the repo (CP3 security fix).
+  local plan="$TEST_PROJECT_ROOT/plan-ac.md"
   printf 'PLAN VERSION A\n' > "$plan"
   export AID_PLAN_AC_FILE="$plan"
   _build high
