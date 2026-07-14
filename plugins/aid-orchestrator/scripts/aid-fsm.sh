@@ -4665,8 +4665,21 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     check-promotion-candidates) shift; cmd_check_promotion_candidates "$@" ;;
     plan-close)                 shift; cmd_plan_close "$@" ;;
     queue-revalidate)           shift; cmd_queue_revalidate "$@" ;;
+    # IMP-232 lifecycle (v2.58.1) — delegate to the sourced lib so the surface the
+    # init advisory + docs reference actually exists on aid-fsm.sh.
+    plan-reconcile)             shift
+                                _pr_id="${1:-}"; shift || true; _pr_apply=false; _pr_root="."
+                                for _a in "$@"; do case "$_a" in --apply) _pr_apply=true ;; --dry-run) _pr_apply=false ;; *) _pr_root="$_a" ;; esac; done
+                                [[ -n "$_pr_id" ]] || { echo "Usage: aid-fsm.sh plan-reconcile <plan_id> [--dry-run|--apply] [root]" >&2; exit 1; }
+                                aid_lifecycle_plan_reconcile "$_pr_id" "$_pr_root" "$_pr_apply" ;;
+    plan-record-delivery)       shift
+                                [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-record-delivery <epic_id> [root]" >&2; exit 1; }
+                                aid_lifecycle_record_delivery "$1" "${2:-.}" ;;
+    plan-state)                 shift
+                                [[ -n "${1:-}" ]] || { echo "Usage: aid-fsm.sh plan-state <plan_id> [root]" >&2; exit 1; }
+                                aid_plan_closure_state "$1" "${2:-.}" ;;
     *)
-      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|queue-revalidate> [args...]" >&2
+      echo "Usage: aid-fsm.sh <init|transition|advance-to-gates|get-state|verify-state|increment-step|get-field|set-field|done-advance|promote-check|check-promotion-candidates|plan-close|plan-reconcile|plan-record-delivery|plan-state|queue-revalidate> [args...]" >&2
       exit 1 ;;
   esac
 fi

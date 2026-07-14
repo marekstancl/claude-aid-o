@@ -44,6 +44,8 @@ case "$cmd" in
                  pid="$1"; shift; apply=false; root="."
                  for a in "$@"; do case "$a" in --apply) apply=true ;; --dry-run) apply=false ;; *) root="$a" ;; esac; done
                  aid_lifecycle_plan_reconcile "$pid" "$root" "$apply" ;;
+  record-delivery) [[ -n "${1:-}" ]] || { echo "usage: record-delivery <epic_id> [root]" >&2; exit 1; }
+                 aid_lifecycle_record_delivery "$1" "${2:-.}" ; exit $? ;;
   ""|-h|--help)  sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
   *)             echo "unknown command: $cmd (see --help)" >&2; exit 1 ;;
 esac

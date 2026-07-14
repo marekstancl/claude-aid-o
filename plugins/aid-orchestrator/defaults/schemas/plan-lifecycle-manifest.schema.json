@@ -33,6 +33,8 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "delivery": { "enum": ["delivered"] },
+          "review": { "enum": ["accepted", "unverifiable", "rejected", "none"] },
           "reviewed_sha": { "type": "string" },
           "reviewed_verdict": { "type": "string" },
           "unresolved_blockers": { "type": "integer", "minimum": 0 },

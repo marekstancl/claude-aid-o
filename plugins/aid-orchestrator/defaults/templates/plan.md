@@ -11,6 +11,11 @@ type: regular   # Plan content classification — enum: regular | bug-fix | refa
 status: draft
 created: YYYY-MM-DD
 author: PM + AI
+lifecycle_strict: true   # IMP-232 plan-level closure. When true, the pipeline
+                         # REQUIRES a durable git-tracked lifecycle manifest at
+                         # scaffold time (fail-closed on ambiguous EPIC grammar).
+                         # New plans are strict by default. Legacy plans without
+                         # this flag proceed under a loud, audited migration.
 ---
 
 # Plan: {Title}

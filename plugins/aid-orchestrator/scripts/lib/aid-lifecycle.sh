@@ -33,6 +33,92 @@ aid_identity_path()   { echo "$(aid_lifecycle_dir "${1:-.}")/repo-identity.yaml"
 aid_manifest_path()   { echo "$(aid_lifecycle_dir "${2:-.}")/manifests/${1}.yaml"; }
 aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"; }
 
+# _aid_lc_require_target_branch <root> — 0 iff HEAD is on the configured
+# target_branch. NO lifecycle tracked write may happen on any other branch
+# (constraint: before merge there are NO tracked lifecycle commits). Callers must
+# check this BEFORE writing any worktree lifecycle artifact.
+_aid_lc_require_target_branch() {
+  local root="${1:-.}" cur tb
+  cur="$(git -C "$root" branch --show-current 2>/dev/null || true)"
+  tb="$(aid_target_branch)"
+  if [[ "$cur" != "$tb" ]]; then
+    echo "lifecycle: refusing on branch '${cur:-<detached>}' — lifecycle writes only on target_branch '${tb}' (pre-merge/task branches make NO tracked lifecycle commit)" >&2
+    return 3
+  fi
+  return 0
+}
+
+# ── Isolated commit (never touches the user's index) ─────────────────────────
+# _aid_lc_isolated_commit <root> <message> <relpath...>
+# Commits ONLY the given paths on target_branch via a throwaway GIT_INDEX_FILE,
+# then re-syncs ONLY those paths' entries in the real index. FAIL-CLOSED guards:
+#   - refuses on a non-target branch (never a commit on a task branch);
+#   - refuses if the USER has any of the target paths STAGED in the real index
+#     (a lifecycle collision would otherwise be silently clobbered by the reset).
+# The user's own staged/unstaged files are provably untouched (index-fingerprint
+# tests). No-op if nothing changed. Non-zero on any failure (leaving the worktree
+# file untracked → ignored by the init clean-tree guard → recovery re-runs).
+# _aid_lc_no_staged_collision <root> <relpath...> — refuses (4) if the user has any
+# target path STAGED in their real index. Safe to call AFTER AID has written its own
+# canonical content to the worktree path (it ignores unstaged worktree state), so it
+# is the defense-in-depth guard used INSIDE _aid_lc_isolated_commit.
+_aid_lc_no_staged_collision() {
+  local root="$1"; shift
+  local staged; staged="$(git -C "$root" diff --cached --name-only -- "$@" 2>/dev/null || true)"
+  if [[ -n "$staged" ]]; then
+    echo "lifecycle: refusing — a lifecycle path is staged in your index: ${staged//$'\n'/ } (unstage it; AID manages these files)" >&2
+    return 4
+  fi
+  return 0
+}
+
+# _aid_lc_precheck_write <root> <relpath...> — the fail-closed ENTRY precondition for
+# ANY lifecycle write. Call BEFORE AID writes/modifies a worktree artifact. Refuses
+# (3) off target_branch, and (4) if the user has EITHER a STAGED lifecycle path OR an
+# UNSTAGED modification to an already-tracked lifecycle path. The unstaged check is
+# essential: the isolated commit builds its tree from the worktree files on disk, so
+# an uncommitted user edit to a tracked manifest/receipt would otherwise be swept
+# into AID's automatic commit. NEVER call this from inside _aid_lc_isolated_commit —
+# by then AID has legitimately modified the worktree file, so an unstaged diff is
+# AID's own; use _aid_lc_no_staged_collision there.
+_aid_lc_precheck_write() {
+  local root="$1"; shift
+  _aid_lc_require_target_branch "$root" || return 3
+  _aid_lc_no_staged_collision "$root" "$@" || return 4
+  local unstaged; unstaged="$(git -C "$root" diff --name-only -- "$@" 2>/dev/null || true)"
+  if [[ -n "$unstaged" ]]; then
+    echo "lifecycle: refusing — a tracked lifecycle path has UNSTAGED changes: ${unstaged//$'\n'/ } (commit or discard your edit; AID manages these files)" >&2
+    return 4
+  fi
+  return 0
+}
+
+_aid_lc_isolated_commit() {
+  local root="$1" msg="$2"; shift 2
+  local rels=("$@")
+  # Defense-in-depth: AID has already written its canonical content to these paths,
+  # so only a STAGED user collision is meaningful here (an unstaged diff would be
+  # AID's own legitimate write). The full unstaged/entry guard runs at the caller.
+  _aid_lc_require_target_branch "$root" || return 3
+  _aid_lc_no_staged_collision "$root" "${rels[@]}" || return $?
+  ( cd "$root"
+    local tmpidx; tmpidx="$(mktemp)"
+    if ! GIT_INDEX_FILE="$tmpidx" git read-tree HEAD 2>/dev/null; then rm -f "$tmpidx"; exit 1; fi
+    GIT_INDEX_FILE="$tmpidx" git add -- "${rels[@]}" 2>/dev/null
+    local tree; tree="$(GIT_INDEX_FILE="$tmpidx" git write-tree 2>/dev/null)"
+    rm -f "$tmpidx"
+    [[ -n "$tree" ]] || exit 1
+    # No-op if the paths are already committed identically.
+    [[ "$tree" == "$(git rev-parse 'HEAD^{tree}' 2>/dev/null)" ]] && exit 0
+    local parent commit
+    parent="$(git rev-parse HEAD 2>/dev/null)"
+    commit="$(git commit-tree "$tree" -p "$parent" -m "$msg" 2>/dev/null)"
+    [[ -n "$commit" ]] || exit 1
+    git update-ref HEAD "$commit" 2>/dev/null || exit 1
+    git reset -q -- "${rels[@]}" 2>/dev/null || true
+  )
+}
+
 # ── Repo identity ────────────────────────────────────────────────────────────
 # aid_repo_id [root] — stable, git-tracked UUID. Created once (uuidgen; fallback
 # to the root-commit SHA as a legacy bootstrap) and then persisted, so it is
@@ -217,7 +303,7 @@ aid_lifecycle_build_receipt() {
       local dsha rsha verdict blockers
       dsha="$(yq -r ".deliveries.\"${eid}\".delivery_sha // \"\"" "$manifest")"
       rsha="$(yq -r ".deliveries.\"${eid}\".reviewed_sha // \"\"" "$manifest")"
-      verdict="$(yq -r ".deliveries.\"${eid}\".reviewed_verdict // \"\"" "$manifest")"
+      verdict="$(yq -r ".deliveries.\"${eid}\".review // \"\"" "$manifest")"
       blockers="$(yq -r ".deliveries.\"${eid}\".unresolved_blockers // 0" "$manifest")"
       echo "  - epic_id: ${eid}"
       [[ -n "$dsha" && "$dsha" != "null" ]] && echo "    delivery_sha: ${dsha}"
@@ -236,6 +322,8 @@ aid_lifecycle_build_receipt() {
 aid_lifecycle_commit_receipt() {
   local plan_id="$1" root="${2:-.}"
   local relpath=".aid-lifecycle/receipts/${plan_id}.yaml"
+  # Fail-closed BEFORE writing anything: target_branch + no staged collision.
+  _aid_lc_precheck_write "$root" "$relpath" || return $?
   local receipt="${root}/${relpath}"
   mkdir -p "$(dirname "$receipt")"
   local tmp; tmp="$(mktemp)"
@@ -244,13 +332,22 @@ aid_lifecycle_commit_receipt() {
   if ! aid_lifecycle_validate_artifact "$tmp" "plan-lifecycle-receipt.schema.json"; then
     rm -f "$tmp"; return 1
   fi
+  # An untracked receipt already on disk is EITHER our own interrupted-run artifact
+  # (byte-identical to the canonical one we just built => safe to re-commit) OR a
+  # user collision (differs => refuse, never clobber). A tracked+modified receipt is
+  # already refused by the entry precheck above; this guards only the untracked case.
+  if [[ -f "$receipt" ]] && ! git -C "$root" ls-files --error-unmatch -- "$relpath" >/dev/null 2>&1; then
+    if ! cmp -s "$receipt" "$tmp"; then
+      rm -f "$tmp"
+      echo "lifecycle: refusing — an untracked receipt ${relpath} differs from the canonical receipt (user collision; remove or reconcile it — AID will not overwrite it)" >&2
+      return 4
+    fi
+  fi
   mv "$tmp" "$receipt"
-  # Commit ONLY the receipt path (pathspec commit — other staged/working changes
-  # are untouched). Idempotent: if the receipt is already committed identically,
-  # `git commit` is a no-op and we fall through to the durability check. Recovery
-  # from an interrupted prior run (untracked/staged receipt) just re-runs this.
-  ( cd "$root" && git add -- "$relpath" >/dev/null 2>&1 \
-      && { git commit -q -m "closure: receipt for ${plan_id}" -- "$relpath" >/dev/null 2>&1 || true; } )
+  # Isolated commit — the user's index/staged files are never touched. Idempotent
+  # (no-op if already committed identically). Recovery from an interrupted prior
+  # run (untracked/staged receipt) just re-runs this.
+  _aid_lc_isolated_commit "$root" "closure: receipt for ${plan_id}" "$relpath" || true
   # `closed` iff the receipt is committed AND reachable from target_branch. A
   # plan-close run on a non-target branch (or a failed commit) yields
   # closing_pending_commit here (durability check fails), never a false closed.
@@ -283,9 +380,19 @@ aid_lifecycle_plan_close() {
 aid_lifecycle_ensure_manifest() {
   local plan_id="$1" root="${2:-.}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
-  [[ -f "$manifest" ]] && return 0
+  # Fast path ONLY when the manifest is already DURABLE on the target branch. A
+  # manifest that exists on disk but is NOT yet committed (an interrupted commit,
+  # or a hand-created/staged file) must NOT be reported as "ensured" — fall through
+  # to the precheck + (re)commit + cat-file verify path below so the durability
+  # guarantee actually holds. Mirrors aid_lifecycle_commit_receipt, which has no
+  # early return and always re-verifies via a cat-file durability probe. Using
+  # existence alone here would report success for a non-durable manifest AND make
+  # the staged-collision precheck unreachable whenever the file is present.
+  git -C "$root" cat-file -e "$(aid_target_branch):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null && return 0
   local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
   [[ -z "$plan_file" ]] && return 3
+  # Fail-closed BEFORE creating any artifact: target_branch + no staged collision.
+  _aid_lc_precheck_write "$root" ".aid-lifecycle/repo-identity.yaml" ".aid-lifecycle/manifests/${plan_id}.yaml" || return $?
   local parsed rc=0
   parsed="$(aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file")" || rc=$?
   [[ "$rc" -ne 0 ]] && return 2
@@ -305,10 +412,15 @@ aid_lifecycle_ensure_manifest() {
     done <<< "$parsed"
     echo "depends_on_plans: []"
   } > "$manifest"
-  # Validate + commit the new tracked manifest (public-safe).
+  # Validate (public-safe) then commit the identity + manifest TOGETHER so the
+  # repo identity is durable from the moment the plan gets a manifest (survives a
+  # clean clone). Isolated commit — the user's index is never touched.
   aid_lifecycle_validate_artifact "$manifest" "plan-lifecycle-manifest.schema.json" || { rm -f "$manifest"; return 2; }
-  ( cd "$root" && git add -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 \
-      && { git commit -q -m "lifecycle: manifest for ${plan_id} (legacy reconcile)" -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || true; } )
+  # Fail-closed: the manifest+identity MUST land as a durable commit. A commit
+  # failure returns non-zero (never a silent "ensured") so the caller can stop.
+  _aid_lc_isolated_commit "$root" "lifecycle: manifest + identity for ${plan_id}" \
+    ".aid-lifecycle/repo-identity.yaml" ".aid-lifecycle/manifests/${plan_id}.yaml" || return 5
+  git -C "$root" cat-file -e "$(aid_target_branch):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null || return 5
   return 0
 }
 
@@ -322,50 +434,60 @@ _aid_lc_epic_reviewed_head() {
   jq -r '.revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
 }
 
-# _aid_lc_epic_accepted <epic_id> <root> — audit verdict accepted (0 blocking
-# findings). Requires the audit-report.json to exist with blocking_findings==false/0.
-_aid_lc_epic_accepted() {
+# _aid_lc_epic_review_status <epic_id> <root> — classify the EPIC's audit review
+# from its provenance (gitignored evidence). Echoes one of:
+#   accepted     — explicit blocking_findings false/0
+#   rejected     — blocking_findings true or a nonzero count
+#   unverifiable — status:unverifiable OR blocking_findings absent/null (never
+#                  presented as accepted — a merge can be delivered while its
+#                  historical review is unverifiable)
+#   none         — no audit report at all
+_aid_lc_epic_review_status() {
   local epic_id="$1" root="${2:-.}"
   local rep
   rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
-  [[ -z "$rep" ]] && return 1
-  local bf
-  # NB: read the field DIRECTLY (no `// empty` — jq's `//` treats false as empty,
-  # which would conflate an explicit false verdict with an omitted one). Absent =>
-  # jq emits "null" => not accepted.
-  bf="$(jq -r '.blocking_findings' "$rep" 2>/dev/null || true)"
-  # Fail-closed: only an EXPLICIT false/0 verdict is accepted. Absent ("null"),
-  # true, or any nonzero count => not accepted (=> plan stays active, never closed).
-  [[ "$bf" == "false" || "$bf" == "0" ]]
+  [[ -z "$rep" ]] && { echo "none"; return 0; }
+  local st bf
+  st="$(jq -r '.status // ""' "$rep" 2>/dev/null || true)"
+  bf="$(jq -r '.blocking_findings' "$rep" 2>/dev/null || true)"   # direct read (no `// empty`)
+  if [[ "$st" == "unverifiable" ]]; then echo "unverifiable"; return 0; fi
+  if [[ "$bf" == "false" || "$bf" == "0" ]]; then echo "accepted"; return 0; fi
+  if [[ "$bf" == "true" || ( "$bf" =~ ^[0-9]+$ && "$bf" != "0" ) ]]; then echo "rejected"; return 0; fi
+  echo "unverifiable"
 }
 
 # _aid_lc_find_delivery_merge <epic_id> <root> — echo an UNAMBIGUOUS merge SHA on
-# target_branch bound to this EPIC, or "" (none) / "AMBIGUOUS". A commit message
-# only LOCATES candidates; binding is confirmed by the caller against provenance.
+# target_branch that MENTIONS this EPIC, or "" (none) / "AMBIGUOUS". The commit
+# message only LOCATES candidates (matches both the `feat: complete EPIC <id>`
+# pipeline merge and a `merge: <id>` message); binding is CONFIRMED by the caller
+# against reviewed-head provenance (ancestor check), never by the message alone.
 _aid_lc_find_delivery_merge() {
   local epic_id="$1" root="${2:-.}" tb; tb="$(aid_target_branch)"
   local shas n
-  shas="$(git -C "$root" log "$tb" --merges --grep "merge: ${epic_id}" --pretty=%H 2>/dev/null || true)"
+  shas="$(git -C "$root" log "$tb" --merges --grep "${epic_id}" --pretty=%H 2>/dev/null || true)"
   n="$(printf '%s' "$shas" | grep -c . || true)"
   if [[ "$n" -eq 0 ]]; then echo ""; return 0; fi
   if [[ "$n" -gt 1 ]]; then echo "AMBIGUOUS"; return 0; fi
   printf '%s' "$shas"
 }
 
-# _aid_lc_can_bind <epic_id> <root> — READ-ONLY strict historical bind check (no
-# manifest, no writes). Echoes "<merge_sha> <reviewed_sha>" on success. Returns
-# 0 (bindable), 1 (not delivered), 2 (ambiguous / missing reviewed-head provenance
-# => unverifiable, never a guess).
+# _aid_lc_can_bind <epic_id> <root> — READ-ONLY delivery-bind check (no manifest,
+# no writes). Delivery is bindable when there is an UNAMBIGUOUS merge on
+# target_branch AND the EPIC's reviewed-head provenance is an ancestor of it —
+# INDEPENDENT of the review verdict (a merge can be delivered while its review is
+# unverifiable). Echoes "<merge_sha> <reviewed_sha> <review_status>" on success.
+# Returns 0 (delivery bindable), 1 (not delivered), 2 (ambiguous merge / missing
+# reviewed-head provenance => unverifiable delivery, never a guess).
 _aid_lc_can_bind() {
   local epic_id="$1" root="${2:-.}"
   local merge; merge="$(_aid_lc_find_delivery_merge "$epic_id" "$root")"
   [[ "$merge" == "AMBIGUOUS" ]] && return 2
   [[ -z "$merge" ]] && return 1
   local rhead; rhead="$(_aid_lc_epic_reviewed_head "$epic_id" "$root")"
-  [[ -z "$rhead" ]] && return 2
+  [[ -z "$rhead" ]] && return 2   # no reviewed-head provenance -> unverifiable delivery
   git -C "$root" merge-base --is-ancestor "$rhead" "$merge" 2>/dev/null || return 1
-  _aid_lc_epic_accepted "$epic_id" "$root" || return 1
-  echo "${merge} ${rhead}"
+  local rs; rs="$(_aid_lc_epic_review_status "$epic_id" "$root")"
+  echo "${merge} ${rhead} ${rs}"
   return 0
 }
 
@@ -378,12 +500,14 @@ aid_lifecycle_bind_delivery() {
   [[ -f "$manifest" ]] || return 1
   local out rc=0; out="$(_aid_lc_can_bind "$epic_id" "$root")" || rc=$?
   [[ "$rc" -ne 0 ]] && return "$rc"
-  local merge="${out%% *}" rhead="${out##* }"
+  local merge rhead rs; read -r merge rhead rs <<< "$out"
+  local blockers; blockers="$([[ "$rs" == "accepted" ]] && echo 0 || echo 1)"
   ( cd "$root"
-    yq -i ".deliveries.\"${epic_id}\".delivery_sha = \"${merge}\" |
+    yq -i ".deliveries.\"${epic_id}\".delivery = \"delivered\" |
+           .deliveries.\"${epic_id}\".delivery_sha = \"${merge}\" |
            .deliveries.\"${epic_id}\".reviewed_sha = \"${rhead}\" |
-           .deliveries.\"${epic_id}\".reviewed_verdict = \"pass\" |
-           .deliveries.\"${epic_id}\".unresolved_blockers = 0" \
+           .deliveries.\"${epic_id}\".review = \"${rs}\" |
+           .deliveries.\"${epic_id}\".unresolved_blockers = ${blockers}" \
       ".aid-lifecycle/manifests/${plan_id}.yaml" )
   return 0
 }
@@ -409,7 +533,15 @@ aid_lifecycle_plan_reconcile() {
 
   # --apply first materializes the tracked manifest (metadata-only, never edits
   # the plan). Dry-run touches NOTHING on disk.
-  if [[ "$apply" == "true" ]]; then aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || true; fi
+  if [[ "$apply" == "true" ]]; then
+    _aid_lc_require_target_branch "$root" || { echo "state: reconcile --apply refused — must run on target_branch"; return 3; }
+    local ercc=0; aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || ercc=$?
+    if [[ "$ercc" -eq 4 ]]; then echo "state: reconcile --apply refused — manifest has a user staged/unstaged collision"; return 4; fi
+    [[ "$ercc" -ne 0 ]] && { echo "state: legacy-unverifiable (manifest could not be created)"; return 2; }
+    # Entry precheck BEFORE the per-EPIC bind loop mutates the manifest: a user's
+    # staged/unstaged edit to the tracked manifest must not be swept into AID's commit.
+    _aid_lc_precheck_write "$root" ".aid-lifecycle/manifests/${plan_id}.yaml" || { echo "state: reconcile --apply refused — manifest has a user staged/unstaged collision"; return 4; }
+  fi
 
   # Classify each REQUIRED EPIC read-only; --apply also records verified bindings.
   local eid scope all_required_ok=true saw_unverifiable=false
@@ -420,20 +552,30 @@ aid_lifecycle_plan_reconcile() {
     if _aid_lc_delivered "$plan_id" "$eid" "$root" && _aid_lc_reviewed_accepted "$plan_id" "$eid" "$root"; then
       echo "  ${eid}: required delivered+accepted"; continue
     fi
-    local crc=0; _aid_lc_can_bind "$eid" "$root" >/dev/null 2>&1 || crc=$?
-    case "$crc" in
-      0) echo "  ${eid}: required delivered+accepted (bindable from evidence)"
-         [[ "$apply" == "true" ]] && aid_lifecycle_bind_delivery "$plan_id" "$eid" "$root" >/dev/null 2>&1 || true ;;
-      2) echo "  ${eid}: required UNVERIFIABLE (ambiguous merge / missing reviewed-head provenance)"; all_required_ok=false; saw_unverifiable=true ;;
-      *) echo "  ${eid}: required NOT delivered"; all_required_ok=false ;;
-    esac
+    local crc=0 cbout; cbout="$(_aid_lc_can_bind "$eid" "$root")" || crc=$?
+    if [[ "$crc" -eq 0 ]]; then
+      local rs; rs="$(printf '%s' "$cbout" | awk '{print $3}')"
+      [[ "$apply" == "true" ]] && aid_lifecycle_bind_delivery "$plan_id" "$eid" "$root" >/dev/null 2>&1 || true
+      if [[ "$rs" == "accepted" ]]; then
+        echo "  ${eid}: required delivered + review accepted"
+      else
+        # Honest: the merge IS delivered, but the review is unverifiable/rejected
+        # => NOT accepted => plan stays active (never presented as accepted).
+        echo "  ${eid}: required DELIVERED but review ${rs} (not accepted)"; all_required_ok=false; saw_unverifiable=true
+      fi
+    elif [[ "$crc" -eq 2 ]]; then
+      echo "  ${eid}: required UNVERIFIABLE delivery (ambiguous merge / no reviewed-head provenance)"; all_required_ok=false; saw_unverifiable=true
+    else
+      echo "  ${eid}: required NOT delivered"; all_required_ok=false
+    fi
   done <<< "$declared"
 
   if [[ "$apply" == "true" ]]; then
-    ( cd "$root" && git add -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 \
-        && { git commit -q -m "lifecycle: delivery bindings for ${plan_id} (reconcile)" -- ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || true; } )
+    if ! _aid_lc_isolated_commit "$root" "lifecycle: delivery bindings for ${plan_id} (reconcile)" ".aid-lifecycle/manifests/${plan_id}.yaml"; then
+      echo "state: reconcile — delivery bindings NOT committed (recoverable — re-run --apply)"; return 5
+    fi
     local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
-    if [[ "$st" == "delivered-but-unreconciled" ]]; then
+    if [[ "$st" == "delivered-but-unreconciled" || "$st" == "closing_pending_commit" ]]; then
       aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1 && st="closed"
     fi
     echo "state: ${st}"
@@ -443,6 +585,52 @@ aid_lifecycle_plan_reconcile() {
     elif [[ "$saw_unverifiable" == "true" ]]; then echo "state: active (some required EPICs unverifiable — see above)"
     else echo "state: active"; fi
   fi
+}
+
+# aid_lifecycle_record_delivery <epic_id> <root>
+# THE post-merge hook (constraint #2): run on target_branch IMMEDIATELY AFTER an
+# EPIC's `git merge task/<epic>/main`. It is the single, named, tested call path
+# that (a) ensures the plan's manifest exists, (b) records THIS EPIC's delivery +
+# review provenance from the just-completed merge (isolated commit), and (c) if
+# that was the last required EPIC now delivered + review-accepted, writes the
+# closure receipt (=> closed). Metadata-only: never edits the plan or the merge,
+# never touches the user's index. Idempotent. Does NOT run pre-merge / on a task
+# branch (constraint #1 — pre-merge plan-close only verifies + keeps the marker).
+aid_lifecycle_record_delivery() {
+  local epic_id="$1" root="${2:-.}"
+  [[ "$epic_id" =~ ^E-([0-9]+) ]] || { echo "record-delivery: cannot derive plan from ${epic_id}" >&2; return 1; }
+  local plan_id="P${BASH_REMATCH[1]}"
+  # POST-MERGE only: refuse on any non-target branch, BEFORE touching anything.
+  _aid_lc_require_target_branch "$root" || return 3
+  # Propagate ANY non-zero from ensure_manifest — a manifest that is not durably in
+  # place (ambiguous parse, not found, commit failure, OR a user staged/unstaged
+  # collision refused by the precheck) must NOT fall through into bind/commit.
+  local mrc=0; aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || mrc=$?
+  if [[ "$mrc" -ne 0 ]]; then
+    case "$mrc" in
+      2) echo "record-delivery: ${plan_id} legacy-unverifiable (ambiguous EPIC declaration)" >&2 ;;
+      3) echo "record-delivery: ${plan_id} plan not found" >&2 ;;
+      4) echo "record-delivery: ${plan_id} manifest has a user staged/unstaged collision — refusing (unstage/commit/discard your edit)" >&2 ;;
+      *) echo "record-delivery: ${plan_id} manifest not ensured durably (rc=${mrc})" >&2 ;;
+    esac
+    return "$mrc"
+  fi
+  # Entry precheck on the manifest BEFORE bind_delivery mutates it: a user's UNSTAGED
+  # edit to the (already durable) tracked manifest must not be merged into AID's
+  # binding and committed. (ensure_manifest early-returns for a durable manifest
+  # without re-prechecking, so this is the guard that catches that case.)
+  _aid_lc_precheck_write "$root" ".aid-lifecycle/manifests/${plan_id}.yaml" || return $?
+  local brc=0; aid_lifecycle_bind_delivery "$plan_id" "$epic_id" "$root" >/dev/null 2>&1 || brc=$?
+  # Durably commit the binding; a commit failure is surfaced (non-zero), never masked.
+  if ! _aid_lc_isolated_commit "$root" "lifecycle: delivery ${epic_id} (post-merge)" ".aid-lifecycle/manifests/${plan_id}.yaml"; then
+    echo "record-delivery ${epic_id}: manifest binding not committed (recoverable — re-run on ${plan_id})" >&2; return 5
+  fi
+  local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
+  if [[ "$st" == "delivered-but-unreconciled" || "$st" == "closing_pending_commit" ]]; then
+    aid_lifecycle_commit_receipt "$plan_id" "$root" >/dev/null 2>&1 && st="$(aid_plan_closure_state "$plan_id" "$root")"
+  fi
+  local dtag; case "$brc" in 0) dtag="delivered";; 2) dtag="unverifiable";; *) dtag="not-delivered";; esac
+  echo "record-delivery ${epic_id}: delivery=${dtag} plan=${plan_id} state=${st}"
 }
 
 # ── Convenience: does a plan even exist here? (for not_found result) ──────────
@@ -479,6 +667,7 @@ aid_lifecycle_declared_epics() {
 # (Phase-1 record). Legacy plans have no manifest deliveries => predicates fail
 # => plan stays `active` (correct); the historical-fallback recording that lets
 # a legacy plan close is aid-plan-reconcile (commit 3).
+# delivered = a bound delivery_sha exists in the manifest (delivery: delivered).
 _aid_lc_delivered() {
   local plan_id="$1" epic_id="$2" root="${3:-.}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
@@ -486,14 +675,14 @@ _aid_lc_delivered() {
   local sha; sha="$(yq -r ".deliveries.\"${epic_id}\".delivery_sha // \"\"" "$manifest" 2>/dev/null || true)"
   [[ -n "$sha" && "$sha" != "null" ]]
 }
+# reviewed-and-accepted = the manifest records review: accepted (an unverifiable
+# or rejected review is NEVER accepted, so the plan stays active).
 _aid_lc_reviewed_accepted() {
   local plan_id="$1" epic_id="$2" root="${3:-.}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
   [[ -f "$manifest" ]] || return 1
-  local verdict blockers
-  verdict="$(yq -r ".deliveries.\"${epic_id}\".reviewed_verdict // \"\"" "$manifest" 2>/dev/null || true)"
-  blockers="$(yq -r ".deliveries.\"${epic_id}\".unresolved_blockers // 1" "$manifest" 2>/dev/null || echo 1)"
-  [[ "$verdict" == "pass" && "$blockers" == "0" ]]
+  local review; review="$(yq -r ".deliveries.\"${epic_id}\".review // \"\"" "$manifest" 2>/dev/null || true)"
+  [[ "$review" == "accepted" ]]
 }
 
 # ── Receipt durability (committed + reachable from target_branch) ─────────────
@@ -523,11 +712,8 @@ aid_plan_closure_state() {
   manifest="$(aid_manifest_path "$plan_id" "$root")"
   plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
 
-  # Committed receipt is authoritative.
-  if [[ -f "$receipt" ]]; then
-    if aid_lifecycle_receipt_durable "$plan_id" "$root"; then echo "closed"; else echo "closing_pending_commit"; fi
-    return 0
-  fi
+  # A COMMITTED + reachable receipt is authoritative -> closed.
+  if [[ -f "$receipt" ]] && aid_lifecycle_receipt_durable "$plan_id" "$root"; then echo "closed"; return 0; fi
   # Nothing at all -> not_found (a plan-number gap has no lifecycle meaning).
   if [[ -z "$plan_file" && ! -f "$manifest" ]]; then echo "not_found"; return 0; fi
 
@@ -536,7 +722,7 @@ aid_plan_closure_state() {
   if [[ "$drc" -eq 2 ]]; then echo "legacy-unverifiable"; return 0; fi
   if [[ "$drc" -eq 3 ]]; then echo "not_found"; return 0; fi
 
-  # Every REQUIRED epic must be delivered + reviewed-accepted.
+  # Every REQUIRED epic must be delivered + reviewed-accepted for closability.
   local eid scope all_ok=true
   while read -r eid scope; do
     [[ "$scope" == "required" ]] || continue
@@ -545,5 +731,12 @@ aid_plan_closure_state() {
     fi
   done <<< "$declared"
 
-  if [[ "$all_ok" == "true" ]]; then echo "delivered-but-unreconciled"; else echo "active"; fi
+  if [[ "$all_ok" != "true" ]]; then
+    # Not closable. A stale UNCOMMITTED receipt (never durable) is ignored, not
+    # treated as pending — the plan is simply active.
+    echo "active"; return 0
+  fi
+  # Closable. An uncommitted receipt on disk means a close is mid-flight
+  # (interrupted before the commit) -> recoverable pending; else ready to close.
+  if [[ -f "$receipt" ]]; then echo "closing_pending_commit"; else echo "delivered-but-unreconciled"; fi
 }

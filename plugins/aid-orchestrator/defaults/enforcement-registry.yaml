@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 286          # granular registry rows; recomputed via `.enforcements|length` (includes P063 Step 4's new gate_runtime_baseline_advisory row, on top of Step 3's gate_timeout_policy_block). The stale "283" this field previously carried already predated at least one prior undocumented addition (plan_close_mechanical_check landed without a totals bump) — 286 is the actual current `yq '.enforcements|length'` count, verified directly rather than hand-incremented. The new row carries no verdict (DG-07 convention), so mapped_with_verdict/mapping_pending are unchanged
-  mapped_with_verdict: 122   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 104 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 121 for force_writes_waiver (verdict: ALIGNED); the two new planned observe rows (dual_run, preempted) carry no verdict (match the DG-07 convention)
-  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the E-059-2_2 rows)
-  verdict_distribution: {ALIGNED: 104, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
+  enforcements: 291          # granular registry rows; recomputed via `.enforcements|length`. v2.58.1 adds the 5 IMP-232 lifecycle-wiring rows (lifecycle_manifest_at_scaffold_strict, lifecycle_record_delivery_target_branch, lifecycle_isolated_index_commit, lifecycle_publicsafe_contract, init_gate_dependency_scoped) — all verdict: ALIGNED. Prior value 286 was P063 Step 4's count; verified directly via `yq '.enforcements|length'`, not hand-incremented.
+  mapped_with_verdict: 127   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 109 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +5 vs 122 for the 5 IMP-232 lifecycle rows (all verdict: ALIGNED)
+  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the v2.58.1 rows)
+  verdict_distribution: {ALIGNED: 109, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
 
 enforcements:
 
@@ -1031,3 +1031,59 @@ enforcements:
     surface: llm-facing
     description: "P063 Step 4: `aid-gate-runtime-report.sh [--project-root <path>] [gate_name]` is a thin, standalone CLI presentation layer over Step 1's library — it sources aid-gate-runtime-baseline.sh directly and calls gate_baseline_show/gate_baseline_report_json rather than re-deriving any percentile/formatting logic. Given a gate_name it prints that gate's p95/timeout/run-mode summary plus a one-line data-sufficiency note (derived only from report_json's own data_sufficient/non_censored_samples_count fields, never from censored/timeout samples); given none, it lists every gate with at least one recorded sample. This is a DISTINCT, non-blocking row from gate_timeout_policy_block above (Step 3) — it is advisory-only, never an FSM precondition, and never changes orchestrator behavior by itself (a human reads it, decides, and edits execution.yaml's timeout_seconds/run_mode by hand if they act on the recommendation)."
     test: "scripts/tests/bats/test-aid-gate-runtime-report.bats"
+
+  # ── IMP-232 v2.58.1: plan-level closure wired into the runtime lifecycle ────
+  # v2.58.0 shipped the closure library/CLI as DETECTORS with no runtime call
+  # path (AID-v3-principles.md §1 violation — the P026/WAN anchor). v2.58.1
+  # wires each into a named, tested enforcement surface. Registered here so the
+  # wiring is never silent (CLAUDE.md rule #5).
+  - id: lifecycle_manifest_at_scaffold_strict
+    type: 1
+    source: "scripts/aid-auto-pipeline.sh (grep: 'lifecycle_strict' scaffold block; aid_lifecycle_ensure_manifest)"
+    instruction: "defaults/templates/plan.md (frontmatter 'lifecycle_strict: true')"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-232: the pipeline creates a durable git-tracked lifecycle manifest (repo identity + manifest committed together via an isolated GIT_INDEX_FILE index) at official plan scaffold, BEFORE any EPIC is generated, so the required-vs-backlog denominator exists before closure and a new plan never waits for a manual reconcile. Enforcement is opt-in per plan and never silent: a plan with frontmatter `lifecycle_strict: true` (the plan-template default, so new plans are strict) whose EPIC declaration is ambiguous FAILS-CLOSED (error_exit code 6) unless AID_LIFECYCLE_MIGRATION=1 is set for an explicit audited legacy run; a legacy plan without the flag proceeds under a loud, logged migration ([WARN] AUDITED migration + a .aid-o/work/lifecycle-migration.log marker), never a silent skip. This keeps pre-lifecycle_strict fixtures and real legacy (table/##-header) plans working without weakening the fail-closed guarantee for new plans."
+    test: "scripts/tests/bats/test-lifecycle-e2e.bats (grep: 'FAIL-CLOSED|AUDITED migration|#1b')"
+  - id: lifecycle_record_delivery_target_branch
+    type: 1
+    source: "scripts/aid-fsm.sh (dispatcher: plan-record-delivery) -> scripts/lib/aid-lifecycle.sh (aid_lifecycle_record_delivery, _aid_lc_require_target_branch)"
+    instruction: "skills/pipeline.md (step 15a, post-merge on target branch)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "IMP-232: the SINGLE post-merge hook `aid-fsm.sh plan-record-delivery <epic_id> <root>` is invoked as the pipeline's post-merge step (skills/pipeline.md step 15a, run on the target branch immediately after the agent-run branch merge — an instruction-side enforcement at the same level as that merge, NOT a hard FSM precondition; if the agent skips it the plan simply never closes, a fail-safe, never a false-close) and records the real merge SHA + review provenance, updates the tracked manifest, and writes the closure receipt so the plan becomes `closed` when the last REQUIRED EPIC is delivered + review-accepted. It is fail-closed off the target branch: _aid_lc_require_target_branch refuses (return 3) if `git branch --show-current` != the configured aid_target_branch, so no delivery SHA / manifest write / receipt can ever be produced on a task/side branch. Pre-merge `plan-close` remains marker-only (verifies reviews + keeps ca-review-complete; no delivery SHA, no tracked commit on the task branch)."
+    test: "scripts/tests/bats/test-lifecycle-e2e.bats (grep: '#2|#3/#4|record-delivery on a NON-target')"
+  - id: lifecycle_isolated_index_commit
+    type: 1
+    source: "scripts/lib/aid-lifecycle.sh (_aid_lc_precheck_write + _aid_lc_isolated_commit)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-232: every lifecycle commit (identity, manifest, receipt) uses a temp GIT_INDEX_FILE index (read-tree/add/write-tree/commit-tree/update-ref) + `git reset -q -- <paths>`, so the user's real staged/working index is provably never touched — verified by index-fingerprint fault-injection tests (before/after each fault point), not merely a clean worktree after recovery. Because the isolated commit builds its tree from the WORKTREE files on disk, the entry guard _aid_lc_precheck_write REFUSES fail-closed if the user has EITHER a STAGED lifecycle path OR an UNSTAGED modification to a tracked lifecycle path, and it runs BEFORE bind_delivery mutates the manifest in record-delivery / plan-reconcile --apply (the in-commit guard _aid_lc_no_staged_collision stays staged-only because AID has by then written its own canonical content). An untracked receipt from an interrupted run is re-committed ONLY when byte-identical to the freshly-built canonical receipt; a differing untracked receipt is a user collision and is refused, never overwritten. record-delivery propagates ANY non-zero ensure_manifest rc so a refused/non-durable manifest never falls through to bind/commit."
+    test: "scripts/tests/bats/test-lifecycle-e2e.bats (grep: '#8|#8b|collision|UNSTAGED'), scripts/tests/bats/test-lifecycle-reconcile.bats (grep: 'collision|OTHER working changes')"
+  - id: lifecycle_publicsafe_contract
+    type: 4
+    source: "scripts/lib/aid-lifecycle.sh (validate before every commit) -> defaults/schemas/plan-lifecycle-manifest.schema.json + receipt schema"
+    instruction: "defaults/schemas/plan-lifecycle-manifest.schema.json (additionalProperties:false)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-232: a binding public-safe contract (JSON-Schema additionalProperties:false + a value/secret/abs-path/free-text-key net) gates every .aid-lifecycle/ artifact before it is committed, so tracked manifests/receipts carry only technical fields — never report bodies, findings, prompts, absolute paths, secrets, PII, or waiver reasons. delivery is enum:[delivered]; review is enum:[accepted,unverifiable,rejected,none] — a merged EPIC whose historical review is unverifiable is recorded review:unverifiable and the plan stays active (never falsely closed / never presented as accepted)."
+    test: "scripts/tests/bats/test-lifecycle.bats (grep: 'publicsafe|additionalProperties|unknown field')"
+  - id: init_gate_dependency_scoped
+    type: 1
+    source: "scripts/aid-fsm.sh (cmd_init D1 gate; grep: 'depends_on_plans')"
+    instruction: "skills/pipeline.md / commands/aid-run.md (init advisory)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    description: "IMP-232 D1: an independent plan's state NEVER hard-blocks another plan's init. The old global cross-plan ca-review-complete precondition is removed; a hard block now occurs ONLY when the initializing plan declares a structured `depends_on_plans` target that is not closed (still --force-overridable + audited). Legacy prose `depends_on` is advisory-only. A single actionable init advisory summarizes delivered-but-unreconciled plans (CI-suppressible), never per-EPIC."
+    test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'depends_on_plans|D1'), scripts/tests/bats/test-lifecycle-reconcile.bats"

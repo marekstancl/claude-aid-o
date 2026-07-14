@@ -249,6 +249,35 @@ prev_epic_id=""
 
 echo "[INFO] Starting pipeline for plan $plan_id ($total_phases phase(s), queue-mode: $queue_mode)" >&2
 
+# IMP-232 v2.58.1: create the plan lifecycle manifest at the official scaffold, as
+# part of the normal commit flow (repo identity + manifest committed together via
+# an isolated index — the user's index is never touched). This is what makes the
+# durable denominator exist BEFORE closure, so a new plan never waits for a manual
+# reconcile to have a lifecycle manifest. Enforcement is split by plan opt-in:
+# lifecycle_strict plans FAIL-CLOSED if the manifest is not durable; legacy plans
+# proceed under a loud, audited migration (never a silent skip).
+if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
+  # shellcheck source=lib/aid-lifecycle.sh
+  source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+  _lc_rc=0; aid_lifecycle_ensure_manifest "$plan_id" "." >/dev/null 2>&1 || _lc_rc=$?
+  if [[ "$_lc_rc" -eq 0 ]]; then
+    echo "[INFO] lifecycle manifest ensured for $plan_id (.aid-lifecycle/manifests/${plan_id}.yaml)" >&2
+  elif grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan" 2>/dev/null && [[ "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
+    # NEW-MODEL plan (opted into strict lifecycle via frontmatter) MUST have a
+    # durable, committed manifest before EPIC scaffolding -> FAIL-CLOSED.
+    error_exit "Lifecycle manifest could not be created for strict plan $plan_id (rc=$_lc_rc). A lifecycle_strict plan MUST have a durable, committed manifest before EPIC scaffolding. Fix the plan's EPIC declaration (strict '**EPIC N: …**' / '**EPIC N / Backlog: …**' grammar) and run on target_branch — or set AID_LIFECYCLE_MIGRATION=1 for an explicit, audited legacy run." 6
+  else
+    # Reached by a LEGACY plan (no lifecycle_strict) OR a strict plan explicitly
+    # overridden with AID_LIFECYCLE_MIGRATION=1 -> explicit, AUDITED migration: a
+    # loud WARN + a logged marker (never a silent skip). Reconcilable after
+    # delivery. Message must NOT assert "legacy" — it may be a strict override.
+    _lc_mode="legacy"; [[ "${AID_LIFECYCLE_MIGRATION:-}" == "1" ]] && _lc_mode="strict-override"
+    echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=$_lc_rc) — proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery. (New plans use the plan template's 'lifecycle_strict: true' + the strict '**EPIC N:**' grammar for fail-closed guarantees.)" >&2
+    mkdir -p ".aid-o/work" 2>/dev/null \
+      && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
+  fi
+fi
+
 for phase in $(seq 1 "$total_phases"); do
 
   # -------------------------------------------------------------------------
