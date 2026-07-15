@@ -913,7 +913,7 @@ actual second vendor (Codex), not an in-process Claude `Agent()` call.
 
 ### `aid-c3-dispatch.sh` — three subcommands
 
-`scripts/aid-c3-dispatch.sh` is the bridge. It has three deterministic
+`scripts/lib/aid-c3-dispatch.sh` is the bridge. It has three deterministic
 subcommands, each a distinct stage of the dispatch lifecycle:
 
 - **`build-manifest`** — assembles the hash-manifested Codex brief (the audit
@@ -977,7 +977,7 @@ plan**, not here.
 
 ### Observe → blocking staging
 
-The FSM `done-advance` C3 hook shells out to `aid-c3-dispatch.sh verify`, making
+The FSM `done-advance` C3 hook shells out to `scripts/lib/aid-c3-dispatch.sh verify`, making
 the full report↔raw faithful-transform binding a **real, deterministic,
 merge-blocking capability** — code, not prose. The shipped default enforcement
 stays **`observe`**; the real blocking activation is decided at a later milestone
