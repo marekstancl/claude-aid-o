@@ -18,3 +18,9 @@ deliveries:
     reviewed_sha: 6280d3748a941f407651716a5cf558cf8f02318b
     review: unverifiable
     unresolved_blockers: 1
+  E-065-2_7:
+    delivery: delivered
+    delivery_sha: 47d57797c6f16a310ce02b2d0b7689b8f59ec3f4
+    reviewed_sha: 9a2bcddc6830c469a664488c12a1b86cafdff742
+    review: unverifiable
+    unresolved_blockers: 1
