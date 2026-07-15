@@ -1323,6 +1323,21 @@ _base_valid_resp() {
   [ "$status" -eq 0 ]
 }
 
+@test "step6/security: _validate_response REJECTS multi-document JSON (a malformed/malicious doc concatenated before a well-formed one)" {
+  # CP2/CP3 finding (HIGH, fixed): `jq -e FILTER file` evaluates FILTER against
+  # EVERY top-level JSON document in the file and -e's exit reflects only the
+  # LAST one — a crafted 2-document file could validate solely against its
+  # last (well-formed) document, silently ignoring an earlier malicious one.
+  # Regression-lock the fix so a future refactor can't silently reintroduce it.
+  _base_valid_resp "$TEST_TMPDIR/valid_tail.json"
+  {
+    printf '{"attacker":"controlled","not":"schema-shaped"}\n'
+    cat "$TEST_TMPDIR/valid_tail.json"
+  } > "$TEST_TMPDIR/multidoc.json"
+  _vr "$TEST_TMPDIR/multidoc.json"
+  [ "$status" -ne 0 ]
+}
+
 @test "step6/AC2: rejects ANY extra top-level key (process_id / provider / model / input_manifest_hash)" {
   local k
   for k in process_id provider model input_manifest_hash; do
