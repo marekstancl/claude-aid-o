@@ -374,16 +374,24 @@ YAML
 
 # ─── CLI skeleton (build-manifest only; other subcommands are stubs) ────────
 
-@test "skeleton: dispatch subcommand is a not-yet-implemented stub (exit 2)" {
+# dispatch is IMPLEMENTED as of Step 5 (this EPIC): it is no longer a stub. With
+# no <evidence_dir> it is a usage/precondition error (exit 1), not exit-2 "not
+# yet implemented". (Full dispatch behavior is covered by the Step-5 block below.)
+@test "skeleton: dispatch subcommand requires <evidence_dir> (usage error, no longer a stub)" {
   run bash "$DISPATCH" dispatch
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"not yet implemented"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" != *"not yet implemented"* ]]
 }
 
-@test "skeleton: verify subcommand is a not-yet-implemented stub (exit 2)" {
+# verify is IMPLEMENTED as of Step 7 (this EPIC): it is no longer a stub. With no
+# <evidence_dir> it is a fail-closed usage error (exit 2 — verify's whole contract
+# is "exit 2 unless fully verified"), NOT the old exit-2 "not yet implemented"
+# stub message. (Full verify behavior is covered by the Step-7 block below.)
+@test "skeleton: verify subcommand requires <evidence_dir> (fail-closed, no longer a stub)" {
   run bash "$DISPATCH" verify
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not yet implemented"* ]]
+  [[ "$output" != *"not yet implemented"* ]]
 }
 
 @test "skeleton: unknown subcommand → exit 1 with usage" {
@@ -955,4 +963,928 @@ EOF
   jq -n '{only:"x"}' > "$TEST_TMPDIR/v.json"
   run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json"
   [ "$status" -ne 0 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 5 (backend) — Executor-first Codex dispatch (`dispatch`) + raw capture
+#
+# Additive only: never touches the Step-2/3/4 tests above. Exercises cmd_dispatch
+# in scripts/lib/aid-c3-dispatch.sh: the executor is chosen FIRST and Codex is
+# ALWAYS probed as cross_provider (never cross_model, never cached); the real
+# codex CLI (the deterministic fake-codex fixture, wrapped by a logging spy) is
+# invoked read-only in a fresh process; raw output + codex-derived provenance
+# are captured into <evidence_dir>/c3/c3-dispatch.json.
+#
+# Grounding: scripts/tests/e2e/evidence/codex-stream-sample/fields.md.
+#
+# Two test seams (both consumed by cmd_dispatch via env, NOT by editing source):
+#   AID_C3_INDEPENDENCE_BIN → a spy that LOGS its `detect --required <level>` args
+#     and returns available(0)/unverifiable(2). It never calls codex, so the only
+#     codex invocations are the dispatch calls themselves (clean AC3 count).
+#   a `codex` spy PREPENDED to PATH that logs each invocation's args (one
+#     ARG:<val> line each) then exec's fake-codex. Lets us assert the exact
+#     `--cd <repo> --sandbox read-only` launch and the absence of --output-schema.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _seed_manifest [risk_profile] — build a REAL manifest for dispatch to consume.
+_seed_manifest() {
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" "${1:-high}"
+  [ "$status" -eq 0 ]
+}
+
+# _dispatch_seams — install the independence pre-check spy + the logging codex
+# spy, and export the paths/handles the Step-5 tests assert against.
+_dispatch_seams() {
+  INDEP_SPY="$TEST_TMPDIR/indep-spy"; mkdir -p "$INDEP_SPY"
+  export INDEP_SPY
+  INDEP_LOG="$TEST_TMPDIR/indep.log"; : > "$INDEP_LOG"
+  export INDEP_LOG
+  cat > "$INDEP_SPY/detect" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$INDEP_LOG"
+exit 0
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  export AID_C3_INDEPENDENCE_BIN="$INDEP_SPY/detect"
+
+  CODEX_SPY="$TEST_TMPDIR/codex-spy"; mkdir -p "$CODEX_SPY"
+  export CODEX_SPY
+  CODEX_LOG="$TEST_TMPDIR/codex.log"; : > "$CODEX_LOG"
+  export CODEX_LOG
+  cat > "$CODEX_SPY/codex" <<EOF
+#!/usr/bin/env bash
+{ echo "=== INVOKE ==="; for a in "\$@"; do printf 'ARG:%s\n' "\$a"; done; } >> "$CODEX_LOG"
+exec "$FAKE_CODEX_DIR/codex" "\$@"
+EOF
+  chmod +x "$CODEX_SPY/codex"
+  PATH="$CODEX_SPY:$PATH"; export PATH
+
+  # Coherent EXPECT_* so valid-mode echoes the manifest's real head + brief hash.
+  export FAKE_CODEX_EXPECT_HEAD="$HEAD_SHA"
+  export FAKE_CODEX_EXPECT_MANIFEST_HASH="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$MANIFEST" 2>/dev/null || echo "")"
+
+  PROJECT_ROOT="$(git -C "$TEST_EVIDENCE_DIR" rev-parse --show-toplevel)"
+  export PROJECT_ROOT
+  DJSON="$TEST_EVIDENCE_DIR/c3/c3-dispatch.json"
+  export DJSON
+}
+
+# ─── AC1: the executor probes cross_provider, NEVER cross_model ──────────────
+
+@test "step5/AC1: high profile → dispatch probes detect --required cross_provider (NOT cross_model)" {
+  _seed_manifest high
+  # For high, the manifest's REQUIRED level is cross_model — the tempting-but-wrong
+  # value the old executor/level mismatch would have probed. The executor must
+  # still probe cross_provider.
+  run jq -r '.audit_input_manifest.required_independence_level' "$MANIFEST"
+  [ "$output" = "cross_model" ]
+
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # The pre-check the bridge ACTUALLY made (spy log):
+  grep -q 'detect --required cross_provider' "$INDEP_LOG"
+  ! grep -q 'cross_model' "$INDEP_LOG"
+
+  # …and it is recorded as the probed level (required is carried through verbatim).
+  run jq -r '.independence.probed_independence_level' "$DJSON"
+  [ "$output" = "cross_provider" ]
+  run jq -r '.independence.required_independence_level' "$DJSON"
+  [ "$output" = "cross_model" ]
+}
+
+# ─── AC2: valid mode captures session id / events_valid / achieved / raw sha ──
+
+@test "step5/AC2: valid — codex launched --cd <repo> --sandbox read-only; session id, events_valid:true, achieved cross_provider, raw_response_sha256 recorded" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DJSON" ]
+
+  # provenance parsed from the --json stream (fields.md paths)
+  run jq -r '.dispatch.codex_session_id' "$DJSON"
+  [[ "$output" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.exit_code' "$DJSON"; [ "$output" = "0" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+  run jq -r '.dispatch.raw_response_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.dispatch.stdout_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+  # reported model = the bridge's own -m arg (the slug is ABSENT from the stream)
+  run jq -r '.executor.reported_model' "$DJSON"; [ "$output" = "gpt-5.6-terra" ]
+
+  # codex was actually launched exec/read-only, cd'd to the repo root, and — per
+  # the DISCOVERED ISSUE — WITHOUT --output-schema (the if/then schema would 400).
+  grep -qx "ARG:exec" "$CODEX_LOG"
+  grep -qx "ARG:--cd" "$CODEX_LOG"
+  grep -qx "ARG:$PROJECT_ROOT" "$CODEX_LOG"
+  grep -qx "ARG:--sandbox" "$CODEX_LOG"
+  grep -qx "ARG:read-only" "$CODEX_LOG"
+  ! grep -qx "ARG:--output-schema" "$CODEX_LOG"
+
+  # raw last-message actually captured; its sha matches the recorded provenance
+  [ -f "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" ]
+  local rsha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" | awk '{print $1}')"
+  [ "$(jq -r '.dispatch.raw_response_sha256' "$DJSON")" = "$rsha" ]
+  # and the stdout sha matches the captured event stream
+  local ssha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/c3/codex-events.jsonl" | awk '{print $1}')"
+  [ "$(jq -r '.dispatch.stdout_sha256' "$DJSON")" = "$ssha" ]
+}
+
+@test "step5/AC2: prompt is rendered deterministically from the committed template (provenance recorded, no residual {{)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # the rendered prompt exists, has no leftover placeholder, and carries head_sha
+  [ -f "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt" ]
+  ! grep -qE '\{\{' "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  grep -q "$HEAD_SHA" "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  # render provenance recorded from aid-render-prompt.sh (the committed template)
+  run jq -r '.prompt.template_id' "$DJSON"; [ "$output" = "c3-audit-prompt" ]
+  run jq -r '.prompt.template_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.prompt.rendered_prompt_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+# ─── AC3: non-sticky — consecutive rate_limited runs each re-attempt codex ───
+
+@test "step5/AC3: two consecutive rate_limited runs BOTH invoke codex (non-sticky; second not skipped, no state persists)" {
+  _seed_manifest high
+  _dispatch_seams
+
+  FAKE_CODEX_MODE=rate_limited run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "rate_limited" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+
+  FAKE_CODEX_MODE=rate_limited run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "rate_limited" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+
+  # BOTH runs launched `codex exec` (the second was NOT skipped) → 2 exec calls.
+  run grep -c '^ARG:exec$' "$CODEX_LOG"
+  [ "$output" = "2" ]
+  # …and each run independently ran the pre-check → 2 probes.
+  run grep -c 'detect --required cross_provider' "$INDEP_LOG"
+  [ "$output" = "2" ]
+  # non-sticky: NO availability-cache / state artifact was written under evidence.
+  run bash -c "find '$TEST_EVIDENCE_DIR' \\( -iname '*availab*' -o -iname '*cache*' \\) | wc -l | tr -d ' '"
+  [ "$output" = "0" ]
+}
+
+# ─── Error handling / edge cases (Error Handling + Edge Cases in the plan) ────
+
+@test "step5/error: dispatch without a manifest → PRECONDITION FAIL exit 1" {
+  run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"manifest missing"* ]]
+}
+
+@test "step5/edge: pre-check unavailable → non-dispatched (invoked:false, achieved unavailable, exit 2); codex NEVER launched" {
+  _seed_manifest high
+  _dispatch_seams
+  # Flip the pre-check spy to report unverifiable (exit 2).
+  cat > "$INDEP_SPY/detect" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$INDEP_LOG"
+exit 2
+EOF
+  chmod +x "$INDEP_SPY/detect"
+
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "unavailable" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+  # the pre-check WAS made (cross_provider), but codex exec was never launched.
+  grep -q 'detect --required cross_provider' "$INDEP_LOG"
+  run grep -c '^ARG:exec$' "$CODEX_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "step5/edge: codex timeout (124) → outcome timeout, invoked true, events_valid false, achieved unavailable, exit 2" {
+  _seed_manifest high
+  _dispatch_seams
+  AID_C3_TIMEOUT_SECONDS=1 FAKE_CODEX_MODE=timeout run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "timeout" ]
+  run jq -r '.dispatch.exit_code' "$DJSON"; [ "$output" = "124" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+}
+
+@test "step5/edge: AID_C3_TIMEOUT_SECONDS unset → 900s default is used (not an empty timeout)" {
+  # We do not want to wait 900s; assert the DEFAULT is wired by inspecting that a
+  # valid run (which returns immediately) still succeeds with the env UNSET.
+  _seed_manifest high
+  _dispatch_seams
+  unset AID_C3_TIMEOUT_SECONDS
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+}
+
+@test "step5/edge: no_stream (well-formed lines, no turn.completed) → events_valid false, outcome failed, exit 2" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=no_stream run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "failed" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+  # session id is still recovered from the (present) thread.started line
+  run jq -r '.dispatch.codex_session_id' "$DJSON"
+  [[ "$output" =~ ^[0-9a-f]{8}- ]]
+}
+
+@test "step5/boundary: invalid_json — stream is well-formed so dispatch SUCCEEDS; the raw malformed last-message is handed to Step 6 (bridge does not reject it)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=invalid_json run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+  # the captured raw last-message is itself NOT valid JSON — Step 6's job to reject,
+  # not the dispatch/capture path's.
+  run jq -e . "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  [ "$status" -ne 0 ]
+  # …but a raw_response_sha256 over those raw bytes is still recorded.
+  run jq -r '.dispatch.raw_response_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+@test "step5/edge: cross_model required (high) is still ATTEMPTED as cross_provider and satisfied by achieved cross_provider" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # required cross_model, probed+achieved cross_provider (never downgraded).
+  run jq -r '.independence.required_independence_level' "$DJSON"; [ "$output" = "cross_model" ]
+  run jq -r '.independence.probed_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 6 (backend) — Validation + deterministic normalization + fail-closed writer
+#
+# Additive only: never touches the Step-2/3/4/5 tests above. Exercises the
+# TRUST-BOUNDARY functions in scripts/lib/aid-c3-dispatch.sh:
+#   _validate_response  (the trusted jq gate — does NOT trust --output-schema)
+#   _normalize          (deterministic fingerprint/occurrence_id computation)
+#   _write_report       (the ONLY place status:pass|fail is written)
+#   _write_unverifiable (fail-closed — every failure ⇒ status:unverifiable)
+#   _process_response   (validate → normalize → write, wired into `dispatch`)
+#
+# Fixture modes (valid/invalid_json/hash_mismatch/head_mismatch/no_stream/
+# timeout/rate_limited/missing_action_owner) drive the end-to-end paths; the
+# _validate_response red-green battery and the review_unverifiable/invalid_output
+# split are driven by SOURCING the bridge and calling the functions directly with
+# crafted inputs (the source-guard makes `main` inert when sourced).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _vr <json-file> — source the bridge and run _validate_response on <json-file>.
+# Sets $status: 0 = accepted, non-0 = rejected (fail-closed).
+_vr() {
+  run bash -c "source '$DISPATCH'; _validate_response '$1'"
+}
+
+# _base_valid_resp <out> — a schema-VALID C3 response (findings status, one high
+# finding with a valid action_owner; blocking_findings consistent).
+_base_valid_resp() {
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h, codex_brief_hash:$bh, review_status:"findings",
+      blocking_findings:true,
+      findings:[{severity:"high",area:"scripts/x.sh:1",finding:"f",recommendation:"r",action_owner:"implementer"}]}' \
+    > "$1"
+}
+
+# ─── AC1: valid high-severity finding → validator-passing audit-report.json ──
+
+@test "step6/AC1: valid high finding normalizes to an audit-report.json that PASSES aid-protocol-validate.sh" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  [ -f "$AR" ]
+  # the whole envelope passes the AUTHORITATIVE runtime validator
+  run bash "$VALIDATE" "$AR"
+  [ "$status" -eq 0 ]
+  # blocking high finding ⇒ envelope status fail; artifact_type audit_report
+  run jq -r '.status' "$AR"; [ "$output" = "fail" ]
+  run jq -r '.artifact_type' "$AR"; [ "$output" = "audit_report" ]
+  # the high finding carries a well-formed fingerprint, a non-empty c3-<epic>-<n>
+  # occurrence_id, and a valid action_owner — all present
+  run jq -e '[.findings[] | select(.severity=="high")
+             | select((.fingerprint|test("^sha256:[0-9a-f]{64}$"))
+                      and (.occurrence_id|test("^c3-E-test-[0-9]+$"))
+                      and (.action_owner=="implementer"))] | length > 0' "$AR"
+  [ "$status" -eq 0 ]
+  # audit_report provenance is bridge-filled and binds to this run
+  run jq -r '.audit_report.provider' "$AR";        [ "$output" = "codex" ]
+  run jq -r '.audit_report.model' "$AR";           [ "$output" = "gpt-5.6-terra" ]
+  run jq -r '.audit_report.reviewed_head' "$AR";   [ "$output" = "$HEAD_SHA" ]
+  run jq -r '.audit_report.independence_level' "$AR"; [ "$output" = "cross_provider" ]
+  run jq -r '.audit_report.input_manifest_hash' "$AR"
+  [ "$output" = "$(jq -r '.audit_input_manifest.input_hash' "$MANIFEST")" ]
+  run jq -r '.audit_report.codex_brief_hash' "$AR"
+  [ "$output" = "$(jq -r '.audit_input_manifest.codex_brief_hash' "$MANIFEST")" ]
+  # dual-emit markdown twin exists
+  [ -f "$TEST_EVIDENCE_DIR/audit-report.md" ]
+}
+
+@test "step6/AC1: low/medium finding WITHOUT action_owner is carried absent (never defaulted) — B5 tuple parity" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  # the valid fixture's medium finding has NO action_owner — it must stay ABSENT
+  run jq -e '[.findings[] | select(.severity=="medium") | select(has("action_owner")|not)] | length > 0' "$AR"
+  [ "$status" -eq 0 ]
+  # …and the report still validates (action_owner only required for crit/high)
+  run bash "$VALIDATE" "$AR"
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC2: _validate_response rejects every safety-rule violation ─────────────
+
+@test "step6/AC2: _validate_response ACCEPTS a schema-valid base response" {
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  _vr "$TEST_TMPDIR/r.json"
+  [ "$status" -eq 0 ]
+}
+
+@test "step6/security: _validate_response REJECTS multi-document JSON (a malformed/malicious doc concatenated before a well-formed one)" {
+  # CP2/CP3 finding (HIGH, fixed): `jq -e FILTER file` evaluates FILTER against
+  # EVERY top-level JSON document in the file and -e's exit reflects only the
+  # LAST one — a crafted 2-document file could validate solely against its
+  # last (well-formed) document, silently ignoring an earlier malicious one.
+  # Regression-lock the fix so a future refactor can't silently reintroduce it.
+  _base_valid_resp "$TEST_TMPDIR/valid_tail.json"
+  {
+    printf '{"attacker":"controlled","not":"schema-shaped"}\n'
+    cat "$TEST_TMPDIR/valid_tail.json"
+  } > "$TEST_TMPDIR/multidoc.json"
+  _vr "$TEST_TMPDIR/multidoc.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects ANY extra top-level key (process_id / provider / model / input_manifest_hash)" {
+  local k
+  for k in process_id provider model input_manifest_hash; do
+    _base_valid_resp "$TEST_TMPDIR/r.json"
+    jq --arg k "$k" '. + {($k): "leaked"}' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/r2.json"
+    _vr "$TEST_TMPDIR/r2.json"
+    [ "$status" -ne 0 ]
+  done
+}
+
+@test "step6/AC2: rejects a missing REQUIRED top-level key" {
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq 'del(.blocking_findings)' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/r2.json"
+  _vr "$TEST_TMPDIR/r2.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects a bad review_status enum" {
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '.review_status="bogus"' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/r2.json"
+  _vr "$TEST_TMPDIR/r2.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: unverifiable REQUIRES non-empty unverifiable_reasons; forbidden otherwise" {
+  # unverifiable WITHOUT reasons → reject
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",blocking_findings:false,findings:[]}' \
+    > "$TEST_TMPDIR/u1.json"
+  _vr "$TEST_TMPDIR/u1.json"; [ "$status" -ne 0 ]
+  # unverifiable WITH empty reasons → reject
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",blocking_findings:false,findings:[],unverifiable_reasons:[]}' \
+    > "$TEST_TMPDIR/u1b.json"
+  _vr "$TEST_TMPDIR/u1b.json"; [ "$status" -ne 0 ]
+  # unverifiable WITH reasons → accept
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",blocking_findings:false,findings:[],unverifiable_reasons:["no gate artifact"]}' \
+    > "$TEST_TMPDIR/u2.json"
+  _vr "$TEST_TMPDIR/u2.json"; [ "$status" -eq 0 ]
+  # reasons on a NON-unverifiable status → reject
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '. + {unverifiable_reasons:["x"]}' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/u3.json"
+  _vr "$TEST_TMPDIR/u3.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects a bad severity enum" {
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '.findings[0].severity="catastrophic"' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/r2.json"
+  _vr "$TEST_TMPDIR/r2.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects a bad action_owner enum at ANY severity (high AND medium)" {
+  # high with a bad owner → reject
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '.findings[0].action_owner="nobody"' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/r2.json"
+  _vr "$TEST_TMPDIR/r2.json"; [ "$status" -ne 0 ]
+  # medium with a bad owner (owner present at a non-blocking severity) → reject
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,
+      findings:[{severity:"medium",area:"a",finding:"f",recommendation:"r",action_owner:"nobody"}]}' \
+    > "$TEST_TMPDIR/m.json"
+  _vr "$TEST_TMPDIR/m.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects a high finding with NO action_owner (required for crit/high)" {
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:true,
+      findings:[{severity:"high",area:"a",finding:"f",recommendation:"r"}]}' \
+    > "$TEST_TMPDIR/r.json"
+  _vr "$TEST_TMPDIR/r.json"
+  [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: rejects a malformed reviewed_head and a malformed codex_brief_hash" {
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '.reviewed_head="XYZ-not-40-hex"' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/h.json"
+  _vr "$TEST_TMPDIR/h.json"; [ "$status" -ne 0 ]
+  _base_valid_resp "$TEST_TMPDIR/r.json"
+  jq '.codex_brief_hash="md5:whatever"' "$TEST_TMPDIR/r.json" > "$TEST_TMPDIR/b.json"
+  _vr "$TEST_TMPDIR/b.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC2: a medium finding WITH a valid action_owner AND one WITHOUT are BOTH accepted" {
+  # medium WITH a valid owner
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,
+      findings:[{severity:"medium",area:"a",finding:"f",recommendation:"r",action_owner:"reviewer"}]}' \
+    > "$TEST_TMPDIR/mw.json"
+  _vr "$TEST_TMPDIR/mw.json"; [ "$status" -eq 0 ]
+  # medium WITHOUT an owner
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,
+      findings:[{severity:"medium",area:"a",finding:"f",recommendation:"r"}]}' \
+    > "$TEST_TMPDIR/mo.json"
+  _vr "$TEST_TMPDIR/mo.json"; [ "$status" -eq 0 ]
+}
+
+@test "step6/AC2: fail-closed on a non-object / unparseable last-message" {
+  printf '[1,2,3]\n' > "$TEST_TMPDIR/arr.json"
+  _vr "$TEST_TMPDIR/arr.json"; [ "$status" -ne 0 ]
+  printf 'not json at all {\n' > "$TEST_TMPDIR/bad.json"
+  _vr "$TEST_TMPDIR/bad.json"; [ "$status" -ne 0 ]
+}
+
+# ─── AC3: review_status ↔ findings binding (red-green) ───────────────────────
+
+@test "step6/AC3: pass WITH non-empty findings → reject" {
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"pass",blocking_findings:false,
+      findings:[{severity:"low",area:"a",finding:"f",recommendation:"r"}]}' \
+    > "$TEST_TMPDIR/p.json"
+  _vr "$TEST_TMPDIR/p.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC3: findings-status WITH empty findings → reject" {
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,findings:[]}' \
+    > "$TEST_TMPDIR/f.json"
+  _vr "$TEST_TMPDIR/f.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC3: blocking_findings NOT matching (∃ crit/high) → reject (both directions)" {
+  # claims blocking:true but only a low finding exists → reject
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:true,
+      findings:[{severity:"low",area:"a",finding:"f",recommendation:"r"}]}' \
+    > "$TEST_TMPDIR/b1.json"
+  _vr "$TEST_TMPDIR/b1.json"; [ "$status" -ne 0 ]
+  # claims blocking:false but a high finding exists → reject
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,
+      findings:[{severity:"high",area:"a",finding:"f",recommendation:"r",action_owner:"implementer"}]}' \
+    > "$TEST_TMPDIR/b2.json"
+  _vr "$TEST_TMPDIR/b2.json"; [ "$status" -ne 0 ]
+}
+
+@test "step6/AC3: a consistent pass (empty findings, blocking:false) → accept" {
+  jq -nc --arg h "$_RH40" --arg bh "$_IMH" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"pass",blocking_findings:false,findings:[]}' \
+    > "$TEST_TMPDIR/ok.json"
+  _vr "$TEST_TMPDIR/ok.json"; [ "$status" -eq 0 ]
+}
+
+# ─── AC4: honest review_unverifiable vs BROKEN invalid_output (red-green) ────
+
+@test "step6/AC4: schema-valid review_status:unverifiable → report unverifiable/review_unverifiable (NOT invalid_output)" {
+  _seed_manifest high
+  local bh; bh="$(jq -r '.audit_input_manifest.codex_brief_hash' "$MANIFEST")"
+  mkdir -p "$TEST_EVIDENCE_DIR/c3"
+  jq -nc --arg h "$HEAD_SHA" --arg bh "$bh" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",blocking_findings:false,
+      findings:[],unverifiable_reasons:["no gate artifact at reviewed HEAD"]}' \
+    > "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  run bash -c "source '$DISPATCH'; _process_response '$TEST_EVIDENCE_DIR' '$MANIFEST' 0 true dispatched cross_provider 'sess-abcd' '$HEAD_SHA' || true"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  [ -f "$AR" ]
+  run jq -r '.status' "$AR";                           [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR";             [ "$output" = "review_unverifiable" ]
+  run jq -r '.audit_report.unverifiable_reasons[0]' "$AR"; [ "$output" = "no gate artifact at reviewed HEAD" ]
+  run jq -r '.audit_report.blocking_findings' "$AR";   [ "$output" = "false" ]
+}
+
+@test "step6/AC4: a BROKEN (schema-invalid) output → report unverifiable/invalid_output (red-green twin)" {
+  _seed_manifest high
+  local bh; bh="$(jq -r '.audit_input_manifest.codex_brief_hash' "$MANIFEST")"
+  mkdir -p "$TEST_EVIDENCE_DIR/c3"
+  # schema-invalid: bad review_status enum (a genuinely broken output)
+  jq -nc --arg h "$HEAD_SHA" --arg bh "$bh" \
+    '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"bogus",blocking_findings:false,findings:[]}' \
+    > "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  run bash -c "source '$DISPATCH'; _process_response '$TEST_EVIDENCE_DIR' '$MANIFEST' 0 true dispatched cross_provider 'sess-abcd' '$HEAD_SHA' || true"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "invalid_output" ]
+}
+
+# ─── AC5: every failure mode → unverifiable with the matching outcome ────────
+
+@test "step6/AC5: invalid_json → unverifiable/invalid_output (never pass/fail)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=invalid_json run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "invalid_output" ]
+}
+
+@test "step6/AC5: hash_mismatch → unverifiable/hash_mismatch (Codex echoed the wrong brief)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=hash_mismatch run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "hash_mismatch" ]
+}
+
+@test "step6/AC5: head_mismatch → unverifiable/head_mismatch (Codex reviewed the wrong commit)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=head_mismatch run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "head_mismatch" ]
+}
+
+@test "step6/AC5: no_stream → unverifiable/invalid_output (events_valid false)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=no_stream run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "invalid_output" ]
+}
+
+@test "step6/AC5: timeout → unverifiable/timeout" {
+  _seed_manifest high
+  _dispatch_seams
+  AID_C3_TIMEOUT_SECONDS=1 FAKE_CODEX_MODE=timeout run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "timeout" ]
+}
+
+@test "step6/AC5: rate_limited → unverifiable/rate_limited" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=rate_limited run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "rate_limited" ]
+}
+
+@test "step6/AC5: missing_action_owner (schema-invalid) → unverifiable/invalid_output (response-reject)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=missing_action_owner run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  run jq -r '.status' "$AR";               [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.outcome' "$AR"; [ "$output" = "invalid_output" ]
+}
+
+@test "step6/AC5: NO failure mode ever produces status pass/fail" {
+  _seed_manifest high
+  _dispatch_seams
+  local m AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  for m in invalid_json hash_mismatch head_mismatch no_stream missing_action_owner rate_limited; do
+    rm -f "$AR"
+    FAKE_CODEX_MODE="$m" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+    run jq -r '.status' "$AR"
+    [ "$output" = "unverifiable" ]
+  done
+  rm -f "$AR"
+  AID_C3_TIMEOUT_SECONDS=1 FAKE_CODEX_MODE=timeout run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  run jq -r '.status' "$AR"; [ "$output" = "unverifiable" ]
+}
+
+# ─── AC6: normalized fingerprints/occurrence_ids are reproducible ───────────
+
+@test "step6/AC6: re-running dispatch on the same raw response yields identical fingerprints/occurrence_ids" {
+  _seed_manifest high
+  _dispatch_seams
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local fps1 occ1
+  fps1="$(jq -c '[.findings[].fingerprint]' "$AR")"
+  occ1="$(jq -c '[.findings[].occurrence_id]' "$AR")"
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local fps2 occ2
+  fps2="$(jq -c '[.findings[].fingerprint]' "$AR")"
+  occ2="$(jq -c '[.findings[].occurrence_id]' "$AR")"
+  [ "$fps1" = "$fps2" ]
+  [ "$occ1" = "$occ2" ]
+  # the finding-0 fingerprint equals the deterministic helper's own output
+  local pid sev area finding rec occ fp_expected fp_actual
+  pid="$(jq -r '.identity.project_id' "$MANIFEST")"
+  sev="$(jq -r '.findings[0].severity' "$AR")"
+  area="$(jq -r '.findings[0].area' "$AR")"
+  finding="$(jq -r '.findings[0].finding' "$AR")"
+  rec="$(jq -r '.findings[0].recommendation' "$AR")"
+  occ="$(jq -r '.findings[0].occurrence_id' "$AR")"
+  fp_expected="$(bash "$AID_PLUGIN_PATH/scripts/lib/aid-finding-fingerprint.sh" fingerprint_audit_report "$pid" audit_report "$occ" "$sev" "$area" "$finding" "$rec")"
+  fp_actual="$(jq -r '.findings[0].fingerprint' "$AR")"
+  [ "$fp_expected" = "$fp_actual" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 7 (backend) — `verify`: provenance chain + report↔raw faithful-transform
+#
+# Additive only: never touches the Step-2/3/4/5/6 tests above (except the verify
+# skeleton test, which was updated from stub→real, mirroring how Step 5 updated
+# the dispatch skeleton test). Exercises cmd_verify in aid-c3-dispatch.sh: it
+# re-checks the codex provenance chain (invoked/exit/outcome/events_valid/session/
+# achieved cross_provider, stdout/raw sha pinning, template freshness, the legacy
+# input_manifest_hash + recomputed codex_brief_hash chains) AND proves
+# audit-report.json is a faithful, deterministic transform of Codex's RAW
+# response (re-validate + reviewed_head/codex_brief_hash/blocking equality +
+# order-insensitive tuple-set + index-bound fingerprint/occurrence_id recompute).
+#
+# Every scenario drives a GENUINE end-to-end valid dispatch with the fake-codex
+# fixture (_drive_valid_dispatch), then verify's its own output — small, targeted
+# tamper tests each isolate ONE broken invariant → exit 2 (fail-closed).
+# _seed_manifest / _dispatch_seams are the Step-5 helpers defined above.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _drive_valid_dispatch — seed a manifest + spies and run a GENUINE valid dispatch
+# end to end, leaving a real evidence dir (c3-dispatch.json + audit-report.json +
+# codex-last-message.json + codex-events.jsonl + audit-input-manifest.json) that
+# `verify` should accept unchanged.
+_drive_valid_dispatch() {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_EVIDENCE_DIR/audit-report.json" ]
+}
+
+# _jq_edit <file> <filter> — jq-rewrite <file> in place (stays valid JSON).
+_jq_edit() {
+  local file="$1" filter="$2"
+  jq "$filter" "$file" > "$file.t" && mv "$file.t" "$file"
+}
+
+# ─── AC1: genuine verify passes; each targeted tamper → exit 2 ───────────────
+
+@test "step7/AC1: verify (live) exits 0 on a genuine dispatched run" {
+  _drive_valid_dispatch
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session"* ]]
+  [[ "$output" == *"$HEAD_SHA"* ]]
+}
+
+@test "step7/AC1: tampered RAW response (edited reviewed_head) → exit 2 (raw sha mismatch)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" '.reviewed_head="0000000000000000000000000000000000000000"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: tampered EVENT stream (appended line) → exit 2 (stdout sha mismatch)" {
+  _drive_valid_dispatch
+  printf '{"type":"injected-noise"}\n' >> "$TEST_EVIDENCE_DIR/c3/codex-events.jsonl"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized reviewed_head tampered in the report → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.reviewed_head="0000000000000000000000000000000000000000"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized input_manifest_hash tampered → exit 2 (legacy chain broken)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.audit_report.input_manifest_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized codex_brief_hash tampered → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.audit_report.codex_brief_hash="sha256:2222222222222222222222222222222222222222222222222222222222222222"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: blocking_findings flipped in the report → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.blocking_findings=false'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding's text tampered in the report → exit 2 (tuple-set divergence)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.findings[0].finding="a totally different, fabricated finding"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding fingerprint tampered → exit 2 (index-bound recompute)" {
+  _drive_valid_dispatch
+  # tuple-set excludes fingerprint, so only the index-bound recompute catches this.
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.findings[0].fingerprint="sha256:3333333333333333333333333333333333333333333333333333333333333333"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding occurrence_id tampered → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.findings[0].occurrence_id="c3-forged-999"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: process_id tampered → exit 2 (does not bind to the dispatch session)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.process_id="not-the-real-session"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: rendered prompt edited → exit 2 (prompt freshness)" {
+  _drive_valid_dispatch
+  printf 'trailing tamper\n' >> "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a pruned brief file → exit 2 (codex_brief recompute fails)" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/c3/bundle-diff.patch"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: an altered brief file → exit 2 (codex_brief sha diverges)" {
+  _drive_valid_dispatch
+  printf 'sneaky extra byte\n' >> "$TEST_EVIDENCE_DIR/c3/bundle-scope.txt"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: dispatch.invoked flipped to false → exit 2 (provenance says codex did not run)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" '.dispatch.invoked=false'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: achieved_independence_level downgraded → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" '.independence.achieved_independence_level="cross_model"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── AC2: --reference freshness vs live HEAD ────────────────────────────────
+
+@test "step7/AC2: --reference verifies against manifest.head_sha even after HEAD moves; live fails" {
+  _drive_valid_dispatch
+  # A later commit moves HEAD WITHOUT touching the evidence brief files.
+  git -C "$TEST_PROJECT_ROOT" commit -q --allow-empty -m "later commit moves HEAD"
+  local NEW_HEAD; NEW_HEAD="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  [ "$NEW_HEAD" != "$HEAD_SHA" ]
+  # live mode now sees a stale reviewed_head (audit reviewed the OLD head) → exit 2
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  # --reference checks freshness against the captured manifest.head_sha → exit 0
+  run bash "$DISPATCH" verify --reference "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session"* ]]
+  [[ "$output" == *"$HEAD_SHA"* ]]
+}
+
+# ─── AC3: B5 action_owner parity + added/removed findings ───────────────────
+
+@test "step7/AC3: a low/medium finding WITHOUT action_owner verifies (raw+report both omit it)" {
+  _drive_valid_dispatch
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  # the valid fixture's medium finding carries NO action_owner in the report…
+  run jq -e '[.findings[]|select(.severity=="medium" and (has("action_owner")|not))]|length>0' "$AR"
+  [ "$status" -eq 0 ]
+  # …nor in the raw response — and verify accepts the identical-absence tuple.
+  run jq -e '[.findings[]|select(.severity=="medium" and (has("action_owner")|not))]|length>0' \
+    "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  [ "$status" -eq 0 ]
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "step7/AC3: adding action_owner to the report's medium finding (absent in raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '(.findings[]|select(.severity=="medium")) |= (. + {action_owner:"reviewer"})'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC3: removing a finding from the normalized report (no matching raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" 'del(.findings[1])'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC3: adding a fabricated finding to the report (no matching raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.findings += [{fingerprint:"sha256:4444444444444444444444444444444444444444444444444444444444444444",occurrence_id:"c3-E-test-9",severity:"low",area:"forged",finding:"forged",recommendation:"forged"}]'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── AC4: absent c3-dispatch.json / manifest → exit 2 even if report claims pass ─
+
+@test "step7/AC4: c3-dispatch.json absent → exit 2 even if the report claims status:pass" {
+  _drive_valid_dispatch
+  # force the report to claim a clean pass, then remove the dispatch provenance
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.status="pass"'
+  rm -f "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"required artifact missing"* ]]
+}
+
+@test "step7/AC4: audit-input-manifest.json absent → exit 2" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC4: codex-last-message.json absent → exit 2" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── edge: raw response that fails the trusted re-validation gate ────────────
+
+@test "step7/edge: a raw response that fails _validate_response (re-validated, not trusted) → exit 2" {
+  # Craft a self-consistent evidence dir whose RAW response is schema-INVALID
+  # (bad severity enum). stdout/raw sha are recomputed to pass step 3, so the
+  # rejection is step 4's own re-validation, not an incidental hash mismatch.
+  _drive_valid_dispatch
+  local LM="$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  _jq_edit "$LM" '.findings[0].severity="catastrophic"'
+  # re-point the recorded raw_response_sha256 at the mutated file (step 3 passes)…
+  local newsha="sha256:$(sha256sum "$LM" | awk '{print $1}')"
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" ".dispatch.raw_response_sha256=\"$newsha\""
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── usage: unknown flag ────────────────────────────────────────────────────
+
+@test "step7/usage: unknown flag → exit 2 (fail-closed)" {
+  run bash "$DISPATCH" verify --bogus "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
 }

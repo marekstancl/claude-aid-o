@@ -3,9 +3,16 @@
 # aid-c3-dispatch.sh — C3 Cross-Provider Dispatch Bridge (P065, E-065-1_7)
 #
 # CLI skeleton for the C3 (independent audit) cross-provider dispatch bridge.
-# Only the `build-manifest` subcommand is implemented in this step (Step 2 of
-# the EPIC); `dispatch` and `verify` are LATER steps and are present here only
-# as fail-closed stubs so the arg-dispatch scaffold is complete.
+# `build-manifest` (E-065-1_7), `dispatch` + `verify` (E-065-2_7) are implemented.
+# `dispatch` now runs the FULL pipeline end-to-end: probe → render → invoke Codex
+# → capture raw → validate (trusted `_validate_response`) → deterministic
+# `_normalize` → `_write_report` (the ONLY place status:pass|fail is written) with
+# a fail-closed `_write_unverifiable` on every failure path (E-065-2_7 Step 6).
+# `verify` (E-065-2_7 Step 7) re-checks the codex-derived provenance chain AND
+# proves audit-report.json is a faithful, deterministic transform of Codex's RAW
+# response (re-validate the raw + field-for-field equality + index-bound
+# fingerprint recompute). A bridge cannot fabricate or edit findings without
+# detection; any divergence → exit 2 (fail-closed). See cmd_verify.
 #
 # ---------------------------------------------------------------------------
 # build-manifest <evidence_dir> <base_sha> <head_sha> <risk_profile>
@@ -44,7 +51,8 @@
 #   1 — PRECONDITION FAIL (usage, non-git dir, unresolvable SHA, unreadable
 #       brief source, or emitted manifest failed protocol validation) — no
 #       audit-input-manifest.json is left behind on precondition failure.
-#   2 — subcommand not yet implemented (dispatch / verify stubs)
+#   2 — dispatch non-dispatched outcome / verify NOT-verified (any provenance or
+#       faithful-transform check failed — fail-closed)
 #
 # Environment (optional):
 #   AID_CHANGED_PATHS   — file with one repo-relative changed path per line
@@ -57,7 +65,7 @@
 #                         unreadable → PRECONDITION FAIL. If unset, falls back to
 #                         <evidence_dir>/final_report.md, then a deterministic stub.
 #
-# **Last Updated:** 2026-07-14
+# **Last Updated:** 2026-07-15
 # =============================================================================
 set -euo pipefail
 
@@ -68,6 +76,21 @@ DEFAULT_POLICY="$PLUGIN_ROOT/defaults/policies/c3-audit-policy.yaml"
 
 PRODUCER="orchestrator@done-review"
 GENERATED_BY_TOOL="aid-c3-dispatch.sh#build-manifest"
+
+# --- dispatch-subcommand collaborators (test seams via env override) ---------
+# INDEPENDENCE_BIN — the "can we invoke codex THIS run" pre-check. Detection
+#   only; NOT a cross-run availability cache. Overridable so tests can spy on
+#   the exact `detect --required <level>` call the bridge makes (AC1/AC3).
+# RENDER_PROMPT   — the deterministic prompt renderer (never a shell heredoc).
+# CODEX_MODEL     — the -m arg the bridge invokes Codex with; this argument is
+#   the authoritative "reported model" for provenance because the model slug is
+#   ABSENT from the codex --json stream (fields.md §Model). Default is the
+#   session-confirmed working model.
+INDEPENDENCE_BIN="${AID_C3_INDEPENDENCE_BIN:-$SCRIPT_DIR/aid-audit-independence.sh}"
+RENDER_PROMPT="${AID_C3_RENDER_BIN:-$SCRIPT_DIR/aid-render-prompt.sh}"
+PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c3-audit-prompt-v1.md"
+RESPONSE_SCHEMA="$PLUGIN_ROOT/defaults/schemas/c3-codex-response.schema.json"
+CODEX_MODEL="${AID_C3_CODEX_MODEL:-gpt-5.6-terra}"
 
 # ---------------------------------------------------------------------------
 # usage
@@ -81,8 +104,21 @@ Subcommands:
       Write the Codex brief files under <evidence_dir>/c3/ and a canonical
       hash-manifest at <evidence_dir>/audit-input-manifest.json.
 
-  dispatch, verify
-      Not yet implemented (later EPIC steps).
+  dispatch <evidence_dir>
+      Select the Codex executor, probe cross_provider availability for THIS run
+      (never cached), render the sealed C3 prompt deterministically, invoke the
+      real Codex CLI (read-only, fresh process) and capture its raw output plus
+      codex-derived provenance into <evidence_dir>/c3/c3-dispatch.json.
+      Exit 0 = dispatched + events_valid (achieved cross_provider); exit 2 =
+      non-dispatched / unavailable / rate_limited / timeout (bridge NEVER runs a
+      fallback itself — it only signals unavailability).
+
+  verify [--reference] <evidence_dir>
+      Re-check the codex provenance chain and prove audit-report.json is a
+      faithful, deterministic transform of Codex's raw response. Exit 0 =
+      verified; exit 2 = any check failed (fail-closed). --reference checks
+      freshness against the manifest's captured head_sha (committed historical
+      fixtures) instead of the live HEAD.
 EOF
 }
 
@@ -453,6 +489,1084 @@ cmd_build_manifest() {
 }
 
 # ===========================================================================
+# dispatch helpers
+# ===========================================================================
+
+# _json_num_or_null <maybe-int>  — echo the integer verbatim if non-empty, else
+# the JSON literal `null` (for --argjson of a not-applicable exit code).
+_json_num_or_null() {
+  if [[ -n "$1" ]]; then printf '%s' "$1"; else printf 'null'; fi
+}
+
+# _json_str_or_null <maybe-string>  — echo a JSON string if non-empty, else the
+# JSON literal `null` (so codex-derived fields are honestly absent, not "").
+_json_str_or_null() {
+  if [[ -n "$1" ]]; then jq -n --arg s "$1" '$s'; else printf 'null'; fi
+}
+
+# _events_valid_of <events_file>  — echo "true"/"false" per fields.md's exact
+# 4-condition definition (first line thread.started with non-empty thread_id,
+# last line turn.completed, no error line, ≥1 agent_message). Mirrors the
+# grounding jq in codex-stream-sample/fields.md §events_valid. Fails closed to
+# "false" on an empty/unparseable stream.
+_events_valid_of() {
+  local f="$1" v=""
+  [[ -s "$f" ]] || { echo "false"; return 0; }
+  v="$(jq -rs '
+        (.[0].type=="thread.started")                                                as $c1a
+        | ((.[0].thread_id // "")|length>0)                                          as $c1b
+        | (.[-1].type=="turn.completed")                                             as $c2
+        | ((map(select(.type=="error"))|length)==0)                                  as $c3
+        | ((map(select(.type=="item.completed" and .item.type=="agent_message"))|length)>0) as $c4
+        | ($c1a and $c1b and $c2 and $c3 and $c4)
+      ' "$f" 2>/dev/null)" || v="false"
+  [[ "$v" == "true" ]] && echo "true" || echo "false"
+}
+
+# _session_id_of <events_file>  — the authoritative session id from the FIRST
+# event (thread.started.thread_id); empty if absent. fields.md §Session id.
+_session_id_of() {
+  local f="$1"
+  [[ -s "$f" ]] || { printf ''; return 0; }
+  # `|| true` so an unparseable stream under `set -o pipefail` yields "" rather
+  # than aborting the caller.
+  jq -r 'select(.type=="thread.started")|.thread_id' "$f" 2>/dev/null | head -n1 || true
+}
+
+# _looks_rate_limited <events_file> <stderr_file>  — 0 iff the live attempt bears
+# the backend rate-limit signature (fields.md §Error path: a stringified 429 /
+# rate_limit_exceeded blob in the error/turn.failed line, and/or on stderr).
+_looks_rate_limited() {
+  grep -qiE 'rate[_ ]?limit|"status"[[:space:]]*:[[:space:]]*429' "$1" "$2" 2>/dev/null
+}
+
+# _run_codex_isolated <project_root> <prompt_file> <events_out> <stderr_out> <last_out>
+#   Launch the REAL codex CLI as an independent, fresh, read-only process and
+#   capture its --json stdout stream, stderr, and last-message. Independence is
+#   provider + fresh process + `--sandbox read-only` (NOT a filesystem jail).
+#
+#   ⚠️ DISCOVERED ISSUE — `--output-schema` is deliberately NOT passed. Step 4's
+#   c3-codex-response.schema.json uses `if/then/else` + `allOf`, and Step 1's
+#   empirical finding (codex-stream-sample/fields.md §`--output-schema empirical
+#   behavior`) is that Codex forwards the schema to OpenAI strict structured
+#   output, which HARD-FAILS (HTTP 400 "'if' is not permitted") on any
+#   conditional keyword. Passing it would 400 every dispatch. The trusted gate
+#   is the bridge's own _validate_response (Step 6, next step), NOT the backend.
+#   We do NOT strip if/then from the schema to work around this — it is not ours
+#   to change, and the conditional rules are load-bearing for bridge validation.
+#
+#   Returns the codex/timeout exit code (124 = timed out).
+_run_codex_isolated() {
+  local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
+  local prompt rc=0
+  prompt="$(cat "$prompt_file")"
+  timeout "${AID_C3_TIMEOUT_SECONDS:-900}" \
+    codex exec --json \
+      --cd "$project_root" \
+      --sandbox read-only \
+      -m "$CODEX_MODEL" \
+      -c model_reasoning_effort=high \
+      --output-last-message "$last_out" \
+      "$prompt" \
+      < /dev/null > "$events_out" 2> "$stderr_out" || rc=$?
+  return "$rc"
+}
+
+# _write_dispatch_json — emit c3/c3-dispatch.json (atomic temp+mv). Writes the
+# dispatch-SIDE provenance only; Step 6 (normalize) finalizes the full artifact
+# shape. Positional args (all provided by cmd_dispatch):
+#   1 out  2 project_root  3 head_sha  4 codex_brief_hash  5 required_level
+#   6 template_id  7 template_sha256  8 rendered_prompt_sha256  9 codex_version
+#   10 invoked(true|false)  11 exit_code(int|"")  12 outcome  13 session_id
+#   14 codex_model  15 events_valid(true|false)  16 stdout_sha256
+#   17 raw_response_sha256  18 achieved_level
+_write_dispatch_json() {
+  local out="$1" project_root="$2" head_sha="$3" codex_brief_hash="$4" required_level="$5"
+  local template_id="$6" template_sha256="$7" rendered_prompt_sha256="$8" codex_version="$9"
+  local invoked="${10}" exit_code="${11}" outcome="${12}" session_id="${13}" codex_model="${14}"
+  local events_valid="${15}" stdout_sha256="${16}" raw_response_sha256="${17}" achieved_level="${18}"
+
+  local iso_now tmp
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  tmp="$out.tmp.$$"
+
+  jq -n \
+    --arg schema_version "aid-2.0" \
+    --arg artifact_type "c3_dispatch" \
+    --arg producer "$PRODUCER" \
+    --arg created_at "$iso_now" \
+    --arg generated_by_tool "aid-c3-dispatch.sh#dispatch" \
+    --arg project_root "$project_root" \
+    --arg head_sha "$head_sha" \
+    --arg codex_brief_hash "$codex_brief_hash" \
+    --arg required_independence_level "$required_level" \
+    --arg probed_independence_level "cross_provider" \
+    --arg executor_kind "codex_cli" \
+    --argjson template_id "$(_json_str_or_null "$template_id")" \
+    --argjson template_sha256 "$(_json_str_or_null "$template_sha256")" \
+    --argjson rendered_prompt_sha256 "$(_json_str_or_null "$rendered_prompt_sha256")" \
+    --argjson codex_version "$(_json_str_or_null "$codex_version")" \
+    --argjson invoked "$invoked" \
+    --argjson exit_code "$(_json_num_or_null "$exit_code")" \
+    --arg outcome "$outcome" \
+    --argjson codex_session_id "$(_json_str_or_null "$session_id")" \
+    --arg codex_reported_model "$codex_model" \
+    --argjson events_valid "$events_valid" \
+    --argjson stdout_sha256 "$(_json_str_or_null "$stdout_sha256")" \
+    --argjson raw_response_sha256 "$(_json_str_or_null "$raw_response_sha256")" \
+    --arg achieved_independence_level "$achieved_level" \
+    '{
+      schema_version: $schema_version,
+      artifact_type: $artifact_type,
+      producer: $producer,
+      created_at: $created_at,
+      provenance: {dispatch_mode: "cross_provider", generated_by_tool: $generated_by_tool},
+      executor: {kind: $executor_kind, reported_model: $codex_reported_model, codex_version: $codex_version},
+      subject: {project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
+      prompt: {template_id: $template_id, template_sha256: $template_sha256, rendered_prompt_sha256: $rendered_prompt_sha256},
+      dispatch: {
+        invoked: $invoked,
+        exit_code: $exit_code,
+        outcome: $outcome,
+        events_valid: $events_valid,
+        codex_session_id: $codex_session_id,
+        stdout_sha256: $stdout_sha256,
+        raw_response_sha256: $raw_response_sha256
+      },
+      independence: {
+        required_independence_level: $required_independence_level,
+        probed_independence_level: $probed_independence_level,
+        achieved_independence_level: $achieved_independence_level
+      }
+    }' > "$tmp" || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$out" || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# ===========================================================================
+# normalize / validate / write-report helpers (E-065-2_7 Step 6)
+#
+# TRUST BOUNDARY. Everything above captures Codex's RAW output verbatim; the
+# functions below are the ONLY place a `status: pass|fail` audit-report.json is
+# ever written, and the only place Codex's narrow findings are turned into a
+# runtime-validator-passing protocol-v2 envelope. Every failure path guarantees
+# a `status: unverifiable` artifact (never pass/fail) — fail-closed.
+# ===========================================================================
+
+# _validate_response <last_message_file>
+#   The TRUSTED gate. An EXPLICIT jq validator that does NOT trust the backend's
+#   best-effort --output-schema hint: it independently re-asserts every safety
+#   rule of the C3 response contract. Returns 0 iff the file parses AND every
+#   rule holds; any violation OR any jq error (fail-closed) → non-zero.
+#
+#   Rules (verbatim from the Step-6 plan):
+#     - top-level object; key set EXACTLY {reviewed_head, codex_brief_hash,
+#       review_status, blocking_findings, findings} + OPTIONAL unverifiable_reasons
+#       (any extra key — incl. provider/model/process_id/input_manifest_hash — or
+#       any missing required key fails);
+#     - review_status ∈ {pass, findings, unverifiable};
+#     - unverifiable_reasons: non-empty string[] REQUIRED iff review_status ==
+#       unverifiable, forbidden otherwise;
+#     - review_status↔findings binding: pass ⇒ findings==[] AND
+#       blocking_findings==false; findings ⇒ findings|length>=1; and
+#       blocking_findings MUST equal (∃ finding.severity ∈ {critical,high});
+#     - reviewed_head ~ ^[0-9a-f]{40}$; codex_brief_hash ~ ^sha256:[0-9a-f]{64}$;
+#       blocking_findings boolean; findings array;
+#     - each finding: severity ∈ {critical,high,medium,low,info}; non-empty
+#       area/finding/recommendation; action_owner REQUIRED for severity ∈
+#       {critical,high} AND — if present at ANY severity — ∈ {implementer,
+#       reviewer,pm,gate-fixer}.
+_validate_response() {
+  local f="$1" rc=0 doc_count
+  [[ -f "$f" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1   # validator unavailable → fail-closed
+
+  # CP2 finding (HIGH): `jq -e FILTER "$f"` below evaluates FILTER against EVERY
+  # top-level JSON document in the file and `-e`'s exit status reflects only the
+  # LAST one — a crafted multi-document file (two concatenated JSON objects)
+  # would validate solely against its last document, silently ignoring the
+  # first. This is the bridge's explicit trust gate over untrusted model
+  # output, so it must reject anything but a single JSON document itself,
+  # rather than relying on some other downstream check to incidentally catch
+  # the malformed shape.
+  doc_count="$(jq -c . "$f" 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [[ "$doc_count" == "1" ]] || return 1
+
+  jq -e '
+    (type == "object")
+    and ((keys_unsorted
+          - ["reviewed_head","codex_brief_hash","review_status","blocking_findings","findings","unverifiable_reasons"])
+         | length == 0)
+    and ((["reviewed_head","codex_brief_hash","review_status","blocking_findings","findings"]
+          - keys_unsorted) | length == 0)
+    and (.review_status | (. == "pass" or . == "findings" or . == "unverifiable"))
+    and (.reviewed_head    | (type == "string" and test("^[0-9a-f]{40}$")))
+    and (.codex_brief_hash | (type == "string" and test("^sha256:[0-9a-f]{64}$")))
+    and (.blocking_findings | type == "boolean")
+    and (.findings | type == "array")
+    and (if .review_status == "unverifiable"
+           then (.unverifiable_reasons
+                 | (type == "array") and (length > 0)
+                   and all(.[]; type == "string" and length > 0))
+           else (has("unverifiable_reasons") | not)
+         end)
+    and (.blocking_findings
+         == ([.findings[] | select(.severity == "critical" or .severity == "high")] | length > 0))
+    and (if .review_status == "pass"
+           then (.findings | length == 0) and (.blocking_findings == false)
+           else true end)
+    and (if .review_status == "findings"
+           then (.findings | length >= 1)
+           else true end)
+    and (all(.findings[]; . as $f
+          | ((["critical","high","medium","low","info"]) | index($f.severity) != null)
+            and ($f.area           | type == "string" and length > 0)
+            and ($f.finding        | type == "string" and length > 0)
+            and ($f.recommendation | type == "string" and length > 0)
+            and (if ($f.severity == "critical" or $f.severity == "high")
+                   then ($f | has("action_owner")) else true end)
+            and (if ($f | has("action_owner"))
+                   then ((["implementer","reviewer","pm","gate-fixer"]) | index($f.action_owner) != null)
+                   else true end)
+        ))
+  ' "$f" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -eq 0 ]]
+}
+
+# _normalize <project_id> <epic_id> <last_message_file>
+#   Deterministically turn Codex's raw findings[] into the top-level protocol-v2
+#   findings[] the runtime validator requires. Echoes the findings JSON array on
+#   success; returns non-zero if any fingerprint cannot be produced (→ caller
+#   maps to invalid_output). Reproducible: identical raw input yields identical
+#   fingerprints/occurrence_ids (no timestamps, no randomness).
+#     occurrence_id = "c3-<epic_id>-<n>"
+#     fingerprint   = aid-finding-fingerprint.sh fingerprint_audit_report ...
+#     action_owner is carried ONLY when the Codex finding has it (B5: the raw and
+#       normalized tuples must carry the identical action_owner presence/value —
+#       never defaulted for low/medium).
+_normalize() {
+  local project_id="$1" epic_id="$2" last_msg="$3"
+  local fp_helper="$SCRIPT_DIR/aid-finding-fingerprint.sh"
+  local count
+  count="$(jq '.findings | length' "$last_msg" 2>/dev/null)" || return 1
+  [[ "$count" =~ ^[0-9]+$ ]] || return 1
+
+  local out="[]" n sev area finding rec has_ao ao occ fp item
+  for (( n=0; n<count; n++ )); do
+    sev="$(jq -r --argjson i "$n" '.findings[$i].severity'       "$last_msg" 2>/dev/null)"     || return 1
+    area="$(jq -r --argjson i "$n" '.findings[$i].area'          "$last_msg" 2>/dev/null)"     || return 1
+    finding="$(jq -r --argjson i "$n" '.findings[$i].finding'    "$last_msg" 2>/dev/null)"     || return 1
+    rec="$(jq -r --argjson i "$n" '.findings[$i].recommendation' "$last_msg" 2>/dev/null)"     || return 1
+    has_ao="$(jq -r --argjson i "$n" '.findings[$i] | has("action_owner")' "$last_msg" 2>/dev/null)" || return 1
+    occ="c3-${epic_id}-${n}"
+    fp="$(bash "$fp_helper" fingerprint_audit_report "$project_id" audit_report "$occ" "$sev" "$area" "$finding" "$rec" 2>/dev/null)" || return 1
+    fp="${fp%$'\n'}"
+    [[ "$fp" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    if [[ "$has_ao" == "true" ]]; then
+      ao="$(jq -r --argjson i "$n" '.findings[$i].action_owner' "$last_msg" 2>/dev/null)" || return 1
+      item="$(jq -nc --arg fp "$fp" --arg occ "$occ" --arg sev "$sev" --arg ao "$ao" \
+                --arg area "$area" --arg finding "$finding" --arg rec "$rec" \
+                '{fingerprint:$fp,occurrence_id:$occ,severity:$sev,action_owner:$ao,area:$area,finding:$finding,recommendation:$rec}')" || return 1
+    else
+      item="$(jq -nc --arg fp "$fp" --arg occ "$occ" --arg sev "$sev" \
+                --arg area "$area" --arg finding "$finding" --arg rec "$rec" \
+                '{fingerprint:$fp,occurrence_id:$occ,severity:$sev,area:$area,finding:$finding,recommendation:$rec}')" || return 1
+    fi
+    out="$(jq -c --argjson item "$item" '. + [$item]' <<<"$out")" || return 1
+  done
+  printf '%s' "$out"
+}
+
+# _write_report_md <md_path> <report_json>  — human-readable dual-emit twin of
+# audit-report.json (same content), matching the Auditor's JSON+MD convention.
+# Its existence is checked by aid-fsm.sh; content is derived from the JSON.
+_write_report_md() {
+  local md="$1" report="$2" tmp="$1.tmp.$$"
+  local status blocking review_status outcome provider model indep reviewed_head n
+  status="$(jq -r '.status // "unverifiable"' "$report" 2>/dev/null)"
+  blocking="$(jq -r '.audit_report.blocking_findings // false' "$report" 2>/dev/null)"
+  review_status="$(jq -r '.audit_report.review_status // "unverifiable"' "$report" 2>/dev/null)"
+  outcome="$(jq -r '.audit_report.outcome // ""' "$report" 2>/dev/null)"
+  provider="$(jq -r '.audit_report.provider // ""' "$report" 2>/dev/null)"
+  model="$(jq -r '.audit_report.model // ""' "$report" 2>/dev/null)"
+  indep="$(jq -r '.audit_report.independence_level // .audit_report.achieved_independence_level // ""' "$report" 2>/dev/null)"
+  reviewed_head="$(jq -r '.audit_report.reviewed_head // ""' "$report" 2>/dev/null)"
+  n="$(jq -r '.findings | length' "$report" 2>/dev/null)"; [[ "$n" =~ ^[0-9]+$ ]] || n=0
+
+  {
+    printf '# C3 Cross-Provider Audit Report\n\n'
+    printf '| Field | Value |\n|---|---|\n'
+    printf '| status | `%s` |\n' "$status"
+    printf '| blocking_findings | `%s` |\n' "$blocking"
+    printf '| review_status | `%s` |\n' "$review_status"
+    [[ -n "$outcome" ]] && printf '| outcome | `%s` |\n' "$outcome"
+    printf '| provider | `%s` |\n' "$provider"
+    printf '| model | `%s` |\n' "$model"
+    printf '| independence | `%s` |\n' "$indep"
+    printf '| reviewed_head | `%s` |\n' "$reviewed_head"
+    printf '| findings | %s |\n\n' "$n"
+
+    if [[ "$status" == "unverifiable" ]]; then
+      printf '**Unverifiable** — no trusted pass/fail was produced (outcome: `%s`).\n\n' "$outcome"
+      local rc
+      rc="$(jq -r '(.audit_report.unverifiable_reasons // []) | length' "$report" 2>/dev/null)"
+      if [[ "$rc" =~ ^[0-9]+$ && "$rc" -gt 0 ]]; then
+        printf '### Reasons\n\n'
+        jq -r '.audit_report.unverifiable_reasons[] | "- " + .' "$report" 2>/dev/null
+        printf '\n'
+      fi
+    fi
+
+    if [[ "$n" -gt 0 ]]; then
+      printf '## Findings\n\n'
+      jq -r '.findings[] | "### [" + .severity + "] " + (.area // "") + "\n\n" +
+             "- **finding:** " + (.finding // "") + "\n" +
+             "- **recommendation:** " + (.recommendation // "") + "\n" +
+             (if (.action_owner // "") != "" then "- **action_owner:** " + .action_owner + "\n" else "" end) +
+             "- **occurrence_id:** `" + (.occurrence_id // "") + "`\n"' "$report" 2>/dev/null
+      printf '\n'
+    fi
+  } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 0; }
+  mv "$tmp" "$md" 2>/dev/null || rm -f "$tmp"
+  return 0
+}
+
+# _write_unverifiable <evidence_dir> <manifest> <outcome> <achieved> <session_id> <last_msg_or_empty> <reasons_json_or_empty>
+#   Fail-closed writer. ALWAYS writes audit-report.json with status:"unverifiable",
+#   blocking_findings:false, empty findings[], honest achieved_independence_level,
+#   and the reason `outcome`. NEVER pass/fail. The report is deliberately NOT run
+#   through aid-protocol-validate.sh's audit_report subfield loop — an unverifiable
+#   report legitimately lacks trusted provenance (no Codex echo, or a rejected one),
+#   so it cannot and must not masquerade as a validator-clean pass. Honest
+#   reviewed_head/codex_brief_hash/process_id are carried only when we actually have
+#   a parseable last-message (review_unverifiable / hash_mismatch / head_mismatch).
+_write_unverifiable() {
+  local evidence_dir="$1" manifest="$2" outcome="$3" achieved="$4" session_id="$5"
+  local last_msg="$6" reasons_json="$7"
+  local report="$evidence_dir/audit-report.json"
+  local report_md="$evidence_dir/audit-report.md"
+
+  local project_id epic_id run_id required_level manifest_input_hash
+  project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest" 2>/dev/null || echo unknown)"
+  [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
+  epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || echo "")"
+  run_id="$(jq -r '.identity.run_id // ""' "$manifest" 2>/dev/null || echo "")"
+  required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest" 2>/dev/null || echo cross_provider)"
+  case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
+  manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
+
+  local raw_head="" raw_brief_hash=""
+  if [[ -n "$last_msg" && -f "$last_msg" ]] && jq -e . "$last_msg" >/dev/null 2>&1; then
+    raw_head="$(jq -r '.reviewed_head // ""' "$last_msg" 2>/dev/null || echo "")"
+    raw_brief_hash="$(jq -r '.codex_brief_hash // ""' "$last_msg" 2>/dev/null || echo "")"
+    [[ "$raw_head" == "null" ]] && raw_head=""
+    [[ "$raw_brief_hash" == "null" ]] && raw_brief_hash=""
+  fi
+
+  local head_sha subject_hex iso_now
+  head_sha="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
+  [[ -n "$head_sha" ]] || head_sha="0000000000000000000000000000000000000000"
+  subject_hex="$(_sha256_str "$head_sha")"
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  [[ -n "$reasons_json" ]] || reasons_json="[]"
+
+  local tmp="$report.tmp.$$"
+  jq -n \
+    --arg project_id "$project_id" --arg epic_id "$epic_id" --arg run_id "$run_id" \
+    --arg created_at "$iso_now" \
+    --arg subject_hash "sha256:$subject_hex" \
+    --arg head_sha "$head_sha" \
+    --arg required_level "$required_level" \
+    --arg achieved "$achieved" \
+    --arg model "$CODEX_MODEL" \
+    --arg process_id "$session_id" \
+    --arg input_manifest_hash "$manifest_input_hash" \
+    --arg reviewed_head "$raw_head" \
+    --arg codex_brief_hash "$raw_brief_hash" \
+    --arg outcome "$outcome" \
+    --argjson reasons "$reasons_json" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "audit_report",
+      producer: "orchestrator@done-review",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      identity: ({project_id: $project_id}
+                 + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "unverifiable",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-c3-dispatch.sh#normalize"},
+      findings: [],
+      audit_report: ({
+          review_status: "unverifiable",
+          blocking_findings: false,
+          required_independence_level: $required_level,
+          achieved_independence_level: $achieved,
+          provider: "codex",
+          model: $model,
+          outcome: $outcome,
+          unverifiable_reasons: $reasons
+        }
+        + (if $input_manifest_hash != "" then {input_manifest_hash: $input_manifest_hash} else {} end)
+        + (if $process_id != ""          then {process_id: $process_id}                   else {} end)
+        + (if $reviewed_head != ""       then {reviewed_head: $reviewed_head}             else {} end)
+        + (if $codex_brief_hash != ""    then {codex_brief_hash: $codex_brief_hash}       else {} end))
+    }' > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv "$tmp" "$report" 2>/dev/null || { rm -f "$tmp"; return 1; }
+
+  _write_report_md "$report_md" "$report"
+  return 0
+}
+
+# _write_report <evidence_dir> <manifest> <last_msg> <achieved> <session_id>
+#   Assemble the validator-passing protocol-v2 envelope from a VALIDATED raw
+#   response (steps 3–5a already passed). The ONLY place status:pass|fail is
+#   written. Any assembly/validation failure fails closed to
+#   _write_unverifiable outcome=invalid_output (the bridge built a bad envelope —
+#   never emit it as pass). Returns 0 on a validator-clean report, 2 otherwise.
+_write_report() {
+  local evidence_dir="$1" manifest="$2" last_msg="$3" achieved="$4" session_id="$5"
+  local report="$evidence_dir/audit-report.json"
+  local report_md="$evidence_dir/audit-report.md"
+
+  local project_id epic_id run_id required_level manifest_input_hash
+  project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest" 2>/dev/null || echo unknown)"
+  [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
+  epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || echo "")"
+  run_id="$(jq -r '.identity.run_id // ""' "$manifest" 2>/dev/null || echo "")"
+  required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest" 2>/dev/null || echo cross_provider)"
+  case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
+  manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
+
+  local raw_head raw_brief_hash raw_status raw_blocking
+  raw_head="$(jq -r '.reviewed_head' "$last_msg" 2>/dev/null)" || raw_head=""
+  raw_brief_hash="$(jq -r '.codex_brief_hash' "$last_msg" 2>/dev/null)" || raw_brief_hash=""
+  raw_status="$(jq -r '.review_status' "$last_msg" 2>/dev/null)" || raw_status=""
+  raw_blocking="$(jq -r '.blocking_findings' "$last_msg" 2>/dev/null)" || raw_blocking=""
+
+  # Normalize findings (compute the exact fields the runtime validator requires).
+  local findings_json
+  findings_json="$(_normalize "$project_id" "$epic_id" "$last_msg")" \
+    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+
+  # Mechanically RE-DERIVE blocking_findings from severity (never trust Codex's claim).
+  local blocking
+  blocking="$(jq -c '[.[] | select(.severity == "critical" or .severity == "high")] | length > 0' <<<"$findings_json" 2>/dev/null)" \
+    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+
+  local env_status
+  if [[ "$blocking" == "true" ]]; then env_status="fail"; else env_status="pass"; fi
+
+  local head_sha subject_hex iso_now
+  head_sha="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
+  [[ -n "$head_sha" ]] \
+    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+  subject_hex="$(_sha256_str "$head_sha")"
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  local tmp="$report.tmp.$$"
+  jq -n \
+    --arg project_id "$project_id" --arg epic_id "$epic_id" --arg run_id "$run_id" \
+    --arg created_at "$iso_now" \
+    --arg subject_hash "sha256:$subject_hex" \
+    --arg head_sha "$head_sha" \
+    --arg status "$env_status" \
+    --argjson findings "$findings_json" \
+    --arg review_status "$raw_status" \
+    --argjson blocking "$blocking" \
+    --arg achieved "$achieved" \
+    --arg required_level "$required_level" \
+    --arg model "$CODEX_MODEL" \
+    --arg process_id "$session_id" \
+    --arg input_manifest_hash "$manifest_input_hash" \
+    --arg codex_brief_hash "$raw_brief_hash" \
+    --arg reviewed_head "$raw_head" \
+    '{
+      schema_version: "aid-2.0",
+      artifact_type: "audit_report",
+      producer: "orchestrator@done-review",
+      created_at: $created_at,
+      control_protocol: "aid-2.0",
+      identity: ({project_id: $project_id}
+                 + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+      subject: {subject_hash: $subject_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: $status,
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-c3-dispatch.sh#normalize"},
+      findings: $findings,
+      audit_report: {
+        review_status: $review_status,
+        blocking_findings: $blocking,
+        independence_level: $achieved,
+        required_independence_level: $required_level,
+        provider: "codex",
+        model: $model,
+        process_id: $process_id,
+        input_manifest_hash: $input_manifest_hash,
+        codex_brief_hash: $codex_brief_hash,
+        reviewed_head: $reviewed_head,
+        outcome: "dispatched"
+      }
+    }' > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+  mv "$tmp" "$report" 2>/dev/null \
+    || { rm -f "$tmp"; _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+
+  # VALIDATE with the authoritative runtime validator; a bad envelope must NEVER
+  # be emitted as pass/fail — fail closed to invalid_output.
+  if [[ ! -f "$VALIDATE" ]] || ! bash "$VALIDATE" "$report" >/dev/null 2>&1; then
+    _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""
+    return 2
+  fi
+
+  # Edge case (plan): Codex's CLAIMED blocking_findings vs the mechanical re-derivation.
+  # _validate_response already enforces equality, so this is defence-in-depth — record
+  # any discrepancy in the human-readable report rather than trusting Codex's claim.
+  _write_report_md "$report_md" "$report"
+  if [[ -n "$raw_blocking" && "$raw_blocking" != "$blocking" ]]; then
+    printf '\n> NOTE: Codex claimed blocking_findings=`%s`; the mechanical severity-based re-derivation is `%s` (authoritative).\n' \
+      "$raw_blocking" "$blocking" >> "$report_md" 2>/dev/null || true
+  fi
+  return 0
+}
+
+# _process_response <evidence_dir> <manifest> <codex_rc> <events_valid> <dispatch_outcome> <achieved> <session_id> <head_sha>
+#   The validate → normalize → write pipeline (plan steps 1–6). Consumes the raw
+#   capture written by cmd_dispatch and guarantees exactly one audit-report.json
+#   is produced. Returns 0 iff a validator-clean pass/fail report was written; 2
+#   for every unverifiable outcome. (The dispatch EXIT code is decided separately
+#   by cmd_dispatch from the CAPTURE outcome — Step-5 contract — so this return
+#   value is informational.)
+_process_response() {
+  local evidence_dir="$1" manifest="$2" codex_rc="$3" events_valid="$4"
+  local dispatch_outcome="$5" achieved="$6" session_id="$7" head_sha="$8"
+  local c3_dir="$evidence_dir/c3"
+  local last_msg="$c3_dir/codex-last-message.json"
+
+  # Step 1: codex exited non-zero → transport-level unverifiable.
+  if [[ "$codex_rc" != "0" ]]; then
+    local uo
+    case "$dispatch_outcome" in
+      timeout)      uo="timeout" ;;
+      rate_limited) uo="rate_limited" ;;
+      *)            uo="unavailable" ;;
+    esac
+    _write_unverifiable "$evidence_dir" "$manifest" "$uo" "$achieved" "$session_id" "" ""
+    return 2
+  fi
+
+  # Step 2: stream did not satisfy events_valid → the output is unusable.
+  if [[ "$events_valid" != "true" ]]; then
+    _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "" ""
+    return 2
+  fi
+
+  # Step 3: last-message must parse AND pass the trusted response validator.
+  if [[ ! -f "$last_msg" ]] || ! jq -e . "$last_msg" >/dev/null 2>&1; then
+    _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "" ""
+    return 2
+  fi
+  if ! _validate_response "$last_msg"; then
+    _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""
+    return 2
+  fi
+
+  # Step 4: provenance-binding hash checks (Codex must have echoed the SEALED brief
+  # and reviewed the EXACT commit — otherwise the audit doesn't bind to this run).
+  local manifest_brief_hash raw_brief_hash raw_head current_head
+  manifest_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest" 2>/dev/null || echo "")"
+  raw_brief_hash="$(jq -r '.codex_brief_hash // ""' "$last_msg" 2>/dev/null || echo "")"
+  if [[ -z "$manifest_brief_hash" || "$raw_brief_hash" != "$manifest_brief_hash" ]]; then
+    _write_unverifiable "$evidence_dir" "$manifest" hash_mismatch "$achieved" "$session_id" "$last_msg" ""
+    return 2
+  fi
+  raw_head="$(jq -r '.reviewed_head // ""' "$last_msg" 2>/dev/null || echo "")"
+  current_head="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
+  if [[ -z "$head_sha" || "$raw_head" != "$head_sha" || -z "$current_head" || "$raw_head" != "$current_head" ]]; then
+    _write_unverifiable "$evidence_dir" "$manifest" head_mismatch "$achieved" "$session_id" "$last_msg" ""
+    return 2
+  fi
+
+  # Step 5a: an HONEST Codex "I couldn't audit" (schema-valid review_status:
+  # unverifiable) is distinct from a BROKEN output — carry its reasons through as
+  # review_unverifiable, NOT invalid_output.
+  local raw_status
+  raw_status="$(jq -r '.review_status // ""' "$last_msg" 2>/dev/null || echo "")"
+  if [[ "$raw_status" == "unverifiable" ]]; then
+    local reasons
+    reasons="$(jq -c '.unverifiable_reasons // []' "$last_msg" 2>/dev/null || echo '[]')"
+    _write_unverifiable "$evidence_dir" "$manifest" review_unverifiable "$achieved" "$session_id" "$last_msg" "$reasons"
+    return 2
+  fi
+
+  # Steps 5–6: normalize + assemble + validate the pass/fail report.
+  _write_report "$evidence_dir" "$manifest" "$last_msg" "$achieved" "$session_id"
+  return $?
+}
+
+# ===========================================================================
+# cmd_dispatch <evidence_dir>
+# ===========================================================================
+cmd_dispatch() {
+  if [[ $# -ne 1 ]]; then
+    usage >&2
+    echo "PRECONDITION FAIL: dispatch requires exactly 1 arg: <evidence_dir>" >&2
+    exit 1
+  fi
+  local evidence_dir="$1"
+  [[ -n "$evidence_dir" ]] || { echo "PRECONDITION FAIL: evidence_dir is empty" >&2; exit 1; }
+  [[ -d "$evidence_dir" ]] || { echo "PRECONDITION FAIL: evidence_dir not a directory: $evidence_dir" >&2; exit 1; }
+
+  local manifest="$evidence_dir/audit-input-manifest.json"
+  [[ -f "$manifest" ]] || { echo "PRECONDITION FAIL: manifest missing (run build-manifest first): $manifest" >&2; exit 1; }
+
+  local c3_dir="$evidence_dir/c3"
+  mkdir -p "$c3_dir" || { echo "PRECONDITION FAIL: cannot create $c3_dir" >&2; exit 1; }
+
+  # --- Step 1: read the sealed brief provenance from the manifest -------------
+  # (manifest.input_hash is read fresh by _write_report/_process_response where
+  # the legacy chain field is actually assembled — not needed in this scope.)
+  local base_sha head_sha codex_brief_hash required_level
+  base_sha="$(jq -r '.audit_input_manifest.base_sha // ""' "$manifest")"
+  head_sha="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest")"
+  codex_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest")"
+  required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest")"
+  [[ -n "$head_sha" ]] || { echo "PRECONDITION FAIL: manifest has no head_sha" >&2; exit 1; }
+
+  # --- Step 1 (cont): resolve project_root = the real repo root --------------
+  local project_root
+  project_root="$(git -C "$evidence_dir" rev-parse --show-toplevel 2>/dev/null)" \
+    || { echo "PRECONDITION FAIL: evidence_dir is not inside a git repository: $evidence_dir" >&2; exit 1; }
+
+  # --- Step 2: executor = codex_cli (hardcoded default; full policy = Step 8) -
+  # Only kind that exists; fail-closed default per the plan. (_write_dispatch_json
+  # hardcodes this string directly for the JSON output — no local var needed here.)
+
+  # --- Step 3: cross_provider PRE-CHECK for THIS run (never cached) -----------
+  # The executor is chosen BEFORE any level check and Codex is ALWAYS probed as
+  # cross_provider, regardless of required_level (achieved cross_provider ≥ a
+  # required cross_model still satisfies — do not downgrade the probe). No
+  # availability cache is read or written; the previous run's outcome is never a
+  # skip precondition — each dispatch independently re-checks and re-attempts.
+  local precheck_rc=0 precheck_out=""
+  precheck_out="$("$INDEPENDENCE_BIN" detect --required cross_provider 2>&1)" || precheck_rc=$?
+
+  if [[ "$precheck_rc" -ne 0 ]]; then
+    # Non-dispatched: cannot invoke codex this run. Signal unavailability; the
+    # bridge NEVER launches a fallback itself (that is a later orchestration EPIC).
+    echo "aid-c3-dispatch: cross_provider unavailable this run (pre-check rc=$precheck_rc): $precheck_out" >&2
+    _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+      "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+    # Fail-closed: a non-dispatched run STILL gets an honest unverifiable report.
+    _write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    exit 2
+  fi
+
+  # --- Step 4: render the sealed C3 prompt DETERMINISTICALLY ------------------
+  # Build the exact declared C3 variable set (canonical JSON) and render via
+  # aid-render-prompt.sh — never a shell heredoc. The renderer fails closed on
+  # any missing/unknown variable or leftover {{placeholder}}.
+  local plan_sha256 input_manifest_hash evidence_paths arc_str vbudget_str output_schema_path
+  plan_sha256="$(jq -r '.audit_input_manifest.codex_brief_files[]? | select(.path=="c3/bundle-plan-ac.md") | .sha256' "$manifest" | head -n1)"
+  [[ -n "$plan_sha256" ]] || plan_sha256="sha256:"
+  input_manifest_hash="sha256:$(sha256sum "$manifest" | awk '{print $1}')"
+  evidence_paths="$(jq -r '.audit_input_manifest.allowlist // [] | join(", ")' "$manifest")"
+  arc_str="$(jq -c '.audit_input_manifest.allowed_recheck_commands // []' "$manifest")"
+  vbudget_str="$(jq -c '.audit_input_manifest.verification_budget // {}' "$manifest")"
+  output_schema_path="$(realpath -m --relative-to="$project_root" "$RESPONSE_SCHEMA" 2>/dev/null || echo "$RESPONSE_SCHEMA")"
+
+  local vars_json="$c3_dir/codex-prompt-vars.json"
+  jq -n \
+    --arg plan_path "c3/bundle-plan-ac.md" \
+    --arg plan_sha256 "$plan_sha256" \
+    --arg base_sha "$base_sha" \
+    --arg head_sha "$head_sha" \
+    --arg input_manifest_path "audit-input-manifest.json" \
+    --arg input_manifest_hash "$input_manifest_hash" \
+    --arg codex_brief_hash "$codex_brief_hash" \
+    --arg bundle_diff_path "c3/bundle-diff.patch" \
+    --arg bundle_scope_path "c3/bundle-scope.txt" \
+    --arg acceptance_criteria_path "c3/bundle-plan-ac.md" \
+    --arg review_profile_path "c3/bundle-review-profile.json" \
+    --arg evidence_paths "$evidence_paths" \
+    --arg output_schema_path "$output_schema_path" \
+    --arg allowed_recheck_commands "$arc_str" \
+    --arg verification_budget "$vbudget_str" \
+    '{plan_path:$plan_path, plan_sha256:$plan_sha256, base_sha:$base_sha, head_sha:$head_sha,
+      input_manifest_path:$input_manifest_path, input_manifest_hash:$input_manifest_hash,
+      codex_brief_hash:$codex_brief_hash, bundle_diff_path:$bundle_diff_path,
+      bundle_scope_path:$bundle_scope_path, acceptance_criteria_path:$acceptance_criteria_path,
+      review_profile_path:$review_profile_path, evidence_paths:$evidence_paths,
+      output_schema_path:$output_schema_path, allowed_recheck_commands:$allowed_recheck_commands,
+      verification_budget:$verification_budget}' \
+    > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }
+
+  local prompt_file="$c3_dir/codex-prompt.txt"
+  local render_prov=""
+  local template_id="" template_sha256="" rendered_prompt_sha256=""
+  if render_prov="$(bash "$RENDER_PROMPT" --template "$PROMPT_TEMPLATE" --vars-json "$vars_json" --output "$prompt_file" 2>&1)"; then
+    template_id="$(printf '%s' "$render_prov" | jq -r '.template_id // ""' 2>/dev/null)"
+    template_sha256="$(printf '%s' "$render_prov" | jq -r '.template_sha256 // ""' 2>/dev/null)"
+    rendered_prompt_sha256="$(printf '%s' "$render_prov" | jq -r '.rendered_prompt_sha256 // ""' 2>/dev/null)"
+  else
+    # Rendering is a precondition for invoking Codex; treat a render failure as
+    # non-dispatched (not invoked) rather than launching Codex with no prompt.
+    echo "aid-c3-dispatch: prompt render failed: $render_prov" >&2
+    _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+      "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+    # Fail-closed: render is a precondition for invoking Codex; no trusted audit.
+    _write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    exit 2
+  fi
+
+  # --- Step 5: codex_version (best effort; slug is NOT in the stream) ---------
+  local codex_version
+  codex_version="$(codex --version 2>/dev/null || echo "")"
+
+  # --- Step 6: launch codex (fresh, read-only, isolated) and capture ---------
+  local events_file="$c3_dir/codex-events.jsonl"
+  local stderr_file="$c3_dir/codex-events.stderr"
+  local last_msg_file="$c3_dir/codex-last-message.json"
+  # Clean any prior run's captures so a partial re-run is never mistaken for fresh.
+  rm -f "$events_file" "$stderr_file" "$last_msg_file"
+
+  local codex_rc=0
+  _run_codex_isolated "$project_root" "$prompt_file" "$events_file" "$stderr_file" "$last_msg_file" \
+    || codex_rc=$?
+
+  # --- Step 7: parse provenance from the captured stream ---------------------
+  local session_id events_valid outcome achieved
+  session_id="$(_session_id_of "$events_file")" || session_id=""
+  events_valid="$(_events_valid_of "$events_file")"
+
+  if [[ "$codex_rc" -eq 124 ]]; then
+    outcome="timeout"
+    events_valid="false"
+  elif [[ "$events_valid" == "true" ]]; then
+    outcome="dispatched"
+  elif _looks_rate_limited "$events_file" "$stderr_file"; then
+    outcome="rate_limited"
+  else
+    outcome="failed"
+  fi
+
+  # achieved_independence_level = cross_provider IFF events_valid, else unavailable.
+  if [[ "$events_valid" == "true" ]]; then
+    achieved="cross_provider"
+  else
+    achieved="unavailable"
+  fi
+
+  local stdout_sha256="" raw_response_sha256=""
+  [[ -s "$events_file" ]]   && stdout_sha256="sha256:$(sha256sum "$events_file"   | awk '{print $1}')"
+  [[ -f "$last_msg_file" ]] && raw_response_sha256="sha256:$(sha256sum "$last_msg_file" | awk '{print $1}')"
+
+  _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+    "$required_level" "$template_id" "$template_sha256" "$rendered_prompt_sha256" "$codex_version" \
+    "true" "$codex_rc" "$outcome" "$session_id" "$CODEX_MODEL" "$events_valid" \
+    "$stdout_sha256" "$raw_response_sha256" "$achieved" \
+    || { echo "PRECONDITION FAIL: cannot write c3-dispatch.json" >&2; exit 1; }
+
+  # --- Step 8 (E-065-2_7 Step 6): validate → normalize → write report ----------
+  # The full pipeline runs end-to-end here. This ALWAYS produces exactly one
+  # audit-report.json (pass/fail for a validator-clean report; unverifiable for
+  # every failure). Its return value is informational — the dispatch EXIT code is
+  # decided below from the CAPTURE outcome (Step-5 contract), NOT from the report.
+  local presp_rc=0
+  _process_response "$evidence_dir" "$manifest" "$codex_rc" "$events_valid" \
+    "$outcome" "$achieved" "$session_id" "$head_sha" || presp_rc=$?
+
+  # --- Step 9: exit status -----------------------------------------------------
+  # 0 iff dispatched + events_valid (Codex ran and produced a well-formed stream);
+  # everything else (timeout / rate_limited / failed) signals unavailability →
+  # exit 2. The TRUSTWORTHINESS of the audit content is recorded in
+  # audit-report.json's status/outcome, independent of this dispatch exit code.
+  echo "$c3_dir/c3-dispatch.json"
+  if [[ "$outcome" == "dispatched" ]]; then
+    return 0
+  else
+    exit 2
+  fi
+}
+
+# ===========================================================================
+# cmd_verify [--reference] <evidence_dir>   (E-065-2_7 Step 7)
+#
+# Re-check the codex-derived provenance chain AND prove the final
+# audit-report.json is a faithful, deterministic transform of Codex's RAW
+# response (c3/codex-last-message.json). An earlier `verify` only bound "codex
+# ran"; this ALSO binds the REPORT CONTENT to Codex's RAW OUTPUT by
+# re-validating the raw response with the SAME trusted jq gate and asserting
+# field-for-field equality + index-bound fingerprint recomputation — so a
+# bridge cannot fabricate, edit, add, or drop a finding without detection.
+#
+# Every failure → exit 2 (fail-closed: anything not fully proven is "NOT
+# verified"). Full success → exit 0 with
+#   verified — codex session <id> reviewed <head>
+#
+# Modes:
+#   live (default)  freshness asserts audit_report.reviewed_head == the repo's
+#                   CURRENT HEAD (a stale audit after later commits fails).
+#   --reference     freshness asserts audit_report.reviewed_head ==
+#                   manifest.head_sha (the commit captured at run time), so a
+#                   COMMITTED historical fixture still verifies after HEAD moves.
+#
+# Provenance chain note: c3-dispatch.json does not carry the legacy
+# input_manifest_hash (it is not in the dispatch artifact — see
+# _write_dispatch_json), so step 7(a) binds the load-bearing 2-way chain
+# audit_report.input_manifest_hash == manifest.input_hash. The codex_brief_hash
+# chain (7b) is bound 3-way (recompute == manifest == dispatch == report).
+# ===========================================================================
+
+# _vfail <reason>  — emit a verify failure reason on stderr and exit 2 (the
+# single fail-closed exit for every NOT-verified condition).
+_vfail() {
+  echo "verify: NOT verified — $1" >&2
+  exit 2
+}
+
+# _file_sha_pref <file>  — "sha256:<64hex>" over a file's raw bytes; empty (→ a
+# guaranteed mismatch on any later compare) when the file is missing/unreadable,
+# so a pruned/edited artifact fails a hash check rather than crashing.
+_file_sha_pref() {
+  local f="$1"
+  [[ -f "$f" && -r "$f" ]] || { printf ''; return 0; }
+  printf 'sha256:%s' "$(sha256sum "$f" | awk '{print $1}')"
+}
+
+# _recompute_codex_brief_hash <evidence_dir> <manifest>
+#   Re-derive codex_brief_hash EXACTLY as build-manifest does: re-hash every
+#   codex_brief_files[] entry from disk (fail if any diverges from the stored
+#   sha256 — a pruned/altered brief), rebuild the canonical
+#   {base_sha,head_sha,codex_brief_files,required_independence_level} object with
+#   the SAME LC_ALL=C path-sorted array order + `jq -S -c`, and sha256 it. Echoes
+#   "sha256:<64hex>" on success; returns non-zero (reason on stderr) on any
+#   pruned/altered brief file so the re-hash is byte-identical to build-manifest.
+_recompute_codex_brief_hash() {
+  local evidence_dir="$1" manifest="$2"
+  local base_sha head_sha level
+  base_sha="$(jq -r '.audit_input_manifest.base_sha // ""' "$manifest" 2>/dev/null)" || return 1
+  head_sha="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest" 2>/dev/null)" || return 1
+  level="$(jq -r '.audit_input_manifest.required_independence_level // ""' "$manifest" 2>/dev/null)" || return 1
+
+  # Path list in the SAME LC_ALL=C sorted order build-manifest stored + hashed.
+  local paths=()
+  mapfile -t paths < <(jq -r '.audit_input_manifest.codex_brief_files[].path' "$manifest" 2>/dev/null | LC_ALL=C sort)
+  [[ ${#paths[@]} -gt 0 ]] || { echo "manifest has no codex_brief_files" >&2; return 1; }
+
+  local cbf_json="[]" p full h sz stored
+  for p in "${paths[@]}"; do
+    full="$evidence_dir/$p"
+    [[ -f "$full" && -r "$full" ]] || { echo "brief file pruned/unreadable: $p" >&2; return 1; }
+    h="$(sha256sum "$full" | awk '{print $1}')"
+    stored="$(jq -r --arg p "$p" '.audit_input_manifest.codex_brief_files[] | select(.path==$p) | .sha256' "$manifest" 2>/dev/null | head -n1)"
+    [[ "sha256:$h" == "$stored" ]] || { echo "brief file altered (sha256 diverged): $p" >&2; return 1; }
+    sz="$(wc -c < "$full" | tr -d '[:space:]')"; [[ -n "$sz" ]] || sz=0
+    cbf_json="$(printf '%s' "$cbf_json" \
+      | jq -c --arg p "$p" --arg s "sha256:$h" --argjson z "$sz" '. + [{path:$p,sha256:$s,size:$z}]')" || return 1
+  done
+
+  local canonical
+  canonical="$(jq -S -c -n \
+    --arg base "$base_sha" --arg head "$head_sha" --argjson files "$cbf_json" --arg level "$level" \
+    '{base_sha:$base,head_sha:$head,codex_brief_files:$files,required_independence_level:$level}')" || return 1
+  printf 'sha256:%s' "$(_sha256_str "$canonical")"
+}
+
+cmd_verify() {
+  # jq/sha256sum are hard requirements — fail closed if either is absent.
+  command -v jq        >/dev/null 2>&1 || _vfail "jq not found in PATH"
+  command -v sha256sum >/dev/null 2>&1 || _vfail "sha256sum not found in PATH"
+
+  # --- arg parse: optional --reference, then <evidence_dir> ------------------
+  local reference=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --reference) reference=1; shift ;;
+      --)          shift; break ;;
+      -*)          _vfail "unknown flag: $1" ;;
+      *)           break ;;
+    esac
+  done
+  local evidence_dir="${1:-}"
+  [[ -n "$evidence_dir" ]] || _vfail "usage: verify [--reference] <evidence_dir>"
+  [[ -d "$evidence_dir" ]] || _vfail "evidence_dir not a directory: $evidence_dir"
+
+  local c3_dir="$evidence_dir/c3"
+  local dispatch_json="$c3_dir/c3-dispatch.json"
+  local report="$evidence_dir/audit-report.json"
+  local last_msg="$c3_dir/codex-last-message.json"
+  local events="$c3_dir/codex-events.jsonl"
+  local manifest="$evidence_dir/audit-input-manifest.json"
+
+  # --- Step 1: every required artifact must exist ---------------------------
+  # The manifest is required too (steps 6a/7/8 read it); a hand-forged report
+  # with no c3-dispatch.json fails HERE even if it claims status:pass.
+  local f
+  for f in "$dispatch_json" "$report" "$last_msg" "$events" "$manifest"; do
+    [[ -f "$f" ]] || _vfail "required artifact missing: ${f#"$evidence_dir"/}"
+  done
+  jq -e . "$dispatch_json" >/dev/null 2>&1 || _vfail "c3-dispatch.json is not valid JSON"
+  jq -e . "$report"        >/dev/null 2>&1 || _vfail "audit-report.json is not valid JSON"
+  jq -e . "$manifest"      >/dev/null 2>&1 || _vfail "audit-input-manifest.json is not valid JSON"
+
+  # --- Step 2: dispatch provenance says codex genuinely ran cross_provider --
+  local d_invoked d_exit d_outcome d_events_valid d_session d_indep
+  d_invoked="$(jq -r '.dispatch.invoked'       "$dispatch_json" 2>/dev/null || true)"
+  d_exit="$(jq -r '.dispatch.exit_code'        "$dispatch_json" 2>/dev/null || true)"
+  d_outcome="$(jq -r '.dispatch.outcome'       "$dispatch_json" 2>/dev/null || true)"
+  d_events_valid="$(jq -r '.dispatch.events_valid' "$dispatch_json" 2>/dev/null || true)"
+  d_session="$(jq -r '.dispatch.codex_session_id // ""' "$dispatch_json" 2>/dev/null || true)"
+  d_indep="$(jq -r '.independence.achieved_independence_level' "$dispatch_json" 2>/dev/null || true)"
+  [[ "$d_invoked" == "true" ]]              || _vfail "dispatch.invoked != true (codex was not invoked)"
+  [[ "$d_exit" == "0" ]]                    || _vfail "dispatch.exit_code != 0 (codex exited: $d_exit)"
+  [[ "$d_outcome" == "dispatched" ]]        || _vfail "dispatch.outcome != dispatched (: $d_outcome)"
+  [[ "$d_events_valid" == "true" ]]         || _vfail "dispatch.events_valid != true"
+  [[ -n "$d_session" && "$d_session" != "null" ]] || _vfail "dispatch.codex_session_id is empty"
+  [[ "$d_indep" == "cross_provider" ]]      || _vfail "achieved_independence_level != cross_provider (: $d_indep)"
+
+  # --- Step 3: recorded stdout/raw sha pinned to the ACTUAL captured streams -
+  # (proves the event stream and the raw response were not swapped or edited.)
+  local d_stdout_sha d_raw_sha events_sha last_sha
+  d_stdout_sha="$(jq -r '.dispatch.stdout_sha256 // ""'       "$dispatch_json" 2>/dev/null || true)"
+  d_raw_sha="$(jq -r '.dispatch.raw_response_sha256 // ""'    "$dispatch_json" 2>/dev/null || true)"
+  events_sha="$(_file_sha_pref "$events")"
+  last_sha="$(_file_sha_pref "$last_msg")"
+  [[ -n "$d_stdout_sha" && "$d_stdout_sha" == "$events_sha" ]] \
+    || _vfail "stdout_sha256 != sha256(codex-events.jsonl) (event stream swapped/edited)"
+  [[ -n "$d_raw_sha" && "$d_raw_sha" == "$last_sha" ]] \
+    || _vfail "raw_response_sha256 != sha256(codex-last-message.json) (raw response swapped/edited)"
+
+  # --- Step 4: RE-VALIDATE the raw response with the SAME trusted jq gate ----
+  # (types/enums/forbidden-top-level/action_owner-for-high + multi-document
+  # guard — NOT trusting Codex's --output-schema. Reuses Step-6 _validate_response.)
+  _validate_response "$last_msg" || _vfail "raw response fails the trusted _validate_response gate"
+
+  # Identity as _normalize consumed it (project_id/epic_id from the manifest).
+  local project_id epic_id
+  project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest" 2>/dev/null || true)"
+  [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
+  epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || true)"
+
+  # --- Step 5: faithful-transform equality — report <-> raw -----------------
+  local r_head r_brief r_block raw_head raw_brief raw_block
+  r_head="$(jq -r '.audit_report.reviewed_head // ""'    "$report"  2>/dev/null || true)"
+  r_brief="$(jq -r '.audit_report.codex_brief_hash // ""' "$report" 2>/dev/null || true)"
+  r_block="$(jq -r '.audit_report.blocking_findings'     "$report"  2>/dev/null || true)"
+  raw_head="$(jq -r '.reviewed_head // ""'    "$last_msg" 2>/dev/null || true)"
+  raw_brief="$(jq -r '.codex_brief_hash // ""' "$last_msg" 2>/dev/null || true)"
+  raw_block="$(jq -r '[.findings[] | select(.severity=="critical" or .severity=="high")] | length > 0' "$last_msg" 2>/dev/null || true)"
+  [[ "$r_head" == "$raw_head" ]]   || _vfail "audit_report.reviewed_head != raw.reviewed_head"
+  [[ "$r_brief" == "$raw_brief" ]] || _vfail "audit_report.codex_brief_hash != raw.codex_brief_hash"
+  [[ "$r_block" == "$raw_block" ]] || _vfail "audit_report.blocking_findings != (exists raw crit/high finding)"
+
+  # Tuple-set equality — order-insensitive, count-sensitive, action_owner by
+  # identical presence-AND-value on BOTH sides (a low/medium finding with no
+  # owner in raw and none in report matches — B5). `-S` + `sort` canonicalise.
+  local raw_tuples report_tuples
+  raw_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
+                          + (if has("action_owner") then {action_owner} else {} end)] | sort' \
+                "$last_msg" 2>/dev/null || true)"
+  report_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
+                             + (if has("action_owner") then {action_owner} else {} end)] | sort' \
+                   "$report" 2>/dev/null || true)"
+  [[ -n "$raw_tuples" && "$raw_tuples" == "$report_tuples" ]] \
+    || _vfail "report findings tuple-set diverges from raw (a finding was added/removed/edited)"
+
+  # Index-bound fingerprint/occurrence_id recompute FROM THE RAW finding — pins
+  # each report finding to its raw source (a reordering that breaks recompute →
+  # fail). occurrence_id = c3-<epic_id>-<n>; fingerprint via the shared helper.
+  local raw_count report_count
+  raw_count="$(jq '.findings | length'    "$last_msg" 2>/dev/null || true)"
+  report_count="$(jq '.findings | length' "$report"   2>/dev/null || true)"
+  [[ "$raw_count" =~ ^[0-9]+$ && "$report_count" =~ ^[0-9]+$ ]] || _vfail "cannot count findings"
+  [[ "$raw_count" == "$report_count" ]] || _vfail "report/raw finding count differ ($report_count vs $raw_count)"
+
+  local fp_helper="$SCRIPT_DIR/aid-finding-fingerprint.sh"
+  local n sev area finding rec occ_expected fp_expected occ_actual fp_actual
+  for (( n=0; n<raw_count; n++ )); do
+    sev="$(jq -r --argjson i "$n" '.findings[$i].severity'       "$last_msg" 2>/dev/null || true)"
+    area="$(jq -r --argjson i "$n" '.findings[$i].area'          "$last_msg" 2>/dev/null || true)"
+    finding="$(jq -r --argjson i "$n" '.findings[$i].finding'    "$last_msg" 2>/dev/null || true)"
+    rec="$(jq -r --argjson i "$n" '.findings[$i].recommendation' "$last_msg" 2>/dev/null || true)"
+    occ_expected="c3-${epic_id}-${n}"
+    fp_expected="$(bash "$fp_helper" fingerprint_audit_report "$project_id" audit_report "$occ_expected" "$sev" "$area" "$finding" "$rec" 2>/dev/null)" \
+      || _vfail "cannot recompute fingerprint for finding $n"
+    fp_expected="${fp_expected%$'\n'}"
+    occ_actual="$(jq -r --argjson i "$n" '.findings[$i].occurrence_id // ""' "$report" 2>/dev/null || true)"
+    fp_actual="$(jq -r --argjson i "$n" '.findings[$i].fingerprint // ""'    "$report" 2>/dev/null || true)"
+    [[ "$occ_actual" == "$occ_expected" ]] || _vfail "finding $n occurrence_id mismatch (got '$occ_actual', expected '$occ_expected')"
+    [[ "$fp_actual" == "$fp_expected" ]]    || _vfail "finding $n fingerprint does not recompute from the raw finding"
+  done
+
+  # --- Step 6: process_id binds to the dispatch session ---------------------
+  local r_pid
+  r_pid="$(jq -r '.audit_report.process_id // ""' "$report" 2>/dev/null || true)"
+  [[ "$r_pid" == "$d_session" ]] || _vfail "audit_report.process_id != dispatch.codex_session_id"
+
+  # --- Step 6a: prompt-template freshness -----------------------------------
+  # A changed template (or an edited rendered prompt) INVALIDATES the report — a
+  # new review must run with the new prompt.
+  local d_tpl_sha d_rendered_sha cur_tpl_sha cur_rendered_sha prompt_txt
+  d_tpl_sha="$(jq -r '.prompt.template_sha256 // ""'        "$dispatch_json" 2>/dev/null || true)"
+  d_rendered_sha="$(jq -r '.prompt.rendered_prompt_sha256 // ""' "$dispatch_json" 2>/dev/null || true)"
+  [[ -f "$PROMPT_TEMPLATE" ]] || _vfail "prompt template missing: $PROMPT_TEMPLATE"
+  cur_tpl_sha="$(_file_sha_pref "$PROMPT_TEMPLATE")"
+  [[ -n "$d_tpl_sha" && "$d_tpl_sha" == "$cur_tpl_sha" ]] \
+    || _vfail "prompt template changed since dispatch (template_sha256 stale) — re-run the audit"
+  prompt_txt="$c3_dir/codex-prompt.txt"
+  [[ -f "$prompt_txt" ]] || _vfail "rendered prompt missing: c3/codex-prompt.txt"
+  cur_rendered_sha="$(_file_sha_pref "$prompt_txt")"
+  [[ -n "$d_rendered_sha" && "$d_rendered_sha" == "$cur_rendered_sha" ]] \
+    || _vfail "rendered prompt edited (rendered_prompt_sha256 mismatch)"
+
+  # --- Step 7(a): LEGACY input_manifest_hash chain --------------------------
+  # audit_report.input_manifest_hash == manifest.input_hash (preserves the D7
+  # chain the schema/auditor/FSM require). c3-dispatch.json does not carry this
+  # field, so the chain is the load-bearing 2-way.
+  local r_imh m_ih
+  r_imh="$(jq -r '.audit_report.input_manifest_hash // ""' "$report"  2>/dev/null || true)"
+  m_ih="$(jq -r '.audit_input_manifest.input_hash // ""'   "$manifest" 2>/dev/null || true)"
+  [[ -n "$m_ih" && "$r_imh" == "$m_ih" ]] \
+    || _vfail "input_manifest_hash chain broken (audit_report != manifest.input_hash)"
+
+  # --- Step 7(b): CODEX brief hash — recompute + 3-way bind -----------------
+  local recomputed m_bh d_bh r_bh
+  recomputed="$(_recompute_codex_brief_hash "$evidence_dir" "$manifest")" \
+    || _vfail "codex_brief recompute failed (a brief file was pruned or altered)"
+  m_bh="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest"      2>/dev/null || true)"
+  d_bh="$(jq -r '.subject.codex_brief_hash // ""'             "$dispatch_json" 2>/dev/null || true)"
+  r_bh="$(jq -r '.audit_report.codex_brief_hash // ""'        "$report"        2>/dev/null || true)"
+  [[ "$recomputed" == "$m_bh" ]] || _vfail "recomputed codex_brief_hash != manifest.codex_brief_hash"
+  [[ "$recomputed" == "$d_bh" ]] || _vfail "recomputed codex_brief_hash != dispatch.codex_brief_hash"
+  [[ "$recomputed" == "$r_bh" ]] || _vfail "recomputed codex_brief_hash != audit_report.codex_brief_hash"
+
+  # --- Step 8: freshness (mode-dependent) -----------------------------------
+  local r_reviewed_head expected_head
+  r_reviewed_head="$(jq -r '.audit_report.reviewed_head // ""' "$report" 2>/dev/null || true)"
+  if [[ "$reference" -eq 1 ]]; then
+    expected_head="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest" 2>/dev/null || true)"
+    [[ -n "$expected_head" ]] || _vfail "manifest has no head_sha (reference mode)"
+    [[ "$r_reviewed_head" == "$expected_head" ]] \
+      || _vfail "reviewed_head != manifest.head_sha (reference-mode freshness)"
+  else
+    expected_head="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
+    [[ -n "$expected_head" ]] || _vfail "cannot resolve current HEAD (live mode)"
+    [[ "$r_reviewed_head" == "$expected_head" ]] \
+      || _vfail "reviewed_head != current HEAD (live-mode freshness — stale audit)"
+  fi
+
+  # --- Step 9: all checks held ----------------------------------------------
+  echo "verified — codex session $d_session reviewed $r_reviewed_head"
+  return 0
+}
+
+# ===========================================================================
 # Subcommand dispatch
 # ===========================================================================
 main() {
@@ -468,10 +1582,11 @@ main() {
     build-manifest)
       cmd_build_manifest "$@"
       ;;
-    dispatch|verify)
-      # LATER EPIC steps — deliberately not implemented here (Step 2 scope).
-      echo "not yet implemented: ${subcommand}" >&2
-      exit 2
+    dispatch)
+      cmd_dispatch "$@"
+      ;;
+    verify)
+      cmd_verify "$@"
       ;;
     -h|--help|help)
       usage
@@ -485,4 +1600,9 @@ main() {
   esac
 }
 
-main "$@"
+# Only run the CLI dispatcher when executed directly; when sourced (e.g. by the
+# bats suite to unit-test _validate_response / _process_response in isolation),
+# just define the functions. Mirrors aid-finding-fingerprint.sh's guard.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
