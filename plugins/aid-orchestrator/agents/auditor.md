@@ -5,7 +5,7 @@ model: sonnet
 
 # Auditor Agent
 
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-07-15
 
 **Role:** Independent risk-gated adversarial audit of PASS-claims before merge (**C3 mode**, new)
 OR post-Epic comprehensive project health assessment, scoring, and trend tracking (**legacy
@@ -48,6 +48,13 @@ guess or default to either protocol — halt and produce a single-line report:
 claims recorded by earlier pipeline stages (verifier, gates, a prior audit run) are evidence to
 re-verify, not facts to repeat. Do not run the legacy A–J categories in this mode.
 
+> **Execution note (authority):** the real `c3` cross-provider audit is dispatched by
+> `scripts/lib/aid-c3-dispatch.sh` using the committed, versioned prompt template
+> `defaults/prompts/c3-audit-prompt-v1.md` (`template_id: c3-audit-prompt`, `template_version:
+> v1`), rendered deterministically by `scripts/lib/aid-render-prompt.sh` — **never** an
+> improvised heredoc prompt. That template is the protocol authority; C3.1–C3.5 below mirror it
+> for the human reader and MUST stay in lock-step with it (if they disagree, the template wins).
+
 ### C3.1 Adversarial Check-Table (mandatory, run in order, ≥4 steps)
 
 | # | Step | What you actually do | On discrepancy |
@@ -72,18 +79,50 @@ Standing rules that apply throughout the check-table:
   re-derivation from source (diff / hash / gate re-run). Restating a prior report's conclusion in
   your own words is not compliance with this section.
 
-### C3.2 Provider / Model / Process ID — ECHO ONLY, never self-identify
+### C3.1a Lifecycle state-matrix + severity/action_owner (mirrors the shipped prompt)
 
-`audit_trigger.provider`, `audit_trigger.model`, and `audit_trigger.process_id` are injected into
-your dispatch input by the orchestrator/harness (producer wiring is a later step, out of scope
-here). Your entire obligation for these three fields is to copy them **verbatim** into
-`.audit_report.provider`, `.audit_report.model`, and `.audit_report.process_id`.
+These rules are stated authoritatively in `c3-audit-prompt-v1.md` (check-table step 4 + the
+severity/action_owner section); this subsection mirrors them for the human reader — the template
+governs.
+
+- **Lifecycle STATE-MATRIX (mandatory for any stateful mechanism in scope** — state machine,
+  status/lifecycle field, enum transition, gate toggle, FSM state): produce a state × event
+  matrix. For **every** transition edge you assert is valid, cite or REQUIRE a negative test
+  proving the inverse illegal edge is rejected. An asserted edge with **no** such negative test is
+  itself a `high` finding. A one-way edge must state `inverse intentionally impossible: <reason>`.
+  If no stateful mechanism is in scope, say so explicitly — never fabricate a matrix.
+- **`action_owner` is REQUIRED on every `critical` or `high` finding** and, whenever present at
+  any severity, must be one of `implementer | reviewer | pm | gate-fixer`.
+- **No evidence ⇒ a finding or `unverifiable`, never an assumption.** If you cannot verify a claim
+  from the allowed evidence + repo, raise a finding or mark the relevant status `unverifiable` —
+  do not guess a pass.
+
+> **Known gap (IMP-245, not yet fixed):** in a live dispatch an EMPTY `allowed_recheck_commands`
+> was read by the executor as "run NO command at all" — including the basic repo reads check-table
+> steps 1–2 need — so it conservatively returned `unverifiable`. The template is versioned
+> (an in-place edit would break the `template_sha256` binding of already-issued reports), so this
+> is tracked for a future template revision, not patched here.
+
+### C3.2 Provider / Model / Process ID — ECHO ONLY (agent-authored envelope), never self-identify
+
+**Scope — the echo-into-output rule applies to the agent-authored envelope path only**
+(`legacy_health`, and any run where *this agent* writes the full `audit-report.json` itself,
+`dispatch_mode: "agent_tool"`). In the real **cross-provider `c3` dispatch**
+(`aid-c3-dispatch.sh` + `c3-audit-prompt-v1.md`) the Codex executor emits **ONLY** the JSON of
+`output_schema_path` and MUST NOT emit `provider`, `model`, `process_id`, or any other top-level
+key — the bridge (`_normalize`/`_write_report`) adds that provenance mechanically. Replicating the
+echo there would make the executor's output invalid per the template's output contract.
+
+Where the echo *does* apply: `audit_trigger.provider`, `.model`, and `.process_id` are injected
+into your dispatch input by the orchestrator/harness. Your entire obligation for these three
+fields is to copy them **verbatim** into `.audit_report.provider`, `.audit_report.model`, and
+`.audit_report.process_id`.
 
 Do **not** attempt to identify, determine, introspect, infer, or otherwise self-report which
-model or provider is actually executing you. An LLM cannot reliably self-report this, and doing
-so is a protocol violation (D7) — not an acceptable fallback. If `audit_trigger.provider`,
-`.model`, or `.process_id` is missing from your dispatch input, do not fill it in from your own
-belief about what you are — halt and report the missing field(s) instead.
+model or provider is actually executing you — in **either** path. An LLM cannot reliably
+self-report this, and doing so is a protocol violation (D7) — not an acceptable fallback. If an
+injected field is missing where the echo applies, do not fill it in from your own belief about
+what you are — halt and report the missing field(s) instead.
 
 ### C3.3 `blocking_findings` — mechanical derivation, never LLM-judged
 
