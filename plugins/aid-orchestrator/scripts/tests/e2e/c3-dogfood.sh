@@ -20,7 +20,13 @@
 #   - a negative control: a corrupted copy of the fixture's raw event stream
 #     must make `verify --reference` exit 2.
 #   - an FSM acceptance demo: with `enforcement: blocking` pinned, a seeded
-#     `done-advance` over the fixture must advance. This runs in an isolated
+#     `done-advance` over the REAL fixture must reach whichever outcome its
+#     own honest content implies — BLOCK if the live run's audit-report.json
+#     came back status:"unverifiable" (Codex declined a firm verdict), or
+#     ADVANCE if it is a genuine pass/fail. A separate, fully-controlled demo
+#     (7b) independently proves the "advances on clean content" half against
+#     an in-test fake codex stub, regardless of what the one real live Codex
+#     call happened to answer content-wise. The 7a demo runs in an isolated
 #     `git worktree` checked out at the EXACT commit the live run reviewed
 #     (still a real, resolvable commit object at this point in the script,
 #     before the throwaway branch is deleted) — this is required because the
@@ -263,30 +269,52 @@ done
 # --- sanitizer (same signature families as discover-codex-stream.sh's) ------
 _escape_ere_pattern() { sed -e 's/[.[\*^$()+?{}|#\\]/\\&/g'; }
 
+# SECURITY REGRESSION FIX (E-065-4_7, CP3 finding, MEDIUM): the real Codex
+# session UUID (dispatch.codex_session_id / audit_report.process_id /
+# codex-events.jsonl thread_id — all the SAME value) was being committed
+# VERBATIM into the fixture, unlike the attestation which deliberately
+# truncates it to a prefix. Replace it with a FIXED, syntactically-valid
+# placeholder UUID everywhere it appears, so future dogfood runs never leak a
+# real session id into this public marketplace repo.
+PLACEHOLDER_SESSION_ID="00000000-0000-7000-8000-000000000000"
+
 _sanitize_file() {
-  local f="$1" user home_esc repo_esc user_esc tmp
+  local f="$1" user home_esc repo_esc user_esc session_esc tmp
   [[ -f "$f" ]] || return 0
   user="$(id -un 2>/dev/null || echo user)"
   home_esc="$(printf '%s' "${HOME:-/nonexistent}" | _escape_ere_pattern)"
   repo_esc="$(printf '%s' "$REPO_ROOT" | _escape_ere_pattern)"
   user_esc="$(printf '%s' "$user" | _escape_ere_pattern)"
   tmp="$f.sanitized.$$"
-  sed -E \
-    -e "s#${repo_esc}#<REPO>#g" \
-    -e "s#${home_esc}#<HOME>#g" \
-    -e "s#/(home|Users)/${user_esc}#<HOME>#g" \
-    -e "s#\\b${user_esc}\\b#<USER>#g" \
-    -e 's#sk[-_](live|test)?[A-Za-z0-9_-]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#gh[ps]_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#gho_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#ghu_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#github_pat_[A-Za-z0-9_]{16,}#<REDACTED_TOKEN>#g' \
-    -e 's#AKIA[0-9A-Z]{16}#<REDACTED_TOKEN>#g' \
-    -e 's#xox[baprs]-[A-Za-z0-9-]{10,}#<REDACTED_TOKEN>#g' \
-    -e 's#-----BEGIN [A-Z ]*PRIVATE KEY-----.*-----END [A-Z ]*PRIVATE KEY-----#<REDACTED_PRIVATE_KEY>#g' \
-    -e 's#([Aa]uthorization:[[:space:]]*Bearer[[:space:]]+)[A-Za-z0-9._~+/=-]+#\1<REDACTED_TOKEN>#g' \
-    -e 's#eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+#<REDACTED_JWT>#g' \
-    "$f" > "$tmp" && mv "$tmp" "$f"
+
+  local -a sed_args=(
+    -e "s#${repo_esc}#<REPO>#g"
+    -e "s#${home_esc}#<HOME>#g"
+    -e "s#/(home|Users)/${user_esc}#<HOME>#g"
+    -e "s#\\b${user_esc}\\b#<USER>#g"
+  )
+  # Real Codex session UUID (dispatch.codex_session_id / audit_report.process_id
+  # / codex-events.jsonl thread_id — all the SAME value): replace with the
+  # FIXED placeholder before the generic token patterns run, so it never lands
+  # verbatim in a committed fixture. Guarded on non-empty — an empty pattern
+  # would otherwise match (and rewrite) every position in the file.
+  if [[ -n "${session_id:-}" ]]; then
+    session_esc="$(printf '%s' "$session_id" | _escape_ere_pattern)"
+    sed_args+=(-e "s#${session_esc}#${PLACEHOLDER_SESSION_ID}#g")
+  fi
+  sed_args+=(
+    -e 's#sk[-_](live|test)?[A-Za-z0-9_-]{16,}#<REDACTED_TOKEN>#g'
+    -e 's#gh[ps]_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g'
+    -e 's#gho_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g'
+    -e 's#ghu_[A-Za-z0-9]{16,}#<REDACTED_TOKEN>#g'
+    -e 's#github_pat_[A-Za-z0-9_]{16,}#<REDACTED_TOKEN>#g'
+    -e 's#AKIA[0-9A-Z]{16}#<REDACTED_TOKEN>#g'
+    -e 's#xox[baprs]-[A-Za-z0-9-]{10,}#<REDACTED_TOKEN>#g'
+    -e 's#-----BEGIN [A-Z ]*PRIVATE KEY-----.*-----END [A-Z ]*PRIVATE KEY-----#<REDACTED_PRIVATE_KEY>#g'
+    -e 's#([Aa]uthorization:[[:space:]]*Bearer[[:space:]]+)[A-Za-z0-9._~+/=-]+#\1<REDACTED_TOKEN>#g'
+    -e 's#eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+#<REDACTED_JWT>#g'
+  )
+  sed -E "${sed_args[@]}" "$f" > "$tmp" && mv "$tmp" "$f"
 }
 
 _verify_no_leaks_dir() {
