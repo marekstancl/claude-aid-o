@@ -813,3 +813,77 @@ JSON
   [[ "$output" != *"C3 dispatch provenance block"* ]]
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "c3_dispatch_would_block"
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# E-065-4_7 — SECURITY REGRESSION FIX (CP3 finding): cmd_verify's Step 5
+# "faithful-transform equality" block never bound the top-level `.status`,
+# `.audit_report.review_status`, `.audit_report.outcome`, or
+# `.audit_report.unverifiable_reasons` fields to the raw Codex response — a
+# report with ONLY its top-level `.status` hand-edited (e.g. a genuine
+# "pass" flipped to "unverifiable", or vice versa) still verified clean, and
+# the FSM done-advance merge gate (which shells out to `verify`) advanced on
+# the tampered copy. Fixed by `_derive_report_semantics` (single shared
+# function) + additive Step 5 checks in cmd_verify. These 3 tests prove the
+# fix actually closes the gap: reverting the fix locally and re-running them
+# makes all 3 fail (see implementer notes in the final report).
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "E-065-4_7 CP3 fix: top-level .status tampered (pass→unverifiable, rest intact) → verify exits non-zero" {
+  _drive_clean_dispatch
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+
+  # _drive_clean_dispatch produces a genuine review_status:"findings",
+  # blocking_findings:false → status:"pass" report. Tamper ONLY the top-level
+  # .status field, leaving audit_report.review_status/blocking_findings/
+  # findings/reviewed_head/codex_brief_hash/process_id all untouched.
+  jq '.status = "unverifiable"' "$TEST_EVIDENCE_DIR/audit-report.json" \
+    > "$TEST_EVIDENCE_DIR/audit-report.json.t"
+  mv "$TEST_EVIDENCE_DIR/audit-report.json.t" "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"audit_report.status != expected-from-raw"* ]]
+}
+
+@test "E-065-4_7 CP3 fix: .audit_report.review_status tampered (findings→unverifiable, .status left as pass) → verify exits non-zero" {
+  _drive_clean_dispatch
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+
+  # Same clean pass/findings report. Tamper ONLY .audit_report.review_status;
+  # top-level .status stays "pass" (internally inconsistent, but isolates this
+  # ONE field so the top-level-status check above cannot be what catches it).
+  jq '.audit_report.review_status = "unverifiable"' "$TEST_EVIDENCE_DIR/audit-report.json" \
+    > "$TEST_EVIDENCE_DIR/audit-report.json.t"
+  mv "$TEST_EVIDENCE_DIR/audit-report.json.t" "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"audit_report.review_status != expected-from-raw"* ]]
+}
+
+@test "E-065-4_7 CP3 fix: done-advance review release rejects a status-only-tampered report under enforcement:blocking" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _drive_clean_dispatch
+  _seed_done_review_state "$state_file"
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _pin_c3_blocking
+
+  # Tamper ONLY the top-level .status (pass→unverifiable) AFTER the genuine
+  # dispatch — the same bypass reproduction the CP3 finding described. All of
+  # checks 1-4 (dispatch presence/success/process_id/reviewed_head) and the
+  # existing report<->raw tuple/hash checks still pass; only the fixed Step 5
+  # status binding can catch this.
+  jq '.status = "unverifiable"' "$TEST_EVIDENCE_DIR/audit-report.json" \
+    > "$TEST_EVIDENCE_DIR/audit-report.json.t"
+  mv "$TEST_EVIDENCE_DIR/audit-report.json.t" "$TEST_EVIDENCE_DIR/audit-report.json"
+  _write_matching_curator_ref "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 dispatch provenance block"* ]]
+  [[ "$output" == *"aid-c3-dispatch.sh verify failed"* ]]
+  [[ "$output" == *"audit_report.status != expected-from-raw"* ]]
+}

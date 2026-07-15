@@ -1,0 +1,46 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_report",
+  "producer": "orchestrator@done-review",
+  "created_at": "2026-07-15T13:51:21Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "unknown",
+    "epic_id": "E-c3-dogfood",
+    "run_id": "R-1435115"
+  },
+  "subject": {
+    "subject_hash": "sha256:3315d6653b928a14b1495502de8c9f5298c840f213ae79a16bfcfedff132fa97"
+  },
+  "revision": {
+    "head_sha": "30b4f6c2f83114d30678a7d368b9b08912d65cb7",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "unverifiable",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c3-dispatch.sh#normalize"
+  },
+  "findings": [],
+  "audit_report": {
+    "review_status": "unverifiable",
+    "blocking_findings": false,
+    "required_independence_level": "cross_model",
+    "achieved_independence_level": "cross_provider",
+    "provider": "codex",
+    "model": "gpt-5.6-terra",
+    "outcome": "review_unverifiable",
+    "unverifiable_reasons": [
+      "The explicit allowed-command list is empty, so I could not re-derive the commit-range diff, verify manifest hashes, inspect committed gate artifacts, or produce the required lifecycle state matrix from evidence."
+    ],
+    "input_manifest_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "process_id": "00000000-0000-7000-8000-000000000000",
+    "reviewed_head": "30b4f6c2f83114d30678a7d368b9b08912d65cb7",
+    "codex_brief_hash": "sha256:514122e8da6ff7001bfc6c86d92cf78027cba04f30d62b02688f8005e4cbed6e"
+  }
+}

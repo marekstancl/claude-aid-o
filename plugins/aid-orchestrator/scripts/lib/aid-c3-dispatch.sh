@@ -733,6 +733,56 @@ _validate_response() {
   [[ "$rc" -eq 0 ]]
 }
 
+# _derive_report_semantics <validated_last_msg_path>
+#   SECURITY REGRESSION FIX (E-065-4_7, CP3 finding): the single shared source
+#   of truth for what audit-report.json's status/review_status/outcome/
+#   blocking_findings/unverifiable_reasons fields MUST be, purely as a
+#   deterministic function of an ALREADY-`_validate_response`-validated raw
+#   Codex response. Both writer call sites (_write_report, _write_unverifiable's
+#   caller in _process_response) and cmd_verify's Step 5 binding check now call
+#   this instead of each independently re-deriving the same logic ad hoc — the
+#   bypass this fixes existed BECAUSE cmd_verify never re-derived and compared
+#   these fields at all.
+#
+#   Echoes a canonical JSON object:
+#     {status, review_status, outcome, blocking_findings, unverifiable_reasons}
+#   Logic:
+#     - raw.review_status == "unverifiable" → status=unverifiable,
+#       review_status=unverifiable, outcome=review_unverifiable,
+#       blocking_findings=false, unverifiable_reasons=raw.unverifiable_reasons
+#       (or [] if absent).
+#     - otherwise → blocking_findings = (any raw finding severity
+#       critical|high); status = blocking_findings ? "fail" : "pass";
+#       review_status = raw's own .review_status value verbatim (already
+#       schema-validated to be "pass" or "findings" at this point);
+#       outcome=dispatched; unverifiable_reasons=[].
+#   Returns non-zero (fail-closed) on any jq failure — callers must not
+#   proceed past a failure here.
+_derive_report_semantics() {
+  local last_msg="$1"
+  [[ -f "$last_msg" ]] || return 1
+  jq -ce '
+    if .review_status == "unverifiable" then
+      {
+        status: "unverifiable",
+        review_status: "unverifiable",
+        outcome: "review_unverifiable",
+        blocking_findings: false,
+        unverifiable_reasons: (.unverifiable_reasons // [])
+      }
+    else
+      ([.findings[] | select(.severity == "critical" or .severity == "high")] | length > 0) as $blocking
+      | {
+          status: (if $blocking then "fail" else "pass" end),
+          review_status: .review_status,
+          outcome: "dispatched",
+          blocking_findings: $blocking,
+          unverifiable_reasons: []
+        }
+    end
+  ' "$last_msg" 2>/dev/null
+}
+
 # _normalize <project_id> <epic_id> <last_message_file>
 #   Deterministically turn Codex's raw findings[] into the top-level protocol-v2
 #   findings[] the runtime validator requires. Echoes the findings JSON array on
@@ -941,24 +991,36 @@ _write_report() {
   case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
   manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
 
-  local raw_head raw_brief_hash raw_status raw_blocking
+  local raw_head raw_brief_hash raw_blocking
   raw_head="$(jq -r '.reviewed_head' "$last_msg" 2>/dev/null)" || raw_head=""
   raw_brief_hash="$(jq -r '.codex_brief_hash' "$last_msg" 2>/dev/null)" || raw_brief_hash=""
-  raw_status="$(jq -r '.review_status' "$last_msg" 2>/dev/null)" || raw_status=""
   raw_blocking="$(jq -r '.blocking_findings' "$last_msg" 2>/dev/null)" || raw_blocking=""
+
+  # SECURITY REGRESSION FIX (E-065-4_7, CP3 finding): derive status/
+  # review_status/blocking_findings from the ONE shared function instead of
+  # ad-hoc inline logic, so this writer and cmd_verify's Step 5 binding check
+  # can never diverge on what these fields should be.
+  local semantics env_status blocking review_status
+  semantics="$(_derive_report_semantics "$last_msg")" \
+    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+  env_status="$(jq -r '.status' <<<"$semantics" 2>/dev/null)"
+  blocking="$(jq -r '.blocking_findings' <<<"$semantics" 2>/dev/null)"
+  review_status="$(jq -r '.review_status' <<<"$semantics" 2>/dev/null)"
+
+  # Invariant: _write_report is only ever reached (via _process_response Step
+  # 5a/6) after the raw response's review_status has already been confirmed
+  # != "unverifiable" — assert this rather than silently trusting it, since a
+  # "pass"-labeled envelope must never be built over an unverifiable raw
+  # response.
+  if [[ "$env_status" == "unverifiable" ]]; then
+    _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""
+    return 2
+  fi
 
   # Normalize findings (compute the exact fields the runtime validator requires).
   local findings_json
   findings_json="$(_normalize "$project_id" "$epic_id" "$last_msg")" \
     || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
-
-  # Mechanically RE-DERIVE blocking_findings from severity (never trust Codex's claim).
-  local blocking
-  blocking="$(jq -c '[.[] | select(.severity == "critical" or .severity == "high")] | length > 0' <<<"$findings_json" 2>/dev/null)" \
-    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
-
-  local env_status
-  if [[ "$blocking" == "true" ]]; then env_status="fail"; else env_status="pass"; fi
 
   local head_sha subject_hex iso_now
   head_sha="$(git -C "$evidence_dir" rev-parse HEAD 2>/dev/null || echo "")"
@@ -975,7 +1037,7 @@ _write_report() {
     --arg head_sha "$head_sha" \
     --arg status "$env_status" \
     --argjson findings "$findings_json" \
-    --arg review_status "$raw_status" \
+    --arg review_status "$review_status" \
     --argjson blocking "$blocking" \
     --arg achieved "$achieved" \
     --arg required_level "$required_level" \
@@ -1094,12 +1156,17 @@ _process_response() {
 
   # Step 5a: an HONEST Codex "I couldn't audit" (schema-valid review_status:
   # unverifiable) is distinct from a BROKEN output — carry its reasons through as
-  # review_unverifiable, NOT invalid_output.
-  local raw_status
-  raw_status="$(jq -r '.review_status // ""' "$last_msg" 2>/dev/null || echo "")"
-  if [[ "$raw_status" == "unverifiable" ]]; then
+  # review_unverifiable, NOT invalid_output. SECURITY REGRESSION FIX
+  # (E-065-4_7, CP3 finding): the branch decision is now derived from the SAME
+  # shared _derive_report_semantics function _write_report and cmd_verify use,
+  # rather than a separate ad-hoc re-read of .review_status — one place decides
+  # "is this raw response honestly unverifiable", everywhere.
+  local semantics_5a
+  semantics_5a="$(_derive_report_semantics "$last_msg")" \
+    || { _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
+  if [[ "$(jq -r '.status' <<<"$semantics_5a" 2>/dev/null)" == "unverifiable" ]]; then
     local reasons
-    reasons="$(jq -c '.unverifiable_reasons // []' "$last_msg" 2>/dev/null || echo '[]')"
+    reasons="$(jq -c '.unverifiable_reasons' <<<"$semantics_5a" 2>/dev/null || echo '[]')"
     _write_unverifiable "$evidence_dir" "$manifest" review_unverifiable "$achieved" "$session_id" "$last_msg" "$reasons"
     return 2
   fi
@@ -1453,7 +1520,42 @@ cmd_verify() {
   [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
   epic_id="$(jq -r '.identity.epic_id // ""' "$manifest" 2>/dev/null || true)"
 
-  # --- Step 5: faithful-transform equality — report <-> raw -----------------
+  # --- Step 5 (SECURITY REGRESSION FIX, E-065-4_7, CP3 finding): status /
+  #     review_status / outcome / unverifiable_reasons binding ---------------
+  # PROVEN BYPASS (pre-fix): none of the checks below this comment ever
+  # examined the top-level .status, .audit_report.review_status,
+  # .audit_report.outcome, or .audit_report.unverifiable_reasons fields — a
+  # report whose top-level .status was hand-edited (e.g. genuine
+  # "unverifiable" flipped to "pass", leaving reviewed_head/codex_brief_hash/
+  # blocking_findings/findings/process_id untouched) still verified clean.
+  # This block derives what those fields MUST be from the raw response via the
+  # SAME _derive_report_semantics function the writers use, and fails closed on
+  # any divergence. Purely additive — every existing Step 5 check below is
+  # unchanged.
+  local expected r_status r_review_status exp_status exp_review_status
+  expected="$(_derive_report_semantics "$last_msg")" \
+    || _vfail "cannot derive expected report semantics from the raw response"
+  exp_status="$(jq -r '.status' <<<"$expected" 2>/dev/null)"
+  exp_review_status="$(jq -r '.review_status' <<<"$expected" 2>/dev/null)"
+  r_status="$(jq -r '.status' "$report" 2>/dev/null || true)"
+  r_review_status="$(jq -r '.audit_report.review_status' "$report" 2>/dev/null || true)"
+  [[ "$r_status" == "$exp_status" ]] \
+    || _vfail "audit_report.status != expected-from-raw (report:${r_status} expected:${exp_status})"
+  [[ "$r_review_status" == "$exp_review_status" ]] \
+    || _vfail "audit_report.review_status != expected-from-raw (report:${r_review_status} expected:${exp_review_status})"
+
+  if [[ "$exp_status" == "unverifiable" ]]; then
+    local r_outcome exp_reasons r_reasons
+    r_outcome="$(jq -r '.audit_report.outcome // ""' "$report" 2>/dev/null || true)"
+    [[ "$r_outcome" == "review_unverifiable" ]] \
+      || _vfail "audit_report.outcome != review_unverifiable (expected-unverifiable path; got: ${r_outcome})"
+    exp_reasons="$(jq -Sc '.unverifiable_reasons | sort' <<<"$expected" 2>/dev/null || true)"
+    r_reasons="$(jq -Sc '(.audit_report.unverifiable_reasons // []) | sort' "$report" 2>/dev/null || true)"
+    [[ -n "$exp_reasons" && "$r_reasons" == "$exp_reasons" ]] \
+      || _vfail "audit_report.unverifiable_reasons != raw.unverifiable_reasons"
+  fi
+
+  # --- Step 5 (pre-existing): faithful-transform equality — report <-> raw --
   local r_head r_brief r_block raw_head raw_brief raw_block
   r_head="$(jq -r '.audit_report.reviewed_head // ""'    "$report"  2>/dev/null || true)"
   r_brief="$(jq -r '.audit_report.codex_brief_hash // ""' "$report" 2>/dev/null || true)"

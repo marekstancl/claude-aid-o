@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.59.0] — 2026-07-15
+
+### Added
+- **C3 cross-provider dispatch bridge** — `aid-c3-dispatch.sh` performs the real independent audit that E8 only detected the feasibility of, using a genuinely different vendor (Codex) instead of an in-process Claude call. `build-manifest` assembles a hash-manifested audit brief (changed files + risk profile + rendered prompt); `dispatch` invokes the Codex CLI as a fresh subprocess, always probed as `cross_provider` and non-sticky, then crosses the untrusted-response trust boundary (schema-validate hardened against a multi-document-JSON bypass, normalize, write report or write-unverifiable); `verify [--reference]` re-binds the written `audit-report.json` to the raw Codex output and confirms it describes HEAD (provenance + faithful-transform proof). Independence comes from the vendor split and a fresh process, not a filesystem sandbox — Codex reads the repo read-only.
+- **Versioned C3 prompt template and deterministic renderer** — `c3-audit-prompt-v1.md` plus `aid-render-prompt.sh` render the same brief from the same run facts every time (the prompt is versioned data, not an ad-hoc string), alongside `c3-codex-response.schema.json` as the external-response contract that routes any off-shape reply to unverifiable rather than a coerced pass.
+- **`c3_executor` audit policy** — `c3-audit-policy.yaml` gains an executor-first block with a `cross_provider` probe and `c3_on_unavailable: unverifiable`, so an unavailable executor degrades fail-closed (blocking for C3-required profiles) rather than silently skipping; the `degraded_advisory` disposition ships in a later phase of this plan.
+
+### Changed
+- **FSM `done-advance` C3 hook now enforces the provenance + faithful-transform chain** — the hook shells out to `aid-c3-dispatch.sh verify`, making the full report↔raw binding a real, deterministic, merge-blocking capability in code rather than prose. Shipped enforcement stays `observe`; blocking activation is decided at a later milestone (E10) after calibration, matching every other C-stage gate's promotion pattern.
+- **`pipeline.md` `c3` audit dispatch uses the real bridge** — the `c3` audit mode now calls `build-manifest`/`dispatch`/`verify` instead of an in-process Claude `Agent()` audit; `legacy_health` mode is unchanged, and `agents/auditor.md` was synced (`C3.1a` state-matrix mirror, `C3.2` scoped to `legacy_health`).
+
 ## [2.58.4] — 2026-07-14
 
 ### Fixed

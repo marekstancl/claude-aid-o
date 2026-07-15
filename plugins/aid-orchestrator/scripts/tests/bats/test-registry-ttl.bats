@@ -1,13 +1,17 @@
 #!/usr/bin/env bats
 # E-046-1_3 Step 6 — aid-registry-ttl-guard.sh regression (Step 5).
-# 6 assertions: past-deadline stale, future deferral, expired deferral,
-# no-deadline opt-out, active-status skip, missing registry → exit 2.
+# TTL-guard assertions: past-deadline stale, future deferral, expired deferral,
+# no-deadline opt-out, active-status skip, missing registry → exit 2 (inline +
+# block-style rows).
+# P065 (v2.59.0): shipped-registry assertions for the c3_cross_provider_dispatch
+# row (presence, full required-key set, expected value shape, totals coherence).
 
 setup() {
   export AID_TEST_MODE=1
   TEST_TMPDIR=$(mktemp -d)
   TTL_GUARD="${BATS_TEST_DIRNAME}/../../aid-registry-ttl-guard.sh"
   REGISTRY="$TEST_TMPDIR/enforcement-registry.yaml"
+  SHIPPED_REGISTRY="${BATS_TEST_DIRNAME}/../../../defaults/enforcement-registry.yaml"
 }
 
 teardown() {
@@ -133,4 +137,43 @@ enforcements:
 EOF
   run bash "$TTL_GUARD" "$REGISTRY"
   [ "$status" -eq 0 ]
+}
+
+# ── P065 C3 cross-provider dispatch bridge (v2.59.0) ────────────────────────
+# The shipped registry MUST carry the c3_cross_provider_dispatch row with the
+# full required-key set, so the P065 real-codex-dispatch enforcement can never
+# silently drop out of the distribution.
+
+@test "shipped registry: c3_cross_provider_dispatch row exists" {
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .id' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "c3_cross_provider_dispatch" ]]
+}
+
+@test "shipped registry: c3_cross_provider_dispatch has all required keys" {
+  for key in id type source description instruction severity surface status verdict test; do
+    run yq -e ".enforcements[] | select(.id == \"c3_cross_provider_dispatch\") | has(\"$key\")" "$SHIPPED_REGISTRY"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "true" ]]
+  done
+}
+
+@test "shipped registry: c3_cross_provider_dispatch key values are the expected shape" {
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .type' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "1" ]]
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .severity' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "blocking" ]]
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .surface' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "internal-guard" ]]
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .status' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "active" ]]
+  run yq -e '.enforcements[] | select(.id == "c3_cross_provider_dispatch") | .verdict' "$SHIPPED_REGISTRY"
+  [ "$status" -eq 0 ]; [[ "$output" == "ALIGNED" ]]
+}
+
+@test "shipped registry: totals.enforcements matches the actual row count" {
+  local declared actual
+  declared=$(yq '.totals.enforcements' "$SHIPPED_REGISTRY")
+  actual=$(yq '.enforcements | length' "$SHIPPED_REGISTRY")
+  [ "$declared" -eq "$actual" ]
 }
