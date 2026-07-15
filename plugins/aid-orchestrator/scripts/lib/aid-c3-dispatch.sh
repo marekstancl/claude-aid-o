@@ -1129,12 +1129,13 @@ cmd_dispatch() {
   mkdir -p "$c3_dir" || { echo "PRECONDITION FAIL: cannot create $c3_dir" >&2; exit 1; }
 
   # --- Step 1: read the sealed brief provenance from the manifest -------------
-  local base_sha head_sha codex_brief_hash required_level input_hash
+  # (manifest.input_hash is read fresh by _write_report/_process_response where
+  # the legacy chain field is actually assembled — not needed in this scope.)
+  local base_sha head_sha codex_brief_hash required_level
   base_sha="$(jq -r '.audit_input_manifest.base_sha // ""' "$manifest")"
   head_sha="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest")"
   codex_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest")"
   required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest")"
-  input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest")"
   [[ -n "$head_sha" ]] || { echo "PRECONDITION FAIL: manifest has no head_sha" >&2; exit 1; }
 
   # --- Step 1 (cont): resolve project_root = the real repo root --------------
@@ -1143,8 +1144,8 @@ cmd_dispatch() {
     || { echo "PRECONDITION FAIL: evidence_dir is not inside a git repository: $evidence_dir" >&2; exit 1; }
 
   # --- Step 2: executor = codex_cli (hardcoded default; full policy = Step 8) -
-  # Only kind that exists; fail-closed default per the plan.
-  local executor_kind="codex_cli"
+  # Only kind that exists; fail-closed default per the plan. (_write_dispatch_json
+  # hardcodes this string directly for the JSON output — no local var needed here.)
 
   # --- Step 3: cross_provider PRE-CHECK for THIS run (never cached) -----------
   # The executor is chosen BEFORE any level check and Codex is ALWAYS probed as
