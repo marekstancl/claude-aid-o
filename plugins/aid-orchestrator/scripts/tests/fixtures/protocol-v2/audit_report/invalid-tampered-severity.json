@@ -23,6 +23,8 @@
   "audit_report": {
     "blocking_findings": false,
     "independence_level": "cross_model",
+    "required_independence_level": "cross_model",
+    "reviewed_head": "1234567890abcdef1234567890abcdef12345678",
     "provider": "anthropic",
     "model": "claude-opus-4",
     "process_id": "c3-run-4471",

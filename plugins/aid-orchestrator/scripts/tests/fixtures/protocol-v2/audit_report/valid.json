@@ -11,6 +11,8 @@
   "verdict": {"kind": "none", "ready": false},
   "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-test"},
   "audit_report": {
+    "required_independence_level": "cross_model",
+    "reviewed_head": "1234567890abcdef1234567890abcdef12345678",
     "provider": "anthropic",
     "model": "claude-opus-4",
     "process_id": "aid-test-run-0001",

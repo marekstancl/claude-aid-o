@@ -20,7 +20,9 @@
 #  11  — head freshness mismatch
 #  12  — missing type-specific payload key
 #  13  — nondeterministic fingerprint
-#  14  — missing required audit_report subfield (provider/model/process_id/input_manifest_hash)
+#  14  — missing/invalid required audit_report subfield (provider/model/process_id/
+#         input_manifest_hash/reviewed_head/required_independence_level; also enum on
+#         required_independence_level & independence_level, boolean type on advisory)
 #  15  — release_decision missing release_ready (D11 core state field)
 #  16  — release_decision D11 state field missing or bad enum/type
 #  17  — waiver reason too short (< 20 chars)
@@ -392,13 +394,46 @@ fi
 # Only applies to artifact_type == audit_report; other types are untouched.
 # ---------------------------------------------------------------------------
 if [[ "$artifact_type" == "audit_report" ]]; then
-  for field in provider model process_id input_manifest_hash; do
+  # P065 E-065-1_7 Step 4: reviewed_head + required_independence_level added to the
+  # UNCONDITIONAL required-subfield loop. They are the C3 cross-provider provenance
+  # the FSM/verify chain binds to — the exact commit the audit reviewed, and the
+  # independence level it was required to run at. All six must be present, string-
+  # typed, and non-empty. First missing field wins (exit 14).
+  # (codex_brief_hash is validated by the bridge's own `verify` step — a LATER EPIC —
+  #  NOT here; input_manifest_hash keeps its legacy provenance-binding meaning.)
+  for field in provider model process_id input_manifest_hash reviewed_head required_independence_level; do
     field_present=$(jq -r --arg f "$field" 'if (.audit_report[$f] // null) != null and (.audit_report[$f] | type) == "string" and (.audit_report[$f] | length) > 0 then "yes" else "no" end' "$ARTIFACT_FILE")
     if [[ "$field_present" != "yes" ]]; then
       echo "missing_audit_report_field:${field}" >&2
       exit 14
     fi
   done
+
+  # required_independence_level enum (mandatory field, checked above for presence).
+  req_indep=$(jq -r '.audit_report.required_independence_level // ""' "$ARTIFACT_FILE")
+  case "$req_indep" in
+    context_only|cross_model|cross_provider) ;;
+    *) echo "bad_audit_report_enum:required_independence_level" >&2; exit 14 ;;
+  esac
+
+  # independence_level enum (OPTIONAL field — the level actually achieved; only
+  # enum-checked when the key is present).
+  if [[ "$(jq -r 'if (.audit_report | has("independence_level")) then "yes" else "no" end' "$ARTIFACT_FILE")" == "yes" ]]; then
+    indep=$(jq -r '.audit_report.independence_level // ""' "$ARTIFACT_FILE")
+    case "$indep" in
+      context_only|cross_model|cross_provider) ;;
+      *) echo "bad_audit_report_enum:independence_level" >&2; exit 14 ;;
+    esac
+  fi
+
+  # advisory (OPTIONAL) must be a boolean when present.
+  if [[ "$(jq -r 'if (.audit_report | has("advisory")) then "yes" else "no" end' "$ARTIFACT_FILE")" == "yes" ]]; then
+    advisory_type=$(jq -r '.audit_report.advisory | type' "$ARTIFACT_FILE")
+    if [[ "$advisory_type" != "boolean" ]]; then
+      echo "bad_audit_report_type:advisory" >&2
+      exit 14
+    fi
+  fi
 fi
 
 # ---------------------------------------------------------------------------

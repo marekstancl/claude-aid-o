@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "c3-output-schema-capability-probe",
+  "description": "MINIMAL self-contained probe schema used ONLY to empirically measure what codex `--output-schema` enforces. NOT the real C3 report schema (that is Step 4's c3-codex-response.schema.json). Two capabilities under test: (1) top-level additionalProperties:false — does codex drop/reject a top-level field the model was told to add? (2) one if/then rule — does codex honor a JSON-Schema conditional (verdict==fail => reason required)?",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "fail"],
+      "description": "Required top-level field."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Conditionally required by the if/then rule when verdict==fail."
+    }
+  },
+  "required": ["verdict"],
+  "if": {
+    "properties": {
+      "verdict": { "const": "fail" }
+    },
+    "required": ["verdict"]
+  },
+  "then": {
+    "required": ["reason"]
+  }
+}

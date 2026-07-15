@@ -52,7 +52,21 @@
         "independence_level": {
           "type": "string",
           "enum": ["context_only", "cross_model", "cross_provider"],
-          "$comment": "resolved by aid-audit-independence.sh; status=unverifiable when required_independence_level is unreachable or auth fails"
+          "$comment": "resolved by aid-audit-independence.sh; status=unverifiable when required_independence_level is unreachable or auth fails. The level ACTUALLY achieved (optional)"
+        },
+        "required_independence_level": {
+          "type": "string",
+          "enum": ["context_only", "cross_model", "cross_provider"],
+          "$comment": "P065 E-065-1_7: the independence level this C3 audit was REQUIRED to run at (carried from the input manifest). REQUIRED + enum-enforced by aid-protocol-validate.sh step 14"
+        },
+        "reviewed_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "$comment": "P065 E-065-1_7: the 40-hex git commit the C3 audit reviewed; echoes revision.head_sha. REQUIRED (non-empty string) by aid-protocol-validate.sh step 14"
+        },
+        "advisory": {
+          "type": "boolean",
+          "$comment": "P065 E-065-1_7: true when this is an advisory (non-blocking fallback) audit rather than a full different-provider one. OPTIONAL; boolean-typed check by aid-protocol-validate.sh step 14 when present"
         },
         "provider": {
           "type": "string",
@@ -69,10 +83,15 @@
         "input_manifest_hash": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
-          "$comment": "must equal the producing audit-input-manifest.json's .audit_input_manifest.input_hash (provenance chaining)"
+          "$comment": "must equal the producing audit-input-manifest.json's .audit_input_manifest.input_hash (provenance chaining) — legacy meaning UNCHANGED; distinct from the bridge's codex_brief_hash echo"
+        },
+        "codex_brief_hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "$comment": "P065 E-065-1_7: sha256 of the sealed Codex brief Codex echoed; bridge-filled during normalize and verified by aid-c3-dispatch.sh `verify` (a LATER EPIC), NOT by the generic protocol validator"
         }
       },
-      "required": ["provider", "model", "process_id", "input_manifest_hash"]
+      "required": ["provider", "model", "process_id", "input_manifest_hash", "reviewed_head", "required_independence_level"]
     }
   },
   "required": ["audit_report"]

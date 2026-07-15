@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"019f6177-6b84-7ed3-8969-e8495959a7fa"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"I’ll read `sample.txt` from the workspace and condense its content into one sentence."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \"ls && sed -n '1,200p' sample.txt\"","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/bash -lc \"ls && sed -n '1,200p' sample.txt\"","aggregated_output":"sample.txt\nProject Falcon status report.\nBudget: on track.\nTimeline: two weeks behind due to vendor delay.\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Project Falcon’s budget is on track, but the timeline is two weeks behind because of a vendor delay."}}
+{"type":"turn.completed","usage":{"input_tokens":23213,"cached_input_tokens":13568,"output_tokens":118,"reasoning_output_tokens":0}}

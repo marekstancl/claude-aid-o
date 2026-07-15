@@ -30,6 +30,17 @@ Thumbs.db
 evidence/
 !evidence/.gitkeep
 
+# P065 Step 1: committed, sanitized real-Codex capture sample — this is a small,
+# fixed, deliberately-tracked grounding artifact (not a runtime evidence dump),
+# but the generic `evidence/` rule above blindly matches any dir named
+# `evidence` anywhere in the tree, including this one. Re-include ONLY this
+# specific committed sample, not the whole `e2e/evidence/` tree (CP2 finding:
+# a broader negation here reproduces the same "catches too much" problem one
+# level down — a future unsanitized runtime dump elsewhere under e2e/evidence/
+# would be silently re-included too).
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/codex-stream-sample/
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/codex-stream-sample/**
+
 # Development workspace (session logs, active work, internal docs)
 workspace/
 
