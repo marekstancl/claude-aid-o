@@ -3,9 +3,9 @@
 # aid-c3-dispatch.sh — C3 Cross-Provider Dispatch Bridge (P065, E-065-1_7)
 #
 # CLI skeleton for the C3 (independent audit) cross-provider dispatch bridge.
-# Only the `build-manifest` subcommand is implemented in this step (Step 2 of
-# the EPIC); `dispatch` and `verify` are LATER steps and are present here only
-# as fail-closed stubs so the arg-dispatch scaffold is complete.
+# `build-manifest` (E-065-1_7) and `dispatch` (E-065-2_7) are implemented.
+# `verify` (E-065-2_7 Step 7) is the remaining LATER step and is present here
+# only as a fail-closed stub so the arg-dispatch scaffold is complete.
 #
 # ---------------------------------------------------------------------------
 # build-manifest <evidence_dir> <base_sha> <head_sha> <risk_profile>
@@ -44,7 +44,7 @@
 #   1 — PRECONDITION FAIL (usage, non-git dir, unresolvable SHA, unreadable
 #       brief source, or emitted manifest failed protocol validation) — no
 #       audit-input-manifest.json is left behind on precondition failure.
-#   2 — subcommand not yet implemented (dispatch / verify stubs)
+#   2 — subcommand not yet implemented (verify stub) / dispatch non-dispatched outcome
 #
 # Environment (optional):
 #   AID_CHANGED_PATHS   — file with one repo-relative changed path per line
