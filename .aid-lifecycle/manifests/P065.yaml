@@ -11,3 +11,10 @@ declared_epics:
   - {id: E-065-6_7, scope: required}
   - {id: E-065-7_7, scope: required}
 depends_on_plans: []
+deliveries:
+  E-065-1_7:
+    delivery: delivered
+    delivery_sha: 74ff471b5c7e0dad459e9906cc17ff3c72c710fb
+    reviewed_sha: 6280d3748a941f407651716a5cf558cf8f02318b
+    review: unverifiable
+    unresolved_blockers: 1
