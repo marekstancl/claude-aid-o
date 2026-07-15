@@ -305,13 +305,20 @@ cmd_build_manifest() {
     done < "$AID_CHANGED_PATHS"
   fi
 
-  local name
-  for name in final_report.md gates_report.json; do
-    if [[ -f "$evidence_dir/$name" ]]; then
-      allow_arr+=("$name")
-      read_path["$name"]="$evidence_dir/$name"
-    fi
-  done
+  if [[ -f "$evidence_dir/final_report.md" ]]; then
+    allow_arr+=("final_report.md")
+    read_path["final_report.md"]="$evidence_dir/final_report.md"
+  fi
+
+  # gates_report.json: root, fallback gates/ (matches aid-release-policy.sh's existing
+  # dual-path pattern — aid-run-gates.sh canonically writes it nested under gates/).
+  if [[ -f "$evidence_dir/gates_report.json" ]]; then
+    allow_arr+=("gates_report.json")
+    read_path["gates_report.json"]="$evidence_dir/gates_report.json"
+  elif [[ -f "$evidence_dir/gates/gates_report.json" ]]; then
+    allow_arr+=("gates/gates_report.json")
+    read_path["gates/gates_report.json"]="$evidence_dir/gates/gates_report.json"
+  fi
 
   local vf bn
   shopt -s nullglob
