@@ -384,10 +384,14 @@ YAML
   [[ "$output" != *"not yet implemented"* ]]
 }
 
-@test "skeleton: verify subcommand is a not-yet-implemented stub (exit 2)" {
+# verify is IMPLEMENTED as of Step 7 (this EPIC): it is no longer a stub. With no
+# <evidence_dir> it is a fail-closed usage error (exit 2 — verify's whole contract
+# is "exit 2 unless fully verified"), NOT the old exit-2 "not yet implemented"
+# stub message. (Full verify behavior is covered by the Step-7 block below.)
+@test "skeleton: verify subcommand requires <evidence_dir> (fail-closed, no longer a stub)" {
   run bash "$DISPATCH" verify
   [ "$status" -eq 2 ]
-  [[ "$output" == *"not yet implemented"* ]]
+  [[ "$output" != *"not yet implemented"* ]]
 }
 
 @test "skeleton: unknown subcommand → exit 1 with usage" {
@@ -1606,4 +1610,266 @@ _base_valid_resp() {
   fp_expected="$(bash "$AID_PLUGIN_PATH/scripts/lib/aid-finding-fingerprint.sh" fingerprint_audit_report "$pid" audit_report "$occ" "$sev" "$area" "$finding" "$rec")"
   fp_actual="$(jq -r '.findings[0].fingerprint' "$AR")"
   [ "$fp_expected" = "$fp_actual" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 7 (backend) — `verify`: provenance chain + report↔raw faithful-transform
+#
+# Additive only: never touches the Step-2/3/4/5/6 tests above (except the verify
+# skeleton test, which was updated from stub→real, mirroring how Step 5 updated
+# the dispatch skeleton test). Exercises cmd_verify in aid-c3-dispatch.sh: it
+# re-checks the codex provenance chain (invoked/exit/outcome/events_valid/session/
+# achieved cross_provider, stdout/raw sha pinning, template freshness, the legacy
+# input_manifest_hash + recomputed codex_brief_hash chains) AND proves
+# audit-report.json is a faithful, deterministic transform of Codex's RAW
+# response (re-validate + reviewed_head/codex_brief_hash/blocking equality +
+# order-insensitive tuple-set + index-bound fingerprint/occurrence_id recompute).
+#
+# Every scenario drives a GENUINE end-to-end valid dispatch with the fake-codex
+# fixture (_drive_valid_dispatch), then verify's its own output — small, targeted
+# tamper tests each isolate ONE broken invariant → exit 2 (fail-closed).
+# _seed_manifest / _dispatch_seams are the Step-5 helpers defined above.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _drive_valid_dispatch — seed a manifest + spies and run a GENUINE valid dispatch
+# end to end, leaving a real evidence dir (c3-dispatch.json + audit-report.json +
+# codex-last-message.json + codex-events.jsonl + audit-input-manifest.json) that
+# `verify` should accept unchanged.
+_drive_valid_dispatch() {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_EVIDENCE_DIR/audit-report.json" ]
+}
+
+# _jq_edit <file> <filter> — jq-rewrite <file> in place (stays valid JSON).
+_jq_edit() {
+  local file="$1" filter="$2"
+  jq "$filter" "$file" > "$file.t" && mv "$file.t" "$file"
+}
+
+# ─── AC1: genuine verify passes; each targeted tamper → exit 2 ───────────────
+
+@test "step7/AC1: verify (live) exits 0 on a genuine dispatched run" {
+  _drive_valid_dispatch
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session"* ]]
+  [[ "$output" == *"$HEAD_SHA"* ]]
+}
+
+@test "step7/AC1: tampered RAW response (edited reviewed_head) → exit 2 (raw sha mismatch)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" '.reviewed_head="0000000000000000000000000000000000000000"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: tampered EVENT stream (appended line) → exit 2 (stdout sha mismatch)" {
+  _drive_valid_dispatch
+  printf '{"type":"injected-noise"}\n' >> "$TEST_EVIDENCE_DIR/c3/codex-events.jsonl"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized reviewed_head tampered in the report → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.reviewed_head="0000000000000000000000000000000000000000"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized input_manifest_hash tampered → exit 2 (legacy chain broken)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.audit_report.input_manifest_hash="sha256:1111111111111111111111111111111111111111111111111111111111111111"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: normalized codex_brief_hash tampered → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.audit_report.codex_brief_hash="sha256:2222222222222222222222222222222222222222222222222222222222222222"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: blocking_findings flipped in the report → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.blocking_findings=false'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding's text tampered in the report → exit 2 (tuple-set divergence)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.findings[0].finding="a totally different, fabricated finding"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding fingerprint tampered → exit 2 (index-bound recompute)" {
+  _drive_valid_dispatch
+  # tuple-set excludes fingerprint, so only the index-bound recompute catches this.
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.findings[0].fingerprint="sha256:3333333333333333333333333333333333333333333333333333333333333333"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a finding occurrence_id tampered → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.findings[0].occurrence_id="c3-forged-999"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: process_id tampered → exit 2 (does not bind to the dispatch session)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.audit_report.process_id="not-the-real-session"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: rendered prompt edited → exit 2 (prompt freshness)" {
+  _drive_valid_dispatch
+  printf 'trailing tamper\n' >> "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: a pruned brief file → exit 2 (codex_brief recompute fails)" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/c3/bundle-diff.patch"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: an altered brief file → exit 2 (codex_brief sha diverges)" {
+  _drive_valid_dispatch
+  printf 'sneaky extra byte\n' >> "$TEST_EVIDENCE_DIR/c3/bundle-scope.txt"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: dispatch.invoked flipped to false → exit 2 (provenance says codex did not run)" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" '.dispatch.invoked=false'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC1: achieved_independence_level downgraded → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" '.independence.achieved_independence_level="cross_model"'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── AC2: --reference freshness vs live HEAD ────────────────────────────────
+
+@test "step7/AC2: --reference verifies against manifest.head_sha even after HEAD moves; live fails" {
+  _drive_valid_dispatch
+  # A later commit moves HEAD WITHOUT touching the evidence brief files.
+  git -C "$TEST_PROJECT_ROOT" commit -q --allow-empty -m "later commit moves HEAD"
+  local NEW_HEAD; NEW_HEAD="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  [ "$NEW_HEAD" != "$HEAD_SHA" ]
+  # live mode now sees a stale reviewed_head (audit reviewed the OLD head) → exit 2
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  # --reference checks freshness against the captured manifest.head_sha → exit 0
+  run bash "$DISPATCH" verify --reference "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session"* ]]
+  [[ "$output" == *"$HEAD_SHA"* ]]
+}
+
+# ─── AC3: B5 action_owner parity + added/removed findings ───────────────────
+
+@test "step7/AC3: a low/medium finding WITHOUT action_owner verifies (raw+report both omit it)" {
+  _drive_valid_dispatch
+  local AR="$TEST_EVIDENCE_DIR/audit-report.json"
+  # the valid fixture's medium finding carries NO action_owner in the report…
+  run jq -e '[.findings[]|select(.severity=="medium" and (has("action_owner")|not))]|length>0' "$AR"
+  [ "$status" -eq 0 ]
+  # …nor in the raw response — and verify accepts the identical-absence tuple.
+  run jq -e '[.findings[]|select(.severity=="medium" and (has("action_owner")|not))]|length>0' \
+    "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  [ "$status" -eq 0 ]
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "step7/AC3: adding action_owner to the report's medium finding (absent in raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '(.findings[]|select(.severity=="medium")) |= (. + {action_owner:"reviewer"})'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC3: removing a finding from the normalized report (no matching raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" 'del(.findings[1])'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC3: adding a fabricated finding to the report (no matching raw) → exit 2" {
+  _drive_valid_dispatch
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" \
+    '.findings += [{fingerprint:"sha256:4444444444444444444444444444444444444444444444444444444444444444",occurrence_id:"c3-E-test-9",severity:"low",area:"forged",finding:"forged",recommendation:"forged"}]'
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── AC4: absent c3-dispatch.json / manifest → exit 2 even if report claims pass ─
+
+@test "step7/AC4: c3-dispatch.json absent → exit 2 even if the report claims status:pass" {
+  _drive_valid_dispatch
+  # force the report to claim a clean pass, then remove the dispatch provenance
+  _jq_edit "$TEST_EVIDENCE_DIR/audit-report.json" '.status="pass"'
+  rm -f "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"required artifact missing"* ]]
+}
+
+@test "step7/AC4: audit-input-manifest.json absent → exit 2" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "step7/AC4: codex-last-message.json absent → exit 2" {
+  _drive_valid_dispatch
+  rm -f "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── edge: raw response that fails the trusted re-validation gate ────────────
+
+@test "step7/edge: a raw response that fails _validate_response (re-validated, not trusted) → exit 2" {
+  # Craft a self-consistent evidence dir whose RAW response is schema-INVALID
+  # (bad severity enum). stdout/raw sha are recomputed to pass step 3, so the
+  # rejection is step 4's own re-validation, not an incidental hash mismatch.
+  _drive_valid_dispatch
+  local LM="$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  _jq_edit "$LM" '.findings[0].severity="catastrophic"'
+  # re-point the recorded raw_response_sha256 at the mutated file (step 3 passes)…
+  local newsha="sha256:$(sha256sum "$LM" | awk '{print $1}')"
+  _jq_edit "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" ".dispatch.raw_response_sha256=\"$newsha\""
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+# ─── usage: unknown flag ────────────────────────────────────────────────────
+
+@test "step7/usage: unknown flag → exit 2 (fail-closed)" {
+  run bash "$DISPATCH" verify --bogus "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
 }
