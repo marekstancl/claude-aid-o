@@ -38,8 +38,33 @@ evidence/
 # a broader negation here reproduces the same "catches too much" problem one
 # level down — a future unsanitized runtime dump elsewhere under e2e/evidence/
 # would be silently re-included too).
+#
+# P065 Step 13 fix: the two negations directly below (added in Step 1) look
+# like they re-include codex-stream-sample/, but on their own they DON'T —
+# git's own documented rule is "a negated pattern cannot re-include a path
+# whose PARENT directory is still excluded", and the bare `evidence/` rule
+# above excludes this whole directory (incl. traversal) before any deeper
+# negation is even considered. `git add` on a brand-new file dropped into
+# codex-stream-sample/ was verified to be REFUSED as ignored — the two
+# files already there only stayed tracked because they were added before/
+# via -f, not because the negation worked. Fixed by un-ignoring this exact
+# `evidence/` directory FIRST (so git descends into it again), then
+# re-excluding its bare contents with `evidence/*`, then re-including only
+# the specific reviewed artifacts below — never the whole tree (a future
+# unsanitized runtime dump elsewhere under e2e/evidence/ must stay ignored).
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/
+plugins/aid-orchestrator/scripts/tests/e2e/evidence/*
 !plugins/aid-orchestrator/scripts/tests/e2e/evidence/codex-stream-sample/
 !plugins/aid-orchestrator/scripts/tests/e2e/evidence/codex-stream-sample/**
+
+# P065 Step 13: committed, sanitized real-Codex dogfood proof (attestation + a
+# re-hashed regression fixture). Same "narrow negation, not the whole tree"
+# rule as codex-stream-sample above — do NOT widen this to
+# `!.../e2e/evidence/` or `!.../e2e/evidence/**`; that would silently
+# re-include any FUTURE unsanitized runtime dump under e2e/evidence/ too.
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-live-attestation.md
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture/
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture/**
 
 # Development workspace (session logs, active work, internal docs)
 workspace/
