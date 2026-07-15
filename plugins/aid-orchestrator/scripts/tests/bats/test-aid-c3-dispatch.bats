@@ -374,10 +374,14 @@ YAML
 
 # ─── CLI skeleton (build-manifest only; other subcommands are stubs) ────────
 
-@test "skeleton: dispatch subcommand is a not-yet-implemented stub (exit 2)" {
+# dispatch is IMPLEMENTED as of Step 5 (this EPIC): it is no longer a stub. With
+# no <evidence_dir> it is a usage/precondition error (exit 1), not exit-2 "not
+# yet implemented". (Full dispatch behavior is covered by the Step-5 block below.)
+@test "skeleton: dispatch subcommand requires <evidence_dir> (usage error, no longer a stub)" {
   run bash "$DISPATCH" dispatch
-  [ "$status" -eq 2 ]
-  [[ "$output" == *"not yet implemented"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" != *"not yet implemented"* ]]
 }
 
 @test "skeleton: verify subcommand is a not-yet-implemented stub (exit 2)" {
@@ -955,4 +959,271 @@ EOF
   jq -n '{only:"x"}' > "$TEST_TMPDIR/v.json"
   run bash "$AID_PLUGIN_PATH/$RENDER_REL" --template "$TEST_TMPDIR/min.md" --vars-json "$TEST_TMPDIR/v.json"
   [ "$status" -ne 0 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Step 5 (backend) — Executor-first Codex dispatch (`dispatch`) + raw capture
+#
+# Additive only: never touches the Step-2/3/4 tests above. Exercises cmd_dispatch
+# in scripts/lib/aid-c3-dispatch.sh: the executor is chosen FIRST and Codex is
+# ALWAYS probed as cross_provider (never cross_model, never cached); the real
+# codex CLI (the deterministic fake-codex fixture, wrapped by a logging spy) is
+# invoked read-only in a fresh process; raw output + codex-derived provenance
+# are captured into <evidence_dir>/c3/c3-dispatch.json.
+#
+# Grounding: scripts/tests/e2e/evidence/codex-stream-sample/fields.md.
+#
+# Two test seams (both consumed by cmd_dispatch via env, NOT by editing source):
+#   AID_C3_INDEPENDENCE_BIN → a spy that LOGS its `detect --required <level>` args
+#     and returns available(0)/unverifiable(2). It never calls codex, so the only
+#     codex invocations are the dispatch calls themselves (clean AC3 count).
+#   a `codex` spy PREPENDED to PATH that logs each invocation's args (one
+#     ARG:<val> line each) then exec's fake-codex. Lets us assert the exact
+#     `--cd <repo> --sandbox read-only` launch and the absence of --output-schema.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _seed_manifest [risk_profile] — build a REAL manifest for dispatch to consume.
+_seed_manifest() {
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" "${1:-high}"
+  [ "$status" -eq 0 ]
+}
+
+# _dispatch_seams — install the independence pre-check spy + the logging codex
+# spy, and export the paths/handles the Step-5 tests assert against.
+_dispatch_seams() {
+  INDEP_SPY="$TEST_TMPDIR/indep-spy"; mkdir -p "$INDEP_SPY"
+  export INDEP_SPY
+  INDEP_LOG="$TEST_TMPDIR/indep.log"; : > "$INDEP_LOG"
+  export INDEP_LOG
+  cat > "$INDEP_SPY/detect" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$INDEP_LOG"
+exit 0
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  export AID_C3_INDEPENDENCE_BIN="$INDEP_SPY/detect"
+
+  CODEX_SPY="$TEST_TMPDIR/codex-spy"; mkdir -p "$CODEX_SPY"
+  export CODEX_SPY
+  CODEX_LOG="$TEST_TMPDIR/codex.log"; : > "$CODEX_LOG"
+  export CODEX_LOG
+  cat > "$CODEX_SPY/codex" <<EOF
+#!/usr/bin/env bash
+{ echo "=== INVOKE ==="; for a in "\$@"; do printf 'ARG:%s\n' "\$a"; done; } >> "$CODEX_LOG"
+exec "$FAKE_CODEX_DIR/codex" "\$@"
+EOF
+  chmod +x "$CODEX_SPY/codex"
+  PATH="$CODEX_SPY:$PATH"; export PATH
+
+  # Coherent EXPECT_* so valid-mode echoes the manifest's real head + brief hash.
+  export FAKE_CODEX_EXPECT_HEAD="$HEAD_SHA"
+  export FAKE_CODEX_EXPECT_MANIFEST_HASH="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$MANIFEST" 2>/dev/null || echo "")"
+
+  PROJECT_ROOT="$(git -C "$TEST_EVIDENCE_DIR" rev-parse --show-toplevel)"
+  export PROJECT_ROOT
+  DJSON="$TEST_EVIDENCE_DIR/c3/c3-dispatch.json"
+  export DJSON
+}
+
+# ─── AC1: the executor probes cross_provider, NEVER cross_model ──────────────
+
+@test "step5/AC1: high profile → dispatch probes detect --required cross_provider (NOT cross_model)" {
+  _seed_manifest high
+  # For high, the manifest's REQUIRED level is cross_model — the tempting-but-wrong
+  # value the old executor/level mismatch would have probed. The executor must
+  # still probe cross_provider.
+  run jq -r '.audit_input_manifest.required_independence_level' "$MANIFEST"
+  [ "$output" = "cross_model" ]
+
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # The pre-check the bridge ACTUALLY made (spy log):
+  grep -q 'detect --required cross_provider' "$INDEP_LOG"
+  ! grep -q 'cross_model' "$INDEP_LOG"
+
+  # …and it is recorded as the probed level (required is carried through verbatim).
+  run jq -r '.independence.probed_independence_level' "$DJSON"
+  [ "$output" = "cross_provider" ]
+  run jq -r '.independence.required_independence_level' "$DJSON"
+  [ "$output" = "cross_model" ]
+}
+
+# ─── AC2: valid mode captures session id / events_valid / achieved / raw sha ──
+
+@test "step5/AC2: valid — codex launched --cd <repo> --sandbox read-only; session id, events_valid:true, achieved cross_provider, raw_response_sha256 recorded" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DJSON" ]
+
+  # provenance parsed from the --json stream (fields.md paths)
+  run jq -r '.dispatch.codex_session_id' "$DJSON"
+  [[ "$output" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.exit_code' "$DJSON"; [ "$output" = "0" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+  run jq -r '.dispatch.raw_response_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.dispatch.stdout_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+  # reported model = the bridge's own -m arg (the slug is ABSENT from the stream)
+  run jq -r '.executor.reported_model' "$DJSON"; [ "$output" = "gpt-5.6-terra" ]
+
+  # codex was actually launched exec/read-only, cd'd to the repo root, and — per
+  # the DISCOVERED ISSUE — WITHOUT --output-schema (the if/then schema would 400).
+  grep -qx "ARG:exec" "$CODEX_LOG"
+  grep -qx "ARG:--cd" "$CODEX_LOG"
+  grep -qx "ARG:$PROJECT_ROOT" "$CODEX_LOG"
+  grep -qx "ARG:--sandbox" "$CODEX_LOG"
+  grep -qx "ARG:read-only" "$CODEX_LOG"
+  ! grep -qx "ARG:--output-schema" "$CODEX_LOG"
+
+  # raw last-message actually captured; its sha matches the recorded provenance
+  [ -f "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" ]
+  local rsha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/c3/codex-last-message.json" | awk '{print $1}')"
+  [ "$(jq -r '.dispatch.raw_response_sha256' "$DJSON")" = "$rsha" ]
+  # and the stdout sha matches the captured event stream
+  local ssha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/c3/codex-events.jsonl" | awk '{print $1}')"
+  [ "$(jq -r '.dispatch.stdout_sha256' "$DJSON")" = "$ssha" ]
+}
+
+@test "step5/AC2: prompt is rendered deterministically from the committed template (provenance recorded, no residual {{)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # the rendered prompt exists, has no leftover placeholder, and carries head_sha
+  [ -f "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt" ]
+  ! grep -qE '\{\{' "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  grep -q "$HEAD_SHA" "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  # render provenance recorded from aid-render-prompt.sh (the committed template)
+  run jq -r '.prompt.template_id' "$DJSON"; [ "$output" = "c3-audit-prompt" ]
+  run jq -r '.prompt.template_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.prompt.rendered_prompt_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+# ─── AC3: non-sticky — consecutive rate_limited runs each re-attempt codex ───
+
+@test "step5/AC3: two consecutive rate_limited runs BOTH invoke codex (non-sticky; second not skipped, no state persists)" {
+  _seed_manifest high
+  _dispatch_seams
+
+  FAKE_CODEX_MODE=rate_limited run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "rate_limited" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+
+  FAKE_CODEX_MODE=rate_limited run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "rate_limited" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+
+  # BOTH runs launched `codex exec` (the second was NOT skipped) → 2 exec calls.
+  run grep -c '^ARG:exec$' "$CODEX_LOG"
+  [ "$output" = "2" ]
+  # …and each run independently ran the pre-check → 2 probes.
+  run grep -c 'detect --required cross_provider' "$INDEP_LOG"
+  [ "$output" = "2" ]
+  # non-sticky: NO availability-cache / state artifact was written under evidence.
+  run bash -c "find '$TEST_EVIDENCE_DIR' \\( -iname '*availab*' -o -iname '*cache*' \\) | wc -l | tr -d ' '"
+  [ "$output" = "0" ]
+}
+
+# ─── Error handling / edge cases (Error Handling + Edge Cases in the plan) ────
+
+@test "step5/error: dispatch without a manifest → PRECONDITION FAIL exit 1" {
+  run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"manifest missing"* ]]
+}
+
+@test "step5/edge: pre-check unavailable → non-dispatched (invoked:false, achieved unavailable, exit 2); codex NEVER launched" {
+  _seed_manifest high
+  _dispatch_seams
+  # Flip the pre-check spy to report unverifiable (exit 2).
+  cat > "$INDEP_SPY/detect" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$INDEP_LOG"
+exit 2
+EOF
+  chmod +x "$INDEP_SPY/detect"
+
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "unavailable" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+  # the pre-check WAS made (cross_provider), but codex exec was never launched.
+  grep -q 'detect --required cross_provider' "$INDEP_LOG"
+  run grep -c '^ARG:exec$' "$CODEX_LOG"
+  [ "$output" = "0" ]
+}
+
+@test "step5/edge: codex timeout (124) → outcome timeout, invoked true, events_valid false, achieved unavailable, exit 2" {
+  _seed_manifest high
+  _dispatch_seams
+  AID_C3_TIMEOUT_SECONDS=1 FAKE_CODEX_MODE=timeout run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "timeout" ]
+  run jq -r '.dispatch.exit_code' "$DJSON"; [ "$output" = "124" ]
+  run jq -r '.dispatch.invoked' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+}
+
+@test "step5/edge: AID_C3_TIMEOUT_SECONDS unset → 900s default is used (not an empty timeout)" {
+  # We do not want to wait 900s; assert the DEFAULT is wired by inspecting that a
+  # valid run (which returns immediately) still succeeds with the env UNSET.
+  _seed_manifest high
+  _dispatch_seams
+  unset AID_C3_TIMEOUT_SECONDS
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+}
+
+@test "step5/edge: no_stream (well-formed lines, no turn.completed) → events_valid false, outcome failed, exit 2" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=no_stream run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "false" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "failed" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "unavailable" ]
+  # session id is still recovered from the (present) thread.started line
+  run jq -r '.dispatch.codex_session_id' "$DJSON"
+  [[ "$output" =~ ^[0-9a-f]{8}- ]]
+}
+
+@test "step5/boundary: invalid_json — stream is well-formed so dispatch SUCCEEDS; the raw malformed last-message is handed to Step 6 (bridge does not reject it)" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=invalid_json run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.dispatch.events_valid' "$DJSON"; [ "$output" = "true" ]
+  run jq -r '.dispatch.outcome' "$DJSON"; [ "$output" = "dispatched" ]
+  # the captured raw last-message is itself NOT valid JSON — Step 6's job to reject,
+  # not the dispatch/capture path's.
+  run jq -e . "$TEST_EVIDENCE_DIR/c3/codex-last-message.json"
+  [ "$status" -ne 0 ]
+  # …but a raw_response_sha256 over those raw bytes is still recorded.
+  run jq -r '.dispatch.raw_response_sha256' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+}
+
+@test "step5/edge: cross_model required (high) is still ATTEMPTED as cross_provider and satisfied by achieved cross_provider" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # required cross_model, probed+achieved cross_provider (never downgraded).
+  run jq -r '.independence.required_independence_level' "$DJSON"; [ "$output" = "cross_model" ]
+  run jq -r '.independence.probed_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
 }
