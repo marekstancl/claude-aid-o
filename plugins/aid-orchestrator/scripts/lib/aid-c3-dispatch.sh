@@ -669,9 +669,21 @@ _write_dispatch_json() {
 #       {critical,high} AND — if present at ANY severity — ∈ {implementer,
 #       reviewer,pm,gate-fixer}.
 _validate_response() {
-  local f="$1" rc=0
+  local f="$1" rc=0 doc_count
   [[ -f "$f" ]] || return 1
   command -v jq >/dev/null 2>&1 || return 1   # validator unavailable → fail-closed
+
+  # CP2 finding (HIGH): `jq -e FILTER "$f"` below evaluates FILTER against EVERY
+  # top-level JSON document in the file and `-e`'s exit status reflects only the
+  # LAST one — a crafted multi-document file (two concatenated JSON objects)
+  # would validate solely against its last document, silently ignoring the
+  # first. This is the bridge's explicit trust gate over untrusted model
+  # output, so it must reject anything but a single JSON document itself,
+  # rather than relying on some other downstream check to incidentally catch
+  # the malformed shape.
+  doc_count="$(jq -c . "$f" 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [[ "$doc_count" == "1" ]] || return 1
+
   jq -e '
     (type == "object")
     and ((keys_unsorted
