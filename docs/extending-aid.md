@@ -901,6 +901,92 @@ items that most affect how you should read the guarantees above:
 
 ---
 
+## C3 Cross-Provider Dispatch Bridge (P065)
+
+P065 resolves the single largest deferral of the E8 C3 core (see "What E8 Does
+NOT Deliver" → *No real `codex exec` dispatch*). Where E8 only **detected**
+whether `cross_provider` independence was achievable, P065 ships the real
+subprocess dispatch, the trust boundary that turns an untrusted external
+response into an `audit-report.json`, and the FSM verification that binds that
+report back to the raw Codex output at HEAD. The audit is now performed by an
+actual second vendor (Codex), not an in-process Claude `Agent()` call.
+
+### `aid-c3-dispatch.sh` — three subcommands
+
+`scripts/aid-c3-dispatch.sh` is the bridge. It has three deterministic
+subcommands, each a distinct stage of the dispatch lifecycle:
+
+- **`build-manifest`** — assembles the hash-manifested Codex brief (the audit
+  input): the changed-file set, the run's risk profile, and the versioned prompt
+  rendered against the run's facts. The manifest is content-hashed so the audit
+  can later be proven to have run against exactly these inputs.
+- **`dispatch`** — invokes the real Codex CLI as a fresh subprocess. It is
+  **always probed as `cross_provider`** (a different vendor than the auditor's
+  own model) and is **non-sticky** — each run re-probes availability rather than
+  trusting a cached "codex is here" flag. The untrusted response crosses the
+  trust boundary through `_validate_response` (schema + shape, hardened against a
+  multi-document-JSON bypass), `_normalize`, and `_write_report` /
+  `_write_unverifiable`.
+- **`verify [--reference]`** — the provenance + faithful-transform check: it
+  re-binds the written `audit-report.json` to the raw Codex output it was
+  transformed from, and confirms the report describes HEAD. This is the exit-0
+  signal the FSM gate consumes.
+
+### The two contracts
+
+The bridge sits between two schemas:
+
+- **Input manifest** — the `build-manifest` output; the hash-manifested brief the
+  Codex process reads.
+- **Codex response** (`defaults/schemas/c3-codex-response.schema.json`) — the
+  shape the external process must return. A response that fails this schema is
+  routed to `_write_unverifiable`, never coerced into a pass.
+
+The versioned prompt template (`c3-audit-prompt-v1.md`) is rendered by the
+deterministic `aid-render-prompt.sh`, so the same run facts always produce the
+same brief — the prompt is data with a version, not an ad-hoc string.
+
+### Normalization and raw-binding (faithful-transform proof)
+
+The external response is **untrusted input**. `_normalize` maps it into the
+protocol-v2 `audit-report.json` envelope; the report retains a binding back to
+the raw Codex output so `verify` can prove the report is a **faithful transform**
+of what Codex actually returned — not a fabricated or drifted summary. The
+faithful-transform binding plus the provenance chain (input-manifest hash →
+dispatch → report → HEAD) is what makes the C3 report trustworthy without
+trusting the auditor to self-report.
+
+### Independence via provider, not sandbox
+
+Codex reads the repository **read-only** — independence does **not** come from a
+filesystem jail. It comes from being a **different vendor running in a fresh
+process**: a distinct model family, distinct training, distinct execution
+context. A read-only repo view is sufficient because the guarantee being sought
+is *independent judgment*, not *containment*. Do not design the bridge assuming a
+sandbox boundary; the boundary is the vendor split.
+
+### `c3_on_unavailable` — degradation policy
+
+`c3-audit-policy.yaml`'s `c3_executor` block is executor-first with a
+`cross_provider` probe and `c3_on_unavailable: unverifiable`. When Codex is not
+available, the run degrades to `unverifiable` (which the C3-required profiles
+treat as blocking — fail-closed, never a silent pass). The alternative
+`degraded_advisory` disposition — where an unavailable executor downgrades to a
+non-blocking advisory instead of blocking — ships in a **later phase of this same
+plan**, not here.
+
+### Observe → blocking staging
+
+The FSM `done-advance` C3 hook shells out to `aid-c3-dispatch.sh verify`, making
+the full report↔raw faithful-transform binding a **real, deterministic,
+merge-blocking capability** — code, not prose. The shipped default enforcement
+stays **`observe`**; the real blocking activation is decided at a later milestone
+(**E10**), after calibration, consistent with every other C-stage gate's
+observe→blocking promotion pattern. Registered as `c3_cross_provider_dispatch`
+(`type: 1`, `surface: internal-guard`) in `defaults/enforcement-registry.yaml`.
+
+---
+
 ## C4 Release Policy (E9)
 
 C4 is the release-decision aggregator: the single deterministic place that decides whether an
@@ -1104,4 +1190,4 @@ clone and the eco-dev↔eco-prod mirror.
 
 ---
 
-**Last Updated:** 2026-07-13
+**Last Updated:** 2026-07-15

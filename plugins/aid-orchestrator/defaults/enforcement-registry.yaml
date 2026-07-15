@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 292          # granular registry rows; recomputed via `.enforcements|length`. v2.58.3 adds plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
-  mapped_with_verdict: 128   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 110 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 127 for plan_files_shape_lint (verdict: ALIGNED)
-  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the v2.58.3 row)
-  verdict_distribution: {ALIGNED: 110, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
+  enforcements: 293          # granular registry rows; recomputed via `.enforcements|length`. v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
+  mapped_with_verdict: 129   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 111 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 128 for c3_cross_provider_dispatch (verdict: ALIGNED)
+  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by the v2.59.0 row)
+  verdict_distribution: {ALIGNED: 111, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
 
 enforcements:
 
@@ -1099,3 +1099,15 @@ enforcements:
     verdict: ALIGNED
     description: "Malformed **Files:** entries are caught at PLAN time, not phase-by-phase during EPIC generation. aid-plan-lint.sh shares the SAME extractor (_aid_extract_files_bullets), path cleaner (_aid_split_path_entry) and shape predicate (_aid_path_shape_ok) as the generator (aid-plan-to-epic.sh) and the D5 gate (gates/aid-contract-validate.sh) — all in lib/aid-scoping.sh, single source of truth — so a plan that passes the lint provably passes the gate (proven by an integration test that runs plan-to-epic -> epic-to-json -> contract gate on a lint-clean plan). ENFORCEMENT is the deterministic hard pre-flight inside aid-plan-to-epic.sh (Step 1a), which fail-fasts before any EPIC file is written or the plan counter is bumped and CANNOT be skipped; the /aid-plan skill auto-runs the lint after writing the plan (before CP1) as EARLY feedback, and CP1 only includes its output. Two-tier severity: ERROR (cleaner yields no path / bad-shape path — WILL break the gate) always blocks; STRICT (cleaner-OK but non-canonical: no `backtick` path, a non-(lines …) parenthetical, or a verb+path split across two lines) blocks lifecycle_strict plans and is a loud advisory for legacy plans (so already-working plans are never suddenly globally blocked). v2.58.3 also DE-DUPLICATES the generator: aid-plan-to-epic.sh's own copy of _aid_split_path_entry + its inline Files-extraction awk were replaced by the shared lib functions (byte-identical generation verified)."
     test: "scripts/tests/bats/test-plan-lint.bats"
+
+  # ── v2.59.0: P065 C3 cross-provider dispatch bridge (real codex audit) ──────
+  - id: c3_cross_provider_dispatch
+    type: 1
+    source: "scripts/aid-fsm.sh (cmd_done_advance C3 dispatch hook)"
+    instruction: "skills/pipeline.md (DONE C3 dispatch) + agents/auditor.md C3.1a"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "C3-required run must prove a real, faithfully-transformed codex audit at HEAD before release."
+    test: "scripts/tests/bats/test-c3-audit.bats"
