@@ -3878,6 +3878,115 @@ EOF
         fi
       fi
 
+      # ── C3 dispatch-provenance enforcement hook (P065 Step 9 / E-065-3_7) ────
+      # THE enforcement point P065 exists to build: under `enforcement: blocking`
+      # a C3-required run may advance ONLY when c3/c3-dispatch.json proves a REAL,
+      # verified Codex run at HEAD. This block is strictly ADDITIVE to the C3
+      # independent-audit hook above — it does NOT replace or weaken any check
+      # there. That hook validates the report's CONTENT
+      # (blocking_findings/status/manifest/freshness); THIS hook validates the
+      # DISPATCH PROVENANCE (that Codex genuinely ran) and — check #5, the
+      # critical new enforcement — SHELLS OUT to `aid-c3-dispatch.sh verify` so
+      # the full report↔raw faithful-transform binding (raw re-validation +
+      # tuple/fingerprint equality) becomes part of the deterministic
+      # MERGE-BLOCKING gate, not merely prose in pipeline.md. An edited/fabricated
+      # report whose otherwise-intact c3-dispatch.json would pass checks 1–4 now
+      # FAILS at the verify shell-out and can no longer pass this gate.
+      #
+      # Reasons are computed IN ORDER (first failing reason wins):
+      #   1. c3/c3-dispatch.json absent (covers legacy pre-P065 runs — c3/ absent).
+      #   2. dispatch did not genuinely succeed cross_provider (invoked!=true OR
+      #      exit_code!=0 OR outcome!="dispatched" OR events_valid!=true OR empty
+      #      codex_session_id).
+      #   3. audit-report.json .audit_report.process_id != dispatch codex_session_id.
+      #   4. audit-report.json .audit_report.reviewed_head != current HEAD (stale).
+      #   5. `aid-c3-dispatch.sh verify <evidence_dir>` exits non-zero
+      #      (report↔raw faithful-transform binding broken).
+      #
+      # Enforcement-gated exactly like the hook above (c3_enforcement, resolved
+      # from c3-audit-policy.yaml near the top of this branch; C3_AUDIT_POLICY is
+      # the test/CI seam). blocking → errors++ with the first failing reason;
+      # observe → emit c3_dispatch_would_block telemetry only, no errors++.
+      # Fail-closed under blocking: jq missing, or c3/c3-dispatch.json absent, is a
+      # block reason (file existence alone is not proof). Every jq/verify command
+      # substitution is guarded against `set -euo pipefail` abort.
+      if [[ "$c3_hook_fired" == "true" ]]; then
+        local c3_dispatch_block_reason=""
+        local c3_dispatch_json="${evidence_dir}/c3/c3-dispatch.json"
+
+        if ! command -v jq >/dev/null 2>&1; then
+          # jq missing → cannot read provenance → fail-closed.
+          c3_dispatch_block_reason="jq is required to verify c3-dispatch.json provenance and is not available"
+        elif [[ ! -f "$c3_dispatch_json" ]]; then
+          # Check 1: absent provenance (also the legacy pre-P065 run case — c3/ absent).
+          c3_dispatch_block_reason="c3/c3-dispatch.json not found — no proof a real Codex audit was dispatched at HEAD"
+        elif ! jq -e . "$c3_dispatch_json" >/dev/null 2>&1; then
+          c3_dispatch_block_reason="c3/c3-dispatch.json is not valid/parseable JSON"
+        else
+          # Guard all reads against set -e abort (this script runs set -euo pipefail).
+          local _d_invoked _d_exit _d_outcome _d_events _d_session
+          local _di_ec=0 _de_ec=0 _do_ec=0 _dev_ec=0 _ds_ec=0
+          _d_invoked=$(jq -r '.dispatch.invoked | tostring' "$c3_dispatch_json" 2>/dev/null) || _di_ec=$?
+          [[ $_di_ec -ne 0 ]] && _d_invoked="MISSING"
+          _d_exit=$(jq -r '.dispatch.exit_code | tostring' "$c3_dispatch_json" 2>/dev/null) || _de_ec=$?
+          [[ $_de_ec -ne 0 ]] && _d_exit="MISSING"
+          _d_outcome=$(jq -r '.dispatch.outcome // "MISSING"' "$c3_dispatch_json" 2>/dev/null) || _do_ec=$?
+          [[ $_do_ec -ne 0 ]] && _d_outcome="MISSING"
+          _d_events=$(jq -r '.dispatch.events_valid | tostring' "$c3_dispatch_json" 2>/dev/null) || _dev_ec=$?
+          [[ $_dev_ec -ne 0 ]] && _d_events="MISSING"
+          _d_session=$(jq -r '.dispatch.codex_session_id // ""' "$c3_dispatch_json" 2>/dev/null) || _ds_ec=$?
+          [[ $_ds_ec -ne 0 ]] && _d_session=""
+
+          # audit-report.json provenance fields (process_id / reviewed_head).
+          local _r_pid _r_reviewed_head _rp_ec=0 _rrh_ec=0 _c3_dp_head=""
+          _r_pid=$(jq -r '.audit_report.process_id // ""' "$c3_report_file" 2>/dev/null) || _rp_ec=$?
+          [[ $_rp_ec -ne 0 ]] && _r_pid=""
+          _r_reviewed_head=$(jq -r '.audit_report.reviewed_head // ""' "$c3_report_file" 2>/dev/null) || _rrh_ec=$?
+          [[ $_rrh_ec -ne 0 ]] && _r_reviewed_head=""
+          _c3_dp_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
+
+          if [[ "$_d_invoked" != "true" || "$_d_exit" != "0" || "$_d_outcome" != "dispatched" \
+                || "$_d_events" != "true" || -z "$_d_session" || "$_d_session" == "null" ]]; then
+            # Check 2: dispatch did not genuinely succeed (covers rate_limited /
+            # unavailable / timeout outcomes, invoked:false, events_valid:false, ...).
+            c3_dispatch_block_reason="c3-dispatch.json does not prove a successful Codex run (invoked=${_d_invoked}, exit_code=${_d_exit}, outcome=${_d_outcome}, events_valid=${_d_events}, session='${_d_session}')"
+          elif [[ -z "$_r_pid" || "$_r_pid" != "$_d_session" ]]; then
+            # Check 3: report's process_id must bind to the dispatch session.
+            c3_dispatch_block_reason="audit-report.json .audit_report.process_id ('${_r_pid}') != c3-dispatch.json codex_session_id ('${_d_session}')"
+          elif [[ -z "$_r_reviewed_head" || -z "$_c3_dp_head" || "$_r_reviewed_head" != "$_c3_dp_head" ]]; then
+            # Check 4: report must have reviewed the CURRENT HEAD (freshness).
+            c3_dispatch_block_reason="audit-report.json .audit_report.reviewed_head ('${_r_reviewed_head:-<empty>}') != current HEAD ('${_c3_dp_head:-<empty>}') — stale audit"
+          else
+            # Check 5 (THE enforcement fix): shell out to the verify command — the
+            # full report↔raw faithful-transform binding. A fabricated/edited report
+            # whose c3-dispatch.json would pass checks 1–4 FAILS here. Guarded so a
+            # non-zero exit is treated as a block reason, never a set -e crash.
+            local _c3_verify_bin="${AID_C3_DISPATCH_BIN:-${SCRIPT_DIR}/lib/aid-c3-dispatch.sh}"
+            local _c3_verify_out="" _c3_verify_rc=0
+            _c3_verify_out=$(bash "$_c3_verify_bin" verify "$evidence_dir" 2>&1) || _c3_verify_rc=$?
+            if [[ "$_c3_verify_rc" -ne 0 ]]; then
+              c3_dispatch_block_reason="aid-c3-dispatch.sh verify failed (report↔raw faithful-transform binding broken, exit ${_c3_verify_rc}): ${_c3_verify_out}"
+            fi
+          fi
+        fi
+
+        if [[ -n "$c3_dispatch_block_reason" ]]; then
+          # Always emit c3_dispatch_would_block so the gate is observable in both
+          # modes; then blocking → errors++, observe → telemetry only (matches the
+          # C3 independent-audit hook's would_block convention above).
+          log_event "$_c3_timeline" "c3_dispatch_would_block" \
+            check="c3_dispatch_provenance" enforcement="$c3_enforcement" \
+            risk_profile="$c3_risk_profile" reason="$c3_dispatch_block_reason"
+          if [[ "$c3_enforcement" == "blocking" ]]; then
+            echo "PRECONDITION FAIL: C3 dispatch provenance block — ${c3_dispatch_block_reason}." >&2
+            echo "Risk profile '${c3_risk_profile}' requires a verified Codex dispatch (c3/c3-dispatch.json) proving a real, faithful audit at HEAD. See: ${c3_dispatch_json}" >&2
+            errors=$((errors + 1))
+          else
+            log_warn "C3 dispatch provenance would_block (enforcement=observe, non-blocking): ${c3_dispatch_block_reason}"
+          fi
+        fi
+      fi
+
       # Block release on critical-severity findings via the auditor's CANONICAL top-level
       # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
       # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start

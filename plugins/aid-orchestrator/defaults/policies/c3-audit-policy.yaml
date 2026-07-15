@@ -30,3 +30,22 @@ risk_profiles:
   unverifiable:
     c3_required: true
     required_independence_level: cross_provider
+
+# c3_executor (P065 Step 8) — the executor the bridge/FSM/build-manifest/pipeline.md
+# read to know WHO runs C3 and WHAT happens when a live attempt does not dispatch.
+# Executor-first: Codex is ALWAYS attempted first every run (no sticky availability
+# state persists), probed as cross_provider, and — because a real independent-provider
+# pass is the strongest evidence — it SATISFIES the weaker levels too (superset).
+c3_executor:
+  kind: codex_cli
+  dispatch_script: scripts/lib/aid-c3-dispatch.sh
+  probe_as: cross_provider          # executor-first; always probe Codex as cross_provider
+  satisfies_levels: [context_only, cross_model, cross_provider]
+  # Codex is ALWAYS attempted first every run; no sticky availability state persists.
+  # c3_on_unavailable: what happens AFTER a live Codex attempt did not dispatch.
+  #   unverifiable      — SHIPPED here (EPIC 3): C3 is unverifiable, nothing else runs.
+  #   degraded_advisory — flipped ON in a later step once agents/auditor.md c3_advisory exists:
+  #                       pipeline.md dispatches the advisory auditor via Agent(); result
+  #                       labelled provider: claude-code, independence_level: context_only,
+  #                       advisory: true. NEVER a cross_provider pass.
+  c3_on_unavailable: unverifiable

@@ -1160,74 +1160,44 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
     instead. The Auditor/Curator dispatch mode is now selected mechanically by
     `aid-audit-mode.sh` (step 6 below), not by prose judgment.
 
-    1. **Read the risk profile:**
-       ```bash
-       risk_profile=$(jq -r '.review_profile.risk_profile // "unverifiable"' \
-         "$evidence_dir/review-profile.json" 2>/dev/null || echo "unverifiable")
-       ```
-       Produced by **step 4a above** (`aid-prefilter.sh profile` / `cmd_profile` — distinct from
-       the `classify` subcommand used by CP2/CP3/CP6, see "Pre-Filter Stage" §13 below). Missing
-       file or missing field → `risk_profile=unverifiable` (fail-closed, matches
-       `unknown_surface_profile: unverifiable` in `review-profiles.yaml`).
-    2. **Look up the required independence level (authoritative source: `c3-audit-policy.yaml`,
-       D8):**
-       ```bash
-       required_independence_level=$(yq -r \
-         ".risk_profiles[\"$risk_profile\"].required_independence_level // \"\"" \
-         "$AID_PLUGIN_PATH/defaults/policies/c3-audit-policy.yaml")
-       ```
-       Empty result (risk profile is not a key in `c3-audit-policy.yaml`, e.g.
-       `docs_trivial`/`low`/`medium`) → C3 not required for this run; stop here and let step 6
-       dispatch Auditor in `legacy_health` mode.
-    3. **Build the allowlist.** Read `$AID_CHANGED_PATHS` — the same file/convention already
-       populated for delivery gates (one repo-relative changed path per line; see
-       `dg05-consumer-compile.sh` / `dg06-removed-dep.sh` for the existing read pattern) — plus
-       this run's own evidence artifacts (`final_report.md`, `gates_report.json`, prior
-       `verifier-output-*.md`). These are the only paths C3 may cite as evidence (auditor.md's
-       "allowlist-only citation" rule). Missing/empty `AID_CHANGED_PATHS` → `allowlist: []`; the
-       Auditor's own C3.1 step 1 still independently re-derives diff scope from `head_sha`.
-    4. **Compute `input_hash`.** For each allowlisted path: `sha256("<path>:" + sha256(file
-       content))`. Sort the resulting per-path lines, join with newlines, and hash the result:
-       `input_hash = "sha256:" + sha256(sorted_joined_lines)`. Deterministic and
-       order-independent — re-running the hook on an unchanged allowlist reproduces the same hash.
-    5. **Set `prior_pass_summaries: "untrusted"`** (D2 — prior PASS claims from earlier stages
-       in this run, or from a previous audit run, are never handed to C3 as trusted fact; this
-       repo's policy never sets `"excluded"` at this hook).
-    6. **Emit the manifest** at `evidence/{epic_id}/{run_id}/audit-input-manifest.json`,
-       conforming to `defaults/schemas/audit-input-manifest.schema.json`:
-       ```json
-       {
-         "schema_version": "aid-2.0",
-         "artifact_type": "audit_input_manifest",
-         "producer": "orchestrator@done-review",
-         "created_at": "{ISO 8601 UTC}",
-         "control_protocol": "aid-2.0",
-         "identity": {"project_id": "{project_id}", "epic_id": "{epic_id}", "run_id": "{run_id}"},
-         "subject": {"subject_hash": "sha256:<64hex>"},
-         "revision": {"head_sha": "{head_sha}", "head_is_current": true, "freshness": "current"},
-         "status": "pass",
-         "verdict": {"kind": "none", "ready": false},
-         "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "pipeline.md#c3-producer-hook"},
-         "audit_input_manifest": {
-           "allowlist": ["path/one.ts", "path/two.md"],
-           "input_hash": "sha256:<64hex>",
-           "prior_pass_summaries": "untrusted",
-           "required_independence_level": "cross_model"
-         }
-       }
-       ```
-    7. **Gate:** DONE Closure Checklist row `2a` requires this file present, with `input_hash`
-       matching a fresh recomputation over `allowlist[]`, before step 6 (Auditor dispatch in C3
-       mode) proceeds. Mechanical enforcement of this gate inside `aid-fsm.sh done-advance` is a
-       later step; this hook documents the producer contract that enforcement will read.
+    When mode is `c3`, the producer hook is now a **single call to the deterministic bridge** —
+    the orchestrator no longer hand-assembles the manifest JSON. An earlier EPIC (E-065-1_7)
+    moved the entire manifest-construction contract into `aid-c3-dispatch.sh build-manifest`:
+    allowlist derivation (from `$AID_CHANGED_PATHS` + this run's evidence artifacts), the per-path
+    `input_hash`, the `required_independence_level` lookup against `c3-audit-policy.yaml`,
+    `prior_pass_summaries: "untrusted"` (D2), the Codex brief files, and the schema-conformant
+    emit of `audit-input-manifest.json`. Call it instead of doing any of that by hand:
 
-    **Consumed by:** `agents/auditor.md` C3 mode via `audit_trigger.input_manifest_path`
-    (pointing at this file) and `audit_trigger.required_independence_level` (copied verbatim
-    from step 2 above). The dispatch wiring that populates `audit_trigger.provider`/`.model`/
-    `.process_id` and invokes `aid-audit-independence.sh detect --required
-    "$required_independence_level"` to determine the achieved independence level is a later
-    step, out of scope here — this hook only guarantees the manifest artifact exists and is
-    correct before that dispatch runs.
+    ```bash
+    # base_sha = base_commit from fsm-state.yaml (the EPIC's run-start commit);
+    # head_sha = current HEAD; risk_profile from step 4a's review-profile.json.
+    risk_profile=$(jq -r '.review_profile.risk_profile // "unverifiable"' \
+      "$evidence_dir/review-profile.json" 2>/dev/null || echo "unverifiable")
+
+    # Only when C3 is required for this risk profile. For docs_trivial/low/medium the
+    # profile is NOT a C3 key — do NOT call the bridge; skip to step 6, which dispatches
+    # the Auditor in legacy_health mode instead.
+    bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" build-manifest \
+      "$evidence_dir" "$base_sha" "$head_sha" "$risk_profile"
+    ```
+
+    `build-manifest <evidence_dir> <base_sha> <head_sha> <risk_profile>` (exactly 4 positional
+    args) writes the Codex brief files under `$evidence_dir/c3/` and the canonical manifest at
+    `$evidence_dir/audit-input-manifest.json`, conforming to
+    `defaults/schemas/audit-input-manifest.schema.json`. It resolves the required independence
+    level from `c3-audit-policy.yaml` internally, so the prose no longer computes it separately.
+    A non-C3 risk profile (`docs_trivial`/`low`/`medium`) does not require C3 — the orchestrator
+    skips this hook entirely and lets step 6 select `legacy_health`.
+
+    **Gate:** DONE Closure Checklist row `2a` requires `audit-input-manifest.json` present, with
+    an `input_hash` that a fresh recomputation over `allowlist[]` reproduces, before step 6's
+    `c3` dispatch proceeds.
+
+    **Consumed by:** step 6's `c3` branch — `aid-c3-dispatch.sh dispatch` reads this manifest to
+    seal the Codex brief and drive the real Codex CLI, and `aid-c3-dispatch.sh verify` re-hashes
+    it to prove `audit-report.json` is a faithful transform of the manifest + Codex response. In
+    `legacy_health` mode the manifest is never built and `agents/auditor.md` runs its trust-based
+    health audit instead.
 6. **Serial dispatch (E-057-2_2):** first resolve the Auditor dispatch mode **mechanically**
    (not by prose judgment) from the profile produced in step 4a:
    ```bash
@@ -1235,13 +1205,38 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    # → "c3" (independent audit) or "legacy_health"; a missing profile prints "c3"
    #   and exits 3 (fail-closed direction) — treat as c3.
    ```
-   Then Auditor (`agents/auditor.md`) dispatches and completes FIRST via its own `Agent()`
-   tool call, in `$audit_mode` (`c3` → independent-audit mode consuming
-   `audit-input-manifest.json`; `legacy_health` → health-audit mode). Only after it completes
-   does Curator (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the
-   Auditor's `audit-report.json` output (Curator hashes its content into
-   `.curator.audit_report_ref` — `aid-fsm.sh done-advance` verifies this ref against a fresh
-   `sha256sum` of the file and blocks release on mismatch).
+   The two modes dispatch the Auditor **differently**:
+
+   - **`c3` → deterministic bridge, NO `Agent()` for the audit.** Do NOT call
+     `Agent(agents/auditor.md)` in this mode. Instead run the bridge over the manifest built in
+     step 5:
+     ```bash
+     bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"
+     bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" verify   "$evidence_dir"
+     ```
+     `dispatch <evidence_dir>` (exactly 1 positional arg) probes cross_provider availability for
+     THIS run, invokes the real Codex CLI read-only, and writes `c3/c3-dispatch.json` plus
+     `audit-report.json`/`.md`. `verify [--reference] <evidence_dir>` (1 positional arg, optional
+     leading `--reference` flag) re-checks the codex provenance chain and proves
+     `audit-report.json` is a faithful, deterministic transform of Codex's raw response.
+     **On `dispatch` exit 2** (non-dispatched / unavailable / rate_limited / timeout) the bridge
+     has ALREADY written an `unverifiable` `audit-report.json` — the orchestrator simply surfaces
+     it (step 12), nothing more to do. There is **no fallback**: the pipeline never substitutes
+     the Claude auditor for a `c3` pass, and it does not run an advisory dispatch (that capability
+     does not exist yet). A missing / non-executable bridge script is treated the same as any
+     other dispatch failure → `status: unverifiable`. The merge-gate consequence of an
+     `unverifiable` report is handled by the `aid-fsm.sh done-advance` C3 hook (blocking vs
+     observe per `c3-audit-policy.yaml`), not here.
+   - **`legacy_health` → UNCHANGED.** Auditor (`agents/auditor.md`) dispatches via its own
+     `Agent()` tool call in `legacy_health` (trust-based health-audit) mode. The bridge is never
+     invoked at all for `docs_trivial`/`low`/`medium` profiles.
+
+   In **both** modes the Auditor output completes FIRST; only after it completes does Curator
+   (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the Auditor's
+   `audit-report.json` output (Curator hashes its content into `.curator.audit_report_ref` —
+   `aid-fsm.sh done-advance` verifies this ref against a fresh `sha256sum` of the file and blocks
+   release on mismatch). Curator's serial-after-Auditor dispatch pattern is identical regardless
+   of how the `audit-report.json` was produced.
 7. **Wait:** Auditor must complete before Curator dispatches; Curator must complete before
    continuing
 8. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
@@ -1287,6 +1282,10 @@ Steps: {done}/{total} | Gates: {pass}/{total} | Duration: {time}
 Auditor Score: {overall}/100 (trend: {delta} vs previous)
   Code: {score} | Security: {score} | Docs: {score} | Process: {score}
 
+{if audit mode was c3 — read from audit-report.json:}
+C3 Independence: {independence_level} achieved / {required_independence_level} required
+  {if status == unverifiable:} ⚠️ status: unverifiable — {reason}
+
 Curator: {applied} fixes applied (S/M/L), {deferred} deferred
   Applied: {list of applied proposals with IDs}
   Deferred: {list — always-defer rules (architecture, standards-L) or rejected — PM can approve in backlog}
@@ -1315,6 +1314,14 @@ Options:
 > `pm-decision-brief.json` + human `pm-summary.md` always land on disk (carrying the full
 > evidence/Reporter/Simplifier/waiver status) so an auto-merge is never silent. Honest limitation:
 > in E9 this is a convention, not a structural guarantee — see §7.6.
+
+> **C3 `unverifiable` in the summary.** When the `c3` audit came back
+> `status: unverifiable` (Codex could not be dispatched — see step 6), the summary shows that
+> status with its `reason`, and the PM is still offered MERGE / FIX / ABORT below. Under the
+> shipped default `enforcement: observe` (`c3-audit-policy.yaml`) the unverifiable verdict is
+> **advisory** — the FSM `done-advance` C3 hook emits telemetry but does not block, so the PM is
+> not forced to ABORT merely because C3 was unverifiable. Only under `enforcement: blocking` does
+> that hook turn the unverifiable report into a hard merge-gate.
 
 12. **PM decides:**
     - **MERGE** → set `pm_decision`, advance sub-phase, continue to step 13
@@ -1868,7 +1875,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-12
+**Last Updated:** 2026-07-15
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

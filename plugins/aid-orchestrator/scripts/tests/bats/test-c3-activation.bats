@@ -595,3 +595,54 @@ YAML
   assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "fsm_done_advance_fail"
   [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
 }
+
+# ─── P065 Step 8: Policy — executor-first, level accounting, SHIP unverifiable ──
+#
+# These assert the DEFAULT policy the bridge/FSM/build-manifest/pipeline.md read
+# (defaults/policies/c3-audit-policy.yaml). The c3_executor block records the Codex
+# executor, the executor-first probe (always cross_provider), the satisfies-rule
+# (a real cross_provider pass is a superset of the weaker levels), and ships
+# c3_on_unavailable: unverifiable — the degraded_advisory default is flipped ON
+# only in a much later step once the c3_advisory auditor capability exists.
+# enforcement stays observe and risk_profiles.* are unchanged (superset).
+
+# _default_c3_policy — path to the real shipped default policy (not a test override).
+_default_c3_policy() {
+  echo "$AID_PLUGIN_PATH/defaults/policies/c3-audit-policy.yaml"
+}
+
+@test "(Step8-AC1) default policy: c3_executor.probe_as = cross_provider AND .kind = codex_cli" {
+  local pol; pol="$(_default_c3_policy)"
+  [ -f "$pol" ]
+  [ "$(yq -r '.c3_executor.probe_as' "$pol")" = "cross_provider" ]
+  [ "$(yq -r '.c3_executor.kind' "$pol")" = "codex_cli" ]
+  # dispatch_script points at the E-065-1/2 dispatch entrypoint.
+  [ "$(yq -r '.c3_executor.dispatch_script' "$pol")" = "scripts/lib/aid-c3-dispatch.sh" ]
+}
+
+@test "(Step8-AC2) default policy: c3_on_unavailable = unverifiable AND enforcement = observe (degraded_advisory NOT flipped yet)" {
+  local pol; pol="$(_default_c3_policy)"
+  # SHIPPED value for EPIC 3 — degraded_advisory is a later step, once c3_advisory exists.
+  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" = "unverifiable" ]
+  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" != "degraded_advisory" ]
+  # enforcement stays observe (this step does not touch it).
+  [ "$(yq -r '.enforcement' "$pol")" = "observe" ]
+}
+
+@test "(Step8-AC3) default policy: c3_executor.satisfies_levels includes cross_model AND cross_provider (executor-first superset)" {
+  local pol; pol="$(_default_c3_policy)"
+  # A live cross_provider Codex pass satisfies the weaker required levels too.
+  [ "$(yq -r '.c3_executor.satisfies_levels | contains(["cross_model"])' "$pol")" = "true" ]
+  [ "$(yq -r '.c3_executor.satisfies_levels | contains(["cross_provider"])' "$pol")" = "true" ]
+  # context_only is the weakest floor and is also covered by the superset.
+  [ "$(yq -r '.c3_executor.satisfies_levels | contains(["context_only"])' "$pol")" = "true" ]
+}
+
+@test "(Step8-superset) default policy: risk_profiles.* required_independence_level UNCHANGED (high=cross_model, unverifiable=cross_provider)" {
+  # Forbidden-zone guard: Step 8 must not alter per-profile independence levels.
+  local pol; pol="$(_default_c3_policy)"
+  [ "$(yq -r '.risk_profiles.high.required_independence_level' "$pol")" = "cross_model" ]
+  [ "$(yq -r '.risk_profiles.unverifiable.required_independence_level' "$pol")" = "cross_provider" ]
+  [ "$(yq -r '.risk_profiles.high.c3_required' "$pol")" = "true" ]
+  [ "$(yq -r '.risk_profiles.unverifiable.c3_required' "$pol")" = "true" ]
+}
