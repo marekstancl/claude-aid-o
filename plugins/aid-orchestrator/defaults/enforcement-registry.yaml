@@ -1107,6 +1107,7 @@ enforcements:
     instruction: "skills/pipeline.md (DONE C3 dispatch) + agents/auditor.md C3.1a"
     severity: blocking
     surface: internal-guard
+    enforcement: observe
     status: active
     verdict: ALIGNED
     description: "C3-required run must prove a real, faithfully-transformed codex audit at HEAD before release."
