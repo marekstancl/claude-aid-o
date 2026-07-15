@@ -350,14 +350,30 @@ jq --arg s "$new_stdout_sha" --arg r "$new_raw_sha" --arg bh "$new_brief_hash" \
 # --- regenerate audit-report.json (+ .md) FROM the sanitized raw response, by
 #     sourcing aid-c3-dispatch.sh (function-only mode — its own guard skips
 #     `main` since $0 here is this script, not aid-c3-dispatch.sh) and calling
-#     its trusted _write_report directly. This guarantees the fixture's report
-#     is a byte-faithful transform of the SANITIZED raw response, exactly like
-#     the real bridge would produce, rather than a hand-patched approximation. -
+#     its trusted _process_response — the SAME dispatch→report pipeline
+#     cmd_dispatch itself uses (validate → hash/head-bind checks → the honest
+#     "review_status: unverifiable" branch → normalize+_write_report OR
+#     _write_unverifiable). Calling _write_report directly here would SKIP that
+#     branch and could fabricate a "status: pass" envelope over a raw response
+#     Codex itself marked unverifiable — _process_response is what guarantees
+#     the fixture is a byte-faithful, HONEST transform of the sanitized raw
+#     response, never a hand-patched approximation of one.
+dispatch_outcome_orig="$(jq -r '.dispatch.outcome // "dispatched"' "$FIXTURE_DIR/c3/c3-dispatch.json" 2>/dev/null)" || dispatch_outcome_orig="dispatched"
 # shellcheck disable=SC1090
 source "$DISPATCH_BIN"
-_write_report "$FIXTURE_DIR" "$FIXTURE_DIR/audit-input-manifest.json" "$FIXTURE_DIR/c3/codex-last-message.json" \
-  "$indep_level" "$session_id" \
-  || { echo "DOGFOOD FAILED: could not regenerate the fixture's audit-report.json from sanitized raw output" >&2; exit 1; }
+set +e
+_process_response "$FIXTURE_DIR" "$FIXTURE_DIR/audit-input-manifest.json" "0" "true" \
+  "$dispatch_outcome_orig" "$indep_level" "$session_id" "$HEAD_SHA"
+process_response_rc=$?
+set -e
+# rc 0 = validator-clean pass/fail; rc 2 = an honest status:"unverifiable" write
+# (e.g. review_unverifiable — Codex itself declined to give a firm verdict).
+# Both are legitimate, FAITHFUL outcomes here; only a missing report is fatal.
+[[ -f "$FIXTURE_DIR/audit-report.json" ]] \
+  || { echo "DOGFOOD FAILED: _process_response did not produce audit-report.json (rc=$process_response_rc)" >&2; exit 1; }
+fixture_status="$(jq -r '.status // ""' "$FIXTURE_DIR/audit-report.json")"
+fixture_review_status="$(jq -r '.audit_report.review_status // ""' "$FIXTURE_DIR/audit-report.json")"
+echo "fixture audit-report.json: status=${fixture_status} review_status=${fixture_review_status}"
 
 # Re-check leaks once more post-regeneration (regeneration re-derives text from
 # the already-sanitized raw response, but this is a cheap, deterministic
@@ -391,29 +407,29 @@ rm -rf "$neg_dir"
 echo "negative control (corrupted codex-events.jsonl): verify --reference correctly exited 2"
 
 # ---------------------------------------------------------------------------
-# Step 7: FSM acceptance demo — with enforcement:blocking pinned, a seeded
-# done-advance over the fixture must advance. Runs in an isolated `git
-# worktree` checked out at the exact commit HEAD_SHA (a real, resolvable
-# object right now — the throwaway branch/commit is only deleted at script
-# exit) so the bridge's live-mode HEAD-freshness checks are satisfiable
-# without disturbing this script's own checkout. Script-internal only; nothing
-# here is committed.
+# Step 7: FSM acceptance demo. All script-internal; nothing here is committed.
+#
+# _seed_and_run_done_advance <worktree_or_repo_dir> <evidence_src_dir>
+#   Seeds the standard DONE/review scaffold (fsm-state.yaml, gates_report.json,
+#   audit-log.jsonl, review-profile.json:high, curator-report.json/.md with a
+#   matching audit_report_ref, c3-audit-policy pinned to enforcement:blocking)
+#   under <worktree_or_repo_dir>, copies <evidence_src_dir>'s
+#   audit-input-manifest.json / audit-report.json(.md) / c3/* into it, and runs
+#   `aid-fsm.sh done-advance review release`. Sets LAST_FSM_RC / LAST_FSM_OUT.
 # ---------------------------------------------------------------------------
-DEMO_WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/c3-dogfood-demo-wt.XXXXXX")"
-rmdir "$DEMO_WORKTREE_DIR"   # git worktree add requires the target not exist
-(cd "$REPO_ROOT" && git worktree add -q --detach "$DEMO_WORKTREE_DIR" "$HEAD_SHA")
+_seed_and_run_done_advance() {
+  local root="$1" src="$2"
+  local evidence="$root/.aid-o/work/evidence/E-c3-dogfood-demo/R-demo"
+  mkdir -p "$evidence/c3" "$evidence/gates" \
+           "$root/.aid-o/tasks" "$root/.aid-o/work" "$root/.aid-o/config"
 
-demo_evidence="$DEMO_WORKTREE_DIR/.aid-o/work/evidence/E-c3-dogfood-demo/R-demo"
-mkdir -p "$demo_evidence/c3" "$demo_evidence/gates" \
-         "$DEMO_WORKTREE_DIR/.aid-o/tasks" "$DEMO_WORKTREE_DIR/.aid-o/work" "$DEMO_WORKTREE_DIR/.aid-o/config"
+  cp "$src/audit-input-manifest.json" "$evidence/audit-input-manifest.json"
+  cp "$src/audit-report.json"          "$evidence/audit-report.json"
+  cp "$src/audit-report.md"            "$evidence/audit-report.md"
+  cp "$src"/c3/*                       "$evidence/c3/"
 
-cp "$FIXTURE_DIR/audit-input-manifest.json" "$demo_evidence/audit-input-manifest.json"
-cp "$FIXTURE_DIR/audit-report.json"          "$demo_evidence/audit-report.json"
-cp "$FIXTURE_DIR/audit-report.md"            "$demo_evidence/audit-report.md"
-cp "$FIXTURE_DIR"/c3/*                       "$demo_evidence/c3/"
-
-demo_state_file="$demo_evidence/fsm-state.yaml"
-cat > "$demo_state_file" <<YAML
+  local state_file="$evidence/fsm-state.yaml"
+  cat > "$state_file" <<YAML
 epic_id: E-c3-dogfood-demo
 run_id: R-demo
 branch: task/E-c3-dogfood-demo/main
@@ -425,18 +441,19 @@ current_step: 1
 pm_decision: merge
 YAML
 
-printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@c3-dogfood","_generated_at":"%s","_command_log":[]}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$demo_evidence/gates/gates_report.json"
-touch "$DEMO_WORKTREE_DIR/.aid-o/work/audit-log.jsonl"
-printf 'project_id: ai-orchestrator\n' > "$DEMO_WORKTREE_DIR/.aid-o/config/project.yaml"
-printf '{"review_profile": {"risk_profile": "high"}}\n' > "$demo_evidence/review-profile.json"
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@c3-dogfood","_generated_at":"%s","_command_log":[]}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$evidence/gates/gates_report.json"
+  touch "$root/.aid-o/work/audit-log.jsonl"
+  printf 'project_id: ai-orchestrator\n' > "$root/.aid-o/config/project.yaml"
+  printf '{"review_profile": {"risk_profile": "high"}}\n' > "$evidence/review-profile.json"
 
-curator_hash="$(sha256sum "$demo_evidence/audit-report.json" | awk '{print $1}')"
-printf '{"curator": {"audit_report_ref": "sha256:%s"}}\n' "$curator_hash" > "$demo_evidence/curator-report.json"
-printf 'curator report\n' > "$demo_evidence/curator-report.md"
+  local curator_hash
+  curator_hash="$(sha256sum "$evidence/audit-report.json" | awk '{print $1}')"
+  printf '{"curator": {"audit_report_ref": "sha256:%s"}}\n' "$curator_hash" > "$evidence/curator-report.json"
+  printf 'curator report\n' > "$evidence/curator-report.md"
 
-blocking_policy="$DEMO_WORKTREE_DIR/.aid-o/c3-audit-policy-blocking.yaml"
-cat > "$blocking_policy" <<'YAML'
+  local blocking_policy="$root/.aid-o/c3-audit-policy-blocking.yaml"
+  cat > "$blocking_policy" <<'YAML'
 version: 1
 enforcement: blocking
 risk_profiles:
@@ -448,19 +465,136 @@ risk_profiles:
     required_independence_level: cross_provider
 YAML
 
-set +e
-fsm_demo_out="$(cd "$DEMO_WORKTREE_DIR" && AID_TEST_MODE=1 C3_AUDIT_POLICY="$blocking_policy" \
-  bash "$FSM_BIN" done-advance review release "$demo_state_file" 2>&1)"
-fsm_demo_rc=$?
-set -e
+  set +e
+  LAST_FSM_OUT="$(cd "$root" && AID_TEST_MODE=1 C3_AUDIT_POLICY="$blocking_policy" \
+    bash "$FSM_BIN" done-advance review release "$state_file" 2>&1)"
+  LAST_FSM_RC=$?
+  set -e
+}
+
+# --- 7a: the REAL fixture, in an isolated worktree pinned at the exact commit
+#     the live run reviewed (a real, resolvable object right now — the
+#     throwaway branch/commit is only deleted at script exit) so the bridge's
+#     live-mode HEAD-freshness checks are satisfiable without disturbing this
+#     script's own checkout. ------------------------------------------------
+DEMO_WORKTREE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/c3-dogfood-demo-wt.XXXXXX")"
+rmdir "$DEMO_WORKTREE_DIR"   # git worktree add requires the target not exist
+(cd "$REPO_ROOT" && git worktree add -q --detach "$DEMO_WORKTREE_DIR" "$HEAD_SHA")
+
+_seed_and_run_done_advance "$DEMO_WORKTREE_DIR" "$FIXTURE_DIR"
+fixture_fsm_rc="$LAST_FSM_RC"
+fixture_fsm_out="$LAST_FSM_OUT"
 
 git -C "$REPO_ROOT" worktree remove --force "$DEMO_WORKTREE_DIR" >/dev/null 2>&1 || true
 rm -rf "$DEMO_WORKTREE_DIR" 2>/dev/null || true
 DEMO_WORKTREE_DIR=""
 
-[[ "$fsm_demo_rc" -eq 0 ]] \
-  || { echo "DOGFOOD FAILED: FSM acceptance demo (seeded done-advance over the fixture, enforcement:blocking) did not advance (rc=$fsm_demo_rc):" >&2; echo "$fsm_demo_out" >&2; exit 1; }
-echo "FSM acceptance demo: seeded done-advance over the fixture advanced (enforcement:blocking)"
+# The REAL Codex response was HONESTLY "review_status: unverifiable" (it
+# declined a firm verdict — see attestation/finding notes: the bridge's
+# allowed_recheck_commands is unconditionally empty by current design, so
+# Codex cannot independently re-check gate/manifest evidence and correctly
+# refuses to guess a pass). Under enforcement:blocking that MUST block —
+# demonstrate whichever behavior the honest content actually implies, rather
+# than asserting a fixed expectation that could paper over either a real
+# regression or a fabricated fixture.
+if [[ "$fixture_status" == "unverifiable" ]]; then
+  [[ "$fixture_fsm_rc" -ne 0 ]] \
+    || { echo "DOGFOOD FAILED: the honest review_status=unverifiable fixture did NOT block done-advance under enforcement:blocking (rc=0) — the content guardrail is not firing." >&2; exit 1; }
+  echo "FSM guardrail check: seeded done-advance over the REAL (review_status=unverifiable) fixture correctly BLOCKED under enforcement:blocking — this is the guardrail working as designed, not a bug."
+else
+  [[ "$fixture_fsm_rc" -eq 0 ]] \
+    || { echo "DOGFOOD FAILED: seeded done-advance over the fixture did not advance (rc=$fixture_fsm_rc):" >&2; echo "$fixture_fsm_out" >&2; exit 1; }
+  echo "FSM acceptance demo: seeded done-advance over the fixture advanced (enforcement:blocking)."
+fi
+
+# --- 7b: supplementary controlled demo — a SEPARATE, fully-isolated scratch
+#     repo drives the SAME real build-manifest -> dispatch -> verify pipeline
+#     against an in-test fake `codex` stub that emits a genuine,
+#     schema-consistent, NON-blocking finding (the exact pattern the plan's own
+#     bats suite uses for this — test-c3-audit.bats's _drive_clean_dispatch).
+#     This proves the DISPATCH-PROVENANCE mechanism this EPIC built (Steps 8-9)
+#     allows done-advance to ADVANCE under enforcement:blocking whenever the
+#     content is genuinely clean — required regardless of what the one real
+#     live Codex call above happened to answer content-wise. Nothing here is
+#     committed; it exists only to prove the "advances" half of AC3 against a
+#     clean report, independently of whether the real run was unverifiable.
+CLEAN_DEMO_DIR="$(mktemp -d "${TMPDIR:-/tmp}/c3-dogfood-clean-demo.XXXXXX")"
+(
+  set -euo pipefail
+  cd "$CLEAN_DEMO_DIR"
+  git init -q -b main
+  git config user.email "c3-dogfood@test.local"
+  git config user.name "c3-dogfood"
+  mkdir -p .aid-o/config
+  printf 'project_id: c3-dogfood-clean-demo\n' > .aid-o/config/project.yaml
+  printf 'export const a = 1;\n' > app.ts
+  git add .
+  git commit -q -m base
+  clean_base="$(git rev-parse HEAD)"
+  printf 'export const b = 2;\n' >> app.ts
+  git add app.ts
+  git commit -q -m head
+  clean_head="$(git rev-parse HEAD)"
+
+  clean_evidence=".aid-o/work/evidence/E-clean-demo/R-clean"
+  mkdir -p "$clean_evidence"
+  bash "$DISPATCH_BIN" build-manifest "$clean_evidence" "$clean_base" "$clean_head" high >/dev/null
+  clean_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash' "$clean_evidence/audit-input-manifest.json")"
+
+  mkdir -p .fakecodex
+  cat > .fakecodex/codex <<'CODEXEOF'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "fake-clean-codex 0.0.0 (c3-dogfood supplementary demo — NOT the real codex CLI)"; exit 0; fi
+last=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-last-message) last="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+report="$(jq -nc --arg h "$FAKE_HEAD" --arg bh "$FAKE_BRIEF_HASH" \
+  '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"findings",blocking_findings:false,
+    findings:[{severity:"medium",area:"maintainability",
+               finding:"Naming in the touched module could be clearer.",
+               recommendation:"Rename for clarity in a follow-up."}]}')"
+jq -nc '{type:"thread.started",thread_id:"019f0000-0000-7000-8000-0000000c1ea1"}'
+printf '%s\n' '{"type":"turn.started"}'
+jq -nc --arg t "$report" '{type:"item.completed",item:{id:"item_final",type:"agent_message",text:$t}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}'
+[[ -n "$last" ]] && printf '%s\n' "$report" > "$last"
+exit 0
+CODEXEOF
+  chmod +x .fakecodex/codex
+
+  mkdir -p .fakeindep
+  printf '#!/usr/bin/env bash\nexit 0\n' > .fakeindep/detect
+  chmod +x .fakeindep/detect
+
+  FAKE_HEAD="$clean_head" FAKE_BRIEF_HASH="$clean_brief_hash" \
+    AID_C3_INDEPENDENCE_BIN="$CLEAN_DEMO_DIR/.fakeindep/detect" \
+    PATH="$CLEAN_DEMO_DIR/.fakecodex:$PATH" \
+    bash "$DISPATCH_BIN" dispatch "$clean_evidence" >/dev/null
+
+  echo "$clean_evidence"
+) > "$CLEAN_DEMO_DIR/.clean_evidence_path.txt" 2>"$CLEAN_DEMO_DIR/.clean_demo.stderr"
+clean_demo_rc=$?
+if [[ "$clean_demo_rc" -ne 0 || ! -s "$CLEAN_DEMO_DIR/.clean_evidence_path.txt" ]]; then
+  echo "DOGFOOD FAILED: supplementary clean-demo dispatch (fake codex stub) did not succeed:" >&2
+  cat "$CLEAN_DEMO_DIR/.clean_demo.stderr" >&2 2>/dev/null || true
+  rm -rf "$CLEAN_DEMO_DIR"
+  exit 1
+fi
+clean_evidence_rel="$(tail -n1 "$CLEAN_DEMO_DIR/.clean_evidence_path.txt")"
+clean_evidence_abs="$CLEAN_DEMO_DIR/$clean_evidence_rel"
+
+_seed_and_run_done_advance "$CLEAN_DEMO_DIR" "$clean_evidence_abs"
+clean_fsm_rc="$LAST_FSM_RC"
+clean_fsm_out="$LAST_FSM_OUT"
+rm -rf "$CLEAN_DEMO_DIR"
+
+[[ "$clean_fsm_rc" -eq 0 ]] \
+  || { echo "DOGFOOD FAILED: supplementary clean-demo seeded done-advance did not advance under enforcement:blocking (rc=$clean_fsm_rc):" >&2; echo "$clean_fsm_out" >&2; exit 1; }
+echo "FSM acceptance demo (supplementary, controlled clean dispatch): seeded done-advance advanced under enforcement:blocking — proves the dispatch-provenance mechanism this EPIC built permits advance on genuinely clean, provenance-intact content."
 
 echo "== c3-dogfood: PASSED =="
 exit 0
