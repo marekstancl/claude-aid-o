@@ -1,0 +1,17 @@
+{
+  "plan_path": "c3/bundle-plan-ac.md",
+  "plan_sha256": "sha256:0e965c5268f1505a8d4c5a1eff53c3e035198d210e1e6085d88fd64d2aff34f9",
+  "base_sha": "9789bf8cd94b53aa2827a66e81644f9cd59ef615",
+  "head_sha": "30b4f6c2f83114d30678a7d368b9b08912d65cb7",
+  "input_manifest_path": "audit-input-manifest.json",
+  "input_manifest_hash": "sha256:17d514b298b82796d496284f2e8812423575ae1c9e4113e8157f8cb6c466ad4a",
+  "codex_brief_hash": "sha256:514122e8da6ff7001bfc6c86d92cf78027cba04f30d62b02688f8005e4cbed6e",
+  "bundle_diff_path": "c3/bundle-diff.patch",
+  "bundle_scope_path": "c3/bundle-scope.txt",
+  "acceptance_criteria_path": "c3/bundle-plan-ac.md",
+  "review_profile_path": "c3/bundle-review-profile.json",
+  "evidence_paths": "",
+  "output_schema_path": "plugins/aid-orchestrator/defaults/schemas/c3-codex-response.schema.json",
+  "allowed_recheck_commands": "[]",
+  "verification_budget": "{\"max_commands\":10,\"max_seconds\":120}"
+}
