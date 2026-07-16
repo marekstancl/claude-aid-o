@@ -88,7 +88,7 @@ GENERATED_BY_TOOL="aid-c3-dispatch.sh#build-manifest"
 #   session-confirmed working model.
 INDEPENDENCE_BIN="${AID_C3_INDEPENDENCE_BIN:-$SCRIPT_DIR/aid-audit-independence.sh}"
 RENDER_PROMPT="${AID_C3_RENDER_BIN:-$SCRIPT_DIR/aid-render-prompt.sh}"
-PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c3-audit-prompt-v1.md"
+PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c3-audit-prompt-v2.md"
 RESPONSE_SCHEMA="$PLUGIN_ROOT/defaults/schemas/c3-codex-response.schema.json"
 CODEX_MODEL="${AID_C3_CODEX_MODEL:-gpt-5.6-terra}"
 

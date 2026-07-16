@@ -5,7 +5,7 @@ model: sonnet
 
 # Auditor Agent
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-07-16
 
 **Role:** Independent risk-gated adversarial audit of PASS-claims before merge (**C3 mode**, new)
 OR post-Epic comprehensive project health assessment, scoring, and trend tracking (**legacy
@@ -50,10 +50,12 @@ re-verify, not facts to repeat. Do not run the legacy A–J categories in this m
 
 > **Execution note (authority):** the real `c3` cross-provider audit is dispatched by
 > `scripts/lib/aid-c3-dispatch.sh` using the committed, versioned prompt template
-> `defaults/prompts/c3-audit-prompt-v1.md` (`template_id: c3-audit-prompt`, `template_version:
-> v1`), rendered deterministically by `scripts/lib/aid-render-prompt.sh` — **never** an
+> `defaults/prompts/c3-audit-prompt-v2.md` (`template_id: c3-audit-prompt`, `template_version:
+> v2`), rendered deterministically by `scripts/lib/aid-render-prompt.sh` — **never** an
 > improvised heredoc prompt. That template is the protocol authority; C3.1–C3.5 below mirror it
 > for the human reader and MUST stay in lock-step with it (if they disagree, the template wins).
+> The frozen `c3-audit-prompt-v1.md` remains on disk only as a historical artifact bound to
+> already-issued reports' provenance chains (IMP-245) — it is never dispatched from v2 onward.
 
 ### C3.1 Adversarial Check-Table (mandatory, run in order, ≥4 steps)
 
@@ -81,7 +83,7 @@ Standing rules that apply throughout the check-table:
 
 ### C3.1a Lifecycle state-matrix + severity/action_owner (mirrors the shipped prompt)
 
-These rules are stated authoritatively in `c3-audit-prompt-v1.md` (check-table step 4 + the
+These rules are stated authoritatively in `c3-audit-prompt-v2.md` (check-table step 4 + the
 severity/action_owner section); this subsection mirrors them for the human reader — the template
 governs.
 
@@ -97,18 +99,24 @@ governs.
   from the allowed evidence + repo, raise a finding or mark the relevant status `unverifiable` —
   do not guess a pass.
 
-> **Known gap (IMP-245, not yet fixed):** in a live dispatch an EMPTY `allowed_recheck_commands`
-> was read by the executor as "run NO command at all" — including the basic repo reads check-table
-> steps 1–2 need — so it conservatively returned `unverifiable`. The template is versioned
-> (an in-place edit would break the `template_sha256` binding of already-issued reports), so this
-> is tracked for a future template revision, not patched here.
+> **Fixed in v2 (IMP-245):** in a live dispatch an EMPTY `allowed_recheck_commands` was read by the
+> executor as "run NO command at all" — including the basic repo reads check-table steps 1–2
+> need — so it conservatively (and correctly, given the ambiguity) returned `unverifiable` on two
+> consecutive real dogfood runs (E-065-3_7, E-065-4_7). `c3-audit-prompt-v2.md` resolves the
+> contradiction by separating two DIFFERENT permissions: an "Always-allowed basic read-only
+> operations" toolkit (file reads, `git diff`/`show`/`log`/`blame`, hashing, directory listing —
+> NEVER gated by `{{allowed_recheck_commands}}`, even when it is empty) versus
+> `{{allowed_recheck_commands}}` itself, which remains narrowly scoped to RE-EXECUTING a specific
+> named test/gate command and stays empty in the common case. `c3-audit-prompt-v1.md` is frozen
+> and untouched — already-issued reports still bind to it — but all dispatches from v2 onward use
+> the clarified template.
 
 ### C3.2 Provider / Model / Process ID — ECHO ONLY (agent-authored envelope), never self-identify
 
 **Scope — the echo-into-output rule applies to the agent-authored envelope path only**
 (`legacy_health`, and any run where *this agent* writes the full `audit-report.json` itself,
 `dispatch_mode: "agent_tool"`). In the real **cross-provider `c3` dispatch**
-(`aid-c3-dispatch.sh` + `c3-audit-prompt-v1.md`) the Codex executor emits **ONLY** the JSON of
+(`aid-c3-dispatch.sh` + `c3-audit-prompt-v2.md`) the Codex executor emits **ONLY** the JSON of
 `output_schema_path` and MUST NOT emit `provider`, `model`, `process_id`, or any other top-level
 key — the bridge (`_normalize`/`_write_report`) adds that provenance mechanically. Replicating the
 echo there would make the executor's output invalid per the template's output contract.

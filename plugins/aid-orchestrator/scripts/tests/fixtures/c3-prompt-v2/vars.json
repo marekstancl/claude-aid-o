@@ -1,0 +1,17 @@
+{
+  "plan_path": ".aid-o/plans/P065-cross-provider.md",
+  "plan_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "input_manifest_path": ".aid-o/work/evidence/E-065-4_7/R-E065-4/audit-input-manifest.json",
+  "input_manifest_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "codex_brief_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "bundle_diff_path": "c3/bundle-diff.patch",
+  "bundle_scope_path": "c3/bundle-scope.txt",
+  "acceptance_criteria_path": "c3/bundle-plan-ac.md",
+  "review_profile_path": "c3/bundle-review-profile.json",
+  "evidence_paths": "final_report.md, gates_report.json, verifier-output-1.md",
+  "output_schema_path": "defaults/schemas/c3-codex-response.schema.json",
+  "allowed_recheck_commands": "[]",
+  "verification_budget": "max_commands=10 max_seconds=120"
+}
