@@ -1,0 +1,17 @@
+{
+  "plan_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/c3/bundle-plan-ac.md",
+  "plan_sha256": "sha256:61ef6e97d737de73cb622c0d94e2998bbaced09c0bacef94df0bb0b9d3367e46",
+  "base_sha": "8da0b10f6e95a30132f9c8a0db1bacafbb0d6c6c",
+  "head_sha": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
+  "input_manifest_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/audit-input-manifest.json",
+  "input_manifest_hash": "sha256:b511d7ef1bc095de72bae8581a7a086b1359b1e92539e2960c2c868523c42173",
+  "codex_brief_hash": "sha256:56d0df67c0a51b6acc51730dcdc89dbf96210696d4fc6b614b6851ba729dcd30",
+  "bundle_diff_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/c3/bundle-diff.patch",
+  "bundle_scope_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/c3/bundle-scope.txt",
+  "acceptance_criteria_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/c3/bundle-plan-ac.md",
+  "review_profile_path": ".aid-o/work/evidence/E-c3-dogfood-real-ac/R-pass-155298/c3/bundle-review-profile.json",
+  "evidence_paths": "scripts/e2e-ac-demo/increment.sh",
+  "output_schema_path": "plugins/aid-orchestrator/defaults/schemas/c3-codex-response.schema.json",
+  "allowed_recheck_commands": "[]",
+  "verification_budget": "{\"max_commands\":10,\"max_seconds\":120}"
+}

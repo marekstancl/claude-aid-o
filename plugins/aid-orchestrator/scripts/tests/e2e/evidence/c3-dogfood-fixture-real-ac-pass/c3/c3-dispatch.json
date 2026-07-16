@@ -1,0 +1,39 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c3_dispatch",
+  "producer": "orchestrator@done-review",
+  "created_at": "2026-07-16T12:09:51Z",
+  "provenance": {
+    "dispatch_mode": "cross_provider",
+    "generated_by_tool": "aid-c3-dispatch.sh#dispatch"
+  },
+  "executor": {
+    "kind": "codex_cli",
+    "reported_model": "gpt-5.6-terra",
+    "codex_version": "codex-cli 0.144.4"
+  },
+  "subject": {
+    "project_root": "<REPO>",
+    "head_sha": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
+    "codex_brief_hash": "sha256:56d0df67c0a51b6acc51730dcdc89dbf96210696d4fc6b614b6851ba729dcd30"
+  },
+  "prompt": {
+    "template_id": "c3-audit-prompt",
+    "template_sha256": "sha256:9f805648a647bc9ef136eb4c78e98a3fbd1ffd3a7043f942d005d787f666f0db",
+    "rendered_prompt_sha256": "sha256:45d0cf003daf7a7ff10bf4da0222baad9d98c8c3db8e79f1af9068357b15dd77"
+  },
+  "dispatch": {
+    "invoked": true,
+    "exit_code": 0,
+    "outcome": "dispatched",
+    "events_valid": true,
+    "codex_session_id": "00000000-0000-7000-8000-000000000000",
+    "stdout_sha256": "sha256:68eeef5c2b899a2ad21b4cecd8f8d293e79a5dc79d062a33a31db8d7aa8e4a0a",
+    "raw_response_sha256": "sha256:fe60e685e4a688ceb6d6883fe4dde652c59beb0bc6f23231ccd56dbe5fb76bab"
+  },
+  "independence": {
+    "required_independence_level": "cross_model",
+    "probed_independence_level": "cross_provider",
+    "achieved_independence_level": "cross_provider"
+  }
+}

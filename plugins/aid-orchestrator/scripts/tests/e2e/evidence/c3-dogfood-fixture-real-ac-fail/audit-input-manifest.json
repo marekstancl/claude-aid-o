@@ -1,0 +1,67 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_input_manifest",
+  "producer": "orchestrator@done-review",
+  "created_at": "2026-07-16T12:10:23Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "unknown",
+    "epic_id": "E-c3-dogfood-real-ac",
+    "run_id": "R-fail-155298"
+  },
+  "subject": {
+    "subject_hash": "sha256:77f2fd774fc097ea449fb5a29dca5c3fe4eee3e059cf0510318b4508f3bfcfea"
+  },
+  "revision": {
+    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pass",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c3-dispatch.sh#build-manifest"
+  },
+  "audit_input_manifest": {
+    "allowlist": [
+      "scripts/e2e-ac-demo/increment.sh"
+    ],
+    "input_hash": "sha256:a2fbcf041d47f03c4ff6563f1b672f610287e3ff3860c9e4a1b396ea684a4c47",
+    "prior_pass_summaries": "untrusted",
+    "required_independence_level": "cross_model",
+    "base_sha": "8da0b10f6e95a30132f9c8a0db1bacafbb0d6c6c",
+    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "codex_brief_files": [
+      {
+        "path": "c3/bundle-diff.patch",
+        "sha256": "sha256:232abdaa9b50972533013757bb5601f443c0fe1fe7a11bfbe35a0ab40c57c32b",
+        "size": 262
+      },
+      {
+        "path": "c3/bundle-plan-ac.md",
+        "sha256": "sha256:61ef6e97d737de73cb622c0d94e2998bbaced09c0bacef94df0bb0b9d3367e46",
+        "size": 358
+      },
+      {
+        "path": "c3/bundle-review-profile.json",
+        "sha256": "sha256:29939f8479b27e17da3ed2fd8fdcdc9268f31f1b3b0a02c0e6c6aa2cbc227693",
+        "size": 68
+      },
+      {
+        "path": "c3/bundle-scope.txt",
+        "sha256": "sha256:09b93e1228364963ca08130c3e02354c948c5e79114b4ab5ade64384a669759b",
+        "size": 33
+      }
+    ],
+    "codex_brief_hash": "sha256:b1c729bf2c54f39951995f70205fc4cd2c312920e2557d9449522e9bca98ddce",
+    "allowed_recheck_commands": [],
+    "verification_budget": {
+      "max_commands": 10,
+      "max_seconds": 120
+    }
+  }
+}

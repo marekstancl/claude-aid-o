@@ -1,0 +1,10 @@
+diff --git a/scripts/e2e-ac-demo/increment.sh b/scripts/e2e-ac-demo/increment.sh
+new file mode 100644
+index 0000000..a528fa3
+--- /dev/null
++++ b/scripts/e2e-ac-demo/increment.sh
+@@ -0,0 +1,4 @@
++#!/usr/bin/env bash
++increment_by_one() {
++  echo $(( $1 + 2 ))
++}
