@@ -190,8 +190,18 @@ _run_case() {
   local throwaway_branch="c3-dogfood-real-ac-${label}-throwaway-$$"
   local run_evidence_dir="$REPO_ROOT/.aid-o/work/evidence/E-c3-dogfood-real-ac/R-${label}-$$"
   local case_rc=0
-  local branch_created=0
 
+  # SECURITY REVIEW FIX: branch creation happens inside the ( ... ) subshell
+  # below, so a "branch_created" flag set there could never be observed by
+  # this outer function (subshells cannot write back to the parent shell's
+  # variables) — that flag existed here before and was permanently 0, making
+  # the `git branch -D` cleanup dead code on every run (confirmed: two stale
+  # throwaway branches were left behind by a real run). Fixed by always
+  # attempting the delete unconditionally — harmless/idempotent if the branch
+  # was never created (e.g. an early failure before `git checkout -b` ran).
+  # Also registers an EXIT trap (matching c3-dogfood.sh's `trap cleanup
+  # EXIT`) so cleanup still runs if this case is interrupted (signal) mid-run,
+  # not only on normal completion.
   _case_cleanup() {
     set +e
     local cur_branch
@@ -199,11 +209,10 @@ _run_case() {
     if [[ "$cur_branch" != "$ORIG_BRANCH" ]]; then
       (cd "$REPO_ROOT" && git checkout -q "$ORIG_BRANCH") 2>/dev/null
     fi
-    if [[ "$branch_created" -eq 1 ]]; then
-      (cd "$REPO_ROOT" && git branch -D "$throwaway_branch") >/dev/null 2>&1
-    fi
+    (cd "$REPO_ROOT" && git branch -D "$throwaway_branch") >/dev/null 2>&1
     rm -rf "$run_evidence_dir" 2>/dev/null
   }
+  trap _case_cleanup EXIT
 
   (
     set -euo pipefail
@@ -395,6 +404,7 @@ EOF2
     echo "== c3-dogfood-real-ac [$label]: PASSED (status=${got_status} as expected) =="
   ) || case_rc=$?
 
+  trap - EXIT
   _case_cleanup
   return "$case_rc"
 }
