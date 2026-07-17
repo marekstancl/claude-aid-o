@@ -43,9 +43,15 @@ c3_executor:
   satisfies_levels: [context_only, cross_model, cross_provider]
   # Codex is ALWAYS attempted first every run; no sticky availability state persists.
   # c3_on_unavailable: what happens AFTER a live Codex attempt did not dispatch.
-  #   unverifiable      — SHIPPED here (EPIC 3): C3 is unverifiable, nothing else runs.
-  #   degraded_advisory — flipped ON in a later step once agents/auditor.md c3_advisory exists:
-  #                       pipeline.md dispatches the advisory auditor via Agent(); result
-  #                       labelled provider: claude-code, independence_level: context_only,
-  #                       advisory: true. NEVER a cross_provider pass.
-  c3_on_unavailable: unverifiable
+  #   unverifiable      — C3 is unverifiable, nothing else runs. Shipped through P065 EPIC 3;
+  #                       still selectable, just no longer the default (see below).
+  #   degraded_advisory — SHIPPED here (P065 Step 15, the plan's FINAL flip, now that
+  #                       agents/auditor.md's c3_advisory mode + pipeline.md's dispatch wiring +
+  #                       aid-fsm.sh's advisory-not-independent hook all exist): pipeline.md
+  #                       dispatches the advisory auditor via Agent(agents/auditor.md, {mode:
+  #                       c3_advisory, ...}); result labelled provider: claude-code,
+  #                       independence_level: context_only, advisory: true. NEVER a
+  #                       cross_provider (or cross_model) pass — status stays unverifiable and
+  #                       aid-fsm.sh's done-advance C3 hook blocks/telemetry-flags it as
+  #                       c3_advisory_not_independent, same as any other unverifiable C3 result.
+  c3_on_unavailable: degraded_advisory

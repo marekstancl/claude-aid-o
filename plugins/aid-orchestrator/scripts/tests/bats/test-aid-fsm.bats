@@ -1849,3 +1849,71 @@ EOF
   # steps[] sync guard skipped gracefully — no crash, no sync event emitted.
   ! assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_status_synced"
 }
+
+# ─── E-065-5_7 DONE-review C3 finding: done-advance had no phase-edge check ──
+# Codex's real DONE-review audit of this EPIC found: cmd_done_advance only
+# verified from_phase matched the CURRENT state and to_phase was a KNOWN
+# phase name — neither enforced a directional edge, so `done-advance release
+# review <state>` reached the final write, regressing done_phase backward
+# with no negative test catching it. Fix: review -> release is the ONLY
+# legal edge; everything else (including same-phase and reverse) is rejected.
+
+@test "(E-065-5_7 C3 finding) done-advance release->review: illegal reverse edge is rejected, done_phase unchanged" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  cat > "$state_file" <<YAML
+epic_id: E-test
+run_id: R-test
+branch: task/E-test/main
+state: DONE
+done_phase: release
+created_at: 2026-06-18T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+
+  run "$FSM" done-advance release review "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"illegal done_phase transition"* ]]
+  [[ "$output" == *"release -> review"* ]]
+  # done_phase must be unchanged — the rejection must happen before any write.
+  [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "release" ]
+}
+
+@test "(E-065-5_7 C3 finding) done-advance release->release: same-phase no-op edge is also rejected" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  cat > "$state_file" <<YAML
+epic_id: E-test
+run_id: R-test
+branch: task/E-test/main
+state: DONE
+done_phase: release
+created_at: 2026-06-18T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+
+  run "$FSM" done-advance release release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"illegal done_phase transition"* ]]
+}
+
+@test "(E-065-5_7 C3 finding) done-advance review->review: same-phase no-op edge is rejected" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  cat > "$state_file" <<YAML
+epic_id: E-test
+run_id: R-test
+branch: task/E-test/main
+state: DONE
+done_phase: review
+created_at: 2026-06-18T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+
+  run "$FSM" done-advance review review "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"illegal done_phase transition"* ]]
+}
