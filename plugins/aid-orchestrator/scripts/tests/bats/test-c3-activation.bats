@@ -596,14 +596,16 @@ YAML
   [ "$(grep '^done_phase:' "$state_file" | awk '{print $2}')" = "review" ]
 }
 
-# ─── P065 Step 8: Policy — executor-first, level accounting, SHIP unverifiable ──
+# ─── P065 Step 8/15: Policy — executor-first, level accounting, degraded_advisory ──
 #
 # These assert the DEFAULT policy the bridge/FSM/build-manifest/pipeline.md read
 # (defaults/policies/c3-audit-policy.yaml). The c3_executor block records the Codex
 # executor, the executor-first probe (always cross_provider), the satisfies-rule
-# (a real cross_provider pass is a superset of the weaker levels), and ships
-# c3_on_unavailable: unverifiable — the degraded_advisory default is flipped ON
-# only in a much later step once the c3_advisory auditor capability exists.
+# (a real cross_provider pass is a superset of the weaker levels). Step 8 shipped
+# c3_on_unavailable: unverifiable (degraded_advisory deferred until the c3_advisory
+# auditor capability existed); Step 15 (P065's FINAL action) flips it to
+# degraded_advisory now that agents/auditor.md's c3_advisory mode + the pipeline
+# dispatch + the FSM c3_advisory_not_independent hook all exist.
 # enforcement stays observe and risk_profiles.* are unchanged (superset).
 
 # _default_c3_policy — path to the real shipped default policy (not a test override).
@@ -620,11 +622,11 @@ _default_c3_policy() {
   [ "$(yq -r '.c3_executor.dispatch_script' "$pol")" = "scripts/lib/aid-c3-dispatch.sh" ]
 }
 
-@test "(Step8-AC2) default policy: c3_on_unavailable = unverifiable AND enforcement = observe (degraded_advisory NOT flipped yet)" {
+@test "(Step15-AC1) default policy: c3_on_unavailable = degraded_advisory (FINAL P065 flip) AND enforcement = observe" {
   local pol; pol="$(_default_c3_policy)"
-  # SHIPPED value for EPIC 3 — degraded_advisory is a later step, once c3_advisory exists.
-  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" = "unverifiable" ]
-  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" != "degraded_advisory" ]
+  # SHIPPED value as of Step 15 — the c3_advisory fallback capability now exists.
+  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" = "degraded_advisory" ]
+  [ "$(yq -r '.c3_executor.c3_on_unavailable' "$pol")" != "unverifiable" ]
   # enforcement stays observe (this step does not touch it).
   [ "$(yq -r '.enforcement' "$pol")" = "observe" ]
 }
