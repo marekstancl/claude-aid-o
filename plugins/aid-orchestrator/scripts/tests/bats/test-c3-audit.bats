@@ -887,3 +887,157 @@ JSON
   [[ "$output" == *"aid-c3-dispatch.sh verify failed"* ]]
   [[ "$output" == *"audit_report.status != expected-from-raw"* ]]
 }
+
+# ─── IMP-245 follow-up: verify's unverifiable-branch discard binding ─────────
+#
+# A real live dogfood run under c3-audit-prompt-v2 got Codex to return a
+# SCHEMA-VALID combination previously never exercised: review_status
+# "unverifiable" alongside real, non-empty findings (Codex may report
+# concrete partial findings while still declining an overall firm verdict).
+# The writer (_write_unverifiable, via _derive_report_semantics) intentionally
+# discards those findings/blocking_findings — but cmd_verify's Step 5 used to
+# compare the report against raw unconditionally, breaking on exactly this
+# valid case. Fixed to assert the writer's own known discard
+# (blocking_findings:false, findings:[]) instead, only for the unverifiable
+# branch. These tests pin that fix as a durable regression.
+
+@test "IMP-245 follow-up: raw unverifiable+findings → report correctly discards, verify passes" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'project_id: test-c3-proj\n' > "$TEST_PROJECT_ROOT/.aid-o/config/project.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/src"
+  printf 'export const a = 1;\n' > "$TEST_PROJECT_ROOT/src/app.ts"
+  git -C "$TEST_PROJECT_ROOT" add src/app.ts .aid-o/config/project.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -q -m base
+  local base_sha; base_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  printf 'export const b = 2;\n' >> "$TEST_PROJECT_ROOT/src/app.ts"
+  git -C "$TEST_PROJECT_ROOT" add src/app.ts
+  git -C "$TEST_PROJECT_ROOT" commit -q -m head
+  local head_sha; head_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+
+  printf 'src/app.ts\n' > "$TEST_TMPDIR/changed-paths.txt"
+  export AID_CHANGED_PATHS="$TEST_TMPDIR/changed-paths.txt"
+  mkdir -p "$TEST_TMPDIR/indep"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TEST_TMPDIR/indep/detect"
+  chmod +x "$TEST_TMPDIR/indep/detect"
+  export AID_C3_INDEPENDENCE_BIN="$TEST_TMPDIR/indep/detect"
+
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$base_sha" "$head_sha" high
+  [ "$status" -eq 0 ]
+  local brief_hash
+  brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+
+  # Fake codex stub: unverifiable, but with real (schema-valid) findings + a
+  # claimed blocking_findings:true — exactly the combination that broke
+  # verify before this fix.
+  mkdir -p "$TEST_TMPDIR/codex-unverifiable-findings"
+  cat > "$TEST_TMPDIR/codex-unverifiable-findings/codex" <<'CODEXEOF'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-findings-codex 0.0.0"; exit 0; fi
+last=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-last-message|-o) last="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+report="$(jq -nc --arg h "$FAKE_HEAD" --arg bh "$FAKE_BRIEF_HASH" \
+  '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",
+    unverifiable_reasons:["no committed gate artifact for this range"],
+    blocking_findings:true,
+    findings:[{severity:"high",area:"scope",finding:"partial concern noted",
+               recommendation:"fix and re-audit",action_owner:"implementer"}]}')"
+jq -nc '{type:"thread.started",thread_id:"019f0000-0000-7000-8000-0000000ced02"}'
+printf '%s\n' '{"type":"turn.started"}'
+jq -nc --arg t "$report" '{type:"item.completed",item:{id:"item_final",type:"agent_message",text:$t}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}'
+[[ -n "$last" ]] && printf '%s\n' "$report" > "$last"
+exit 0
+CODEXEOF
+  chmod +x "$TEST_TMPDIR/codex-unverifiable-findings/codex"
+  export FAKE_HEAD="$head_sha" FAKE_BRIEF_HASH="$brief_hash"
+  PATH="$TEST_TMPDIR/codex-unverifiable-findings:$PATH"
+
+  run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]  # dispatch's exit code reflects capture success, not report trustworthiness
+
+  # The writer must have discarded the raw findings/blocking_findings.
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "unverifiable" ]
+  run jq -r '.audit_report.blocking_findings' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "false" ]
+  run jq -r '.findings | length' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "0" ]
+
+  # verify must accept this as faithful (the discard is the correct,
+  # documented behavior, not evidence of tampering).
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == verified* ]]
+}
+
+@test "IMP-245 follow-up: unverifiable report with blocking_findings tampered to true → verify rejects" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'project_id: test-c3-proj\n' > "$TEST_PROJECT_ROOT/.aid-o/config/project.yaml"
+  mkdir -p "$TEST_PROJECT_ROOT/src"
+  printf 'export const a = 1;\n' > "$TEST_PROJECT_ROOT/src/app.ts"
+  git -C "$TEST_PROJECT_ROOT" add src/app.ts .aid-o/config/project.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -q -m base
+  local base_sha; base_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  printf 'export const b = 2;\n' >> "$TEST_PROJECT_ROOT/src/app.ts"
+  git -C "$TEST_PROJECT_ROOT" add src/app.ts
+  git -C "$TEST_PROJECT_ROOT" commit -q -m head
+  local head_sha; head_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+
+  printf 'src/app.ts\n' > "$TEST_TMPDIR/changed-paths.txt"
+  export AID_CHANGED_PATHS="$TEST_TMPDIR/changed-paths.txt"
+  mkdir -p "$TEST_TMPDIR/indep"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$TEST_TMPDIR/indep/detect"
+  chmod +x "$TEST_TMPDIR/indep/detect"
+  export AID_C3_INDEPENDENCE_BIN="$TEST_TMPDIR/indep/detect"
+
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$base_sha" "$head_sha" high
+  [ "$status" -eq 0 ]
+  local brief_hash
+  brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+
+  mkdir -p "$TEST_TMPDIR/codex-unverifiable-plain"
+  cat > "$TEST_TMPDIR/codex-unverifiable-plain/codex" <<'CODEXEOF'
+#!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then echo "fake-unverifiable-plain-codex 0.0.0"; exit 0; fi
+last=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-last-message|-o) last="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+report="$(jq -nc --arg h "$FAKE_HEAD" --arg bh "$FAKE_BRIEF_HASH" \
+  '{reviewed_head:$h,codex_brief_hash:$bh,review_status:"unverifiable",
+    unverifiable_reasons:["no committed gate artifact for this range"],
+    blocking_findings:false,findings:[]}')"
+jq -nc '{type:"thread.started",thread_id:"019f0000-0000-7000-8000-0000000ced03"}'
+printf '%s\n' '{"type":"turn.started"}'
+jq -nc --arg t "$report" '{type:"item.completed",item:{id:"item_final",type:"agent_message",text:$t}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}'
+[[ -n "$last" ]] && printf '%s\n' "$report" > "$last"
+exit 0
+CODEXEOF
+  chmod +x "$TEST_TMPDIR/codex-unverifiable-plain/codex"
+  export FAKE_HEAD="$head_sha" FAKE_BRIEF_HASH="$brief_hash"
+  PATH="$TEST_TMPDIR/codex-unverifiable-plain:$PATH"
+
+  run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]  # dispatch's exit code reflects capture success, not report trustworthiness
+
+  # Tamper the genuinely-unverifiable report AFTER dispatch: claim
+  # blocking_findings:true with no findings — must still be rejected.
+  jq '.audit_report.blocking_findings = true' "$TEST_EVIDENCE_DIR/audit-report.json" \
+    > "$TEST_EVIDENCE_DIR/audit-report.json.t"
+  mv "$TEST_EVIDENCE_DIR/audit-report.json.t" "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings != false"* ]]
+}

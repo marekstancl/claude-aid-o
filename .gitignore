@@ -66,6 +66,15 @@ plugins/aid-orchestrator/scripts/tests/e2e/evidence/*
 !plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture/
 !plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture/**
 
+# IMP-245 follow-up: real-AC dogfood proof (pass + fail cases) — same narrow
+# negation rule, same reasoning.
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-pass-live-attestation.md
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-pass/
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-pass/**
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-fail-live-attestation.md
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-fail/
+!plugins/aid-orchestrator/scripts/tests/e2e/evidence/c3-dogfood-fixture-real-ac-fail/**
+
 # Development workspace (session logs, active work, internal docs)
 workspace/
 

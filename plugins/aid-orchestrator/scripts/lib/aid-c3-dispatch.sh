@@ -88,7 +88,7 @@ GENERATED_BY_TOOL="aid-c3-dispatch.sh#build-manifest"
 #   session-confirmed working model.
 INDEPENDENCE_BIN="${AID_C3_INDEPENDENCE_BIN:-$SCRIPT_DIR/aid-audit-independence.sh}"
 RENDER_PROMPT="${AID_C3_RENDER_BIN:-$SCRIPT_DIR/aid-render-prompt.sh}"
-PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c3-audit-prompt-v1.md"
+PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c3-audit-prompt-v2.md"
 RESPONSE_SCHEMA="$PLUGIN_ROOT/defaults/schemas/c3-codex-response.schema.json"
 CODEX_MODEL="${AID_C3_CODEX_MODEL:-gpt-5.6-terra}"
 
@@ -1247,19 +1247,34 @@ cmd_dispatch() {
   vbudget_str="$(jq -c '.audit_input_manifest.verification_budget // {}' "$manifest")"
   output_schema_path="$(realpath -m --relative-to="$project_root" "$RESPONSE_SCHEMA" 2>/dev/null || echo "$RESPONSE_SCHEMA")"
 
+  # IMP-245 path-resolution fix: Codex runs with `--cd "$project_root"` (the repo
+  # root), NOT `--cd "$evidence_dir"` — so every sealed-artifact path handed to it
+  # MUST be resolved relative to project_root (matching output_schema_path's
+  # existing, correct pattern above), never a bare evidence_dir-relative string
+  # like "c3/bundle-diff.patch". A real live dogfood run under c3-audit-prompt-v2
+  # surfaced this: once the prompt actually told Codex it's allowed to read these
+  # files (fixing the OTHER half of IMP-245), Codex tried to and genuinely
+  # couldn't find them from its own --cd anchor, correctly reporting them absent.
+  local plan_path_rel input_manifest_path_rel bundle_diff_path_rel bundle_scope_path_rel review_profile_path_rel
+  plan_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-plan-ac.md" 2>/dev/null || echo "c3/bundle-plan-ac.md")"
+  input_manifest_path_rel="$(realpath -m --relative-to="$project_root" "$manifest" 2>/dev/null || echo "audit-input-manifest.json")"
+  bundle_diff_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-diff.patch" 2>/dev/null || echo "c3/bundle-diff.patch")"
+  bundle_scope_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-scope.txt" 2>/dev/null || echo "c3/bundle-scope.txt")"
+  review_profile_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-review-profile.json" 2>/dev/null || echo "c3/bundle-review-profile.json")"
+
   local vars_json="$c3_dir/codex-prompt-vars.json"
   jq -n \
-    --arg plan_path "c3/bundle-plan-ac.md" \
+    --arg plan_path "$plan_path_rel" \
     --arg plan_sha256 "$plan_sha256" \
     --arg base_sha "$base_sha" \
     --arg head_sha "$head_sha" \
-    --arg input_manifest_path "audit-input-manifest.json" \
+    --arg input_manifest_path "$input_manifest_path_rel" \
     --arg input_manifest_hash "$input_manifest_hash" \
     --arg codex_brief_hash "$codex_brief_hash" \
-    --arg bundle_diff_path "c3/bundle-diff.patch" \
-    --arg bundle_scope_path "c3/bundle-scope.txt" \
-    --arg acceptance_criteria_path "c3/bundle-plan-ac.md" \
-    --arg review_profile_path "c3/bundle-review-profile.json" \
+    --arg bundle_diff_path "$bundle_diff_path_rel" \
+    --arg bundle_scope_path "$bundle_scope_path_rel" \
+    --arg acceptance_criteria_path "$plan_path_rel" \
+    --arg review_profile_path "$review_profile_path_rel" \
     --arg evidence_paths "$evidence_paths" \
     --arg output_schema_path "$output_schema_path" \
     --arg allowed_recheck_commands "$arc_str" \
@@ -1562,49 +1577,76 @@ cmd_verify() {
   r_block="$(jq -r '.audit_report.blocking_findings'     "$report"  2>/dev/null || true)"
   raw_head="$(jq -r '.reviewed_head // ""'    "$last_msg" 2>/dev/null || true)"
   raw_brief="$(jq -r '.codex_brief_hash // ""' "$last_msg" 2>/dev/null || true)"
-  raw_block="$(jq -r '[.findings[] | select(.severity=="critical" or .severity=="high")] | length > 0' "$last_msg" 2>/dev/null || true)"
   [[ "$r_head" == "$raw_head" ]]   || _vfail "audit_report.reviewed_head != raw.reviewed_head"
   [[ "$r_brief" == "$raw_brief" ]] || _vfail "audit_report.codex_brief_hash != raw.codex_brief_hash"
-  [[ "$r_block" == "$raw_block" ]] || _vfail "audit_report.blocking_findings != (exists raw crit/high finding)"
 
-  # Tuple-set equality — order-insensitive, count-sensitive, action_owner by
-  # identical presence-AND-value on BOTH sides (a low/medium finding with no
-  # owner in raw and none in report matches — B5). `-S` + `sort` canonicalise.
-  local raw_tuples report_tuples
-  raw_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
-                          + (if has("action_owner") then {action_owner} else {} end)] | sort' \
-                "$last_msg" 2>/dev/null || true)"
-  report_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
-                             + (if has("action_owner") then {action_owner} else {} end)] | sort' \
-                   "$report" 2>/dev/null || true)"
-  [[ -n "$raw_tuples" && "$raw_tuples" == "$report_tuples" ]] \
-    || _vfail "report findings tuple-set diverges from raw (a finding was added/removed/edited)"
+  # IMP-245 follow-up fix: when the raw response is honestly unverifiable, the
+  # writer (_write_report's invariant + _write_unverifiable, both via
+  # _derive_report_semantics) intentionally DISCARDS any findings/
+  # blocking_findings Codex may have ALSO included alongside its unverifiable
+  # verdict — a schema-valid combination (Codex may report concrete partial
+  # findings while still declining an overall firm pass/fail; the response
+  # schema does not restrict findings/blocking_findings when review_status is
+  # "unverifiable"). Comparing the report's blocking_findings/findings against
+  # RAW unconditionally (as this block used to, unguarded) breaks on exactly
+  # that valid combination — a real live dogfood run under c3-audit-prompt-v2
+  # hit this once Codex started returning substantive findings instead of
+  # always-empty unverifiable responses (the same class of "writer/verify
+  # diverge on a field neither side unified" bug the earlier CRITICAL fix
+  # closed for status/review_status/outcome — this is the same root cause
+  # surfacing on a different field). For the unverifiable branch, assert the
+  # report matches the WRITER's own known, intentional discard
+  # (blocking_findings: false, findings: []) rather than raw's actual findings.
+  if [[ "$exp_status" == "unverifiable" ]]; then
+    [[ "$r_block" == "false" ]] \
+      || _vfail "audit_report.blocking_findings != false (required for the unverifiable branch)"
+    local r_findings_count
+    r_findings_count="$(jq '.findings | length' "$report" 2>/dev/null || true)"
+    [[ "$r_findings_count" == "0" ]] \
+      || _vfail "audit_report.findings is non-empty in the unverifiable branch (must be [])"
+  else
+    raw_block="$(jq -r '[.findings[] | select(.severity=="critical" or .severity=="high")] | length > 0' "$last_msg" 2>/dev/null || true)"
+    [[ "$r_block" == "$raw_block" ]] || _vfail "audit_report.blocking_findings != (exists raw crit/high finding)"
 
-  # Index-bound fingerprint/occurrence_id recompute FROM THE RAW finding — pins
-  # each report finding to its raw source (a reordering that breaks recompute →
-  # fail). occurrence_id = c3-<epic_id>-<n>; fingerprint via the shared helper.
-  local raw_count report_count
-  raw_count="$(jq '.findings | length'    "$last_msg" 2>/dev/null || true)"
-  report_count="$(jq '.findings | length' "$report"   2>/dev/null || true)"
-  [[ "$raw_count" =~ ^[0-9]+$ && "$report_count" =~ ^[0-9]+$ ]] || _vfail "cannot count findings"
-  [[ "$raw_count" == "$report_count" ]] || _vfail "report/raw finding count differ ($report_count vs $raw_count)"
+    # Tuple-set equality — order-insensitive, count-sensitive, action_owner by
+    # identical presence-AND-value on BOTH sides (a low/medium finding with no
+    # owner in raw and none in report matches — B5). `-S` + `sort` canonicalise.
+    local raw_tuples report_tuples
+    raw_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
+                            + (if has("action_owner") then {action_owner} else {} end)] | sort' \
+                  "$last_msg" 2>/dev/null || true)"
+    report_tuples="$(jq -Sc '[.findings[] | {severity,area,finding,recommendation}
+                               + (if has("action_owner") then {action_owner} else {} end)] | sort' \
+                     "$report" 2>/dev/null || true)"
+    [[ -n "$raw_tuples" && "$raw_tuples" == "$report_tuples" ]] \
+      || _vfail "report findings tuple-set diverges from raw (a finding was added/removed/edited)"
 
-  local fp_helper="$SCRIPT_DIR/aid-finding-fingerprint.sh"
-  local n sev area finding rec occ_expected fp_expected occ_actual fp_actual
-  for (( n=0; n<raw_count; n++ )); do
-    sev="$(jq -r --argjson i "$n" '.findings[$i].severity'       "$last_msg" 2>/dev/null || true)"
-    area="$(jq -r --argjson i "$n" '.findings[$i].area'          "$last_msg" 2>/dev/null || true)"
-    finding="$(jq -r --argjson i "$n" '.findings[$i].finding'    "$last_msg" 2>/dev/null || true)"
-    rec="$(jq -r --argjson i "$n" '.findings[$i].recommendation' "$last_msg" 2>/dev/null || true)"
-    occ_expected="c3-${epic_id}-${n}"
-    fp_expected="$(bash "$fp_helper" fingerprint_audit_report "$project_id" audit_report "$occ_expected" "$sev" "$area" "$finding" "$rec" 2>/dev/null)" \
-      || _vfail "cannot recompute fingerprint for finding $n"
-    fp_expected="${fp_expected%$'\n'}"
-    occ_actual="$(jq -r --argjson i "$n" '.findings[$i].occurrence_id // ""' "$report" 2>/dev/null || true)"
-    fp_actual="$(jq -r --argjson i "$n" '.findings[$i].fingerprint // ""'    "$report" 2>/dev/null || true)"
-    [[ "$occ_actual" == "$occ_expected" ]] || _vfail "finding $n occurrence_id mismatch (got '$occ_actual', expected '$occ_expected')"
-    [[ "$fp_actual" == "$fp_expected" ]]    || _vfail "finding $n fingerprint does not recompute from the raw finding"
-  done
+    # Index-bound fingerprint/occurrence_id recompute FROM THE RAW finding — pins
+    # each report finding to its raw source (a reordering that breaks recompute →
+    # fail). occurrence_id = c3-<epic_id>-<n>; fingerprint via the shared helper.
+    local raw_count report_count
+    raw_count="$(jq '.findings | length'    "$last_msg" 2>/dev/null || true)"
+    report_count="$(jq '.findings | length' "$report"   2>/dev/null || true)"
+    [[ "$raw_count" =~ ^[0-9]+$ && "$report_count" =~ ^[0-9]+$ ]] || _vfail "cannot count findings"
+    [[ "$raw_count" == "$report_count" ]] || _vfail "report/raw finding count differ ($report_count vs $raw_count)"
+
+    local fp_helper="$SCRIPT_DIR/aid-finding-fingerprint.sh"
+    local n sev area finding rec occ_expected fp_expected occ_actual fp_actual
+    for (( n=0; n<raw_count; n++ )); do
+      sev="$(jq -r --argjson i "$n" '.findings[$i].severity'       "$last_msg" 2>/dev/null || true)"
+      area="$(jq -r --argjson i "$n" '.findings[$i].area'          "$last_msg" 2>/dev/null || true)"
+      finding="$(jq -r --argjson i "$n" '.findings[$i].finding'    "$last_msg" 2>/dev/null || true)"
+      rec="$(jq -r --argjson i "$n" '.findings[$i].recommendation' "$last_msg" 2>/dev/null || true)"
+      occ_expected="c3-${epic_id}-${n}"
+      fp_expected="$(bash "$fp_helper" fingerprint_audit_report "$project_id" audit_report "$occ_expected" "$sev" "$area" "$finding" "$rec" 2>/dev/null)" \
+        || _vfail "cannot recompute fingerprint for finding $n"
+      fp_expected="${fp_expected%$'\n'}"
+      occ_actual="$(jq -r --argjson i "$n" '.findings[$i].occurrence_id // ""' "$report" 2>/dev/null || true)"
+      fp_actual="$(jq -r --argjson i "$n" '.findings[$i].fingerprint // ""'    "$report" 2>/dev/null || true)"
+      [[ "$occ_actual" == "$occ_expected" ]] || _vfail "finding $n occurrence_id mismatch (got '$occ_actual', expected '$occ_expected')"
+      [[ "$fp_actual" == "$fp_expected" ]]    || _vfail "finding $n fingerprint does not recompute from the raw finding"
+    done
+  fi
 
   # --- Step 6: process_id binds to the dispatch session ---------------------
   local r_pid

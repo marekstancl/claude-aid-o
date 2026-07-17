@@ -85,3 +85,53 @@ _grep_leak_signatures() {
   [ "$status" -eq 0 ]
   [[ "$output" == verified* ]]
 }
+
+# --- IMP-245 follow-up: real-AC dogfood proof (pass + fail, both determinate) ---
+
+@test "e2e evidence: c3-dogfood-fixture-real-ac-pass/ exists, is committed, and is a determinate pass" {
+  [ -d "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass" ]
+  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass/audit-report.json" ]
+  run jq -r '.status' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass/audit-report.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "pass" ]
+}
+
+@test "e2e evidence: c3-dogfood-fixture-real-ac-fail/ exists, is committed, and is a determinate fail" {
+  [ -d "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail" ]
+  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json" ]
+  run jq -r '.status' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fail" ]
+  run jq -r '.audit_report.blocking_findings' "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail/audit-report.json"
+  [ "$output" = "true" ]
+}
+
+@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}/ contain no leak signatures" {
+  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}-live-attestation.md exist and contain no leak signatures" {
+  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass-live-attestation.md" ]
+  [ -f "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail-live-attestation.md" ]
+  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass-live-attestation.md"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+  run _grep_leak_signatures "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail-live-attestation.md"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+@test "e2e evidence: c3-dogfood-fixture-real-ac-{pass,fail}/ both pass aid-c3-dispatch.sh verify --reference" {
+  local dispatch="$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-c3-dispatch.sh"
+  run bash "$dispatch" verify --reference "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-pass"
+  [ "$status" -eq 0 ]
+  [[ "$output" == verified* ]]
+  run bash "$dispatch" verify --reference "$E2E_EVIDENCE_DIR/c3-dogfood-fixture-real-ac-fail"
+  [ "$status" -eq 0 ]
+  [[ "$output" == verified* ]]
+}

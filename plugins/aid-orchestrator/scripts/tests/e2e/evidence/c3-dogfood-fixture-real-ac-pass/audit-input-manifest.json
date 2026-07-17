@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T06:36:49Z",
+  "created_at": "2026-07-16T12:08:14Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
-    "epic_id": "E-c3-dogfood",
-    "run_id": "R-3017212"
+    "epic_id": "E-c3-dogfood-real-ac",
+    "run_id": "R-pass-155298"
   },
   "subject": {
-    "subject_hash": "sha256:3a39fe15706e5a56ea0fae826bac6f9a990fc2051b3c5f6d95adbca1288f48fb"
+    "subject_hash": "sha256:d3bbb8fcbe4ab7e0f597aab256e8c0eb657a861dbddf355fce831a31cb4edfb1"
   },
   "revision": {
-    "head_sha": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
+    "head_sha": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -27,22 +27,24 @@
     "generated_by_tool": "aid-c3-dispatch.sh#build-manifest"
   },
   "audit_input_manifest": {
-    "allowlist": [],
-    "input_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "allowlist": [
+      "scripts/e2e-ac-demo/increment.sh"
+    ],
+    "input_hash": "sha256:1f231299627bebc7be5fff086f66a4af36a7b52fd404ccc8e7895798bf8d55e0",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_model",
-    "base_sha": "a63fd0c0e95088471cd3a063b33a8df54fe4e997",
-    "head_sha": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
+    "base_sha": "8da0b10f6e95a30132f9c8a0db1bacafbb0d6c6c",
+    "head_sha": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
     "codex_brief_files": [
       {
         "path": "c3/bundle-diff.patch",
-        "sha256": "sha256:4dc7cda567322ed0d4a18023c8b4931955492dc0643be3a16ebbd42678b56b4e",
-        "size": 544
+        "sha256": "sha256:280c1ddde8ff1ed54741fd65eeb45851b795465268ab552673864c5cc392c771",
+        "size": 300
       },
       {
         "path": "c3/bundle-plan-ac.md",
-        "sha256": "sha256:93aa81ea7001694d799f3aee7ddca50bb92b0197da1ee8f5846078887aed7b37",
-        "size": 118
+        "sha256": "sha256:61ef6e97d737de73cb622c0d94e2998bbaced09c0bacef94df0bb0b9d3367e46",
+        "size": 358
       },
       {
         "path": "c3/bundle-review-profile.json",
@@ -51,11 +53,11 @@
       },
       {
         "path": "c3/bundle-scope.txt",
-        "sha256": "sha256:c8976788f3a83da13bd8dd82a8f6dbf62610e624ab43f9c2347b139ea4c23cb7",
-        "size": 83
+        "sha256": "sha256:09b93e1228364963ca08130c3e02354c948c5e79114b4ab5ade64384a669759b",
+        "size": 33
       }
     ],
-    "codex_brief_hash": "sha256:0745e9316e18209a51fd43604dd3888c6cf1e44828f0f4ae97791964b22ee59a",
+    "codex_brief_hash": "sha256:56d0df67c0a51b6acc51730dcdc89dbf96210696d4fc6b614b6851ba729dcd30",
     "allowed_recheck_commands": [],
     "verification_budget": {
       "max_commands": 10,

@@ -39,6 +39,15 @@ setup() {
   GOLDEN_TXT="$FIX_DIR/codex-prompt.golden.txt"
   export FIX_DIR GOLDEN_VARS GOLDEN_TXT
 
+  # v2 template fixtures (IMP-245 corrective fix) — same variable set as v1, a
+  # new golden render of c3-audit-prompt-v2.md. v1's own fixtures above are left
+  # completely untouched (v1 is a frozen historical artifact).
+  PROMPT_TEMPLATE_V2="$AID_PLUGIN_PATH/defaults/prompts/c3-audit-prompt-v2.md"
+  FIX_DIR_V2="$AID_PLUGIN_PATH/scripts/tests/fixtures/c3-prompt-v2"
+  GOLDEN_VARS_V2="$FIX_DIR_V2/vars.json"
+  GOLDEN_TXT_V2="$FIX_DIR_V2/codex-prompt-v2.golden.txt"
+  export PROMPT_TEMPLATE_V2 FIX_DIR_V2 GOLDEN_VARS_V2 GOLDEN_TXT_V2
+
   # fake-codex CLI fixture (deterministic Codex stub) — used by the integration
   # test only; harmless elsewhere.
   FAKE_CODEX_DIR="$(cd "$BATS_TEST_DIRNAME/../fixtures/fake-codex" && pwd)"
@@ -216,4 +225,94 @@ _vr() {
     > "$TEST_TMPDIR/unv.json"
   _vr "$TEST_TMPDIR/unv.json"
   [ "$status" -ne 0 ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# v2 template (IMP-245 corrective fix) — c3-audit-prompt-v2.md. v1's tests above
+# are untouched: v1 is a frozen historical artifact whose bytes already bind to
+# every previously-issued report's `template_sha256`. v2 is the ACTIVE template
+# `aid-c3-dispatch.sh` now points at (PROMPT_TEMPLATE). These tests mirror T1/
+# T2/T5/T6 above against v2's fixtures, plus a regression proof (V7) that the
+# always-allowed-reads vs allowed_recheck_commands contradiction is fixed.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── V1: golden render reproduces the committed v2 golden byte-for-byte ──────
+
+@test "prompt/golden v2: rendering c3-audit-prompt-v2.md with the committed vars reproduces codex-prompt-v2.golden.txt byte-for-byte" {
+  [ -f "$GOLDEN_VARS_V2" ]
+  [ -f "$GOLDEN_TXT_V2" ]
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$GOLDEN_VARS_V2" --output "$TEST_TMPDIR/rendered-v2.txt"
+  [ "$status" -eq 0 ]
+  cmp -s "$TEST_TMPDIR/rendered-v2.txt" "$GOLDEN_TXT_V2"
+}
+
+# ─── V2: key-set mismatch (missing OR unknown) → renderer exits non-zero ─────
+
+@test "prompt/render v2: a MISSING declared variable makes aid-render-prompt.sh exit non-zero (no output)" {
+  jq 'del(.head_sha)' "$GOLDEN_VARS_V2" > "$TEST_TMPDIR/vars-missing-v2.json"
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$TEST_TMPDIR/vars-missing-v2.json" --output "$TEST_TMPDIR/out-v2.txt"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MISSING"* ]]
+  [ ! -f "$TEST_TMPDIR/out-v2.txt" ]
+}
+
+@test "prompt/render v2: an UNKNOWN (undeclared) variable makes aid-render-prompt.sh exit non-zero" {
+  jq '. + {surprise_key: "x"}' "$GOLDEN_VARS_V2" > "$TEST_TMPDIR/vars-unknown-v2.json"
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$TEST_TMPDIR/vars-unknown-v2.json" --output "$TEST_TMPDIR/out-v2.txt"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"UNKNOWN"* ]]
+  [ ! -f "$TEST_TMPDIR/out-v2.txt" ]
+}
+
+# ─── V5: rendered v2 output has NO literal `{{` left ────────────────────────
+
+@test "prompt/render v2: the rendered c3 prompt contains no leftover {{ placeholder anywhere" {
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$GOLDEN_VARS_V2" --output "$TEST_TMPDIR/rendered-v2.txt"
+  [ "$status" -eq 0 ]
+  ! grep -qF '{{' "$TEST_TMPDIR/rendered-v2.txt"
+}
+
+# ─── V6: the fake-Codex fixture receives EXACTLY the rendered v2 prompt ──────
+
+@test "prompt/integration v2: _run_codex_isolated hands the fake-Codex fixture exactly the rendered v2 codex-prompt.txt" {
+  local prompt_file="$TEST_TMPDIR/codex-prompt-v2.txt"
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$GOLDEN_VARS_V2" --output "$prompt_file"
+  [ "$status" -eq 0 ]
+
+  local spy_dir="$TEST_TMPDIR/spy-v2"
+  mkdir -p "$spy_dir"
+  local capture="$TEST_TMPDIR/prompt-capture-v2.txt"
+  cat > "$spy_dir/codex" <<EOF
+#!/usr/bin/env bash
+printf '%s' "\${!#}" > "$capture"
+exec "$FAKE_CODEX_DIR/codex" "\$@"
+EOF
+  chmod +x "$spy_dir/codex"
+
+  export FAKE_CODEX_MODE=valid
+  export FAKE_CODEX_EXPECT_HEAD="$RH40"
+  export FAKE_CODEX_EXPECT_MANIFEST_HASH="$BRIEF_HASH"
+  PATH="$spy_dir:$PATH" run bash -c "
+    source '$DISPATCH'
+    _run_codex_isolated '$TEST_PROJECT_ROOT' '$prompt_file' \
+      '$TEST_TMPDIR/events-v2.jsonl' '$TEST_TMPDIR/stderr-v2.txt' '$TEST_TMPDIR/last-v2.txt'
+  "
+  [ "$status" -eq 0 ]
+  [ -f "$capture" ]
+  [ "$(cat "$capture")" = "$(cat "$prompt_file")" ]
+}
+
+# ─── V7: regression proof — always-allowed reads vs allowed_recheck_commands ─
+# The actual IMP-245 fix: the v2 golden render must contain language that
+# distinguishes the always-permitted baseline read-only toolkit from the
+# separate, narrower `allowed_recheck_commands` re-execution permission — this
+# is what a v1 render never had, and what caused two real dogfood runs to
+# return `unverifiable` for lack of it.
+
+@test "prompt/regression v2 (IMP-245): the rendered v2 prompt distinguishes always-allowed reads from allowed_recheck_commands" {
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$GOLDEN_VARS_V2" --output "$TEST_TMPDIR/rendered-v2.txt"
+  [ "$status" -eq 0 ]
+  grep -qF "Always-allowed basic read-only operations" "$TEST_TMPDIR/rendered-v2.txt"
+  grep -qi "NEVER gated by" "$TEST_TMPDIR/rendered-v2.txt"
+  grep -qF "STRONGER" "$TEST_TMPDIR/rendered-v2.txt"
 }

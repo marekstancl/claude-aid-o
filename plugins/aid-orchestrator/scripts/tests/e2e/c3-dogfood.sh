@@ -390,8 +390,18 @@ dispatch_outcome_orig="$(jq -r '.dispatch.outcome // "dispatched"' "$FIXTURE_DIR
 # shellcheck disable=SC1090
 source "$DISPATCH_BIN"
 set +e
+# IMP-245 follow-up fix: pass the PLACEHOLDER session id here, not the real
+# $session_id — this call regenerates the fixture's audit-report.json (a
+# sanitized artifact), and _process_response writes its 7th arg verbatim into
+# audit_report.process_id. Passing the real $session_id defeated the sed-based
+# sanitization applied to every other file (which operates on file TEXT, not
+# on this function argument): a real run surfaced the fixture committing a
+# real session id in this ONE field while every other occurrence was
+# correctly replaced. Must match $PLACEHOLDER_SESSION_ID, the exact value
+# _sanitize_file substitutes elsewhere, so process_id stays internally
+# consistent with dispatch.codex_session_id per verify's Step 6 binding.
 _process_response "$FIXTURE_DIR" "$FIXTURE_DIR/audit-input-manifest.json" "0" "true" \
-  "$dispatch_outcome_orig" "$indep_level" "$session_id" "$HEAD_SHA"
+  "$dispatch_outcome_orig" "$indep_level" "$PLACEHOLDER_SESSION_ID" "$HEAD_SHA"
 process_response_rc=$?
 set -e
 # rc 0 = validator-clean pass/fail; rc 2 = an honest status:"unverifiable" write
