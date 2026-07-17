@@ -1211,9 +1211,14 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
      `Agent(agents/auditor.md)` in this mode. Instead run the bridge over the manifest built in
      step 5:
      ```bash
-     bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"
+     AID_C3_ATTEMPT=1 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"
      bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" verify   "$evidence_dir"
      ```
+     `AID_C3_ATTEMPT=1` (P065 Step 17) layers this call's raw evidence under
+     `c3/attempt-01/` and atomically copies its report to the canonical evidence-root path used
+     everywhere else in this section — the FIRST, INITIAL dispatch is always attempt 1, even
+     when the loop below never fires. `verify` is unaffected by the env var; it always reads the
+     canonical evidence-root report.
      `dispatch <evidence_dir>` (exactly 1 positional arg) probes cross_provider availability for
      THIS run, invokes the real Codex CLI read-only, and writes `c3/c3-dispatch.json` plus
      `audit-report.json`/`.md`. `verify [--reference] <evidence_dir>` (1 positional arg, optional
@@ -1309,15 +1314,22 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
       ```bash
       bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" build-manifest \
         "$evidence_dir" "$base_sha" "$newHEAD" "$risk_profile"   # new codex_brief_hash
-      bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"   # NEW
+      AID_C3_ATTEMPT=$((c3_recheck_count + 2)) \
+        bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"   # NEW
       # isolated codex exec — a genuinely new codex_session_id, never the prior attempt's
       bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" verify   "$evidence_dir"
       ```
-      Each call overwrites `audit-input-manifest.json` / `audit-report.json` / `.md` /
-      `c3/c3-dispatch.json` in place at the evidence root — there is no separate per-attempt
-      file in this step (that per-attempt evidence layering is Step 17's job; this step only
-      guarantees the evidence root always holds the CANONICAL, i.e. last-attempt, report —
-      see the matching confirmation in `aid-fsm.sh`).
+      `AID_C3_ATTEMPT` (P065 Step 17) is `c3_recheck_count + 2` — at this point in the loop body
+      `c3_recheck_count` still holds the count of rechecks ALREADY COMPLETED before this one (the
+      increment in step 3 below happens AFTER this dispatch), so on the first loop entry
+      (`c3_recheck_count == 0`) this recheck is attempt 2 (attempt 1 was the initial dispatch
+      above); the second loop entry (`c3_recheck_count == 1`) is attempt 3; etc. — this layers
+      each attempt's raw evidence + report under its own `c3/attempt-NN/` (preserving the full
+      repair history for audit) while atomically copying the LATEST attempt's report to the
+      canonical evidence-root path — the CANONICAL, i.e. last-attempt, report that `aid-fsm.sh`
+      and Curator read (see the matching confirmation there). `verify` (unprefixed, no
+      `AID_C3_ATTEMPT`) always checks the canonical path; `verify --reference
+      "$evidence_dir/c3/attempt-NN"` checks a specific historical attempt directly.
    3. `bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" set-field c3_recheck_count <n> "$state_file"`
       (increment). Then re-evaluate blocking status on the new `audit-report.json`:
       - Still blocking AND the SAME finding `fingerprint` survived this recheck (fix
