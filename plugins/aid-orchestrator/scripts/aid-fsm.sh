@@ -3287,6 +3287,17 @@ cmd_done_advance() {
     exit 1
   }
 
+  # SECURITY/CORRECTNESS FIX (E-065-5_7 DONE-review C3 finding): the checks
+  # above only verify from_phase matches the CURRENT phase and to_phase is a
+  # KNOWN phase name — neither enforces a directional edge, so
+  # `done-advance release review <state>` previously reached the final write,
+  # regressing done_phase backward with no negative test catching it. DONE
+  # phases only ever move forward: review -> release is the ONLY legal edge.
+  [[ "$from_phase" == "review" && "$to_phase" == "release" ]] || {
+    echo "ERROR: illegal done_phase transition: $from_phase -> $to_phase (only review -> release is allowed)" >&2
+    exit 1
+  }
+
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
     local epic_id run_id evidence_dir
