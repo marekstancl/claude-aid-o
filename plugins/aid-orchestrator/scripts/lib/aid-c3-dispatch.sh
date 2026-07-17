@@ -1376,7 +1376,21 @@ _c3_finalize_attempt() {
     rc=1
   fi
 
-  _c3_write_loop_summary "$evidence_dir" "$n" "$session_id" "$head_sha" "$dispatch_outcome" "$report_status" || true
+  # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding): a
+  # loop-summary write failure was previously swallowed with `|| true`, so a
+  # successful canonical-copy (rc still 0 at this point) could report overall
+  # dispatch success even though the recheck-count/escalation audit trail
+  # (c3/loop-summary.json) is missing or stale — making the loop's actual
+  # progress unverifiable to the FSM hook, Curator, and PM. Fail closed: a
+  # loop-summary write failure now also fails the whole attempt, even when
+  # the canonical report copy itself succeeded.
+  local summary_rc=0
+  _c3_write_loop_summary "$evidence_dir" "$n" "$session_id" "$head_sha" "$dispatch_outcome" "$report_status" || summary_rc=$?
+  if [[ "$summary_rc" -ne 0 ]]; then
+    echo "aid-c3-dispatch: FATAL — c3/loop-summary.json write failed after attempt $nn; the recheck/escalation audit trail is unverifiable. Failing closed." >&2
+    _write_unverifiable "$evidence_dir" "$root_manifest" loop_summary_write_failed unavailable "" "" "" || true
+    rc=1
+  fi
   return "$rc"
 }
 
@@ -1411,6 +1425,32 @@ cmd_dispatch() {
   if [[ -n "$attempt_n" ]]; then
     [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
       || { echo "PRECONDITION FAIL: AID_C3_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
+
+    # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding): escalation
+    # must be TERMINAL for automatic dispatches. Nothing previously stopped a
+    # 4th (or Nth) explicit-attempt dispatch from silently overwriting an
+    # already-"escalated" c3/loop-summary.json outcome back to clean/
+    # in-progress — the bounded-loop requirement (c3_fix_loop.max_rechecks)
+    # was documented in pipeline.md but never mechanically enforced here.
+    # Every explicit-attempt dispatch now checks the CURRENT loop-summary.json
+    # (if one already exists for this evidence dir) before proceeding; a
+    # recorded outcome:"escalated" rejects any further attempt unless an
+    # explicit, auditable, PM-authorized override is supplied — mirroring
+    # this project's established `--force --reason '<>=20 chars>'` pattern.
+    local existing_summary="$c3_dir/loop-summary.json"
+    if [[ -f "$existing_summary" ]]; then
+      local prior_loop_outcome
+      prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)"
+      if [[ "$prior_loop_outcome" == "escalated" ]]; then
+        if [[ -z "${AID_C3_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C3_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+          echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"escalated\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement, c3_fix_loop.max_rechecks exhausted)." >&2
+          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C3_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          exit 1
+        fi
+        echo "aid-c3-dispatch: WARNING — proceeding past a recorded escalation via PM-authorized override: ${AID_C3_FORCE_BEYOND_ESCALATION}" >&2
+      fi
+    fi
+
     attempt_explicit=1
     attempt_nn="$(printf '%02d' "$attempt_n")"
     attempt_dir="$c3_dir/attempt-$attempt_nn"

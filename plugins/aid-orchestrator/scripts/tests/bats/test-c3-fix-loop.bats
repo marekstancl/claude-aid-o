@@ -386,3 +386,112 @@ _drive_two_attempts() {
   run jq -r '.audit_report.reviewed_head' "$TEST_EVIDENCE_DIR/audit-report.json"
   [ "$output" = "${heads[2]}" ]
 }
+
+# ─── DONE-review C3 finding fixes: escalation-terminal enforcement + ────────
+# ─── loop-summary write-failure fail-closed (E-065-6_7) ─────────────────────
+#
+# A real live Codex DONE-review audit of this EPIC found: (1) nothing
+# mechanically stopped a 4th (or Nth) explicit-attempt dispatch from
+# proceeding after c3/loop-summary.json already recorded outcome:"escalated"
+# — the bounded-loop requirement was documented in pipeline.md prose only,
+# never enforced in code; (2) _c3_finalize_attempt swallowed a
+# _c3_write_loop_summary failure with `|| true`, so a successful
+# canonical-copy could report overall dispatch success (exit 0) even when
+# the recheck/escalation audit trail was never actually written.
+
+@test "escalation is terminal: a 4th dispatch after outcome==escalated is rejected without an override" {
+  local heads=() bhs=()
+  local i head bh
+  for i in 1 2 3; do
+    head="$(_commit_change "$i")"
+    heads+=("$head")
+    _build_manifest "$BASE_SHA" "$head"
+    bh="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+    bhs+=("$bh")
+    export FAKE_C3_HEAD="$head" FAKE_C3_BRIEF_HASH="$bh" FAKE_C3_THREAD_ID="thread-term-$i" \
+           FAKE_C3_BLOCKING=true \
+           FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Still unchecked.","recommendation":"Fix it.","action_owner":"implementer"}]'
+    AID_C3_ATTEMPT="$i" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+    [ "$status" -eq 0 ]
+  done
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "escalated" ]
+
+  # A 4th attempt (no PM-authorized override) must be rejected BEFORE any
+  # codex invocation or evidence write for attempt-04.
+  local head4; head4="$(_commit_change 4)"
+  _build_manifest "$BASE_SHA" "$head4"
+  local bh4; bh4="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head4" FAKE_C3_BRIEF_HASH="$bh4" FAKE_C3_THREAD_ID="thread-term-4" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"escalated"* ]]
+  [ ! -d "$TEST_EVIDENCE_DIR/c3/attempt-04" ]
+
+  # The loop-summary and canonical report are UNCHANGED by the rejected call.
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "escalated" ]
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "fail" ]
+
+  # A short (< 20 char) override is ALSO rejected — the reason must be real.
+  AID_C3_FORCE_BEYOND_ESCALATION="too short" AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # A genuine, >=20-char, PM-authorized override DOES let the 4th attempt through.
+  AID_C3_FORCE_BEYOND_ESCALATION="PM approved a 4th recheck 2026-07-17 per manual review" \
+    AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_EVIDENCE_DIR/c3/attempt-04" ]
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "pass" ]
+}
+
+@test "loop-summary write failure fails the whole attempt closed, even when the canonical report copy succeeded" {
+  # Filesystem-permission injection cannot isolate JUST the loop-summary write
+  # from a full `dispatch` CLI run: c3/attempt-NN/ and c3/loop-summary.json
+  # are siblings under the same c3/ directory, and both must exist by the time
+  # `mv` overwrites an existing DIRECTORY by moving into it rather than
+  # failing (verified empirically), so a directory-collision trick doesn't
+  # work either. Test the function directly instead: source the script and
+  # call _c3_finalize_attempt with a real, valid, pre-built attempt_dir
+  # (living OUTSIDE the evidence dir entirely, so its own construction is
+  # unaffected by the permission change below) while evidence_dir/c3/ itself
+  # is read-only — canonical-copy (a evidence_dir ROOT-level write) succeeds,
+  # the loop-summary write (evidence_dir/c3/loop-summary.json, a NEW file in
+  # a now-unwritable directory) genuinely fails.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+
+  local attempt_src="$TEST_TMPDIR/prebuilt-attempt-01"
+  mkdir -p "$attempt_src"
+  jq -n --arg h "$head1" \
+    '{schema_version:"aid-2.0",artifact_type:"audit_report",status:"pass",
+      audit_report:{review_status:"pass",blocking_findings:false,reviewed_head:$h}}' \
+    > "$attempt_src/audit-report.json"
+  printf '# report\n' > "$attempt_src/audit-report.md"
+
+  mkdir -p "$TEST_EVIDENCE_DIR/c3"
+  chmod 555 "$TEST_EVIDENCE_DIR/c3"
+
+  # shellcheck disable=SC1090
+  source "$DISPATCH"
+  run _c3_finalize_attempt "$TEST_EVIDENCE_DIR" "$attempt_src" \
+    "$TEST_EVIDENCE_DIR/audit-input-manifest.json" 1 "01" "thread-summary-fail" "$head1" dispatched
+  chmod u+rwx "$TEST_EVIDENCE_DIR/c3"   # restore immediately for the assertions below
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FATAL"* ]]
+  [[ "$output" == *"loop-summary.json"* ]]
+
+  # The canonical report copy DID succeed (evidence_dir root stayed
+  # writable) — but the function must not report overall success (rc 1
+  # above) once the audit-trail write failed, and the canonical report was
+  # stomped to unverifiable — NEVER left as a silently-successful "pass"
+  # when the loop-summary write failed.
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "unverifiable" ]
+}
