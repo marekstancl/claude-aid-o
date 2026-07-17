@@ -3843,12 +3843,34 @@ EOF
           [[ $c3_head_sha_ec -ne 0 ]] && c3_head_sha=""
           c3_current_head=$(git -C "$project_root" rev-parse HEAD 2>/dev/null || echo "")
 
+          # P065 Step 15 (E-065-5_7) — ADDITIVE ONLY: detect a degraded_advisory
+          # same-provider Claude fallback report (agents/auditor.md `c3_advisory` mode,
+          # dispatched by pipeline.md when c3-audit-policy.yaml's c3_on_unavailable ==
+          # degraded_advisory). Read alongside the fields above so the elif chain below can
+          # give it a MORE SPECIFIC reason than the generic unverifiable check — it does not
+          # change what blocks, only how precisely the reason is reported.
+          local c3_advisory="" c3_independence_level=""
+          local c3_advisory_ec=0 c3_independence_level_ec=0
+          c3_advisory=$(jq -r 'if (.audit_report.advisory | type) == "boolean" then (.audit_report.advisory | tostring) else "false" end' "$c3_report_file" 2>/dev/null) || c3_advisory_ec=$?
+          [[ $c3_advisory_ec -ne 0 ]] && c3_advisory="false"
+          c3_independence_level=$(jq -r '.audit_report.independence_level // ""' "$c3_report_file" 2>/dev/null) || c3_independence_level_ec=$?
+          [[ $c3_independence_level_ec -ne 0 ]] && c3_independence_level=""
+
           if [[ "$c3_blocking" != "false" && "$c3_blocking" != "true" ]]; then
             # Covers missing/null/non-boolean .audit_report.blocking_findings — fail-closed,
             # deliberately NOT `// false` (that is the exact anti-pattern this hook replaces).
             c3_block_reason="audit-report.json .audit_report.blocking_findings is missing or not a boolean (fail-closed)"
           elif [[ "$c3_blocking" == "true" ]]; then
             c3_block_reason="audit-report.json .audit_report.blocking_findings == true (critical/high finding present)"
+          elif [[ "$c3_advisory" == "true" || "$c3_independence_level" == "context_only" ]]; then
+            # P065 Step 15 — checked BEFORE the generic unverifiable check below on purpose: an
+            # advisory report always ALSO has status: unverifiable (see agents/auditor.md
+            # "C3 Advisory Mode"), so without this branch first it would only ever surface the
+            # generic reason, never this more actionable one. A genuine (non-advisory) c3 report
+            # never sets .advisory:true or independence_level:context_only — c3-audit-policy.yaml
+            # requires cross_model/cross_provider for the two c3_required profiles, so this
+            # branch cannot fire on a real Codex pass/fail/unverifiable result.
+            c3_block_reason="c3_advisory_not_independent: audit-report.json .audit_report.advisory=${c3_advisory} / .audit_report.independence_level=${c3_independence_level:-<empty>} (same-provider Claude fallback review — not an independent cross-provider/cross-model C3 audit)"
           elif [[ "$c3_status" == "unverifiable" ]]; then
             c3_block_reason="audit-report.json .status == \"unverifiable\" (required independence level could not be confirmed)"
           elif [[ -z "$c3_manifest_hash" ]]; then

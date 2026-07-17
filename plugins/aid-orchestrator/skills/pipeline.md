@@ -1220,13 +1220,58 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
      leading `--reference` flag) re-checks the codex provenance chain and proves
      `audit-report.json` is a faithful, deterministic transform of Codex's raw response.
      **On `dispatch` exit 2** (non-dispatched / unavailable / rate_limited / timeout) the bridge
-     has ALREADY written an `unverifiable` `audit-report.json` — the orchestrator simply surfaces
-     it (step 12), nothing more to do. There is **no fallback**: the pipeline never substitutes
-     the Claude auditor for a `c3` pass, and it does not run an advisory dispatch (that capability
-     does not exist yet). A missing / non-executable bridge script is treated the same as any
-     other dispatch failure → `status: unverifiable`. The merge-gate consequence of an
-     `unverifiable` report is handled by the `aid-fsm.sh done-advance` C3 hook (blocking vs
-     observe per `c3-audit-policy.yaml`), not here.
+     has ALREADY written a minimal `unverifiable` `audit-report.json` (a bridge-owned placeholder,
+     never a pass) and `c3/c3-dispatch.json` records the real Codex outcome
+     (`unavailable`/`rate_limited`/`timeout`). A missing / non-executable bridge script is treated
+     the same as any other dispatch failure → `status: unverifiable`. Read policy
+     `c3_on_unavailable` (`c3-audit-policy.yaml` → `c3_executor.c3_on_unavailable`) to decide what
+     happens next — there is **no fallback to a `c3` pass** either way; the pipeline never
+     substitutes the Claude auditor for a `c3` pass:
+
+     - **`c3_on_unavailable: unverifiable`** — skip any further dispatch entirely. The
+       orchestrator simply surfaces the bridge's minimal `unverifiable` report (step 12), nothing
+       more to do.
+     - **`c3_on_unavailable: degraded_advisory`** (shipped default — P065 Step 15, the plan's
+       final flip) — dispatch the `c3_advisory` auditor as a **same-provider Claude fallback**,
+       still never a `c3` pass:
+       ```
+       Agent(agents/auditor.md, {
+         mode: "c3_advisory",
+         provider: "claude-code",
+         model: "<this session's configured model>",
+         process_id: "advisory-<run_id>",
+         evidence_dir: "$evidence_dir",
+         manifest: "$evidence_dir/audit-input-manifest.json"
+       })
+       ```
+       **The pipeline OWNS `provider`/`model`/`process_id`** — inject them into the dispatch
+       input; `agents/auditor.md`'s `c3_advisory` mode only ECHOES them into the envelope (the D7
+       contract "C3 Advisory Mode" documents) and HALTs if any of the three is missing from its
+       input. Never let the advisory auditor self-identify these fields.
+
+       **Artifact ownership on the advisory path.** The advisory auditor OVERWRITES
+       `audit-report.json`/`.md` with the richer advisory report — still `status: unverifiable`,
+       `.audit_report.advisory: true`, `.audit_report.independence_level: "context_only"`,
+       findings present — so Curator/PM can consume the findings (never a `pass`, never
+       `cross_provider`/`cross_model`). `c3/c3-dispatch.json` is left **UNTOUCHED** — it still
+       records the real Codex `outcome: unavailable/rate_limited/timeout`, preserving the truth
+       that Codex did not run and this report is advisory, not a real dispatch. Consequently
+       `aid-c3-dispatch.sh verify` on an advisory report exits 2 (no dispatched provenance to
+       verify against) — this is CORRECT: advisory reports never verify via the bridge, that is a
+       documented, orthogonal path, not a bug.
+
+       **Error handling.** If the `Agent()` advisory dispatch fails or returns nothing usable, the
+       bridge's minimal `unverifiable` report stays on disk (never overwritten by an empty
+       advisory); log `advisory_dispatch_failed` and continue to step 12 with the bridge's plain
+       unverifiable report. If `c3_on_unavailable: degraded_advisory` but the `c3_advisory` mode
+       is somehow unavailable, fall back to the plain `unverifiable` report (never a silent pass)
+       and log `c3_advisory_unavailable`.
+
+     Either branch: the merge-gate consequence (blocking vs observe per `c3-audit-policy.yaml`) is
+     handled by the `aid-fsm.sh done-advance` C3 hook, not here. An advisory report's
+     `.audit_report.advisory: true` (or `independence_level: "context_only"`) is a NEW block
+     reason that hook recognizes — `c3_advisory_not_independent` — strictly additive to its
+     existing `status == "unverifiable"` check, never a replacement for it.
    - **`legacy_health` → UNCHANGED.** Auditor (`agents/auditor.md`) dispatches via its own
      `Agent()` tool call in `legacy_health` (trust-based health-audit) mode. The bridge is never
      invoked at all for `docs_trivial`/`low`/`medium` profiles.
@@ -1322,6 +1367,16 @@ Options:
 > **advisory** — the FSM `done-advance` C3 hook emits telemetry but does not block, so the PM is
 > not forced to ABORT merely because C3 was unverifiable. Only under `enforcement: blocking` does
 > that hook turn the unverifiable report into a hard merge-gate.
+
+> **Advisory findings labelled distinctly (P065 Step 15).** When `audit-report.json` carries
+> `.audit_report.advisory: true` — the `degraded_advisory` same-provider Claude fallback from
+> step 6 — the PM summary above labels every finding from it **"advisory (Claude, not independent)"**,
+> distinct from a genuine `c3` cross-provider/cross-model verdict, and still
+> shows `status: unverifiable` (an advisory run is never a pass, regardless of how clean its
+> findings look). Under `enforcement: blocking` the FSM `done-advance` C3 hook blocks with
+> `c3_advisory_not_independent`; under the shipped `enforcement: observe` default it emits
+> `c3_gate_would_block` telemetry only, matching the existing `unverifiable`-handling convention
+> immediately above — same enforcement toggle, same telemetry event, just a more specific reason.
 
 12. **PM decides:**
     - **MERGE** → set `pm_decision`, advance sub-phase, continue to step 13
