@@ -64,8 +64,20 @@
 #   AID_PLAN_AC_FILE    — explicit source for c3/bundle-plan-ac.md. If set but
 #                         unreadable → PRECONDITION FAIL. If unset, falls back to
 #                         <evidence_dir>/final_report.md, then a deterministic stub.
+#   AID_C3_ATTEMPT      — (P065 Step 17, E-065-6_7) optional positive integer
+#                         identifying which fix->reverify loop attempt (pipeline.md
+#                         §6a, Step 16) THIS `dispatch` call is (01 = initial audit,
+#                         02/03 = rechecks). Unset (the default) → legacy single-shot
+#                         behavior: every artifact lands directly under
+#                         <evidence_dir>/c3/ and audit-report.{json,md} as it always
+#                         did, byte-for-byte unchanged. Set → this call's artifacts
+#                         are written into the self-contained <evidence_dir>/c3/
+#                         attempt-NN/ (NN zero-padded), and that attempt's
+#                         audit-report.{json,md} is copied to the canonical
+#                         evidence-root path afterward. See cmd_dispatch's own
+#                         header comment for the full contract.
 #
-# **Last Updated:** 2026-07-15
+# **Last Updated:** 2026-07-17
 # =============================================================================
 set -euo pipefail
 
@@ -112,6 +124,8 @@ Subcommands:
       Exit 0 = dispatched + events_valid (achieved cross_provider); exit 2 =
       non-dispatched / unavailable / rate_limited / timeout (bridge NEVER runs a
       fallback itself — it only signals unavailability).
+      Optional AID_C3_ATTEMPT=<N> env var layers this call's artifacts under
+      c3/attempt-NN/ instead (P065 Step 17 fix->reverify loop evidence).
 
   verify [--reference] <evidence_dir>
       Re-check the codex provenance chain and prove audit-report.json is a
@@ -1179,6 +1193,193 @@ _process_response() {
 # ===========================================================================
 # cmd_dispatch <evidence_dir>
 # ===========================================================================
+#
+# P065 Step 17 (E-065-6_7) — per-attempt evidence layering.
+#
+# Interface: an OPTIONAL AID_C3_ATTEMPT env var (positive integer, e.g. "2")
+# tells this invocation which fix->reverify LOOP ATTEMPT it is (pipeline.md
+# §6a's c3 fix->reverify loop, Step 16). Chosen as an env var, not a new
+# positional arg — `dispatch <evidence_dir>` is a fixed 1-arg CLI many existing
+# callers/tests already invoke bare, and env is the SAME seam convention this
+# file already uses for every other dispatch-time collaborator override
+# (AID_C3_INDEPENDENCE_BIN, AID_C3_CODEX_MODEL, AID_C3_TIMEOUT_SECONDS, ...).
+#
+# UNSET (the default) → LEGACY BEHAVIOR, byte-for-byte unchanged from before
+# Step 17: every artifact is written directly under <evidence_dir>/c3/ and
+# <evidence_dir>/audit-report.{json,md}, and NO c3/attempt-*/ directory or
+# c3/loop-summary.json is ever created. Deliberate — callers/tests that predate
+# the loop concept (including this file's own "two consecutive dispatch calls
+# on the same evidence dir" tests) must keep working unmodified.
+#
+# SET to N → this call's artifacts are written into the SELF-CONTAINED
+# directory <evidence_dir>/c3/attempt-NN/ (NN = N zero-padded to 2 digits),
+# mirroring the evidence_dir shape exactly: its own audit-input-manifest.json
+# snapshot + audit-report.{json,md} + a c3/ subdir holding c3-dispatch.json /
+# codex-events.jsonl / codex-events.stderr / codex-last-message.json /
+# codex-prompt.txt / codex-prompt-vars.json. Mirroring the shape means
+# `verify [--reference] <evidence_dir>/c3/attempt-NN` works UNCHANGED against
+# cmd_verify below — no verify code needed to change for this step. After the
+# attempt completes (whatever its outcome), its audit-report.{json,md} is
+# copied to the CANONICAL <evidence_dir>/audit-report.{json,md} path — the one
+# the FSM C3 hook + Curator read (Step 16's existing, unchanged read path) — so
+# canonical always equals the LAST attempt. If that copy cannot be made
+# durable, the attempt's own report stays authoritative under attempt-NN/ but
+# the overall run fails closed (exit 2, canonical stomped to
+# status:unverifiable outcome:canonical_copy_failed) rather than silently
+# leaving a stale canonical report in place.
+#
+# Collision guard (plan edge case: "never reuse a number within a single run's
+# evidence directory"): reusing an AID_C3_ATTEMPT value that already recorded a
+# GENUINELY completed (c3-dispatch.json .dispatch.outcome == "dispatched")
+# audit is a PRECONDITION FAIL. A retry of a non-dispatched slot (unavailable /
+# rate_limited / timeout / render_failed — pipeline.md's "NOT a loop iteration"
+# case) is NOT a collision and may overwrite, matching how the legacy default
+# path has always allowed re-dispatching after a non-dispatched outcome.
+# ===========================================================================
+
+# _c3_copy_atomic <src> <dst>  — copy <src> to <dst> via temp+mv (a reader never
+# observes a partial file). Returns 1 — no side effect beyond a removed temp —
+# if <src> is missing or either write step fails, e.g. <dst>'s parent directory
+# is not writable (chmod 555): the exact "canonical path unwritable" failure
+# mode Step 17's error handling must fail closed on.
+_c3_copy_atomic() {
+  local src="$1" dst="$2" tmp
+  [[ -f "$src" ]] || return 1
+  tmp="$dst.tmp.$$"
+  cp -f "$src" "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv -f "$tmp" "$dst" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  return 0
+}
+
+# _c3_write_loop_summary <evidence_dir> <n> <session_id> <head_sha> <dispatch_outcome> <report_status>
+#   Accumulate <evidence_dir>/c3/loop-summary.json — the PM-facing record of
+#   every loop attempt this evidence dir has seen so far. NEW schema (Step 16
+#   was docs/policy only, nothing wrote this file before now) — chosen here:
+#     {schema_version, artifact_type:"c3_loop_summary", producer, created_at,
+#      attempts: [{n, session_id, head, outcome, recorded_at}, ...] (sorted by
+#        n; re-writing entry <n> REPLACES any prior record for that same n, so
+#        a retried non-loop-iteration outcome on the same slot updates in
+#        place rather than duplicating),
+#      recheck_count,   -- count of GENUINELY dispatched attempts minus 1,
+#                          floored at 0. Mirrors pipeline.md §6a: an
+#                          unavailable/rate_limited/timeout/render_failed
+#                          attempt is explicitly "NOT a loop iteration" and
+#                          must not inflate this count.
+#      outcome}         -- "clean" (latest attempt's audit-report.json
+#                          status=="pass"), "unverifiable" (latest attempt's
+#                          status=="unverifiable"), "escalated" (latest attempt
+#                          still status=="fail" AND recheck_count has reached
+#                          c3_fix_loop.max_rechecks — the SAME policy key
+#                          build-manifest already reads via C3_AUDIT_POLICY/
+#                          DEFAULT_POLICY, fail-closed to 2 on any read issue,
+#                          matching Step 16's own fail-closed default), or null
+#                          (still blocking, budget not yet exhausted — loop
+#                          should recheck again). Writing "escalated" here is a
+#                          purely DESCRIPTIVE annotation of mechanical facts
+#                          already in hand (recheck_count + latest status) — it
+#                          does not itself stop, retry, or dispatch anything;
+#                          the actual loop-DRIVING decision (whether to spend
+#                          another recheck, when to hand off to the PM) stays
+#                          the pipeline-level controller's job, per the plan.
+#   Only ever called from the AID_C3_ATTEMPT-explicit path in cmd_dispatch —
+#   never touches the legacy default path. Returns 1 on any write failure
+#   (temp+mv — never a partial overwrite).
+_c3_write_loop_summary() {
+  local evidence_dir="$1" n="$2" session_id="$3" head_sha="$4" dispatch_outcome="$5" report_status="$6"
+  local out="$evidence_dir/c3/loop-summary.json"
+  local tmp="$out.tmp.$$"
+  local existing="[]"
+  if [[ -f "$out" ]]; then
+    existing="$(jq -c '.attempts // []' "$out" 2>/dev/null)"
+    [[ -n "$existing" ]] || existing="[]"
+  fi
+
+  local iso_now new_entry
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  new_entry="$(jq -nc \
+    --argjson n "$n" \
+    --argjson session_id "$(_json_str_or_null "$session_id")" \
+    --argjson head "$(_json_str_or_null "$head_sha")" \
+    --arg outcome "$dispatch_outcome" \
+    --arg recorded_at "$iso_now" \
+    '{n:$n, session_id:$session_id, head:$head, outcome:$outcome, recorded_at:$recorded_at}')" \
+    || return 1
+
+  local attempts dispatched_count recheck_count top_outcome
+  attempts="$(jq -c --argjson e "$new_entry" --argjson n "$n" \
+    '(map(select(.n != $n))) + [$e] | sort_by(.n)' <<<"$existing")" || return 1
+  dispatched_count="$(jq '[.[] | select(.outcome=="dispatched")] | length' <<<"$attempts" 2>/dev/null)"
+  [[ "$dispatched_count" =~ ^[0-9]+$ ]] || dispatched_count=0
+  recheck_count=0
+  [[ "$dispatched_count" -gt 0 ]] && recheck_count=$(( dispatched_count - 1 ))
+
+  local policy_file="${C3_AUDIT_POLICY:-$DEFAULT_POLICY}" max_rechecks=2
+  if [[ -f "$policy_file" ]]; then
+    local mr
+    mr="$(yq -r '.c3_fix_loop.max_rechecks // 2' "$policy_file" 2>/dev/null || echo 2)"
+    [[ "$mr" =~ ^[0-9]+$ ]] && max_rechecks="$mr"
+  fi
+
+  case "$report_status" in
+    pass)         top_outcome='"clean"' ;;
+    unverifiable) top_outcome='"unverifiable"' ;;
+    fail)
+      if [[ "$recheck_count" -ge "$max_rechecks" ]]; then
+        top_outcome='"escalated"'
+      else
+        top_outcome='null'
+      fi
+      ;;
+    *)            top_outcome='null' ;;
+  esac
+
+  jq -n \
+    --argjson attempts "$attempts" \
+    --argjson recheck_count "$recheck_count" \
+    --argjson outcome "$top_outcome" \
+    --arg created_at "$iso_now" \
+    '{schema_version:"aid-2.0", artifact_type:"c3_loop_summary",
+      producer:"orchestrator@done-review", created_at:$created_at,
+      attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome}' \
+    > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# _c3_finalize_attempt <evidence_dir> <attempt_dir> <root_manifest> <n> <nn> <session_id> <head_sha> <dispatch_outcome>
+#   Only ever called when AID_C3_ATTEMPT was explicit (cmd_dispatch gates every
+#   call site on attempt_explicit). Copies <attempt_dir>'s audit-report.{json,md}
+#   to the canonical <evidence_dir> root, then updates c3/loop-summary.json.
+#   On a canonical-copy failure: stomps the canonical report to
+#   status:unverifiable (best effort — evidence_dir may itself be unwritable,
+#   in which case this ALSO silently no-ops; that is fine, because the caller
+#   reacts to THIS function's return code, not to the stomped file's presence)
+#   and prints a FATAL line. Returns 0 iff the canonical copy succeeded; 1
+#   otherwise — the caller (cmd_dispatch) must exit 2 on a 1, never exit 0.
+_c3_finalize_attempt() {
+  local evidence_dir="$1" attempt_dir="$2" root_manifest="$3" n="$4" nn="$5"
+  local session_id="$6" head_sha="$7" dispatch_outcome="$8"
+
+  local report_status=""
+  [[ -f "$attempt_dir/audit-report.json" ]] \
+    && report_status="$(jq -r '.status // ""' "$attempt_dir/audit-report.json" 2>/dev/null)"
+
+  local rc=0
+  if _c3_copy_atomic "$attempt_dir/audit-report.json" "$evidence_dir/audit-report.json"; then
+    # .md is a human-readable convenience twin of the same content; a failure
+    # copying it does not itself invalidate the canonical JSON just copied.
+    _c3_copy_atomic "$attempt_dir/audit-report.md" "$evidence_dir/audit-report.md" || true
+  else
+    echo "aid-c3-dispatch: FATAL — cannot copy c3/attempt-$nn/audit-report.json to the canonical evidence-root path; failing closed (attempt evidence remains authoritative under c3/attempt-$nn/)" >&2
+    _write_unverifiable "$evidence_dir" "$root_manifest" canonical_copy_failed unavailable "" "" "" || true
+    report_status="canonical_copy_failed"
+    rc=1
+  fi
+
+  _c3_write_loop_summary "$evidence_dir" "$n" "$session_id" "$head_sha" "$dispatch_outcome" "$report_status" || true
+  return "$rc"
+}
+
 cmd_dispatch() {
   if [[ $# -ne 1 ]]; then
     usage >&2
@@ -1195,14 +1396,72 @@ cmd_dispatch() {
   local c3_dir="$evidence_dir/c3"
   mkdir -p "$c3_dir" || { echo "PRECONDITION FAIL: cannot create $c3_dir" >&2; exit 1; }
 
+  # --- Step 0 (P065 Step 17): resolve the attempt slot for THIS invocation ---
+  # work_evidence_dir/work_c3_dir/manifest_for_call are what the rest of this
+  # function reads/writes through. attempt_explicit=0 (AID_C3_ATTEMPT unset)
+  # makes them IDENTICAL to the pre-Step-17 evidence_dir/c3_dir/manifest — the
+  # legacy path is untouched. See this function's header comment for the full
+  # contract.
+  local attempt_n="${AID_C3_ATTEMPT:-}"
+  local attempt_explicit=0 attempt_dir="" attempt_nn=""
+  local work_evidence_dir="$evidence_dir"
+  local work_c3_dir="$c3_dir"
+  local manifest_for_call="$manifest"
+
+  if [[ -n "$attempt_n" ]]; then
+    [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
+      || { echo "PRECONDITION FAIL: AID_C3_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
+    attempt_explicit=1
+    attempt_nn="$(printf '%02d' "$attempt_n")"
+    attempt_dir="$c3_dir/attempt-$attempt_nn"
+
+    # Collision guard — see header comment above.
+    if [[ -f "$attempt_dir/c3/c3-dispatch.json" ]]; then
+      local prior_outcome
+      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c3/c3-dispatch.json" 2>/dev/null)"
+      if [[ "$prior_outcome" == "dispatched" ]]; then
+        echo "PRECONDITION FAIL: c3/attempt-$attempt_nn already recorded a completed dispatch (outcome=dispatched); refusing to reuse — pass a new AID_C3_ATTEMPT" >&2
+        exit 1
+      fi
+    fi
+
+    mkdir -p "$attempt_dir/c3" || { echo "PRECONDITION FAIL: cannot create $attempt_dir/c3" >&2; exit 1; }
+    # Seal this attempt's OWN manifest snapshot (build-manifest already wrote
+    # the live/current one at evidence_dir root for this recheck's
+    # base..newHEAD — Step 16) so a later `verify` against attempt_dir alone
+    # is self-contained.
+    _c3_copy_atomic "$manifest" "$attempt_dir/audit-input-manifest.json" \
+      || { echo "PRECONDITION FAIL: cannot seal audit-input-manifest.json into $attempt_dir" >&2; exit 1; }
+
+    # Seal a COPY of every codex_brief_files[] entry too (bundle-diff.patch,
+    # bundle-scope.txt, bundle-plan-ac.md, bundle-review-profile.json — the
+    # brief files build-manifest wrote at evidence_dir root, referenced by
+    # RELATIVE path in the manifest). cmd_verify's _recompute_codex_brief_hash
+    # reads codex_brief_files[] paths relative to whatever evidence_dir it is
+    # given, so `verify [--reference] <evidence_dir>/c3/attempt-NN` needs its
+    # OWN copies here, not just the sealed manifest above.
+    local _brief_path
+    while IFS= read -r _brief_path; do
+      [[ -n "$_brief_path" ]] || continue
+      mkdir -p "$attempt_dir/$(dirname "$_brief_path")" \
+        || { echo "PRECONDITION FAIL: cannot create $attempt_dir/$(dirname "$_brief_path")" >&2; exit 1; }
+      _c3_copy_atomic "$evidence_dir/$_brief_path" "$attempt_dir/$_brief_path" \
+        || { echo "PRECONDITION FAIL: cannot seal brief file into $attempt_dir: $_brief_path" >&2; exit 1; }
+    done < <(jq -r '.audit_input_manifest.codex_brief_files[]?.path // empty' "$manifest" 2>/dev/null)
+
+    work_evidence_dir="$attempt_dir"
+    work_c3_dir="$attempt_dir/c3"
+    manifest_for_call="$attempt_dir/audit-input-manifest.json"
+  fi
+
   # --- Step 1: read the sealed brief provenance from the manifest -------------
   # (manifest.input_hash is read fresh by _write_report/_process_response where
   # the legacy chain field is actually assembled — not needed in this scope.)
   local base_sha head_sha codex_brief_hash required_level
-  base_sha="$(jq -r '.audit_input_manifest.base_sha // ""' "$manifest")"
-  head_sha="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest")"
-  codex_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest")"
-  required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest")"
+  base_sha="$(jq -r '.audit_input_manifest.base_sha // ""' "$manifest_for_call")"
+  head_sha="$(jq -r '.audit_input_manifest.head_sha // ""' "$manifest_for_call")"
+  codex_brief_hash="$(jq -r '.audit_input_manifest.codex_brief_hash // ""' "$manifest_for_call")"
+  required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest_for_call")"
   [[ -n "$head_sha" ]] || { echo "PRECONDITION FAIL: manifest has no head_sha" >&2; exit 1; }
 
   # --- Step 1 (cont): resolve project_root = the real repo root --------------
@@ -1227,10 +1486,14 @@ cmd_dispatch() {
     # Non-dispatched: cannot invoke codex this run. Signal unavailability; the
     # bridge NEVER launches a fallback itself (that is a later orchestration EPIC).
     echo "aid-c3-dispatch: cross_provider unavailable this run (pre-check rc=$precheck_rc): $precheck_out" >&2
-    _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+    _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
       "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
     # Fail-closed: a non-dispatched run STILL gets an honest unverifiable report.
-    _write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
+    if [[ "$attempt_explicit" -eq 1 ]]; then
+      _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+        "" "$head_sha" unavailable || true
+    fi
     exit 2
   fi
 
@@ -1262,7 +1525,7 @@ cmd_dispatch() {
   bundle_scope_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-scope.txt" 2>/dev/null || echo "c3/bundle-scope.txt")"
   review_profile_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-review-profile.json" 2>/dev/null || echo "c3/bundle-review-profile.json")"
 
-  local vars_json="$c3_dir/codex-prompt-vars.json"
+  local vars_json="$work_c3_dir/codex-prompt-vars.json"
   jq -n \
     --arg plan_path "$plan_path_rel" \
     --arg plan_sha256 "$plan_sha256" \
@@ -1288,7 +1551,7 @@ cmd_dispatch() {
       verification_budget:$verification_budget}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }
 
-  local prompt_file="$c3_dir/codex-prompt.txt"
+  local prompt_file="$work_c3_dir/codex-prompt.txt"
   local render_prov=""
   local template_id="" template_sha256="" rendered_prompt_sha256=""
   if render_prov="$(bash "$RENDER_PROMPT" --template "$PROMPT_TEMPLATE" --vars-json "$vars_json" --output "$prompt_file" 2>&1)"; then
@@ -1299,10 +1562,14 @@ cmd_dispatch() {
     # Rendering is a precondition for invoking Codex; treat a render failure as
     # non-dispatched (not invoked) rather than launching Codex with no prompt.
     echo "aid-c3-dispatch: prompt render failed: $render_prov" >&2
-    _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+    _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
       "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
     # Fail-closed: render is a precondition for invoking Codex; no trusted audit.
-    _write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
+    if [[ "$attempt_explicit" -eq 1 ]]; then
+      _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+        "" "$head_sha" render_failed || true
+    fi
     exit 2
   fi
 
@@ -1311,9 +1578,9 @@ cmd_dispatch() {
   codex_version="$(codex --version 2>/dev/null || echo "")"
 
   # --- Step 6: launch codex (fresh, read-only, isolated) and capture ---------
-  local events_file="$c3_dir/codex-events.jsonl"
-  local stderr_file="$c3_dir/codex-events.stderr"
-  local last_msg_file="$c3_dir/codex-last-message.json"
+  local events_file="$work_c3_dir/codex-events.jsonl"
+  local stderr_file="$work_c3_dir/codex-events.stderr"
+  local last_msg_file="$work_c3_dir/codex-last-message.json"
   # Clean any prior run's captures so a partial re-run is never mistaken for fresh.
   rm -f "$events_file" "$stderr_file" "$last_msg_file"
 
@@ -1348,7 +1615,7 @@ cmd_dispatch() {
   [[ -s "$events_file" ]]   && stdout_sha256="sha256:$(sha256sum "$events_file"   | awk '{print $1}')"
   [[ -f "$last_msg_file" ]] && raw_response_sha256="sha256:$(sha256sum "$last_msg_file" | awk '{print $1}')"
 
-  _write_dispatch_json "$c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
+  _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
     "$required_level" "$template_id" "$template_sha256" "$rendered_prompt_sha256" "$codex_version" \
     "true" "$codex_rc" "$outcome" "$session_id" "$CODEX_MODEL" "$events_valid" \
     "$stdout_sha256" "$raw_response_sha256" "$achieved" \
@@ -1360,7 +1627,7 @@ cmd_dispatch() {
   # every failure). Its return value is informational — the dispatch EXIT code is
   # decided below from the CAPTURE outcome (Step-5 contract), NOT from the report.
   local presp_rc=0
-  _process_response "$evidence_dir" "$manifest" "$codex_rc" "$events_valid" \
+  _process_response "$work_evidence_dir" "$manifest_for_call" "$codex_rc" "$events_valid" \
     "$outcome" "$achieved" "$session_id" "$head_sha" || presp_rc=$?
 
   # --- Step 9: exit status -----------------------------------------------------
@@ -1368,8 +1635,22 @@ cmd_dispatch() {
   # everything else (timeout / rate_limited / failed) signals unavailability →
   # exit 2. The TRUSTWORTHINESS of the audit content is recorded in
   # audit-report.json's status/outcome, independent of this dispatch exit code.
-  echo "$c3_dir/c3-dispatch.json"
-  if [[ "$outcome" == "dispatched" ]]; then
+  # P065 Step 17: when AID_C3_ATTEMPT is explicit, the attempt's report is also
+  # copied to the canonical evidence-root path here — a copy failure flips an
+  # otherwise-0 exit to 2 (fail-closed; see _c3_finalize_attempt).
+  echo "$work_c3_dir/c3-dispatch.json"
+
+  local final_rc=2
+  [[ "$outcome" == "dispatched" ]] && final_rc=0
+
+  if [[ "$attempt_explicit" -eq 1 ]]; then
+    if ! _c3_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+           "$session_id" "$head_sha" "$outcome"; then
+      final_rc=2
+    fi
+  fi
+
+  if [[ "$final_rc" -eq 0 ]]; then
     return 0
   else
     exit 2
