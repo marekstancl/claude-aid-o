@@ -55,3 +55,16 @@ c3_executor:
   #                       aid-fsm.sh's done-advance C3 hook blocks/telemetry-flags it as
   #                       c3_advisory_not_independent, same as any other unverifiable C3 result.
   c3_on_unavailable: degraded_advisory
+
+# c3_fix_loop (P065 Step 16) — bounded fix→reverify loop after a dispatched (real Codex,
+# never degraded_advisory) C3 report comes back with a blocking finding. Mirrors
+# review-checkpoints.yaml's `fix_loop.max_iterations: 2` for CP2/CP3: gate-fixer/implementer
+# fixes the SPECIFIC finding by `fingerprint`, a new HEAD + manifest are built, a NEW isolated
+# `codex exec` reverifies — capped at max_rechecks, then ESCALATION (a further recheck is
+# PM-approved only, never automatic). See pipeline.md DONE §6, step "6a" for the full
+# orchestration (entry condition, loop body, exit conditions, error handling).
+c3_fix_loop:
+  max_rechecks: 2                        # initial audit + up to 2 rechecks = 3 Codex runs max
+  eligible_severities: [critical, high]  # a blocking finding outside this list is never
+                                          # auto-fixed by this loop (C3 blocks only on
+                                          # critical/high anyway); surfaced to the PM as before

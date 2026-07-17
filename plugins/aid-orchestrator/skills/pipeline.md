@@ -1276,14 +1276,91 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
      `Agent()` tool call in `legacy_health` (trust-based health-audit) mode. The bridge is never
      invoked at all for `docs_trivial`/`low`/`medium` profiles.
 
-   In **both** modes the Auditor output completes FIRST; only after it completes does Curator
+   **6a. C3 fix→reverify loop (P065 Step 16).** `c3` mode only — `legacy_health` never enters
+   this loop (Curator dispatches immediately after it, as before). Runs after the `c3` branch's
+   `dispatch`+`verify` above, BEFORE Curator dispatches (Curator must consume the loop's FINAL
+   `audit-report.json`, never an intermediate attempt). This closes the CP5 gap: previously a
+   blocking C3 finding only got flagged in the PM Summary (step 12) and the PM decided ABORT
+   manually — C3 now gets the same bounded auto-repair loop CP2/CP3 already have
+   (`review-checkpoints.yaml` `fix_loop.max_iterations: 2`), read here from
+   `c3-audit-policy.yaml` → `c3_fix_loop` (`max_rechecks: 2`, `eligible_severities: [critical,
+   high]`; policy unreadable → fail-closed to `max_rechecks: 2`).
+
+   **Entry condition:** the report is genuinely `dispatched` (a real Codex run — check
+   `c3/c3-dispatch.json` `.dispatch.outcome == "dispatched"`, NOT the `degraded_advisory`
+   fallback) AND `audit-report.json` `.audit_report.blocking_findings == true` with at least one
+   finding whose severity ∈ `c3_fix_loop.eligible_severities`. A clean first audit (no blocking
+   findings) never enters the loop — 0 extra Codex runs.
+
+   **Not a loop iteration.** A `dispatch` returning `unavailable`/`rate_limited`/`timeout`/
+   `invalid_output` is the EXISTING `unverifiable` (+ step 6's `degraded_advisory` fallback)
+   path, not this loop — `c3_recheck_count` is NOT incremented and no gate-fixer/implementer
+   runs (there is no finding to fix; Codex did not audit). Do not conflate the two paths.
+
+   **Loop body** (while blocking AND `c3_recheck_count < max_rechecks`):
+   1. Dispatch gate-fixer (S/M effort) or implementer (L effort) to fix the SPECIFIC blocking
+      finding(s) by `fingerprint` — a targeted fix, never a general rewrite — producing a new
+      commit → new HEAD.
+      - Fix dispatch fails, or produces no diff (new HEAD identical to prior HEAD) → exit the
+        loop to **ESCALATION** immediately (cannot make progress / would re-audit the identical
+        HEAD).
+   2. Re-run the bridge on `base_sha..newHEAD` for a fresh, isolated Codex pass — this is
+      "recheck N":
+      ```bash
+      bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" build-manifest \
+        "$evidence_dir" "$base_sha" "$newHEAD" "$risk_profile"   # new codex_brief_hash
+      bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" dispatch "$evidence_dir"   # NEW
+      # isolated codex exec — a genuinely new codex_session_id, never the prior attempt's
+      bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" verify   "$evidence_dir"
+      ```
+      Each call overwrites `audit-input-manifest.json` / `audit-report.json` / `.md` /
+      `c3/c3-dispatch.json` in place at the evidence root — there is no separate per-attempt
+      file in this step (that per-attempt evidence layering is Step 17's job; this step only
+      guarantees the evidence root always holds the CANONICAL, i.e. last-attempt, report —
+      see the matching confirmation in `aid-fsm.sh`).
+   3. `bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" set-field c3_recheck_count <n> "$state_file"`
+      (increment). Then re-evaluate blocking status on the new `audit-report.json`:
+      - Still blocking AND the SAME finding `fingerprint` survived this recheck (fix
+        ineffective), OR the findings are mutually conflicting → **ESCALATION** immediately —
+        do not burn the remaining budget on a non-converging fix.
+      - Still blocking, fingerprint(s) differ (a fix introduced a NEW critical/high finding
+        counts against this SAME budget, never a fresh one) → loop again if
+        `c3_recheck_count < max_rechecks`, else fall through to the budget-exhaustion exit
+        below.
+      - Clean (no blocking findings) → exit the loop, proceed to Curator dispatch / merge
+        decision.
+
+   **Exit conditions (exactly one applies):**
+   - **Clean** → proceed to Curator dispatch (step 6's closing paragraph) and the merge
+     decision as normal.
+   - **`c3_recheck_count == max_rechecks (2)` and still blocking** → **ESCALATION**: surfaced to
+     the PM in step 12's summary as blocking (never silently merged); a 3rd recheck / 4th total
+     Codex run is PM-approved only, never automatic re-entry into this loop.
+   - **Same fingerprint survives a recheck, or conflicting findings** → **ESCALATION**
+     immediately, regardless of remaining budget.
+   - A blocking finding NOT in `eligible_severities` (e.g. `medium`) never triggers this loop —
+     no auto-fix; surfaced to the PM as before (C3 blocks only on critical/high anyway, per
+     `c3-audit-policy.yaml`).
+
+   This EPIC 6 loop stays within the `review` sub-phase — it does not itself invoke
+   `aid-fsm.sh transition ... ESCALATION` (the top-level FSM state; no `DONE:ESCALATION`
+   transition exists — DONE's `review`/`release` sub-phases are orthogonal to the READY/
+   EXECUTE/GATES/ESCALATION state machine in §1–§9). "ESCALATION" here means: the loop stops
+   auto-fixing, the FINAL `audit-report.json` (still `blocking_findings: true`) is what
+   Curator/step 12 consume, and the PM Summary's existing MERGE/FIX/ABORT decision point (step
+   12) is where a human actually resolves it — MERGE is not a reasonable option while
+   `blocking_findings: true` survives the loop, matching the existing "⛔ CRITICAL FINDINGS
+   (block merge)" convention already in the summary template below.
+
+   In **both** modes (after 6a resolves, for `c3`; immediately, for `legacy_health`) the
+   Auditor output is FINAL before Curator dispatches; only after it completes does Curator
    (`agents/curator.md`) dispatch, via a separate `Agent()` tool call, consuming the Auditor's
    `audit-report.json` output (Curator hashes its content into `.curator.audit_report_ref` —
    `aid-fsm.sh done-advance` verifies this ref against a fresh `sha256sum` of the file and blocks
    release on mismatch). Curator's serial-after-Auditor dispatch pattern is identical regardless
    of how the `audit-report.json` was produced.
-7. **Wait:** Auditor must complete before Curator dispatches; Curator must complete before
-   continuing
+7. **Wait:** Auditor (and, for `c3`, the 6a fix→reverify loop) must complete before Curator
+   dispatches; Curator must complete before continuing
 8. **Curator auto-fix:** Gate-fixer applies approved proposals at **every effort level (S, M, L)**.
    Tier 2 default: S/M/L all approve; only an explicit `always_defer` rule (architecture,
    standards-L) defers.
@@ -1930,7 +2007,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-07-17
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,
