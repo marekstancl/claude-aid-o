@@ -62,10 +62,13 @@
 #
 # Exit codes:
 #   init/increment/read: 0 = success, 1 = precondition/fail-closed failure.
-#   check-budget: 0 = budget available (incl. pm_override present), 1 = FAIL-
-#     CLOSED (exhausted, OR corrupt ledger, OR evidence present but ledger
-#     missing), 2 = not_initialized (no ledger AND no CP1 evidence — a
-#     genuinely brand-new plan; caller should run `init`).
+#   check-budget: 0 = budget available, 1 = FAIL-CLOSED (exhausted, OR
+#     corrupt ledger, OR evidence present but ledger missing), 2 =
+#     not_initialized (no ledger AND no CP1 evidence — a genuinely
+#     brand-new plan; caller should run `init`). The ledger's own internal
+#     `pm_override` field is schema-only and never grants a bypass — the
+#     sole sanctioned override is aid-cp1-gate.sh's single-use
+#     cp1-pm-escalation-override.json artifact.
 #
 # **Last Updated:** 2026-07-18
 # =============================================================================
