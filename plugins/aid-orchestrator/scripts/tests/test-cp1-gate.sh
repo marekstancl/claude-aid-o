@@ -277,7 +277,7 @@ set_ledger_pm_override() {
 # write_pm_override <plan_evidence_root> [ref]
 #   The gate's OWN one-shot PM-escalation override artifact (distinct from
 #   the ledger's pm_override field) — see aid-cp1-gate.sh's
-#   _cp1_check_pm_override / _cp1_consume_pm_override.
+#   _cp1_check_and_consume_pm_override.
 write_pm_override() {
   local root="$1" ref="${2:-PM approved bypass 2026-07-18 review}"
   mkdir -p "$root"

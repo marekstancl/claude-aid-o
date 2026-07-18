@@ -65,7 +65,7 @@
 # Either requirement's failure can be bypassed ONLY by an explicit,
 # ONE-SHOT PM-escalation override artifact at
 # `<plan_evidence_root>/cp1-pm-escalation-override.json` — see
-# `_cp1_check_pm_override` below. Once consumed to bypass a failure, the
+# `_cp1_check_and_consume_pm_override` below. Once consumed to bypass a failure, the
 # override file is renamed to `<...>.consumed-<epoch>` so it cannot silently
 # authorize a second bypass (mirrors "the override permits exactly one more
 # attempt", plan Error Handling section).
