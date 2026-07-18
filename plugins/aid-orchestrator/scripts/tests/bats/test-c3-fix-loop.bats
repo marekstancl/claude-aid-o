@@ -338,13 +338,21 @@ _drive_two_attempts() {
 }
 
 @test "collision guard: reusing an AID_C3_ATTEMPT that already recorded a completed dispatch is a PRECONDITION FAIL" {
+  # Deliberately BLOCKING (not clean) and below max_rechecks, so loop-summary
+  # outcome stays null (neither "clean" nor "escalated") — this isolates the
+  # attempt-number collision guard from the terminal-outcome check (own tests:
+  # "escalation is terminal" / "clean is ALSO terminal").
   local head1; head1="$(_commit_change 1)"
   _build_manifest "$BASE_SHA" "$head1"
   local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
   export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-first" \
-         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Unchecked error path.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
   AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "null" ]
 
   # Same manifest/head still current; a second call reusing AID_C3_ATTEMPT=1
   # must be refused — attempt-01 already recorded a genuine dispatched outcome.
@@ -448,6 +456,59 @@ _drive_two_attempts() {
   [ -d "$TEST_EVIDENCE_DIR/c3/attempt-04" ]
   run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
   [ "$output" = "pass" ]
+}
+
+@test "clean is ALSO terminal: a 2nd explicit dispatch after outcome==clean is rejected without an override" {
+  # AC1's fixture (a single clean attempt-01) reaches loop-summary outcome
+  # "clean" — pipeline.md 6a documents this as the exit-to-Curator terminal
+  # state, exactly as symmetric to "escalated". A second live DONE-review
+  # audit of this fix (E-065-6_7, round 2) found the round-1 fix only ever
+  # checked for "escalated", leaving "clean" free to be silently overwritten
+  # by an unbudgeted extra dispatch — this test proves that gap is now closed.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-clean-term-1" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "clean" ]
+
+  # A 2nd attempt (no PM-authorized override) must be rejected BEFORE any
+  # codex invocation or evidence write for attempt-02.
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-clean-term-2" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"clean"* ]]
+  [ ! -d "$TEST_EVIDENCE_DIR/c3/attempt-02" ]
+
+  # The loop-summary and canonical report are UNCHANGED by the rejected call.
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "clean" ]
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "pass" ]
+  run jq -r '.audit_report.reviewed_head' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "$head1" ]
+
+  # A short (< 20 char) override is ALSO rejected — the reason must be real.
+  AID_C3_FORCE_BEYOND_ESCALATION="too short" AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # A genuine, >=20-char, PM-authorized override DOES let the 2nd attempt through.
+  AID_C3_FORCE_BEYOND_ESCALATION="PM approved an extra recheck 2026-07-18 review" \
+    AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_EVIDENCE_DIR/c3/attempt-02" ]
+  run jq -r '.audit_report.reviewed_head' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "$head2" ]
 }
 
 @test "loop-summary write failure fails the whole attempt closed, even when the canonical report copy succeeded" {

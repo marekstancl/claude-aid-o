@@ -1426,28 +1426,32 @@ cmd_dispatch() {
     [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
       || { echo "PRECONDITION FAIL: AID_C3_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
 
-    # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding): escalation
-    # must be TERMINAL for automatic dispatches. Nothing previously stopped a
-    # 4th (or Nth) explicit-attempt dispatch from silently overwriting an
-    # already-"escalated" c3/loop-summary.json outcome back to clean/
-    # in-progress — the bounded-loop requirement (c3_fix_loop.max_rechecks)
-    # was documented in pipeline.md but never mechanically enforced here.
-    # Every explicit-attempt dispatch now checks the CURRENT loop-summary.json
-    # (if one already exists for this evidence dir) before proceeding; a
-    # recorded outcome:"escalated" rejects any further attempt unless an
-    # explicit, auditable, PM-authorized override is supplied — mirroring
-    # this project's established `--force --reason '<>=20 chars>'` pattern.
+    # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 findings, two rounds):
+    # BOTH terminal loop outcomes — "escalated" AND "clean" — must stop
+    # automatic dispatches. Round 1 fixed "escalated"; a live re-audit at the
+    # round-1 fix's own HEAD caught that "clean" was still left open: nothing
+    # stopped a 4th (or Nth) explicit-attempt dispatch from silently
+    # overwriting an already-"clean" c3/loop-summary.json back to
+    # in-progress, exactly the same unbounded-loop problem in a different
+    # guise — the bounded-loop requirement (pipeline.md 6a: clean exits to
+    # Curator, is terminal) was documented but never mechanically enforced
+    # for the clean case. Every explicit-attempt dispatch now checks the
+    # CURRENT loop-summary.json (if one already exists for this evidence
+    # dir) before proceeding; a recorded outcome of "escalated" OR "clean"
+    # rejects any further attempt unless an explicit, auditable,
+    # PM-authorized override is supplied — mirroring this project's
+    # established `--force --reason '<>=20 chars>'` pattern.
     local existing_summary="$c3_dir/loop-summary.json"
     if [[ -f "$existing_summary" ]]; then
       local prior_loop_outcome
       prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)"
-      if [[ "$prior_loop_outcome" == "escalated" ]]; then
+      if [[ "$prior_loop_outcome" == "escalated" || "$prior_loop_outcome" == "clean" ]]; then
         if [[ -z "${AID_C3_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C3_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
-          echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"escalated\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement, c3_fix_loop.max_rechecks exhausted)." >&2
+          echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement: \"$prior_loop_outcome\" is a terminal outcome per pipeline.md 6a)." >&2
           echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C3_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
           exit 1
         fi
-        echo "aid-c3-dispatch: WARNING — proceeding past a recorded escalation via PM-authorized override: ${AID_C3_FORCE_BEYOND_ESCALATION}" >&2
+        echo "aid-c3-dispatch: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${AID_C3_FORCE_BEYOND_ESCALATION}" >&2
       fi
     fi
 
