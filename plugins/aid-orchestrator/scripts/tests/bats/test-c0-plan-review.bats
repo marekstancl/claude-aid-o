@@ -835,10 +835,13 @@ EOF
 
   # Proof: the ledger's attempts counter must have advanced from 0 to 1.
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
-  # Proof: the attempts_log must record the plan_hash and codex session.
+  # Proof: the attempts_log must record the plan_hash and codex session —
+  # THREAD_ID is the fixed default codex_session_id this fixture's fake
+  # codex stub always emits (see THREAD_ID at the top of this file), unless
+  # FAKE_C0_THREAD_ID overrides it (not done in this test).
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts_log | length')" = "1" ]
   run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test
-  [[ "$output" == *"$session_id"* ]] || true
+  [[ "$output" == *"$THREAD_ID"* ]]
 }
 
 @test "FINDING 1: dispatch without a valid ledger fails closed (unverifiable), even though Codex is clean" {
@@ -855,6 +858,33 @@ EOF
   [ "$output" = "unverifiable" ]
   run jq -r '.outcome' "$REPORT"
   [ "$output" = "ledger_increment_failed" ]
+}
+
+@test "FINDING 1 (CP2 round-4 re-review): a transport-genuine but content-invalid dispatch (hash_mismatch) does NOT increment the ledger" {
+  # CP2 independently reproduced this exact scenario and found the ORIGINAL
+  # fix's gate (bare `outcome == "dispatched"`) is too broad: `outcome` is a
+  # pure transport-level signal (Codex's CLI stream was well-formed) and
+  # says nothing about whether the response CONTENT then passed validation.
+  # A hash-mismatch response still has outcome=="dispatched" (the transport
+  # genuinely succeeded) but review_status=="unverifiable" (content invalid)
+  # — the plan's own Step 20 spec groups this with true transport failures
+  # ("Codex unavailable/timeout/invalid does not increment the ledger"),
+  # so it must NOT consume a budget slot.
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=hash_mismatch run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+
+  run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
+  run jq -r '.outcome' "$REPORT"; [ "$output" = "hash_mismatch" ]
+
+  # The ledger must still be at attempts:0 — this content-invalid response
+  # never consumed a budget slot despite the transport-level dispatch
+  # succeeding.
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.attempts' <<<"$output")" = "0" ]
+  [ "$(jq -r '.attempts_log | length' <<<"$output")" = "0" ]
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

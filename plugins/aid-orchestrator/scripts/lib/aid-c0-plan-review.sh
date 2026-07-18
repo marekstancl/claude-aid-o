@@ -1047,11 +1047,29 @@ cmd_dispatch() {
   _c0_process_response "$evidence_dir" "$manifest" "$codex_rc" "$events_valid" \
     "$outcome" "$achieved" "$session_id" "$reviewed_head" || presp_rc=$?
 
-  # FINDING 1 FIX: Mechanically increment the CP1 ledger ONLY for a genuine,
-  # well-formed Codex dispatch (outcome == "dispatched"). This closes the gap:
-  # before this fix, the ledger was never incremented by code, only mentioned
-  # in prose. Now every real dispatch also advances the counter.
-  if [[ "$outcome" == "dispatched" ]]; then
+  # FINDING 1 FIX: Mechanically increment the CP1 ledger for a genuine
+  # dispatch. This closes the gap: before this fix, the ledger was never
+  # incremented by code, only mentioned in prose. Now every real dispatch
+  # also advances the counter.
+  #
+  # CP2 (round-4 re-review) found `outcome == "dispatched"` alone is too
+  # broad a gate: `outcome` is a pure TRANSPORT-level signal (Codex's CLI
+  # event stream was well-formed) — it says nothing about whether the
+  # RESPONSE CONTENT then passed validation (hash binding, schema). A
+  # transport-genuine-but-content-invalid response (`_c0_process_response`
+  # writes `review_status: "unverifiable"`) would have incremented the
+  # ledger under the outcome-only check — contradicting BOTH this file's
+  # own carve-out below AND the plan's own Step 20 spec ("Codex
+  # unavailable/timeout/invalid does not increment the ledger"), which
+  # explicitly groups "invalid" alongside true transport failures for C0
+  # (unlike C3's sibling EPIC 6 system, which evolved a DIFFERENT,
+  # deliberately more nuanced budget rule for its own "genuinely dispatched
+  # but invalid content" case in a later round — C0's spec never asked for
+  # that distinction). Gate on the ACTUAL WRITTEN report's `review_status`,
+  # not the transport-level `outcome` alone.
+  local report_review_status=""
+  report_review_status="$(jq -r '.review_status // ""' "$evidence_dir/c0-plan-review.json" 2>/dev/null || echo "")"
+  if [[ "$outcome" == "dispatched" && "$report_review_status" != "unverifiable" ]]; then
     local plan_id plan_hash ledger_rc=0
     plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest" 2>/dev/null || echo "")"
     plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest" 2>/dev/null || echo "")"
