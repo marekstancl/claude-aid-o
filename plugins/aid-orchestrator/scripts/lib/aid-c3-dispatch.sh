@@ -2132,9 +2132,21 @@ cmd_escalate() {
     || _fail "no c3/loop-summary.json at $evidence_dir — nothing to escalate (escalate marks an IN-PROGRESS fix-loop terminal; it does not create one from nothing)"
 
   local cur_outcome
+  # CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding, round 5): the original
+  # check only rejected "clean", implicitly allowing "unverifiable" (and even
+  # an already-"escalated") summary to be escalated too. "unverifiable" is
+  # NOT an in-progress-blocking state — per pipeline.md 6a's "not a loop
+  # iteration" carve-out (rounds 3-4) it must stay freely retriable, so
+  # forcing it to "escalated" here would wrongly terminate a state the rest
+  # of the bridge deliberately keeps open. escalate is for ending an
+  # IN-PROGRESS (still-blocking, not yet terminal) loop early on a
+  # controller's judgment call — that state is represented by exactly one
+  # value: a JSON `null` outcome, which `jq -r '.outcome // ""'` reads back
+  # as the empty string. Fail closed on every other value (clean, escalated,
+  # unverifiable, or anything unrecognized).
   cur_outcome="$(jq -r '.outcome // ""' "$summary" 2>/dev/null)"
-  [[ "$cur_outcome" != "clean" ]] \
-    || _fail "c3/loop-summary.json already recorded outcome=\"clean\" — refusing to overwrite a clean audit verdict with a manual escalation"
+  [[ -z "$cur_outcome" ]] \
+    || _fail "c3/loop-summary.json already recorded a terminal or non-actionable outcome (\"$cur_outcome\") — escalate only applies to an in-progress, still-blocking loop; refusing to overwrite \"$cur_outcome\""
 
   local tmp="$summary.tmp.$$" iso_now
   iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

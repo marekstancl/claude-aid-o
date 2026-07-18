@@ -752,6 +752,62 @@ _drive_two_attempts() {
   [[ "$output" == *"clean"* ]]
 }
 
+@test "escalate subcommand: precondition failure — outcome==unverifiable must stay retriable, NOT escalatable (round-5 fix)" {
+  # A live DONE-review found the round-4 escalate subcommand only rejected
+  # "clean", implicitly allowing an "unverifiable" summary (a genuinely
+  # dispatched-but-invalid-content attempt, still under budget — see the
+  # round-3 test) to be manually escalated too. That would wrongly terminate
+  # a state pipeline.md 6a's "not a loop iteration" carve-out (rounds 3-4)
+  # deliberately keeps retriable.
+  local WRONG_HEAD="0000000000000000000000000000000000dead"
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$WRONG_HEAD" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-unv-esc" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "unverifiable" ]
+
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "attempting to escalate an unverifiable outcome"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"unverifiable"* ]]
+
+  # Confirm the summary is genuinely untouched and a retry is STILL allowed
+  # without any override — escalate's rejection did not itself become a
+  # terminal state.
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "unverifiable" ]
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+}
+
+@test "escalate subcommand: precondition failure — cannot re-escalate (or change the reason of) an already-escalated summary" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-reesc-1" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Finding Y.","recommendation":"Fix Y.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "first conflicting-findings judgment recorded here"
+  [ "$status" -eq 0 ]
+  run jq -r '.manual_escalation.reason' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "first conflicting-findings judgment recorded here" ]
+
+  # A second escalate call must NOT silently overwrite the first judgment.
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "a different, later judgment attempt"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"escalated"* ]]
+  run jq -r '.manual_escalation.reason' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "first conflicting-findings judgment recorded here" ]
+}
+
 @test "loop-summary write failure fails the whole attempt closed, even when the canonical report copy succeeded" {
   # Filesystem-permission injection cannot isolate JUST the loop-summary write
   # from a full `dispatch` CLI run: c3/attempt-NN/ and c3/loop-summary.json
