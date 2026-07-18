@@ -442,6 +442,20 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
   "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
+
+# Record the first C0 dispatch on the ledger, ONLY if it was a genuine,
+# verifiable dispatch (review_status != "unverifiable"). A dispatch failure
+# (Codex unavailable, etc.) leaves review_status unverifiable and does NOT
+# consume a ledger attempt — this carve-out mirrors the loop's own "Not a
+# loop iteration" rule.
+review_status="$(jq -r '.review_status // ""' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
+if [[ "$review_status" != "unverifiable" ]]; then
+  codex_session_id="$(jq -r '.codex_session // null' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
+  reviewed_plan_hash="$(jq -r '.reviewed_plan_hash // ""' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
+  bash "$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh" increment \
+    --project-root "$PROJECT_ROOT" --codex-session "$codex_session_id" \
+    "$PLAN_ID" "$reviewed_plan_hash"
+fi
 ```
 `PLAN_EVIDENCE_ROOT` is `.aid-o/work/evidence/<plan_id>/` (one level above
 `cp1-deep/` — the same root `aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
@@ -550,7 +564,7 @@ failure.
 
 Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
 Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
-Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (plan evidence ROOT — one level above `cp1-deep/`), per-attempt raw evidence under `.aid-o/work/evidence/<plan_id>/c0/`.
+Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (the canonical, latest-attempt review result, stored at the plan evidence ROOT — one level above `cp1-deep/`). Note: raw Codex evidence (dispatch.json, codex-events.jsonl, codex-last-message.json) is not retained per-attempt; only the final canonical review survives.
 Ledger location (high-risk only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`aid-cp1-ledger.sh`).
 
 EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L1/L2/L3/adjudicator files, unresolved accepted blockers, a missing/unverifiable/still-blocking C0 review, or an exhausted CP1 ledger budget each cause a non-zero exit — see "C0 Cross-Provider Review Loop" above for the full contract.

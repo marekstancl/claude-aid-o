@@ -241,11 +241,14 @@ artifact — see "Bounded Loop" below.
   bypass. Using it always records the override AND the unresolved findings
   in the gate's own log output — never a silent pass.
 
-**Evidence layering:** per-attempt raw evidence lives under
-`.aid-o/work/evidence/<plan_id>/c0/attempt-NN/` (mirrors C3's
-`c3/attempt-NN/` convention); the canonical `c0-plan-review.json` at the
-evidence root is always the LATEST attempt — the file the adjudicator and
-`aid-cp1-gate.sh` both consume.
+**Evidence retention:** raw Codex evidence files (dispatch.json, codex-events.jsonl,
+codex-last-message.json) are not preserved per-attempt; each dispatch run
+overwrites the prior attempt's raw evidence. The canonical `c0-plan-review.json`
+at the evidence root survives all rechecks and always reflects the LATEST
+attempt — the file the adjudicator and `aid-cp1-gate.sh` both consume. Per-attempt
+raw evidence layering (mirroring C3's `c3/attempt-NN/` convention) is not yet
+implemented; deferred to a later EPIC if audit retention of intermediate attempts
+becomes required.
 
 ### C0 Observe Lenses — Adjudicator Addendum (append-only, E4)
 

@@ -189,18 +189,22 @@ _ledger_field() {
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
 }
 
-@test "check-budget reports available when pm_override.present is true, even if exhausted" {
+@test "check-budget ignores pm_override.present field; it is NOT honored as a bypass" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:aaa >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:bbb >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:ccc >/dev/null
-  # Simulate an out-of-band PM override (no dedicated setter subcommand per spec).
+  # At this point, attempts=3 and max=3, so budget is exhausted.
+  # Simulate an out-of-band ledger-internal override (no dedicated setter subcommand per spec).
   local lf; lf="$(_ledger_file P132)"
   yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18"' "$lf"
+  # Even with pm_override.present set to true, the budget check must still
+  # report exhausted — the ONLY sanctioned override is the gate-level
+  # cp1-pm-escalation-override.json artifact, not the ledger-internal field.
   run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132
-  [ "$status" -eq 0 ]
-  [[ "$(echo "$output" | jq -r '.status')" == "available" ]]
-  [[ "$(echo "$output" | jq -r '.pm_override')" == "true" ]]
+  [ "$status" -eq 1 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
 }
 
 @test "check-budget is FAIL-CLOSED (init_required) when CP1 evidence exists but ledger is missing" {

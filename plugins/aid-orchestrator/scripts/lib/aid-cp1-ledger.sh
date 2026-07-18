@@ -402,23 +402,22 @@ cmd_check_budget() {
     return 1
   fi
 
-  local attempts max override_present
+  local attempts max
   attempts="$(printf '%s' "$ledger_json" | jq -r '.attempts')"
   max="$(printf '%s' "$ledger_json" | jq -r '.max')"
-  override_present="$(printf '%s' "$ledger_json" | jq -r '.pm_override.present // false')"
   local ev_bool; ev_bool="$([[ "$evidence_present" == "true" ]] && echo true || echo false)"
 
-  if [[ "$override_present" == "true" ]]; then
-    jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
-      '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: true,
-        reason: "PM override present — budget check bypassed."}'
-    return 0
-  fi
+  # NOTE: The pm_override field is retained in the ledger schema for forward
+  # compatibility and informational purposes, but check-budget NO LONGER uses it
+  # to authorize bypassing the budget check. The ONLY sanctioned override path
+  # for an exhausted budget is the gate-level cp1-pm-escalation-override.json
+  # artifact, verified and consumed by aid-cp1-gate.sh. Direct ledger-internal
+  # overrides (via pm_override.present hand-edit) are no longer honored.
 
   if [[ "$attempts" -ge "$max" ]]; then
     jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
       '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
-        reason: "attempts >= max and no PM override — revision budget exhausted."}'
+        reason: "attempts >= max — revision budget exhausted. Use PM-escalation override if needed."}'
     return 1
   fi
 

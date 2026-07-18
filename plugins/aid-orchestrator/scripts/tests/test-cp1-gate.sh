@@ -30,7 +30,8 @@
 #      (proves the DEFAULT wiring genuinely shells out, not just a test seam)
 #  19. CP1 ledger missing while CP1-deep evidence is present → fail-closed block
 #  20. CP1 ledger budget exhausted (attempts>=max, no pm_override) → gate fails
-#  21. CP1 ledger pm_override.present=true bypasses an exhausted budget → PASS
+#  21. CP1 ledger pm_override.present=true does NOT bypass an exhausted budget
+#      (ledger-internal override removed; only gate-level override honored)
 #  22. PM-escalation override artifact bypasses a missing c0-plan-review.json → PASS
 #  23. the PM-escalation override is consumed (renamed) after one bypass — a
 #      second gate run without a fresh override blocks again
@@ -866,9 +867,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 21: CP1 ledger pm_override.present=true bypasses an exhausted budget
+# TEST 21: CP1 ledger pm_override.present=true does NOT bypass exhausted budget
+#           (the ONLY sanctioned override is the gate-level cp1-pm-escalation-override.json)
 # ---------------------------------------------------------------------------
-run_test "ledger pm_override.present=true bypasses an exhausted budget"
+run_test "ledger pm_override.present=true does NOT bypass exhausted budget"
 
 proj21="$(make_project_root "t21")"
 plan21="$TMPDIR_ROOT/t21-plan.md"
@@ -880,16 +882,21 @@ proot21="$(plan_evidence_root_of "$ev21")"
 write_passing_c0_review "$proot21"
 stub_c0_verify "$TMPDIR_ROOT/t21-stub" ok
 init_ledger_exhausted "$proj21" "P021"
+# Set pm_override.present = true in the ledger (simulating a hand-edit).
 set_ledger_pm_override "$proj21" "P021"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan21" --project-root "$proj21" 2>&1)" || gate_exit=$?
 unstub_c0_verify
 
-if [[ "$gate_exit" -eq 0 ]]; then
-  pass "ledger pm_override bypasses exhausted budget"
+# Even with pm_override.present = true in the ledger, the gate must still
+# reject an exhausted budget (exit 1) — the ledger-internal field is no longer
+# honored as a bypass mechanism. The ONLY sanctioned override is the gate-level
+# cp1-pm-escalation-override.json artifact.
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "ledger pm_override does NOT bypass exhausted budget"
 else
-  fail "ledger pm_override bypasses exhausted budget" "got exit=$gate_exit, output: $gate_out"
+  fail "ledger pm_override does NOT bypass exhausted budget" "got exit=$gate_exit (expected non-zero), output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

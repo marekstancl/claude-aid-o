@@ -277,40 +277,40 @@ _cp1_override_file() {
 }
 
 # ---------------------------------------------------------------------------
-# _cp1_check_pm_override <plan_evidence_root>
-#   Echoes the override's pm_ref reason and returns 0 iff a structurally
-#   valid override artifact is present (non-empty "pm_ref" field, >= 20
-#   chars — same reasoned-override convention as AID_C3_FORCE_BEYOND_
-#   ESCALATION elsewhere in this project). Returns 1 (nothing echoed)
-#   otherwise. Read-only — never consumes/renames the file.
+# _cp1_check_and_consume_pm_override <plan_evidence_root>
+#   Atomically checks for a valid PM-escalation override and claims/consumes it
+#   in one operation via no-clobber rename (mv -n). This prevents TOCTOU races
+#   where two concurrent invocations could both read the override as present
+#   before either consumes it.
+#
+#   If the override file exists and is structurally valid (non-empty pm_ref
+#   field >= 20 chars), attempts to rename it to a .consumed-<epoch> sibling.
+#   - If the rename succeeds (mv -n exits 0): we now own this override.
+#     Echoes the pm_ref reason and returns 0.
+#   - If the rename fails (file already renamed by another process, or never
+#     existed): echoes nothing and returns 1.
+#
+#   This is the ONLY way to authorize a bypass — no separate check+consume calls.
 # ---------------------------------------------------------------------------
-_cp1_check_pm_override() {
-  local plan_evidence_root="$1" override_file reason
+_cp1_check_and_consume_pm_override() {
+  local plan_evidence_root="$1" override_file consumed_file reason
   override_file="$(_cp1_override_file "$plan_evidence_root")"
+
+  # Quick sanity check: does the file exist and have valid pm_ref?
   [[ -f "$override_file" ]] || return 1
   reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
   [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
-  printf '%s' "$reason"
-  return 0
-}
 
-# ---------------------------------------------------------------------------
-# _cp1_consume_pm_override <plan_evidence_root>
-#   Renames the override artifact to a `.consumed-<epoch>` sibling once it
-#   has been used to bypass a failing check — mechanically enforces "the
-#   override permits exactly one more attempt" (plan Error Handling
-#   section) rather than leaving that as prose only. Best-effort: a rename
-#   failure is logged but does not itself fail the gate (the bypass this
-#   run already happened).
-# ---------------------------------------------------------------------------
-_cp1_consume_pm_override() {
-  local plan_evidence_root="$1" override_file
-  override_file="$(_cp1_override_file "$plan_evidence_root")"
-  [[ -f "$override_file" ]] || return 0
-  if ! mv -f "$override_file" "${override_file}.consumed-$(date -u +%s)" 2>/dev/null; then
-    echo "CP1-gate: WARNING — could not archive consumed PM-escalation override at ${override_file}" >&2
+  # Atomically claim this override via no-clobber rename. If another process
+  # already consumed it, our rename will fail (exit 1) and we return 1.
+  consumed_file="${override_file}.consumed-$(date -u +%s)"
+  if mv -n "$override_file" "$consumed_file" 2>/dev/null; then
+    printf '%s' "$reason"
+    return 0
+  else
+    # File was already consumed by another run, or never existed.
+    return 1
   fi
-  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -326,8 +326,12 @@ _cp1_c0_and_ledger_gate() {
   local plan_evidence_root="${project_root}/.aid-o/work/evidence/${plan_id}"
   local c0_review_file="${plan_evidence_root}/c0-plan-review.json"
 
+  # Atomically check-and-consume PM-override: if it exists and is valid, we
+  # claim it here via no-clobber rename. A second concurrent run attempting
+  # the same rename will fail and get override_present=0 — the override
+  # authorizes exactly one bypass, never more.
   local override_reason="" override_present=0
-  if override_reason="$(_cp1_check_pm_override "$plan_evidence_root")"; then
+  if override_reason="$(_cp1_check_and_consume_pm_override "$plan_evidence_root")"; then
     override_present=1
   fi
 
@@ -411,12 +415,10 @@ ERRMSG
     fi
   fi
 
-  # The override was needed for at least one of the two checks above (both
-  # branches that would otherwise `exit 1` already returned control here
-  # ONLY because override_present==1) — consume it now, exactly once.
-  if [[ "$override_present" -eq 1 && ( "$c0_ok" -ne 1 || "$ledger_ok" -ne 1 ) ]]; then
-    _cp1_consume_pm_override "$plan_evidence_root"
-  fi
+  # NOTE: The PM-override has already been atomically consumed (renamed to
+  # .consumed-<epoch>) at the early check point if it existed and was valid.
+  # This enforces exactly-once semantics at the filesystem level (no separate
+  # consume operation needed).
 
   echo "CP1-gate: C0 plan review + ledger budget checks passed for ${plan_id}." >&2
   exit 0
