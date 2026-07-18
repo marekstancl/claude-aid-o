@@ -334,6 +334,12 @@ _cp1_check_pm_override() {
 #   per the harness above), and a stale-destination collision (mv reports
 #   0 via -n's no-clobber skip, but source remains — caught by the
 #   source-gone half).
+#
+#   Platform note: relies on GNU coreutils' `mv -n` using an atomic
+#   renameat2(RENAME_NOREPLACE) on Linux (this project's target platform,
+#   confirmed empirically via a 550-iteration concurrent-race harness,
+#   0 double-claims) — not a portability guarantee across all `mv`
+#   implementations.
 # ---------------------------------------------------------------------------
 _cp1_claim_pm_override() {
   local plan_evidence_root="$1" override_file consumed_file reason
