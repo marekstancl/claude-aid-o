@@ -19,6 +19,24 @@
 #  12. lens file with content but missing stop_rule_blockers: field fails gate
 #  13. adjudicator missing verdict: field fails gate
 #
+# P065 E-065-7_7 Step 20 additions (C0 cross-provider review + CP1 ledger gate):
+#  14. c0-plan-review.json missing → gate fails even with clean CP1-deep evidence
+#  15. c0-plan-review.json review_status=unverifiable → gate fails
+#  16. c0-plan-review.json blocking_findings=true → gate fails
+#  17. aid-c0-plan-review.sh verify failure (stubbed) → gate fails even though the
+#      report's own fields look clean (proves the shell-out is load-bearing)
+#  18. a fabricated-but-field-clean c0-plan-review.json with NO real supporting
+#      dispatch evidence fails the REAL (unstubbed) verify() → gate blocks
+#      (proves the DEFAULT wiring genuinely shells out, not just a test seam)
+#  19. CP1 ledger missing while CP1-deep evidence is present → fail-closed block
+#  20. CP1 ledger budget exhausted (attempts>=max, no pm_override) → gate fails
+#  21. CP1 ledger pm_override.present=true bypasses an exhausted budget → PASS
+#  22. PM-escalation override artifact bypasses a missing c0-plan-review.json → PASS
+#  23. the PM-escalation override is consumed (renamed) after one bypass — a
+#      second gate run without a fresh override blocks again
+#  24. full success path: complete CP1-deep evidence + verified clean C0 review
+#      (stubbed verify=ok) + available ledger budget → PASS with no override needed
+#
 # Exit codes: 0=all passed, 1=one or more tests failed
 # =============================================================================
 set -uo pipefail
@@ -137,6 +155,137 @@ write_plan() {
 }
 
 # ---------------------------------------------------------------------------
+# P065 E-065-7_7 Step 20 helpers — C0 review + CP1 ledger fixtures
+# ---------------------------------------------------------------------------
+LEDGER_SCRIPT="$REPO_ROOT/plugins/aid-orchestrator/scripts/lib/aid-cp1-ledger.sh"
+
+# plan_evidence_root_of <cp1_deep_evidence_dir>  — the plan evidence ROOT is
+# one level ABOVE cp1-deep/ (same convention aid-c0-plan-review.sh and
+# aid-cp1-gate.sh's own Step 20 code both use).
+plan_evidence_root_of() {
+  dirname "$1"
+}
+
+# write_passing_c0_review <plan_evidence_root>
+#   A clean, non-blocking c0-plan-review.json. On its own this only satisfies
+#   the gate's FIELD checks — pair with stub_c0_verify_ok (or a real
+#   dispatched+verified evidence trail) to also satisfy the verify() shell-out.
+write_passing_c0_review() {
+  local root="$1"
+  mkdir -p "$root"
+  cat > "${root}/c0-plan-review.json" <<'EOF'
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_plan_review",
+  "review_status": "pass",
+  "blocking_findings": false,
+  "findings": []
+}
+EOF
+}
+
+write_unverifiable_c0_review() {
+  local root="$1"
+  mkdir -p "$root"
+  cat > "${root}/c0-plan-review.json" <<'EOF'
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_plan_review",
+  "review_status": "unverifiable",
+  "blocking_findings": false,
+  "findings": [],
+  "unverifiable_reasons": ["codex unavailable"]
+}
+EOF
+}
+
+write_blocking_c0_review() {
+  local root="$1"
+  mkdir -p "$root"
+  cat > "${root}/c0-plan-review.json" <<'EOF'
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "c0_plan_review",
+  "review_status": "findings",
+  "blocking_findings": true,
+  "findings": [
+    {"severity":"high","area":"feasibility","finding":"Named resource does not exist.",
+     "recommendation":"Add a Create step.","action_owner":"implementer"}
+  ]
+}
+EOF
+}
+
+# stub_c0_verify <dir> <ok|fail>
+#   Installs a stand-in for aid-c0-plan-review.sh (AID_CP1_GATE_C0_REVIEW_BIN
+#   test seam) that always succeeds/fails, so most tests can prove the GATE's
+#   own logic without a full git+fake-codex dispatch fixture. The seam is
+#   never set in production — see test 18 below for a REAL (unstubbed)
+#   verify() proving the default wiring is load-bearing.
+stub_c0_verify() {
+  local dir="$1" mode="$2"
+  mkdir -p "$dir"
+  local stub="$dir/stub-c0-verify.sh"
+  if [[ "$mode" == "ok" ]]; then
+    cat > "$stub" <<'EOF'
+#!/usr/bin/env bash
+echo "verified — stub ok"
+exit 0
+EOF
+  else
+    cat > "$stub" <<'EOF'
+#!/usr/bin/env bash
+echo "verify: NOT verified — stub tamper" >&2
+exit 2
+EOF
+  fi
+  chmod +x "$stub"
+  AID_CP1_GATE_C0_REVIEW_BIN="$stub"
+  export AID_CP1_GATE_C0_REVIEW_BIN
+}
+
+unstub_c0_verify() {
+  unset AID_CP1_GATE_C0_REVIEW_BIN
+}
+
+# init_ledger_available <project_root> <plan_id>
+#   Bootstraps a ledger with budget available. --pre-enforcement is required
+#   here because these fixtures always write CP1-deep evidence FIRST (an
+#   already-in-flight plan from the ledger's point of view — see
+#   aid-cp1-ledger.sh's own init contract), never a provably-new plan.
+init_ledger_available() {
+  local proj="$1" plan_id="$2"
+  bash "$LEDGER_SCRIPT" init --pre-enforcement --project-root "$proj" "$plan_id" >/dev/null
+}
+
+# init_ledger_exhausted <project_root> <plan_id>  — attempts == max, no override.
+init_ledger_exhausted() {
+  local proj="$1" plan_id="$2"
+  init_ledger_available "$proj" "$plan_id"
+  local ledger_file="${proj}/.aid-o/work/cp1-ledger/${plan_id}.yaml"
+  yq -i '.attempts = .max' "$ledger_file"
+}
+
+# set_ledger_pm_override <project_root> <plan_id> [ref]
+set_ledger_pm_override() {
+  local proj="$1" plan_id="$2" ref="${3:-PM approved additional attempt 2026-07-18}"
+  local ledger_file="${proj}/.aid-o/work/cp1-ledger/${plan_id}.yaml"
+  yq -i ".pm_override.present = true | .pm_override.ref = \"${ref}\"" "$ledger_file"
+}
+
+# write_pm_override <plan_evidence_root> [ref]
+#   The gate's OWN one-shot PM-escalation override artifact (distinct from
+#   the ledger's pm_override field) — see aid-cp1-gate.sh's
+#   _cp1_check_pm_override / _cp1_consume_pm_override.
+write_pm_override() {
+  local root="$1" ref="${2:-PM approved bypass 2026-07-18 review}"
+  mkdir -p "$root"
+  jq -n --arg ref "$ref" \
+    '{schema_version:"aid-2.0", artifact_type:"cp1_pm_escalation_override", pm_ref:$ref, created_at:"2026-07-18T00:00:00Z"}' \
+    > "${root}/cp1-pm-escalation-override.json"
+}
+
+# ---------------------------------------------------------------------------
 # Guard: gate script must exist
 # ---------------------------------------------------------------------------
 if [[ ! -f "$GATE_SCRIPT" ]]; then
@@ -179,9 +328,14 @@ write_plan "$plan2" "P002" "risk: high" "Some high-risk plan content."
 
 ev2="$(make_evidence_dir "$proj2" "P002")"
 write_passing_evidence "$ev2"
+proot2="$(plan_evidence_root_of "$ev2")"
+write_passing_c0_review "$proot2"
+stub_c0_verify "$TMPDIR_ROOT/t2-stub" ok
+init_ledger_available "$proj2" "P002"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan2" --project-root "$proj2" 2>&1)" || gate_exit=$?
+unstub_c0_verify
 
 if [[ "$gate_exit" -eq 0 ]]; then
   pass "high-risk plan with complete evidence exits 0"
@@ -309,9 +463,14 @@ fi
 # Now provide the evidence and it should pass
 ev6="$(make_evidence_dir "$proj6" "P006")"
 write_passing_evidence "$ev6"
+proot6="$(plan_evidence_root_of "$ev6")"
+write_passing_c0_review "$proot6"
+stub_c0_verify "$TMPDIR_ROOT/t6-stub" ok
+init_ledger_available "$proj6" "P006"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan6" --project-root "$proj6" 2>&1)" || gate_exit=$?
+unstub_c0_verify
 
 if [[ "$gate_exit" -eq 0 ]]; then
   pass "plan with high-risk body pattern passes gate when evidence present"
@@ -487,6 +646,348 @@ if [[ "$gate_exit" -ne 0 ]]; then
   pass "adjudicator missing verdict: field causes gate failure"
 else
   fail "adjudicator missing verdict: field causes gate failure" "got exit=0"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 14: c0-plan-review.json missing → gate fails even with clean CP1-deep evidence
+# ---------------------------------------------------------------------------
+run_test "c0-plan-review.json missing fails gate even with clean CP1-deep evidence"
+
+proj14="$(make_project_root "t14")"
+plan14="$TMPDIR_ROOT/t14-plan.md"
+write_plan "$plan14" "P014" "risk: high" "authenticate() handler added."
+
+ev14="$(make_evidence_dir "$proj14" "P014")"
+write_passing_evidence "$ev14"
+proot14="$(plan_evidence_root_of "$ev14")"
+init_ledger_available "$proj14" "P014"
+# Deliberately no c0-plan-review.json written.
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan14" --project-root "$proj14" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "missing c0-plan-review.json fails gate"
+else
+  fail "missing c0-plan-review.json fails gate" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "c0-plan-review.json missing\|cross-provider plan review"; then
+  pass "error output explains the missing C0 review requirement"
+else
+  fail "error output explains the missing C0 review requirement" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 15: c0-plan-review.json review_status=unverifiable → gate fails
+# ---------------------------------------------------------------------------
+run_test "c0-plan-review.json review_status=unverifiable fails gate"
+
+proj15="$(make_project_root "t15")"
+plan15="$TMPDIR_ROOT/t15-plan.md"
+write_plan "$plan15" "P015" "risk: high" "authenticate() handler added."
+
+ev15="$(make_evidence_dir "$proj15" "P015")"
+write_passing_evidence "$ev15"
+proot15="$(plan_evidence_root_of "$ev15")"
+write_unverifiable_c0_review "$proot15"
+init_ledger_available "$proj15" "P015"
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan15" --project-root "$proj15" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "unverifiable c0-plan-review.json fails gate"
+else
+  fail "unverifiable c0-plan-review.json fails gate" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "unverifiable"; then
+  pass "error output mentions unverifiable"
+else
+  fail "error output mentions unverifiable" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 16: c0-plan-review.json blocking_findings=true → gate fails
+# ---------------------------------------------------------------------------
+run_test "c0-plan-review.json with surviving blocking_findings fails gate"
+
+proj16="$(make_project_root "t16")"
+plan16="$TMPDIR_ROOT/t16-plan.md"
+write_plan "$plan16" "P016" "risk: high" "authenticate() handler added."
+
+ev16="$(make_evidence_dir "$proj16" "P016")"
+write_passing_evidence "$ev16"
+proot16="$(plan_evidence_root_of "$ev16")"
+write_blocking_c0_review "$proot16"
+init_ledger_available "$proj16" "P016"
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan16" --project-root "$proj16" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "c0-plan-review.json with blocking_findings=true fails gate"
+else
+  fail "c0-plan-review.json with blocking_findings=true fails gate" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "blocking_findings"; then
+  pass "error output mentions blocking_findings"
+else
+  fail "error output mentions blocking_findings" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 17: aid-c0-plan-review.sh verify failure (stubbed) fails gate even
+# though the report's own top-level fields look clean.
+# ---------------------------------------------------------------------------
+run_test "stubbed verify() failure fails gate despite clean top-level fields"
+
+proj17="$(make_project_root "t17")"
+plan17="$TMPDIR_ROOT/t17-plan.md"
+write_plan "$plan17" "P017" "risk: high" "authenticate() handler added."
+
+ev17="$(make_evidence_dir "$proj17" "P017")"
+write_passing_evidence "$ev17"
+proot17="$(plan_evidence_root_of "$ev17")"
+write_passing_c0_review "$proot17"
+init_ledger_available "$proj17" "P017"
+stub_c0_verify "$TMPDIR_ROOT/t17-stub" fail
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan17" --project-root "$proj17" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "stubbed verify() failure fails gate"
+else
+  fail "stubbed verify() failure fails gate" "got exit=0 — clean top-level fields alone should not be enough"
+fi
+if echo "$gate_out" | grep -qi "verify failed"; then
+  pass "error output mentions the verify failure"
+else
+  fail "error output mentions the verify failure" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 18: a fabricated-but-field-clean c0-plan-review.json with NO real
+# supporting dispatch evidence fails the REAL (default, unstubbed) verify()
+# — proves the shell-out to aid-c0-plan-review.sh is genuinely load-bearing
+# in the DEFAULT production wiring, not merely a test seam.
+# ---------------------------------------------------------------------------
+run_test "fabricated c0-plan-review.json with no real evidence fails the REAL verify()"
+
+proj18="$(make_project_root "t18")"
+plan18="$TMPDIR_ROOT/t18-plan.md"
+write_plan "$plan18" "P018" "risk: high" "authenticate() handler added."
+
+ev18="$(make_evidence_dir "$proj18" "P018")"
+write_passing_evidence "$ev18"
+proot18="$(plan_evidence_root_of "$ev18")"
+write_passing_c0_review "$proot18"
+init_ledger_available "$proj18" "P018"
+unstub_c0_verify
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan18" --project-root "$proj18" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "fabricated c0-plan-review.json without real dispatch evidence fails the real verify()"
+else
+  fail "fabricated c0-plan-review.json without real dispatch evidence fails the real verify()" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "verify failed\|required artifact missing\|not verified"; then
+  pass "error output shows the real verify() rejected the fabricated report"
+else
+  fail "error output shows the real verify() rejected the fabricated report" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 19: CP1 ledger missing while CP1-deep evidence is present → fail-closed
+# ---------------------------------------------------------------------------
+run_test "missing CP1 ledger with CP1-deep evidence present fails gate (fail-closed)"
+
+proj19="$(make_project_root "t19")"
+plan19="$TMPDIR_ROOT/t19-plan.md"
+write_plan "$plan19" "P019" "risk: high" "authenticate() handler added."
+
+ev19="$(make_evidence_dir "$proj19" "P019")"
+write_passing_evidence "$ev19"
+proot19="$(plan_evidence_root_of "$ev19")"
+write_passing_c0_review "$proot19"
+stub_c0_verify "$TMPDIR_ROOT/t19-stub" ok
+# Deliberately no ledger init.
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan19" --project-root "$proj19" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "missing ledger with CP1-deep evidence present fails gate"
+else
+  fail "missing ledger with CP1-deep evidence present fails gate" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "ledger"; then
+  pass "error output mentions the ledger"
+else
+  fail "error output mentions the ledger" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 20: CP1 ledger budget exhausted (attempts>=max, no pm_override) fails gate
+# ---------------------------------------------------------------------------
+run_test "exhausted CP1 ledger budget (no pm_override) fails gate"
+
+proj20="$(make_project_root "t20")"
+plan20="$TMPDIR_ROOT/t20-plan.md"
+write_plan "$plan20" "P020" "risk: high" "authenticate() handler added."
+
+ev20="$(make_evidence_dir "$proj20" "P020")"
+write_passing_evidence "$ev20"
+proot20="$(plan_evidence_root_of "$ev20")"
+write_passing_c0_review "$proot20"
+stub_c0_verify "$TMPDIR_ROOT/t20-stub" ok
+init_ledger_exhausted "$proj20" "P020"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan20" --project-root "$proj20" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "exhausted ledger budget fails gate"
+else
+  fail "exhausted ledger budget fails gate" "got exit=0"
+fi
+if echo "$gate_out" | grep -qi "exhausted"; then
+  pass "error output mentions exhausted budget"
+else
+  fail "error output mentions exhausted budget" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 21: CP1 ledger pm_override.present=true bypasses an exhausted budget
+# ---------------------------------------------------------------------------
+run_test "ledger pm_override.present=true bypasses an exhausted budget"
+
+proj21="$(make_project_root "t21")"
+plan21="$TMPDIR_ROOT/t21-plan.md"
+write_plan "$plan21" "P021" "risk: high" "authenticate() handler added."
+
+ev21="$(make_evidence_dir "$proj21" "P021")"
+write_passing_evidence "$ev21"
+proot21="$(plan_evidence_root_of "$ev21")"
+write_passing_c0_review "$proot21"
+stub_c0_verify "$TMPDIR_ROOT/t21-stub" ok
+init_ledger_exhausted "$proj21" "P021"
+set_ledger_pm_override "$proj21" "P021"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan21" --project-root "$proj21" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "ledger pm_override bypasses exhausted budget"
+else
+  fail "ledger pm_override bypasses exhausted budget" "got exit=$gate_exit, output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 22: gate's own PM-escalation override artifact bypasses a missing
+# c0-plan-review.json
+# ---------------------------------------------------------------------------
+run_test "gate PM-escalation override bypasses a missing c0-plan-review.json"
+
+proj22="$(make_project_root "t22")"
+plan22="$TMPDIR_ROOT/t22-plan.md"
+write_plan "$plan22" "P022" "risk: high" "authenticate() handler added."
+
+ev22="$(make_evidence_dir "$proj22" "P022")"
+write_passing_evidence "$ev22"
+proot22="$(plan_evidence_root_of "$ev22")"
+init_ledger_available "$proj22" "P022"
+write_pm_override "$proot22"
+# Deliberately no c0-plan-review.json.
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan22" --project-root "$proj22" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "PM-escalation override bypasses missing c0-plan-review.json"
+else
+  fail "PM-escalation override bypasses missing c0-plan-review.json" "got exit=$gate_exit, output: $gate_out"
+fi
+if echo "$gate_out" | grep -qi "WARNING.*override\|PM-escalation override"; then
+  pass "output records the override was used (never a silent pass)"
+else
+  fail "output records the override was used (never a silent pass)" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 23: the PM-escalation override is consumed after one bypass — a
+# second gate run without a fresh override blocks again ("exactly one more
+# attempt").
+# ---------------------------------------------------------------------------
+run_test "PM-escalation override is single-use (consumed after one bypass)"
+
+override_path="${proot22}/cp1-pm-escalation-override.json"
+if [[ ! -f "$override_path" ]]; then
+  pass "override artifact was archived (renamed) after being consumed"
+else
+  fail "override artifact was archived (renamed) after being consumed" "still present at $override_path"
+fi
+consumed_count="$(find "$proot22" -maxdepth 1 -name 'cp1-pm-escalation-override.json.consumed-*' 2>/dev/null | wc -l | tr -d '[:space:]')"
+if [[ "$consumed_count" -ge 1 ]]; then
+  pass "a .consumed-* archive of the override exists"
+else
+  fail "a .consumed-* archive of the override exists" "none found under $proot22"
+fi
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan22" --project-root "$proj22" 2>&1)" || gate_exit=$?
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "second gate run without a fresh override blocks again"
+else
+  fail "second gate run without a fresh override blocks again" "got exit=0 — override was reusable"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 24: full success path — complete CP1-deep evidence + verified clean C0
+# review (stubbed verify=ok) + available ledger budget → PASS, no override needed
+# ---------------------------------------------------------------------------
+run_test "full success path passes without needing any PM-escalation override"
+
+proj24="$(make_project_root "t24")"
+plan24="$TMPDIR_ROOT/t24-plan.md"
+write_plan "$plan24" "P024" "risk: high" "authenticate() handler added."
+
+ev24="$(make_evidence_dir "$proj24" "P024")"
+write_passing_evidence "$ev24"
+proot24="$(plan_evidence_root_of "$ev24")"
+write_passing_c0_review "$proot24"
+stub_c0_verify "$TMPDIR_ROOT/t24-stub" ok
+init_ledger_available "$proj24" "P024"
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan24" --project-root "$proj24" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "full success path passes gate"
+else
+  fail "full success path passes gate" "got exit=$gate_exit, output: $gate_out"
+fi
+if echo "$gate_out" | grep -qi "WARNING"; then
+  fail "no override warning printed on the clean success path" "unexpected WARNING in output: $gate_out"
+else
+  pass "no override warning printed on the clean success path"
+fi
+# The override artifact was never written for this plan — nothing to consume.
+if [[ ! -f "${proot24}/cp1-pm-escalation-override.json" ]]; then
+  pass "no override artifact needed/created on the clean success path"
+else
+  fail "no override artifact needed/created on the clean success path" "unexpectedly present"
 fi
 
 # ---------------------------------------------------------------------------
