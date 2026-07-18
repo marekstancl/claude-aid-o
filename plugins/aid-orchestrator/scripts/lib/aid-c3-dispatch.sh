@@ -1496,28 +1496,28 @@ cmd_dispatch() {
     [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
       || { echo "PRECONDITION FAIL: AID_C3_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
 
-    # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 findings, two rounds):
-    # BOTH terminal loop outcomes — "escalated" AND "clean" — must stop
-    # automatic dispatches. Round 1 fixed "escalated"; a live re-audit at the
-    # round-1 fix's own HEAD caught that "clean" was still left open: nothing
-    # stopped a 4th (or Nth) explicit-attempt dispatch from silently
-    # overwriting an already-"clean" c3/loop-summary.json back to
-    # in-progress, exactly the same unbounded-loop problem in a different
-    # guise — the bounded-loop requirement (pipeline.md 6a: clean exits to
-    # Curator, is terminal) was documented but never mechanically enforced
-    # for the clean case. Every explicit-attempt dispatch now checks the
-    # CURRENT loop-summary.json (if one already exists for this evidence
-    # dir) before proceeding; a recorded outcome of "escalated" OR "clean"
-    # rejects any further attempt unless an explicit, auditable,
-    # PM-authorized override is supplied — mirroring this project's
+    # SECURITY/CORRECTNESS FIX (E-065-6_7 DONE-review C3 findings, now six
+    # rounds on this guard): rounds 1-2 rejected "escalated" then "clean".
+    # A live re-audit at round 5's own HEAD found the check was still a
+    # DENYLIST ("escalated" OR "clean") rather than an ALLOWLIST — any OTHER
+    # parseable-but-unrecognized outcome string (a typo, corrupted data, a
+    # future schema value this check was never updated for) silently fell
+    # through and was ALLOWED, defeating the entire bounded-loop guarantee
+    # for exactly the class of state this check exists to close off. Flip
+    # the polarity: only two values are KNOWN-SAFE to proceed on without an
+    # override — "" (bare JSON null via `// ""`, a genuinely in-progress
+    # loop) and "unverifiable" (pipeline.md 6a's "not a loop iteration"
+    # carve-out, rounds 3-4 — must stay freely retriable). Every other value,
+    # recognized-terminal ("clean"/"escalated") or not, now requires the
+    # explicit, auditable, PM-authorized override — mirroring this project's
     # established `--force --reason '<>=20 chars>'` pattern.
     local existing_summary="$c3_dir/loop-summary.json"
     if [[ -f "$existing_summary" ]]; then
       local prior_loop_outcome
       prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)"
-      if [[ "$prior_loop_outcome" == "escalated" || "$prior_loop_outcome" == "clean" ]]; then
+      if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
         if [[ -z "${AID_C3_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C3_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
-          echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement: \"$prior_loop_outcome\" is a terminal outcome per pipeline.md 6a)." >&2
+          echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
           echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C3_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
           exit 1
         fi

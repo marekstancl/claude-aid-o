@@ -521,6 +521,51 @@ _drive_two_attempts() {
   [ "$output" = "$head2" ]
 }
 
+@test "the terminal guard is an ALLOWLIST, not a denylist: any unrecognized/corrupted outcome value is treated as terminal too (round 6)" {
+  # A live DONE-review found the round-1/2 guard only rejected the two
+  # RECOGNIZED terminal strings ("escalated", "clean") — any OTHER
+  # parseable-but-unexpected outcome (corrupted data, a typo, a future
+  # schema value this check was never updated for) silently fell through
+  # and was ALLOWED, defeating the entire bounded-loop guarantee. The fix
+  # flips this to an allowlist: only "" (in-progress) and "unverifiable"
+  # (must stay retriable, rounds 3-4) proceed without an override; anything
+  # else — recognized or not — now requires one.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-bogus-1" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Directly corrupt the recorded outcome to an unrecognized value — this is
+  # NOT reachable through any normal write path (the case-statement in
+  # _c3_write_loop_summary only ever emits clean/escalated/unverifiable/null),
+  # simulating a corrupted file or a future schema value this guard was
+  # never updated for.
+  local SUM="$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  local tmp="$SUM.bogus.tmp"
+  jq '.outcome = "bogus_unrecognized_state"' "$SUM" > "$tmp" && mv -f "$tmp" "$SUM"
+  run jq -r '.outcome' "$SUM"; [ "$output" = "bogus_unrecognized_state" ]
+
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-bogus-2" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"bogus_unrecognized_state"* ]]
+  [ ! -d "$TEST_EVIDENCE_DIR/c3/attempt-02" ]
+
+  # A genuine override still works, same as any other terminal outcome.
+  AID_C3_FORCE_BEYOND_ESCALATION="PM approved proceeding past a corrupted state" \
+    AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$TEST_EVIDENCE_DIR/c3/attempt-02" ]
+}
+
 @test "true dispatch failure (codex unavailable) never advances recheck_count and stays retriable forever — the documented 'not a loop iteration' path is unaffected by the unverifiable-budget fix" {
   # A THIRD live DONE-review audit found that repeated genuinely-dispatched
   # attempts producing invalid/unverifiable CONTENT had no escalation cap
