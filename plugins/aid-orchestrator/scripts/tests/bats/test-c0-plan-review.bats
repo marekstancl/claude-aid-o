@@ -830,18 +830,22 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
+  # Set FAKE_C0_THREAD_ID explicitly (rather than relying on the fake
+  # codex stub subprocess's own internal default) so THIS test's shell
+  # scope has a real, known value to assert against afterward — CP2 found
+  # a prior version of this assertion referenced a bare $THREAD_ID that
+  # was never actually in scope here (only inside the stub subprocess's
+  # own heredoc-defined script), making it silently match any string.
+  export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-00000feedbee"
   FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
   # Proof: the ledger's attempts counter must have advanced from 0 to 1.
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
-  # Proof: the attempts_log must record the plan_hash and codex session —
-  # THREAD_ID is the fixed default codex_session_id this fixture's fake
-  # codex stub always emits (see THREAD_ID at the top of this file), unless
-  # FAKE_C0_THREAD_ID overrides it (not done in this test).
+  # Proof: the attempts_log must record the plan_hash and codex session.
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts_log | length')" = "1" ]
   run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test
-  [[ "$output" == *"$THREAD_ID"* ]]
+  [[ "$output" == *"$FAKE_C0_THREAD_ID"* ]]
 }
 
 @test "FINDING 1: dispatch without a valid ledger fails closed (unverifiable), even though Codex is clean" {
