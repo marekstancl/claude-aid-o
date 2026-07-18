@@ -141,9 +141,11 @@ Subcommands:
       conflicting" exit condition — a subjective judgment call the bridge
       cannot detect mechanically, unlike same-fingerprint-survival (which
       `dispatch` already detects and escalates automatically, no manual step
-      needed). Once recorded, the same terminal guard that rejects further
-      dispatches after any other "escalated"/"clean" outcome applies here too
-      — bypassable only via AID_C3_FORCE_BEYOND_ESCALATION, same as always.
+      needed). Once recorded, the same terminal guard applies here too — it
+      allows a further dispatch only when the outcome is "" (in-progress) or
+      "unverifiable" (must stay retriable); every other value, including the
+      "escalated" this call just wrote, is rejected without an override —
+      bypassable only via AID_C3_FORCE_BEYOND_ESCALATION, same as always.
 EOF
 }
 
