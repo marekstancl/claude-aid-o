@@ -290,6 +290,19 @@ _cp1_override_file() {
 #   - If the rename fails (file already renamed by another process, or never
 #     existed): echoes nothing and returns 1.
 #
+#   WHY this is atomic for the concurrent race it targets: `mv -n src dst`'s
+#   guarantee here comes from the SOURCE vanishing under `rename(2)`, not
+#   from `-n`'s destination no-clobber check. Two concurrent invocations
+#   racing on the SAME still-present override_file both compute the same
+#   consumed_file name; the first rename succeeds and removes the source,
+#   so the second's `mv -n` fails with ENOENT on the now-missing source —
+#   that is what makes exactly-one-winner hold. `-n`'s own no-clobber check
+#   (dst already exists) is a DIFFERENT, narrower case: it also exits 0
+#   without moving anything, but only if consumed_file (a fresh epoch-
+#   stamped name) happens to already exist — astronomically unlikely and
+#   not the mechanism this function relies on for correctness (tracked as a
+#   separate, non-blocking edge case: verifier-output-step-2.md Finding 2).
+#
 #   This is the ONLY way to authorize a bypass — no separate check+consume calls.
 # ---------------------------------------------------------------------------
 _cp1_check_and_consume_pm_override() {
