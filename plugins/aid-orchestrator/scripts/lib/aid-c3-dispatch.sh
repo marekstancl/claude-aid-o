@@ -1320,17 +1320,35 @@ _c3_write_loop_summary() {
     [[ "$mr" =~ ^[0-9]+$ ]] && max_rechecks="$mr"
   fi
 
+  # CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding, round 3): "unverifiable"
+  # covers two distinct cases that must NOT be treated alike. (a) A true
+  # dispatch failure (codex unavailable/timeout/rate_limited/render_failed) —
+  # its attempts[] entry.outcome is the failure string, never "dispatched", so
+  # it never contributes to dispatched_count/recheck_count above; this is
+  # pipeline.md 6a's documented "not a loop iteration" — retrying it is the
+  # whole point and must stay unbounded-retriable, exactly as before. (b) A
+  # GENUINE dispatch (attempts[] entry.outcome == "dispatched", Codex's CLI
+  # stream was well-formed) whose FINAL response content still failed
+  # schema/semantic validation in _process_response — this DOES advance
+  # recheck_count (case (a) never does) but previously had no escalation cap
+  # at all, unlike the symmetric "fail" branch below: an attacker or
+  # malfunctioning caller could keep forcing AID_C3_ATTEMPT dispatches that
+  # each produce a genuinely-dispatched-but-invalid report forever, never
+  # reaching "escalated" and therefore never hitting the terminal-outcome
+  # guard added in rounds 1-2. Mirror the "fail" branch's budget check here
+  # too — case (a) is unaffected (recheck_count stays 0 for it either way).
   case "$report_status" in
-    pass)         top_outcome='"clean"' ;;
-    unverifiable) top_outcome='"unverifiable"' ;;
-    fail)
+    pass) top_outcome='"clean"' ;;
+    unverifiable|fail)
       if [[ "$recheck_count" -ge "$max_rechecks" ]]; then
         top_outcome='"escalated"'
+      elif [[ "$report_status" == "unverifiable" ]]; then
+        top_outcome='"unverifiable"'
       else
         top_outcome='null'
       fi
       ;;
-    *)            top_outcome='null' ;;
+    *)    top_outcome='null' ;;
   esac
 
   jq -n \

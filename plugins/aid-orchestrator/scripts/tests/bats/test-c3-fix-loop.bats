@@ -511,6 +511,86 @@ _drive_two_attempts() {
   [ "$output" = "$head2" ]
 }
 
+@test "true dispatch failure (codex unavailable) never advances recheck_count and stays retriable forever — the documented 'not a loop iteration' path is unaffected by the unverifiable-budget fix" {
+  # A THIRD live DONE-review audit found that repeated genuinely-dispatched
+  # attempts producing invalid/unverifiable CONTENT had no escalation cap
+  # (unlike "fail"). Fixing that must NOT regress the orthogonal, explicitly
+  # documented case this test proves: a dispatch that never even reaches
+  # Codex (cross_provider unavailable) records outcome "unavailable" (not
+  # "dispatched") in loop-summary.json's attempts[], so it is EXCLUDED from
+  # dispatched_count/recheck_count — pipeline.md 6a's "Not a loop iteration"
+  # — and must remain retriable without limit or override.
+  export AID_C3_INDEPENDENCE_BIN="$TEST_TMPDIR/indep/always-fail"
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$AID_C3_INDEPENDENCE_BIN"
+  chmod +x "$AID_C3_INDEPENDENCE_BIN"
+
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+
+  for i in 1 2 3 4; do
+    AID_C3_ATTEMPT="$i" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+    [ "$status" -eq 2 ]
+  done
+
+  run jq -r '[.attempts[].outcome] | unique | .[]' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "unavailable" ]
+  run jq -r '.recheck_count' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "0" ]
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "unverifiable" ]
+
+  # A 5th attempt is STILL accepted without any override — never terminal.
+  AID_C3_ATTEMPT=5 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+}
+
+@test "genuinely-dispatched-but-invalid-content attempts DO advance recheck_count and escalate at the policy budget, closing the round-3 gap" {
+  # Distinguishes from the test above: here the codex CLI stream is well-formed
+  # (a real dispatch, events_valid) but the report content fails provenance
+  # validation each time (reviewed_head mismatch → _process_response writes an
+  # unverifiable report) — attempts[].outcome=="dispatched" for every one of
+  # these, so recheck_count DOES advance, and once it reaches max_rechecks
+  # (default 2) the loop must escalate exactly like the "fail" path already
+  # does, subjecting further attempts to the same terminal guard.
+  local WRONG_HEAD="0000000000000000000000000000000000dead"
+  local i head bh
+  for i in 1 2 3; do
+    head="$(_commit_change "$i")"
+    _build_manifest "$BASE_SHA" "$head"
+    bh="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+    # Deliberately WRONG reviewed_head → provenance mismatch → unverifiable
+    # report, even though the dispatch itself is genuinely well-formed.
+    export FAKE_C3_HEAD="$WRONG_HEAD" FAKE_C3_BRIEF_HASH="$bh" FAKE_C3_THREAD_ID="thread-inval-$i" \
+           FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+    AID_C3_ATTEMPT="$i" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+    [ "$status" -eq 0 ]
+  done
+
+  local SUM="$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  run jq -r '[.attempts[].outcome] | unique | .[]' "$SUM"
+  [ "$output" = "dispatched" ]
+  run jq -r '.recheck_count' "$SUM"
+  [ "$output" = "2" ]
+  run jq -r '.outcome' "$SUM"
+  [ "$output" = "escalated" ]
+  run jq -r '.status' "$TEST_EVIDENCE_DIR/audit-report.json"
+  [ "$output" = "unverifiable" ]
+
+  # A 4th attempt (no override) is now rejected by the SAME terminal guard
+  # rounds 1-2 built for "escalated" — no new code path, just a correctly
+  # populated outcome field reaching it.
+  local head4; head4="$(_commit_change 4)"
+  _build_manifest "$BASE_SHA" "$head4"
+  local bh4; bh4="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head4" FAKE_C3_BRIEF_HASH="$bh4" FAKE_C3_THREAD_ID="thread-inval-4" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=4 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"escalated"* ]]
+}
+
 @test "loop-summary write failure fails the whole attempt closed, even when the canonical report copy succeeded" {
   # Filesystem-permission injection cannot isolate JUST the loop-summary write
   # from a full `dispatch` CLI run: c3/attempt-NN/ and c3/loop-summary.json
