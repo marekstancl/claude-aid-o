@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/c0-plan-review.schema.json",
+  "title": "AID P065 — C0 Codex PLAN Review Raw Response",
+  "$comment": "producer: Codex CLI (a DIFFERENT-provider process, `_run_codex_isolated` — the SAME transport C3 uses, extracted by P065 E-065-7_7 Step 18), consumer: aid-c0-plan-review.sh `dispatch`/`verify`. This is the RAW last-message Codex emits for a PLAN review (BEFORE plan/EPIC-generation), NOT a finished-implementation audit. It is intentionally a DIFFERENT shape from c3-codex-response.schema.json: the C0 response is self-describing (`artifact_type` is a REQUIRED, model-emitted, const-pinned field) so a model that mistakenly answers with a C3-shaped `audit_report` payload (reviewed_head/codex_brief_hash/no artifact_type) is REJECTED by this schema's required-key list and additionalProperties:false, never silently accepted as a plan review. codex `session_id`/`model`/provenance are added by the bridge during normalize — they are FORBIDDEN here, exactly like C3's forbidden top-level provenance keys, and for the same reason: the model must never self-assert its own provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifact_type", "reviewed_plan_hash", "reviewed_head", "input_manifest_hash", "review_status", "blocking_findings", "findings"],
+  "properties": {
+    "artifact_type": {
+      "const": "c0_plan_review",
+      "$comment": "REQUIRED, model-emitted, and pinned to this exact value — NOT 'audit_report'. This is the mechanical fence that makes a C3-shaped response invalid_output under this schema (audit_report responses never carry this key)."
+    },
+    "reviewed_plan_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "$comment": "verbatim echo of the sealed brief's plan_sha256 (= build-manifest's reviewed_plan_hash for the plan file under review)."
+    },
+    "reviewed_head": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "$comment": "the commit Codex reviewed the repository at; MUST equal the brief's reviewed_head (40-hex git sha)."
+    },
+    "input_manifest_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "$comment": "verbatim echo of the sealed brief's input_manifest_hash. Distinct from C3's codex_brief_hash concept — C0 has no separate 'brief' bundle; the input manifest IS what is sealed and echoed."
+    },
+    "review_status": {
+      "type": "string",
+      "enum": ["pass", "findings", "unverifiable"]
+    },
+    "unverifiable_reasons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "$comment": "how the model reports 'could not complete the plan review' without inventing a field; conditionally required (see allOf)."
+    },
+    "blocking_findings": {
+      "type": "boolean",
+      "$comment": "Codex asserts this; the bridge cross-checks blocking_findings == (∃ crit/high finding) in jq — JSON-Schema cannot express that cross-field arithmetic."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "area", "finding", "recommendation"],
+        "properties": {
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+          "area": {"type": "string", "minLength": 1},
+          "finding": {"type": "string", "minLength": 1},
+          "recommendation": {"type": "string", "minLength": 1},
+          "action_owner": {"type": "string", "enum": ["implementer", "reviewer", "pm", "gate-fixer"]}
+        },
+        "allOf": [
+          {
+            "$comment": "action_owner is REQUIRED when severity is critical or high; optional (but still enum-constrained) otherwise. Fingerprint/occurrence_id are NOT here — those are bridge-added during normalize, exactly like C3's findings[], never emitted by the model itself.",
+            "if": {
+              "required": ["severity"],
+              "properties": {"severity": {"enum": ["critical", "high"]}}
+            },
+            "then": {"required": ["action_owner"]}
+          }
+        ]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "unverifiable ⇒ unverifiable_reasons required (non-empty); forbidden otherwise.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "unverifiable"}}
+      },
+      "then": {"required": ["unverifiable_reasons"]},
+      "else": {"not": {"required": ["unverifiable_reasons"]}}
+    },
+    {
+      "$comment": "pass ⇒ no findings AND blocking_findings must be false.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "pass"}}
+      },
+      "then": {
+        "properties": {
+          "findings": {"maxItems": 0},
+          "blocking_findings": {"const": false}
+        }
+      }
+    },
+    {
+      "$comment": "findings ⇒ at least one finding.",
+      "if": {
+        "required": ["review_status"],
+        "properties": {"review_status": {"const": "findings"}}
+      },
+      "then": {"properties": {"findings": {"minItems": 1}}}
+    }
+  ]
+}

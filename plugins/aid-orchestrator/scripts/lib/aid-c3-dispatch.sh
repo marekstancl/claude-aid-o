@@ -572,22 +572,35 @@ _looks_rate_limited() {
 #   capture its --json stdout stream, stderr, and last-message. Independence is
 #   provider + fresh process + `--sandbox read-only` (NOT a filesystem jail).
 #
+#   SHARED TRANSPORT (P065 E-065-7_7 Step 18): this helper carries no C3-specific
+#   coupling — it takes only a project root + a pre-rendered prompt file and
+#   returns raw captures via the five output-file parameters. `aid-c0-plan-review.sh`
+#   sources this file (guarded by the BASH_SOURCE!=0 check at the bottom, so
+#   sourcing never runs C3's own CLI dispatcher) and reuses THIS function verbatim
+#   for the C0 plan-review Codex launch. The only knobs it reads are $CODEX_MODEL
+#   (a plain global, not a C3-only concept — a caller may repoint it before
+#   calling) and the timeout env var below (AID_C3_TIMEOUT_SECONDS is read FIRST,
+#   for exact backward compatibility with existing C3 tests/callers; the generic
+#   AID_CODEX_ISOLATED_TIMEOUT_SECONDS is the non-C3-named equivalent for new
+#   callers that should not need to know this transport started life in C3).
+#
 #   ⚠️ DISCOVERED ISSUE — `--output-schema` is deliberately NOT passed. Step 4's
 #   c3-codex-response.schema.json uses `if/then/else` + `allOf`, and Step 1's
 #   empirical finding (codex-stream-sample/fields.md §`--output-schema empirical
 #   behavior`) is that Codex forwards the schema to OpenAI strict structured
 #   output, which HARD-FAILS (HTTP 400 "'if' is not permitted") on any
 #   conditional keyword. Passing it would 400 every dispatch. The trusted gate
-#   is the bridge's own _validate_response (Step 6, next step), NOT the backend.
-#   We do NOT strip if/then from the schema to work around this — it is not ours
-#   to change, and the conditional rules are load-bearing for bridge validation.
+#   is the caller's own explicit jq response validator (_validate_response for
+#   C3, its C0 analogue for aid-c0-plan-review.sh), NOT the backend. We do NOT
+#   strip if/then from either schema to work around this — it is not ours to
+#   change, and the conditional rules are load-bearing for bridge validation.
 #
 #   Returns the codex/timeout exit code (124 = timed out).
 _run_codex_isolated() {
   local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
   local prompt rc=0
   prompt="$(cat "$prompt_file")"
-  timeout "${AID_C3_TIMEOUT_SECONDS:-900}" \
+  timeout "${AID_C3_TIMEOUT_SECONDS:-${AID_CODEX_ISOLATED_TIMEOUT_SECONDS:-900}}" \
     codex exec --json \
       --cd "$project_root" \
       --sandbox read-only \
