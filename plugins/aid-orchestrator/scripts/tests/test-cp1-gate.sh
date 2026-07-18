@@ -277,7 +277,7 @@ set_ledger_pm_override() {
 # write_pm_override <plan_evidence_root> [ref]
 #   The gate's OWN one-shot PM-escalation override artifact (distinct from
 #   the ledger's pm_override field) — see aid-cp1-gate.sh's
-#   _cp1_check_and_consume_pm_override.
+#   _cp1_check_pm_override / _cp1_claim_pm_override.
 write_pm_override() {
   local root="$1" ref="${2:-PM approved bypass 2026-07-18 review}"
   mkdir -p "$root"
@@ -995,6 +995,97 @@ if [[ ! -f "${proot24}/cp1-pm-escalation-override.json" ]]; then
   pass "no override artifact needed/created on the clean success path"
 else
   fail "no override artifact needed/created on the clean success path" "unexpectedly present"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 25: a live DONE-review audit (E-065-7_7, finding c3-E-065-7_7-0) found
+# an earlier design consumed a present, valid PM-escalation override even on
+# a run where NEITHER the C0 review nor the ledger check would have failed —
+# violating "Available + clean gate should remain Available". Prove the fix:
+# a genuinely clean run with a valid override SITTING PRESENT must leave it
+# completely untouched (not renamed, not consumed) for a later run that
+# might actually need it.
+# ---------------------------------------------------------------------------
+run_test "a clean pass leaves a present-but-unneeded PM-escalation override completely unconsumed"
+
+proj25="$(make_project_root "t25")"
+plan25="$TMPDIR_ROOT/t25-plan.md"
+write_plan "$plan25" "P025" "risk: high" "authenticate() handler added."
+
+ev25="$(make_evidence_dir "$proj25" "P025")"
+write_passing_evidence "$ev25"
+proot25="$(plan_evidence_root_of "$ev25")"
+write_passing_c0_review "$proot25"
+stub_c0_verify "$TMPDIR_ROOT/t25-stub" ok
+init_ledger_available "$proj25" "P025"
+write_pm_override "$proot25"   # present but NOT needed — everything else is clean
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan25" --project-root "$proj25" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "clean pass with an unneeded override present still passes gate"
+else
+  fail "clean pass with an unneeded override present still passes gate" "got exit=$gate_exit, output: $gate_out"
+fi
+if [[ -f "${proot25}/cp1-pm-escalation-override.json" ]]; then
+  pass "override artifact is STILL PRESENT, untouched (not consumed on a clean pass)"
+else
+  fail "override artifact is STILL PRESENT, untouched (not consumed on a clean pass)" "override was consumed despite no failure needing it"
+fi
+consumed_count25="$(find "$proot25" -maxdepth 1 -name 'cp1-pm-escalation-override.json.consumed-*' 2>/dev/null | wc -l | tr -d '[:space:]')"
+if [[ "$consumed_count25" -eq 0 ]]; then
+  pass "no .consumed-* archive was created on the clean pass"
+else
+  fail "no .consumed-* archive was created on the clean pass" "found $consumed_count25 archive(s)"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 26: the same audit found `_cp1_claim_pm_override`'s old implementation
+# trusted `mv -n`'s bare exit code as proof of ownership — but `mv -n` ALSO
+# exits 0 (without moving anything) when the destination already exists (a
+# stale `.consumed-<epoch>` sibling from an earlier consumption landing on
+# the same epoch second). Prove the fix fails closed in that exact collision:
+# the override must remain unconsumed (and the gate must correctly refuse to
+# treat a pre-existing collision as authorization) rather than falsely
+# reporting success while silently leaving the source reusable.
+# ---------------------------------------------------------------------------
+run_test "a pre-existing .consumed-<epoch> collision does not falsely authorize a bypass"
+
+proj26="$(make_project_root "t26")"
+plan26="$TMPDIR_ROOT/t26-plan.md"
+write_plan "$plan26" "P026" "risk: high" "authenticate() handler added."
+
+ev26="$(make_evidence_dir "$proj26" "P026")"
+write_passing_evidence "$ev26"
+proot26="$(plan_evidence_root_of "$ev26")"
+init_ledger_available "$proj26" "P026"
+write_pm_override "$proot26"
+# Deliberately no c0-plan-review.json — the gate NEEDS the override this time.
+
+# Pre-create every plausible .consumed-<epoch> destination for the next ~8
+# seconds (generous margin against test-execution timing jitter) so the real
+# claim attempt is virtually guaranteed to collide with an already-existing
+# (unrelated, stale) destination name.
+now_epoch="$(date -u +%s)"
+for offset in 0 1 2 3 4 5 6 7 8; do
+  touch "${proot26}/cp1-pm-escalation-override.json.consumed-$((now_epoch + offset))"
+done
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan26" --project-root "$proj26" 2>&1)" || gate_exit=$?
+
+if [[ -f "${proot26}/cp1-pm-escalation-override.json" ]]; then
+  pass "override source remains present after a destination collision (fail-closed, not falsely consumed)"
+else
+  fail "override source remains present after a destination collision (fail-closed, not falsely consumed)" "source vanished despite a pre-existing destination collision"
+fi
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "gate correctly refuses to authorize a bypass on a destination collision"
+else
+  fail "gate correctly refuses to authorize a bypass on a destination collision" "got exit=0 — collision falsely authorized a bypass: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

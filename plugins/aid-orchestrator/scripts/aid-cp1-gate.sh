@@ -277,53 +277,77 @@ _cp1_override_file() {
 }
 
 # ---------------------------------------------------------------------------
-# _cp1_check_and_consume_pm_override <plan_evidence_root>
-#   Atomically checks for a valid PM-escalation override and claims/consumes it
-#   in one operation via no-clobber rename (mv -n). This prevents TOCTOU races
-#   where two concurrent invocations could both read the override as present
-#   before either consumes it.
+# _cp1_check_pm_override <plan_evidence_root>
+#   READ-ONLY: reports whether a structurally valid PM-escalation override
+#   (non-empty pm_ref field, >= 20 chars) is currently present. Never
+#   consumes/renames anything. Echoes the pm_ref reason and returns 0 iff
+#   valid; returns 1 (nothing echoed) otherwise.
 #
-#   If the override file exists and is structurally valid (non-empty pm_ref
-#   field >= 20 chars), attempts to rename it to a .consumed-<epoch> sibling.
-#   - If the rename succeeds (mv -n exits 0): we now own this override.
-#     Echoes the pm_ref reason and returns 0.
-#   - If the rename fails (file already renamed by another process, or never
-#     existed): echoes nothing and returns 1.
-#
-#   WHY this is atomic for the concurrent race it targets: `mv -n src dst`'s
-#   guarantee here comes from the SOURCE vanishing under `rename(2)`, not
-#   from `-n`'s destination no-clobber check. Two concurrent invocations
-#   racing on the SAME still-present override_file both compute the same
-#   consumed_file name; the first rename succeeds and removes the source,
-#   so the second's `mv -n` fails with ENOENT on the now-missing source —
-#   that is what makes exactly-one-winner hold. `-n`'s own no-clobber check
-#   (dst already exists) is a DIFFERENT, narrower case: it also exits 0
-#   without moving anything, but only if consumed_file (a fresh epoch-
-#   stamped name) happens to already exist — astronomically unlikely and
-#   not the mechanism this function relies on for correctness (tracked as a
-#   separate, non-blocking edge case: verifier-output-step-2.md Finding 2).
-#
-#   This is the ONLY way to authorize a bypass — no separate check+consume calls.
+#   Deliberately separate from consumption (see _cp1_claim_pm_override
+#   below): a live DONE-review audit (E-065-7_7, finding c3-E-065-7_7-0)
+#   found the EARLIER single-call design (check-and-consume as one eager
+#   operation, called unconditionally before evaluating C0/ledger) consumed
+#   a present override even on a run where NEITHER check would have failed
+#   — violating "Available + clean gate should remain Available." The gate
+#   now evaluates C0-ok and ledger-ok FIRST using only this read-only check,
+#   and calls the atomic claim below ONLY if at least one actually failed.
 # ---------------------------------------------------------------------------
-_cp1_check_and_consume_pm_override() {
+_cp1_check_pm_override() {
+  local plan_evidence_root="$1" override_file reason
+  override_file="$(_cp1_override_file "$plan_evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+  printf '%s' "$reason"
+  return 0
+}
+
+# _cp1_claim_pm_override <plan_evidence_root>
+#   Atomically CLAIMS (consumes) a present, valid PM-escalation override —
+#   call this ONLY once a caller has determined the override is actually
+#   needed (a check alone, via _cp1_check_pm_override, must never trigger
+#   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
+#   sibling and returns 0 (echoing the pm_ref reason) iff the SOURCE FILE
+#   IS CONFIRMED GONE afterward — never trusts `mv -n`'s bare exit code.
+#
+#   WHY checking source-gone (not `mv -n`'s exit code) matters: a second
+#   live DONE-review finding (same audit as above, same fingerprint area)
+#   showed `mv -n src dst` ALSO exits 0 — without moving anything — when
+#   `dst` happens to already exist (a stale `.consumed-<epoch>` sibling
+#   from an earlier run landing on the SAME epoch second). The old code
+#   trusted that exit-0 as "we now own it," reporting success while the
+#   override file was still sitting on disk, fully intact and reusable —
+#   a genuine one-shot-authorization violation. Checking `[[ ! -f "$src" ]]`
+#   after the `mv -n` call distinguishes the two exit-0 cases correctly:
+#   genuinely moved (source gone → real ownership) vs. no-clobber no-op
+#   (source still present → we do NOT own it, fail closed, try again
+#   later once the epoch second has moved on).
+#
+#   Concurrent-race safety (the ORIGINAL TOCTOU this function exists to
+#   close) is unaffected by moving the claim to be conditional: two
+#   concurrent invocations that BOTH determine a bypass is needed still
+#   race on the SAME rename target; the loser's source-file check
+#   correctly reports "not gone" (still present, because the winner's
+#   rename targeted a DIFFERENT destination path — different PID/subshell
+#   timing) or "gone but not to our destination" — either way the loser
+#   returns 1, never falsely claims ownership.
+# ---------------------------------------------------------------------------
+_cp1_claim_pm_override() {
   local plan_evidence_root="$1" override_file consumed_file reason
   override_file="$(_cp1_override_file "$plan_evidence_root")"
-
-  # Quick sanity check: does the file exist and have valid pm_ref?
   [[ -f "$override_file" ]] || return 1
   reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
   [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
 
-  # Atomically claim this override via no-clobber rename. If another process
-  # already consumed it, our rename will fail (exit 1) and we return 1.
   consumed_file="${override_file}.consumed-$(date -u +%s)"
-  if mv -n "$override_file" "$consumed_file" 2>/dev/null; then
+  mv -n "$override_file" "$consumed_file" 2>/dev/null || true
+  if [[ ! -f "$override_file" && -f "$consumed_file" ]]; then
     printf '%s' "$reason"
     return 0
-  else
-    # File was already consumed by another run, or never existed.
-    return 1
   fi
+  # Either mv failed outright, or it no-op'd on a pre-existing destination
+  # (source still present) — we do NOT own this override. Fail closed.
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -339,12 +363,14 @@ _cp1_c0_and_ledger_gate() {
   local plan_evidence_root="${project_root}/.aid-o/work/evidence/${plan_id}"
   local c0_review_file="${plan_evidence_root}/c0-plan-review.json"
 
-  # Atomically check-and-consume PM-override: if it exists and is valid, we
-  # claim it here via no-clobber rename. A second concurrent run attempting
-  # the same rename will fail and get override_present=0 — the override
-  # authorizes exactly one bypass, never more.
+  # Read-only override peek — used ONLY to decide whether either check below
+  # is allowed to proceed on a failure; does NOT consume anything. Genuine
+  # consumption happens later, exactly once, and only if actually needed —
+  # see the claim call after both checks (E-065-7_7 live DONE-review finding
+  # c3-E-065-7_7-0: an earlier eager-consume design spent a valid override
+  # on runs that would have passed cleanly with no override at all).
   local override_reason="" override_present=0
-  if override_reason="$(_cp1_check_and_consume_pm_override "$plan_evidence_root")"; then
+  if override_reason="$(_cp1_check_pm_override "$plan_evidence_root")"; then
     override_present=1
   fi
 
@@ -384,8 +410,30 @@ _cp1_c0_and_ledger_gate() {
     fi
   fi
 
+  # override_claimed: -1 = not yet attempted this run, 0 = attempted and
+  # failed (no valid override, or lost a concurrent race), 1 = claimed —
+  # attempted at most ONCE per gate invocation, only on genuine first need,
+  # and its result is reused for the ledger check below (a single override
+  # authorizes bypassing both, exactly once, never a re-claim per check).
+  # _cp1_ensure_override_claimed sets override_reason/override_claimed as a
+  # side effect; wrapped in `if` (not a bare `&&`/`||` chain) so a failed
+  # claim attempt never trips `set -e`.
+  local override_claimed=-1
+  _cp1_ensure_override_claimed() {
+    if [[ "$override_claimed" -eq -1 ]]; then
+      if override_reason="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
+        override_claimed=1
+      else
+        override_claimed=0
+      fi
+    fi
+  }
+
   if [[ "$c0_ok" -ne 1 ]]; then
     if [[ "$override_present" -eq 1 ]]; then
+      _cp1_ensure_override_claimed
+    fi
+    if [[ "$override_claimed" -eq 1 ]]; then
       echo "CP1-gate: WARNING — proceeding past C0 plan-review requirement (${c0_reason}) via PM-escalation override: ${override_reason}" >&2
     else
       cat >&2 <<ERRMSG
@@ -414,6 +462,9 @@ ERRMSG
 
   if [[ "$ledger_ok" -ne 1 ]]; then
     if [[ "$override_present" -eq 1 ]]; then
+      _cp1_ensure_override_claimed
+    fi
+    if [[ "$override_claimed" -eq 1 ]]; then
       echo "CP1-gate: WARNING — proceeding past CP1 ledger budget check (${ledger_reason}) via PM-escalation override: ${override_reason}" >&2
     else
       cat >&2 <<ERRMSG
@@ -428,10 +479,10 @@ ERRMSG
     fi
   fi
 
-  # NOTE: The PM-override has already been atomically consumed (renamed to
-  # .consumed-<epoch>) at the early check point if it existed and was valid.
-  # This enforces exactly-once semantics at the filesystem level (no separate
-  # consume operation needed).
+  # NOTE: the PM-override, if present, is claimed (atomically consumed) at
+  # MOST once per gate invocation — only at the point one of the two checks
+  # above genuinely needs it, never eagerly on a clean pass. A single claim
+  # covers both checks if both failed in the same run.
 
   echo "CP1-gate: C0 plan review + ledger budget checks passed for ${plan_id}." >&2
   exit 0
