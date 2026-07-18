@@ -24,6 +24,8 @@ setup() {
   export DISPATCH
   VALIDATE="$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh"
   export VALIDATE
+  LEDGER="$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh"
+  export LEDGER
 
   # C0_EVIDENCE_DIR is the PLAN-ID evidence ROOT (.aid-o/work/evidence/<plan_id>/),
   # a directory ABOVE the epic/run leaf setup_test_evidence_dir created.
@@ -34,6 +36,11 @@ setup() {
   printf 'project_id: test-c0-proj\n' > "$TEST_PROJECT_ROOT/.aid-o/config/project.yaml"
   mkdir -p "$TEST_PROJECT_ROOT/defaults/schemas"
   printf '{"type":"object"}\n' > "$TEST_PROJECT_ROOT/defaults/schemas/example-contract.schema.json"
+
+  # Initialize the CP1 ledger for plan P900-c0-test (used by all tests in this suite).
+  # This is needed for Finding 1 fix: cmd_dispatch now calls ledger increment on every
+  # genuine dispatch, so tests that dispatch must have a ledger ready.
+  bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test" >/dev/null 2>&1 || true
 
   PLAN_FILE="$TEST_PROJECT_ROOT/plan-low.md"
   cat > "$PLAN_FILE" <<'EOF'
@@ -651,8 +658,7 @@ _setup_cp1_gate_paths() {
   FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   _write_passing_cp1_deep_evidence
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup() — no need to re-init here.
 
   run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
@@ -666,8 +672,7 @@ _setup_cp1_gate_paths() {
   FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   _write_passing_cp1_deep_evidence
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup().
 
   run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
@@ -688,8 +693,7 @@ EOF
   [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   _write_passing_cp1_deep_evidence
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup().
 
   run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
@@ -713,8 +717,7 @@ EOF
   jq '.blocking_findings = false | .findings = []' "$REPORT" > "$tmp"
   mv "$tmp" "$REPORT"
   _write_passing_cp1_deep_evidence
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup().
 
   run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
@@ -729,8 +732,7 @@ EOF
   FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   _write_passing_cp1_deep_evidence
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup() at attempts:0. Manually exhaust the budget.
   ledger_file="$TEST_PROJECT_ROOT/.aid-o/work/cp1-ledger/P900-c0-test.yaml"
   yq -i '.attempts = .max' "$ledger_file"
 
@@ -746,11 +748,13 @@ EOF
   _seed_dispatch_env
   FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
-  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup() at attempts:0. The first dispatch
+  # should have incremented it to 1.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
 
   plan_hash_1="$(jq -r '.reviewed_plan_hash' "$REPORT")"
-  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" --codex-session "session-1" "P900-c0-test" "$plan_hash_1"
+  # Confirm: re-running with the same hash is a no-op (stays at 1).
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" --codex-session "session-1-retry" "P900-c0-test" "$plan_hash_1"
   [ "$status" -eq 0 ]
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
 
@@ -786,8 +790,7 @@ EOF
 
 @test "integration: Codex-unavailable during the loop does NOT increment the ledger / consume a recheck" {
   _setup_cp1_gate_paths
-  run bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
-  [ "$status" -eq 0 ]
+  # Ledger is already initialized in setup() at attempts:0.
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "0" ]
 
   _build_high
@@ -817,4 +820,77 @@ EOF
   run bash "$GATE" --plan "$PLAN_FILE" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"low-risk"* ]]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Finding 1 tests: dispatch increments the ledger
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "FINDING 1: dispatch with successful Codex response increments the ledger (attempts advances)" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Proof: the ledger's attempts counter must have advanced from 0 to 1.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
+  # Proof: the attempts_log must record the plan_hash and codex session.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts_log | length')" = "1" ]
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test
+  [[ "$output" == *"$session_id"* ]] || true
+}
+
+@test "FINDING 1: dispatch without a valid ledger fails closed (unverifiable), even though Codex is clean" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  # Sabotage the ledger by deleting it (simulating a corruption/missing-ledger scenario).
+  rm -f "$TEST_PROJECT_ROOT/.aid-o/work/cp1-ledger/P900-c0-test.yaml"
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # dispatch must fail (exit 2) because the ledger increment failed, even though
+  # Codex itself returned a clean response (outcome=dispatched in the dispatch.json).
+  [ "$status" -eq 2 ]
+  run jq -r '.review_status' "$REPORT"
+  [ "$output" = "unverifiable" ]
+  run jq -r '.outcome' "$REPORT"
+  [ "$output" = "ledger_increment_failed" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Finding 2 tests: increment rejects when budget exhausted with new hash
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "FINDING 2: increment at attempts==max with a new hash is REJECTED and ledger unchanged" {
+  # Setup: init ledger and manually advance it to max (3).
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2"
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:ccc >/dev/null
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "3" ]
+
+  # Attempt to increment with a NEW hash while at max — must fail.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2" sha256:ddd
+  [ "$status" -ne 0 ]
+
+  # Proof: the ledger must be UNCHANGED (still at attempts=3).
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts')" = "3" ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2 | jq -r '.attempts_log | length')" = "3" ]
+}
+
+@test "FINDING 2: increment at attempts==max with the SAME hash is still a no-op (not rejected)" {
+  # Setup: init and advance to max with three different hashes.
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop"
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:ccc >/dev/null
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "3" ]
+
+  # Re-run with the LAST hash (unchanged) — must succeed and be a no-op.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" "P900-ledger-finding2-noop" sha256:ccc
+  [ "$status" -eq 0 ]
+
+  # Proof: attempts still 3, no new entry in log.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "3" ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts_log | length')" = "3" ]
 }

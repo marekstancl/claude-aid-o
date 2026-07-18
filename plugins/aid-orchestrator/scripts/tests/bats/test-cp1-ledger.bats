@@ -286,3 +286,41 @@ _ledger_field() {
   [ "$status" -ne 0 ]
   [ ! -f "$(_ledger_file P142)" ]
 }
+
+# ─── FINDING 2 (E-065-7_7 dispatch integration) ───────────────────────────
+
+@test "FINDING 2: increment rejects a new hash when budget is exhausted (attempts >= max)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P150
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:ccc >/dev/null
+  [ "$(_ledger_field P150 '.attempts')" = "3" ]
+  [ "$(_ledger_field P150 '.max')" = "3" ]
+
+  # At this point, attempts == max, budget is exhausted. Attempt to increment
+  # with a NEW hash (different from the last recorded one).
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P150 sha256:ddd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"budget exhausted"* ]]
+
+  # Proof: ledger must be byte-for-byte unchanged (attempts still 3, log still has 3 entries).
+  [ "$(_ledger_field P150 '.attempts')" = "3" ]
+  [ "$(_ledger_field P150 '.attempts_log | length')" = "3" ]
+}
+
+@test "FINDING 2: increment with unchanged hash at max is still a no-op (not budget-gated)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P151
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:ccc >/dev/null
+  [ "$(_ledger_field P151 '.attempts')" = "3" ]
+
+  # At max budget, but re-running with the SAME last hash is a no-op and must
+  # NOT be rejected (the design intent: only NEW hashes trigger budget checks).
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P151 sha256:ccc
+  [ "$status" -eq 0 ]
+
+  # Proof: attempts still 3, log still has 3 entries (no new entry added).
+  [ "$(_ledger_field P151 '.attempts')" = "3" ]
+  [ "$(_ledger_field P151 '.attempts_log | length')" = "3" ]
+}

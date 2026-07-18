@@ -295,12 +295,24 @@ cmd_increment() {
   # plan_hash AND a new codex_session to differ would risk a stuck ledger if
   # a caller re-supplies the prior session id alongside a genuinely new
   # plan_hash. Session-repeat enforcement, if wanted, is Step 20's call.
-  local last_hash
+  local last_hash attempts max
   last_hash="$(printf '%s' "$ledger_json" | jq -r '.attempts_log[-1].plan_hash // ""')"
+  attempts="$(printf '%s' "$ledger_json" | jq -r '.attempts')"
+  max="$(printf '%s' "$ledger_json" | jq -r '.max')"
 
   if [[ "$plan_hash" == "$last_hash" ]]; then
     printf '%s\n' "$ledger_json"
     return 0
+  fi
+
+  # FINDING 2 FIX: Reject an attempt to increment with a NEW plan_hash when
+  # the ledger is already exhausted (attempts >= max). This is the
+  # "Exhausted(n>=max) × new-hash increment" edge case that the audit's
+  # state-matrix identified as missing. The no-op behavior for an UNCHANGED
+  # plan_hash is NOT gated by budget — it's preserved exactly as above (never
+  # mutates the ledger regardless of exhaustion).
+  if [[ "$attempts" -ge "$max" ]]; then
+    _fail "increment rejected: budget exhausted (attempts=$attempts >= max=$max) and new plan_hash supplied — cannot advance further. Use PM override if needed."
   fi
 
   local attempts new_n now

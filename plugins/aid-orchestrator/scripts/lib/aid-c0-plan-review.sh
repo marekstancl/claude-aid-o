@@ -110,6 +110,7 @@ C0_PROMPT_TEMPLATE="$PLUGIN_ROOT/defaults/prompts/c0-plan-review-prompt-v1.md"
 C0_RESPONSE_SCHEMA="$PLUGIN_ROOT/defaults/schemas/c0-plan-review.schema.json"
 C0_INDEPENDENCE_BIN="${AID_C0_INDEPENDENCE_BIN:-$SCRIPT_DIR/aid-audit-independence.sh}"
 C0_RENDER_PROMPT="${AID_C0_RENDER_BIN:-$SCRIPT_DIR/aid-render-prompt.sh}"
+C0_LEDGER_BIN="${AID_C0_LEDGER_BIN:-$SCRIPT_DIR/aid-cp1-ledger.sh}"
 C0_PRODUCER="orchestrator@cp1-deep"
 # CODEX_MODEL is a plain global (sourced default "gpt-5.6-terra"); repoint it
 # for THIS process only when a C0-specific override is given.
@@ -1045,6 +1046,29 @@ cmd_dispatch() {
   local presp_rc=0
   _c0_process_response "$evidence_dir" "$manifest" "$codex_rc" "$events_valid" \
     "$outcome" "$achieved" "$session_id" "$reviewed_head" || presp_rc=$?
+
+  # FINDING 1 FIX: Mechanically increment the CP1 ledger ONLY for a genuine,
+  # well-formed Codex dispatch (outcome == "dispatched"). This closes the gap:
+  # before this fix, the ledger was never incremented by code, only mentioned
+  # in prose. Now every real dispatch also advances the counter.
+  if [[ "$outcome" == "dispatched" ]]; then
+    local plan_id plan_hash ledger_rc=0
+    plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest" 2>/dev/null || echo "")"
+    plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest" 2>/dev/null || echo "")"
+
+    if [[ -z "$plan_id" || -z "$plan_hash" ]]; then
+      echo "PRECONDITION FAIL: cannot extract plan_id or plan_hash from manifest for ledger increment" >&2
+      _c0_write_unverifiable "$evidence_dir" "$manifest" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      exit 2
+    fi
+
+    if ! bash "$C0_LEDGER_BIN" increment --project-root "$project_root" --codex-session "$session_id" "$plan_id" "$plan_hash" >/dev/null 2>&1; then
+      ledger_rc=$?
+      echo "aid-c0-plan-review: ledger increment failed (rc=$ledger_rc) for plan_id=$plan_id — dispatched codex response is unverifiable without a recorded loop iteration" >&2
+      _c0_write_unverifiable "$evidence_dir" "$manifest" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      exit 2
+    fi
+  fi
 
   echo "$c0_dir/c0-dispatch.json"
 
