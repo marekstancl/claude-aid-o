@@ -365,6 +365,12 @@ _drive_two_attempts() {
 # ─── AC3 (cont): "escalated" once recheck_count reaches the policy budget ───
 
 @test "loop-summary.json outcome == escalated once recheck_count reaches c3_fix_loop.max_rechecks while still blocking (no policy override — default max_rechecks:2)" {
+  # DELIBERATELY DISTINCT finding text per attempt — each recheck's "fix"
+  # genuinely changes what's blocking (a fresh finding each time), so this
+  # test isolates budget-exhaustion escalation from the SEPARATE
+  # same-fingerprint-survives auto-escalation (its own dedicated test below).
+  # Reusing identical finding text here would trip the fingerprint check one
+  # round early — this bit this suite for real (E-065-6_7 DONE-review round 4).
   local heads=() bhs=()
   local i head bh
   for i in 1 2 3; do
@@ -375,7 +381,7 @@ _drive_two_attempts() {
     bhs+=("$bh")
     export FAKE_C3_HEAD="$head" FAKE_C3_BRIEF_HASH="$bh" FAKE_C3_THREAD_ID="thread-esc-$i" \
            FAKE_C3_BLOCKING=true \
-           FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Still unchecked.","recommendation":"Fix it.","action_owner":"implementer"}]'
+           FAKE_C3_FINDINGS="[{\"severity\":\"high\",\"area\":\"correctness\",\"finding\":\"Still unchecked in variant $i.\",\"recommendation\":\"Fix it.\",\"action_owner\":\"implementer\"}]"
     AID_C3_ATTEMPT="$i" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
     [ "$status" -eq 0 ]
   done
@@ -386,6 +392,7 @@ _drive_two_attempts() {
   # the default policy's c3_fix_loop.max_rechecks:2 allows → recheck_count=2.
   run jq -r '.recheck_count' "$SUM"; [ "$output" = "2" ]
   run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
+  run jq -r '.escalation_reason' "$SUM"; [ "$output" = "budget_exhausted" ]
 
   # Every attempt's own report still holds status:fail (never silently
   # rewritten to look clean) — canonical == the LAST (3rd) attempt.
@@ -408,6 +415,9 @@ _drive_two_attempts() {
 # the recheck/escalation audit trail was never actually written.
 
 @test "escalation is terminal: a 4th dispatch after outcome==escalated is rejected without an override" {
+  # DISTINCT finding text per attempt — see the comment on the
+  # budget-exhaustion test above for why (avoids tripping the SEPARATE
+  # same-fingerprint-survives auto-escalation one round early).
   local heads=() bhs=()
   local i head bh
   for i in 1 2 3; do
@@ -418,7 +428,7 @@ _drive_two_attempts() {
     bhs+=("$bh")
     export FAKE_C3_HEAD="$head" FAKE_C3_BRIEF_HASH="$bh" FAKE_C3_THREAD_ID="thread-term-$i" \
            FAKE_C3_BLOCKING=true \
-           FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Still unchecked.","recommendation":"Fix it.","action_owner":"implementer"}]'
+           FAKE_C3_FINDINGS="[{\"severity\":\"high\",\"area\":\"correctness\",\"finding\":\"Still unchecked in variant $i.\",\"recommendation\":\"Fix it.\",\"action_owner\":\"implementer\"}]"
     AID_C3_ATTEMPT="$i" run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
     [ "$status" -eq 0 ]
   done
@@ -589,6 +599,157 @@ _drive_two_attempts() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"escalated"* ]]
+}
+
+# ─── DONE-review C3 finding fix, round 4: same-fingerprint-survives + ───────
+# ─── conflicting-findings escalation enforcement (E-065-6_7) ────────────────
+#
+# A FOURTH live Codex DONE-review audit found pipeline.md 6a documents THREE
+# escalation triggers but only budget-exhaustion was ever code-enforced —
+# "same fingerprint survived a recheck" was prose-only. Fingerprints are
+# deterministic content hashes, so this IS mechanically decidable: dispatch
+# now compares each attempt's blocking-finding fingerprints against the
+# immediately-prior dispatched attempt's on its own, no controller action
+# needed. "Conflicting findings" remains a genuine judgment call the bridge
+# cannot make — the new `escalate` subcommand gives the controller a durable
+# way to record that judgment so the SAME terminal guard picks it up.
+
+@test "same fingerprint surviving a recheck escalates immediately, even with budget remaining (recheck_count 1 of 2)" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  local SAME_FINDING='[{"severity":"high","area":"correctness","finding":"Unchecked error path — identical across attempts.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-fp-1" \
+         FAKE_C3_BLOCKING=true FAKE_C3_FINDINGS="$SAME_FINDING"
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "null" ]
+
+  # Attempt 2: the "fix" was ineffective — Codex reports the EXACT SAME
+  # finding again (same severity/area/finding/recommendation → same
+  # fingerprint). Budget (max_rechecks:2) is nowhere near exhausted
+  # (recheck_count would only be 1 of 2) — the fingerprint match alone must
+  # still force escalation immediately.
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-fp-2" \
+         FAKE_C3_BLOCKING=true FAKE_C3_FINDINGS="$SAME_FINDING"
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  local SUM="$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  run jq -r '.recheck_count' "$SUM"; [ "$output" = "1" ]
+  run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
+  run jq -r '.escalation_reason' "$SUM"; [ "$output" = "same_fingerprint_survived" ]
+
+  # A 3rd attempt (no override) is rejected by the same terminal guard —
+  # despite recheck_count(1) < max_rechecks(2), i.e. budget was NOT the
+  # reason this became terminal.
+  local head3; head3="$(_commit_change 3)"
+  _build_manifest "$BASE_SHA" "$head3"
+  local bh3; bh3="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head3" FAKE_C3_BRIEF_HASH="$bh3" FAKE_C3_THREAD_ID="thread-fp-3" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=3 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"escalated"* ]]
+}
+
+@test "different findings across rechecks do NOT trigger same-fingerprint escalation (only the true budget check can escalate them)" {
+  # Companion negative case: attempt 2's finding is GENUINELY different
+  # content from attempt 1's — the fingerprint check must not false-positive.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-diff-1" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"First distinct issue.","recommendation":"Fix A.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-diff-2" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"A SECOND, genuinely different issue.","recommendation":"Fix B.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "null" ]
+  run jq -r '.recheck_count' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "1" ]
+}
+
+@test "escalate subcommand: durably records a controller's conflicting-findings judgment, gated by the same terminal guard" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-conf-1" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Finding X.","recommendation":"Fix X.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "null" ]
+
+  # A too-short reason is rejected — the justification must be real.
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "too short"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # The controller judges attempt 1's finding conflicts with a fix already
+  # applied elsewhere and records that judgment durably.
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "Finding X conflicts with the approach taken in PR-42"
+  [ "$status" -eq 0 ]
+
+  local SUM="$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
+  run jq -r '.escalation_reason' "$SUM"; [ "$output" = "conflicting_findings" ]
+  run jq -r '.manual_escalation.reason' "$SUM"
+  [ "$output" = "Finding X conflicts with the approach taken in PR-42" ]
+
+  # A further attempt is rejected by the SAME terminal guard rounds 1-3 built.
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-conf-2" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"escalated"* ]]
+
+  # A genuine override still works, same as any other escalation.
+  AID_C3_FORCE_BEYOND_ESCALATION="PM approved proceeding past manual escalation" \
+    AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "escalate subcommand: precondition failures (no loop-summary yet, already clean)" {
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "no loop exists yet for this evidence dir"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"nothing to escalate"* ]]
+
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-conf-clean" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.outcome' "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+  [ "$output" = "clean" ]
+
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "refusing to overwrite a clean verdict"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"clean"* ]]
 }
 
 @test "loop-summary write failure fails the whole attempt closed, even when the canonical report copy succeeded" {

@@ -133,6 +133,17 @@ Subcommands:
       verified; exit 2 = any check failed (fail-closed). --reference checks
       freshness against the manifest's captured head_sha (committed historical
       fixtures) instead of the live HEAD.
+
+  escalate <evidence_dir> <reason, >=20 chars>
+      Manually mark an IN-PROGRESS C3 fix-loop (c3/loop-summary.json must
+      already exist) as outcome:"escalated" / escalation_reason:
+      "conflicting_findings". For pipeline.md 6a's "the findings are mutually
+      conflicting" exit condition — a subjective judgment call the bridge
+      cannot detect mechanically, unlike same-fingerprint-survival (which
+      `dispatch` already detects and escalates automatically, no manual step
+      needed). Once recorded, the same terminal guard that rejects further
+      dispatches after any other "escalated"/"clean" outcome applies here too
+      — bypassable only via AID_C3_FORCE_BEYOND_ESCALATION, same as always.
 EOF
 }
 
@@ -1320,6 +1331,40 @@ _c3_write_loop_summary() {
     [[ "$mr" =~ ^[0-9]+$ ]] && max_rechecks="$mr"
   fi
 
+  # CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding, round 4): pipeline.md
+  # 6a's loop body documents THREE distinct escalation triggers, but only
+  # budget-exhaustion (recheck_count >= max_rechecks, below) was ever
+  # code-enforced — "the SAME finding fingerprint survived this recheck (fix
+  # ineffective)" was prose-only, so nothing stopped a further automatic
+  # AID_C3_ATTEMPT dispatch after the controller judged a fix ineffective.
+  # Unlike "conflicting findings" (an inherently subjective judgment call —
+  # left to the controller via the `escalate` subcommand below), "same
+  # fingerprint survived" IS mechanically decidable: fingerprints are
+  # deterministic content hashes, so compare THIS attempt's blocking-finding
+  # fingerprints against the immediately-prior dispatched attempt's — any
+  # overlap while still blocking means the fix didn't work.
+  local same_fingerprint_survived=false
+  if [[ "$report_status" == "fail" ]]; then
+    local prev_n prev_nn prev_report
+    prev_n="$(jq -r --argjson n "$n" \
+      '[.[] | select(.n < $n and .outcome == "dispatched")] | sort_by(.n) | last | .n // empty' \
+      <<<"$attempts" 2>/dev/null)"
+    if [[ -n "$prev_n" ]]; then
+      prev_nn="$(printf '%02d' "$prev_n")"
+      prev_report="$evidence_dir/c3/attempt-$prev_nn/audit-report.json"
+      if [[ -f "$prev_report" ]]; then
+        local cur_fps prev_fps overlap
+        cur_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$evidence_dir/audit-report.json" 2>/dev/null)"
+        prev_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$prev_report" 2>/dev/null)"
+        [[ -n "$cur_fps" ]] || cur_fps='[]'
+        [[ -n "$prev_fps" ]] || prev_fps='[]'
+        overlap="$(jq -n --argjson a "$cur_fps" --argjson b "$prev_fps" \
+          '[$a[] | select(. as $x | $b | index($x))] | length' 2>/dev/null)"
+        [[ "${overlap:-0}" -gt 0 ]] && same_fingerprint_survived=true
+      fi
+    fi
+  fi
+
   # CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding, round 3): "unverifiable"
   # covers two distinct cases that must NOT be treated alike. (a) A true
   # dispatch failure (codex unavailable/timeout/rate_limited/render_failed) —
@@ -1337,11 +1382,16 @@ _c3_write_loop_summary() {
   # reaching "escalated" and therefore never hitting the terminal-outcome
   # guard added in rounds 1-2. Mirror the "fail" branch's budget check here
   # too — case (a) is unaffected (recheck_count stays 0 for it either way).
+  local escalation_reason='null'
   case "$report_status" in
     pass) top_outcome='"clean"' ;;
     unverifiable|fail)
-      if [[ "$recheck_count" -ge "$max_rechecks" ]]; then
+      if [[ "$same_fingerprint_survived" == true ]]; then
         top_outcome='"escalated"'
+        escalation_reason='"same_fingerprint_survived"'
+      elif [[ "$recheck_count" -ge "$max_rechecks" ]]; then
+        top_outcome='"escalated"'
+        escalation_reason='"budget_exhausted"'
       elif [[ "$report_status" == "unverifiable" ]]; then
         top_outcome='"unverifiable"'
       else
@@ -1355,10 +1405,12 @@ _c3_write_loop_summary() {
     --argjson attempts "$attempts" \
     --argjson recheck_count "$recheck_count" \
     --argjson outcome "$top_outcome" \
+    --argjson escalation_reason "$escalation_reason" \
     --arg created_at "$iso_now" \
     '{schema_version:"aid-2.0", artifact_type:"c3_loop_summary",
       producer:"orchestrator@done-review", created_at:$created_at,
-      attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome}' \
+      attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome,
+      escalation_reason:$escalation_reason}' \
     > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
   return 0
@@ -2053,6 +2105,51 @@ cmd_verify() {
   return 0
 }
 
+# cmd_escalate <evidence_dir> <reason>
+#   E-065-6_7 DONE-review round 4: pipeline.md 6a's "the findings are mutually
+#   conflicting" exit condition is a subjective controller judgment call the
+#   bridge cannot detect mechanically (unlike same-fingerprint-survival, which
+#   _c3_write_loop_summary now detects and escalates on its own). Before this,
+#   there was no way for the controller to durably RECORD that judgment —
+#   meaning nothing stopped a later stray/automatic AID_C3_ATTEMPT dispatch
+#   from reopening a loop the controller had already decided to end. This
+#   subcommand gives the controller that missing write path: mark an
+#   IN-PROGRESS loop's c3/loop-summary.json outcome "escalated" directly, so
+#   the same terminal guard `dispatch` already enforces for every other
+#   escalation picks it up on the very next explicit-attempt call.
+cmd_escalate() {
+  if [[ $# -ne 2 ]]; then
+    usage >&2
+    echo "PRECONDITION FAIL: escalate requires exactly 2 args: <evidence_dir> <reason>" >&2
+    exit 1
+  fi
+  local evidence_dir="$1" reason="$2"
+  [[ "${#reason}" -ge 20 ]] \
+    || _fail "escalate reason must be >= 20 characters (got: ${#reason}) — a real, auditable justification is required"
+
+  local summary="$evidence_dir/c3/loop-summary.json"
+  [[ -f "$summary" ]] \
+    || _fail "no c3/loop-summary.json at $evidence_dir — nothing to escalate (escalate marks an IN-PROGRESS fix-loop terminal; it does not create one from nothing)"
+
+  local cur_outcome
+  cur_outcome="$(jq -r '.outcome // ""' "$summary" 2>/dev/null)"
+  [[ "$cur_outcome" != "clean" ]] \
+    || _fail "c3/loop-summary.json already recorded outcome=\"clean\" — refusing to overwrite a clean audit verdict with a manual escalation"
+
+  local tmp="$summary.tmp.$$" iso_now
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq --arg reason "$reason" --arg recorded_at "$iso_now" \
+    '.outcome = "escalated" | .escalation_reason = "conflicting_findings" |
+     .manual_escalation = {reason: $reason, recorded_at: $recorded_at}' \
+    "$summary" > "$tmp" 2>/dev/null \
+    || { rm -f "$tmp"; _fail "cannot compute updated loop-summary.json"; }
+  mv -f "$tmp" "$summary" 2>/dev/null \
+    || { rm -f "$tmp"; _fail "cannot write updated loop-summary.json"; }
+
+  echo "aid-c3-dispatch: c3/loop-summary.json marked outcome=\"escalated\" (conflicting_findings): $reason" >&2
+  return 0
+}
+
 # ===========================================================================
 # Subcommand dispatch
 # ===========================================================================
@@ -2074,6 +2171,9 @@ main() {
       ;;
     verify)
       cmd_verify "$@"
+      ;;
+    escalate)
+      cmd_escalate "$@"
       ;;
     -h|--help|help)
       usage

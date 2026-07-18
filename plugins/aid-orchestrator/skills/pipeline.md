@@ -1333,12 +1333,31 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    3. `bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" set-field c3_recheck_count <n> "$state_file"`
       (increment). Then re-evaluate blocking status on the new `audit-report.json`:
       - Still blocking AND the SAME finding `fingerprint` survived this recheck (fix
-        ineffective), OR the findings are mutually conflicting → **ESCALATION** immediately —
-        do not burn the remaining budget on a non-converging fix.
-      - Still blocking, fingerprint(s) differ (a fix introduced a NEW critical/high finding
-        counts against this SAME budget, never a fresh one) → loop again if
-        `c3_recheck_count < max_rechecks`, else fall through to the budget-exhaustion exit
-        below.
+        ineffective) → **ESCALATION** immediately — do not burn the remaining budget on a
+        non-converging fix. `dispatch`/`_c3_write_loop_summary` (P065 Step 17, DONE-review
+        round 4) detects this MECHANICALLY — it compares this attempt's blocking-finding
+        fingerprints against the immediately-prior dispatched attempt's and writes
+        `c3/loop-summary.json` `outcome:"escalated"` / `escalation_reason:"same_fingerprint_survived"`
+        itself; the controller does not need to take any extra action beyond re-checking
+        `audit-report.json` as it already does — the terminal-outcome guard (rounds 1-2) then
+        rejects any further automatic dispatch on its own.
+      - Still blocking AND the findings are mutually conflicting (a controller judgment call
+        the bridge cannot make mechanically) → **ESCALATION** immediately. Unlike the
+        fingerprint case, this is NOT auto-detected — the controller MUST durably record it:
+        ```bash
+        bash "$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh" escalate "$evidence_dir" \
+          "<reason, >=20 chars — what conflicts and why>"
+        ```
+        This writes the same `outcome:"escalated"` (`escalation_reason:"conflicting_findings"`)
+        that the fingerprint case writes automatically, so it is picked up by the exact same
+        terminal guard. Skipping this call is a Detector-without-Enforcement gap (see
+        `docs/plans/AID-v3-principles.md` §1) — the controller's own prose judgment would
+        otherwise never be durably recorded, leaving a later stray dispatch free to reopen the
+        loop.
+      - Still blocking, fingerprint(s) differ and findings do not conflict (a fix introduced a
+        NEW critical/high finding — counts against this SAME budget, never a fresh one) → loop
+        again if `c3_recheck_count < max_rechecks`, else fall through to the budget-exhaustion
+        exit below.
       - Clean (no blocking findings) → exit the loop, proceed to Curator dispatch / merge
         decision.
 
@@ -1348,8 +1367,9 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    - **`c3_recheck_count == max_rechecks (2)` and still blocking** → **ESCALATION**: surfaced to
      the PM in step 12's summary as blocking (never silently merged); a 3rd recheck / 4th total
      Codex run is PM-approved only, never automatic re-entry into this loop.
-   - **Same fingerprint survives a recheck, or conflicting findings** → **ESCALATION**
-     immediately, regardless of remaining budget.
+   - **Same fingerprint survives a recheck** (auto-detected, see step 3 above) **or conflicting
+     findings** (controller calls `escalate`, see step 3 above) → **ESCALATION** immediately,
+     regardless of remaining budget.
    - A blocking finding NOT in `eligible_severities` (e.g. `medium`) never triggers this loop —
      no auto-fix; surfaced to the PM as before (C3 blocks only on critical/high anyway, per
      `c3-audit-policy.yaml`).
