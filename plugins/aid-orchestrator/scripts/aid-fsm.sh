@@ -3823,6 +3823,21 @@ EOF
       # guard + C3 hook). The secondary trigger completes resolution before the Curator guard
       # runs, ensuring c3_hook_fired reflects BOTH primary and secondary conditions (E-057-2_2
       # Step 1 defense-in-depth fix).
+      #
+      # P065 Step 16 (E-065-6_7) — CANONICAL-report confirmation, documentation only, NO
+      # functional change here. pipeline.md's C3 fix→reverify loop (bounded at
+      # `c3-audit-policy.yaml` → `c3_fix_loop.max_rechecks`) re-runs build-manifest/dispatch/
+      # verify IN PLACE on every recheck — each iteration overwrites this same
+      # `$evidence_dir/audit-report.json` (and `c3/c3-dispatch.json`) rather than writing a
+      # per-attempt file. That means this hook, reading `$c3_report_file` at the evidence root
+      # exactly as it always has, is ALREADY reading the CANONICAL (last-attempt) report —
+      # whatever the loop's final outcome (clean, or still-blocking at recheck-budget
+      # exhaustion), the content checks below see that final state. Per-attempt evidence
+      # layering (a distinct file per attempt, preserving earlier attempts for audit trail) is
+      # Step 17's job, not this hook's — no change needed here for that. `c3_recheck_count`
+      # (if the run entered the fix loop) is read below, best-effort, purely to enrich the
+      # `c3_gate_would_block` telemetry event below with how many rechecks preceded a block —
+      # it does not participate in any pass/fail decision in this hook.
 
       if [[ "$c3_hook_fired" == "true" ]]; then
         local c3_block_reason=""
@@ -3898,9 +3913,19 @@ EOF
           # so the gate is observable whether or not it blocks; then:
           #   observe  → telemetry only, transition continues (staged wake, default)
           #   blocking → today's fail-closed behavior (counts toward errors → exit 1)
+          #
+          # P065 Step 16 — best-effort read of c3_recheck_count from fsm-state.yaml
+          # (set via `aid-fsm.sh set-field c3_recheck_count <n> <state_file>` by
+          # pipeline.md's fix→reverify loop; absent on any run that never entered the
+          # loop, e.g. a clean first audit). Purely additive telemetry enrichment — it
+          # does not affect c3_block_reason or the enforcement decision above/below.
+          local c3_recheck_count
+          c3_recheck_count=$(yaml_field "$state_file" c3_recheck_count)
+          [[ -z "$c3_recheck_count" ]] && c3_recheck_count="0"
           log_event "$_c3_timeline" "c3_gate_would_block" \
             check="c3_independent_audit" enforcement="$c3_enforcement" \
-            risk_profile="$c3_risk_profile" reason="$c3_block_reason"
+            risk_profile="$c3_risk_profile" reason="$c3_block_reason" \
+            c3_recheck_count="$c3_recheck_count"
           if [[ "$c3_enforcement" == "blocking" ]]; then
             echo "PRECONDITION FAIL: C3 independent audit block — ${c3_block_reason}." >&2
             echo "Risk profile '${c3_risk_profile}' requires a fresh, clean audit-report.json before release. See: ${c3_report_file}" >&2
