@@ -1089,6 +1089,56 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# TEST 27: BOTH the C0 review AND the ledger budget fail in the SAME run,
+# with a single valid PM-escalation override present. CP3 code-review noted
+# this is the one path where the round-3 "claim once, reuse for both checks"
+# logic (_cp1_ensure_override_claimed) actually does something — previously
+# verified only by manual trace, not a test. Prove: the gate passes (both
+# failures bypassed by the SAME override), the output warns about BOTH, and
+# exactly ONE .consumed-<epoch> archive is created (not two — a single
+# override must not be claimed twice in the same run).
+# ---------------------------------------------------------------------------
+run_test "a single PM-escalation override covers BOTH a C0 failure and a ledger failure in the same run (claimed exactly once)"
+
+proj27="$(make_project_root "t27")"
+plan27="$TMPDIR_ROOT/t27-plan.md"
+write_plan "$plan27" "P027" "risk: high" "authenticate() handler added."
+
+ev27="$(make_evidence_dir "$proj27" "P027")"
+write_passing_evidence "$ev27"
+proot27="$(plan_evidence_root_of "$ev27")"
+# Deliberately no c0-plan-review.json (C0 check fails) AND an exhausted
+# ledger (ledger check fails) — both in the same run.
+init_ledger_exhausted "$proj27" "P027"
+write_pm_override "$proot27"
+
+unstub_c0_verify
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan27" --project-root "$proj27" 2>&1)" || gate_exit=$?
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "gate passes when a single override bypasses both a C0 and a ledger failure"
+else
+  fail "gate passes when a single override bypasses both a C0 and a ledger failure" "got exit=$gate_exit, output: $gate_out"
+fi
+if echo "$gate_out" | grep -qi "WARNING.*C0 plan-review"; then
+  pass "output warns about the bypassed C0 requirement"
+else
+  fail "output warns about the bypassed C0 requirement" "output: $gate_out"
+fi
+if echo "$gate_out" | grep -qi "WARNING.*ledger"; then
+  pass "output warns about the bypassed ledger requirement"
+else
+  fail "output warns about the bypassed ledger requirement" "output: $gate_out"
+fi
+consumed_count27="$(find "$proot27" -maxdepth 1 -name 'cp1-pm-escalation-override.json.consumed-*' 2>/dev/null | wc -l | tr -d '[:space:]')"
+if [[ "$consumed_count27" -eq 1 ]]; then
+  pass "exactly one .consumed-* archive exists (claimed once, not twice)"
+else
+  fail "exactly one .consumed-* archive exists (claimed once, not twice)" "found $consumed_count27 archive(s)"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

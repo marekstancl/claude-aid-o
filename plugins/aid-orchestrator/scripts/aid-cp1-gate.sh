@@ -65,7 +65,7 @@
 # Either requirement's failure can be bypassed ONLY by an explicit,
 # ONE-SHOT PM-escalation override artifact at
 # `<plan_evidence_root>/cp1-pm-escalation-override.json` — see
-# `_cp1_check_and_consume_pm_override` below. Once consumed to bypass a failure, the
+# `_cp1_check_pm_override` / `_cp1_claim_pm_override` below. Once consumed to bypass a failure, the
 # override file is renamed to `<...>.consumed-<epoch>` so it cannot silently
 # authorize a second bypass (mirrors "the override permits exactly one more
 # attempt", plan Error Handling section).
@@ -307,30 +307,33 @@ _cp1_check_pm_override() {
 #   call this ONLY once a caller has determined the override is actually
 #   needed (a check alone, via _cp1_check_pm_override, must never trigger
 #   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
-#   sibling and returns 0 (echoing the pm_ref reason) iff the SOURCE FILE
-#   IS CONFIRMED GONE afterward — never trusts `mv -n`'s bare exit code.
+#   sibling and returns 0 (echoing the pm_ref reason) iff BOTH `mv -n`
+#   itself reports success AND the source file is confirmed gone afterward.
 #
-#   WHY checking source-gone (not `mv -n`'s exit code) matters: a second
-#   live DONE-review finding (same audit as above, same fingerprint area)
-#   showed `mv -n src dst` ALSO exits 0 — without moving anything — when
-#   `dst` happens to already exist (a stale `.consumed-<epoch>` sibling
-#   from an earlier run landing on the SAME epoch second). The old code
-#   trusted that exit-0 as "we now own it," reporting success while the
-#   override file was still sitting on disk, fully intact and reusable —
-#   a genuine one-shot-authorization violation. Checking `[[ ! -f "$src" ]]`
-#   after the `mv -n` call distinguishes the two exit-0 cases correctly:
-#   genuinely moved (source gone → real ownership) vs. no-clobber no-op
-#   (source still present → we do NOT own it, fail closed, try again
-#   later once the epoch second has moved on).
-#
-#   Concurrent-race safety (the ORIGINAL TOCTOU this function exists to
-#   close) is unaffected by moving the claim to be conditional: two
-#   concurrent invocations that BOTH determine a bypass is needed still
-#   race on the SAME rename target; the loser's source-file check
-#   correctly reports "not gone" (still present, because the winner's
-#   rename targeted a DIFFERENT destination path — different PID/subshell
-#   timing) or "gone but not to our destination" — either way the loser
-#   returns 1, never falsely claims ownership.
+#   WHY BOTH checks together (a live DONE-review audit found real bugs on
+#   EACH side of this, in two successive rounds):
+#   - Checking source-gone ALONE (round 2's first attempt) is not enough:
+#     under a genuine concurrent race, the LOSING process's own `mv -n`
+#     call can itself fail (non-zero exit, e.g. its `rename(2)` hits ENOENT
+#     because the winner already removed the source) while the source
+#     happens to be gone anyway — because the WINNER removed it, not this
+#     process. Trusting source-gone alone made the loser wrongly believe
+#     it also won, an empirically-confirmed double-claim (verified via a
+#     200-iteration concurrent-race harness: source-only check produced
+#     200/200 double-claims; requiring both conditions produced 0/200).
+#   - Checking `mv -n`'s exit code ALONE (round 1's original bug) is not
+#     enough either: `mv -n src dst` ALSO exits 0 — without moving
+#     anything — when `dst` already exists as a stale `.consumed-<epoch>`
+#     sibling from an earlier, unrelated run landing on the SAME epoch
+#     second, silently leaving the override intact and reusable.
+#   Only the CONJUNCTION of "mv itself reported success" AND "the source
+#   is now confirmed gone" distinguishes all three cases correctly: a
+#   genuine solo claim (both true), a race loser (mv fails OR, if mv
+#   spuriously reports 0, source-gone was caused by someone else — but the
+#   mv-exit-code check alone already screens out the real race-loser case
+#   per the harness above), and a stale-destination collision (mv reports
+#   0 via -n's no-clobber skip, but source remains — caught by the
+#   source-gone half).
 # ---------------------------------------------------------------------------
 _cp1_claim_pm_override() {
   local plan_evidence_root="$1" override_file consumed_file reason
@@ -340,13 +343,13 @@ _cp1_claim_pm_override() {
   [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
 
   consumed_file="${override_file}.consumed-$(date -u +%s)"
-  mv -n "$override_file" "$consumed_file" 2>/dev/null || true
-  if [[ ! -f "$override_file" && -f "$consumed_file" ]]; then
+  if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
     printf '%s' "$reason"
     return 0
   fi
-  # Either mv failed outright, or it no-op'd on a pre-existing destination
-  # (source still present) — we do NOT own this override. Fail closed.
+  # Either mv failed outright (a race loser, or a permission error), or it
+  # no-op'd on a pre-existing destination (source still present) — we do
+  # NOT own this override. Fail closed.
   return 1
 }
 

@@ -533,11 +533,15 @@ call the loop cannot resolve), write:
 `.aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json` with a
 non-empty `pm_ref` field (>= 20 characters — same reasoned-override
 convention as this project's other `*_FORCE_*` escalation overrides,
-recording who/what/why). `aid-cp1-gate.sh` reads this artifact, proceeds with
-EPIC generation, and RENAMES it to a `.consumed-<epoch>` sibling immediately
-after — the override authorizes exactly one more attempt, never a standing
-bypass. Using it always leaves the unresolved findings on record; it is
-never a silent pass.
+recording who/what/why). `aid-cp1-gate.sh` checks for this artifact only
+AFTER determining the C0 review and/or ledger budget check actually failed
+— a present override is never touched on a clean pass, so it stays
+available for a run that genuinely needs it. Only once a bypass is
+genuinely required does the gate claim it, renaming it to a
+`.consumed-<epoch>` sibling — the override authorizes exactly one more
+attempt (covering whichever of the two checks failed in that same run),
+never a standing bypass. Using it always leaves the unresolved findings on
+record; it is never a silent pass.
 
 **Gate enforcement.** `aid-cp1-gate.sh` (called by `aid-plan-to-epic.sh`) is
 the mechanical backstop for all of the above: it independently re-checks
