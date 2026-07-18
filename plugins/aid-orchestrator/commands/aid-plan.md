@@ -442,25 +442,25 @@ bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
   "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
 bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
-
-# Record the first C0 dispatch on the ledger, ONLY if it was a genuine,
-# verifiable dispatch (review_status != "unverifiable"). A dispatch failure
-# (Codex unavailable, etc.) leaves review_status unverifiable and does NOT
-# consume a ledger attempt — this carve-out mirrors the loop's own "Not a
-# loop iteration" rule.
-review_status="$(jq -r '.review_status // ""' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
-if [[ "$review_status" != "unverifiable" ]]; then
-  codex_session_id="$(jq -r '.codex_session // null' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
-  reviewed_plan_hash="$(jq -r '.reviewed_plan_hash // ""' "$PLAN_EVIDENCE_ROOT/c0-plan-review.json" 2>/dev/null || echo "")"
-  bash "$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh" increment \
-    --project-root "$PROJECT_ROOT" --codex-session "$codex_session_id" \
-    "$PLAN_ID" "$reviewed_plan_hash"
-fi
 ```
 `PLAN_EVIDENCE_ROOT` is `.aid-o/work/evidence/<plan_id>/` (one level above
 `cp1-deep/` — the same root `aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
 read). `init` runs once per plan, before the first C0 dispatch of its
 lifetime.
+
+**The ledger `increment` is now MECHANICAL, not a step the orchestrator
+performs.** `dispatch` itself calls `aid-cp1-ledger.sh increment` internally
+immediately after determining a genuine `outcome == "dispatched"` — the
+orchestrator does NOT need (and should NOT) call `increment` separately;
+`dispatch`'s own carve-out already skips it for `unavailable`/`timeout`/
+`rate_limited`/`render_failed` outcomes, matching "Not a loop iteration"
+below exactly. If the ledger increment itself fails (missing/corrupt/
+exhausted), `dispatch` fails closed too — `c0-plan-review.json` reports
+`status: unverifiable` even if Codex's own response was clean, and `verify`
+will correctly refuse to bless it. This closes a live DONE-review finding
+(E-065-7_7's own 2nd audit dispatch): the increment used to be prose-only,
+so a session that didn't perfectly follow this instruction could dispatch
+indefinitely with the ledger never actually advancing.
 
 **Not a loop iteration.** `dispatch` returning `unavailable`/`rate_limited`/
 `timeout`/`invalid_output` (Codex never genuinely dispatched a well-formed,
@@ -487,17 +487,15 @@ blocking AND `cp1-ledger.sh check-budget` reports budget available,
    bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
    bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
    ```
-3. Only after a genuinely dispatched attempt (never for an `unverifiable`
-   one — see the carve-out above), record it on the ledger:
-   ```bash
-   bash "$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh" increment \
-     --project-root "$PROJECT_ROOT" --codex-session "<codex_session_id from the c0-plan-review.json>" \
-     "$PLAN_ID" "<new reviewed_plan_hash>"
-   ```
-   A re-run with an UNCHANGED plan hash is a no-op (the ledger never
-   advances on it) — this is what makes "each recheck = a new plan hash"
-   mechanically enforced, not just documented.
-4. Re-evaluate the new `c0-plan-review.json`:
+   `dispatch` already records this attempt on the ledger internally (see
+   "The ledger `increment` is now MECHANICAL" above) — no separate step
+   needed here. A re-run with an UNCHANGED plan hash is a no-op inside
+   `increment` (the ledger never advances on it) — this is what makes "each
+   recheck = a new plan hash" mechanically enforced, not just documented.
+   Once the ledger is genuinely exhausted (`attempts >= max`), `increment`
+   itself now refuses to advance further on a new hash too — not just
+   `check-budget`'s read-only report.
+3. Re-evaluate the new `c0-plan-review.json`:
    - Clean (`review_status: pass`, `blocking_findings: false`) → exit the
      loop, proceed to EPIC generation.
    - Still blocking AND the SAME finding `fingerprint` survived this
