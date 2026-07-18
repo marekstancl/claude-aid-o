@@ -9,7 +9,7 @@ user_invocable: false
 Defines the per-checkpoint contract for AID review agents. Referenced by agent prompts.
 Additive to the canonical verifier output format (`agents/verifier.md`).
 
-**Last Updated:** 2026-06-29
+**Last Updated:** 2026-07-18
 
 ## False-Green Guardrails
 
@@ -154,7 +154,98 @@ Before EPIC generation for a high-risk plan, all 4 files must exist, be non-empt
 - `cp1-lens-L3-enforcement.md` — must contain `stop_rule_blockers:` at line-start
 - `cp1-adjudicator.md` — must contain `verdict:` at line-start
 
-Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`.
+Gate enforcement: `scripts/aid-cp1-gate.sh` validates presence of all 4 files and absence of unresolved accepted blockers before allowing EPIC generation. Called as subprocess by `scripts/aid-plan-to-epic.sh`. As of P065 Step 20, the same gate ALSO enforces the C0 cross-provider plan review and the CP1 ledger budget below — both are additional, independent requirements checked AFTER the 4-file/adjudicator check above passes.
+
+### C0 Cross-Provider Plan Review — Adjudicator MUST-Consume Contract
+
+**Not the same "C0" as the 5 observe lenses below.** This section governs a
+SEPARATE artifact: a single, mandatory, cross-provider (Codex) pass over the
+FINAL plan, produced by `scripts/lib/aid-c0-plan-review.sh` (build-manifest →
+dispatch → verify) as `.aid-o/work/evidence/<plan_id>/c0-plan-review.json`.
+It is the plan-time analogue of the C3 audit's cross-provider Codex pass —
+see `pipeline.md` §6a for the DONE-phase sibling this loop mirrors. The 5
+`c0-lens-*.md` semantic lenses in "C0 Observe Lenses" / "C0 Semantic Lenses"
+further below are a DIFFERENT, Claude-dispatched, still observe-only system;
+do not conflate the two.
+
+**Applies when:** the plan is high-risk (same trigger as CP1-deep itself —
+pattern match OR `risk: high`). A low/docs/medium (no pattern match) plan
+never requires this review, the gate check below, or the ledger — even if
+CP1-deep evidence happens to exist for it. If a PM promotes a low-risk plan
+to high mid-flow, the requirement applies from that point on.
+
+**Adjudicator MUST-consume rule:** when `c0-plan-review.json` is present for
+the plan under review, the CP1-deep adjudicator MUST read it and treat its
+contents as gate inputs, not merely observe them:
+- Any `blocking_findings: true` in `c0-plan-review.json` MUST be reflected
+  in the adjudicator's own verdict (`verdict: revise` or `fail`, never
+  `pass`) — the adjudicator does not get to independently judge the C0
+  review's findings away; it records them.
+- `review_status: unverifiable` MUST also prevent a `verdict: pass` while
+  the plan remains high-risk and no PM-escalation override is on record.
+- This is a documentation/LLM-prose requirement (the adjudicator agent
+  reads and acts on it). The MECHANICAL, code-level backstop — which does
+  not depend on the adjudicator having correctly followed this prose — is
+  `aid-cp1-gate.sh`, described next.
+
+**Gate enforcement (the mechanical backstop):** `scripts/aid-cp1-gate.sh`
+refuses EPIC generation for a high-risk plan unless ALL of the following
+hold, checked AFTER the existing 4-file/adjudicator check:
+1. `c0-plan-review.json` exists at the plan's evidence root
+   (`.aid-o/work/evidence/<plan_id>/`, one level above `cp1-deep/`).
+2. Its `review_status` is not `"unverifiable"`.
+3. Its `blocking_findings` is not `true`.
+4. `aid-c0-plan-review.sh verify` (the SAME subcommand that script ships)
+   exits 0 against that evidence root — this re-proves the raw-binding/
+   provenance chain in CODE, so a hand-edited or stale report is rejected
+   even when its top-level fields look clean (Principle #1: a check that
+   only reads fields, never re-derives them, is not enforcement).
+
+Any of the 4 failing is bypassable ONLY by a PM-escalation override
+artifact — see "Bounded Loop" below.
+
+**Bounded loop (mirrors `pipeline.md` §6a, at plan level):**
+- Initial review + up to `max_rechecks: 2` rechecks (`review-checkpoints.yaml`
+  → `cp1_codex_review.max_rechecks`) = 3 Codex runs max, same budget shape
+  as C3's fix→reverify loop.
+- Each recheck is a genuine plan REVISION: a new commit → a new
+  `reviewed_plan_hash` → a fresh, isolated Codex session. The CP1 revision-
+  limit ledger (`scripts/lib/aid-cp1-ledger.sh`) is the mechanical authority
+  for this count — `increment <plan_id> <new_plan_hash>` is called once per
+  genuinely new attempt; re-supplying the SAME `plan_hash` is a no-op, never
+  advances the count.
+- **Not a loop iteration:** Codex unavailable/timeout/rate_limited/
+  invalid_output (`aid-c0-plan-review.sh dispatch` exit 2 without a
+  genuinely dispatched raw response) is `review_status: unverifiable` and
+  does NOT call `increment` — exactly like C3's own "not a loop iteration"
+  carve-out. It blocks high-risk EPIC generation pending a PM decision, but
+  never silently burns the revision budget and never becomes a blind retry.
+- **Exit conditions:**
+  - Clean (`review_status: pass`, `blocking_findings: false`, verified) →
+    proceed to EPIC generation.
+  - The SAME finding fingerprint survives a revision, or the findings are
+    mutually conflicting → immediate escalation (do not spend the
+    remaining budget on a non-converging fix) — same judgment split as
+    C3's fingerprint-survives (mechanical) vs. conflicting-findings
+    (controller judgment call) distinction.
+  - After the 3rd review run (initial + 2 rechecks) still blocking →
+    `PM_ESCALATION_REQUIRED`: execution halts, `aid-cp1-gate.sh` reports
+    `check-budget` as exhausted, and only an explicit PM-escalation
+    override permits a 4th attempt — never an automatic re-entry.
+- **PM-escalation override:** a `cp1-pm-escalation-override.json` artifact
+  at the plan's evidence root, containing a non-empty `pm_ref` (>= 20
+  characters, mirroring this project's `AID_C3_FORCE_BEYOND_ESCALATION`
+  reasoned-override convention). `aid-cp1-gate.sh` consumes it EXACTLY
+  ONCE — after using it to bypass a failing check, it renames the artifact
+  to a `.consumed-<epoch>` sibling so it cannot silently authorize a second
+  bypass. Using it always records the override AND the unresolved findings
+  in the gate's own log output — never a silent pass.
+
+**Evidence layering:** per-attempt raw evidence lives under
+`.aid-o/work/evidence/<plan_id>/c0/attempt-NN/` (mirrors C3's
+`c3/attempt-NN/` convention); the canonical `c0-plan-review.json` at the
+evidence root is always the LATEST attempt — the file the adjudicator and
+`aid-cp1-gate.sh` both consume.
 
 ### C0 Observe Lenses — Adjudicator Addendum (append-only, E4)
 

@@ -609,3 +609,212 @@ EOF
   run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
   [ "$status" -eq 2 ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# integration: aid-cp1-gate.sh consuming c0-plan-review.json + the CP1
+# revision-limit ledger (P065 E-065-7_7 Step 20).
+#
+# These tests exercise the REAL, unstubbed chain: aid-cp1-gate.sh shells out
+# to the REAL aid-c0-plan-review.sh verify (this file's own subject) and the
+# REAL aid-cp1-ledger.sh check-budget — no AID_CP1_GATE_C0_REVIEW_BIN /
+# AID_CP1_GATE_LEDGER_BIN test seam is set here (that seam exists for
+# test-cp1-gate.sh's own lighter-weight unit tests). This is the genuine
+# end-to-end proof that the gate's shell-out is load-bearing in production,
+# using this file's fake-codex-c0 fixture as the only substitute (for the
+# Codex CLI itself, exactly as the rest of this suite already does).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _write_passing_cp1_deep_evidence — the 4 L1/L2/L3/adjudicator files
+# aid-cp1-gate.sh's PRE-EXISTING (Step 18/19-era) evidence check requires,
+# independent of and unmodified by this step.
+_write_passing_cp1_deep_evidence() {
+  local dir="$C0_EVIDENCE_DIR/cp1-deep"
+  mkdir -p "$dir"
+  printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "$dir/cp1-lens-L1-behavior.md"
+  printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "$dir/cp1-lens-L2-feasibility.md"
+  printf 'findings: []\nstop_rule_blockers: []\nconfidence: high\n' > "$dir/cp1-lens-L3-enforcement.md"
+  printf 'accepted_blockers: []\nrejected_blockers: []\nverdict: pass\nrevision_count: 0\n' > "$dir/cp1-adjudicator.md"
+}
+
+_setup_cp1_gate_paths() {
+  GATE="$AID_PLUGIN_PATH/scripts/aid-cp1-gate.sh"
+  export GATE
+  LEDGER="$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh"
+  export LEDGER
+}
+
+@test "integration: aid-cp1-gate.sh PASSES when C0 review is genuinely dispatched+clean and the ledger has budget" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  _write_passing_cp1_deep_evidence
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "integration: aid-cp1-gate.sh BLOCKS when C0 review genuinely dispatched but still has blocking findings" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  _write_passing_cp1_deep_evidence
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+}
+
+@test "integration: aid-cp1-gate.sh BLOCKS when Codex was unavailable (unverifiable is not a loop iteration)" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  cat > "$INDEP_SPY/detect" <<'EOF'
+#!/usr/bin/env bash
+exit 2
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
+  _write_passing_cp1_deep_evidence
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unverifiable"* ]]
+  # unverifiable is NOT a loop iteration — the ledger must stay untouched (0).
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "0" ]
+}
+
+@test "integration: aid-cp1-gate.sh BLOCKS a post-hoc tampered c0-plan-review.json even though its fields look clean" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # Tamper: flip blocking_findings to false and clear findings post-hoc,
+  # WITHOUT re-dispatching Codex — the raw-binding/faithful-transform chain
+  # verify() checks is now broken, even though the top-level fields alone
+  # would otherwise satisfy the gate's cheaper field checks.
+  tmp="$TEST_TMPDIR/tampered-cp1-report.json"
+  jq '.blocking_findings = false | .findings = []' "$REPORT" > "$tmp"
+  mv "$tmp" "$REPORT"
+  _write_passing_cp1_deep_evidence
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"verify failed"* ]]
+}
+
+@test "integration: aid-cp1-gate.sh BLOCKS when the CP1 ledger budget is exhausted, even with a clean C0 review" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  _write_passing_cp1_deep_evidence
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+  ledger_file="$TEST_PROJECT_ROOT/.aid-o/work/cp1-ledger/P900-c0-test.yaml"
+  yq -i '.attempts = .max' "$ledger_file"
+
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"exhausted"* ]]
+}
+
+@test "integration: the bounded C0 review loop — a plan revision (new hash) advances the ledger; a same-hash re-run is a no-op" {
+  _setup_cp1_gate_paths
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+
+  plan_hash_1="$(jq -r '.reviewed_plan_hash' "$REPORT")"
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" --codex-session "session-1" "P900-c0-test" "$plan_hash_1"
+  [ "$status" -eq 0 ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
+
+  # A "fix" to the plan (a new commit) => new reviewed_plan_hash => new
+  # dispatch => a genuinely new Codex session for the recheck.
+  echo "fix attempt 2" >> "$PLAN_FILE_HIGH"
+  git add plan-high.md
+  git commit -q -m "revise plan (recheck 1)"
+
+  run bash "$DISPATCH" build-manifest "$PLAN_FILE_HIGH" "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  plan_hash_2="$(jq -r '.reviewed_plan_hash' "$REPORT")"
+  [ "$plan_hash_2" != "$plan_hash_1" ]
+
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" --codex-session "session-2" "P900-c0-test" "$plan_hash_2"
+  [ "$status" -eq 0 ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "2" ]
+
+  # Re-running the SAME (unchanged) plan hash again is a no-op — never
+  # inflates the count (mirrors C3's "not a loop iteration" carve-out, here
+  # for the mechanical increment primitive itself).
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" --codex-session "session-2-retry" "P900-c0-test" "$plan_hash_2"
+  [ "$status" -eq 0 ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "2" ]
+
+  _write_passing_cp1_deep_evidence
+  run bash "$GATE" --plan "$PLAN_FILE_HIGH" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "integration: Codex-unavailable during the loop does NOT increment the ledger / consume a recheck" {
+  _setup_cp1_gate_paths
+  run bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" "P900-c0-test"
+  [ "$status" -eq 0 ]
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "0" ]
+
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  cat > "$INDEP_SPY/detect" <<'EOF'
+#!/usr/bin/env bash
+exit 2
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
+  run jq -r '.outcome' "$REPORT"; [ "$output" = "unavailable" ]
+
+  # NOT a loop iteration: there is no genuinely-dispatched attempt to
+  # increment on (no codex session, no trustworthy plan_hash echo) — the
+  # ledger correctly stays at 0, matching pipeline.md §6a's carve-out.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "0" ]
+}
+
+@test "integration: low-risk plan never requires c0-plan-review.json or a ledger at all" {
+  _setup_cp1_gate_paths
+  _write_passing_cp1_deep_evidence >/dev/null 2>&1 || true
+  # Deliberately: no build-manifest/dispatch, no ledger init, no
+  # c0-plan-review.json, and PLAN_FILE (risk: low) is used, not the high one.
+  run bash "$GATE" --plan "$PLAN_FILE" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"low-risk"* ]]
+}
