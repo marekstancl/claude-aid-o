@@ -4,8 +4,8 @@ template_version: v2
 artifact: c3
 variables: [plan_path, plan_sha256, base_sha, head_sha, input_manifest_path,
   input_manifest_hash, codex_brief_hash, bundle_diff_path, bundle_scope_path,
-  acceptance_criteria_path, review_profile_path, evidence_paths, output_schema_path,
-  allowed_recheck_commands, verification_budget]
+  acceptance_criteria_path, review_profile_path, evidence_paths, evidence_dir_path,
+  output_schema_path, allowed_recheck_commands, verification_budget]
 ---
 
 # C3 Independent Cross-Provider Audit — Codex
@@ -39,7 +39,13 @@ is defined ONLY by this prompt and the output schema.
 - Brief hash you MUST echo back verbatim: `{{codex_brief_hash}}`
 - Diff: `{{bundle_diff_path}}` — Changed-file scope: `{{bundle_scope_path}}`
 - Acceptance criteria: `{{acceptance_criteria_path}}` — Review profile: `{{review_profile_path}}`
-- Allow-listed evidence you may cite: `{{evidence_paths}}`
+- Allow-listed evidence you may cite: `{{evidence_paths}}`. Path base: entries under this run's
+  evidence directory, `{{evidence_dir_path}}` (e.g. `gates_report.json`, `gates/gates_report.json`,
+  `final_report.md`, `verifier-output-*.md`) are relative to `{{evidence_dir_path}}` — resolve them
+  as `{{evidence_dir_path}}/<entry>`. Every OTHER entry is a changed production source file and is
+  already relative to the repository root you are `--cd`'d into. If an allow-listed evidence
+  artifact is genuinely absent even after resolving it against `{{evidence_dir_path}}`, that is a
+  real finding — do not silently assume you resolved the path wrong instead.
 - The ONLY commands you may run to RE-EXECUTE a named test/gate: `{{allowed_recheck_commands}}` (an
   explicit list — see check-table step 3; this is separate from, and stronger than, the always-
   allowed reads below)

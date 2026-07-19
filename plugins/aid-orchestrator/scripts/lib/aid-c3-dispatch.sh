@@ -1663,7 +1663,39 @@ cmd_dispatch() {
   plan_sha256="$(jq -r '.audit_input_manifest.codex_brief_files[]? | select(.path=="c3/bundle-plan-ac.md") | .sha256' "$manifest" | head -n1)"
   [[ -n "$plan_sha256" ]] || plan_sha256="sha256:"
   input_manifest_hash="sha256:$(sha256sum "$manifest" | awk '{print $1}')"
-  evidence_paths="$(jq -r '.audit_input_manifest.allowlist // [] | join(", ")' "$manifest")"
+
+  # DONE-review #4 live-audit finding (P065 E-065-7_7): allowlist[] mixes TWO
+  # path bases with no marker — production-file entries (from
+  # AID_CHANGED_PATHS, Step 3 above) are already repo-root-relative; evidence-
+  # artifact entries (final_report.md / gates_report.json / gates/gates_
+  # report.json / verifier-output-*.md, written relative to evidence_dir by
+  # this same Step 3) are NOT. This is the exact IMP-245 bug class (Codex
+  # runs with --cd project_root, not --cd evidence_dir) on the one array that
+  # earlier IMP-245 fix never touched — a live audit tried to read an
+  # allow-listed evidence path, resolved it against project_root as every
+  # other sealed path here already correctly does, found nothing, and
+  # (correctly, given what it was told) reported the artifact absent. Rewrite
+  # just the evidence-artifact subset to be project_root-relative, matching
+  # bundle_diff_path_rel etc. below; production-file entries are left as-is
+  # (they are already correct).
+  local evidence_paths_arr=() evidence_paths_resolved=() _ep
+  mapfile -t evidence_paths_arr < <(jq -r '.audit_input_manifest.allowlist // [] | .[]' "$manifest")
+  for _ep in "${evidence_paths_arr[@]}"; do
+    case "$_ep" in
+      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+        evidence_paths_resolved+=("$(realpath -m --relative-to="$project_root" "$evidence_dir/$_ep" 2>/dev/null || echo "$_ep")") ;;
+      *)
+        evidence_paths_resolved+=("$_ep") ;;
+    esac
+  done
+  evidence_paths=""
+  if [[ ${#evidence_paths_resolved[@]} -gt 0 ]]; then
+    local _ep_first=true
+    for _ep in "${evidence_paths_resolved[@]}"; do
+      if [[ "$_ep_first" == true ]]; then evidence_paths="$_ep"; _ep_first=false
+      else evidence_paths="$evidence_paths, $_ep"; fi
+    done
+  fi
   arc_str="$(jq -c '.audit_input_manifest.allowed_recheck_commands // []' "$manifest")"
   vbudget_str="$(jq -c '.audit_input_manifest.verification_budget // {}' "$manifest")"
   output_schema_path="$(realpath -m --relative-to="$project_root" "$RESPONSE_SCHEMA" 2>/dev/null || echo "$RESPONSE_SCHEMA")"
@@ -1676,12 +1708,16 @@ cmd_dispatch() {
   # surfaced this: once the prompt actually told Codex it's allowed to read these
   # files (fixing the OTHER half of IMP-245), Codex tried to and genuinely
   # couldn't find them from its own --cd anchor, correctly reporting them absent.
-  local plan_path_rel input_manifest_path_rel bundle_diff_path_rel bundle_scope_path_rel review_profile_path_rel
+  local plan_path_rel input_manifest_path_rel bundle_diff_path_rel bundle_scope_path_rel review_profile_path_rel evidence_dir_path_rel
   plan_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-plan-ac.md" 2>/dev/null || echo "c3/bundle-plan-ac.md")"
   input_manifest_path_rel="$(realpath -m --relative-to="$project_root" "$manifest" 2>/dev/null || echo "audit-input-manifest.json")"
   bundle_diff_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-diff.patch" 2>/dev/null || echo "c3/bundle-diff.patch")"
   bundle_scope_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-scope.txt" 2>/dev/null || echo "c3/bundle-scope.txt")"
   review_profile_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-review-profile.json" 2>/dev/null || echo "c3/bundle-review-profile.json")"
+  # DONE-review #4 finding: give the auditor the resolved evidence-dir root
+  # explicitly, so it does not have to infer which base each evidence_paths
+  # entry resolves against.
+  evidence_dir_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir" 2>/dev/null || echo "$evidence_dir")"
 
   local vars_json="$work_c3_dir/codex-prompt-vars.json"
   jq -n \
@@ -1697,6 +1733,7 @@ cmd_dispatch() {
     --arg acceptance_criteria_path "$plan_path_rel" \
     --arg review_profile_path "$review_profile_path_rel" \
     --arg evidence_paths "$evidence_paths" \
+    --arg evidence_dir_path "$evidence_dir_path_rel" \
     --arg output_schema_path "$output_schema_path" \
     --arg allowed_recheck_commands "$arc_str" \
     --arg verification_budget "$vbudget_str" \
@@ -1705,6 +1742,7 @@ cmd_dispatch() {
       codex_brief_hash:$codex_brief_hash, bundle_diff_path:$bundle_diff_path,
       bundle_scope_path:$bundle_scope_path, acceptance_criteria_path:$acceptance_criteria_path,
       review_profile_path:$review_profile_path, evidence_paths:$evidence_paths,
+      evidence_dir_path:$evidence_dir_path,
       output_schema_path:$output_schema_path, allowed_recheck_commands:$allowed_recheck_commands,
       verification_budget:$verification_budget}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }

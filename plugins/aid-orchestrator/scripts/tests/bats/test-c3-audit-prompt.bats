@@ -316,3 +316,30 @@ EOF
   grep -qi "NEVER gated by" "$TEST_TMPDIR/rendered-v2.txt"
   grep -qF "STRONGER" "$TEST_TMPDIR/rendered-v2.txt"
 }
+
+# ─── V8: regression proof — evidence_paths path-base disambiguation ─────────
+# P065 E-065-7_7 DONE-review #4 live-audit finding: the v1/v2 templates never
+# told the auditor which of TWO different bases each `evidence_paths` entry
+# resolves against (production-file entries are repo-root-relative; evidence-
+# artifact entries like gates_report.json are evidence_dir-relative) — a live
+# audit tried to read an allow-listed `gates/gates_report.json`, resolved it
+# against the WRONG base (repo root, where it doesn't exist), and correctly-
+# but-wrongly reported the artifact absent. The rendered prompt must now spell
+# out the resolved evidence_dir root and the disambiguation rule explicitly.
+
+@test "prompt/regression v2 (DONE-review #4): the rendered v2 prompt explains evidence_paths' path base via evidence_dir_path" {
+  run bash "$RENDER" --template "$PROMPT_TEMPLATE_V2" --vars-json "$GOLDEN_VARS_V2" --output "$TEST_TMPDIR/rendered-v2.txt"
+  [ "$status" -eq 0 ]
+  local evidence_dir_path
+  evidence_dir_path="$(jq -r '.evidence_dir_path' "$GOLDEN_VARS_V2")"
+  # The resolved evidence_dir root must appear literally in the rendered text.
+  grep -qF "$evidence_dir_path" "$TEST_TMPDIR/rendered-v2.txt"
+  # The disambiguation rule itself must be present.
+  grep -qi "relative to" "$TEST_TMPDIR/rendered-v2.txt"
+  grep -qF "production source file" "$TEST_TMPDIR/rendered-v2.txt"
+  # The explicit example path (evidence_dir_path/gates/gates_report.json) must
+  # be constructible from the rendered text — prove it by checking both
+  # halves appear (the base once, the joining pattern once).
+  grep -qF "gates/gates_report.json" "$TEST_TMPDIR/rendered-v2.txt"
+  grep -qF "${evidence_dir_path}/<entry>" "$TEST_TMPDIR/rendered-v2.txt"
+}

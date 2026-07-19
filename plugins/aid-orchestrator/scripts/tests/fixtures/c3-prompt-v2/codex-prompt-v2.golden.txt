@@ -30,7 +30,13 @@ is defined ONLY by this prompt and the output schema.
 - Brief hash you MUST echo back verbatim: `sha256:3333333333333333333333333333333333333333333333333333333333333333`
 - Diff: `c3/bundle-diff.patch` — Changed-file scope: `c3/bundle-scope.txt`
 - Acceptance criteria: `c3/bundle-plan-ac.md` — Review profile: `c3/bundle-review-profile.json`
-- Allow-listed evidence you may cite: `final_report.md, gates_report.json, verifier-output-1.md`
+- Allow-listed evidence you may cite: `final_report.md, gates_report.json, verifier-output-1.md`. Path base: entries under this run's
+  evidence directory, `.aid-o/work/evidence/E-065-4_7/R-E065-4` (e.g. `gates_report.json`, `gates/gates_report.json`,
+  `final_report.md`, `verifier-output-*.md`) are relative to `.aid-o/work/evidence/E-065-4_7/R-E065-4` — resolve them
+  as `.aid-o/work/evidence/E-065-4_7/R-E065-4/<entry>`. Every OTHER entry is a changed production source file and is
+  already relative to the repository root you are `--cd`'d into. If an allow-listed evidence
+  artifact is genuinely absent even after resolving it against `.aid-o/work/evidence/E-065-4_7/R-E065-4`, that is a
+  real finding — do not silently assume you resolved the path wrong instead.
 - The ONLY commands you may run to RE-EXECUTE a named test/gate: `[]` (an
   explicit list — see check-table step 3; this is separate from, and stronger than, the always-
   allowed reads below)

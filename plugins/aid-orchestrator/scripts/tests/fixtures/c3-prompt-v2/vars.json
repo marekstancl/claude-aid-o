@@ -11,6 +11,7 @@
   "acceptance_criteria_path": "c3/bundle-plan-ac.md",
   "review_profile_path": "c3/bundle-review-profile.json",
   "evidence_paths": "final_report.md, gates_report.json, verifier-output-1.md",
+  "evidence_dir_path": ".aid-o/work/evidence/E-065-4_7/R-E065-4",
   "output_schema_path": "defaults/schemas/c3-codex-response.schema.json",
   "allowed_recheck_commands": "[]",
   "verification_budget": "max_commands=10 max_seconds=120"

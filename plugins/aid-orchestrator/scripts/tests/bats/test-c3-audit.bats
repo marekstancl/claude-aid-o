@@ -878,6 +878,35 @@ JSON
   [[ "$output" == *"c3/c3-dispatch.json not found"* ]]
 }
 
+# ─── DONE-review #4 finding: evidence_paths (allowlist) entries under the
+#     evidence dir must resolve to project_root-relative paths in the ACTUAL
+#     rendered prompt — not just in the template's own explanatory text (V8
+#     in test-c3-audit-prompt.bats covers that half; this is the end-to-end
+#     proof that a real build-manifest + dispatch against a real
+#     gates/gates_report.json file produces a correctly resolved reference). ─
+
+@test "DONE-review #4 finding: a real gates/gates_report.json in the evidence dir renders as evidence_dir/gates/gates_report.json, resolvable from project_root" {
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  printf '{"overall":"pass"}\n' > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+
+  _drive_clean_dispatch
+  [ "$status" -eq 0 ]
+
+  local expected_rel
+  expected_rel="$(realpath -m --relative-to="$TEST_PROJECT_ROOT" "$TEST_EVIDENCE_DIR/gates/gates_report.json")"
+  # Sanity: the expected path is genuinely evidence_dir-prefixed, not a bare
+  # "gates/gates_report.json" (which is what the pre-fix bug rendered).
+  [[ "$expected_rel" == *".aid-o/work/evidence/"*"/gates/gates_report.json" ]]
+
+  run grep -F "$expected_rel" "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ "$status" -eq 0 ]
+  # The bare, unresolved form must NOT appear on its own inside the
+  # evidence_paths line (it legitimately appears once inside the
+  # evidence_dir_path disambiguation sentence's own example text).
+  run grep -c "\`gates/gates_report.json, " "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ "$output" = "0" ]
+}
+
 # ─── AC4: THE critical test — a fabricated report (edited AFTER dispatch, with an
 #     intact c3-dispatch.json that passes checks 1–4) is BLOCKED under blocking
 #     because verify's report↔raw faithful-transform binding fails. This proves
