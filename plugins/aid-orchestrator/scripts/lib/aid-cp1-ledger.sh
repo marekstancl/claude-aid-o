@@ -379,9 +379,10 @@ cmd_increment() {
   #
   # However, a valid PM-escalation override artifact can authorize exactly
   # ONE additional increment past max. Check for and claim it now.
+  local override_used=false override_reason=""
   if [[ "$attempts" -ge "$max" ]]; then
     # Compute the plan-evidence-root where the override artifact lives.
-    local plan_evidence_root override_reason
+    local plan_evidence_root
     plan_evidence_root="$(_cp1_plan_evidence_root "$project_root" "$plan_id")"
 
     # Attempt to claim the override atomically (consume it if present/valid).
@@ -389,8 +390,7 @@ cmd_increment() {
       # Override claim succeeded — permit this ONE increment past max.
       # The override is now consumed (renamed to .consumed-<epoch>), so a
       # SUBSEQUENT increment attempt would need a FRESH override.
-      # Continue to the increment logic below (do not _fail).
-      true  # Fall through to increment logic
+      override_used=true
     else
       # No valid override present, or it was already consumed elsewhere.
       # Reject exactly as before (fail-closed).
@@ -403,6 +403,26 @@ cmd_increment() {
   new_n=$(( attempts + 1 ))
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+  # PERSIST the override decision in the ledger itself (not just the
+  # transient artifact consumption) — a live DONE-review audit found the
+  # earlier version of this fix consumed the override at THIS layer but
+  # left aid-cp1-gate.sh's own SEPARATE check-budget call with no way to
+  # know the resulting over-budget state was legitimately authorized (the
+  # artifact was already gone by the time the gate read it), so a
+  # genuinely clean 4th review still could not reach EPIC generation — the
+  # PM's authorization was spent but never actually delivered its effect.
+  # Every increment now explicitly records pm_override.present for the
+  # CURRENT ledger tip: true only when THIS SPECIFIC advance was
+  # override-claimed, false otherwise (clearing any stale true from a
+  # PRIOR advance — pm_override always describes only the latest attempt,
+  # never a standing/sticky bypass).
+  local override_json
+  if [[ "$override_used" == true ]]; then
+    override_json="$(jq -nc --arg ref "$override_reason" '{present: true, ref: $ref}')"
+  else
+    override_json='{"present": false, "ref": null}'
+  fi
+
   local cs_json new_json
   cs_json="$(_json_str_or_null "$codex_session")"
   new_json="$(printf '%s' "$ledger_json" | jq \
@@ -410,8 +430,10 @@ cmd_increment() {
     --argjson cs "$cs_json" \
     --arg now "$now" \
     --argjson n "$new_n" \
+    --argjson pmo "$override_json" \
     '.attempts = $n
      | .updated_at = $now
+     | .pm_override = $pmo
      | .attempts_log += [{n: $n, plan_hash: $ph, codex_session: $cs, at: $now}]')" \
     || _fail "cannot compute updated ledger for ${plan_id}"
 
@@ -505,14 +527,28 @@ cmd_check_budget() {
   max="$(printf '%s' "$ledger_json" | jq -r '.max')"
   local ev_bool; ev_bool="$([[ "$evidence_present" == "true" ]] && echo true || echo false)"
 
-  # NOTE: The pm_override field is retained in the ledger schema for forward
-  # compatibility and informational purposes, but check-budget NO LONGER uses it
-  # to authorize bypassing the budget check. The ONLY sanctioned override path
-  # for an exhausted budget is the gate-level cp1-pm-escalation-override.json
-  # artifact, verified and consumed by aid-cp1-gate.sh. Direct ledger-internal
-  # overrides (via pm_override.present hand-edit) are no longer honored.
+  # pm_override.present is set by cmd_increment ONLY when that specific
+  # advance was genuinely authorized by an atomically-claimed, single-use
+  # PM-escalation override artifact (never by hand-editing the ledger — the
+  # field is fully derived, cmd_increment is its only writer). A live
+  # DONE-review audit found that without this persistent record,
+  # check-budget had no way to know a legitimately PM-authorized over-budget
+  # state (produced via cmd_increment's own override-claim path) was
+  # authorized — the artifact was already consumed by the time check-budget
+  # ran, so a genuinely clean 4th review still could not reach EPIC
+  # generation. This is READ-ONLY here; check-budget never mutates it.
+  local pm_override_present
+  pm_override_present="$(printf '%s' "$ledger_json" | jq -r '.pm_override.present // false')"
 
   if [[ "$attempts" -ge "$max" ]]; then
+    if [[ "$pm_override_present" == "true" ]]; then
+      local pm_ref
+      pm_ref="$(printf '%s' "$ledger_json" | jq -r '.pm_override.ref // ""')"
+      jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" --arg ref "$pm_ref" \
+        '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: true,
+          reason: ("attempts (" + ($attempts|tostring) + ") exceeds max (" + ($max|tostring) + ") but the LATEST attempt was PM-escalation-authorized: " + $ref)}'
+      return 0
+    fi
     jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
       '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
         reason: "attempts >= max — revision budget exhausted. Use PM-escalation override if needed."}'

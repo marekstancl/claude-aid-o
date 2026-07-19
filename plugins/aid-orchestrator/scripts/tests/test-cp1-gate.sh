@@ -30,8 +30,11 @@
 #      (proves the DEFAULT wiring genuinely shells out, not just a test seam)
 #  19. CP1 ledger missing while CP1-deep evidence is present → fail-closed block
 #  20. CP1 ledger budget exhausted (attempts>=max, no pm_override) → gate fails
-#  21. CP1 ledger pm_override.present=true does NOT bypass an exhausted budget
-#      (ledger-internal override removed; only gate-level override honored)
+#  21. CP1 ledger pm_override.present=true IS honored by the gate — this
+#      field is set exclusively by aid-cp1-ledger.sh's own atomically-
+#      consumed, single-use override-claim path (cmd_increment); a direct
+#      hand-edit works the same way by design (accepted trust boundary,
+#      matches IMP-250's precedent for C3's sibling mechanism)
 #  22. PM-escalation override artifact bypasses a missing c0-plan-review.json → PASS
 #  23. the PM-escalation override is consumed (renamed) after one bypass — a
 #      second gate run without a fresh override blocks again
@@ -889,14 +892,25 @@ gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan21" --project-root "$proj21" 2>&1)" || gate_exit=$?
 unstub_c0_verify
 
-# Even with pm_override.present = true in the ledger, the gate must still
-# reject an exhausted budget (exit 1) — the ledger-internal field is no longer
-# honored as a bypass mechanism. The ONLY sanctioned override is the gate-level
-# cp1-pm-escalation-override.json artifact.
-if [[ "$gate_exit" -ne 0 ]]; then
-  pass "ledger pm_override does NOT bypass exhausted budget"
+# DESIGN EVOLUTION (2 live-audit rounds on this same field, both within
+# E-065-7_7): this field was ORIGINALLY a dead/unvalidated bypass (no
+# legitimate setter) and correctly closed by an earlier fix. A LATER live
+# audit then found that fix went too far once aid-cp1-ledger.sh's own
+# cmd_increment gained a REAL, atomically-consumed, single-use override-claim
+# path — check-budget ignoring pm_override.present entirely broke the
+# documented "PM override permits one more attempt" promise end-to-end (see
+# test-cp1-ledger.bats's own "closes the E-065-7_7 3rd-audit coordination
+# gap" test for the full narrative). check-budget now DOES honor this field
+# again, so the gate correctly PASSES here — this test now proves the field's
+# hand-edited value is read consistently through the gate too (a direct
+# ledger-file edit is an accepted, narrow trust boundary matching this
+# project's IMP-250 precedent for C3's sibling loop-summary.json mechanism,
+# not something this gate is expected to distinguish from a legitimate
+# cmd_increment-set value).
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "ledger pm_override.present is honored by the gate (consistent with cmd_increment's own legitimate write path)"
 else
-  fail "ledger pm_override does NOT bypass exhausted budget" "got exit=$gate_exit (expected non-zero), output: $gate_out"
+  fail "ledger pm_override.present is honored by the gate (consistent with cmd_increment's own legitimate write path)" "got exit=$gate_exit (expected 0), output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------

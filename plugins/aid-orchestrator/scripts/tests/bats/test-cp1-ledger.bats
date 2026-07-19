@@ -194,17 +194,51 @@ _ledger_field() {
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:aaa >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:bbb >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:ccc >/dev/null
-  # At this point, attempts=3 and max=3, so budget is exhausted.
-  # Simulate an out-of-band ledger-internal override (no dedicated setter subcommand per spec).
-  local lf; lf="$(_ledger_file P132)"
-  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18"' "$lf"
-  # Even with pm_override.present set to true, the budget check must still
-  # report exhausted — the ONLY sanctioned override is the gate-level
-  # cp1-pm-escalation-override.json artifact, not the ledger-internal field.
+  # At this point, attempts=3 and max=3, so budget is exhausted, and (proven
+  # by the immediately-following assertions) pm_override.present is false —
+  # NONE of these 3 increments were override-claimed (no override artifact
+  # was ever present), so check-budget correctly reports exhausted.
+  #
+  # NOTE — design evolution across 2 live-audit rounds on this same field:
+  # round 4/5 fixed a REAL bug where pm_override.present was dead/vestigial
+  # (no legitimate setter, so ANY value there — including a hand-edit — was
+  # meaningless and check-budget correctly ignored it entirely). A LATER
+  # live audit (E-065-7_7's 3rd DONE-review dispatch) found THAT fix went
+  # too far: once cmd_increment gained a REAL, validated, single-use
+  # override-claim path (this file's own PM-override tests below), the
+  # field became a legitimate, meaningful signal again — and check-budget
+  # ignoring it entirely broke the documented "PM override permits one more
+  # attempt" promise end-to-end (a genuinely PM-authorized 4th dispatch
+  # could succeed at the ledger layer yet still never reach EPIC generation,
+  # because the gate's own separate check-budget call had no way to know).
+  # check-budget now DOES honor pm_override.present again — but ONLY because
+  # cmd_increment is its sole writer (see cmd_increment's own override-claim
+  # block), which requires successfully, atomically consuming a real,
+  # length-validated artifact. A direct hand-edit of the ledger YAML file
+  # (this test's OWN technique, below) is NOT prevented by anything in this
+  # file — that remains an accepted, narrow trust boundary consistent with
+  # this project's established precedent (IMP-250: a party who can write to
+  # `.aid-o/work/` runtime state is already inside the trusted orchestration
+  # context, the same judgment already applied to C3's sibling
+  # `c3/loop-summary.json` mechanism). This test proves the field's
+  # DOCUMENTED, intended write path (cmd_increment only) — not an attempt to
+  # cryptographically bind it against a determined hand-editor.
   run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132
   [ "$status" -eq 1 ]
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
   [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
+
+  # A direct hand-edit DOES now flip check-budget's verdict (the accepted
+  # trust-boundary consequence documented above) — proving the mechanism
+  # works as designed for the LEGITIMATE path (cmd_increment sets the exact
+  # same field), not proving hand-editing is prevented (it isn't, by design
+  # parity with IMP-250).
+  local lf; lf="$(_ledger_file P132)"
+  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"' "$lf"
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132
+  [ "$status" -eq 0 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "available" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "true" ]]
 }
 
 @test "check-budget is FAIL-CLOSED (init_required) when CP1 evidence exists but ledger is missing" {
@@ -436,4 +470,70 @@ _write_override() {
   [ "$(_ledger_field P164 '.attempts')" = "3" ]
   local ev_root_abs; ev_root_abs="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P164"
   [ -f "${ev_root_abs}/cp1-pm-escalation-override.json" ]
+}
+
+@test "PM-override: an override-authorized increment persists pm_override.present, and check-budget reports available afterward (closes the E-065-7_7 3rd-audit coordination gap)" {
+  # A live DONE-review audit (E-065-7_7, 3rd dispatch) found the FIRST
+  # attempt at this fix let the override-claimed increment succeed, but
+  # aid-cp1-gate.sh's OWN separate check-budget call — run afterward, for
+  # the actual EPIC-generation decision — had no way to know that specific
+  # over-budget state was PM-authorized (the artifact was already consumed
+  # by the ledger's own claim). This test proves the full, closed loop:
+  # override-claimed increment → the ledger PERSISTS that decision →
+  # check-budget (a genuinely separate, later call) reads it and reports
+  # "available", not "exhausted".
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P165
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:ccc >/dev/null
+
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P165"
+  _write_override "$ev_root"
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P165 sha256:ddd >/dev/null
+  [ "$(_ledger_field P165 '.attempts')" = "4" ]
+
+  # Proof 1: the ledger itself now records pm_override.present == true for
+  # this specific (4th) attempt.
+  [ "$(_ledger_field P165 '.pm_override.present')" = "true" ]
+  [ -n "$(_ledger_field P165 '.pm_override.ref')" ]
+
+  # Proof 2: a genuinely SEPARATE, later check-budget call — exactly what
+  # aid-cp1-gate.sh does at EPIC-generation time, with NO override artifact
+  # present anymore (it was already consumed by the increment above) —
+  # reports "available", closing the gap the live audit found.
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P165
+  [ "$status" -eq 0 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "available" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "true" ]]
+}
+
+@test "PM-override: each attempt past max needs its OWN fresh override — the flag is never a standing/sticky bypass" {
+  # pm_override.present describes only the CURRENT ledger tip's attempt.
+  # Once past max, EVERY further new-hash increment (there is no "normal,
+  # non-override" path once attempts >= max — the exhaustion check fires
+  # unconditionally) requires its own fresh, single-use override claim.
+  # This proves a 5th attempt does NOT ride on the 4th's already-spent
+  # authorization — it needs, and gets, a genuinely SECOND PM decision.
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P166
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:ccc >/dev/null
+
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P166"
+  _write_override "$ev_root"
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:ddd >/dev/null
+  [ "$(_ledger_field P166 '.pm_override.present')" = "true" ]
+
+  # A fresh override authorizes a 5th attempt too (each override is
+  # single-use, consumed by its own claim — this is NOT the sticky-flag
+  # scenario, it's a deliberate second PM decision). A 1s sleep avoids the
+  # already-known, already-tested (test-cp1-gate.sh) epoch-second
+  # .consumed-<epoch> destination-collision edge case between these two
+  # back-to-back claims — irrelevant to what THIS test is proving.
+  sleep 1
+  _write_override "$ev_root"
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P166 sha256:eee >/dev/null
+  [ "$(_ledger_field P166 '.attempts')" = "5" ]
+  [ "$(_ledger_field P166 '.pm_override.present')" = "true" ]
+  [ "$(_ledger_field P166 '.pm_override.ref')" != "null" ]
 }
