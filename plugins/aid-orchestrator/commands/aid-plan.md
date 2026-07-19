@@ -450,16 +450,27 @@ lifetime.
 
 **The ledger `increment` is now MECHANICAL, not a step the orchestrator
 performs.** `dispatch` itself calls `aid-cp1-ledger.sh increment` internally
-immediately after determining a genuine `outcome == "dispatched"` — the
-orchestrator does NOT need (and should NOT) call `increment` separately;
-`dispatch`'s own carve-out already skips it for `unavailable`/`timeout`/
-`rate_limited`/`render_failed` outcomes, matching "Not a loop iteration"
-below exactly. If the ledger increment itself fails (missing/corrupt/
-exhausted), `dispatch` fails closed too — `c0-plan-review.json` reports
-`status: unverifiable` even if Codex's own response was clean, and `verify`
-will correctly refuse to bless it. This closes a live DONE-review finding
-(E-065-7_7's own 2nd audit dispatch): the increment used to be prose-only,
-so a session that didn't perfectly follow this instruction could dispatch
+— the orchestrator does NOT need (and should NOT) call `increment`
+separately. The gate is TWO conditions, both required: (1) the dispatch was
+a genuine, well-formed transport-level exchange (`outcome == "dispatched"`
+in `c0/codex/c0-dispatch.json` — Codex's CLI stream itself was valid), AND
+(2) the WRITTEN `c0-plan-review.json`'s own `review_status` is NOT
+`"unverifiable"`. Condition (2) exists because `outcome == "dispatched"`
+alone says nothing about whether the response CONTENT then passed
+validation — a transport-genuine-but-content-invalid response (a hash or
+head mismatch, a malformed/C3-shaped reply, etc.) still reaches
+`outcome == "dispatched"` but must NOT consume a budget slot, matching
+"Not a loop iteration" below exactly (which groups content-invalid
+responses alongside true transport failures for C0, unlike C3's sibling
+EPIC 6 system, which evolved a deliberately different, more nuanced rule
+for its own case). If the ledger increment itself fails (missing/corrupt/
+exhausted) once BOTH conditions hold, `dispatch` fails closed too —
+`c0-plan-review.json` is overwritten to report `status: unverifiable` even
+if Codex's own response was otherwise clean, and `verify` will correctly
+refuse to bless it. This closes a live DONE-review finding (E-065-7_7's own
+2nd audit dispatch, refined across two follow-up rounds after the first fix
+attempt's gate proved too broad): the increment used to be prose-only, so a
+session that didn't perfectly follow this instruction could dispatch
 indefinitely with the ledger never actually advancing.
 
 **Not a loop iteration.** `dispatch` returning `unavailable`/`rate_limited`/
