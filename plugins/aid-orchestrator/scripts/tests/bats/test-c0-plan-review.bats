@@ -928,3 +928,125 @@ EOF
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts')" = "3" ]
   [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-ledger-finding2-noop | jq -r '.attempts_log | length')" = "3" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P065 E-065-7_7 Step 18: AID_C0_ATTEMPT evidence layering
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "AID_C0_ATTEMPT: single attempt=1 dispatch produces c0/attempt-01/ with raw evidence, canonical report matches" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Proof: attempt-01/ directory exists with its own evidence.
+  [ -d "$C0_EVIDENCE_DIR/c0/attempt-01" ]
+  [ -f "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json" ]
+  [ -f "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json" ]
+  [ -f "$C0_EVIDENCE_DIR/c0/attempt-01/c0/audit-input-manifest.json" ]
+
+  # Proof: canonical report exists and EQUALS the attempt's report.
+  [ -f "$REPORT" ]
+  run diff <(jq -S '.' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json") <(jq -S '.' "$REPORT")
+  [ "$status" -eq 0 ]
+}
+
+@test "AID_C0_ATTEMPT: two sequential attempts (1 then 2) produce both attempt-01/ and attempt-02/, canonical == last" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  # First dispatch with attempt=1.
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  report_1="$REPORT"
+  report_1_content="$(jq -S '.' "$report_1")"
+
+  # Second dispatch with attempt=2 (no rebuild, same manifest).
+  FAKE_C0_MODE=findings AID_C0_ATTEMPT=2 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  report_2="$REPORT"
+  report_2_content="$(jq -S '.' "$report_2")"
+
+  # Proof: both attempt directories exist with distinct sessions/content.
+  [ -d "$C0_EVIDENCE_DIR/c0/attempt-01" ]
+  [ -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+  [ -f "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json" ]
+  [ -f "$C0_EVIDENCE_DIR/c0/attempt-02/c0-plan-review.json" ]
+
+  # Proof: attempt-01 is different from attempt-02 (different content).
+  run diff <(echo "$report_1_content") <(echo "$report_2_content")
+  [ "$status" -ne 0 ]
+
+  # Proof: canonical report equals the LAST (attempt-02's) content.
+  [ "$report_2_content" = "$(jq -S '.' "$report_2")" ]
+  run diff <(echo "$report_2_content") <(jq -S '.' "$REPORT")
+  [ "$status" -eq 0 ]
+}
+
+@test "AID_C0_ATTEMPT regression: unset AID_C0_ATTEMPT never creates c0/attempt-*/ directories (byte-for-byte legacy)" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  # Explicitly UNSET AID_C0_ATTEMPT (default behavior).
+  unset AID_C0_ATTEMPT || true
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Proof: no attempt-*/ directory was ever created.
+  [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-01" ]
+  [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+
+  # Proof: canonical report is still at the legacy path.
+  [ -f "$REPORT" ]
+  # Proof: dispatch.json is still at the legacy c0/codex/ path.
+  [ -f "$C0_EVIDENCE_DIR/c0/codex/c0-dispatch.json" ]
+}
+
+@test "AID_C0_ATTEMPT collision guard: reusing outcome==dispatched slot is a PRECONDITION FAIL" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  # First dispatch with attempt=1 — outcome will be "dispatched".
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Proof: attempt-01/c0-dispatch.json records outcome==dispatched.
+  [ "$(jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json")" = "dispatched" ]
+
+  # Second dispatch WITH THE SAME AID_C0_ATTEMPT=1 — must FAIL.
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"already recorded a completed dispatch"* ]]
+}
+
+@test "AID_C0_ATTEMPT: retrying a non-dispatched slot (e.g., unavailable) is allowed" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  # First dispatch with attempt=1 — make it UNAVAILABLE (independence check fails).
+  cat > "$INDEP_SPY/detect" <<'EOF'
+#!/usr/bin/env bash
+exit 2
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  AID_C0_ATTEMPT=1 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+
+  # Proof: outcome is "unavailable", NOT "dispatched".
+  [ "$(jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json")" = "unavailable" ]
+
+  # Second dispatch with THE SAME AID_C0_ATTEMPT=1 (retry) — must SUCCEED and overwrite.
+  cat > "$INDEP_SPY/detect" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$INDEP_SPY/detect"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Proof: the second dispatch overwrote the first; outcome is now "dispatched".
+  [ "$(jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json")" = "dispatched" ]
+}
+
