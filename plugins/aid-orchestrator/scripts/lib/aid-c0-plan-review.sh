@@ -116,6 +116,9 @@ C0_PRODUCER="orchestrator@cp1-deep"
 # for THIS process only when a C0-specific override is given.
 CODEX_MODEL="${AID_C0_CODEX_MODEL:-$CODEX_MODEL}"
 
+# --- C0-specific policy defaults (mirror C3's defaults, fail-closed) ---------
+C0_AUDIT_POLICY="${C0_AUDIT_POLICY:-$DEFAULT_POLICY}"
+
 # ---------------------------------------------------------------------------
 # usage — overrides the sourced C3 usage() (function redefinition wins).
 # ---------------------------------------------------------------------------
@@ -834,6 +837,193 @@ _c0_write_report() {
   return 0
 }
 
+# ===========================================================================
+# C0 Fix-loop helpers — P065 E-065-7_7 Step 18 (port of C3's E-065-6_7 Step 17)
+# ===========================================================================
+#
+# SCOPE DECISION (deliberately documented here): This fix ports ONLY the
+# MECHANICAL half of C3's bounded-loop architecture to C0 — per-attempt
+# evidence layering + automatic same-fingerprint-survives detection + the
+# terminal guard. It does NOT build a separate "escalate" subcommand for
+# C0's "conflicting findings" case (C3's own round-4 judgment-call mechanism);
+# that remains a controller/PM-level judgment for C0 too, operationally covered
+# by the EXISTING cp1-pm-escalation-override.json mechanism (already wired into
+# aid-cp1-gate.sh AND aid-cp1-ledger.sh's cmd_increment) rather than a new
+# C0-specific verb. This is a deliberate boundary per the plan.
+#
+# Interface: an OPTIONAL AID_C0_ATTEMPT env var (positive integer, e.g. "2")
+# tells the dispatch which fix->reverify loop attempt it is. UNSET (the
+# default) → legacy behavior, byte-for-byte unchanged. SET → this call's raw
+# evidence goes under c0/attempt-NN/ instead of c0/codex/, then the attempt's
+# c0-plan-review.json is atomically copied to the canonical root path.
+#
+# See aid-c3-dispatch.sh's Step 17 section (cmd_dispatch header) for the FULL
+# technical contract and hardening lessons from 6 live-audit rounds in EPIC 6.
+# This implementation ports the same structure faithfully, adapting only C3-
+# specific naming/paths to C0's own.
+# ===========================================================================
+
+# _c0_copy_atomic <src> <dst>  — copy <src> to <dst> via temp+mv (a reader
+# never observes a partial file). Returns 1 — no side effect beyond a removed
+# temp — if <src> is missing or either write step fails, e.g. <dst>'s parent
+# directory is not writable.
+_c0_copy_atomic() {
+  local src="$1" dst="$2" tmp
+  [[ -f "$src" ]] || return 1
+  tmp="$dst.tmp.$$"
+  cp -f "$src" "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv -f "$tmp" "$dst" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  return 0
+}
+
+# _c0_write_loop_summary <evidence_dir> <n> <session_id> <reviewed_head> <dispatch_outcome> <report_status>
+#   Accumulate <evidence_dir>/c0/loop-summary.json — the PM-facing record of
+#   every loop attempt this evidence dir has seen so far. Schema mirrors C3's:
+#     {schema_version, artifact_type:"c0_loop_summary", producer, created_at,
+#      attempts: [{n, session_id, head, outcome, recorded_at}, ...] (sorted),
+#      recheck_count,   -- count of GENUINELY dispatched attempts minus 1,
+#                          floored at 0. Non-dispatched attempts (unavailable/
+#                          rate_limited/timeout) do not count.
+#      outcome}         -- "clean" (pass), "unverifiable" (unverifiable),
+#                          "escalated" (same-fingerprint-survived OR budget
+#                          exhausted), or null (still blocking, budget not
+#                          exhausted — loop should continue).
+#   Returns 1 on any write failure (temp+mv — never a partial overwrite).
+_c0_write_loop_summary() {
+  local evidence_dir="$1" n="$2" session_id="$3" reviewed_head="$4" dispatch_outcome="$5" report_status="$6"
+  local out="$evidence_dir/c0/loop-summary.json"
+  local tmp="$out.tmp.$$"
+  local existing="[]"
+  if [[ -f "$out" ]]; then
+    existing="$(jq -c '.attempts // []' "$out" 2>/dev/null)"
+    [[ -n "$existing" ]] || existing="[]"
+  fi
+
+  local iso_now new_entry
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  new_entry="$(jq -nc \
+    --argjson n "$n" \
+    --argjson session_id "$(_json_str_or_null "$session_id")" \
+    --argjson head "$(_json_str_or_null "$reviewed_head")" \
+    --arg outcome "$dispatch_outcome" \
+    --arg recorded_at "$iso_now" \
+    '{n:$n, session_id:$session_id, head:$head, outcome:$outcome, recorded_at:$recorded_at}')" \
+    || return 1
+
+  local attempts dispatched_count recheck_count top_outcome
+  attempts="$(jq -c --argjson e "$new_entry" --argjson n "$n" \
+    '(map(select(.n != $n))) + [$e] | sort_by(.n)' <<<"$existing")" || return 1
+  dispatched_count="$(jq '[.[] | select(.outcome=="dispatched")] | length' <<<"$attempts" 2>/dev/null)"
+  [[ "$dispatched_count" =~ ^[0-9]+$ ]] || dispatched_count=0
+  recheck_count=0
+  [[ "$dispatched_count" -gt 0 ]] && recheck_count=$(( dispatched_count - 1 ))
+
+  local policy_file="$C0_AUDIT_POLICY" max_rechecks=2
+  if [[ -f "$policy_file" ]]; then
+    local mr
+    mr="$(yq -r '.c0_plan_review_loop.max_rechecks // 2' "$policy_file" 2>/dev/null || echo 2)"
+    [[ "$mr" =~ ^[0-9]+$ ]] && max_rechecks="$mr"
+  fi
+
+  # AUTOMATIC SAME-FINGERPRINT-SURVIVED DETECTION (ported from C3 round 4):
+  # Compare THIS attempt's blocking-finding fingerprints against the
+  # immediately-prior dispatched attempt's — any overlap while still blocking
+  # means the fix didn't work, escalate immediately.
+  local same_fingerprint_survived=false
+  if [[ "$report_status" == "fail" ]]; then
+    local prev_n prev_nn prev_report
+    prev_n="$(jq -r --argjson n "$n" \
+      '[.[] | select(.n < $n and .outcome == "dispatched")] | sort_by(.n) | last | .n // empty' \
+      <<<"$attempts" 2>/dev/null)"
+    if [[ -n "$prev_n" ]]; then
+      prev_nn="$(printf '%02d' "$prev_n")"
+      prev_report="$evidence_dir/c0/attempt-$prev_nn/c0-plan-review.json"
+      if [[ -f "$prev_report" ]]; then
+        local cur_fps prev_fps overlap
+        cur_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$evidence_dir/c0-plan-review.json" 2>/dev/null)"
+        prev_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$prev_report" 2>/dev/null)"
+        [[ -n "$cur_fps" ]] || cur_fps='[]'
+        [[ -n "$prev_fps" ]] || prev_fps='[]'
+        overlap="$(jq -n --argjson a "$cur_fps" --argjson b "$prev_fps" \
+          '[$a[] | select(. as $x | $b | index($x))] | length' 2>/dev/null)"
+        [[ "${overlap:-0}" -gt 0 ]] && same_fingerprint_survived=true
+      fi
+    fi
+  fi
+
+  # UNVERIFIABLE BUDGET CAP (ported from C3 round 3): a genuine dispatch whose
+  # content still fails validation (status=="unverifiable") must still
+  # eventually escalate — case (b) in C3's own wording. Count it as a recheck
+  # (it DID advance dispatched_count) but also check budget.
+  local escalation_reason='null'
+  case "$report_status" in
+    pass) top_outcome='"clean"' ;;
+    unverifiable|fail)
+      if [[ "$same_fingerprint_survived" == true ]]; then
+        top_outcome='"escalated"'
+        escalation_reason='"same_fingerprint_survived"'
+      elif [[ "$recheck_count" -ge "$max_rechecks" ]]; then
+        top_outcome='"escalated"'
+        escalation_reason='"budget_exhausted"'
+      elif [[ "$report_status" == "unverifiable" ]]; then
+        top_outcome='"unverifiable"'
+      else
+        top_outcome='null'
+      fi
+      ;;
+    *)    top_outcome='null' ;;
+  esac
+
+  jq -n \
+    --argjson attempts "$attempts" \
+    --argjson recheck_count "$recheck_count" \
+    --argjson outcome "$top_outcome" \
+    --argjson escalation_reason "$escalation_reason" \
+    --arg created_at "$iso_now" \
+    '{schema_version:"aid-2.0", artifact_type:"c0_loop_summary",
+      producer:"orchestrator@cp1-deep", created_at:$created_at,
+      attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome,
+      escalation_reason:$escalation_reason}' \
+    > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# _c0_finalize_attempt <evidence_dir> <attempt_dir> <root_manifest> <n> <nn> <session_id> <reviewed_head> <dispatch_outcome>
+#   Only ever called when AID_C0_ATTEMPT was explicit. Copies <attempt_dir>'s
+#   c0-plan-review.json to the canonical <evidence_dir> root, then updates
+#   c0/loop-summary.json. On failure: stomps the canonical report to
+#   status:unverifiable (best effort) and returns 1 — caller (cmd_dispatch)
+#   must exit 2 on a 1, never exit 0.
+_c0_finalize_attempt() {
+  local evidence_dir="$1" attempt_dir="$2" root_manifest="$3" n="$4" nn="$5"
+  local session_id="$6" reviewed_head="$7" dispatch_outcome="$8"
+
+  local report_status=""
+  [[ -f "$attempt_dir/c0-plan-review.json" ]] \
+    && report_status="$(jq -r '.review_status // ""' "$attempt_dir/c0-plan-review.json" 2>/dev/null)"
+
+  local rc=0
+  if _c0_copy_atomic "$attempt_dir/c0-plan-review.json" "$evidence_dir/c0-plan-review.json"; then
+    # canonical copy succeeded
+    :
+  else
+    echo "aid-c0-plan-review: FATAL — cannot copy c0/attempt-$nn/c0-plan-review.json to the canonical evidence-root path; failing closed (attempt evidence remains authoritative under c0/attempt-$nn/)" >&2
+    _c0_write_unverifiable "$evidence_dir" "$root_manifest" canonical_copy_failed unavailable "" "" "" || true
+    report_status="canonical_copy_failed"
+    rc=1
+  fi
+
+  local summary_rc=0
+  _c0_write_loop_summary "$evidence_dir" "$n" "$session_id" "$reviewed_head" "$dispatch_outcome" "$report_status" || summary_rc=$?
+  if [[ "$summary_rc" -ne 0 ]]; then
+    echo "aid-c0-plan-review: FATAL — c0/loop-summary.json write failed after attempt $nn; the recheck/escalation audit trail is unverifiable. Failing closed." >&2
+    _c0_write_unverifiable "$evidence_dir" "$root_manifest" loop_summary_write_failed unavailable "" "" "" || true
+    rc=1
+  fi
+  return "$rc"
+}
+
 # _c0_process_response <evidence_dir> <manifest> <codex_rc> <events_valid> <dispatch_outcome> <achieved> <session_id> <reviewed_head>
 #   The validate → normalize → write pipeline. Mirrors
 #   aid-c3-dispatch.sh's _process_response for the C0 key-shape.
@@ -923,9 +1113,70 @@ cmd_dispatch() {
   local c0_dir="$evidence_dir/c0/codex"
   mkdir -p "$c0_dir" || { echo "PRECONDITION FAIL: cannot create $c0_dir" >&2; exit 1; }
 
+  # --- Step 0 (P065 E-065-7_7): resolve the attempt slot for THIS invocation -
+  # work_evidence_dir/work_c0_dir/manifest_for_call are what the rest of this
+  # function reads/writes through. attempt_explicit=0 (AID_C0_ATTEMPT unset)
+  # makes them IDENTICAL to the legacy evidence_dir/c0_dir/manifest — the
+  # legacy path is untouched. See aid-c3-dispatch.sh §cmd_dispatch Step 17 for
+  # the FULL contract and hardening lessons from 6 live-audit rounds in EPIC 6.
+  local attempt_n="${AID_C0_ATTEMPT:-}"
+  local attempt_explicit=0 attempt_dir="" attempt_nn=""
+  local work_evidence_dir="$evidence_dir"
+  local work_c0_dir="$c0_dir"
+  local manifest_for_call="$manifest"
+
+  if [[ -n "$attempt_n" ]]; then
+    [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
+      || { echo "PRECONDITION FAIL: AID_C0_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
+
+    # TERMINAL GUARD (ALLOWLIST version, ported from C3 round 6): only two
+    # values are KNOWN-SAFE to proceed on without an override — "" (bare JSON
+    # null via `// ""`, a genuinely in-progress loop) and "unverifiable" (the
+    # "not a loop iteration" carve-out). Every other value requires
+    # AID_C0_FORCE_BEYOND_ESCALATION (PM-authorized override, >=20 chars).
+    local existing_summary="$c0_dir/loop-summary.json"
+    if [[ -f "$existing_summary" ]]; then
+      local prior_loop_outcome
+      prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)"
+      if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
+        if [[ -z "${AID_C0_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C0_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+          echo "PRECONDITION FAIL: c0/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C0 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
+          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C0_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          exit 1
+        fi
+        echo "aid-c0-plan-review: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${AID_C0_FORCE_BEYOND_ESCALATION}" >&2
+      fi
+    fi
+
+    attempt_explicit=1
+    attempt_nn="$(printf '%02d' "$attempt_n")"
+    attempt_dir="$c0_dir/attempt-$attempt_nn"
+
+    # Collision guard — reusing a "dispatched" attempt is forbidden; retrying
+    # a non-dispatched one is allowed.
+    if [[ -f "$attempt_dir/c0/c0-dispatch.json" ]]; then
+      local prior_outcome
+      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c0/c0-dispatch.json" 2>/dev/null)"
+      if [[ "$prior_outcome" == "dispatched" ]]; then
+        echo "PRECONDITION FAIL: c0/attempt-$attempt_nn already recorded a completed dispatch (outcome=dispatched); refusing to reuse — pass a new AID_C0_ATTEMPT" >&2
+        exit 1
+      fi
+    fi
+
+    mkdir -p "$attempt_dir/c0" || { echo "PRECONDITION FAIL: cannot create $attempt_dir/c0" >&2; exit 1; }
+    # Seal this attempt's OWN manifest snapshot so a later `verify` against
+    # attempt_dir alone is self-contained.
+    _c0_copy_atomic "$manifest" "$attempt_dir/audit-input-manifest.json" \
+      || { echo "PRECONDITION FAIL: cannot seal audit-input-manifest.json into $attempt_dir" >&2; exit 1; }
+
+    work_evidence_dir="$attempt_dir"
+    work_c0_dir="$attempt_dir/c0"
+    manifest_for_call="$attempt_dir/audit-input-manifest.json"
+  fi
+
   local risk_profile reviewed_head
-  risk_profile="$(jq -r '.audit_input_manifest.c0_plan_review_input.risk_profile // "low"' "$manifest")"
-  reviewed_head="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_head // ""' "$manifest")"
+  risk_profile="$(jq -r '.audit_input_manifest.c0_plan_review_input.risk_profile // "low"' "$manifest_for_call")"
+  reviewed_head="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_head // ""' "$manifest_for_call")"
   [[ -n "$reviewed_head" ]] || { echo "PRECONDITION FAIL: manifest has no reviewed_head" >&2; exit 1; }
 
   # --- risk gate: low/docs profile → Codex NOT auto-run -----------------------
@@ -942,7 +1193,7 @@ cmd_dispatch() {
     || { echo "PRECONDITION FAIL: evidence_dir is not inside a git repository: $evidence_dir" >&2; exit 1; }
 
   local manifest_input_hash
-  manifest_input_hash="sha256:$(sha256sum "$manifest" | awk '{print $1}')"
+  manifest_input_hash="sha256:$(sha256sum "$manifest_for_call" | awk '{print $1}')"
 
   # --- cross_provider PRE-CHECK for THIS run (never cached) -------------------
   local precheck_rc=0 precheck_out=""
@@ -950,25 +1201,29 @@ cmd_dispatch() {
 
   if [[ "$precheck_rc" -ne 0 ]]; then
     echo "aid-c0-plan-review: cross_provider unavailable this run (pre-check rc=$precheck_rc): $precheck_out" >&2
-    _c0_write_dispatch_json "$c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
+    _c0_write_dispatch_json "$work_c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
       "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
-    _c0_write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
+    if [[ "$attempt_explicit" -eq 1 ]]; then
+      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+        "" "$reviewed_head" unavailable || true
+    fi
     exit 2
   fi
 
   # --- render the sealed C0 prompt DETERMINISTICALLY --------------------------
   local plan_file_rel reviewed_plan_hash plan_graph_rel contracts_str c0_evidence_str
-  plan_file_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_file // ""' "$manifest")"
-  reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest")"
-  plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.path // ""' "$manifest")"
-  contracts_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.contracts // [] | join(", ")' "$manifest")"
-  c0_evidence_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.c0_evidence // [] | join(", ")' "$manifest")"
+  plan_file_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_file // ""' "$manifest_for_call")"
+  reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call")"
+  plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.path // ""' "$manifest_for_call")"
+  contracts_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.contracts // [] | join(", ")' "$manifest_for_call")"
+  c0_evidence_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.c0_evidence // [] | join(", ")' "$manifest_for_call")"
 
   local output_schema_path input_manifest_path_rel
   output_schema_path="$(realpath -m --relative-to="$project_root" "$C0_RESPONSE_SCHEMA" 2>/dev/null || echo "$C0_RESPONSE_SCHEMA")"
-  input_manifest_path_rel="$(realpath -m --relative-to="$project_root" "$manifest" 2>/dev/null || echo "$manifest")"
+  input_manifest_path_rel="$(realpath -m --relative-to="$project_root" "$manifest_for_call" 2>/dev/null || echo "$manifest_for_call")"
 
-  local vars_json="$c0_dir/codex-prompt-vars.json"
+  local vars_json="$work_c0_dir/codex-prompt-vars.json"
   jq -n \
     --arg plan_path "$plan_file_rel" \
     --arg plan_sha256 "$reviewed_plan_hash" \
@@ -985,7 +1240,7 @@ cmd_dispatch() {
       c0_evidence_paths:$c0_evidence_paths, output_schema_path:$output_schema_path}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }
 
-  local prompt_file="$c0_dir/codex-prompt.txt"
+  local prompt_file="$work_c0_dir/codex-prompt.txt"
   local render_prov=""
   local template_id="" template_sha256="" rendered_prompt_sha256=""
   if render_prov="$(bash "$C0_RENDER_PROMPT" --template "$C0_PROMPT_TEMPLATE" --vars-json "$vars_json" --output "$prompt_file" 2>&1)"; then
@@ -994,18 +1249,22 @@ cmd_dispatch() {
     rendered_prompt_sha256="$(printf '%s' "$render_prov" | jq -r '.rendered_prompt_sha256 // ""' 2>/dev/null)"
   else
     echo "aid-c0-plan-review: prompt render failed: $render_prov" >&2
-    _c0_write_dispatch_json "$c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
+    _c0_write_dispatch_json "$work_c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
       "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
-    _c0_write_unverifiable "$evidence_dir" "$manifest" unavailable "unavailable" "" "" "" || true
+    _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
+    if [[ "$attempt_explicit" -eq 1 ]]; then
+      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+        "" "$reviewed_head" render_failed || true
+    fi
     exit 2
   fi
 
   local codex_version
   codex_version="$(codex --version 2>/dev/null || echo "")"
 
-  local events_file="$c0_dir/codex-events.jsonl"
-  local stderr_file="$c0_dir/codex-events.stderr"
-  local last_msg_file="$c0_dir/codex-last-message.json"
+  local events_file="$work_c0_dir/codex-events.jsonl"
+  local stderr_file="$work_c0_dir/codex-events.stderr"
+  local last_msg_file="$work_c0_dir/codex-last-message.json"
   rm -f "$events_file" "$stderr_file" "$last_msg_file"
 
   local codex_rc=0
@@ -1037,14 +1296,14 @@ cmd_dispatch() {
   [[ -s "$events_file" ]]   && stdout_sha256="sha256:$(sha256sum "$events_file"   | awk '{print $1}')"
   [[ -f "$last_msg_file" ]] && raw_response_sha256="sha256:$(sha256sum "$last_msg_file" | awk '{print $1}')"
 
-  _c0_write_dispatch_json "$c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
+  _c0_write_dispatch_json "$work_c0_dir/c0-dispatch.json" "$project_root" "$reviewed_head" "$manifest_input_hash" \
     "$template_id" "$template_sha256" "$rendered_prompt_sha256" "$codex_version" \
     "true" "$codex_rc" "$outcome" "$session_id" "$CODEX_MODEL" "$events_valid" \
     "$stdout_sha256" "$raw_response_sha256" "$achieved" \
     || { echo "PRECONDITION FAIL: cannot write c0-dispatch.json" >&2; exit 1; }
 
   local presp_rc=0
-  _c0_process_response "$evidence_dir" "$manifest" "$codex_rc" "$events_valid" \
+  _c0_process_response "$work_evidence_dir" "$manifest_for_call" "$codex_rc" "$events_valid" \
     "$outcome" "$achieved" "$session_id" "$reviewed_head" || presp_rc=$?
 
   # FINDING 1 FIX: Mechanically increment the CP1 ledger for a genuine
@@ -1066,31 +1325,53 @@ cmd_dispatch() {
   # deliberately more nuanced budget rule for its own "genuinely dispatched
   # but invalid content" case in a later round — C0's spec never asked for
   # that distinction). Gate on the ACTUAL WRITTEN report's `review_status`,
-  # not the transport-level `outcome` alone.
+  # not the transport-level `outcome` alone. When attempt_explicit=1, the
+  # report is at work_evidence_dir/c0-plan-review.json (not yet copied to
+  # canonical root).
+  local report_path="$evidence_dir/c0-plan-review.json"
+  [[ "$attempt_explicit" -eq 1 ]] && report_path="$work_evidence_dir/c0-plan-review.json"
   local report_review_status=""
-  report_review_status="$(jq -r '.review_status // ""' "$evidence_dir/c0-plan-review.json" 2>/dev/null || echo "")"
+  report_review_status="$(jq -r '.review_status // ""' "$report_path" 2>/dev/null || echo "")"
   if [[ "$outcome" == "dispatched" && "$report_review_status" != "unverifiable" ]]; then
     local plan_id plan_hash ledger_rc=0
-    plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest" 2>/dev/null || echo "")"
-    plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest" 2>/dev/null || echo "")"
+    plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest_for_call" 2>/dev/null || echo "")"
+    plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call" 2>/dev/null || echo "")"
 
     if [[ -z "$plan_id" || -z "$plan_hash" ]]; then
       echo "PRECONDITION FAIL: cannot extract plan_id or plan_hash from manifest for ledger increment" >&2
-      _c0_write_unverifiable "$evidence_dir" "$manifest" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      if [[ "$attempt_explicit" -eq 1 ]]; then
+        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+          "$session_id" "$reviewed_head" "$outcome" || true
+      fi
       exit 2
     fi
 
     if ! bash "$C0_LEDGER_BIN" increment --project-root "$project_root" --codex-session "$session_id" "$plan_id" "$plan_hash" >/dev/null 2>&1; then
       ledger_rc=$?
       echo "aid-c0-plan-review: ledger increment failed (rc=$ledger_rc) for plan_id=$plan_id — dispatched codex response is unverifiable without a recorded loop iteration" >&2
-      _c0_write_unverifiable "$evidence_dir" "$manifest" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" ledger_increment_failed "$achieved" "$session_id" "" "" || true
+      if [[ "$attempt_explicit" -eq 1 ]]; then
+        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+          "$session_id" "$reviewed_head" "$outcome" || true
+      fi
       exit 2
     fi
   fi
 
-  echo "$c0_dir/c0-dispatch.json"
+  echo "$work_c0_dir/c0-dispatch.json"
 
-  if [[ "$outcome" == "dispatched" ]]; then
+  local final_rc=2
+  [[ "$outcome" == "dispatched" ]] && final_rc=0
+
+  if [[ "$attempt_explicit" -eq 1 ]]; then
+    if ! _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$manifest" "$attempt_n" "$attempt_nn" \
+           "$session_id" "$reviewed_head" "$outcome"; then
+      final_rc=2
+    fi
+  fi
+
+  if [[ "$final_rc" -eq 0 ]]; then
     return 0
   else
     exit 2
