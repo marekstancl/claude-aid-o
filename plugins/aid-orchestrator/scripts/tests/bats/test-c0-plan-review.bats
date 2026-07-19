@@ -1418,3 +1418,34 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
 }
+
+@test "Part B CP2 finding: a skipped (low-risk, Codex never invoked) attempt does NOT get recorded as terminal 'clean'" {
+  # A low-risk plan attempt genuinely skips Codex (review_status:"skipped",
+  # _c0_write_skipped) — CP2's self-verify of Part B found this fell through
+  # to report_status:"pass" -> loop-summary outcome:"clean" (TERMINAL),
+  # permanently blocking the plan's first REAL review once it's later
+  # revised into high-risk territory (same evidence dir, rebuilt manifest —
+  # exactly what a plan revision does).
+  _build_low
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.review_status' "$C0_EVIDENCE_DIR/c0-plan-review.json"; [ "$output" = "skipped" ]
+
+  # Proof: the skip is recorded as "unverifiable" (non-terminal — the same
+  # allowlisted, freely-retriable value a true dispatch failure gets), NOT
+  # the terminal "clean".
+  run jq -r '.outcome' "$C0_EVIDENCE_DIR/c0/loop-summary.json"
+  [ "$output" = "unverifiable" ]
+
+  # The plan is revised into high-risk territory — a real second attempt on
+  # the SAME evidence dir must proceed WITHOUT needing a PM override.
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  [ -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+}

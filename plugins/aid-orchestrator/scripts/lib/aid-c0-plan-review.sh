@@ -899,15 +899,27 @@ _c0_finalize_attempt() {
   # report_status: this attempt's OWN report status BEFORE the canonical
   # copy — "fail" iff blocking_findings (mirrors _derive_report_semantics'
   # status:"fail" iff a crit/high finding exists), "unverifiable" iff
-  # review_status=="unverifiable", else "pass". C0's report has no top-level
-  # .status field (unlike C3's audit-report.json), so derive the equivalent
-  # from review_status + blocking_findings directly.
+  # review_status=="unverifiable" OR "skipped", else "pass". C0's report has
+  # no top-level .status field (unlike C3's audit-report.json), so derive
+  # the equivalent from review_status + blocking_findings directly.
+  #
+  # CP2 Part-B self-verify finding: "skipped" (the low/docs risk-profile
+  # early-return — _c0_write_skipped, Codex never invoked) was NOT
+  # special-cased here and fell through to "pass", which
+  # _c0_write_loop_summary then maps to top-level outcome:"clean" — and
+  # "clean" is TERMINAL under the new ALLOWLIST guard. A plan that starts
+  # low-risk (attempt 1 correctly skips) and is later revised into
+  # high-risk territory (attempt 2, rebuilt manifest) would then have its
+  # first REAL review permanently blocked by a guard meant to prevent
+  # re-litigating an already-genuinely-clean review. "skipped" means "no
+  # review happened at all" — treat it the same as "unverifiable" (also
+  # non-terminal in the ALLOWLIST) rather than a genuine clean pass.
   local report_status=""
   if [[ -f "$attempt_dir/c0-plan-review.json" ]]; then
     local rs bf
     rs="$(jq -r '.review_status // ""' "$attempt_dir/c0-plan-review.json" 2>/dev/null)" || rs=""
     bf="$(jq -r '.blocking_findings // false' "$attempt_dir/c0-plan-review.json" 2>/dev/null)" || bf="false"
-    if [[ "$rs" == "unverifiable" ]]; then
+    if [[ "$rs" == "unverifiable" || "$rs" == "skipped" ]]; then
       report_status="unverifiable"
     elif [[ "$bf" == "true" ]]; then
       report_status="fail"
