@@ -1050,3 +1050,56 @@ EOF
   [ "$(jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json")" = "dispatched" ]
 }
 
+@test "AID_C0_ATTEMPT CP2 round-9 Finding 1: a genuinely valid response is recorded as review_status=pass, not unverifiable" {
+  # CP2's round-9 review found _c0_process_response's last-message lookup
+  # used a hardcoded two-level path (evidence_dir/c0/codex) that did not
+  # match attempt mode's one-level work_c0_dir (attempt_dir/c0) — so EVERY
+  # attempt-mode dispatch was unconditionally recorded unverifiable/
+  # invalid_output regardless of the actual Codex response. The prior 5
+  # tests never caught this because they only asserted file existence and
+  # "attempt equals canonical" — both true whether the report says "pass"
+  # or "unverifiable". Assert the actual semantic field values instead.
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run jq -r '.review_status' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json"
+  [ "$output" = "pass" ]
+  run jq -r '.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json"
+  [ "$output" = "dispatched" ]
+
+  # Canonical report (finalized from the attempt) must show the same.
+  run jq -r '.review_status' "$REPORT"; [ "$output" = "pass" ]
+  run jq -r '.outcome' "$REPORT"; [ "$output" = "dispatched" ]
+
+  # A genuinely valid attempt-mode dispatch must still advance the ledger.
+  [ "$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')" = "1" ]
+}
+
+@test "AID_C0_ATTEMPT CP2 round-9 Finding 2: a content-invalid attempt-mode dispatch does NOT increment the ledger" {
+  # CP2's round-9 review found the ledger-increment gate read
+  # evidence_dir/c0-plan-review.json (the canonical root) instead of
+  # work_evidence_dir's (the current attempt's own report) — in attempt
+  # mode these diverge until _c0_finalize_attempt runs at the very end, so
+  # the gate was checking a stale/prior report instead of this dispatch's
+  # own. Prove the fix: a hash-mismatch (content-invalid, transport-genuine)
+  # attempt-mode dispatch must leave the ledger untouched.
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=hash_mismatch run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+
+  run jq -r '.review_status' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json"
+  [ "$output" = "unverifiable" ]
+  run jq -r '.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json"
+  [ "$output" = "hash_mismatch" ]
+  run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
+
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.attempts' <<<"$output")" = "0" ]
+  [ "$(jq -r '.attempts_log | length' <<<"$output")" = "0" ]
+}
+

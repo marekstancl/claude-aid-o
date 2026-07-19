@@ -866,13 +866,18 @@ _c0_write_report() {
   return 0
 }
 
-# _c0_process_response <evidence_dir> <manifest> <codex_rc> <events_valid> <dispatch_outcome> <achieved> <session_id> <reviewed_head>
+# _c0_process_response <evidence_dir> <manifest> <codex_rc> <events_valid> <dispatch_outcome> <achieved> <session_id> <reviewed_head> <c0_dir>
 #   The validate → normalize → write pipeline. Mirrors
 #   aid-c3-dispatch.sh's _process_response for the C0 key-shape.
+#   <c0_dir> is the directory the raw Codex artifacts (codex-last-message.json
+#   etc) were actually written to by THIS invocation of cmd_dispatch — passed
+#   explicitly rather than re-derived, since legacy mode's two-level
+#   <evidence_dir>/c0/codex and attempt mode's one-level <attempt_dir>/c0
+#   differ (P065 E-065-7_7 DONE-review Finding 2 Part A, CP2 round-9).
 _c0_process_response() {
   local evidence_dir="$1" manifest="$2" codex_rc="$3" events_valid="$4"
   local dispatch_outcome="$5" achieved="$6" session_id="$7" reviewed_head="$8"
-  local c0_dir="$evidence_dir/c0/codex"
+  local c0_dir="$9"
   local last_msg="$c0_dir/codex-last-message.json"
 
   if [[ "$codex_rc" != "0" ]]; then
@@ -1138,7 +1143,7 @@ cmd_dispatch() {
 
   local presp_rc=0
   _c0_process_response "$work_evidence_dir" "$manifest_for_call" "$codex_rc" "$events_valid" \
-    "$outcome" "$achieved" "$session_id" "$reviewed_head" || presp_rc=$?
+    "$outcome" "$achieved" "$session_id" "$reviewed_head" "$work_c0_dir" || presp_rc=$?
 
   # FINDING 1 FIX: Mechanically increment the CP1 ledger for a genuine
   # dispatch. This closes the gap: before this fix, the ledger was never
@@ -1160,8 +1165,14 @@ cmd_dispatch() {
   # but invalid content" case in a later round — C0's spec never asked for
   # that distinction). Gate on the ACTUAL WRITTEN report's `review_status`,
   # not the transport-level `outcome` alone.
+  # Read from work_evidence_dir (the CURRENT attempt's own report), not the
+  # canonical evidence_dir root — in attempt mode these diverge until
+  # _c0_finalize_attempt copies the attempt's report to the root at the end
+  # of this function; reading the root here would check a stale/prior
+  # attempt's report instead of this dispatch's own (P065 E-065-7_7
+  # DONE-review Finding 2 Part A, CP2 round-9).
   local report_review_status=""
-  report_review_status="$(jq -r '.review_status // ""' "$evidence_dir/c0-plan-review.json" 2>/dev/null || echo "")"
+  report_review_status="$(jq -r '.review_status // ""' "$work_evidence_dir/c0-plan-review.json" 2>/dev/null || echo "")"
   if [[ "$outcome" == "dispatched" && "$report_review_status" != "unverifiable" ]]; then
     local plan_id plan_hash ledger_rc=0
     plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest_for_call" 2>/dev/null || echo "")"
