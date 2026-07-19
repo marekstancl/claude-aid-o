@@ -189,56 +189,94 @@ _ledger_field() {
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
 }
 
-@test "check-budget honors pm_override.present (only cmd_increment's own atomic claim legitimately sets it)" {
+@test "check-budget reports exhausted (pm_override false) when no increment was ever override-claimed" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:aaa >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:bbb >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:ccc >/dev/null
-  # At this point, attempts=3 and max=3, so budget is exhausted, and (proven
-  # by the immediately-following assertions) pm_override.present is false —
-  # NONE of these 3 increments were override-claimed (no override artifact
-  # was ever present), so check-budget correctly reports exhausted.
-  #
-  # NOTE — design evolution across 2 live-audit rounds on this same field:
-  # round 4/5 fixed a REAL bug where pm_override.present was dead/vestigial
-  # (no legitimate setter, so ANY value there — including a hand-edit — was
-  # meaningless and check-budget correctly ignored it entirely). A LATER
-  # live audit (E-065-7_7's 3rd DONE-review dispatch) found THAT fix went
-  # too far: once cmd_increment gained a REAL, validated, single-use
-  # override-claim path (this file's own PM-override tests below), the
-  # field became a legitimate, meaningful signal again — and check-budget
-  # ignoring it entirely broke the documented "PM override permits one more
-  # attempt" promise end-to-end (a genuinely PM-authorized 4th dispatch
-  # could succeed at the ledger layer yet still never reach EPIC generation,
-  # because the gate's own separate check-budget call had no way to know).
-  # check-budget now DOES honor pm_override.present again — but ONLY because
-  # cmd_increment is its sole writer (see cmd_increment's own override-claim
-  # block), which requires successfully, atomically consuming a real,
-  # length-validated artifact. A direct hand-edit of the ledger YAML file
-  # (this test's OWN technique, below) is NOT prevented by anything in this
-  # file — that remains an accepted, narrow trust boundary consistent with
-  # this project's established precedent (IMP-250: a party who can write to
-  # `.aid-o/work/` runtime state is already inside the trusted orchestration
-  # context, the same judgment already applied to C3's sibling
-  # `c3/loop-summary.json` mechanism). This test proves the field's
-  # DOCUMENTED, intended write path (cmd_increment only) — not an attempt to
-  # cryptographically bind it against a determined hand-editor.
+  # attempts=3, max=3 — exhausted. None of these 3 increments were
+  # override-claimed (no override artifact was ever present), so
+  # pm_override.present is false and check-budget correctly reports
+  # exhausted.
   run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132
   [ "$status" -eq 1 ]
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
   [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
+}
 
-  # A direct hand-edit DOES now flip check-budget's verdict (the accepted
-  # trust-boundary consequence documented above) — proving the mechanism
-  # works as designed for the LEGITIMATE path (cmd_increment sets the exact
-  # same field), not proving hand-editing is prevented (it isn't, by design
-  # parity with IMP-250).
-  local lf; lf="$(_ledger_file P132)"
-  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"' "$lf"
-  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132
-  [ "$status" -eq 0 ]
-  [[ "$(echo "$output" | jq -r '.status')" == "available" ]]
-  [[ "$(echo "$output" | jq -r '.pm_override')" == "true" ]]
+@test "DONE-review #5 fix: a bare hand-edit of pm_override.present=true (no matching claim artifact) is REJECTED — check-budget still reports exhausted" {
+  # CP2/live-audit history on this exact field: round 4/5 first found
+  # pm_override.present dead/vestigial (no legitimate setter). A later
+  # audit (E-065-7_7's 3rd DONE-review) found THAT fix went too far —
+  # cmd_increment's own genuine override-claim path needed check-budget to
+  # honor the field again, or a real PM-authorized 4th dispatch could never
+  # reach EPIC generation. That re-enable (commit 8e5a8f4) then had this
+  # test PROVE a bare hand-edit ALSO flips the verdict — i.e. it codified
+  # the exact bypass a 5th live audit correctly flagged as a real,
+  # unauthenticated authorization bypass (severity high): the ledger file
+  # is not tamper-evident, so "cmd_increment is the sole INTENDED writer"
+  # was never actually enforced. The fix (see cmd_increment/cmd_check_budget)
+  # binds pm_override.present to a corroborating claim_artifact/claim_sha256
+  # pointing at the REAL .consumed-<epoch> file a genuine claim produces —
+  # this test now proves the INVERSE of what it used to: a hand-edited
+  # boolean with no matching artifact grants NOTHING.
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132b
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132b sha256:ccc >/dev/null
+
+  local lf; lf="$(_ledger_file P132b)"
+  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"
+    | .pm_override.claim_artifact = "cp1-pm-escalation-override.json.consumed-1234567890"
+    | .pm_override.claim_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' "$lf"
+
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132b
+  [ "$status" -eq 1 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
+  [[ "$(echo "$output" | jq -r '.reason')" == *"could not be corroborated"* ]]
+}
+
+@test "DONE-review #5 fix: a hand-edit pointing at a REAL file with WRONG content hash is also REJECTED" {
+  # Distinguishes "no file at all" (previous test) from "a file exists at
+  # the claimed path, but its content doesn't match claim_sha256" — proves
+  # the check is a genuine content comparison, not just an existence check.
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132c
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132c sha256:ccc >/dev/null
+
+  local plan_evidence_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P132c"
+  mkdir -p "$plan_evidence_root"
+  local fake_artifact="$plan_evidence_root/cp1-pm-escalation-override.json.consumed-1234567890"
+  printf 'not the real consumed artifact content\n' > "$fake_artifact"
+
+  local lf; lf="$(_ledger_file P132c)"
+  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"
+    | .pm_override.claim_artifact = "cp1-pm-escalation-override.json.consumed-1234567890"
+    | .pm_override.claim_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' "$lf"
+
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132c
+  [ "$status" -eq 1 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
+}
+
+@test "DONE-review #5 fix: claim_artifact with a path-traversal filename is rejected (never escapes the plan's own evidence root)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132d
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132d sha256:ccc >/dev/null
+
+  local lf; lf="$(_ledger_file P132d)"
+  yq -i '.pm_override.present = true | .pm_override.ref = "pm-decision-2026-07-18-twenty-chars"
+    | .pm_override.claim_artifact = "../../../../etc/passwd"
+    | .pm_override.claim_sha256 = "sha256:0000000000000000000000000000000000000000000000000000000000000000"' "$lf"
+
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P132d
+  [ "$status" -eq 1 ]
+  [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
+  [[ "$(echo "$output" | jq -r '.pm_override')" == "false" ]]
 }
 
 @test "check-budget is FAIL-CLOSED (init_required) when CP1 evidence exists but ledger is missing" {

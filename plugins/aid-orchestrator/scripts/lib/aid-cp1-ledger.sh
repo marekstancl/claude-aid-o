@@ -50,7 +50,21 @@
 #   attempts:        integer (0 = no revision cycle counted yet)
 #   max:             integer, currently 3 (1 initial + 2 revisions)
 #   pre_enforcement: boolean (true only for the explicit P065 bootstrap path)
-#   pm_override:     {present: boolean, ref: string|null}
+#   pm_override:     {present: boolean, ref: string|null,
+#                      claim_artifact: string|null, claim_sha256: string|null}
+#     — present/ref/claim_artifact/claim_sha256 are written ONLY by
+#     cmd_increment, ONLY when THAT SPECIFIC advance was authorized by
+#     atomically claiming a genuine cp1-pm-escalation-override.json (never
+#     a standing/sticky flag — cleared to false/null on every increment
+#     that does NOT itself claim an override). claim_artifact/claim_sha256
+#     bind this record to the actual `.consumed-<epoch>` file the claim
+#     produced (DONE-review #5 fix — see cmd_check_budget): a ledger file
+#     is a plain, non-tamper-evident file, so `present` being
+#     cmd_increment's INTENDED sole writer does not make it the only
+#     POSSIBLE one — check-budget re-verifies claim_artifact/claim_sha256
+#     against disk before trusting `present`, so a bare hand-edit of
+#     `present:true` (with no matching, existing, content-verified
+#     .consumed-<epoch> file) is NOT sufficient to grant a bypass.
 #   created_at / updated_at: ISO-8601 UTC
 #   attempts_log:    [{n, plan_hash, codex_session (string|null), at}, ...]
 #
@@ -65,10 +79,13 @@
 #   check-budget: 0 = budget available, 1 = FAIL-CLOSED (exhausted, OR
 #     corrupt ledger, OR evidence present but ledger missing), 2 =
 #     not_initialized (no ledger AND no CP1 evidence — a genuinely
-#     brand-new plan; caller should run `init`). The ledger's own internal
-#     `pm_override` field is schema-only and never grants a bypass — the
-#     sole sanctioned override is aid-cp1-gate.sh's single-use
-#     cp1-pm-escalation-override.json artifact.
+#     brand-new plan; caller should run `init`). A pm_override.present:true
+#     ledger entry is honored ONLY when corroborated by its claim_artifact/
+#     claim_sha256 against a genuine, matching .consumed-<epoch> file on
+#     disk (see the pm_override field description above) — the sole path
+#     that can ever produce such a file is aid-cp1-gate.sh's/this file's
+#     shared single-use cp1-pm-escalation-override.json artifact, claimed
+#     atomically by cmd_increment.
 #
 # **Last Updated:** 2026-07-18
 # =============================================================================
@@ -194,10 +211,15 @@ _cp1_check_pm_override() {
 #   call this ONLY once a caller has determined the override is actually
 #   needed (a check alone, via _cp1_check_pm_override, must never trigger
 #   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
-#   sibling and returns 0 (echoing the pm_ref reason) iff BOTH `mv -n`
-#   itself reports success AND the source file is confirmed gone afterward.
-#   Mirrors aid-cp1-gate.sh's implementation exactly (including the
-#   round-3 fix requiring both mv exit code AND source-gone confirmation).
+#   sibling and returns 0 (echoing a JSON {reason, consumed_path} — the
+#   caller needs consumed_path to bind the ledger's own pm_override record
+#   to physical, verifiable evidence of a genuine claim, see cmd_increment
+#   and cmd_check_budget below) iff BOTH `mv -n` itself reports success AND
+#   the source file is confirmed gone afterward. The claim/consume LOGIC
+#   mirrors aid-cp1-gate.sh's implementation exactly (including the round-3
+#   fix requiring both mv exit code AND source-gone confirmation); the
+#   return SHAPE (JSON, not a bare reason string) is specific to this file's
+#   own downstream provenance-binding need.
 # ---------------------------------------------------------------------------
 _cp1_claim_pm_override() {
   local plan_evidence_root="$1" override_file consumed_file reason
@@ -208,7 +230,8 @@ _cp1_claim_pm_override() {
 
   consumed_file="${override_file}.consumed-$(date -u +%s)"
   if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
-    printf '%s' "$reason"
+    jq -nc --arg reason "$reason" --arg consumed_path "$consumed_file" \
+      '{reason:$reason, consumed_path:$consumed_path}'
     return 0
   fi
   # Either mv failed outright (a race loser, or a permission error), or it
@@ -308,7 +331,7 @@ cmd_init() {
       attempts: 0,
       max: $max,
       pre_enforcement: $pre,
-      pm_override: {present: false, ref: null},
+      pm_override: {present: false, ref: null, claim_artifact: null, claim_sha256: null},
       created_at: $now,
       updated_at: $now,
       attempts_log: []
@@ -379,18 +402,28 @@ cmd_increment() {
   #
   # However, a valid PM-escalation override artifact can authorize exactly
   # ONE additional increment past max. Check for and claim it now.
-  local override_used=false override_reason=""
+  local override_used=false override_reason="" override_consumed_path="" override_consumed_sha256=""
   if [[ "$attempts" -ge "$max" ]]; then
     # Compute the plan-evidence-root where the override artifact lives.
     local plan_evidence_root
     plan_evidence_root="$(_cp1_plan_evidence_root "$project_root" "$plan_id")"
 
     # Attempt to claim the override atomically (consume it if present/valid).
-    if override_reason="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
+    local claim_json
+    if claim_json="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
       # Override claim succeeded — permit this ONE increment past max.
       # The override is now consumed (renamed to .consumed-<epoch>), so a
       # SUBSEQUENT increment attempt would need a FRESH override.
       override_used=true
+      override_reason="$(jq -r '.reason' <<<"$claim_json")"
+      override_consumed_path="$(jq -r '.consumed_path' <<<"$claim_json")"
+      # DONE-review #5 finding fix: capture a content hash of the ACTUAL
+      # consumed artifact, not just the reason text — check-budget below
+      # (and, more importantly, its own copy of this file at a later,
+      # separate invocation) needs physical, verifiable evidence that this
+      # specific pm_override.present:true entry corresponds to a genuine
+      # atomic claim, not a bare hand-edited YAML boolean.
+      override_consumed_sha256="sha256:$(sha256sum "$override_consumed_path" | awk '{print $1}')"
     else
       # No valid override present, or it was already consumed elsewhere.
       # Reject exactly as before (fail-closed).
@@ -416,11 +449,30 @@ cmd_increment() {
   # override-claimed, false otherwise (clearing any stale true from a
   # PRIOR advance — pm_override always describes only the latest attempt,
   # never a standing/sticky bypass).
+  #
+  # DONE-review #5 finding fix: a 5th live audit found `present`/`ref` alone
+  # is a bare, hand-editable YAML boolean+string with no provenance binding
+  # — check-budget (below, and its own separate invocation from
+  # aid-cp1-gate.sh) trusted it blindly, so directly hand-editing
+  # pm_override.present=true in the ledger file granted the exact same
+  # bypass a genuine PM-authorized claim does, with no corroborating
+  # evidence required. claim_artifact/claim_sha256 bind this record to the
+  # PHYSICAL, already-existing `.consumed-<epoch>` artifact
+  # _cp1_claim_pm_override just created via its atomic rename — a real
+  # claim always has a genuine one; a bare YAML hand-edit does not (unless
+  # the editor ALSO fabricates a matching file, a materially higher bar
+  # than flipping a boolean, and exactly the kind of forgery this project's
+  # established IMP-250 trust-boundary precedent already accepts as
+  # out-of-scope for a party with .aid-o/work/ filesystem access).
   local override_json
   if [[ "$override_used" == true ]]; then
-    override_json="$(jq -nc --arg ref "$override_reason" '{present: true, ref: $ref}')"
+    override_json="$(jq -nc \
+      --arg ref "$override_reason" \
+      --arg artifact "$(basename "$override_consumed_path")" \
+      --arg sha "$override_consumed_sha256" \
+      '{present: true, ref: $ref, claim_artifact: $artifact, claim_sha256: $sha}')"
   else
-    override_json='{"present": false, "ref": null}'
+    override_json='{"present": false, "ref": null, "claim_artifact": null, "claim_sha256": null}'
   fi
 
   local cs_json new_json
@@ -527,27 +579,63 @@ cmd_check_budget() {
   max="$(printf '%s' "$ledger_json" | jq -r '.max')"
   local ev_bool; ev_bool="$([[ "$evidence_present" == "true" ]] && echo true || echo false)"
 
-  # pm_override.present is set by cmd_increment ONLY when that specific
+  # pm_override.present is SET by cmd_increment ONLY when that specific
   # advance was genuinely authorized by an atomically-claimed, single-use
-  # PM-escalation override artifact (never by hand-editing the ledger — the
-  # field is fully derived, cmd_increment is its only writer). A live
-  # DONE-review audit found that without this persistent record,
-  # check-budget had no way to know a legitimately PM-authorized over-budget
-  # state (produced via cmd_increment's own override-claim path) was
-  # authorized — the artifact was already consumed by the time check-budget
-  # ran, so a genuinely clean 4th review still could not reach EPIC
-  # generation. This is READ-ONLY here; check-budget never mutates it.
+  # PM-escalation override artifact. But the ledger YAML file itself is a
+  # plain, non-tamper-evident file — cmd_increment being the INTENDED sole
+  # writer does not mean it is the only POSSIBLE writer. A 5th live
+  # DONE-review audit correctly found that check-budget trusted
+  # `pm_override.present` blindly, so directly hand-editing that one
+  # boolean field in the ledger granted the exact same over-budget bypass
+  # as a genuine claim, with zero corroborating evidence — `test-cp1-
+  # ledger.bats` and `test-cp1-gate.sh` even asserted this as CORRECT
+  # behavior. Fix: do not trust the boolean alone. Require it to be
+  # corroborated by the PHYSICAL `.consumed-<epoch>` artifact
+  # cmd_increment's own atomic claim always creates (claim_artifact +
+  # claim_sha256, written in lockstep with `present` — see cmd_increment).
+  # A bare hand-edit of `present:true` with no matching, existing,
+  # content-verified consumed-artifact file FAILS this check and falls
+  # through to the honest "exhausted" status below — this is the
+  # DONE-review #5 fix. This function remains READ-ONLY: it never mutates
+  # the ledger or the artifact directory.
   local pm_override_present
   pm_override_present="$(printf '%s' "$ledger_json" | jq -r '.pm_override.present // false')"
 
   if [[ "$attempts" -ge "$max" ]]; then
     if [[ "$pm_override_present" == "true" ]]; then
-      local pm_ref
+      local pm_ref claim_artifact claim_sha256 plan_evidence_root claim_path claim_ok=false
       pm_ref="$(printf '%s' "$ledger_json" | jq -r '.pm_override.ref // ""')"
-      jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" --arg ref "$pm_ref" \
-        '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: true,
-          reason: ("attempts (" + ($attempts|tostring) + ") exceeds max (" + ($max|tostring) + ") but the LATEST attempt was PM-escalation-authorized: " + $ref)}'
-      return 0
+      claim_artifact="$(printf '%s' "$ledger_json" | jq -r '.pm_override.claim_artifact // ""')"
+      claim_sha256="$(printf '%s' "$ledger_json" | jq -r '.pm_override.claim_sha256 // ""')"
+      plan_evidence_root="$(_cp1_plan_evidence_root "$project_root" "$plan_id")"
+
+      # Corroboration check: the claimed artifact's filename must match the
+      # exact pattern _cp1_claim_pm_override produces (rejects path
+      # traversal / pointing at an unrelated file), must exist under this
+      # plan's OWN evidence root, and its CURRENT content hash must match
+      # what cmd_increment recorded at claim time.
+      if [[ -n "$claim_artifact" && -n "$claim_sha256" \
+            && "$claim_artifact" == cp1-pm-escalation-override.json.consumed-* \
+            && "$claim_artifact" != */* ]]; then
+        claim_path="${plan_evidence_root}/${claim_artifact}"
+        if [[ -f "$claim_path" ]]; then
+          local actual_sha256
+          actual_sha256="sha256:$(sha256sum "$claim_path" | awk '{print $1}')"
+          [[ "$actual_sha256" == "$claim_sha256" ]] && claim_ok=true
+        fi
+      fi
+
+      if [[ "$claim_ok" == true ]]; then
+        jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" --arg ref "$pm_ref" \
+          '{plan_id: $pid, status: "available", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: true,
+            reason: ("attempts (" + ($attempts|tostring) + ") exceeds max (" + ($max|tostring) + ") but the LATEST attempt was PM-escalation-authorized: " + $ref)}'
+        return 0
+      fi
+
+      jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
+        '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,
+          reason: "attempts >= max — revision budget exhausted. pm_override.present is set but could not be corroborated against a genuine, matching .consumed-<epoch> claim artifact (missing, unreadable, or content mismatch) — treated as untrusted, not a legitimate override. Use a fresh PM-escalation override if needed."}'
+      return 1
     fi
     jq -n --arg pid "$plan_id" --argjson attempts "$attempts" --argjson max "$max" --argjson ev "$ev_bool" \
       '{plan_id: $pid, status: "exhausted", evidence_present: $ev, attempts: $attempts, max: $max, pm_override: false,

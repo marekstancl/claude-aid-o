@@ -870,10 +870,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 21: CP1 ledger pm_override.present=true IS honored (only cmd_increment's own atomic claim legitimately sets it)
-#           (the ONLY sanctioned override is the gate-level cp1-pm-escalation-override.json)
+# TEST 21: DONE-review #5 fix — a bare hand-edited ledger pm_override.present=
+#           true (no corroborating claim artifact) must NOT pass the gate
 # ---------------------------------------------------------------------------
-run_test "ledger pm_override.present=true is honored by the gate (only cmd_increment's own claim legitimately sets it)"
+run_test "a bare hand-edited ledger pm_override.present=true (no matching claim artifact) does NOT pass the gate"
 
 proj21="$(make_project_root "t21")"
 plan21="$TMPDIR_ROOT/t21-plan.md"
@@ -885,32 +885,78 @@ proot21="$(plan_evidence_root_of "$ev21")"
 write_passing_c0_review "$proot21"
 stub_c0_verify "$TMPDIR_ROOT/t21-stub" ok
 init_ledger_exhausted "$proj21" "P021"
-# Set pm_override.present = true in the ledger (simulating a hand-edit).
+# Set pm_override.present = true in the ledger (simulating a hand-edit) —
+# NO claim_artifact/claim_sha256, exactly the DONE-review #5 finding's
+# repro: a bare boolean+string with nothing corroborating it.
 set_ledger_pm_override "$proj21" "P021"
 
 gate_exit=0
 gate_out="$(bash "$GATE_SCRIPT" --plan "$plan21" --project-root "$proj21" 2>&1)" || gate_exit=$?
 unstub_c0_verify
 
-# DESIGN EVOLUTION (2 live-audit rounds on this same field, both within
-# E-065-7_7): this field was ORIGINALLY a dead/unvalidated bypass (no
-# legitimate setter) and correctly closed by an earlier fix. A LATER live
-# audit then found that fix went too far once aid-cp1-ledger.sh's own
-# cmd_increment gained a REAL, atomically-consumed, single-use override-claim
-# path — check-budget ignoring pm_override.present entirely broke the
-# documented "PM override permits one more attempt" promise end-to-end (see
-# test-cp1-ledger.bats's own "closes the E-065-7_7 3rd-audit coordination
-# gap" test for the full narrative). check-budget now DOES honor this field
-# again, so the gate correctly PASSES here — this test now proves the field's
-# hand-edited value is read consistently through the gate too (a direct
-# ledger-file edit is an accepted, narrow trust boundary matching this
-# project's IMP-250 precedent for C3's sibling loop-summary.json mechanism,
-# not something this gate is expected to distinguish from a legitimate
-# cmd_increment-set value).
-if [[ "$gate_exit" -eq 0 ]]; then
-  pass "ledger pm_override.present is honored by the gate (consistent with cmd_increment's own legitimate write path)"
+# DESIGN EVOLUTION (3 live-audit rounds on this same field, all within
+# E-065-7_7): round 4/5 first closed a dead/unvalidated bypass. A LATER
+# audit (3rd DONE-review) found that fix went too far once
+# aid-cp1-ledger.sh's own cmd_increment gained a REAL, atomically-consumed,
+# single-use override-claim path — check-budget ignoring pm_override.present
+# entirely broke the documented "PM override permits one more attempt"
+# promise end-to-end. A 5th audit then found THAT re-enable itself went too
+# far the OTHER way: check-budget trusted the bare boolean with no
+# corroborating evidence, so a hand-edit (this test's own technique) granted
+# the exact same bypass as a genuine claim — this test previously asserted
+# gate_exit -eq 0 (PASS) here, i.e. it codified the bypass the audit flagged
+# as a real, unauthenticated authorization gap. The fix binds
+# pm_override.present to claim_artifact/claim_sha256, which check-budget now
+# verifies against a genuine, matching .consumed-<epoch> file on disk before
+# trusting it (see aid-cp1-ledger.sh's cmd_check_budget) — a bare hand-edit
+# has no such file, so it is now correctly REJECTED, and this test asserts
+# the INVERSE of what it used to.
+if [[ "$gate_exit" -ne 0 ]]; then
+  pass "a bare hand-edited pm_override.present does NOT pass the gate (DONE-review #5 fix)"
 else
-  fail "ledger pm_override.present is honored by the gate (consistent with cmd_increment's own legitimate write path)" "got exit=$gate_exit (expected 0), output: $gate_out"
+  fail "a bare hand-edited pm_override.present does NOT pass the gate (DONE-review #5 fix)" "got exit=0 (expected non-zero), output: $gate_out"
+fi
+if echo "$gate_out" | grep -qi "exhausted"; then
+  pass "gate's failure reason still mentions exhausted budget (not a silent/opaque block)"
+else
+  fail "gate's failure reason still mentions exhausted budget (not a silent/opaque block)" "output: $gate_out"
+fi
+
+# ---------------------------------------------------------------------------
+# TEST 21b: the LEGITIMATE PM-override flow (a real cp1-pm-escalation-
+#           override.json, atomically claimed via a genuine
+#           aid-cp1-ledger.sh increment call) still lets the gate PASS —
+#           proves the DONE-review #5 fix did not break the real path while
+#           closing the hand-edit bypass above.
+# ---------------------------------------------------------------------------
+run_test "a genuine PM-escalation override, claimed via a real ledger increment, DOES pass the gate"
+
+proj21b="$(make_project_root "t21b")"
+plan21b="$TMPDIR_ROOT/t21b-plan.md"
+write_plan "$plan21b" "P021b" "risk: high" "authenticate() handler added."
+
+ev21b="$(make_evidence_dir "$proj21b" "P021b")"
+write_passing_evidence "$ev21b"
+proot21b="$(plan_evidence_root_of "$ev21b")"
+write_passing_c0_review "$proot21b"
+stub_c0_verify "$TMPDIR_ROOT/t21b-stub" ok
+init_ledger_exhausted "$proj21b" "P021b"
+
+# Write the REAL, shared single-use override artifact and claim it via a
+# genuine `aid-cp1-ledger.sh increment` call (exactly what aid-c0-plan-
+# review.sh's cmd_dispatch does in production) — this is what legitimately
+# populates claim_artifact/claim_sha256, not a hand-edit.
+write_pm_override "$proot21b" "PM approved additional attempt 2026-07-19 review"
+bash "$LEDGER_SCRIPT" increment --project-root "$proj21b" "P021b" "sha256:$(printf 'p021b-new-hash' | sha256sum | cut -d' ' -f1)" >/dev/null
+
+gate_exit=0
+gate_out="$(bash "$GATE_SCRIPT" --plan "$plan21b" --project-root "$proj21b" 2>&1)" || gate_exit=$?
+unstub_c0_verify
+
+if [[ "$gate_exit" -eq 0 ]]; then
+  pass "a genuinely claimed PM override still passes the gate"
+else
+  fail "a genuinely claimed PM override still passes the gate" "got exit=$gate_exit (expected 0), output: $gate_out"
 fi
 
 # ---------------------------------------------------------------------------
