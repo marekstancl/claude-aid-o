@@ -3987,7 +3987,13 @@ EOF
         # (same loop-summary.json current_attempt field, same zero-pad).
         if [[ -f "${evidence_dir}/c3/loop-summary.json" ]] && command -v jq >/dev/null 2>&1; then
           local _c3_hook_cur_attempt
-          _c3_hook_cur_attempt=$(jq -r '.current_attempt // empty' "${evidence_dir}/c3/loop-summary.json" 2>/dev/null)
+          # Guarded like every other jq substitution in this function (see the
+          # header comment above: "every jq/verify command substitution is
+          # guarded against set -euo pipefail abort") — a malformed/partial
+          # loop-summary.json (e.g. a truncated write) must fall through to
+          # the legacy path below, not crash the whole done-advance call.
+          _c3_hook_cur_attempt=$(jq -r '.current_attempt // empty' "${evidence_dir}/c3/loop-summary.json" 2>/dev/null) \
+            || _c3_hook_cur_attempt=""
           if [[ "$_c3_hook_cur_attempt" =~ ^[1-9][0-9]*$ ]]; then
             local _c3_hook_cur_nn
             _c3_hook_cur_nn=$(printf '%02d' "$_c3_hook_cur_attempt")

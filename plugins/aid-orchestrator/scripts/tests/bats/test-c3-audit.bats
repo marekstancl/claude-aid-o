@@ -822,7 +822,11 @@ JSON
   echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
   _pin_c3_blocking
 
-  # Tamper the CURRENT attempt's raw last-message post-dispatch.
+  # Tamper the CURRENT attempt's raw last-message post-dispatch. This must
+  # still get caught by CHECK 5 (the `verify` shell-out), not by checks 1-4
+  # incidentally finding a wrong path — CP2 round-9d found the prior generic
+  # assertion here couldn't distinguish the two, so this now asserts the
+  # check-5-specific reason text.
   jq '.findings = []' "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json" \
     > "$TEST_TMPDIR/tampered.json"
   cp "$TEST_TMPDIR/tampered.json" "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json"
@@ -831,6 +835,47 @@ JSON
   run "$FSM" done-advance review release "$state_file"
   [ "$status" -ne 0 ]
   [[ "$output" == *"C3 dispatch provenance block"* ]]
+  [[ "$output" == *"aid-c3-dispatch.sh verify failed"* ]]
+  [[ "$output" == *"faithful-transform binding broken"* ]]
+}
+
+@test "Finding B follow-up (CP2 round-9d Finding 1): a malformed c3/loop-summary.json never crashes done-advance — observe stays non-blocking, blocking gets a clean reason" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  export AID_C3_ATTEMPT=1
+  _drive_clean_dispatch
+  unset AID_C3_ATTEMPT
+  _seed_done_review_state "$state_file"
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _write_matching_curator_ref "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  # Corrupt loop-summary.json: valid JSON, but not an object (models a
+  # realistic truncated/partial-write, not a hand-crafted parse error) — jq
+  # '.current_attempt' on a bare array exits non-zero.
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  # observe (shipped default): must stay non-blocking — this is the CRITICAL
+  # regression CP2 found: pre-fix, the unguarded jq substitution crashed the
+  # whole done-advance call under set -e BEFORE the observe/blocking branch
+  # was ever reached, defeating "observe is never supposed to block."
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"C3 dispatch provenance block"* ]]
+
+  # blocking: a malformed pointer falls back to the legacy path (which is
+  # genuinely absent for an attempt-mode dispatch), so this correctly BLOCKS
+  # via check 1 — but with an honest "not found"/PRECONDITION FAIL reason,
+  # never a raw crash (the pre-fix bug: exit 5, no PRECONDITION FAIL message
+  # at all, because the whole process aborted before reaching this branch).
+  _reset_review_state "$state_file"
+  _pin_c3_blocking
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"C3 dispatch provenance block"* ]]
+  [[ "$output" == *"c3/c3-dispatch.json not found"* ]]
 }
 
 # ─── AC4: THE critical test — a fabricated report (edited AFTER dispatch, with an
