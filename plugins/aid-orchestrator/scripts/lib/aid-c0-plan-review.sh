@@ -771,52 +771,157 @@ _c0_copy_atomic() {
   return 0
 }
 
-# _c0_write_loop_summary <evidence_dir> <n>
-#   Minimal c0/loop-summary.json: records ONLY current_attempt — which
-#   attempt-NN/ directory's raw evidence + report is CURRENTLY the one
-#   copied to the canonical evidence-root path. cmd_verify needs this to
-#   resolve raw dispatch artifacts (c0-dispatch.json, codex-last-message.json,
-#   codex-events.jsonl), which are never mirrored to the canonical c0/codex/
-#   path in attempt mode (P065 E-065-7_7 DONE-review Finding B). Deliberately
-#   does NOT port aid-c3-dispatch.sh's fingerprint/escalation/recheck_count
-#   machinery — that is Part B's separate, not-yet-built scope; this schema
-#   is purely additive, so Part B can extend the same file later without
-#   breaking this reader. Returns 1 on any write failure (temp+mv — never a
-#   partial overwrite).
+# _c0_write_loop_summary <evidence_dir> <n> <session_id> <head_sha> <dispatch_outcome> <report_status>
+#   Accumulate <evidence_dir>/c0/loop-summary.json — the PM-facing record of
+#   every C0 review attempt this evidence dir has seen so far. Mirrors
+#   aid-c3-dispatch.sh's _c3_write_loop_summary (P065 Step 17/E-065-6_7):
+#     {schema_version, artifact_type:"c0_loop_summary", producer, created_at,
+#      attempts: [{n, session_id, head, outcome, recorded_at}, ...] (sorted by
+#        n; re-writing entry <n> REPLACES any prior record for that same n),
+#      recheck_count,   -- count of GENUINELY dispatched attempts minus 1,
+#                          floored at 0.
+#      outcome,         -- "clean" (latest attempt's blocking_findings==false),
+#                          "unverifiable" (latest review_status=="unverifiable"),
+#                          "escalated" (latest still blocking AND the SAME
+#                          blocking-finding fingerprint survived the immediately
+#                          prior dispatched attempt — mechanically decidable,
+#                          the ONE new capability Part B adds), or null (still
+#                          blocking, retriable).
+#      escalation_reason, current_attempt}
+#   DELIBERATELY does NOT port a "budget_exhausted" escalation branch: C0's
+#   actual attempt-count bound is the CP1 ledger (aid-cp1-ledger.sh, max:3),
+#   a SEPARATE, already-tested enforcement mechanism. Duplicating that bound
+#   here would create two independent copies of the same truth that could
+#   diverge (P065 E-065-7_7 Finding B PM decision: no dual-copy-of-truth) —
+#   the hard 3-attempt cap keeps working unchanged via the ledger regardless
+#   of what this documentary file says. Returns 1 on any write failure
+#   (temp+mv — never a partial overwrite).
 _c0_write_loop_summary() {
-  local evidence_dir="$1" n="$2"
+  local evidence_dir="$1" n="$2" session_id="$3" head_sha="$4" dispatch_outcome="$5" report_status="$6"
   local out="$evidence_dir/c0/loop-summary.json"
   local tmp="$out.tmp.$$"
-  local iso_now
+  local existing="[]"
+  if [[ -f "$out" ]]; then
+    existing="$(jq -c '.attempts // []' "$out" 2>/dev/null)"
+    [[ -n "$existing" ]] || existing="[]"
+  fi
+
+  local iso_now new_entry
   iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  new_entry="$(jq -nc \
+    --argjson n "$n" \
+    --argjson session_id "$(_json_str_or_null "$session_id")" \
+    --argjson head "$(_json_str_or_null "$head_sha")" \
+    --arg outcome "$dispatch_outcome" \
+    --arg recorded_at "$iso_now" \
+    '{n:$n, session_id:$session_id, head:$head, outcome:$outcome, recorded_at:$recorded_at}')" \
+    || return 1
+
+  local attempts dispatched_count recheck_count top_outcome
+  attempts="$(jq -c --argjson e "$new_entry" --argjson n "$n" \
+    '(map(select(.n != $n))) + [$e] | sort_by(.n)' <<<"$existing")" || return 1
+  dispatched_count="$(jq '[.[] | select(.outcome=="dispatched")] | length' <<<"$attempts" 2>/dev/null)"
+  [[ "$dispatched_count" =~ ^[0-9]+$ ]] || dispatched_count=0
+  recheck_count=0
+  [[ "$dispatched_count" -gt 0 ]] && recheck_count=$(( dispatched_count - 1 ))
+
+  # Same-fingerprint-survives detection — compare THIS attempt's blocking-
+  # finding fingerprints against the immediately-prior dispatched attempt's.
+  # Mirrors _c3_write_loop_summary's identical logic exactly.
+  local same_fingerprint_survived=false
+  if [[ "$report_status" == "fail" ]]; then
+    local prev_n prev_nn prev_report
+    prev_n="$(jq -r --argjson n "$n" \
+      '[.[] | select(.n < $n and .outcome == "dispatched")] | sort_by(.n) | last | .n // empty' \
+      <<<"$attempts" 2>/dev/null)"
+    if [[ -n "$prev_n" ]]; then
+      prev_nn="$(printf '%02d' "$prev_n")"
+      prev_report="$evidence_dir/c0/attempt-$prev_nn/c0-plan-review.json"
+      if [[ -f "$prev_report" ]]; then
+        local cur_fps prev_fps overlap
+        cur_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$evidence_dir/c0-plan-review.json" 2>/dev/null)"
+        prev_fps="$(jq -c '[.findings[]?.fingerprint] | sort' "$prev_report" 2>/dev/null)"
+        [[ -n "$cur_fps" ]] || cur_fps='[]'
+        [[ -n "$prev_fps" ]] || prev_fps='[]'
+        overlap="$(jq -n --argjson a "$cur_fps" --argjson b "$prev_fps" \
+          '[$a[] | select(. as $x | $b | index($x))] | length' 2>/dev/null)"
+        [[ "${overlap:-0}" -gt 0 ]] && same_fingerprint_survived=true
+      fi
+    fi
+  fi
+
+  local escalation_reason='null'
+  case "$report_status" in
+    pass) top_outcome='"clean"' ;;
+    unverifiable|fail)
+      if [[ "$same_fingerprint_survived" == true ]]; then
+        top_outcome='"escalated"'
+        escalation_reason='"same_fingerprint_survived"'
+      elif [[ "$report_status" == "unverifiable" ]]; then
+        top_outcome='"unverifiable"'
+      else
+        top_outcome='null'
+      fi
+      ;;
+    *)    top_outcome='null' ;;
+  esac
+
   jq -n \
+    --argjson attempts "$attempts" \
+    --argjson recheck_count "$recheck_count" \
+    --argjson outcome "$top_outcome" \
+    --argjson escalation_reason "$escalation_reason" \
     --argjson current_attempt "$n" \
     --arg created_at "$iso_now" \
     '{schema_version:"aid-2.0", artifact_type:"c0_loop_summary",
       producer:"orchestrator@done-review", created_at:$created_at,
-      current_attempt:$current_attempt}' \
+      attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome,
+      escalation_reason:$escalation_reason, current_attempt:$current_attempt}' \
     > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
   return 0
 }
 
-# _c0_finalize_attempt <evidence_dir> <attempt_dir> <manifest> <n> <nn>
+# _c0_finalize_attempt <evidence_dir> <attempt_dir> <manifest> <n> <nn> <session_id> <head_sha> <dispatch_outcome>
 #   Copies <attempt_dir>'s c0-plan-review.json to the canonical <evidence_dir>
-#   root, then updates c0/loop-summary.json's current_attempt pointer. On a
+#   root, then updates c0/loop-summary.json (attempts history, same-
+#   fingerprint-survives detection, current_attempt pointer). On a
 #   canonical-copy failure: stomps the canonical report to status:unverifiable
 #   (best effort) and marks the whole call a failure — the caller
 #   (cmd_dispatch) must exit 2 on a 1, never exit 0. Mirrors
-#   aid-c3-dispatch.sh's _c3_finalize_attempt (minus its fingerprint/
-#   escalation extras, deliberately out of scope here — see
-#   _c0_write_loop_summary's header comment).
+#   aid-c3-dispatch.sh's _c3_finalize_attempt (minus its budget_exhausted
+#   escalation branch — see _c0_write_loop_summary's header comment).
 _c0_finalize_attempt() {
   local evidence_dir="$1" attempt_dir="$2" manifest="$3" n="$4" nn="$5"
+  local session_id="$6" head_sha="$7" dispatch_outcome="$8"
   local rc=0
+
+  # report_status: this attempt's OWN report status BEFORE the canonical
+  # copy — "fail" iff blocking_findings (mirrors _derive_report_semantics'
+  # status:"fail" iff a crit/high finding exists), "unverifiable" iff
+  # review_status=="unverifiable", else "pass". C0's report has no top-level
+  # .status field (unlike C3's audit-report.json), so derive the equivalent
+  # from review_status + blocking_findings directly.
+  local report_status=""
+  if [[ -f "$attempt_dir/c0-plan-review.json" ]]; then
+    local rs bf
+    rs="$(jq -r '.review_status // ""' "$attempt_dir/c0-plan-review.json" 2>/dev/null)" || rs=""
+    bf="$(jq -r '.blocking_findings // false' "$attempt_dir/c0-plan-review.json" 2>/dev/null)" || bf="false"
+    if [[ "$rs" == "unverifiable" ]]; then
+      report_status="unverifiable"
+    elif [[ "$bf" == "true" ]]; then
+      report_status="fail"
+    else
+      report_status="pass"
+    fi
+  fi
+
   if _c0_copy_atomic "$attempt_dir/c0-plan-review.json" "$evidence_dir/c0-plan-review.json"; then
     : # success — fall through to the loop-summary write below
   else
     echo "aid-c0-plan-review: FATAL — cannot copy c0/attempt-$nn/c0-plan-review.json to the canonical evidence-root path; failing closed (attempt evidence remains authoritative under c0/attempt-$nn/)" >&2
     _c0_write_unverifiable "$evidence_dir" "$manifest" canonical_copy_failed unavailable "" "" "" || true
+    report_status="canonical_copy_failed"
     rc=1
   fi
 
@@ -825,7 +930,7 @@ _c0_finalize_attempt() {
   # cmd_verify would have no way to find this attempt's raw evidence
   # (mirrors aid-c3-dispatch.sh's identical fail-closed rule).
   local summary_rc=0
-  _c0_write_loop_summary "$evidence_dir" "$n" || summary_rc=$?
+  _c0_write_loop_summary "$evidence_dir" "$n" "$session_id" "$head_sha" "$dispatch_outcome" "$report_status" || summary_rc=$?
   if [[ "$summary_rc" -ne 0 ]]; then
     echo "aid-c0-plan-review: FATAL — c0/loop-summary.json write failed after attempt $nn; cmd_verify cannot resolve the current attempt's raw evidence. Failing closed." >&2
     _c0_write_unverifiable "$evidence_dir" "$manifest" loop_summary_write_failed unavailable "" "" "" || true
@@ -1025,6 +1130,32 @@ cmd_dispatch() {
     [[ "$attempt_n" =~ ^[1-9][0-9]*$ ]] \
       || { echo "PRECONDITION FAIL: AID_C0_ATTEMPT must be a positive integer (got: $attempt_n)" >&2; exit 1; }
 
+    # Terminal-outcome guard (Part B, mirrors aid-c3-dispatch.sh's identical
+    # round-1-6-hardened guard exactly, including its ALLOWLIST polarity —
+    # see that file's own header comment for the full rationale). Only two
+    # values are KNOWN-SAFE to proceed on without an override — "" (a
+    # genuinely in-progress loop) and "unverifiable" (not a loop iteration,
+    # must stay freely retriable). Every other value — recognized-terminal
+    # ("clean"/"escalated") or not — requires an explicit, auditable,
+    # PM-authorized override.
+    local existing_summary="$evidence_dir/c0/loop-summary.json"
+    if [[ -f "$existing_summary" ]]; then
+      if ! jq -e 'type == "object"' "$existing_summary" >/dev/null 2>&1; then
+        echo "PRECONDITION FAIL: c0/loop-summary.json exists but is not a valid JSON object — cannot determine loop state; refusing further automatic dispatch (bounded-loop requirement: state must be provably safe, never assumed)." >&2
+        exit 1
+      fi
+      local prior_loop_outcome
+      prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)" || prior_loop_outcome=""
+      if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
+        if [[ -z "${AID_C0_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C0_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+          echo "PRECONDITION FAIL: c0/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C0 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
+          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C0_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          exit 1
+        fi
+        echo "aid-c0-plan-review: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${AID_C0_FORCE_BEYOND_ESCALATION}" >&2
+      fi
+    fi
+
     attempt_explicit=1
     attempt_nn="$(printf '%02d' "$attempt_n")"
     attempt_dir="$evidence_dir/c0/attempt-$attempt_nn"
@@ -1073,7 +1204,8 @@ cmd_dispatch() {
     _c0_write_skipped "$work_evidence_dir" "$manifest_for_call" \
       || { echo "PRECONDITION FAIL: cannot write skipped c0-plan-review.json" >&2; exit 1; }
     if [[ "$attempt_explicit" -eq 1 ]]; then
-      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" || true
+      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+        "" "$reviewed_head" "skipped(profile)" || true
     fi
     echo "$evidence_dir/c0-plan-review.json"
     return 0
@@ -1096,7 +1228,8 @@ cmd_dispatch() {
       "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
     _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
-      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" || true
+      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+        "" "$reviewed_head" unavailable || true
     fi
     exit 2
   fi
@@ -1143,7 +1276,8 @@ cmd_dispatch() {
       "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
     _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
-      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" || true
+      _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+        "" "$reviewed_head" render_failed || true
     fi
     exit 2
   fi
@@ -1232,7 +1366,8 @@ cmd_dispatch() {
       echo "PRECONDITION FAIL: cannot extract plan_id or plan_hash from manifest for ledger increment" >&2
       _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" ledger_increment_failed "$achieved" "$session_id" "" "" || true
       if [[ "$attempt_explicit" -eq 1 ]]; then
-        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" || true
+        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+          "$session_id" "$reviewed_head" "$outcome" || true
       fi
       exit 2
     fi
@@ -1242,7 +1377,8 @@ cmd_dispatch() {
       echo "aid-c0-plan-review: ledger increment failed (rc=$ledger_rc) for plan_id=$plan_id — dispatched codex response is unverifiable without a recorded loop iteration" >&2
       _c0_write_unverifiable "$work_evidence_dir" "$manifest_for_call" ledger_increment_failed "$achieved" "$session_id" "" "" || true
       if [[ "$attempt_explicit" -eq 1 ]]; then
-        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" || true
+        _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+          "$session_id" "$reviewed_head" "$outcome" || true
       fi
       exit 2
     fi
@@ -1252,7 +1388,8 @@ cmd_dispatch() {
 
   # --- finalize attempt: copy to canonical path if attempt_explicit -------
   if [[ "$attempt_explicit" -eq 1 ]]; then
-    if ! _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn"; then
+    if ! _c0_finalize_attempt "$evidence_dir" "$work_evidence_dir" "$root_manifest" "$attempt_n" "$attempt_nn" \
+           "$session_id" "$reviewed_head" "$outcome"; then
       exit 2
     fi
   fi

@@ -956,14 +956,16 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  # First dispatch with attempt=1.
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # First dispatch with attempt=1 — deliberately BLOCKING (not clean, Part B):
+  # a "clean" first attempt would hit the terminal-outcome guard (Part B,
+  # mirrors aid-c3-dispatch.sh) before a second attempt could ever run.
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   report_1="$REPORT"
   report_1_content="$(jq -S '.' "$report_1")"
 
   # Second dispatch with attempt=2 (no rebuild, same manifest).
-  FAKE_C0_MODE=findings AID_C0_ATTEMPT=2 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  FAKE_C0_MODE=valid AID_C0_ATTEMPT=2 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   report_2="$REPORT"
   report_2_content="$(jq -S '.' "$report_2")"
@@ -1007,15 +1009,18 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  # First dispatch with attempt=1 — outcome will be "dispatched".
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # First dispatch with attempt=1 — outcome will be "dispatched". Deliberately
+  # BLOCKING (not clean, Part B): isolates the COLLISION guard (this test's
+  # target) from the SEPARATE terminal-outcome guard, which a clean first
+  # attempt would trip first and produce a different message.
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
   # Proof: attempt-01/c0-dispatch.json records outcome==dispatched.
   [ "$(jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json")" = "dispatched" ]
 
   # Second dispatch WITH THE SAME AID_C0_ATTEMPT=1 — must FAIL.
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"already recorded a completed dispatch"* ]]
@@ -1126,8 +1131,10 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
+  # First attempt deliberately BLOCKING (Part B's terminal-outcome guard
+  # would otherwise block the second attempt after a clean first one).
   export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a1111"
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a2222"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
@@ -1143,7 +1150,7 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
@@ -1159,7 +1166,7 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
@@ -1268,7 +1275,10 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # Deliberately BLOCKING (Part B's terminal-outcome guard would otherwise
+  # block ANY further dispatch — including a retry of the SAME attempt slot —
+  # after a clean first attempt, isolating this test from that separate guard.
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
   # Simulate a torn/interrupted write of THIS attempt's own dispatch.json —
@@ -1277,9 +1287,134 @@ EOF
   # this as "not dispatched" and allow the retry to proceed and overwrite it.
   printf '[]\n' > "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
 
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
   run jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
   [ "$output" = "dispatched" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P065 E-065-7_7 Part B: c0/loop-summary.json attempts history, same-
+# fingerprint-survives detection, and the terminal ALLOWLIST guard. Mirrors
+# aid-c3-dispatch.sh's already-6-round-hardened equivalent mechanism
+# (test-c3-fix-loop.bats), minus the budget_exhausted escalation branch,
+# which is deliberately NOT ported — see _c0_write_loop_summary's header
+# comment (C0's real attempt-count bound is the CP1 ledger, a separate,
+# already-tested mechanism; duplicating it here would be two independent
+# copies of the same truth).
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "Part B: c0/loop-summary.json accumulates both attempts and reflects the right recheck_count/outcome" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  export FAKE_C0_THREAD_ID="thread-partb-01"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  export FAKE_C0_THREAD_ID="thread-partb-02"
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  local SUM="$C0_EVIDENCE_DIR/c0/loop-summary.json"
+  [ -f "$SUM" ]
+  run jq -r '.attempts | length' "$SUM"; [ "$output" = "2" ]
+  run jq -r '.attempts[0].n' "$SUM"; [ "$output" = "1" ]
+  run jq -r '.attempts[0].outcome' "$SUM"; [ "$output" = "dispatched" ]
+  run jq -r '.attempts[1].n' "$SUM"; [ "$output" = "2" ]
+  run jq -r '.attempts[1].outcome' "$SUM"; [ "$output" = "dispatched" ]
+
+  # attempt-01 = initial review (not a recheck), attempt-02 = the one recheck.
+  run jq -r '.recheck_count' "$SUM"; [ "$output" = "1" ]
+  # latest attempt (attempt-02) is clean → top-level outcome:"clean".
+  run jq -r '.outcome' "$SUM"; [ "$output" = "clean" ]
+  run jq -r '.current_attempt' "$SUM"; [ "$output" = "2" ]
+}
+
+@test "Part B: the SAME blocking-finding fingerprint surviving a recheck escalates immediately" {
+  # The shared fake-codex fixture's FAKE_C0_MODE=findings always emits the
+  # SAME fixed finding text (build_findings with_owner) — dispatching it
+  # twice in a row is exactly the "fix ineffective, same finding still
+  # blocking" scenario this mechanism exists to catch.
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  local SUM="$C0_EVIDENCE_DIR/c0/loop-summary.json"
+  run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
+  run jq -r '.escalation_reason' "$SUM"; [ "$output" = "same_fingerprint_survived" ]
+}
+
+@test "Part B: clean is terminal — a 2nd explicit dispatch after outcome==clean is rejected without an override" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.outcome' "$C0_EVIDENCE_DIR/c0/loop-summary.json"; [ "$output" = "clean" ]
+
+  # A 2nd attempt (no PM-authorized override) must be rejected BEFORE any
+  # codex invocation or evidence write for attempt-02.
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"clean"* ]]
+  [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+
+  # A short (< 20 char) override is ALSO rejected.
+  AID_C0_FORCE_BEYOND_ESCALATION="too short" AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid \
+    run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # A genuine, >=20-char, PM-authorized override DOES let the 2nd attempt through.
+  AID_C0_FORCE_BEYOND_ESCALATION="PM approved an extra recheck 2026-07-19 review" \
+    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+}
+
+@test "Part B: the terminal guard is an ALLOWLIST — any unrecognized/corrupted outcome value is treated as terminal too" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Directly corrupt the recorded outcome to an unrecognized value — not
+  # reachable through any normal write path, simulating a corrupted file or
+  # a future schema value this guard was never updated for.
+  local SUM="$C0_EVIDENCE_DIR/c0/loop-summary.json"
+  jq '.outcome = "bogus_unrecognized_state"' "$SUM" > "$TEST_TMPDIR/bogus.json"
+  cp "$TEST_TMPDIR/bogus.json" "$SUM"
+
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"bogus_unrecognized_state"* ]]
+  [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+
+  AID_C0_FORCE_BEYOND_ESCALATION="PM approved proceeding past a corrupted state" \
+    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "Part B regression: legacy (AID_C0_ATTEMPT unset) dispatch never creates or checks c0/loop-summary.json" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
+
+  # A second legacy (non-attempt) dispatch must NOT be blocked by any
+  # terminal-outcome guard — that guard only ever applies inside the
+  # AID_C0_ATTEMPT-explicit branch.
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
 }
