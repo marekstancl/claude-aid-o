@@ -3972,6 +3972,29 @@ EOF
         local c3_dispatch_block_reason=""
         local c3_dispatch_json="${evidence_dir}/c3/c3-dispatch.json"
 
+        # P065 E-065-7_7 DONE-review Finding B follow-up (found by CP2 while
+        # verifying the Finding B fix itself): AID_C3_ATTEMPT layering
+        # (Step 17) writes c3-dispatch.json under c3/attempt-NN/c3/, never
+        # mirroring it to this legacy root path — the exact same
+        # evidence_dir/work_evidence_dir confusion Finding B fixed inside
+        # aid-c3-dispatch.sh's own cmd_verify, but this hook reads the file
+        # directly instead of going through cmd_verify for checks 1-4. Check
+        # 5 below already shells out to `verify`, which is attempt-aware
+        # since the Finding B fix and remains the authoritative validator
+        # regardless of this resolution's own correctness — this snippet
+        # only needs to get checks 1-4's PATH right, not re-validate
+        # anything. Mirrors cmd_verify's own Step 0 resolution exactly
+        # (same loop-summary.json current_attempt field, same zero-pad).
+        if [[ -f "${evidence_dir}/c3/loop-summary.json" ]] && command -v jq >/dev/null 2>&1; then
+          local _c3_hook_cur_attempt
+          _c3_hook_cur_attempt=$(jq -r '.current_attempt // empty' "${evidence_dir}/c3/loop-summary.json" 2>/dev/null)
+          if [[ "$_c3_hook_cur_attempt" =~ ^[1-9][0-9]*$ ]]; then
+            local _c3_hook_cur_nn
+            _c3_hook_cur_nn=$(printf '%02d' "$_c3_hook_cur_attempt")
+            c3_dispatch_json="${evidence_dir}/c3/attempt-${_c3_hook_cur_nn}/c3/c3-dispatch.json"
+          fi
+        fi
+
         if ! command -v jq >/dev/null 2>&1; then
           # jq missing → cannot read provenance → fail-closed.
           c3_dispatch_block_reason="jq is required to verify c3-dispatch.json provenance and is not available"
