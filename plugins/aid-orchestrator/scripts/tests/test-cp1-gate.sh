@@ -30,11 +30,13 @@
 #      (proves the DEFAULT wiring genuinely shells out, not just a test seam)
 #  19. CP1 ledger missing while CP1-deep evidence is present → fail-closed block
 #  20. CP1 ledger budget exhausted (attempts>=max, no pm_override) → gate fails
-#  21. CP1 ledger pm_override.present=true IS honored by the gate — this
-#      field is set exclusively by aid-cp1-ledger.sh's own atomically-
-#      consumed, single-use override-claim path (cmd_increment); a direct
-#      hand-edit works the same way by design (accepted trust boundary,
-#      matches IMP-250's precedent for C3's sibling mechanism)
+#  21. CP1 ledger pm_override.present=true is honored by the gate ONLY when
+#      corroborated by a genuine, matching claim_artifact/claim_sha256 (a
+#      real .consumed-<epoch> file aid-cp1-ledger.sh's cmd_increment
+#      produced) — DONE-review #5 fix: a bare hand-edit of present/ref
+#      alone (no matching artifact) is now REJECTED, not honored; see
+#      21b for the legitimate flow (a real override claimed via a genuine
+#      ledger increment) still passing
 #  22. PM-escalation override artifact bypasses a missing c0-plan-review.json → PASS
 #  23. the PM-escalation override is consumed (renamed) after one bypass — a
 #      second gate run without a fresh override blocks again

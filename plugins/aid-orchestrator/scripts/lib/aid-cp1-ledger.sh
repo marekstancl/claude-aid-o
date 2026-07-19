@@ -459,11 +459,25 @@ cmd_increment() {
   # evidence required. claim_artifact/claim_sha256 bind this record to the
   # PHYSICAL, already-existing `.consumed-<epoch>` artifact
   # _cp1_claim_pm_override just created via its atomic rename — a real
-  # claim always has a genuine one; a bare YAML hand-edit does not (unless
-  # the editor ALSO fabricates a matching file, a materially higher bar
-  # than flipping a boolean, and exactly the kind of forgery this project's
-  # established IMP-250 trust-boundary precedent already accepts as
-  # out-of-scope for a party with .aid-o/work/ filesystem access).
+  # claim always produces a genuine one; a bare boolean-only YAML hand-edit
+  # does not.
+  #
+  # HONEST LIMIT (CP2 round-1 finding on this exact commit): this closes
+  # the trivial "flip one boolean" bypass, but does NOT achieve
+  # cryptographic unforgeability — a party with the SAME filesystem write
+  # access this whole mechanism already trusts (this project's established
+  # IMP-250 precedent) can still fabricate a fake .consumed-<epoch> file,
+  # compute its real sha256, and hand-write matching claim_artifact/
+  # claim_sha256 fields; check-budget cannot distinguish that forged pair
+  # from a genuine claim, since it never inspects the artifact's OWN
+  # content (e.g. that its pm_ref matches the ledger's recorded ref) or
+  # binds it to a specific plan_id/attempt beyond filename+hash. This is a
+  # real, acknowledged residual gap, not "solved" — it is accepted for now
+  # because it requires understanding and replicating the exact multi-file
+  # side effect of a real claim rather than a single-field edit, and stays
+  # within the SAME IMP-250 trust boundary (filesystem write access to
+  # .aid-o/work/) this project has already accepted elsewhere, not a NEW
+  # exposure this fix introduces.
   local override_json
   if [[ "$override_used" == true ]]; then
     override_json="$(jq -nc \
