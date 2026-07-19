@@ -1416,16 +1416,23 @@ _c3_write_loop_summary() {
     *)    top_outcome='null' ;;
   esac
 
+  # current_attempt: which attempt-NN/ directory's raw evidence + report is
+  # CURRENTLY the one copied to the canonical evidence-root path — set
+  # unconditionally to $n on every call, since this function only ever runs
+  # from _c3_finalize_attempt right after attempt $n's canonical copy (P065
+  # E-065-7_7 DONE-review Finding B: cmd_verify needs this to resolve raw
+  # dispatch artifacts, which are never mirrored to the canonical root).
   jq -n \
     --argjson attempts "$attempts" \
     --argjson recheck_count "$recheck_count" \
     --argjson outcome "$top_outcome" \
     --argjson escalation_reason "$escalation_reason" \
+    --argjson current_attempt "$n" \
     --arg created_at "$iso_now" \
     '{schema_version:"aid-2.0", artifact_type:"c3_loop_summary",
       producer:"orchestrator@done-review", created_at:$created_at,
       attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome,
-      escalation_reason:$escalation_reason}' \
+      escalation_reason:$escalation_reason, current_attempt:$current_attempt}' \
     > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
   return 0
@@ -1890,11 +1897,50 @@ cmd_verify() {
   [[ -d "$evidence_dir" ]] || _vfail "evidence_dir not a directory: $evidence_dir"
 
   local c3_dir="$evidence_dir/c3"
-  local dispatch_json="$c3_dir/c3-dispatch.json"
   local report="$evidence_dir/audit-report.json"
+  local manifest="$evidence_dir/audit-input-manifest.json"
+
+  # --- Step 0 (P065 E-065-7_7 DONE-review Finding B): resolve the CURRENT
+  # attempt's raw-evidence directory, if this evidence_dir has ever used
+  # AID_C3_ATTEMPT layering. Raw dispatch artifacts (c3-dispatch.json,
+  # codex-last-message.json, codex-events.jsonl, codex-prompt.txt) are
+  # written ONLY under c3/attempt-NN/c3/ — never mirrored to the canonical
+  # c3/ root — so a plain `verify <evidence_dir>` after an attempt-mode
+  # dispatch must read them from there, not from the legacy c3/ location.
+  # c3/loop-summary.json's current_attempt (set by _c3_write_loop_summary,
+  # unconditionally, on every _c3_finalize_attempt call) is the single
+  # source of truth for "which attempt is canonical right now." Absent
+  # entirely (this evidence_dir never used AID_C3_ATTEMPT) → unchanged
+  # legacy behavior.
+  local loop_summary="$c3_dir/loop-summary.json"
+  if [[ -f "$loop_summary" ]]; then
+    jq -e . "$loop_summary" >/dev/null 2>&1 \
+      || _vfail "c3/loop-summary.json is not valid JSON"
+    local cur_attempt
+    cur_attempt="$(jq -r '.current_attempt // empty' "$loop_summary" 2>/dev/null)"
+    if [[ -n "$cur_attempt" ]]; then
+      [[ "$cur_attempt" =~ ^[1-9][0-9]*$ ]] \
+        || _vfail "c3/loop-summary.json current_attempt is not a positive integer: $cur_attempt"
+      local cur_nn resolved_attempt_dir
+      cur_nn="$(printf '%02d' "$cur_attempt")"
+      resolved_attempt_dir="$c3_dir/attempt-$cur_nn"
+      [[ -d "$resolved_attempt_dir" ]] \
+        || _vfail "c3/loop-summary.json points at attempt-$cur_nn but c3/attempt-$cur_nn/ is missing"
+      # The canonical report must be EXACTLY this attempt's own report — a
+      # diverged pointer or a stale/hand-copied canonical report must fail
+      # closed rather than silently verify raw evidence against the wrong
+      # report.
+      [[ -f "$resolved_attempt_dir/audit-report.json" ]] \
+        || _vfail "c3/attempt-$cur_nn/audit-report.json is missing"
+      cmp -s "$resolved_attempt_dir/audit-report.json" "$report" \
+        || _vfail "canonical audit-report.json does not match c3/attempt-$cur_nn/audit-report.json (report and raw evidence must come from the same attempt)"
+      c3_dir="$resolved_attempt_dir/c3"
+    fi
+  fi
+
+  local dispatch_json="$c3_dir/c3-dispatch.json"
   local last_msg="$c3_dir/codex-last-message.json"
   local events="$c3_dir/codex-events.jsonl"
-  local manifest="$evidence_dir/audit-input-manifest.json"
 
   # --- Step 1: every required artifact must exist ---------------------------
   # The manifest is required too (steps 6a/7/8 read it); a hand-forged report

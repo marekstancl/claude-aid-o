@@ -1103,3 +1103,145 @@ EOF
   [ "$(jq -r '.attempts_log | length' <<<"$output")" = "0" ]
 }
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P065 E-065-7_7 DONE-review Finding B: plain `verify` on the canonical
+# evidence_dir after an AID_C0_ATTEMPT dispatch (mirrors aid-c3-dispatch.sh's
+# test-c3-fix-loop.bats Finding B block).
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "Finding B: plain verify succeeds immediately after a SINGLE attempt-mode dispatch" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == verified* ]]
+}
+
+@test "Finding B: plain verify after two attempts checks attempt-02's raw evidence, not stale attempt-01's" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a1111"
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a2222"
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0000000a2222"* ]]
+  [[ "$output" != *"0000000a1111"* ]]
+}
+
+@test "Finding B: tampering the CURRENT attempt's raw evidence makes plain verify fail" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  jq '.findings = []' "$C0_EVIDENCE_DIR/c0/attempt-02/c0/codex-last-message.json" > "$TEST_TMPDIR/tampered.json"
+  cp "$TEST_TMPDIR/tampered.json" "$C0_EVIDENCE_DIR/c0/attempt-02/c0/codex-last-message.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+}
+
+@test "Finding B: tampering an OLD (non-current) attempt's raw evidence does NOT affect plain verify" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  jq '.reviewed_plan_hash = "sha256:0000000000000000000000000000000000000000000000000000000000dd"' \
+    "$C0_EVIDENCE_DIR/c0/attempt-01/c0/codex-last-message.json" > "$TEST_TMPDIR/tampered.json"
+  cp "$TEST_TMPDIR/tampered.json" "$C0_EVIDENCE_DIR/c0/attempt-01/c0/codex-last-message.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+}
+
+@test "Finding B: current_attempt pointing at a missing attempt directory fails closed" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  jq '.current_attempt = 9' "$C0_EVIDENCE_DIR/c0/loop-summary.json" > "$TEST_TMPDIR/ls.json"
+  cp "$TEST_TMPDIR/ls.json" "$C0_EVIDENCE_DIR/c0/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"attempt-09"* ]]
+  [[ "$output" == *"missing"* ]]
+}
+
+@test "Finding B: a non-integer current_attempt fails closed" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  jq '.current_attempt = "one"' "$C0_EVIDENCE_DIR/c0/loop-summary.json" > "$TEST_TMPDIR/ls.json"
+  cp "$TEST_TMPDIR/ls.json" "$C0_EVIDENCE_DIR/c0/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not a positive integer"* ]]
+}
+
+@test "Finding B: a canonical report hand-edited out of sync with the pointed-at attempt fails closed" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  jq '.reviewed_plan_hash = "sha256:0000000000000000000000000000000000000000000000000000000000dd"' \
+    "$REPORT" > "$TEST_TMPDIR/canonical.json"
+  cp "$TEST_TMPDIR/canonical.json" "$REPORT"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"does not match"* ]]
+}
+
+@test "Finding B: current_attempt's own raw evidence missing fails closed" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  rm -f "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"required artifact missing"* ]]
+  [[ "$output" == *"attempt-01"* ]]
+}
+
+@test "Finding B regression: legacy (AID_C0_ATTEMPT unset) dispatch+verify is byte-for-byte unaffected" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == verified* ]]
+}

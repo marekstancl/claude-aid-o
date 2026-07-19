@@ -771,23 +771,67 @@ _c0_copy_atomic() {
   return 0
 }
 
+# _c0_write_loop_summary <evidence_dir> <n>
+#   Minimal c0/loop-summary.json: records ONLY current_attempt — which
+#   attempt-NN/ directory's raw evidence + report is CURRENTLY the one
+#   copied to the canonical evidence-root path. cmd_verify needs this to
+#   resolve raw dispatch artifacts (c0-dispatch.json, codex-last-message.json,
+#   codex-events.jsonl), which are never mirrored to the canonical c0/codex/
+#   path in attempt mode (P065 E-065-7_7 DONE-review Finding B). Deliberately
+#   does NOT port aid-c3-dispatch.sh's fingerprint/escalation/recheck_count
+#   machinery — that is Part B's separate, not-yet-built scope; this schema
+#   is purely additive, so Part B can extend the same file later without
+#   breaking this reader. Returns 1 on any write failure (temp+mv — never a
+#   partial overwrite).
+_c0_write_loop_summary() {
+  local evidence_dir="$1" n="$2"
+  local out="$evidence_dir/c0/loop-summary.json"
+  local tmp="$out.tmp.$$"
+  local iso_now
+  iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n \
+    --argjson current_attempt "$n" \
+    --arg created_at "$iso_now" \
+    '{schema_version:"aid-2.0", artifact_type:"c0_loop_summary",
+      producer:"orchestrator@done-review", created_at:$created_at,
+      current_attempt:$current_attempt}' \
+    > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
 # _c0_finalize_attempt <evidence_dir> <attempt_dir> <manifest> <n> <nn>
 #   Copies <attempt_dir>'s c0-plan-review.json to the canonical <evidence_dir>
-#   root. On a canonical-copy failure: stomps the canonical report to
-#   status:unverifiable (best effort) and returns 1. The caller (cmd_dispatch)
-#   must exit 2 on a 1, never exit 0. Mirrors aid-c3-dispatch.sh's
-#   _c3_finalize_attempt.
+#   root, then updates c0/loop-summary.json's current_attempt pointer. On a
+#   canonical-copy failure: stomps the canonical report to status:unverifiable
+#   (best effort) and marks the whole call a failure — the caller
+#   (cmd_dispatch) must exit 2 on a 1, never exit 0. Mirrors
+#   aid-c3-dispatch.sh's _c3_finalize_attempt (minus its fingerprint/
+#   escalation extras, deliberately out of scope here — see
+#   _c0_write_loop_summary's header comment).
 _c0_finalize_attempt() {
   local evidence_dir="$1" attempt_dir="$2" manifest="$3" n="$4" nn="$5"
   local rc=0
   if _c0_copy_atomic "$attempt_dir/c0-plan-review.json" "$evidence_dir/c0-plan-review.json"; then
-    # Success path — no further action needed.
-    return 0
+    : # success — fall through to the loop-summary write below
   else
     echo "aid-c0-plan-review: FATAL — cannot copy c0/attempt-$nn/c0-plan-review.json to the canonical evidence-root path; failing closed (attempt evidence remains authoritative under c0/attempt-$nn/)" >&2
     _c0_write_unverifiable "$evidence_dir" "$manifest" canonical_copy_failed unavailable "" "" "" || true
-    return 1
+    rc=1
   fi
+
+  # SECURITY/CORRECTNESS: a loop-summary write failure must also fail this
+  # call, even when the canonical report copy itself succeeded — otherwise
+  # cmd_verify would have no way to find this attempt's raw evidence
+  # (mirrors aid-c3-dispatch.sh's identical fail-closed rule).
+  local summary_rc=0
+  _c0_write_loop_summary "$evidence_dir" "$n" || summary_rc=$?
+  if [[ "$summary_rc" -ne 0 ]]; then
+    echo "aid-c0-plan-review: FATAL — c0/loop-summary.json write failed after attempt $nn; cmd_verify cannot resolve the current attempt's raw evidence. Failing closed." >&2
+    _c0_write_unverifiable "$evidence_dir" "$manifest" loop_summary_write_failed unavailable "" "" "" || true
+    rc=1
+  fi
+  return "$rc"
 }
 
 # _c0_write_report <evidence_dir> <manifest> <last_msg> <achieved> <session_id>
@@ -1248,8 +1292,47 @@ cmd_verify() {
   [[ -d "$evidence_dir" ]] || _c0_vfail "evidence_dir not a directory: $evidence_dir"
 
   local c0_dir="$evidence_dir/c0/codex"
-  local dispatch_json="$c0_dir/c0-dispatch.json"
   local report="$evidence_dir/c0-plan-review.json"
+
+  # --- Step 0 (P065 E-065-7_7 DONE-review Finding B): resolve the CURRENT
+  # attempt's raw-evidence directory, if this evidence_dir has ever used
+  # AID_C0_ATTEMPT layering. Raw dispatch artifacts (c0-dispatch.json,
+  # codex-last-message.json, codex-events.jsonl, codex-prompt.txt, and the
+  # sealed audit-input-manifest.json) are written ONLY under
+  # c0/attempt-NN/c0/ — never mirrored to the canonical c0/codex/ location —
+  # so a plain `verify <evidence_dir>` after an attempt-mode dispatch must
+  # read them from there. c0/loop-summary.json's current_attempt (set by
+  # _c0_write_loop_summary, unconditionally, on every _c0_finalize_attempt
+  # call) is the single source of truth for "which attempt is canonical
+  # right now." Absent entirely (this evidence_dir never used
+  # AID_C0_ATTEMPT) → unchanged legacy behavior.
+  local loop_summary="$evidence_dir/c0/loop-summary.json"
+  if [[ -f "$loop_summary" ]]; then
+    jq -e . "$loop_summary" >/dev/null 2>&1 \
+      || _c0_vfail "c0/loop-summary.json is not valid JSON"
+    local cur_attempt
+    cur_attempt="$(jq -r '.current_attempt // empty' "$loop_summary" 2>/dev/null)"
+    if [[ -n "$cur_attempt" ]]; then
+      [[ "$cur_attempt" =~ ^[1-9][0-9]*$ ]] \
+        || _c0_vfail "c0/loop-summary.json current_attempt is not a positive integer: $cur_attempt"
+      local cur_nn resolved_attempt_dir
+      cur_nn="$(printf '%02d' "$cur_attempt")"
+      resolved_attempt_dir="$evidence_dir/c0/attempt-$cur_nn"
+      [[ -d "$resolved_attempt_dir" ]] \
+        || _c0_vfail "c0/loop-summary.json points at attempt-$cur_nn but c0/attempt-$cur_nn/ is missing"
+      # The canonical report must be EXACTLY this attempt's own report — a
+      # diverged pointer or a stale/hand-copied canonical report must fail
+      # closed rather than silently verify raw evidence against the wrong
+      # report.
+      [[ -f "$resolved_attempt_dir/c0-plan-review.json" ]] \
+        || _c0_vfail "c0/attempt-$cur_nn/c0-plan-review.json is missing"
+      cmp -s "$resolved_attempt_dir/c0-plan-review.json" "$report" \
+        || _c0_vfail "canonical c0-plan-review.json does not match c0/attempt-$cur_nn/c0-plan-review.json (report and raw evidence must come from the same attempt)"
+      c0_dir="$resolved_attempt_dir/c0"
+    fi
+  fi
+
+  local dispatch_json="$c0_dir/c0-dispatch.json"
   local last_msg="$c0_dir/codex-last-message.json"
   local events="$c0_dir/codex-events.jsonl"
   local manifest="$c0_dir/audit-input-manifest.json"
