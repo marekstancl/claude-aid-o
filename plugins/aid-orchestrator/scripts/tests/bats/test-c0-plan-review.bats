@@ -1245,3 +1245,21 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == verified* ]]
 }
+
+@test "CP2 round-9e: cmd_verify fails closed (not a crash) on a corrupted c0/loop-summary.json" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Valid JSON, but not an object — models a realistic truncated/partial
+  # write, not a hand-crafted parse error (the old jq -e . alone would accept
+  # this and slip past the pre-check, then crash the unguarded read below).
+  printf '[]\n' > "$C0_EVIDENCE_DIR/c0/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"NOT verified"* ]]
+  [[ "$output" == *"loop-summary.json is not a valid JSON object"* ]]
+}

@@ -412,6 +412,71 @@ _drive_two_attempts() {
   [[ "$output" == *"verified — codex session thread-legacy-verify"* ]]
 }
 
+# ─── CP2 round-9e finding: a corrupted c3/loop-summary.json must fail closed
+#     with a clean message in every reader, never crash under set -euo
+#     pipefail (found in cmd_verify, cmd_dispatch's bounded-loop check, and
+#     cmd_escalate — all three read loop-summary.json's fields via a jq
+#     command substitution that had no `|| var=default` guard, unlike every
+#     other jq read in this file) ────────────────────────────────────────────
+
+@test "CP2 round-9e: cmd_verify fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-verify" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Valid JSON, but not an object — models a realistic truncated/partial
+  # write, not a hand-crafted parse error (jq -e . alone would accept this).
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"NOT verified"* ]]
+  [[ "$output" == *"loop-summary.json is not a valid JSON object"* ]]
+}
+
+@test "CP2 round-9e: cmd_dispatch's bounded-loop check fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-dispatch" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-corrupt-dispatch-2"
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"not a valid JSON object"* ]]
+}
+
+@test "CP2 round-9e: cmd_escalate fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-escalate" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Unchecked error path.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "a genuinely long enough test reason here"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"not a valid JSON object"* ]]
+}
+
 # ─── AC5: canonical-copy failure → fail closed ──────────────────────────────
 
 @test "canonical-copy-to-root prevented → dispatch fails closed (attempt evidence stays authoritative, exit 2, no stale/false canonical pass)" {

@@ -1308,10 +1308,19 @@ cmd_verify() {
   # AID_C0_ATTEMPT) → unchanged legacy behavior.
   local loop_summary="$evidence_dir/c0/loop-summary.json"
   if [[ -f "$loop_summary" ]]; then
-    jq -e . "$loop_summary" >/dev/null 2>&1 \
-      || _c0_vfail "c0/loop-summary.json is not valid JSON"
+    # CP2 round-9e finding (found in aid-c3-dispatch.sh's mirror of this exact
+    # block, same fix applied here): `jq -e .` alone accepts any
+    # syntactically-valid JSON — including a bare array/scalar/bool, e.g.
+    # from a truncated or partial write — which then crashed the UNGUARDED
+    # read below under `set -euo pipefail`. Require the top-level value to
+    # actually be an object, AND guard the read itself (belt + suspenders,
+    # matching every other jq call in this file's `cmd || var=default`
+    # idiom) so a corrupted file fails closed with a clean message, never a
+    # raw crash.
+    jq -e 'type == "object"' "$loop_summary" >/dev/null 2>&1 \
+      || _c0_vfail "c0/loop-summary.json is not a valid JSON object"
     local cur_attempt
-    cur_attempt="$(jq -r '.current_attempt // empty' "$loop_summary" 2>/dev/null)"
+    cur_attempt="$(jq -r '.current_attempt // empty' "$loop_summary" 2>/dev/null)" || cur_attempt=""
     if [[ -n "$cur_attempt" ]]; then
       [[ "$cur_attempt" =~ ^[1-9][0-9]*$ ]] \
         || _c0_vfail "c0/loop-summary.json current_attempt is not a positive integer: $cur_attempt"
