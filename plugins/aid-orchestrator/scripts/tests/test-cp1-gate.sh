@@ -870,10 +870,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TEST 21: CP1 ledger pm_override.present=true does NOT bypass exhausted budget
+# TEST 21: CP1 ledger pm_override.present=true IS honored (only cmd_increment's own atomic claim legitimately sets it)
 #           (the ONLY sanctioned override is the gate-level cp1-pm-escalation-override.json)
 # ---------------------------------------------------------------------------
-run_test "ledger pm_override.present=true does NOT bypass exhausted budget"
+run_test "ledger pm_override.present=true is honored by the gate (only cmd_increment's own claim legitimately sets it)"
 
 proj21="$(make_project_root "t21")"
 plan21="$TMPDIR_ROOT/t21-plan.md"

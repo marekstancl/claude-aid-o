@@ -483,7 +483,17 @@ Codex unavailability), exactly like C3's own carve-out.
 
 **A genuine dispatch with blocking findings enters the bounded loop** (while
 blocking AND `cp1-ledger.sh check-budget` reports budget available,
-`review-checkpoints.yaml` → `cp1_codex_review.max_rechecks: 2`):
+`review-checkpoints.yaml` → `cp1_codex_review.max_rechecks: 2`).
+**Caution on `check-budget`'s meaning after an override-authorized attempt:**
+once `attempts > max` via a PM-override-claimed increment (see below),
+`check-budget` reports `available` again — but this describes the CURRENT
+tip's attempt as retrospectively authorized (what the gate needs), NOT a
+standing "you may loop again" grant. The override was single-use and is
+already consumed; if THIS attempt is still blocking, do not re-enter the
+loop body below without confirming a FRESH override is present first —
+`aid-cp1-ledger.sh increment` will correctly reject a further attempt with
+no fresh artifact, but check that before spending a real gate-fixer +
+Codex dispatch on an attempt that will fail closed anyway.
 1. Dispatch gate-fixer (S/M effort) or implementer (L effort) to revise the
    SPECIFIC accepted/blocking finding(s) by `fingerprint` — a targeted plan
    revision, never a general rewrite — producing a new commit.

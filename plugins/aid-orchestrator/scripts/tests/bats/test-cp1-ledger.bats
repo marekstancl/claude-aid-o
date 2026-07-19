@@ -189,7 +189,7 @@ _ledger_field() {
   [[ "$(echo "$output" | jq -r '.status')" == "exhausted" ]]
 }
 
-@test "check-budget ignores pm_override.present field; it is NOT honored as a bypass" {
+@test "check-budget honors pm_override.present (only cmd_increment's own atomic claim legitimately sets it)" {
   bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P132
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:aaa >/dev/null
   bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P132 sha256:bbb >/dev/null
