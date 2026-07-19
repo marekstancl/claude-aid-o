@@ -555,6 +555,36 @@ _drive_two_attempts() {
   [[ "$output" == *"already recorded a completed dispatch"* ]]
 }
 
+@test "CP2 round-9f: collision guard on a CORRUPTED (torn-write) attempt c3-dispatch.json does not crash — treats it as retriable" {
+  # Deliberately BLOCKING (not clean), mirroring the sibling collision-guard
+  # test above — a "clean" outcome would hit the SEPARATE terminal-outcome
+  # guard (round-4/6 hardening) before ever reaching this test's own target
+  # code, and this test needs to isolate the collision guard specifically.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-torn" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Unchecked error path.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Simulate a torn/interrupted write of THIS attempt's own dispatch.json —
+  # valid JSON, but not an object (a realistic partial-write shape, same
+  # class as the loop-summary.json corruption this round's sibling fixes
+  # address). The collision guard's read of .dispatch.outcome must not crash
+  # under set -euo pipefail; it must treat this as "not dispatched" (a
+  # corrupted file cannot possibly BE a genuinely completed dispatch) and
+  # allow the retry to proceed and overwrite it.
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/c3-dispatch.json"
+
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  run jq -r '.dispatch.outcome' "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/c3-dispatch.json"
+  [ "$output" = "dispatched" ]
+}
+
 # ─── AC3 (cont): "escalated" once recheck_count reaches the policy budget ───
 
 @test "loop-summary.json outcome == escalated once recheck_count reaches c3_fix_loop.max_rechecks while still blocking (no policy override — default max_rechecks:2)" {

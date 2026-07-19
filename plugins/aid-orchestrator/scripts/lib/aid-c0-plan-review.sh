@@ -1032,7 +1032,13 @@ cmd_dispatch() {
     # Collision guard — reusing a dispatched slot is a PRECONDITION FAIL.
     if [[ -f "$attempt_dir/c0/c0-dispatch.json" ]]; then
       local prior_outcome
-      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c0/c0-dispatch.json" 2>/dev/null)"
+      # CP2 round-9f finding (mirrors the identical fix in aid-c3-dispatch.sh):
+      # guarded like every other jq read in this file. A corrupted/torn
+      # c0-dispatch.json cannot possibly BE a genuinely completed prior
+      # dispatch (the writer always writes valid JSON atomically via
+      # temp+mv), so falling back to "" (not dispatched, retry allowed) on a
+      # read failure is the semantically correct default.
+      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c0/c0-dispatch.json" 2>/dev/null)" || prior_outcome=""
       if [[ "$prior_outcome" == "dispatched" ]]; then
         echo "PRECONDITION FAIL: c0/attempt-$attempt_nn already recorded a completed dispatch (outcome=dispatched); refusing to reuse — pass a new AID_C0_ATTEMPT" >&2
         exit 1

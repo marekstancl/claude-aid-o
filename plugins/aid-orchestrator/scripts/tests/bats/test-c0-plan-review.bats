@@ -1263,3 +1263,23 @@ EOF
   [[ "$output" == *"NOT verified"* ]]
   [[ "$output" == *"loop-summary.json is not a valid JSON object"* ]]
 }
+
+@test "CP2 round-9f: collision guard on a CORRUPTED (torn-write) attempt c0-dispatch.json does not crash — treats it as retriable" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Simulate a torn/interrupted write of THIS attempt's own dispatch.json —
+  # valid JSON, but not an object. The collision guard's read of
+  # .dispatch.outcome must not crash under set -euo pipefail; it must treat
+  # this as "not dispatched" and allow the retry to proceed and overwrite it.
+  printf '[]\n' > "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
+
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  run jq -r '.dispatch.outcome' "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
+  [ "$output" = "dispatched" ]
+}

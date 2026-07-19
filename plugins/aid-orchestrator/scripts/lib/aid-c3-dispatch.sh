@@ -1567,7 +1567,16 @@ cmd_dispatch() {
     # Collision guard — see header comment above.
     if [[ -f "$attempt_dir/c3/c3-dispatch.json" ]]; then
       local prior_outcome
-      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c3/c3-dispatch.json" 2>/dev/null)"
+      # CP2 round-9f finding: guarded like every other jq read in this file
+      # (`cmd || var=default` idiom). A corrupted/torn c3-dispatch.json (the
+      # exact torn-write scenario this collision guard exists to let a
+      # caller retry past — see "retrying a non-dispatched slot is allowed"
+      # below) cannot possibly BE a genuinely completed prior dispatch
+      # (_write_dispatch_json always writes valid JSON atomically via
+      # temp+mv), so falling back to "" (not dispatched, retry allowed) on a
+      # read failure is the semantically correct default here, not a
+      # fail-closed block — unlike loop-summary.json's bounded-loop checks.
+      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c3/c3-dispatch.json" 2>/dev/null)" || prior_outcome=""
       if [[ "$prior_outcome" == "dispatched" ]]; then
         echo "PRECONDITION FAIL: c3/attempt-$attempt_nn already recorded a completed dispatch (outcome=dispatched); refusing to reuse — pass a new AID_C3_ATTEMPT" >&2
         exit 1
