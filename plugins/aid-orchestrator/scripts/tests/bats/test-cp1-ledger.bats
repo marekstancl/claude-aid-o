@@ -324,3 +324,116 @@ _ledger_field() {
   [ "$(_ledger_field P151 '.attempts')" = "3" ]
   [ "$(_ledger_field P151 '.attempts_log | length')" = "3" ]
 }
+
+# ─── PM-escalation override tests ──────────────────────────────────────────
+
+# _write_override <plan_evidence_root> [pm_ref]  — writes a valid PM-escalation override.
+_write_override() {
+  local root="$1" pm_ref="${2:-PM approved additional attempt 2026-07-19}"
+  mkdir -p "$root"
+  jq -n --arg ref "$pm_ref" \
+    '{schema_version:"aid-2.0", artifact_type:"cp1_pm_escalation_override", pm_ref:$ref, created_at:"2026-07-19T00:00:00Z"}' \
+    > "${root}/cp1-pm-escalation-override.json"
+}
+
+@test "PM-override: increment at max with valid override artifact succeeds and advances attempts to max+1" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P160
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:ccc >/dev/null
+  [ "$(_ledger_field P160 '.attempts')" = "3" ]
+
+  # Write a valid PM-escalation override at the plan-evidence-root.
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P160"
+  _write_override "$ev_root"
+
+  # Attempt to increment with a new hash at max budget WITH a valid override.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P160 sha256:ddd
+  [ "$status" -eq 0 ]
+
+  # Proof: attempts advances to max+1 (4).
+  [ "$(_ledger_field P160 '.attempts')" = "4" ]
+  [ "$(_ledger_field P160 '.attempts_log | length')" = "4" ]
+  [ "$(_ledger_field P160 '.attempts_log[-1].plan_hash')" = "sha256:ddd" ]
+}
+
+@test "PM-override: the override artifact is consumed (renamed) after a successful override-authorized increment" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P161
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:ccc >/dev/null
+
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P161"
+  _write_override "$ev_root"
+  local override_path="${ev_root}/cp1-pm-escalation-override.json"
+
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P161 sha256:ddd >/dev/null
+
+  # Proof: original file is gone.
+  [ ! -f "$override_path" ]
+
+  # Proof: a .consumed-<epoch> archive exists.
+  local consumed_count; consumed_count="$(find "$ev_root" -maxdepth 1 -name 'cp1-pm-escalation-override.json.consumed-*' 2>/dev/null | wc -l | tr -d '[:space:]')"
+  [ "$consumed_count" -ge 1 ]
+}
+
+@test "PM-override: a second increment without a fresh override is rejected (single-use proven)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P162
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:ccc >/dev/null
+
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P162"
+  _write_override "$ev_root"
+
+  # First increment: succeeds because override is present.
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:ddd >/dev/null
+  [ "$(_ledger_field P162 '.attempts')" = "4" ]
+
+  # Second increment: should fail because the override was consumed.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P162 sha256:eee
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"budget exhausted"* ]]
+
+  # Proof: attempts remains 4 (unchanged by the rejected attempt).
+  [ "$(_ledger_field P162 '.attempts')" = "4" ]
+  [ "$(_ledger_field P162 '.attempts_log | length')" = "4" ]
+}
+
+@test "PM-override: without an override artifact, increment at max still rejects (regression)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P163
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:ccc >/dev/null
+  [ "$(_ledger_field P163 '.attempts')" = "3" ]
+
+  # Do NOT write an override — budget should remain exhausted.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P163 sha256:ddd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"budget exhausted"* ]]
+
+  # Proof: ledger unchanged.
+  [ "$(_ledger_field P163 '.attempts')" = "3" ]
+  [ "$(_ledger_field P163 '.attempts_log | length')" = "3" ]
+}
+
+@test "PM-override: a too-short pm_ref (< 20 chars) is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P164
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:bbb >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:ccc >/dev/null
+
+  local ev_root; ev_root="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P164"
+  # Write an override with a pm_ref that is too short (19 chars).
+  _write_override "$ev_root" "too-short-ref-1234"
+
+  # Attempt to increment with the invalid override — should be rejected.
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P164 sha256:ddd
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"budget exhausted"* ]]
+
+  # Proof: ledger unchanged, override untouched (not consumed).
+  [ "$(_ledger_field P164 '.attempts')" = "3" ]
+  local ev_root_abs; ev_root_abs="$TEST_PROJECT_ROOT/.aid-o/work/evidence/P164"
+  [ -f "${ev_root_abs}/cp1-pm-escalation-override.json" ]
+}

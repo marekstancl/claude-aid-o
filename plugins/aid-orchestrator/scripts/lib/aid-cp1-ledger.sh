@@ -153,6 +153,71 @@ _cp1_evidence_exists() {
 }
 
 # ---------------------------------------------------------------------------
+# _cp1_plan_evidence_root <project_root> <plan_id>
+#   Computes the plan-evidence-root directory (parent of cp1-deep/).
+#   Mirrors aid-cp1-gate.sh's own computation for consistency.
+# ---------------------------------------------------------------------------
+_cp1_plan_evidence_root() {
+  printf '%s/.aid-o/work/evidence/%s' "$1" "$2"
+}
+
+# ---------------------------------------------------------------------------
+# _cp1_override_file <plan_evidence_root>
+#   Computes the path to the PM-escalation override artifact.
+#   Mirrors aid-cp1-gate.sh's implementation exactly.
+# ---------------------------------------------------------------------------
+_cp1_override_file() {
+  printf '%s/cp1-pm-escalation-override.json' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# _cp1_check_pm_override <plan_evidence_root>
+#   READ-ONLY: reports whether a structurally valid PM-escalation override
+#   (non-empty pm_ref field, >= 20 chars) is currently present. Never
+#   consumes/renames anything. Echoes the pm_ref reason and returns 0 iff
+#   valid; returns 1 (nothing echoed) otherwise.
+#   Mirrors aid-cp1-gate.sh's implementation exactly.
+# ---------------------------------------------------------------------------
+_cp1_check_pm_override() {
+  local plan_evidence_root="$1" override_file reason
+  override_file="$(_cp1_override_file "$plan_evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+  printf '%s' "$reason"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _cp1_claim_pm_override <plan_evidence_root>
+#   Atomically CLAIMS (consumes) a present, valid PM-escalation override —
+#   call this ONLY once a caller has determined the override is actually
+#   needed (a check alone, via _cp1_check_pm_override, must never trigger
+#   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
+#   sibling and returns 0 (echoing the pm_ref reason) iff BOTH `mv -n`
+#   itself reports success AND the source file is confirmed gone afterward.
+#   Mirrors aid-cp1-gate.sh's implementation exactly (including the
+#   round-3 fix requiring both mv exit code AND source-gone confirmation).
+# ---------------------------------------------------------------------------
+_cp1_claim_pm_override() {
+  local plan_evidence_root="$1" override_file consumed_file reason
+  override_file="$(_cp1_override_file "$plan_evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+
+  consumed_file="${override_file}.consumed-$(date -u +%s)"
+  if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  # Either mv failed outright (a race loser, or a permission error), or it
+  # no-op'd on a pre-existing destination (source still present) — we do
+  # NOT own this override. Fail closed.
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # _json_str_or_null <maybe-string>  — JSON string if non-empty, else `null`.
 # ---------------------------------------------------------------------------
 _json_str_or_null() {
@@ -311,8 +376,26 @@ cmd_increment() {
   # state-matrix identified as missing. The no-op behavior for an UNCHANGED
   # plan_hash is NOT gated by budget — it's preserved exactly as above (never
   # mutates the ledger regardless of exhaustion).
+  #
+  # However, a valid PM-escalation override artifact can authorize exactly
+  # ONE additional increment past max. Check for and claim it now.
   if [[ "$attempts" -ge "$max" ]]; then
-    _fail "increment rejected: budget exhausted (attempts=$attempts >= max=$max) and new plan_hash supplied — cannot advance further. Use PM override if needed."
+    # Compute the plan-evidence-root where the override artifact lives.
+    local plan_evidence_root override_reason
+    plan_evidence_root="$(_cp1_plan_evidence_root "$project_root" "$plan_id")"
+
+    # Attempt to claim the override atomically (consume it if present/valid).
+    if override_reason="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
+      # Override claim succeeded — permit this ONE increment past max.
+      # The override is now consumed (renamed to .consumed-<epoch>), so a
+      # SUBSEQUENT increment attempt would need a FRESH override.
+      # Continue to the increment logic below (do not _fail).
+      true  # Fall through to increment logic
+    else
+      # No valid override present, or it was already consumed elsewhere.
+      # Reject exactly as before (fail-closed).
+      _fail "increment rejected: budget exhausted (attempts=$attempts >= max=$max) and new plan_hash supplied — cannot advance further. Use PM override if needed."
+    fi
   fi
 
   local attempts new_n now
