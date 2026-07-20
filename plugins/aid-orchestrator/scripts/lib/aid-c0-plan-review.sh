@@ -1227,6 +1227,56 @@ cmd_dispatch() {
   project_root="$(git -C "$evidence_dir" rev-parse --show-toplevel 2>/dev/null)" \
     || { echo "PRECONDITION FAIL: evidence_dir is not inside a git repository: $evidence_dir" >&2; exit 1; }
 
+  # SAME-HASH RE-DISPATCH GUARD (7th DONE-review audit, P065 E-065-7_7: "C0
+  # bounded review lifecycle" finding). The CP1 ledger's own `increment` is
+  # correctly a no-op for an unchanged plan_hash (that's a deliberate,
+  # already-tested design choice — see aid-cp1-ledger.sh's NOTE at
+  # cmd_increment), but that no-op only protects the BUDGET COUNTER.
+  # Nothing previously stopped a caller from dispatching to Codex repeatedly
+  # for the SAME unchanged plan_hash — at zero ledger cost — until a
+  # favorable review happened to come back, then simply not dispatching
+  # again: budget-free fishing for a pass on an unrevised plan.
+  #
+  # LEGACY MODE ONLY (attempt_explicit == 0): in attempt-explicit mode
+  # (AID_C0_ATTEMPT set), the terminal-outcome guard above ALREADY protects
+  # same-hash re-dispatch correctly — it lets a non-terminal outcome (e.g.
+  # blocking findings, "unverifiable") retry at the SAME hash (that IS the
+  # bounded review loop: findings -> fix -> retry, tracked/capped by the
+  # ledger), while rejecting further attempts once a TERMINAL outcome
+  # ("clean"/"escalated"/anything unrecognized) is recorded — see the Part B
+  # tests above ("clean is terminal", "ALLOWLIST" test). Applying this guard
+  # there too would incorrectly block that already-correct, already-tested
+  # retry flow. The audit's own finding text specifically singles out legacy
+  # mode as the acute gap ("In legacy mode, no loop-summary terminal guard
+  # is consulted at all") — this closes exactly that gap without touching
+  # attempt-explicit mode's separate, already-adequate mechanism.
+  #
+  # Uses the ledger's own last recorded hash for this plan_id (read-only —
+  # `read` never mutates or consumes the ledger); a genuine PM override path
+  # is provided, reusing AID_C0_FORCE_BEYOND_ESCALATION's existing pattern
+  # from the terminal-outcome guard above rather than inventing a new
+  # mechanism. A plan_id with no ledger yet (first-ever dispatch) has
+  # nothing to compare against and proceeds normally.
+  local c0_plan_id c0_reviewed_plan_hash
+  c0_plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest_for_call" 2>/dev/null || echo "")"
+  c0_reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call" 2>/dev/null || echo "")"
+  if [[ "$attempt_explicit" -eq 0 && -n "$c0_plan_id" && -n "$c0_reviewed_plan_hash" ]]; then
+    local ledger_read_json="" ledger_read_rc=0
+    ledger_read_json="$(bash "$C0_LEDGER_BIN" read --project-root "$project_root" "$c0_plan_id" 2>/dev/null)" || ledger_read_rc=$?
+    if [[ "$ledger_read_rc" -eq 0 && -n "$ledger_read_json" ]]; then
+      local c0_last_hash
+      c0_last_hash="$(jq -r '.attempts_log[-1].plan_hash // ""' <<<"$ledger_read_json" 2>/dev/null || echo "")"
+      if [[ -n "$c0_last_hash" && "$c0_last_hash" == "$c0_reviewed_plan_hash" ]]; then
+        if [[ -z "${AID_C0_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C0_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+          echo "PRECONDITION FAIL: plan_hash $c0_reviewed_plan_hash for plan_id=$c0_plan_id already has a recorded ledger attempt at this exact hash — refusing to re-dispatch an unchanged plan to Codex (a same-hash re-run cannot consume ledger budget, so nothing else stops repeated re-dispatch of an unchanged plan hoping for a favorable review by chance)." >&2
+          echo "Fix: change the plan (new plan_hash) before dispatching again, or provide an explicit, auditable PM-authorized override: AID_C0_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          exit 1
+        fi
+        echo "aid-c0-plan-review: WARNING — proceeding with a same-hash re-dispatch ($c0_reviewed_plan_hash) via PM-authorized override: ${AID_C0_FORCE_BEYOND_ESCALATION}" >&2
+      fi
+    fi
+  fi
+
   local manifest_input_hash
   manifest_input_hash="sha256:$(sha256sum "$manifest_for_call" | awk '{print $1}')"
 

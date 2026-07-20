@@ -1411,9 +1411,84 @@ EOF
   [ "$status" -eq 0 ]
   [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
 
-  # A second legacy (non-attempt) dispatch must NOT be blocked by any
-  # terminal-outcome guard — that guard only ever applies inside the
-  # AID_C0_ATTEMPT-explicit branch.
+  # 7th DONE-review audit fix ("C0 bounded review lifecycle"): a second
+  # legacy dispatch of the SAME unchanged plan_hash must now be REJECTED by
+  # the same-hash re-dispatch guard — it is NOT blocked by the (still
+  # inapplicable-in-legacy-mode) loop-summary terminal-outcome guard, but by
+  # a separate, unconditional check against the ledger's own last recorded
+  # hash. Before this fix, this same assertion block asserted status 0 with
+  # no PRECONDITION FAIL — that was the exact budget-free "re-dispatch an
+  # unrevised plan hoping for a favorable review" gap the audit found.
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"already has a recorded ledger attempt at this exact hash"* ]]
+  [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
+
+  # Still legacy mode, still no loop-summary.json involved: revising the
+  # plan (new plan_hash) is NOT blocked — the guard is per-hash, not a
+  # sticky lockout. Proves legacy mode retains its original freedom to
+  # dispatch again once the plan actually changes.
+  cat > "$PLAN_FILE_HIGH" <<'EOF'
+---
+id: P900-c0-test
+title: A high-risk plan (revised)
+risk: high
+---
+# Plan
+
+This plan adds an authenticate() handler, revised after review.
+EOF
+  git -C "$TEST_PROJECT_ROOT" add plan-high.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "revise plan-high.md"
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
+}
+
+@test "7th DONE-review audit fix: same-hash re-dispatch guard is overridable via AID_C0_FORCE_BEYOND_ESCALATION" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Without override: rejected (same assertion as the regression test above).
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # With a genuine, auditable PM override: proceeds, and the override
+  # reason is echoed to the log for traceability.
+  AID_C0_FORCE_BEYOND_ESCALATION="deliberate re-review, PM-authorized" \
+    FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"same-hash re-dispatch"* ]]
+}
+
+@test "7th DONE-review audit fix: a plan_id with no ledger yet (first-ever dispatch) is not blocked by the same-hash guard" {
+  bash "$LEDGER" init --pre-enforcement --project-root "$TEST_PROJECT_ROOT" "P901-c0-fresh" >/dev/null 2>&1 || true
+  PLAN_FILE_HIGH="$TEST_PROJECT_ROOT/plan-high-901.md"
+  cat > "$PLAN_FILE_HIGH" <<'EOF'
+---
+id: P901-c0-fresh
+title: A brand-new high-risk plan
+risk: high
+---
+# Plan
+
+This plan has never been dispatched before.
+EOF
+  git -C "$TEST_PROJECT_ROOT" add plan-high-901.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "seed plan-high-901.md"
+  run bash "$DISPATCH" build-manifest "$PLAN_FILE_HIGH" "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
   FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
