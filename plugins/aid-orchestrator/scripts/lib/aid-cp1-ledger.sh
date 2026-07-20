@@ -73,6 +73,7 @@
 #   aid-cp1-ledger.sh increment [--project-root <path>] [--codex-session <id>] <plan_id> <plan_hash>
 #   aid-cp1-ledger.sh read [--project-root <path>] <plan_id>
 #   aid-cp1-ledger.sh check-budget [--project-root <path>] <plan_id>
+#   aid-cp1-ledger.sh claim-pm-override [--project-root <path>] <plan_id>
 #
 # Exit codes:
 #   init/increment/read: 0 = success, 1 = precondition/fail-closed failure.
@@ -120,6 +121,14 @@ Subcommands:
 
   check-budget [--project-root <path>] <plan_id>
       Report budget status without mutating anything. See exit codes above.
+
+  claim-pm-override [--project-root <path>] <plan_id>
+      Atomically consume a present, valid cp1-pm-escalation-override.json
+      (pm_ref >= 20 chars) for <plan_id>, printing {reason, consumed_path}.
+      Shared single-use claim primitive — used by cmd_increment above AND
+      by other scripts (e.g. aid-c0-plan-review.sh's bounded-loop override)
+      that need the SAME real, auditable PM authorization, not a bare env
+      var. Fails (exit 1, nothing printed) if no valid override is present.
 EOF
 }
 
@@ -715,6 +724,52 @@ cmd_check_budget() {
 }
 
 # ===========================================================================
+# cmd_claim_pm_override [--project-root <path>] <plan_id>
+#
+# 9th DONE-review audit fix (P065 E-065-7_7: "C0 bounded review lifecycle"
+# finding): a thin CLI wrapper exposing THIS file's own `_cp1_claim_pm_override`
+# / `_cp1_plan_evidence_root` primitives to OTHER scripts (aid-c0-plan-review.sh)
+# that need the SAME single-use PM-escalation-override claim this file already
+# uses for cmd_increment — reused verbatim, not reimplemented, per explicit PM
+# instruction ("use the same cp1-pm-escalation-override.json / single-use claim
+# pattern"). Atomically CONSUMES a present, valid override artifact
+# (`<plan_evidence_root>/cp1-pm-escalation-override.json`, `{pm_ref: "<reason,
+# >=20 chars>"}`) — a bare 20+-character string is NOT itself sufficient
+# (that was the exact bypass this finding flagged elsewhere); the artifact
+# must physically exist and be claimable. On success, prints
+# `{reason, consumed_path}` (exit 0) — the caller MUST persist consumed_path
+# (and its sha256) wherever it records that a bypass occurred, so a LATER,
+# separate read can corroborate the claim rather than trust a bare boolean
+# (mirrors cmd_increment's own pm_override.claim_artifact/claim_sha256
+# binding). On no valid/present override, exits 1 with nothing printed —
+# fail-closed, same as every other subcommand here.
+# ===========================================================================
+cmd_claim_pm_override() {
+  local project_root="" plan_id=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root) project_root="${2:-}"; shift 2 ;;
+      --project-root=*) project_root="${1#--project-root=}"; shift ;;
+      -h|--help) usage; exit 0 ;;
+      --*) _fail "unknown flag: $1" ;;
+      *)
+        [[ -z "$plan_id" ]] || _fail "unexpected extra argument: $1"
+        plan_id="$1"; shift ;;
+    esac
+  done
+  _validate_plan_id "$plan_id"
+  [[ -z "$project_root" ]] && project_root="$(pwd)"
+
+  local plan_evidence_root claim_json
+  plan_evidence_root="$(_cp1_plan_evidence_root "$project_root" "$plan_id")"
+  if claim_json="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
+    printf '%s\n' "$claim_json"
+    return 0
+  fi
+  _fail "no valid PM-escalation override artifact present for plan_id=${plan_id} (need ${plan_evidence_root}/cp1-pm-escalation-override.json with pm_ref >= 20 chars) — cannot claim"
+}
+
+# ===========================================================================
 # main
 # ===========================================================================
 main() {
@@ -724,10 +779,11 @@ main() {
   fi
   local sub="$1"; shift
   case "$sub" in
-    init)          cmd_init "$@" ;;
-    increment)     cmd_increment "$@" ;;
-    read)          cmd_read "$@" ;;
-    check-budget)  cmd_check_budget "$@" ;;
+    init)               cmd_init "$@" ;;
+    increment)          cmd_increment "$@" ;;
+    read)               cmd_read "$@" ;;
+    check-budget)       cmd_check_budget "$@" ;;
+    claim-pm-override)  cmd_claim_pm_override "$@" ;;
     -h|--help)     usage; exit 0 ;;
     *)
       usage >&2

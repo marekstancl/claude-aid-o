@@ -700,3 +700,40 @@ _write_override() {
   run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P217
   [ "$status" -eq 0 ]
 }
+
+# ─── claim-pm-override (9th DONE-review audit, P065 E-065-7_7: shared CLI wrapper for OTHER scripts) ─
+
+@test "9th DONE-review audit fix: claim-pm-override fails when no override artifact is present" {
+  run bash "$LEDGER" claim-pm-override --project-root "$TEST_PROJECT_ROOT" P220
+  [ "$status" -ne 0 ]
+}
+
+@test "9th DONE-review audit fix: claim-pm-override succeeds on a genuine artifact, prints {reason,consumed_path}, and consumes it (single-use)" {
+  local ev_root="$(_evidence_dir P221 | xargs dirname)"
+  _write_override "$ev_root" "PM approved this specific C0 bypass 2026-07-20"
+  [ -f "$ev_root/cp1-pm-escalation-override.json" ]
+
+  run bash "$LEDGER" claim-pm-override --project-root "$TEST_PROJECT_ROOT" P221
+  [ "$status" -eq 0 ]
+  local claim_json="$output"
+  [ "$(jq -r '.reason' <<< "$claim_json")" = "PM approved this specific C0 bypass 2026-07-20" ]
+  [[ "$(jq -r '.consumed_path' <<< "$claim_json")" == "$ev_root/cp1-pm-escalation-override.json.consumed-"* ]]
+
+  # Source is gone, a matching .consumed-* archive exists.
+  [ ! -f "$ev_root/cp1-pm-escalation-override.json" ]
+  run bash -c "ls '$ev_root'/cp1-pm-escalation-override.json.consumed-* 2>/dev/null | wc -l"
+  [ "$output" -ge 1 ]
+
+  # Single-use: a second claim with no fresh artifact fails.
+  run bash "$LEDGER" claim-pm-override --project-root "$TEST_PROJECT_ROOT" P221
+  [ "$status" -ne 0 ]
+}
+
+@test "9th DONE-review audit fix: claim-pm-override rejects a too-short pm_ref (< 20 chars), mirroring cmd_increment's own requirement" {
+  local ev_root="$(_evidence_dir P222 | xargs dirname)"
+  _write_override "$ev_root" "too short"
+  run bash "$LEDGER" claim-pm-override --project-root "$TEST_PROJECT_ROOT" P222
+  [ "$status" -ne 0 ]
+  # Fail-closed means untouched, not consumed.
+  [ -f "$ev_root/cp1-pm-escalation-override.json" ]
+}
