@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-20T03:47:20Z",
+  "created_at": "2026-07-20T08:23:45Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood-real-ac",
-    "run_id": "R-pass-317373"
+    "run_id": "R-pass-2916895"
   },
   "subject": {
-    "subject_hash": "sha256:2d57071cae809536d97e750a6ab7eb9cb7029a216edf37a8e34009334fc9c064"
+    "subject_hash": "sha256:2d12690f13328f7e07416e8b71221350cf25936b0d6e6e1ac43c981053d5a647"
   },
   "revision": {
-    "head_sha": "d51514671cb9d97d4cf737367b0db99002b981ef",
+    "head_sha": "02c13586d50455389d835cb54f566bcc1aa07073",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -31,11 +31,11 @@
       "gates/gates_report.json",
       "scripts/e2e-ac-demo/increment.sh"
     ],
-    "input_hash": "sha256:67c1fa896883e340b4fe33f3cad4c67a89a469d0b9318543c20e9ba034cd65a5",
+    "input_hash": "sha256:11a91b5671df8f03fbffa6da5d26238976a6c9bfbdfe8a56650d4bcaf20b653f",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_model",
-    "base_sha": "88e4adfc43bf613db925fd7b7ed453036df9aac2",
-    "head_sha": "d51514671cb9d97d4cf737367b0db99002b981ef",
+    "base_sha": "063911f3dad4326c6005995ba40de9f0bacc4d80",
+    "head_sha": "02c13586d50455389d835cb54f566bcc1aa07073",
     "codex_brief_files": [
       {
         "path": "c3/bundle-diff.patch",
@@ -58,11 +58,18 @@
         "size": 33
       }
     ],
-    "codex_brief_hash": "sha256:a86d8ed71223405cef0f9020811f2c260bd28e6ba97e3afaccceba7371b4a1c0",
+    "codex_brief_hash": "sha256:fd28fa1152c92e37b6ce93d437f30d539571c7c2d2fd18125fd4b74fbe7c118e",
     "allowed_recheck_commands": [],
     "verification_budget": {
       "max_commands": 10,
       "max_seconds": 120
-    }
+    },
+    "evidence_hashes": [
+      {
+        "path": "gates/gates_report.json",
+        "sha256": "sha256:9c0a70848683525d5db21793e91776d86d2fad36b3f3501c0436fab0b12a5db6",
+        "size": 660
+      }
+    ]
   }
 }

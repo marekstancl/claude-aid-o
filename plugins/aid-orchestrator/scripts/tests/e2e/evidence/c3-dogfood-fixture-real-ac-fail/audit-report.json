@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_report",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-20T03:50:55Z",
+  "created_at": "2026-07-20T08:27:04Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood-real-ac",
-    "run_id": "R-fail-317373"
+    "run_id": "R-fail-2916895"
   },
   "subject": {
-    "subject_hash": "sha256:42288da2f902cac47e3a677c03ca9796c229d85b71d9d8a49c6566ca7ac08145"
+    "subject_hash": "sha256:4aed47212eb6b7880802de1c4614e0a2164a7391e25439c84961c1e4f08ba4ba"
   },
   "revision": {
-    "head_sha": "7351138659d829652f01e0dd5b6f6180a41c76d3",
+    "head_sha": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -28,29 +28,21 @@
   },
   "findings": [
     {
-      "fingerprint": "sha256:8b4faa92b57a0c7109885f5e3a232198fb746adde6f710461437745d1116025f",
+      "fingerprint": "sha256:ff4fc35f0d0b43098a23f5393d7b77919a008ceb71ec533b1425d50bf08820de",
       "occurrence_id": "c3-E-c3-dogfood-real-ac-0",
       "severity": "high",
       "action_owner": "implementer",
-      "area": "acceptance criterion: increment behavior",
-      "finding": "At reviewed HEAD, scripts/e2e-ac-demo/increment.sh implements `increment_by_one` as `$1 + 2`, not `$1 + 1`. The independently inspected diff scope exactly matches the claimed single-file scope. The committed gate artifact is bound to the reviewed HEAD, records the exact smoke-command fingerprint, and records exit code 1/overall fail; its command expects increment_by_one(3) to equal 4, whereas the committed source yields 5.",
-      "recommendation": "Change the arithmetic to add exactly 1, then obtain a passing gate artifact for the reviewed revision."
+      "area": "acceptance criteria / scripts/e2e-ac-demo/increment.sh",
+      "finding": "The reviewed HEAD adds the only changed file as claimed, but increment_by_one echoes its argument plus 2 rather than plus exactly 1, and it has no one-line comment directly above the function. The sealed gates/gates_report.json matches its authoritative SHA-256 and records the HEAD, the exact smoke-check command, and exit code 1.",
+      "recommendation": "Change the arithmetic to add exactly 1 and add the required one-line explanatory comment immediately above the function definition; regenerate passing gate evidence."
     },
     {
-      "fingerprint": "sha256:33879c26c4cba22b863ef594e3e00d588943525e5ff69628daf1cd436ec0ad76",
+      "fingerprint": "sha256:998ed1ef3d8f3496fa868c70f96e1263d1b824bf7fea61fa1d5f1a80cca793d8",
       "occurrence_id": "c3-E-c3-dogfood-real-ac-1",
-      "severity": "medium",
-      "area": "acceptance criterion: required documentation comment",
-      "finding": "scripts/e2e-ac-demo/increment.sh has no one-line comment directly above the increment_by_one definition, contrary to the acceptance criteria.",
-      "recommendation": "Add a concise one-line comment immediately above the function definition explaining that it echoes its integer argument plus one."
-    },
-    {
-      "fingerprint": "sha256:e2e06cf43ed7f1735d89973b27c277417216bf0023f90d5a33f12871776fa325",
-      "occurrence_id": "c3-E-c3-dogfood-real-ac-2",
       "severity": "info",
-      "area": "lifecycle state matrix",
-      "finding": "No stateful mechanism, lifecycle/status field, enum transition, gate toggle, or FSM transition is in the changed-file scope; no state × event matrix is applicable.",
-      "recommendation": "No lifecycle transition test is required for this change."
+      "area": "lifecycle state-matrix",
+      "finding": "No stateful mechanism is in scope: the changed artifact is a pure shell function with no lifecycle state, status field, enum, or transition edges. A state × event matrix is not applicable.",
+      "recommendation": "No lifecycle transition tests are required for this change."
     }
   ],
   "audit_report": {
@@ -61,9 +53,9 @@
     "provider": "codex",
     "model": "gpt-5.6-terra",
     "process_id": "00000000-0000-7000-8000-000000000000",
-    "input_manifest_hash": "sha256:1f78d15e9d8ec89b641b09daf98090894d4aeea6aabbea7931f20c70a82afd81",
-    "codex_brief_hash": "sha256:b4a3c9d0161425762a079322fb5608fba0e57b4cbb9cf8830785198b7e0931ad",
-    "reviewed_head": "7351138659d829652f01e0dd5b6f6180a41c76d3",
+    "input_manifest_hash": "sha256:7e405ef5e9791347db1448159f3ea35336a9b1e3cc5ac550697bbe410ce59ecf",
+    "codex_brief_hash": "sha256:b760cce097b244046039deae6926516e4335132b037ea7efbd834527b993c3c2",
+    "reviewed_head": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "outcome": "dispatched"
   }
 }
