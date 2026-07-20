@@ -614,3 +614,89 @@ _write_override() {
   [ "$((end - start))" -ge 1 ]
   [ "$(_ledger_field P201 '.attempts')" = "1" ]
 }
+
+# ─── semantic corruption (8th DONE-review audit, P065 E-065-7_7: "CP1 revision-limit ledger") ─
+# The old validation only checked TYPES (attempts/max numeric, plan_id
+# non-empty string). Each test below produces a ledger that is syntactically
+# valid YAML/JSON, satisfying the old check, but semantically corrupted in
+# exactly one way — proving _ledger_read_json's fuller invariant now catches
+# what the type-only check missed. All three consumers (read, check-budget,
+# increment) go through _ledger_read_json, so `read` failing closed is a
+# sufficient, representative proof for all of them (increment/check-budget
+# are additionally spot-checked once each).
+
+@test "8th DONE-review audit fix: a NEGATIVE attempts count is rejected (read, check-budget, increment all fail closed)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P210
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P210 sha256:aaa >/dev/null
+  yq -i '.attempts = -1' "$(_ledger_file P210)"
+
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P210
+  [ "$status" -ne 0 ]
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P210
+  [ "$status" -eq 1 ]
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P210 sha256:bbb
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: a FRACTIONAL max is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P211
+  yq -i '.max = 3.5' "$(_ledger_file P211)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P211
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: a TAMPERED max (inflated past the fixed policy MAX_ATTEMPTS) is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P212
+  yq -i '.max = 100' "$(_ledger_file P212)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P212
+  [ "$status" -ne 0 ]
+  # Confirms this would otherwise have reopened budget: a hand-inflated max
+  # with an unchanged attempts count would read as "available" under the
+  # old type-only check — check-budget must fail closed instead.
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P212
+  [ "$status" -eq 1 ]
+}
+
+@test "8th DONE-review audit fix: a MISMATCHED plan_id inside the ledger file is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P213
+  yq -i '.plan_id = "P999-not-me"' "$(_ledger_file P213)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P213
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: attempts_log LENGTH desynced from attempts is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P214
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P214 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P214 sha256:bbb >/dev/null
+  # Drop the second attempts_log entry but leave attempts:2 — length(1) != attempts(2).
+  yq -i '.attempts_log = [.attempts_log[0]]' "$(_ledger_file P214)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P214
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: attempts_log entries OUT OF ORDER (n values not 1..attempts in sequence) is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P215
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P215 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P215 sha256:bbb >/dev/null
+  yq -i '.attempts_log |= reverse' "$(_ledger_file P215)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P215
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: an attempts_log entry with an EMPTY plan_hash is rejected" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P216
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P216 sha256:aaa >/dev/null
+  yq -i '.attempts_log[0].plan_hash = ""' "$(_ledger_file P216)"
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P216
+  [ "$status" -ne 0 ]
+}
+
+@test "8th DONE-review audit fix: a genuinely valid ledger (matching plan_id, exact policy max, consistent log) still reads fine (no false positives)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P217
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P217 sha256:aaa >/dev/null
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P217 sha256:bbb >/dev/null
+  run bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P217
+  [ "$status" -eq 0 ]
+  run bash "$LEDGER" check-budget --project-root "$TEST_PROJECT_ROOT" P217
+  [ "$status" -eq 0 ]
+}

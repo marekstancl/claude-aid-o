@@ -248,22 +248,48 @@ _json_str_or_null() {
 }
 
 # ---------------------------------------------------------------------------
-# _ledger_read_json <ledger_path>
-#   Reads the ledger YAML, converts to JSON, and validates the minimal shape
-#   (attempts/max numeric, plan_id non-empty string). Echoes the JSON on
-#   success; returns non-zero (fail-closed) on missing file, unparseable
-#   YAML, or a malformed shape. Never partially trusts a corrupt file.
+# _ledger_read_json <ledger_path> <expected_plan_id>
+#   Reads the ledger YAML, converts to JSON, and validates the FULL ledger
+#   invariant (8th DONE-review audit, P065 E-065-7_7: "CP1 revision-limit
+#   ledger" finding — the prior check only validated TYPES, not VALUES:
+#   attempts/max being syntactically numeric said nothing about them being
+#   sane integers, matching the fixed policy budget, or internally
+#   consistent with attempts_log. A semantically corrupted ledger — e.g.
+#   attempts hand-edited to a negative/fractional number, max inflated past
+#   MAX_ATTEMPTS, plan_id swapped, or attempts_log de-synced from attempts —
+#   passed the old check and check-budget would then treat it as available,
+#   silently reopening a budget that should be closed):
+#     - attempts: integer (no fractional part), >= 0.
+#     - max: integer, EQUAL TO this script's own MAX_ATTEMPTS constant — no
+#       ledger may claim a different budget than the fixed policy allows;
+#       there is no per-plan override mechanism for max, so any deviation
+#       is definitionally tampering, not a legitimate variant.
+#     - plan_id: non-empty string, and MUST equal the caller's expected
+#       plan_id (catches a ledger file swapped/symlinked under a different
+#       plan's path).
+#     - attempts_log: an array whose length equals attempts (no silent
+#       drift between the counter and its own audit trail), whose entries'
+#       `n` values are exactly 1..attempts in order (no gaps, no
+#       reordering, no duplicates), and whose every entry has a non-empty
+#       string plan_hash (no null/blank hash entries).
+#   Echoes the JSON on success; returns non-zero (fail-closed) on missing
+#   file, unparseable YAML, or ANY invariant violation. Never partially
+#   trusts a corrupt file.
 # ---------------------------------------------------------------------------
 _ledger_read_json() {
-  local path="$1"
+  local path="$1" expected_plan_id="$2"
   [[ -f "$path" ]] || return 1
   local json
   json="$(yq -o=json '.' "$path" 2>/dev/null)" || return 1
   [[ -n "$json" ]] || return 1
-  printf '%s' "$json" | jq -e '
-    (.attempts | type == "number")
-    and (.max | type == "number")
-    and (.plan_id | type == "string" and length > 0)
+  printf '%s' "$json" | jq -e --arg plan_id "$expected_plan_id" --argjson max "$MAX_ATTEMPTS" '
+    (.attempts | type == "number" and (. | floor) == . and . >= 0)
+    and (.max | type == "number" and (. | floor) == . and . == $max)
+    and (.plan_id | type == "string" and length > 0 and . == $plan_id)
+    and (.attempts_log | type == "array")
+    and ((.attempts_log | length) == .attempts)
+    and ((.attempts_log | map(.n)) == [range(1; .attempts + 1)])
+    and (.attempts_log | all(.plan_hash | type == "string" and length > 0))
   ' >/dev/null 2>&1 || return 1
   printf '%s' "$json"
 }
@@ -393,7 +419,7 @@ cmd_increment() {
     || { echo "PRECONDITION FAIL: increment lock timeout for ${plan_id} at ${lockfile} (another increment held it >10s)" >&2; exit 2; }
 
   local ledger_json
-  ledger_json="$(_ledger_read_json "$ledger_path")" \
+  ledger_json="$(_ledger_read_json "$ledger_path" "$plan_id")" \
     || _fail "ledger for ${plan_id} at ${ledger_path} is missing/corrupt/unparseable — cannot safely increment (fail-closed; obtain a PM override or investigate before re-init)."
 
   # NOTE (design decision, documented per Step-19 process instructions):
@@ -555,7 +581,7 @@ cmd_read() {
 
   local ledger_path; ledger_path="$(_ledger_path "$project_root" "$plan_id")"
   local ledger_json
-  ledger_json="$(_ledger_read_json "$ledger_path")" \
+  ledger_json="$(_ledger_read_json "$ledger_path" "$plan_id")" \
     || _fail "ledger for ${plan_id} at ${ledger_path} is missing or corrupt."
 
   printf '%s' "$ledger_json" | jq '.'
@@ -606,7 +632,7 @@ cmd_check_budget() {
 
   # Case 2: ledger file exists — validate it.
   local ledger_json
-  if ! ledger_json="$(_ledger_read_json "$ledger_path")"; then
+  if ! ledger_json="$(_ledger_read_json "$ledger_path" "$plan_id")"; then
     jq -n --arg pid "$plan_id" --argjson ev "$([[ "$evidence_present" == "true" ]] && echo true || echo false)" \
       '{plan_id: $pid, status: "init_required", evidence_present: $ev, attempts: null, max: null, pm_override: false,
         reason: "Ledger file exists but is corrupt/unparseable — treated as budget-exhausted. PM override required."}'
