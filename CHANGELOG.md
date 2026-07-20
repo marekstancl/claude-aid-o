@@ -3,6 +3,96 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.60.0] — 2026-07-20
+
+### Added
+- **C0 plan-review — pre-EPIC cross-provider review (`aid-c0-plan-review.sh`)** — before a
+  risky plan is even turned into an EPIC, a real independent Codex CLI review of the plan
+  itself now runs (mirrors the C3 bridge's `build-manifest`/`dispatch`/`verify` shape, same
+  transport, different target and schema). High-risk plans get a bounded, ledger-tracked
+  fix→reverify loop (same-hash re-dispatch guard in both legacy and `AID_C0_ATTEMPT`
+  attempt-explicit modes); Codex-reported `unverifiable` and content-invalid responses
+  (hash/head mismatch, C3-shaped output, missing `action_owner`) are both treated as
+  untrusted and correctly propagate a non-zero exit from `cmd_dispatch`, never masked as a
+  clean pass.
+- **CP1 revision-limit ledger (`aid-cp1-ledger.sh`)** — mechanically enforces how many
+  revision rounds a plan gets during C0 review (previously only written down in
+  documentation, never enforced by code). Full ledger-file invariant validation (attempt
+  counts, fixed policy max, plan-id match, ordered attempts_log), `flock`-protected
+  read-modify-write on increment (concurrent-safe), and a real single-use PM-override
+  artifact (`cp1-pm-escalation-override.json`, atomically claimed and consumed) for
+  authorized bounded-loop bypasses — replacing an earlier bare-env-var bypass.
+- **Bounded C3 fix→reverify loop (`c3/attempt-NN/` + `c3/loop-summary.json`)** —
+  `AID_C3_ATTEMPT`-driven per-attempt evidence layering, terminal-outcome tracking (an
+  ALLOWLIST of recognized terminal values — any unrecognized/corrupted outcome is treated as
+  terminal too, fail-closed), a controller-judged `escalate` subcommand for conflicting
+  findings, and a `c3_fix_loop` policy (`max_rechecks: 2`) in `c3-audit-policy.yaml`.
+- **Advisory Claude fallback for C3 (`c3_advisory` audit mode)** — when Codex is genuinely
+  unavailable (down, rate-limited, no auth), the system runs a same-provider Claude fallback
+  review instead of silently skipping. Always honestly labelled "advisory, not independent"
+  and never satisfies `c3_required` (D7 echo-only) — policy default flipped
+  `c3_on_unavailable: unverifiable → degraded_advisory`.
+- **Versioned `c3-audit-prompt-v2.md`** (v1 frozen) — explicitly separates always-allowed
+  read-only operations from `allowed_recheck_commands` (narrowly scoped to re-executing a
+  named test/gate command), fixing IMP-245 (an empty `allowed_recheck_commands` list read
+  over-conservatively as "no commands allowed at all," blocking even Codex's always-required
+  basic repo reads — found via 2 consecutive real dogfood runs).
+- **Full protocol-v2 envelope on `c3-dispatch.json`** (`aid-protocol-validate.sh`,
+  `aid-c3-dispatch.sh`) — `c3_dispatch` added to `VALID_ARTIFACT_TYPES` /
+  `TYPE_PAYLOAD_MAP`, and `_write_dispatch_json` now emits `control_protocol`, `identity`,
+  `subject.subject_hash`, and the correct `provenance.dispatch_mode: deterministic` (was
+  incorrectly hardcoded to the C3-domain value `cross_provider`, conflating the envelope's
+  "how was this artifact produced" concept with C3's own
+  `independence.achieved_independence_level`). Closes a gap that had silently affected every
+  EPIC's evidence pack in this plan, discovered only while exercising a real end-to-end
+  Curator/CP4/delivery-gate closure for the first time.
+
+### Changed
+- **FSM `done-advance` C3/C0 hooks harden against the bounded-loop bypass class** — the
+  same-hash re-dispatch guard now applies in both legacy and `AID_C0_ATTEMPT` modes; a shared
+  `pm_override_claimed_this_call` flag prevents one claimed PM-override artifact from being
+  consumed twice when both C0 guards fire on the same dispatch call.
+- **`cmd_done_advance` (`aid-fsm.sh`) gained a directional phase-edge check** —
+  `review → release` is now the ONLY legal `done_phase` forward edge; a prior gap let
+  `release → review` regress the phase backward with no negative test catching it.
+- **`review-profiles.yaml` surface coverage improved** — `e2e/evidence/**` fixtures now
+  classify as low-risk (were previously falling through to `unverifiable`, over-triggering
+  C3 review on test fixture churn).
+- **CI `bash-tests`** (carried from 2.58.4, first released here) — the SIGPIPE flake in
+  `test-regression.sh`'s `grep -q` usage is fixed across all eight affected sites.
+
+### Fixed
+- **CRITICAL: `aid-c3-dispatch.sh verify` did not bind `audit-report.json`'s own semantic
+  fields to the raw Codex response** — `status`/`review_status`/`outcome`/
+  `unverifiable_reasons` were unbound, so a hand-edited `unverifiable → pass` flip on a
+  committed report still verified clean and could have let `done-advance`'s merge gate
+  wrongly advance under `enforcement: blocking`. Fixed with one shared
+  `_derive_report_semantics` function used by both the writer and the verifier, additive
+  binding checks, and an FSM-level rejection test. Independently re-verified 3 times (CP2
+  security re-review + 2 fresh CP3 passes) before merge.
+- **`cmd_dispatch` (`aid-c0-plan-review.sh`) returned exit 0 for a transport-genuine but
+  content-invalid C0 review response** — the final exit-code decision checked only the
+  transport-level `$outcome`, never the already-computed `$presp_rc` or the written report's
+  own `review_status`. A hash/head mismatch, schema-invalid output, or Codex itself honestly
+  reporting `unverifiable` all still returned exit 0, letting a caller treat an untrustworthy
+  review as a clean pass. Found by this EPIC's own 12th live Codex CLI DONE-review audit
+  against its evolving HEAD; fixed by checking `presp_rc`/`review_status` before returning 0,
+  matching the pattern the ledger-increment gate already used.
+- **A real Codex session UUID was briefly committed** during this plan's EPIC-4 CRITICAL-
+  bypass fix cycle; already resolved via a PM-directed history rewrite (git plumbing, object
+  pruned) before this release.
+
+This release ships the full **C3 Cross-Provider Dispatch Bridge** plan (P065, 7 EPICs,
+E-065-1_7 → E-065-7_7): C3's dispatch/validate/normalize/verify core (2.59.0) is now joined
+by real merge-gate enforcement, the advisory fallback, the bounded fix→reverify loop, and the
+plan-time C0 counterpart with its own revision-limit ledger — the first time AID's
+"independent cross-provider audit" claim is backed by an actually-independent, actually-
+verified second opinion end to end. Enforcement stays staged at `observe`, not `blocking`,
+for both C3 and the CP1 ledger; full production promotion is a separate, deliberately
+deferred decision (P062/E10). E-065-7_7 (the final EPIC) merged as an explicit PM-authorized
+risk-accepted override rather than a green `aid-release-policy.sh` gate — see
+`.aid-o/work/evidence/E-065-7_7/R-E065-7/merge-decision.md` for the full reasoning.
+
 ## [2.59.0] — 2026-07-15
 
 ### Added
