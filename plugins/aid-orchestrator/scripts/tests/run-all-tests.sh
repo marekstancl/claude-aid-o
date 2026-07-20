@@ -43,9 +43,25 @@ for arg in "$@"; do
 done
 
 # ---------------------------------------------------------------------------
+# Suites delegated to a dedicated CI job (P064 E-064-1_2 Step 1)
+#
+# A suite listed here owns its own job in .github/workflows/ci.yml and is
+# deliberately SKIPPED by this aggregate runner — running it here too would
+# execute it in both jobs and risk blowing this job's timeout budget for no
+# benefit (the dedicated job already covers it, usually with a larger
+# budget this job doesn't have room for). Keyed by bats file basename;
+# value is the owning CI job name, purely for the DELEGATED report line
+# below — never run silently, always visible in the output.
+# ---------------------------------------------------------------------------
+declare -A DELEGATED_SUITES=(
+  ["test-aid-plan-release-boundary.bats"]="plan-boundary-tests"
+)
+
+# ---------------------------------------------------------------------------
 # Discover test suites
 # ---------------------------------------------------------------------------
 SUITES=()
+DELEGATED_LOG=()
 for f in "$SCRIPT_DIR"/test-*.sh; do
   [[ -f "$f" ]] || continue
   SUITES+=("$f")
@@ -53,10 +69,15 @@ done
 # Also discover bats suites in bats/ subdirectory (E-046-1_3 Step 6)
 for f in "$SCRIPT_DIR"/bats/test-*.bats; do
   [[ -f "$f" ]] || continue
+  bn="$(basename "$f")"
+  if [[ -n "${DELEGATED_SUITES[$bn]:-}" ]]; then
+    DELEGATED_LOG+=("$bn -> ${DELEGATED_SUITES[$bn]}")
+    continue
+  fi
   SUITES+=("$f")
 done
 
-if [[ ${#SUITES[@]} -eq 0 ]]; then
+if [[ ${#SUITES[@]} -eq 0 && ${#DELEGATED_LOG[@]} -eq 0 ]]; then
   echo "ERROR: No test-*.sh or bats/test-*.bats suites found in $SCRIPT_DIR" >&2
   exit 1
 fi
@@ -83,6 +104,11 @@ echo "  AID Pipeline Tests"
 echo "========================================================================"
 echo ""
 echo "Discovered ${#SUITES[@]} test suite(s)"
+if [[ ${#DELEGATED_LOG[@]} -gt 0 ]]; then
+  for entry in "${DELEGATED_LOG[@]}"; do
+    echo "DELEGATED: $entry"
+  done
+fi
 echo ""
 
 for suite in "${SUITES[@]}"; do
@@ -103,12 +129,24 @@ for suite in "${SUITES[@]}"; do
   # Run the suite, capturing output and exit code
   suite_output=""
   suite_exit=0
+  bats_missing_hard_fail=0
   if [[ "$is_bats" -eq 1 ]]; then
-    # bats test: requires bats binary
+    # bats test: requires bats binary. A missing binary is a HARD FAILURE,
+    # not a green skip — every bats suite in the repo used to report green
+    # when bats was simply absent, which is worse than useless (it looks
+    # like coverage that never ran). Set AID_ALLOW_MISSING_BATS=1 to accept
+    # the skip explicitly (e.g. a contributor without bats installed who
+    # knows CI will still run these suites).
     BATS_BIN="$(command -v bats 2>/dev/null || echo "")"
     if [[ -z "$BATS_BIN" ]]; then
-      suite_output="SKIP: bats not installed"
-      suite_exit=0
+      if [[ "${AID_ALLOW_MISSING_BATS:-0}" == "1" ]]; then
+        suite_output="SKIP: bats not installed (AID_ALLOW_MISSING_BATS=1)"
+        suite_exit=0
+      else
+        suite_output="FAIL: bats not installed — this suite did not run. Install bats, or set AID_ALLOW_MISSING_BATS=1 to explicitly accept skipping bats suites."
+        suite_exit=1
+        bats_missing_hard_fail=1
+      fi
     else
       suite_output="$("$BATS_BIN" "$suite" 2>&1)" && suite_exit=0 || suite_exit=$?
     fi
@@ -143,6 +181,15 @@ for suite in "${SUITES[@]}"; do
     # If run count wasn't in TAP plan line, infer from pass+fail
     if [[ "$suite_run" -eq 0 ]]; then
       suite_run=$(( suite_passed + suite_failed + suite_skipped ))
+    fi
+    # bats never ran at all (missing binary, no AID_ALLOW_MISSING_BATS) —
+    # there is no TAP output to parse; report one explicit failed test
+    # rather than a misleading 0/0.
+    if [[ "$bats_missing_hard_fail" -eq 1 ]]; then
+      suite_run=1
+      suite_passed=0
+      suite_failed=1
+      suite_skipped=0
     fi
   else
     # Parse the Results line from the bash suite output
