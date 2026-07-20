@@ -648,22 +648,53 @@ _run_codex_isolated() {
 #   6 template_id  7 template_sha256  8 rendered_prompt_sha256  9 codex_version
 #   10 invoked(true|false)  11 exit_code(int|"")  12 outcome  13 session_id
 #   14 codex_model  15 events_valid(true|false)  16 stdout_sha256
-#   17 raw_response_sha256  18 achieved_level
+#   17 raw_response_sha256  18 achieved_level  19 manifest_path
+#
+# manifest_path (P065 E-065-7_7 post-merge fix, "control_protocol envelope"
+# finding — aid-evidence-verify.sh/aid-protocol-validate.sh require every
+# protocol-v2 artifact to carry the FULL envelope: schema_version,
+# artifact_type, producer, created_at, control_protocol, identity, subject,
+# revision, status, verdict, provenance. This writer had schema_version/
+# artifact_type/producer/created_at/provenance but was missing
+# control_protocol/identity/revision/status/verdict entirely — never caught
+# because aid-release-policy.sh's verification_report step (the ONLY thing
+# that runs aid-evidence-verify.sh against a real C3-active EPIC's evidence
+# pack) had itself never actually been exercised for real across any of
+# this plan's 7 EPICs until now. project_id/epic_id/run_id are read from
+# the manifest exactly like _write_unverifiable already does, for the same
+# reason: this function has no other source for them.
 _write_dispatch_json() {
   local out="$1" project_root="$2" head_sha="$3" codex_brief_hash="$4" required_level="$5"
   local template_id="$6" template_sha256="$7" rendered_prompt_sha256="$8" codex_version="$9"
   local invoked="${10}" exit_code="${11}" outcome="${12}" session_id="${13}" codex_model="${14}"
   local events_valid="${15}" stdout_sha256="${16}" raw_response_sha256="${17}" achieved_level="${18}"
+  local manifest_path="${19:-}"
 
   local iso_now tmp
   iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   tmp="$out.tmp.$$"
+
+  local project_id="unknown" epic_id="" run_id=""
+  if [[ -n "$manifest_path" && -f "$manifest_path" ]]; then
+    project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest_path" 2>/dev/null || echo unknown)"
+    [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
+    epic_id="$(jq -r '.identity.epic_id // ""' "$manifest_path" 2>/dev/null || echo "")"
+    run_id="$(jq -r '.identity.run_id // ""' "$manifest_path" 2>/dev/null || echo "")"
+    [[ "$epic_id" == "null" ]] && epic_id=""
+    [[ "$run_id" == "null" ]] && run_id=""
+  fi
+  local subject_hash="sha256:$(_sha256_str "$head_sha")"
 
   jq -n \
     --arg schema_version "aid-2.0" \
     --arg artifact_type "c3_dispatch" \
     --arg producer "$PRODUCER" \
     --arg created_at "$iso_now" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "$project_id" \
+    --arg epic_id "$epic_id" \
+    --arg run_id "$run_id" \
+    --arg subject_hash "$subject_hash" \
     --arg generated_by_tool "aid-c3-dispatch.sh#dispatch" \
     --arg project_root "$project_root" \
     --arg head_sha "$head_sha" \
@@ -689,9 +720,16 @@ _write_dispatch_json() {
       artifact_type: $artifact_type,
       producer: $producer,
       created_at: $created_at,
-      provenance: {dispatch_mode: "cross_provider", generated_by_tool: $generated_by_tool},
+      control_protocol: $control_protocol,
+      identity: ({project_id: $project_id}
+                 + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+      subject: {subject_hash: $subject_hash, project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "pass",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: $generated_by_tool},
       executor: {kind: $executor_kind, reported_model: $codex_reported_model, codex_version: $codex_version},
-      subject: {project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
       prompt: {template_id: $template_id, template_sha256: $template_sha256, rendered_prompt_sha256: $rendered_prompt_sha256},
       dispatch: {
         invoked: $invoked,
@@ -1674,7 +1712,7 @@ cmd_dispatch() {
     # bridge NEVER launches a fallback itself (that is a later orchestration EPIC).
     echo "aid-c3-dispatch: cross_provider unavailable this run (pre-check rc=$precheck_rc): $precheck_out" >&2
     _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
-      "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+      "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
     # Fail-closed: a non-dispatched run STILL gets an honest unverifiable report.
     _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
@@ -1808,7 +1846,7 @@ cmd_dispatch() {
     # non-dispatched (not invoked) rather than launching Codex with no prompt.
     echo "aid-c3-dispatch: prompt render failed: $render_prov" >&2
     _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
-      "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+      "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
     # Fail-closed: render is a precondition for invoking Codex; no trusted audit.
     _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
@@ -1863,7 +1901,7 @@ cmd_dispatch() {
   _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
     "$required_level" "$template_id" "$template_sha256" "$rendered_prompt_sha256" "$codex_version" \
     "true" "$codex_rc" "$outcome" "$session_id" "$CODEX_MODEL" "$events_valid" \
-    "$stdout_sha256" "$raw_response_sha256" "$achieved" \
+    "$stdout_sha256" "$raw_response_sha256" "$achieved" "$manifest_for_call" \
     || { echo "PRECONDITION FAIL: cannot write c3-dispatch.json" >&2; exit 1; }
 
   # --- Step 8 (E-065-2_7 Step 6): validate → normalize → write report ----------

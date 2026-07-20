@@ -1143,6 +1143,39 @@ EOF
   [ "$(jq -r '.dispatch.stdout_sha256' "$DJSON")" = "$ssha" ]
 }
 
+@test "post-merge fix ('control_protocol envelope' finding, 10th DONE-review audit): c3-dispatch.json carries the full protocol-v2 envelope and passes aid-protocol-validate.sh" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DJSON" ]
+
+  # Envelope fields aid-evidence-verify.sh's V2_ARTIFACTS scan requires on
+  # ANY schema_version:"aid-2.0" file, not just the ones with a dedicated
+  # payload schema (this artifact was missing ALL of these before the fix,
+  # not just control_protocol — the first-missing-field error only ever
+  # named control_protocol because it's earliest in the required-fields loop).
+  run jq -r '.control_protocol' "$DJSON"; [ "$output" = "aid-2.0" ]
+  run jq -r '.identity.project_id' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  run jq -r '.subject.subject_hash' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.revision.head_sha' "$DJSON"; [ "$output" = "$HEAD_SHA" ]
+  run jq -r '.status' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  run jq -r '.verdict.kind' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  # provenance.dispatch_mode is the GENERAL protocol-v2 envelope concept
+  # (how was this artifact's content produced — deterministic script here),
+  # distinct from independence.*_level's C3-specific "cross_provider" — the
+  # bug fixed here was conflating the two under the same field.
+  run jq -r '.provenance.dispatch_mode' "$DJSON"; [ "$output" = "deterministic" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+
+  run bash "$VALIDATE" "$DJSON"
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$DJSON" --check-fingerprint
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$DJSON" --current-head "$HEAD_SHA"
+  [ "$status" -eq 0 ]
+}
+
 @test "step5/AC2: prompt is rendered deterministically from the committed template (provenance recorded, no residual {{)" {
   _seed_manifest high
   _dispatch_seams
