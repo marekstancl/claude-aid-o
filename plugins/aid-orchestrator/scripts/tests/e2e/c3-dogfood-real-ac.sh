@@ -29,7 +29,7 @@
 #
 # Requirements: bash 4+, jq, git, sha256sum, codex CLI (>= 0.143.0) authenticated.
 #
-# **Last Updated:** 2026-07-16
+# **Last Updated:** 2026-07-20
 # =============================================================================
 set -euo pipefail
 
@@ -233,6 +233,35 @@ _run_case() {
     printf '%s' "$ac_content" > "$ac_file"
     local changed_paths_file="$run_evidence_dir/changed-paths.txt"
     printf '%s\n' "$demo_file" > "$changed_paths_file"
+
+    # Real, HEAD-bound gate artifact (P065 E-065-7_7 6th-audit Finding 2 class:
+    # the audit prompt requires a committed gate artifact binding a PASS/FAIL to
+    # the reviewed HEAD with a recorded exit code + command fingerprint before it
+    # will accept a gate result — an artifact-less run cannot reach a determinate
+    # pass, only "gate evidence missing"). This actually executes
+    # increment_by_one(3) against the demo file and records the REAL exit code —
+    # not fabricated — so both the pass and fail cases get an honest gate result.
+    mkdir -p "$run_evidence_dir/gates"
+    local gate_cmd="bash -c 'source \"$demo_file\" && [[ \$(increment_by_one 3) == 4 ]]'"
+    local gate_exit=0
+    bash -c "source \"$demo_file\" && [[ \$(increment_by_one 3) == 4 ]]" && gate_exit=0 || gate_exit=$?
+    local gate_result="pass"
+    [[ "$gate_exit" -eq 0 ]] || gate_result="fail"
+    jq -n --arg head "$head_sha" --arg cmd "$gate_cmd" --argjson exit "$gate_exit" \
+      --arg result "$gate_result" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+      {
+        overall: $result,
+        completed_at: $ts,
+        revision: {head_sha: $head},
+        gates: {
+          ac_demo_smoke: {
+            gate: "ac_demo_smoke", result: $result, exit_code: $exit,
+            duration_ms: 0, output: "increment_by_one(3) smoke check against demo AC", attempts: 1
+          }
+        },
+        "_command_log": [{name: "ac_demo_smoke", command: $cmd, exit_code: $exit, duration_ms: 0}],
+        "_generated_by": "c3-dogfood-real-ac.sh@smoke-check"
+      }' > "$run_evidence_dir/gates/gates_report.json"
 
     AID_CHANGED_PATHS="$changed_paths_file" AID_PLAN_AC_FILE="$ac_file" \
       bash "$DISPATCH_BIN" build-manifest "$run_evidence_dir" "$base_sha" "$head_sha" high
