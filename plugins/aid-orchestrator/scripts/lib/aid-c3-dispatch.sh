@@ -400,12 +400,39 @@ cmd_build_manifest() {
 
   # input_hash: per-path sha256("<path>:" + sha256(content)); sort lines
   # (LC_ALL=C); join with newlines; input_hash = "sha256:" + sha256(joined).
+  #
+  # evidence_hashes[] (8th DONE-review audit, P065 E-065-7_7: "Gate evidence
+  # integrity" finding): production source-file allowlist entries are
+  # already independently verifiable — Codex can `git show <head_sha>:<path>
+  # | sha256sum` them itself, since they're committed. Evidence-class
+  # entries (final_report.md / gates_report.json / gates/gates_report.json /
+  # verifier-output-*.md) are NOT git-tracked (runtime evidence, gitignored
+  # by design — see aid-cp1-ledger.sh's identical NOT COMMITTED rationale),
+  # so there was previously nothing in the SEALED manifest binding a claimed
+  # PASS to an immutable digest: Codex could hash the file itself but had no
+  # authoritative value to compare against, i.e. no way to distinguish a
+  # genuine result from one edited after manifest sealing. Mirrors
+  # codex_brief_files[]'s existing {path,sha256,size} shape (same schema
+  # entry type, audit-input-manifest.schema.json) rather than inventing a
+  # new one.
+  local evidence_hashes_json="[]"
   local input_lines=()
   local p rp inner
   for p in "${allow_sorted[@]}"; do
     rp="${read_path[$p]:-}"
     inner="$(_sha256_file "$rp")"
     input_lines+=("$(_sha256_str "${p}:${inner}")")
+    case "$p" in
+      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+        local ev_sz=0
+        [[ -f "$rp" ]] && ev_sz="$(wc -c < "$rp" | tr -d '[:space:]')"
+        [[ -n "$ev_sz" ]] || ev_sz=0
+        evidence_hashes_json="$(printf '%s' "$evidence_hashes_json" \
+          | jq -c --arg p "$p" --arg s "sha256:$inner" --argjson z "$ev_sz" \
+              '. + [{path: $p, sha256: $s, size: $z}]')" \
+          || _fail "cannot assemble evidence_hashes entry for $p"
+        ;;
+    esac
   done
 
   local joined="" input_hash
@@ -474,6 +501,7 @@ cmd_build_manifest() {
     --arg codex_brief_hash "$codex_brief_hash" \
     --argjson allowed_recheck_commands "$arc_json" \
     --argjson verification_budget "$vbudget_json" \
+    --argjson evidence_hashes "$evidence_hashes_json" \
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
@@ -496,7 +524,8 @@ cmd_build_manifest() {
         codex_brief_files: $codex_brief_files,
         codex_brief_hash: $codex_brief_hash,
         allowed_recheck_commands: $allowed_recheck_commands,
-        verification_budget: $verification_budget
+        verification_budget: $verification_budget,
+        evidence_hashes: $evidence_hashes
       }
     }' > "$manifest_tmp" \
     || { rm -f "$manifest_tmp"; _fail "jq failed to render the manifest"; }
@@ -1700,6 +1729,25 @@ cmd_dispatch() {
   vbudget_str="$(jq -c '.audit_input_manifest.verification_budget // {}' "$manifest")"
   output_schema_path="$(realpath -m --relative-to="$project_root" "$RESPONSE_SCHEMA" 2>/dev/null || echo "$RESPONSE_SCHEMA")"
 
+  # evidence_hashes (8th DONE-review audit, "gate evidence integrity" finding):
+  # human-readable rendering of audit_input_manifest.evidence_hashes[] — the
+  # sealed {path,sha256,size} digests for the NOT-git-tracked evidence-class
+  # allowlist entries, computed once by build-manifest and never touched
+  # again. Told to Codex as the AUTHORITATIVE value (see the prompt template
+  # body) so a PASS claim can be bound to an immutable digest instead of
+  # trusting whatever bytes happen to be on disk when the audit runs.
+  local evidence_hashes_str=""
+  local eh_arr=() eh_entry eh_p eh_s eh_z eh_first=true
+  mapfile -t eh_arr < <(jq -c '.audit_input_manifest.evidence_hashes // [] | .[]' "$manifest")
+  for eh_entry in "${eh_arr[@]}"; do
+    eh_p="$(jq -r '.path' <<<"$eh_entry")"
+    eh_s="$(jq -r '.sha256' <<<"$eh_entry")"
+    eh_z="$(jq -r '.size' <<<"$eh_entry")"
+    if [[ "$eh_first" == true ]]; then evidence_hashes_str="${eh_p}=${eh_s} (${eh_z} bytes)"; eh_first=false
+    else evidence_hashes_str="$evidence_hashes_str; ${eh_p}=${eh_s} (${eh_z} bytes)"; fi
+  done
+  [[ -n "$evidence_hashes_str" ]] || evidence_hashes_str="(none)"
+
   # IMP-245 path-resolution fix: Codex runs with `--cd "$project_root"` (the repo
   # root), NOT `--cd "$evidence_dir"` — so every sealed-artifact path handed to it
   # MUST be resolved relative to project_root (matching output_schema_path's
@@ -1734,6 +1782,7 @@ cmd_dispatch() {
     --arg review_profile_path "$review_profile_path_rel" \
     --arg evidence_paths "$evidence_paths" \
     --arg evidence_dir_path "$evidence_dir_path_rel" \
+    --arg evidence_hashes "$evidence_hashes_str" \
     --arg output_schema_path "$output_schema_path" \
     --arg allowed_recheck_commands "$arc_str" \
     --arg verification_budget "$vbudget_str" \
@@ -1742,7 +1791,7 @@ cmd_dispatch() {
       codex_brief_hash:$codex_brief_hash, bundle_diff_path:$bundle_diff_path,
       bundle_scope_path:$bundle_scope_path, acceptance_criteria_path:$acceptance_criteria_path,
       review_profile_path:$review_profile_path, evidence_paths:$evidence_paths,
-      evidence_dir_path:$evidence_dir_path,
+      evidence_dir_path:$evidence_dir_path, evidence_hashes:$evidence_hashes,
       output_schema_path:$output_schema_path, allowed_recheck_commands:$allowed_recheck_commands,
       verification_budget:$verification_budget}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }

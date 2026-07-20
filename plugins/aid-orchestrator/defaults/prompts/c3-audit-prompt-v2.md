@@ -5,7 +5,7 @@ artifact: c3
 variables: [plan_path, plan_sha256, base_sha, head_sha, input_manifest_path,
   input_manifest_hash, codex_brief_hash, bundle_diff_path, bundle_scope_path,
   acceptance_criteria_path, review_profile_path, evidence_paths, evidence_dir_path,
-  output_schema_path, allowed_recheck_commands, verification_budget]
+  evidence_hashes, output_schema_path, allowed_recheck_commands, verification_budget]
 ---
 
 # C3 Independent Cross-Provider Audit — Codex
@@ -46,6 +46,17 @@ is defined ONLY by this prompt and the output schema.
   already relative to the repository root you are `--cd`'d into. If an allow-listed evidence
   artifact is genuinely absent even after resolving it against `{{evidence_dir_path}}`, that is a
   real finding — do not silently assume you resolved the path wrong instead.
+- AUTHORITATIVE evidence digests, sealed at manifest-build time: `{{evidence_hashes}}` (format
+  `<path>=sha256:<hex> (<size> bytes)`, one per evidence-class entry above — NOT the changed
+  production source files, which you can independently verify via `git show {{head_sha}}:<path>`
+  since they are committed). These evidence-class files (gate reports, final report, verifier
+  output) are runtime artifacts, not committed source, so this sealed digest is the ONLY thing
+  that can bind a claimed PASS to an immutable value: hash the file you actually read (an
+  always-allowed read-only operation) and compare it to the matching `{{evidence_hashes}}` entry.
+  A mismatch means the file changed after this manifest was sealed — treat that as a HIGH finding
+  regardless of what the file currently says. A file with NO matching `{{evidence_hashes}}` entry
+  (e.g. it did not exist yet at build-manifest time) cannot have its PASS claim bound this way —
+  that absence is itself something to weigh when deciding how much to trust it.
 - The ONLY commands you may run to RE-EXECUTE a named test/gate: `{{allowed_recheck_commands}}` (an
   explicit list — see check-table step 3; this is separate from, and stronger than, the always-
   allowed reads below)
@@ -81,9 +92,13 @@ the plan boundary, not by you, unless a specific command is explicitly listed in
    operation, e.g. `sha256sum`) and compare to the input manifest; emit a finding on any mismatch.
    Cite ONLY allow-listed paths + the repo.
 3. Verify gate results WITHOUT re-running their suites: for every gate result whose PASS a
-   merge-blocking acceptance criterion or a critical/high area depends on, check the committed gate
-   artifact against the reviewed HEAD, its recorded exit code, and its command fingerprint (all
-   always-allowed reads) — emit a finding on any mismatch or missing artifact. `{{allowed_recheck_commands}}`
+   merge-blocking acceptance criterion or a critical/high area depends on, check the gate artifact
+   against the reviewed HEAD, its recorded exit code, and its command fingerprint (all always-allowed
+   reads) — emit a finding on any mismatch or missing artifact. If the gate artifact is one of the
+   evidence-class entries listed in `{{evidence_hashes}}`, also hash it yourself and compare against
+   its `{{evidence_hashes}}` entry (see above) — this is what makes "committed" meaningful for a
+   NOT-git-tracked runtime artifact; a hash mismatch is itself a finding, independent of what the
+   file currently claims. `{{allowed_recheck_commands}}`
    governs ONLY re-executing a specific named test/gate command in full — it does NOT govern the
    ordinary reads this step otherwise requires. You may re-run a gate ONLY if its exact command is
    listed in `{{allowed_recheck_commands}}`, and only within `{{verification_budget}}`. Do NOT

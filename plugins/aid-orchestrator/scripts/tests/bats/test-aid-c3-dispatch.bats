@@ -228,6 +228,54 @@ _build() {
   [ "$output" = "0" ]
 }
 
+@test "8th DONE-review audit fix ('gate evidence integrity'): manifest binds evidence-class allowlist entries to a sealed {path,sha256,size} digest" {
+  _build high
+  [ "$status" -eq 0 ]
+
+  # evidence_hashes[] must contain both evidence-class entries, matching
+  # the ACTUAL bytes on disk at build-manifest time.
+  local real_gates_sha; real_gates_sha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/gates_report.json" | awk '{print $1}')"
+  local real_gates_size; real_gates_size="$(wc -c < "$TEST_EVIDENCE_DIR/gates_report.json" | tr -d '[:space:]')"
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .sha256' "$MANIFEST"
+  [ "$output" = "$real_gates_sha" ]
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .size' "$MANIFEST"
+  [ "$output" = "$real_gates_size" ]
+
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="final_report.md") | .sha256' "$MANIFEST"
+  [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+  # Production source files (changed paths) are NOT in evidence_hashes —
+  # they're independently git-verifiable, unlike runtime evidence.
+  run jq -r '[.audit_input_manifest.evidence_hashes[] | select(.path=="src/app.ts")] | length' "$MANIFEST"
+  [ "$output" = "0" ]
+
+  # Full schema shape: every entry has path+sha256+size, sha256 well-formed.
+  run jq -e '.audit_input_manifest.evidence_hashes | all(has("path") and has("sha256") and has("size"))' "$MANIFEST"
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$MANIFEST"
+  [ "$status" -eq 0 ]
+
+  # A hash mismatch (post-seal tamper) is detectable: the manifest's stored
+  # value must NOT change just because the file on disk changes afterward.
+  printf 'TAMPERED AFTER SEAL\n' > "$TEST_EVIDENCE_DIR/gates_report.json"
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .sha256' "$MANIFEST"
+  [ "$output" = "$real_gates_sha" ]
+  [ "$output" != "sha256:$(sha256sum "$TEST_EVIDENCE_DIR/gates_report.json" | awk '{print $1}')" ]
+}
+
+@test "8th DONE-review audit fix: the rendered C3 prompt exposes evidence_hashes as an authoritative binding" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local prompt="$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ -f "$prompt" ]
+  run grep -c "AUTHORITATIVE evidence digests" "$prompt"
+  [ "$output" -ge 1 ]
+  run grep -c "gates_report.json=sha256:" "$prompt"
+  [ "$output" -ge 1 ]
+}
+
 @test "AC3: prior verifier-output-*.md are included in allowlist when present, omitted when absent" {
   # absent → not in allowlist
   _build high

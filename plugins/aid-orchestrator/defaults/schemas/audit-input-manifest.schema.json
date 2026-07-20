@@ -66,6 +66,19 @@
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$",
           "$comment": "P065 E-065-1_7: canonical sha256 over {base_sha,head_sha,codex_brief_files,required_independence_level}; Codex echoes this (NOT input_hash). Step 2 emits it at runtime; formalised here, NOT required"
+        },
+        "evidence_hashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "sha256", "size"],
+            "properties": {
+              "path": {"type": "string", "$comment": "allowlist[]-relative path, evidence-dir-relative (e.g. gates/gates_report.json)"},
+              "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "size": {"type": "number"}
+            }
+          },
+          "$comment": "P065 E-065-7_7 8th DONE-review audit ('gate evidence integrity'): authoritative digest+size for the NOT-git-tracked evidence-class allowlist entries (final_report.md, gates_report.json, gates/gates_report.json, verifier-output-*.md) — these are runtime artifacts, not committed source, so unlike other allowlist entries C3 cannot independently verify them via `git show <head_sha>:<path>`. This is what binds a claimed PASS to an immutable value sealed at manifest-build time. Step 6 emits it at build-manifest time; formalised here, NOT required (empty when no evidence-class file exists yet)."
         }
       }
     }
