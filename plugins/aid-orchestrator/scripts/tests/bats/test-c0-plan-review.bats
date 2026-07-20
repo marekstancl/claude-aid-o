@@ -272,6 +272,27 @@ _seed_dispatch_env() {
   export FAKE_C0_EXPECT_IMH="sha256:$(sha256sum "$MANIFEST" | awk '{print $1}')"
 }
 
+# _revise_plan_high <marker> — appends a unique line to PLAN_FILE_HIGH,
+# commits it, rebuilds the manifest, and re-seeds the dispatch env. Used to
+# give successive attempts a genuinely DIFFERENT reviewed_plan_hash (7th/8th
+# DONE-review audit fix: the same-hash re-dispatch guard now applies in
+# BOTH legacy and attempt-explicit mode, so tests that legitimately need
+# multiple genuine dispatches — attempt-directory structure, verify,
+# loop-summary accumulation, escalation detection — must revise the plan
+# between attempts, exactly like a real bounded-review loop iteration
+# would). The FAKE_C0_MODE codex spy's canned response content does not
+# depend on plan content, so this does not change what Codex "reports" —
+# only the plan_hash the ledger/guard see, which is the point.
+_revise_plan_high() {
+  local marker="$1"
+  printf '\n<!-- revision: %s -->\n' "$marker" >> "$PLAN_FILE_HIGH"
+  git -C "$TEST_PROJECT_ROOT" add plan-high.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "revise plan-high.md ($marker)"
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # build-manifest
 # ═══════════════════════════════════════════════════════════════════════════
@@ -964,7 +985,10 @@ EOF
   report_1="$REPORT"
   report_1_content="$(jq -S '.' "$report_1")"
 
-  # Second dispatch with attempt=2 (no rebuild, same manifest).
+  # Second dispatch with attempt=2, plan REVISED (new hash) — 8th DONE-review
+  # audit fix: the same-hash re-dispatch guard now applies in attempt-explicit
+  # mode too, so a genuine second attempt requires a revised plan.
+  _revise_plan_high "attempt-2"
   FAKE_C0_MODE=valid AID_C0_ATTEMPT=2 run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   report_2="$REPORT"
@@ -1136,6 +1160,7 @@ EOF
   export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a1111"
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+  _revise_plan_high "attempt-2"
   export FAKE_C0_THREAD_ID="019f0000-0000-7000-8000-0000000a2222"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
@@ -1152,6 +1177,7 @@ EOF
   _seed_dispatch_env
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+  _revise_plan_high "attempt-2"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
@@ -1168,6 +1194,7 @@ EOF
   _seed_dispatch_env
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+  _revise_plan_high "attempt-2"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
@@ -1275,16 +1302,19 @@ EOF
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  # Deliberately BLOCKING (Part B's terminal-outcome guard would otherwise
-  # block ANY further dispatch — including a retry of the SAME attempt slot —
-  # after a clean first attempt, isolating this test from that separate guard.
-  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
-  [ "$status" -eq 0 ]
 
-  # Simulate a torn/interrupted write of THIS attempt's own dispatch.json —
-  # valid JSON, but not an object. The collision guard's read of
-  # .dispatch.outcome must not crash under set -euo pipefail; it must treat
-  # this as "not dispatched" and allow the retry to proceed and overwrite it.
+  # 8th DONE-review audit fix: the same-hash re-dispatch guard now applies
+  # in attempt-explicit mode too, gated on the LEDGER's own recorded hash —
+  # so this test no longer runs a genuine first dispatch (which would
+  # increment the ledger for this hash and then have the guard correctly
+  # reject the retry below, for an unrelated reason). Instead it directly
+  # seeds the torn-write artifact a crashed PRIOR process would have left
+  # behind — valid JSON, not an object, no genuine dispatch ever completed,
+  # ledger never touched — isolating this test to what it actually proves:
+  # the collision guard's read of .dispatch.outcome must not crash under
+  # set -euo pipefail; it must treat this as "not dispatched" and allow the
+  # attempt to proceed and overwrite it.
+  mkdir -p "$C0_EVIDENCE_DIR/c0/attempt-01/c0"
   printf '[]\n' > "$C0_EVIDENCE_DIR/c0/attempt-01/c0/c0-dispatch.json"
 
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
@@ -1312,6 +1342,7 @@ EOF
   export FAKE_C0_THREAD_ID="thread-partb-01"
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+  _revise_plan_high "attempt-2"
   export FAKE_C0_THREAD_ID="thread-partb-02"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
@@ -1341,12 +1372,53 @@ EOF
   _seed_dispatch_env
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
+  _revise_plan_high "attempt-2"
   AID_C0_ATTEMPT=2 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 
   local SUM="$C0_EVIDENCE_DIR/c0/loop-summary.json"
   run jq -r '.outcome' "$SUM"; [ "$output" = "escalated" ]
   run jq -r '.escalation_reason' "$SUM"; [ "$output" = "same_fingerprint_survived" ]
+}
+
+@test "8th DONE-review audit fix: attempt-explicit mode — a blocking (non-terminal) prior attempt plus an UNCHANGED plan_hash is rejected, Codex is never invoked, and the ledger does not change" {
+  _build_high
+  [ "$status" -eq 0 ]
+  _seed_dispatch_env
+  AID_C0_ATTEMPT=1 FAKE_C0_MODE=findings run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  # Genuinely dispatched + blocking (not "unverifiable") → the ledger WAS
+  # incremented for this hash (FINDING 1 fix). Confirm the pre-state before
+  # the rejected retry, so "ledger does not change" below is a real proof,
+  # not an assumption.
+  attempts_before="$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')"
+  [ "$attempts_before" -ge 1 ]
+
+  # loop-summary outcome after a blocking (non-escalated) result is null —
+  # NOT terminal under the existing ALLOWLIST guard, so THAT guard alone
+  # would let this through; the same-hash guard is what must catch it.
+  run jq -r '.outcome' "$C0_EVIDENCE_DIR/c0/loop-summary.json"; [ "$output" = "null" ]
+
+  # No plan revision — same manifest, same reviewed_plan_hash. Must be
+  # rejected BEFORE any codex invocation or ledger mutation.
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"already has a recorded ledger attempt at this exact hash"* ]]
+
+  # Proof: Codex was never invoked for attempt-02 — no raw evidence exists.
+  [ ! -f "$C0_EVIDENCE_DIR/c0/attempt-02/c0/codex-events.jsonl" ]
+  [ ! -f "$C0_EVIDENCE_DIR/c0/attempt-02/c0/c0-dispatch.json" ]
+
+  # Proof: the ledger did not change (still exactly attempts_before).
+  attempts_after="$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')"
+  [ "$attempts_after" = "$attempts_before" ]
+
+  # Proof: a genuine PM override still gets through, exactly as in legacy mode.
+  AID_C0_FORCE_BEYOND_ESCALATION="deliberate re-review, PM-authorized" \
+    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
 }
 
 @test "Part B: clean is terminal — a 2nd explicit dispatch after outcome==clean is rejected without an override" {

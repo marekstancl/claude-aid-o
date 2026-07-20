@@ -1227,29 +1227,32 @@ cmd_dispatch() {
   project_root="$(git -C "$evidence_dir" rev-parse --show-toplevel 2>/dev/null)" \
     || { echo "PRECONDITION FAIL: evidence_dir is not inside a git repository: $evidence_dir" >&2; exit 1; }
 
-  # SAME-HASH RE-DISPATCH GUARD (7th DONE-review audit, P065 E-065-7_7: "C0
-  # bounded review lifecycle" finding). The CP1 ledger's own `increment` is
-  # correctly a no-op for an unchanged plan_hash (that's a deliberate,
-  # already-tested design choice — see aid-cp1-ledger.sh's NOTE at
-  # cmd_increment), but that no-op only protects the BUDGET COUNTER.
+  # SAME-HASH RE-DISPATCH GUARD (7th + 8th DONE-review audits, P065
+  # E-065-7_7: "C0 bounded review lifecycle" finding). The CP1 ledger's own
+  # `increment` is correctly a no-op for an unchanged plan_hash (that's a
+  # deliberate, already-tested design choice — see aid-cp1-ledger.sh's NOTE
+  # at cmd_increment), but that no-op only protects the BUDGET COUNTER.
   # Nothing previously stopped a caller from dispatching to Codex repeatedly
   # for the SAME unchanged plan_hash — at zero ledger cost — until a
   # favorable review happened to come back, then simply not dispatching
   # again: budget-free fishing for a pass on an unrevised plan.
   #
-  # LEGACY MODE ONLY (attempt_explicit == 0): in attempt-explicit mode
-  # (AID_C0_ATTEMPT set), the terminal-outcome guard above ALREADY protects
-  # same-hash re-dispatch correctly — it lets a non-terminal outcome (e.g.
-  # blocking findings, "unverifiable") retry at the SAME hash (that IS the
-  # bounded review loop: findings -> fix -> retry, tracked/capped by the
-  # ledger), while rejecting further attempts once a TERMINAL outcome
-  # ("clean"/"escalated"/anything unrecognized) is recorded — see the Part B
-  # tests above ("clean is terminal", "ALLOWLIST" test). Applying this guard
-  # there too would incorrectly block that already-correct, already-tested
-  # retry flow. The audit's own finding text specifically singles out legacy
-  # mode as the acute gap ("In legacy mode, no loop-summary terminal guard
-  # is consulted at all") — this closes exactly that gap without touching
-  # attempt-explicit mode's separate, already-adequate mechanism.
+  # APPLIES TO BOTH MODES (fixed after the 8th audit — the 7th-audit fix
+  # scoped this to legacy mode only, reasoning that attempt-explicit mode's
+  # terminal-outcome guard above was already adequate; the 8th audit
+  # correctly found that reasoning incomplete). The terminal-outcome guard
+  # only rejects retrying after a TERMINAL outcome ("clean"/"escalated");
+  # loop-summary's outcome is `null` (read back as "" by the guard above)
+  # for a genuinely-dispatched-but-still-blocking, non-escalated result —
+  # indistinguishable there from "never dispatched yet". That let
+  # attempt-explicit mode retry the SAME unrevised hash indefinitely after
+  # a blocking (non-terminal) review, same budget-free fishing gap, just in
+  # the other mode. The ledger-tip-hash check below is a strictly separate,
+  # additional guard that closes this in BOTH modes uniformly, using the
+  # SAME authoritative signal (was this exact hash EVER genuinely
+  # dispatched, per the ledger's own attempts_log — which is never written
+  # for transport failures/"unverifiable" results, so those remain freely
+  # retriable at the same hash exactly as before, in both modes).
   #
   # Uses the ledger's own last recorded hash for this plan_id (read-only —
   # `read` never mutates or consumes the ledger); a genuine PM override path
@@ -1260,7 +1263,7 @@ cmd_dispatch() {
   local c0_plan_id c0_reviewed_plan_hash
   c0_plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest_for_call" 2>/dev/null || echo "")"
   c0_reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call" 2>/dev/null || echo "")"
-  if [[ "$attempt_explicit" -eq 0 && -n "$c0_plan_id" && -n "$c0_reviewed_plan_hash" ]]; then
+  if [[ -n "$c0_plan_id" && -n "$c0_reviewed_plan_hash" ]]; then
     local ledger_read_json="" ledger_read_rc=0
     ledger_read_json="$(bash "$C0_LEDGER_BIN" read --project-root "$project_root" "$c0_plan_id" 2>/dev/null)" || ledger_read_rc=$?
     if [[ "$ledger_read_rc" -eq 0 && -n "$ledger_read_json" ]]; then
