@@ -9,12 +9,14 @@
 | provider | `codex` |
 | model | `gpt-5.6-terra` |
 | independence | `cross_provider` |
-| reviewed_head | `4059b16d60fd2d5476aa836c8186a60f72887c75` |
+| reviewed_head | `4a37fe749ec477e16878a7a6db320aacbc7eb09a` |
 | findings | 0 |
 
 **Unverifiable** — no trusted pass/fail was produced (outcome: `review_unverifiable`).
 
 ### Reasons
 
-- The sealed acceptance-criteria document supplies no plan or acceptance criteria, so merge correctness cannot be independently evaluated without assuming unstated requirements.
+- The supplied acceptance-criteria artifact contains only a no-source placeholder, so the intended behavior and merge-blocking criteria cannot be independently verified.
+- No allow-listed gate, verifier, or final-report artifact was supplied to bind any gate result to the reviewed HEAD; no gate re-execution is permitted.
+- The independently derived diff scope matches the claimed single static marker-file addition. No stateful mechanism is in scope, so no lifecycle state matrix applies.
 
