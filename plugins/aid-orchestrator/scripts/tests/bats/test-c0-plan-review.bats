@@ -272,6 +272,20 @@ _seed_dispatch_env() {
   export FAKE_C0_EXPECT_IMH="sha256:$(sha256sum "$MANIFEST" | awk '{print $1}')"
 }
 
+# _write_c0_override [pm_ref] [plan_id] — writes a genuine, claimable
+# cp1-pm-escalation-override.json for the given plan_id (default
+# P900-c0-test, this file's fixed test plan) at the exact path
+# aid-cp1-ledger.sh's claim-pm-override subcommand reads. 9th DONE-review
+# audit fix: the bounded-loop override is no longer a bare env var — it
+# must be a real, single-use artifact.
+_write_c0_override() {
+  local pm_ref="${1:-PM approved this specific bypass, 2026-07-20 review}"
+  local plan_id="${2:-P900-c0-test}"
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${plan_id}"
+  mkdir -p "$dir"
+  jq -nc --arg r "$pm_ref" '{pm_ref: $r}' > "$dir/cp1-pm-escalation-override.json"
+}
+
 # _revise_plan_high <marker> — appends a unique line to PLAN_FILE_HIGH,
 # commits it, rebuilds the manifest, and re-seeds the dispatch env. Used to
 # give successive attempts a genuinely DIFFERENT reviewed_plan_hash (7th/8th
@@ -1414,9 +1428,10 @@ EOF
   attempts_after="$(bash "$LEDGER" read --project-root "$TEST_PROJECT_ROOT" P900-c0-test | jq -r '.attempts')"
   [ "$attempts_after" = "$attempts_before" ]
 
-  # Proof: a genuine PM override still gets through, exactly as in legacy mode.
-  AID_C0_FORCE_BEYOND_ESCALATION="deliberate re-review, PM-authorized" \
-    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # Proof: a genuine, claimed PM override still gets through, exactly as in
+  # legacy mode — but now it must be a real artifact, not a bare env var.
+  _write_c0_override
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
 }
@@ -1437,17 +1452,32 @@ EOF
   [[ "$output" == *"clean"* ]]
   [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
 
-  # A short (< 20 char) override is ALSO rejected.
-  AID_C0_FORCE_BEYOND_ESCALATION="too short" AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid \
-    run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # 9th DONE-review audit fix: an arbitrary 20+-char environment variable no
+  # longer bypasses anything — only a genuine, claimable artifact does. A
+  # too-short pm_ref inside a REAL artifact is ALSO rejected (mirrors
+  # aid-cp1-ledger.sh's own >=20-char pm_ref requirement).
+  AID_C0_FORCE_BEYOND_ESCALATION="this is 20+ characters but is NOT a real artifact" \
+    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
 
-  # A genuine, >=20-char, PM-authorized override DOES let the 2nd attempt through.
-  AID_C0_FORCE_BEYOND_ESCALATION="PM approved an extra recheck 2026-07-19 review" \
-    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  _write_c0_override "too short"
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # A genuine, >=20-char, single-use claimed override DOES let the 2nd
+  # attempt through.
+  _write_c0_override "PM approved an extra recheck 2026-07-19 review"
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [ -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
+
+  # And it is now consumed — a THIRD attempt without a fresh artifact is
+  # rejected again (single-use proven).
+  AID_C0_ATTEMPT=3 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
 }
 
 @test "Part B: the terminal guard is an ALLOWLIST — any unrecognized/corrupted outcome value is treated as terminal too" {
@@ -1470,8 +1500,8 @@ EOF
   [[ "$output" == *"bogus_unrecognized_state"* ]]
   [ ! -d "$C0_EVIDENCE_DIR/c0/attempt-02" ]
 
-  AID_C0_FORCE_BEYOND_ESCALATION="PM approved proceeding past a corrupted state" \
-    AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  _write_c0_override "PM approved proceeding past a corrupted state"
+  AID_C0_ATTEMPT=2 FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
 }
 
@@ -1522,7 +1552,7 @@ EOF
   [ ! -f "$C0_EVIDENCE_DIR/c0/loop-summary.json" ]
 }
 
-@test "7th DONE-review audit fix: same-hash re-dispatch guard is overridable via AID_C0_FORCE_BEYOND_ESCALATION" {
+@test "9th DONE-review audit fix: same-hash re-dispatch guard is overridable via a genuine, single-use claimed PM override (NOT a bare env var)" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
@@ -1534,13 +1564,30 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
 
-  # With a genuine, auditable PM override: proceeds, and the override
-  # reason is echoed to the log for traceability.
-  AID_C0_FORCE_BEYOND_ESCALATION="deliberate re-review, PM-authorized" \
+  # An arbitrary 20+-char env var alone does NOT let it through anymore.
+  AID_C0_FORCE_BEYOND_ESCALATION="this is 20+ characters but is NOT a real artifact" \
     FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # With a genuine, claimed PM override artifact: proceeds, and the claimed
+  # reason + consumed_path is echoed to the log for traceability.
+  _write_c0_override "deliberate re-review, PM-authorized"
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"same-hash re-dispatch"* ]]
+  [[ "$output" == *"deliberate re-review, PM-authorized"* ]]
+  [[ "$output" == *"consumed:"* ]]
+
+  # Single-use: the artifact is gone, a fresh (third, still same-hash)
+  # attempt without a new artifact is rejected again.
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_id' "$MANIFEST"
+  local plan_id="$output"
+  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/work/evidence/${plan_id}/cp1-pm-escalation-override.json" ]
+  FAKE_C0_MODE=valid run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
 }
 
 @test "7th DONE-review audit fix: a plan_id with no ledger yet (first-ever dispatch) is not blocked by the same-hash guard" {

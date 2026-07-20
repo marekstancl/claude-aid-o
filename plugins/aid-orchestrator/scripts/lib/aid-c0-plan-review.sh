@@ -1102,6 +1102,33 @@ _c0_process_response() {
   return $?
 }
 
+# _c0_try_claim_override <project_root> <plan_id> <bypass_label>
+#   9th DONE-review audit fix (P065 E-065-7_7: "C0 bounded review lifecycle"
+#   finding). Both bypass points in cmd_dispatch below previously accepted
+#   ANY AID_C0_FORCE_BEYOND_ESCALATION env var >= 20 characters as
+#   "PM-authorized" — no real authorization was required or consumed, so
+#   anyone with shell access could bypass the bounded review loop
+#   indefinitely. Replaced with a real, single-use claim against the SAME
+#   cp1-pm-escalation-override.json artifact + atomic-claim primitive
+#   aid-cp1-ledger.sh's cmd_increment already uses (via its shared
+#   claim-pm-override subcommand — reused, not reimplemented). On success,
+#   warns to stderr with the claimed reason + consumed_path (operator-
+#   visible audit trail, mirroring the WARNING this file already printed)
+#   and returns 0. On failure (no valid artifact present for this plan_id),
+#   returns 1 with nothing printed — caller rejects exactly as before.
+_c0_try_claim_override() {
+  local project_root="$1" plan_id="$2" bypass_label="$3"
+  [[ -n "$project_root" && -n "$plan_id" ]] || return 1
+  local claim_json
+  claim_json="$(bash "$C0_LEDGER_BIN" claim-pm-override --project-root "$project_root" "$plan_id" 2>/dev/null)" || return 1
+  local reason consumed_path
+  reason="$(jq -r '.reason // ""' <<<"$claim_json" 2>/dev/null)"
+  consumed_path="$(jq -r '.consumed_path // ""' <<<"$claim_json" 2>/dev/null)"
+  [[ -n "$reason" ]] || return 1
+  echo "aid-c0-plan-review: WARNING — proceeding past ${bypass_label} via a genuine, claimed PM-escalation override: ${reason} (consumed: ${consumed_path})" >&2
+  return 0
+}
+
 # ===========================================================================
 # cmd_dispatch <evidence_dir>
 #
@@ -1133,6 +1160,15 @@ cmd_dispatch() {
   # untouched. See this function's header comment for the full contract.
   local attempt_n="${AID_C0_ATTEMPT:-}"
   local attempt_explicit=0 attempt_dir="" attempt_nn=""
+  # One PM-escalation override authorizes bypassing WHATEVER guard(s) below
+  # would otherwise block THIS dispatch call — a PM placing the artifact is
+  # authorizing "one more dispatch despite normal restrictions", not a
+  # specific internal mechanism. Without this flag, a same-hash retry after
+  # a terminal outcome hits BOTH the terminal-outcome guard AND the
+  # same-hash guard, and each would independently try to claim (consume)
+  # the single-use artifact — the second claim would then fail on an
+  # already-consumed file, defeating a legitimately-authorized retry.
+  local pm_override_claimed_this_call=false
   local work_evidence_dir="$evidence_dir"
   local work_c0_dir="$evidence_dir/c0/codex"
   local root_manifest="$evidence_dir/c0/codex/audit-input-manifest.json"
@@ -1159,12 +1195,15 @@ cmd_dispatch() {
       local prior_loop_outcome
       prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)" || prior_loop_outcome=""
       if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
-        if [[ -z "${AID_C0_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C0_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+        local guard_project_root guard_plan_id
+        guard_project_root="$(git -C "$evidence_dir" rev-parse --show-toplevel 2>/dev/null || echo "")"
+        guard_plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$root_manifest" 2>/dev/null || echo "")"
+        if ! _c0_try_claim_override "$guard_project_root" "$guard_plan_id" "a recorded terminal outcome (\"$prior_loop_outcome\")"; then
           echo "PRECONDITION FAIL: c0/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C0 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
-          echo "Fix: a further attempt requires an explicit, auditable PM-authorized override: AID_C0_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          echo "Fix: a further attempt requires a genuine, single-use PM-escalation override artifact: \${plan_evidence_root}/cp1-pm-escalation-override.json with a pm_ref >= 20 chars — not a bare environment variable." >&2
           exit 1
         fi
-        echo "aid-c0-plan-review: WARNING — proceeding past a recorded terminal outcome (\"$prior_loop_outcome\") via PM-authorized override: ${AID_C0_FORCE_BEYOND_ESCALATION}" >&2
+        pm_override_claimed_this_call=true
       fi
     fi
 
@@ -1255,11 +1294,11 @@ cmd_dispatch() {
   # retriable at the same hash exactly as before, in both modes).
   #
   # Uses the ledger's own last recorded hash for this plan_id (read-only —
-  # `read` never mutates or consumes the ledger); a genuine PM override path
-  # is provided, reusing AID_C0_FORCE_BEYOND_ESCALATION's existing pattern
-  # from the terminal-outcome guard above rather than inventing a new
-  # mechanism. A plan_id with no ledger yet (first-ever dispatch) has
-  # nothing to compare against and proceeds normally.
+  # `read` never mutates or consumes the ledger); a genuine, single-use PM
+  # override path is provided via _c0_try_claim_override (9th DONE-review
+  # audit fix — see that function's header). A plan_id with no ledger yet
+  # (first-ever dispatch) has nothing to compare against and proceeds
+  # normally.
   local c0_plan_id c0_reviewed_plan_hash
   c0_plan_id="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_id // ""' "$manifest_for_call" 2>/dev/null || echo "")"
   c0_reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call" 2>/dev/null || echo "")"
@@ -1269,13 +1308,13 @@ cmd_dispatch() {
     if [[ "$ledger_read_rc" -eq 0 && -n "$ledger_read_json" ]]; then
       local c0_last_hash
       c0_last_hash="$(jq -r '.attempts_log[-1].plan_hash // ""' <<<"$ledger_read_json" 2>/dev/null || echo "")"
-      if [[ -n "$c0_last_hash" && "$c0_last_hash" == "$c0_reviewed_plan_hash" ]]; then
-        if [[ -z "${AID_C0_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C0_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
+      if [[ -n "$c0_last_hash" && "$c0_last_hash" == "$c0_reviewed_plan_hash" && "$pm_override_claimed_this_call" != true ]]; then
+        if ! _c0_try_claim_override "$project_root" "$c0_plan_id" "a same-hash re-dispatch ($c0_reviewed_plan_hash)"; then
           echo "PRECONDITION FAIL: plan_hash $c0_reviewed_plan_hash for plan_id=$c0_plan_id already has a recorded ledger attempt at this exact hash — refusing to re-dispatch an unchanged plan to Codex (a same-hash re-run cannot consume ledger budget, so nothing else stops repeated re-dispatch of an unchanged plan hoping for a favorable review by chance)." >&2
-          echo "Fix: change the plan (new plan_hash) before dispatching again, or provide an explicit, auditable PM-authorized override: AID_C0_FORCE_BEYOND_ESCALATION='<reason, >=20 chars>'." >&2
+          echo "Fix: change the plan (new plan_hash) before dispatching again, or provide a genuine, single-use PM-escalation override artifact: \${plan_evidence_root}/cp1-pm-escalation-override.json with a pm_ref >= 20 chars — not a bare environment variable." >&2
           exit 1
         fi
-        echo "aid-c0-plan-review: WARNING — proceeding with a same-hash re-dispatch ($c0_reviewed_plan_hash) via PM-authorized override: ${AID_C0_FORCE_BEYOND_ESCALATION}" >&2
+        pm_override_claimed_this_call=true
       fi
     fi
   fi
