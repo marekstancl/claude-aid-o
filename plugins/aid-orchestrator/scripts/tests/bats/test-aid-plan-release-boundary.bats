@@ -442,3 +442,50 @@ _init_plan() {
   n=$(wc -l < "$(_ops_file P064)")
   [ "$n" -eq 3 ]
 }
+
+# ─── Corruption isolation: _plan_op_last_command_subject must skip unparseable
+#     lines elsewhere in the file, not fail silently ──────────────────────────
+@test "Regression: _plan_op_last_command_subject is resilient to corrupt/truncated lines elsewhere in operations.jsonl" {
+  _init_plan "P064"
+
+  # Seed the operations log with 3 clean records for an earlier op_id (opA).
+  local op_a="epic-merge-to-plan:P064:-:0:E-064-1_4"
+  plan_op_begin "P064" "$op_a" "epic-merge-to-plan" "E-064-1_4" "1111111111111111111111111111111111111111"
+  plan_op_mark_git_applied "P064" "$op_a" "2222222222222222222222222222222222222222"
+  plan_op_commit "P064" "$op_a"
+
+  # Now append a genuinely unparseable line (not valid JSON at all) — this is
+  # the actual corruption scenario the bug was about. jq -s (slurp mode, the
+  # original implementation) errors out on the WHOLE file if even one line
+  # fails to parse, which silently looked like "no record found" to callers.
+  printf '{this is not valid json AT ALL, no closing brace\n' >> "$(_ops_file P064)"
+
+  # Begin an unrelated operation (opB). This should succeed and write an
+  # intent record despite the corrupt line earlier in the file.
+  local op_b="epic-merge-to-plan:P064:-:0:E-064-2_4"
+  run plan_op_begin "P064" "$op_b" "epic-merge-to-plan" "E-064-2_4" "3333333333333333333333333333333333333333"
+  [ "$status" -eq 0 ]
+
+  # Now try plan_op_mark_git_applied for opB — this MUST succeed and NOT
+  # complain "no prior record found" even though a corrupt line exists
+  # elsewhere in the file. With the fix, _plan_op_last_command_subject skips
+  # the unparseable line (matching plan_op_reconcile's corruption isolation)
+  # and finds the valid opB intent record.
+  run plan_op_mark_git_applied "P064" "$op_b" "4444444444444444444444444444444444444444"
+  [ "$status" -eq 0 ]
+
+  # And plan_op_commit should also succeed for opB.
+  run plan_op_commit "P064" "$op_b"
+  [ "$status" -eq 0 ]
+
+  # Verify the full cycle for opB completed successfully. plan_op_reconcile
+  # still reports rc=5 here (per its own contract: ANY corrupt line in the
+  # file, matching this op_id or not, is flagged) but its best-effort status
+  # on stdout is unaffected — this is the file-wide corruption signal that
+  # _plan_op_last_command_subject intentionally does NOT replicate, since
+  # that helper's job is narrowly "find this op_id's record", not "audit the
+  # whole file".
+  run plan_op_reconcile "P064" "$op_b"
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"state_committed"* ]]
+}

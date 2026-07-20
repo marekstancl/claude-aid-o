@@ -573,19 +573,59 @@ _plan_op_append() {
 # Used by plan_op_mark_git_applied/plan_op_commit so every record for one
 # op_id carries the same command/subject (see the Edge Cases note in the
 # file header about a command/key mismatch being treated as corrupt).
-# Returns 1 (nothing on stdout) if no record exists yet, or the file itself
-# is unparseable (defensive — a genuinely corrupt log must not be used to
-# silently synthesize a plausible-looking follow-on record).
+# Returns 1 (nothing on stdout) if no record exists yet, or if all parseable
+# records do not match op_id (defensive — a corrupt line elsewhere must not
+# block lookup of a valid record for this op_id, matching plan_op_reconcile's
+# corruption isolation).
 _plan_op_last_command_subject() {
-  local plan_id="$1" op_id="$2" ops_path found
+  local plan_id="$1" op_id="$2" ops_path
   ops_path="$(_plan_ops_path "$plan_id")"
   [[ -f "$ops_path" ]] || return 1
-  found="$(jq -rs --arg id "$op_id" '
-    [ .[] | select(.op_id == $id) ] | last |
-    if . == null then empty else ((.command // "") + "\t" + (.subject // "")) end
-  ' "$ops_path" 2>/dev/null)"
-  [[ -n "$found" ]] || return 1
-  printf '%s' "$found"
+
+  # Check if file ends with newline (to detect truncated final line).
+  local ends_with_nl=true
+  if [[ -n "$(tail -c1 -- "$ops_path" 2>/dev/null)" ]]; then
+    ends_with_nl=false
+  fi
+
+  local -a lines=()
+  mapfile -t lines < "$ops_path"
+  local total="${#lines[@]}"
+
+  local last_found="" i line_no content parsed is_last
+  local op_field cmd subj
+
+  for i in "${!lines[@]}"; do
+    line_no=$((i + 1))
+    content="${lines[$i]}"
+    [[ -z "$content" ]] && continue
+
+    is_last=false
+    [[ "$line_no" -eq "$total" ]] && is_last=true
+
+    # Truncated final line (crash mid-append) — never trusted, regardless
+    # of whether it happens to parse (matches plan_op_reconcile).
+    if [[ "$is_last" == true && "$ends_with_nl" == false ]]; then
+      continue
+    fi
+
+    # Try to parse this line — skip if it fails.
+    if ! parsed="$(jq -e -c '.' <<<"$content" 2>/dev/null)"; then
+      continue
+    fi
+
+    # Check if this line matches our op_id.
+    op_field="$(jq -r '.op_id // empty' <<<"$parsed" 2>/dev/null)"
+    [[ "$op_field" == "$op_id" ]] || continue
+
+    # Found a matching record — extract command and subject.
+    cmd="$(jq -r '.command // empty' <<<"$parsed" 2>/dev/null)"
+    subj="$(jq -r '.subject // empty' <<<"$parsed" 2>/dev/null)"
+    [[ -n "$cmd" && -n "$subj" ]] && printf -v last_found '%s\t%s' "$cmd" "$subj"
+  done
+
+  [[ -n "$last_found" ]] || return 1
+  printf '%s' "$last_found"
   return 0
 }
 
