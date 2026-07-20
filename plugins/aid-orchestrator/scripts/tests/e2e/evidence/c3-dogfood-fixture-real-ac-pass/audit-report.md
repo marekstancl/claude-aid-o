@@ -9,6 +9,6 @@
 | provider | `codex` |
 | model | `gpt-5.6-terra` |
 | independence | `cross_provider` |
-| reviewed_head | `d268a46f23ed80efd64ddbe4c5e119b79efd84ec` |
+| reviewed_head | `d51514671cb9d97d4cf737367b0db99002b981ef` |
 | findings | 0 |
 

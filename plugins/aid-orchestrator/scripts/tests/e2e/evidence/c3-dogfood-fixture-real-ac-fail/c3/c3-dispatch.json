@@ -2,7 +2,7 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c3_dispatch",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T12:12:11Z",
+  "created_at": "2026-07-20T03:50:44Z",
   "provenance": {
     "dispatch_mode": "cross_provider",
     "generated_by_tool": "aid-c3-dispatch.sh#dispatch"
@@ -14,13 +14,13 @@
   },
   "subject": {
     "project_root": "<REPO>",
-    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
-    "codex_brief_hash": "sha256:b1c729bf2c54f39951995f70205fc4cd2c312920e2557d9449522e9bca98ddce"
+    "head_sha": "7351138659d829652f01e0dd5b6f6180a41c76d3",
+    "codex_brief_hash": "sha256:b4a3c9d0161425762a079322fb5608fba0e57b4cbb9cf8830785198b7e0931ad"
   },
   "prompt": {
     "template_id": "c3-audit-prompt",
-    "template_sha256": "sha256:9f805648a647bc9ef136eb4c78e98a3fbd1ffd3a7043f942d005d787f666f0db",
-    "rendered_prompt_sha256": "sha256:48bc967c385346cbd726e435b8fe1608d3fe5f41d266442497d761ba45e4be31"
+    "template_sha256": "sha256:88713155d9cac9990a2a8bb9e311e02b3bddf09b628ba7b3acdc1a530c95326f",
+    "rendered_prompt_sha256": "sha256:71df74ee52065233001de19886bbec056cbe48aa25acdbb7507684fa78d4c3b8"
   },
   "dispatch": {
     "invoked": true,
@@ -28,8 +28,8 @@
     "outcome": "dispatched",
     "events_valid": true,
     "codex_session_id": "00000000-0000-7000-8000-000000000000",
-    "stdout_sha256": "sha256:9eca28273d4a48d6244882c833389182e49ae2572dc2b57ee43b33c77e61d3e8",
-    "raw_response_sha256": "sha256:f7ece22a255840fd36ffa1407af404cc924a3efa985d3a88564378d5e0cf7457"
+    "stdout_sha256": "sha256:31560cf0239f897cfee317854a009b9e46c6c6b470c0d50d7ed451964ae57e80",
+    "raw_response_sha256": "sha256:4c356794c050780a4c231126d1d66b85ef7295954ddad061796d70b3e054df1b"
   },
   "independence": {
     "required_independence_level": "cross_model",
