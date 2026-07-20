@@ -416,8 +416,159 @@ CP1-deep:
   → adjudicator produces: verdict: pass|fail|revise (required field), accepted_blockers[], rejected_blockers[]
   → if verdict=revise AND revision_count < 2: auto-revise plan, re-run CP1-deep (max 2 iterations)
   → if revision_count >= 2 AND accepted_blockers survive: escalate to PM (not pass)
-  → if verdict=pass AND accepted_blockers=[]: generate EPIC
+  → if risk is high AND verdict=pass: run the C0 cross-provider Codex review loop (below) —
+    MUST complete before EPIC generation, independent of the L1/L2/L3 adjudicator loop above
+  → if verdict=pass AND accepted_blockers=[] AND (risk is not high OR the C0 review loop exited clean): generate EPIC
 ```
+
+### C0 Cross-Provider Review Loop (high-risk plans only)
+
+After the L1/L2/L3 adjudicator produces `verdict: pass` for a high-risk plan, a
+SEPARATE, mandatory cross-provider (Codex) pass over the FINAL plan runs before
+EPIC generation is allowed — see `review-checkpoint-contracts.md` §"C0
+Cross-Provider Plan Review — Adjudicator MUST-Consume Contract" for the full
+contract this loop implements, and `pipeline.md` §6a for the DONE-phase C3
+fix→reverify loop this one mirrors at plan level (same bounded-loop shape,
+same "not a loop iteration" carve-out, same fingerprint-survives vs.
+conflicting-findings escalation split). Low/docs/medium (no pattern match)
+plans skip this loop entirely; a PM promoting a low plan to `risk: high`
+brings it into scope from that point on.
+
+**First pass:**
+```bash
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-cp1-ledger.sh" init --pre-enforcement \
+  --project-root "$PROJECT_ROOT" "$PLAN_ID"   # or plain 'init' for a provably new plan
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
+  "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
+bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
+```
+`PLAN_EVIDENCE_ROOT` is `.aid-o/work/evidence/<plan_id>/` (one level above
+`cp1-deep/` — the same root `aid-c0-plan-review.sh` and `aid-cp1-gate.sh` both
+read). `init` runs once per plan, before the first C0 dispatch of its
+lifetime.
+
+**The ledger `increment` is now MECHANICAL, not a step the orchestrator
+performs.** `dispatch` itself calls `aid-cp1-ledger.sh increment` internally
+— the orchestrator does NOT need (and should NOT) call `increment`
+separately. The gate is TWO conditions, both required: (1) the dispatch was
+a genuine, well-formed transport-level exchange (`outcome == "dispatched"`
+in `c0/codex/c0-dispatch.json` — Codex's CLI stream itself was valid), AND
+(2) the WRITTEN `c0-plan-review.json`'s own `review_status` is NOT
+`"unverifiable"`. Condition (2) exists because `outcome == "dispatched"`
+alone says nothing about whether the response CONTENT then passed
+validation — a transport-genuine-but-content-invalid response (a hash or
+head mismatch, a malformed/C3-shaped reply, etc.) still reaches
+`outcome == "dispatched"` but must NOT consume a budget slot, matching
+"Not a loop iteration" below exactly (which groups content-invalid
+responses alongside true transport failures for C0, unlike C3's sibling
+EPIC 6 system, which evolved a deliberately different, more nuanced rule
+for its own case). If the ledger increment itself fails (missing/corrupt/
+exhausted) once BOTH conditions hold, `dispatch` fails closed too —
+`c0-plan-review.json` is overwritten to report `status: unverifiable` even
+if Codex's own response was otherwise clean, and `verify` will correctly
+refuse to bless it. This closes a live DONE-review finding (E-065-7_7's own
+2nd audit dispatch, refined across two follow-up rounds after the first fix
+attempt's gate proved too broad): the increment used to be prose-only, so a
+session that didn't perfectly follow this instruction could dispatch
+indefinitely with the ledger never actually advancing.
+
+**Not a loop iteration.** `dispatch` returning `unavailable`/`rate_limited`/
+`timeout`/`invalid_output` (Codex never genuinely dispatched a well-formed,
+raw-bound response) yields `review_status: unverifiable`. This blocks
+EPIC generation for the high-risk plan pending a PM decision, but it is NOT a
+loop iteration — do NOT call `aid-cp1-ledger.sh increment` for it, and do not
+treat it as consuming one of the 2 rechecks. Retry it freely (transient
+Codex unavailability), exactly like C3's own carve-out.
+
+**A genuine dispatch with blocking findings enters the bounded loop** (while
+blocking AND `cp1-ledger.sh check-budget` reports budget available,
+`review-checkpoints.yaml` → `cp1_codex_review.max_rechecks: 2`).
+**Caution on `check-budget`'s meaning after an override-authorized attempt:**
+once `attempts > max` via a PM-override-claimed increment (see below),
+`check-budget` reports `available` again — but this describes the CURRENT
+tip's attempt as retrospectively authorized (what the gate needs), NOT a
+standing "you may loop again" grant. The override was single-use and is
+already consumed; if THIS attempt is still blocking, do not re-enter the
+loop body below without confirming a FRESH override is present first —
+`aid-cp1-ledger.sh increment` will correctly reject a further attempt with
+no fresh artifact, but check that before spending a real gate-fixer +
+Codex dispatch on an attempt that will fail closed anyway.
+1. Dispatch gate-fixer (S/M effort) or implementer (L effort) to revise the
+   SPECIFIC accepted/blocking finding(s) by `fingerprint` — a targeted plan
+   revision, never a general rewrite — producing a new commit.
+   - Revision fails, or produces no diff (plan file unchanged) → exit to PM
+     escalation immediately (cannot make progress / would re-review the
+     identical plan text).
+2. Re-run the C0 review on the revised plan — a fresh `reviewed_plan_hash`
+   and a genuinely new Codex session, never a reuse of the prior attempt:
+   ```bash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" build-manifest \
+     "$PLAN_FILE" "$PLAN_EVIDENCE_ROOT"        # new reviewed_plan_hash
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" dispatch "$PLAN_EVIDENCE_ROOT"
+   bash "$AID_PLUGIN_PATH/scripts/lib/aid-c0-plan-review.sh" verify   "$PLAN_EVIDENCE_ROOT"
+   ```
+   `dispatch` already records this attempt on the ledger internally (see
+   "The ledger `increment` is now MECHANICAL" above) — no separate step
+   needed here. A re-run with an UNCHANGED plan hash is a no-op inside
+   `increment` (the ledger never advances on it) — this is what makes "each
+   recheck = a new plan hash" mechanically enforced, not just documented.
+   Once the ledger is genuinely exhausted (`attempts >= max`), `increment`
+   itself now refuses to advance further on a new hash too — not just
+   `check-budget`'s read-only report.
+3. Re-evaluate the new `c0-plan-review.json`:
+   - Clean (`review_status: pass`, `blocking_findings: false`) → exit the
+     loop, proceed to EPIC generation.
+   - Still blocking AND the SAME finding `fingerprint` survived this
+     recheck (the revision didn't actually fix it) → **PM escalation**
+     immediately — do not spend the remaining budget on a non-converging
+     fix. This is mechanically decidable (fingerprints are deterministic
+     content hashes over the finding); compare this attempt's blocking
+     fingerprints against the immediately-prior dispatched attempt's.
+   - Still blocking AND the findings are mutually conflicting (a judgment
+     call this loop cannot make mechanically) → **PM escalation**
+     immediately; durably record this as the escalation reason (never leave
+     it as unrecorded prose — a later stray revision attempt must not
+     silently reopen the loop).
+   - Still blocking, fingerprint(s) differ, findings don't conflict (the
+     revision introduced a NEW blocking finding — counts against this SAME
+     budget) → loop again if budget remains, else fall through below.
+
+**Exit conditions (exactly one applies):**
+- **Clean** → proceed to EPIC generation as normal.
+- **`aid-cp1-ledger.sh check-budget` reports `exhausted`** (initial review +
+  2 rechecks = 3 Codex runs consumed, still blocking) →
+  **`PM_ESCALATION_REQUIRED`**: execution halts, surfaced to the PM;
+  `aid-cp1-gate.sh` refuses EPIC generation. A 4th review run requires an
+  explicit PM-escalation override artifact (below) — never automatic
+  re-entry into this loop.
+- **Same fingerprint survives a recheck, or conflicting findings** (see step
+  4 above) → **`PM_ESCALATION_REQUIRED`** immediately, regardless of
+  remaining budget.
+
+**PM-escalation override.** When the PM explicitly authorizes proceeding past
+a blocked state (budget exhausted, unverifiable persisting, or a judgment
+call the loop cannot resolve), write:
+`.aid-o/work/evidence/<plan_id>/cp1-pm-escalation-override.json` with a
+non-empty `pm_ref` field (>= 20 characters — same reasoned-override
+convention as this project's other `*_FORCE_*` escalation overrides,
+recording who/what/why). `aid-cp1-gate.sh` checks for this artifact only
+AFTER determining the C0 review and/or ledger budget check actually failed
+— a present override is never touched on a clean pass, so it stays
+available for a run that genuinely needs it. Only once a bypass is
+genuinely required does the gate claim it, renaming it to a
+`.consumed-<epoch>` sibling — the override authorizes exactly one more
+attempt (covering whichever of the two checks failed in that same run),
+never a standing bypass. Using it always leaves the unresolved findings on
+record; it is never a silent pass.
+
+**Gate enforcement.** `aid-cp1-gate.sh` (called by `aid-plan-to-epic.sh`) is
+the mechanical backstop for all of the above: it independently re-checks
+`c0-plan-review.json`'s presence/status/blocking_findings, re-runs
+`aid-c0-plan-review.sh verify` itself (never trusting the file's fields
+alone), and re-checks `aid-cp1-ledger.sh check-budget` — EPIC generation is
+blocked if any of these fail, override or no override for that specific
+failure.
 
 **Required evidence files** (must exist, be non-empty, and contain required fields in `.aid-o/work/evidence/<plan_id>/cp1-deep/`):
 
@@ -432,15 +583,18 @@ CP1-deep:
 | `c0-lens-dep_api_grounding.md` | C0 dep_api_grounding lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-idempotency_matrix.md` | C0 idempotency_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
 | `c0-lens-authority_runtime_matrix.md` | C0 authority_runtime_matrix lens | `stop_rule_blockers:` at line-start | observe (E4) |
+| `c0-plan-review.json` | C0 cross-provider (Codex) plan review (`aid-c0-plan-review.sh`) | `review_status`/`blocking_findings` fields + a passing `verify` | **blocking (high-risk only)** |
 
 Evidence location for L1/L2/L3/adjudicator: `.aid-o/work/evidence/<plan_id>/cp1-deep/`
 Evidence location for C0 lenses: `.aid-o/work/evidence/<plan_id>/c0/`
+Evidence location for the C0 cross-provider plan review: `.aid-o/work/evidence/<plan_id>/c0-plan-review.json` (the canonical, latest-attempt review result, stored at the plan evidence ROOT — one level above `cp1-deep/`). Note: raw Codex evidence (dispatch.json, codex-events.jsonl, codex-last-message.json) is not retained per-attempt; only the final canonical review survives.
+Ledger location (high-risk only): `.aid-o/work/cp1-ledger/<plan_id>.yaml` (`aid-cp1-ledger.sh`).
 
-EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces this: missing files or unresolved accepted blockers cause a non-zero exit.
+EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces all of this: missing L1/L2/L3/adjudicator files, unresolved accepted blockers, a missing/unverifiable/still-blocking C0 review, or an exhausted CP1 ledger budget each cause a non-zero exit — see "C0 Cross-Provider Review Loop" above for the full contract.
 
 **Adjudicator acceptance rule:** A `stop_rule_blocker` is accepted ONLY if it has a command/artifact reference (function name, file path, SQL query, config key) AND file:line evidence or an explicit quote from the plan. Vague or hypothetical blockers are rejected with a `rejection_reason`.
 
-**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed.
+**PM escalation:** After 2 auto-revisions with surviving accepted blockers, execution halts and the PM must resolve or waive the blockers before EPIC generation can proceed. For a high-risk plan, the SAME halt-and-resolve rule applies independently to the C0 cross-provider review loop (see above) once its own budget is exhausted or it hits a mechanically-detected non-convergence.
 
 ## Reference Files
 
@@ -449,7 +603,10 @@ EPIC generation gate (`scripts/aid-cp1-gate.sh`) enforces this: missing files or
 - `skills/planner.md` — dependency graph and parallel groups
 - `skills/review-checkpoint-contracts.md` — high-risk pattern definitions and CP1-deep contract
 - `{plugin_path}/scripts/aid-auto-pipeline.sh` — deterministic EPIC generation pipeline
-- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate (called by aid-plan-to-epic.sh)
+- `{plugin_path}/scripts/aid-cp1-gate.sh` — CP1-deep evidence gate, incl. the C0 review + CP1 ledger checks (called by aid-plan-to-epic.sh)
+- `{plugin_path}/scripts/lib/aid-c0-plan-review.sh` — C0 cross-provider (Codex) plan review bridge (build-manifest/dispatch/verify)
+- `{plugin_path}/scripts/lib/aid-cp1-ledger.sh` — CP1 revision-limit ledger (init/increment/read/check-budget)
+- `defaults/policies/review-checkpoints.yaml` — `cp1_codex_review` bounded-loop policy (`max_rechecks`)
 - `defaults/templates/plan.md` — base plan template
 
 ## Important

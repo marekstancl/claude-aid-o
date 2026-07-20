@@ -9,11 +9,11 @@ re-hashed regression fixture (proves `verify`'s logic, not external provenance).
 | Field | Value |
 |---|---|
 | codex_version | `` |
-| codex_session_id (prefix only) | `019f6ad5...` |
+| codex_session_id (prefix only) | `019f7ea1...` |
 | achieved_independence_level | `cross_provider` |
 | expected status | `fail` |
 | observed status | `fail` |
-| run_at (UTC) | `2026-07-16T12:12:29Z` |
+| run_at (UTC) | `2026-07-20T08:27:09Z` |
 | live_verify | passed |
 
 live_verify: passed

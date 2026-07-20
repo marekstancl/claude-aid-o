@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_report",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T12:10:00Z",
+  "created_at": "2026-07-20T08:25:12Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood-real-ac",
-    "run_id": "R-pass-155298"
+    "run_id": "R-pass-2916895"
   },
   "subject": {
-    "subject_hash": "sha256:d3bbb8fcbe4ab7e0f597aab256e8c0eb657a861dbddf355fce831a31cb4edfb1"
+    "subject_hash": "sha256:2d12690f13328f7e07416e8b71221350cf25936b0d6e6e1ac43c981053d5a647"
   },
   "revision": {
-    "head_sha": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
+    "head_sha": "02c13586d50455389d835cb54f566bcc1aa07073",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -26,18 +26,27 @@
     "dispatch_mode": "deterministic",
     "generated_by_tool": "aid-c3-dispatch.sh#normalize"
   },
-  "findings": [],
+  "findings": [
+    {
+      "fingerprint": "sha256:d04d740fba7dc45f7183916810c8447365c8fc4da5ed11fe5cb7edcae1181f8d",
+      "occurrence_id": "c3-E-c3-dogfood-real-ac-0",
+      "severity": "info",
+      "area": "lifecycle state matrix",
+      "finding": "N/A: the sole changed file defines a stateless shell arithmetic function; it introduces no lifecycle/status field, enum, FSM state, gate toggle, states, events, or transition edges. Therefore no state × event matrix or inverse-edge negative test is applicable.",
+      "recommendation": "No lifecycle-transition test is required for this change."
+    }
+  ],
   "audit_report": {
-    "review_status": "pass",
+    "review_status": "findings",
     "blocking_findings": false,
     "independence_level": "cross_provider",
     "required_independence_level": "cross_model",
     "provider": "codex",
     "model": "gpt-5.6-terra",
     "process_id": "00000000-0000-7000-8000-000000000000",
-    "input_manifest_hash": "sha256:1f231299627bebc7be5fff086f66a4af36a7b52fd404ccc8e7895798bf8d55e0",
-    "codex_brief_hash": "sha256:56d0df67c0a51b6acc51730dcdc89dbf96210696d4fc6b614b6851ba729dcd30",
-    "reviewed_head": "d268a46f23ed80efd64ddbe4c5e119b79efd84ec",
+    "input_manifest_hash": "sha256:11a91b5671df8f03fbffa6da5d26238976a6c9bfbdfe8a56650d4bcaf20b653f",
+    "codex_brief_hash": "sha256:fd28fa1152c92e37b6ce93d437f30d539571c7c2d2fd18125fd4b74fbe7c118e",
+    "reviewed_head": "02c13586d50455389d835cb54f566bcc1aa07073",
     "outcome": "dispatched"
   }
 }

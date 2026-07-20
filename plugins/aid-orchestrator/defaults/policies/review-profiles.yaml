@@ -92,6 +92,7 @@ surfaces:
     match:
       path_globs:
         - "plugins/aid-orchestrator/scripts/tests/fixtures/**"
+        - "plugins/aid-orchestrator/scripts/tests/e2e/evidence/**"
       content_signals: []
     risk: low
     lenses:

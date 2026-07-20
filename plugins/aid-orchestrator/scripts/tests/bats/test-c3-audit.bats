@@ -626,7 +626,16 @@ CODEXEOF
   run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
   [ "$status" -eq 0 ]
   [ -f "$TEST_EVIDENCE_DIR/audit-report.json" ]
-  [ -f "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" ]
+  # P065 E-065-7_7 Finding B follow-up: a caller may set AID_C3_ATTEMPT before
+  # invoking this helper, in which case c3-dispatch.json lives under
+  # c3/attempt-NN/c3/, not the legacy root — legacy (unset) callers are
+  # completely unaffected by this branch.
+  if [[ -n "${AID_C3_ATTEMPT:-}" ]]; then
+    local _attempt_nn; _attempt_nn="$(printf '%02d' "$AID_C3_ATTEMPT")"
+    [ -f "$TEST_EVIDENCE_DIR/c3/attempt-${_attempt_nn}/c3/c3-dispatch.json" ]
+  else
+    [ -f "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" ]
+  fi
 }
 
 # ─── AC1: enforcement=blocking blocks each provenance anomaly (distinct FAIL) ─
@@ -758,6 +767,144 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" != *"C3 dispatch provenance block"* ]]
   [[ "$output" != *"PRECONDITION FAIL"* ]]
+}
+
+# ─── P065 E-065-7_7 DONE-review Finding B follow-up: this hook must be
+#     attempt-aware too, mirroring aid-c3-dispatch.sh's own cmd_verify fix ───
+#     (found by CP2 while independently verifying that fix — the hook read
+#     c3/c3-dispatch.json from the legacy root, which AID_C3_ATTEMPT layering
+#     never writes to; only c3/attempt-NN/c3/c3-dispatch.json exists).
+
+@test "Finding B follow-up: an AID_C3_ATTEMPT-mode dispatch → done-advance passes (observe AND blocking)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  export AID_C3_ATTEMPT=1
+  _drive_clean_dispatch
+  unset AID_C3_ATTEMPT
+
+  # Proof this genuinely exercises attempt-mode layering, not the legacy path.
+  [ -f "$TEST_EVIDENCE_DIR/c3/loop-summary.json" ]
+  [ -f "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/c3-dispatch.json" ]
+  [ ! -f "$TEST_EVIDENCE_DIR/c3/c3-dispatch.json" ]
+
+  _seed_done_review_state "$state_file"
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _write_matching_curator_ref "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  # Mode 1: observe (shipped default policy).
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"C3 dispatch provenance block"* ]]
+
+  # Mode 2: blocking — THE regression this test guards: before this fix, this
+  # failed closed with "c3/c3-dispatch.json not found" even though a genuine
+  # clean dispatch had just happened, purely because the hook looked at the
+  # wrong (legacy) path.
+  _reset_review_state "$state_file"
+  _pin_c3_blocking
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"C3 dispatch provenance block"* ]]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+}
+
+@test "Finding B follow-up: a tampered CURRENT attempt's raw evidence still BLOCKS under blocking (check 5 is unaffected)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  export AID_C3_ATTEMPT=1
+  _drive_clean_dispatch
+  unset AID_C3_ATTEMPT
+  _seed_done_review_state "$state_file"
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _pin_c3_blocking
+
+  # Tamper the CURRENT attempt's raw last-message post-dispatch. This must
+  # still get caught by CHECK 5 (the `verify` shell-out), not by checks 1-4
+  # incidentally finding a wrong path — CP2 round-9d found the prior generic
+  # assertion here couldn't distinguish the two, so this now asserts the
+  # check-5-specific reason text.
+  jq '.findings = []' "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json" \
+    > "$TEST_TMPDIR/tampered.json"
+  cp "$TEST_TMPDIR/tampered.json" "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json"
+  _write_matching_curator_ref "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"C3 dispatch provenance block"* ]]
+  [[ "$output" == *"aid-c3-dispatch.sh verify failed"* ]]
+  [[ "$output" == *"faithful-transform binding broken"* ]]
+}
+
+@test "Finding B follow-up (CP2 round-9d Finding 1): a malformed c3/loop-summary.json never crashes done-advance — observe stays non-blocking, blocking gets a clean reason" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  export AID_C3_ATTEMPT=1
+  _drive_clean_dispatch
+  unset AID_C3_ATTEMPT
+  _seed_done_review_state "$state_file"
+  cat > "$TEST_EVIDENCE_DIR/review-profile.json" <<'JSON'
+{"review_profile": {"risk_profile": "high"}}
+JSON
+  echo "auditor report" > "$TEST_EVIDENCE_DIR/audit-report.md"
+  _write_matching_curator_ref "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  # Corrupt loop-summary.json: valid JSON, but not an object (models a
+  # realistic truncated/partial-write, not a hand-crafted parse error) — jq
+  # '.current_attempt' on a bare array exits non-zero.
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  # observe (shipped default): must stay non-blocking — this is the CRITICAL
+  # regression CP2 found: pre-fix, the unguarded jq substitution crashed the
+  # whole done-advance call under set -e BEFORE the observe/blocking branch
+  # was ever reached, defeating "observe is never supposed to block."
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"C3 dispatch provenance block"* ]]
+
+  # blocking: a malformed pointer falls back to the legacy path (which is
+  # genuinely absent for an attempt-mode dispatch), so this correctly BLOCKS
+  # via check 1 — but with an honest "not found"/PRECONDITION FAIL reason,
+  # never a raw crash (the pre-fix bug: exit 5, no PRECONDITION FAIL message
+  # at all, because the whole process aborted before reaching this branch).
+  _reset_review_state "$state_file"
+  _pin_c3_blocking
+  run "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"C3 dispatch provenance block"* ]]
+  [[ "$output" == *"c3/c3-dispatch.json not found"* ]]
+}
+
+# ─── DONE-review #4 finding: evidence_paths (allowlist) entries under the
+#     evidence dir must resolve to project_root-relative paths in the ACTUAL
+#     rendered prompt — not just in the template's own explanatory text (V8
+#     in test-c3-audit-prompt.bats covers that half; this is the end-to-end
+#     proof that a real build-manifest + dispatch against a real
+#     gates/gates_report.json file produces a correctly resolved reference). ─
+
+@test "DONE-review #4 finding: a real gates/gates_report.json in the evidence dir renders as evidence_dir/gates/gates_report.json, resolvable from project_root" {
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  printf '{"overall":"pass"}\n' > "$TEST_EVIDENCE_DIR/gates/gates_report.json"
+
+  _drive_clean_dispatch
+  [ "$status" -eq 0 ]
+
+  local expected_rel
+  expected_rel="$(realpath -m --relative-to="$TEST_PROJECT_ROOT" "$TEST_EVIDENCE_DIR/gates/gates_report.json")"
+  # Sanity: the expected path is genuinely evidence_dir-prefixed, not a bare
+  # "gates/gates_report.json" (which is what the pre-fix bug rendered).
+  [[ "$expected_rel" == *".aid-o/work/evidence/"*"/gates/gates_report.json" ]]
+
+  run grep -F "$expected_rel" "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ "$status" -eq 0 ]
+  # The bare, unresolved form must NOT appear on its own inside the
+  # evidence_paths line (it legitimately appears once inside the
+  # evidence_dir_path disambiguation sentence's own example text).
+  run grep -c "\`gates/gates_report.json, " "$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ "$output" = "0" ]
 }
 
 # ─── AC4: THE critical test — a fabricated report (edited AFTER dispatch, with an

@@ -17,9 +17,9 @@ the fixture is the regression check.
 | Field | Value |
 |---|---|
 | codex_version | `codex-cli 0.144.4` |
-| codex_session_id (prefix only) | `019f69a4...` |
+| codex_session_id (prefix only) | `019f7e9c...` |
 | achieved_independence_level | `cross_provider` |
-| run_at (UTC) | `2026-07-16T06:38:20Z` |
+| run_at (UTC) | `2026-07-20T08:22:27Z` |
 | live_verify | passed |
 | audit-report.json validator | passed |
 | working tree after run | unchanged |

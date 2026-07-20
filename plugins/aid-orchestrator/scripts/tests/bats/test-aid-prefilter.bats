@@ -297,3 +297,20 @@ EOF
   [ "$status" -eq 0 ]
   [ "$(grep '^state:' "$state_file" | awk '{print $2}')" = "GATES" ]
 }
+
+# ─── profile (C3 risk-surface matching) ────────────────────────────────────
+
+@test "profile: e2e/evidence/** fixture files classify under 'fixtures' surface (low), not unknown_surface_profile" {
+  make_commit "base" "README.md" "base"
+  local base_sha; base_sha="$(git rev-parse HEAD)"
+  make_commit "add e2e evidence fixture" \
+    "plugins/aid-orchestrator/scripts/tests/e2e/evidence/dummy-fixture/output.json" '{"k":"v"}'
+  local head_sha; head_sha="$(git rev-parse HEAD)"
+  run "$PREFILTER" profile "README.md" "$TEST_EVIDENCE_DIR" --range "${base_sha}..${head_sha}"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ "risk_profile=low" ]]
+  run jq -r '.review_profile.risk_profile' "$TEST_EVIDENCE_DIR/review-profile.json"
+  [ "$output" = "low" ]
+  run jq -r '.review_profile.matched_surfaces[]' "$TEST_EVIDENCE_DIR/review-profile.json"
+  [[ "$output" == *"fixtures"* ]]
+}

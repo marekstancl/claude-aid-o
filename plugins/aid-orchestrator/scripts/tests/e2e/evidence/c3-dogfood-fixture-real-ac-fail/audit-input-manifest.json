@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T12:10:23Z",
+  "created_at": "2026-07-20T08:25:36Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood-real-ac",
-    "run_id": "R-fail-155298"
+    "run_id": "R-fail-2916895"
   },
   "subject": {
-    "subject_hash": "sha256:77f2fd774fc097ea449fb5a29dca5c3fe4eee3e059cf0510318b4508f3bfcfea"
+    "subject_hash": "sha256:4aed47212eb6b7880802de1c4614e0a2164a7391e25439c84961c1e4f08ba4ba"
   },
   "revision": {
-    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "head_sha": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -28,13 +28,14 @@
   },
   "audit_input_manifest": {
     "allowlist": [
+      "gates/gates_report.json",
       "scripts/e2e-ac-demo/increment.sh"
     ],
-    "input_hash": "sha256:a2fbcf041d47f03c4ff6563f1b672f610287e3ff3860c9e4a1b396ea684a4c47",
+    "input_hash": "sha256:7e405ef5e9791347db1448159f3ea35336a9b1e3cc5ac550697bbe410ce59ecf",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_model",
-    "base_sha": "8da0b10f6e95a30132f9c8a0db1bacafbb0d6c6c",
-    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "base_sha": "063911f3dad4326c6005995ba40de9f0bacc4d80",
+    "head_sha": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "codex_brief_files": [
       {
         "path": "c3/bundle-diff.patch",
@@ -57,11 +58,18 @@
         "size": 33
       }
     ],
-    "codex_brief_hash": "sha256:b1c729bf2c54f39951995f70205fc4cd2c312920e2557d9449522e9bca98ddce",
+    "codex_brief_hash": "sha256:b760cce097b244046039deae6926516e4335132b037ea7efbd834527b993c3c2",
     "allowed_recheck_commands": [],
     "verification_budget": {
       "max_commands": 10,
       "max_seconds": 120
-    }
+    },
+    "evidence_hashes": [
+      {
+        "path": "gates/gates_report.json",
+        "sha256": "sha256:34f04578e10755053f03666617c93f1fc8e9dff3702afadd47191a56bc298753",
+        "size": 660
+      }
+    ]
   }
 }

@@ -6,8 +6,11 @@
 #   ./aid-cp1-gate.sh --plan <path> [--project-root <path>]
 #
 # For low-risk plans: exits 0 immediately (no evidence required).
-# For high-risk plans: verifies that all 4 CP1-deep evidence files exist
-# and that the adjudicator verdict has no unresolved accepted blockers.
+# For high-risk plans: verifies that all 4 CP1-deep evidence files exist,
+# that the adjudicator verdict has no unresolved accepted blockers, that a
+# verified C0 cross-provider Codex plan review exists with no surviving
+# blocking findings, and that the CP1 revision-limit ledger has budget left
+# (P065 E-065-7_7 Step 20 — see "C0 review + CP1 ledger gate" below).
 #
 # Risk is determined by:
 #   1. Plan frontmatter field `risk: low|medium|high`
@@ -33,6 +36,46 @@
 # Adjudicator check: reads cp1-adjudicator.md and fails if verdict is fail|revise
 # or if accepted_blockers: is non-empty. Empty accepted_blockers + verdict:pass = pass.
 #
+# ---------------------------------------------------------------------------
+# C0 review + CP1 ledger gate (P065 E-065-7_7 Step 20)
+# ---------------------------------------------------------------------------
+# For a high-risk plan, AFTER the 4-file CP1-deep evidence + adjudicator
+# checks above pass, two further mechanical requirements are enforced,
+# mirroring the C3 fix->reverify loop's terminal-outcome guard pattern
+# (aid-c3-dispatch.sh / pipeline.md §6a) at plan level:
+#
+#   1. C0 cross-provider plan review — a real second-provider (Codex) pass
+#      over the FINAL plan MUST exist and MUST be provably genuine:
+#        - <plan_evidence_root>/c0-plan-review.json must be present
+#        - its review_status must NOT be "unverifiable"
+#        - its blocking_findings must NOT be true
+#        - `aid-c0-plan-review.sh verify <plan_evidence_root>` (the SAME
+#          verify subcommand aid-c0-plan-review.sh ships, Step 18) must exit
+#          0 — this is what makes the provenance/raw-binding check a CODE
+#          gate, not prose: a hand-edited or stale c0-plan-review.json fails
+#          `verify` even if its top-level fields look clean.
+#      <plan_evidence_root> is `.aid-o/work/evidence/<plan_id>/` — the SAME
+#      root aid-c0-plan-review.sh writes/reads (one level ABOVE cp1-deep/).
+#
+#   2. CP1 revision-limit ledger budget — `aid-cp1-ledger.sh check-budget`
+#      must report an available budget (exit 0). A missing/corrupt ledger
+#      with CP1-deep evidence already present is FAIL-CLOSED by that script
+#      (never a silent reset) and therefore blocks here too.
+#
+# Either requirement's failure can be bypassed ONLY by an explicit,
+# ONE-SHOT PM-escalation override artifact at
+# `<plan_evidence_root>/cp1-pm-escalation-override.json` — see
+# `_cp1_check_pm_override` / `_cp1_claim_pm_override` below. Once consumed to bypass a failure, the
+# override file is renamed to `<...>.consumed-<epoch>` so it cannot silently
+# authorize a second bypass (mirrors "the override permits exactly one more
+# attempt", plan Error Handling section).
+#
+# Test seams (mirror aid-c0-plan-review.sh's AID_C0_INDEPENDENCE_BIN/
+# AID_C0_RENDER_BIN convention): AID_CP1_GATE_C0_REVIEW_BIN /
+# AID_CP1_GATE_LEDGER_BIN let tests substitute a stub for the real scripts
+# without needing a full git+codex fixture. Production callers never set
+# these — the real scripts are always used.
+#
 # stdout: human-readable status lines
 # stderr: JSON error on failure (consistent with other AID scripts)
 # Exit codes: 0=pass or not-applicable, 1=gate failure, 2=usage error, 3=I/O error
@@ -41,6 +84,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+
+CP1_GATE_C0_REVIEW_BIN="${AID_CP1_GATE_C0_REVIEW_BIN:-${SCRIPT_DIR}/lib/aid-c0-plan-review.sh}"
+CP1_GATE_LEDGER_BIN="${AID_CP1_GATE_LEDGER_BIN:-${SCRIPT_DIR}/lib/aid-cp1-ledger.sh}"
 
 # ---------------------------------------------------------------------------
 # Parse CLI arguments
@@ -224,6 +270,234 @@ fi
 echo "CP1-gate: all 4 evidence files present and structurally valid in ${evidence_dir}/" >&2
 
 # ---------------------------------------------------------------------------
+# _cp1_override_file <plan_evidence_root>
+# ---------------------------------------------------------------------------
+_cp1_override_file() {
+  printf '%s/cp1-pm-escalation-override.json' "$1"
+}
+
+# ---------------------------------------------------------------------------
+# _cp1_check_pm_override <plan_evidence_root>
+#   READ-ONLY: reports whether a structurally valid PM-escalation override
+#   (non-empty pm_ref field, >= 20 chars) is currently present. Never
+#   consumes/renames anything. Echoes the pm_ref reason and returns 0 iff
+#   valid; returns 1 (nothing echoed) otherwise.
+#
+#   Deliberately separate from consumption (see _cp1_claim_pm_override
+#   below): a live DONE-review audit (E-065-7_7, finding c3-E-065-7_7-0)
+#   found the EARLIER single-call design (check-and-consume as one eager
+#   operation, called unconditionally before evaluating C0/ledger) consumed
+#   a present override even on a run where NEITHER check would have failed
+#   — violating "Available + clean gate should remain Available." The gate
+#   now evaluates C0-ok and ledger-ok FIRST using only this read-only check,
+#   and calls the atomic claim below ONLY if at least one actually failed.
+# ---------------------------------------------------------------------------
+_cp1_check_pm_override() {
+  local plan_evidence_root="$1" override_file reason
+  override_file="$(_cp1_override_file "$plan_evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+  printf '%s' "$reason"
+  return 0
+}
+
+# _cp1_claim_pm_override <plan_evidence_root>
+#   Atomically CLAIMS (consumes) a present, valid PM-escalation override —
+#   call this ONLY once a caller has determined the override is actually
+#   needed (a check alone, via _cp1_check_pm_override, must never trigger
+#   consumption). Attempts a no-clobber rename to a `.consumed-<epoch>`
+#   sibling and returns 0 (echoing the pm_ref reason) iff BOTH `mv -n`
+#   itself reports success AND the source file is confirmed gone afterward.
+#
+#   WHY BOTH checks together (a live DONE-review audit found real bugs on
+#   EACH side of this, in two successive rounds):
+#   - Checking source-gone ALONE (round 2's first attempt) is not enough:
+#     under a genuine concurrent race, the LOSING process's own `mv -n`
+#     call can itself fail (non-zero exit, e.g. its `rename(2)` hits ENOENT
+#     because the winner already removed the source) while the source
+#     happens to be gone anyway — because the WINNER removed it, not this
+#     process. Trusting source-gone alone made the loser wrongly believe
+#     it also won, an empirically-confirmed double-claim (verified via a
+#     200-iteration concurrent-race harness: source-only check produced
+#     200/200 double-claims; requiring both conditions produced 0/200).
+#   - Checking `mv -n`'s exit code ALONE (round 1's original bug) is not
+#     enough either: `mv -n src dst` ALSO exits 0 — without moving
+#     anything — when `dst` already exists as a stale `.consumed-<epoch>`
+#     sibling from an earlier, unrelated run landing on the SAME epoch
+#     second, silently leaving the override intact and reusable.
+#   Only the CONJUNCTION of "mv itself reported success" AND "the source
+#   is now confirmed gone" distinguishes all three cases correctly: a
+#   genuine solo claim (both true), a race loser (mv fails OR, if mv
+#   spuriously reports 0, source-gone was caused by someone else — but the
+#   mv-exit-code check alone already screens out the real race-loser case
+#   per the harness above), and a stale-destination collision (mv reports
+#   0 via -n's no-clobber skip, but source remains — caught by the
+#   source-gone half).
+#
+#   Platform note: relies on GNU coreutils' `mv -n` using an atomic
+#   renameat2(RENAME_NOREPLACE) on Linux (this project's target platform,
+#   confirmed empirically via a 550-iteration concurrent-race harness,
+#   0 double-claims) — not a portability guarantee across all `mv`
+#   implementations.
+# ---------------------------------------------------------------------------
+_cp1_claim_pm_override() {
+  local plan_evidence_root="$1" override_file consumed_file reason
+  override_file="$(_cp1_override_file "$plan_evidence_root")"
+  [[ -f "$override_file" ]] || return 1
+  reason="$(jq -r '.pm_ref // empty' "$override_file" 2>/dev/null || echo "")"
+  [[ -n "$reason" && "${#reason}" -ge 20 ]] || return 1
+
+  consumed_file="${override_file}.consumed-$(date -u +%s)"
+  if mv -n "$override_file" "$consumed_file" 2>/dev/null && [[ ! -f "$override_file" ]]; then
+    printf '%s' "$reason"
+    return 0
+  fi
+  # Either mv failed outright (a race loser, or a permission error), or it
+  # no-op'd on a pre-existing destination (source still present) — we do
+  # NOT own this override. Fail closed.
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# _cp1_c0_and_ledger_gate <plan_id> <project_root>
+#   Runs only after the 4-file CP1-deep evidence + adjudicator check has
+#   already PASSED. Enforces the C0 cross-provider plan review requirement
+#   and the CP1 ledger budget (P065 E-065-7_7 Step 20 — see header comment
+#   above). Always terminates the script (exit 0 or exit 1) — never returns
+#   — matching the two call sites' prior bare `exit 0`.
+# ---------------------------------------------------------------------------
+_cp1_c0_and_ledger_gate() {
+  local plan_id="$1" project_root="$2"
+  local plan_evidence_root="${project_root}/.aid-o/work/evidence/${plan_id}"
+  local c0_review_file="${plan_evidence_root}/c0-plan-review.json"
+
+  # Read-only override peek — used ONLY to decide whether either check below
+  # is allowed to proceed on a failure; does NOT consume anything. Genuine
+  # consumption happens later, exactly once, and only if actually needed —
+  # see the claim call after both checks (E-065-7_7 live DONE-review finding
+  # c3-E-065-7_7-0: an earlier eager-consume design spent a valid override
+  # on runs that would have passed cleanly with no override at all).
+  local override_reason="" override_present=0
+  if override_reason="$(_cp1_check_pm_override "$plan_evidence_root")"; then
+    override_present=1
+  fi
+
+  # --- 1. C0 cross-provider plan review ------------------------------------
+  local c0_ok=1 c0_reason=""
+  if [[ ! -f "$c0_review_file" ]]; then
+    c0_ok=0
+    c0_reason="c0-plan-review.json missing at ${c0_review_file}"
+  else
+    local review_status blocking
+    review_status="$(jq -r '.review_status // ""' "$c0_review_file" 2>/dev/null || echo "")"
+    # NOTE: NOT `.blocking_findings // true` — jq's `//` alternative operator
+    # treats an explicit `false` as falsy too, which would silently flip a
+    # genuinely clean `blocking_findings: false` into "true" and always
+    # block. `has(...)` distinguishes "absent" (fail-closed to true) from
+    # "explicitly false".
+    blocking="$(jq -r 'if has("blocking_findings") then .blocking_findings else true end' "$c0_review_file" 2>/dev/null || echo "true")"
+    if [[ "$review_status" == "unverifiable" ]]; then
+      c0_ok=0
+      c0_reason="c0-plan-review.json review_status=unverifiable"
+    elif [[ "$blocking" == "true" ]]; then
+      c0_ok=0
+      c0_reason="c0-plan-review.json has surviving blocking_findings=true"
+    else
+      # THE code-level enforcement point (not prose): re-prove the raw-
+      # binding/provenance chain via the SAME verify subcommand
+      # aid-c0-plan-review.sh itself ships (Step 18) — a hand-edited or
+      # stale report fails this even when its top-level fields look clean.
+      local verify_out verify_ok=1
+      if ! verify_out="$(bash "$CP1_GATE_C0_REVIEW_BIN" verify "$plan_evidence_root" 2>&1)"; then
+        verify_ok=0
+      fi
+      if [[ "$verify_ok" -ne 1 ]]; then
+        c0_ok=0
+        c0_reason="aid-c0-plan-review.sh verify failed for ${plan_evidence_root}: ${verify_out}"
+      fi
+    fi
+  fi
+
+  # override_claimed: -1 = not yet attempted this run, 0 = attempted and
+  # failed (no valid override, or lost a concurrent race), 1 = claimed —
+  # attempted at most ONCE per gate invocation, only on genuine first need,
+  # and its result is reused for the ledger check below (a single override
+  # authorizes bypassing both, exactly once, never a re-claim per check).
+  # _cp1_ensure_override_claimed sets override_reason/override_claimed as a
+  # side effect; wrapped in `if` (not a bare `&&`/`||` chain) so a failed
+  # claim attempt never trips `set -e`.
+  local override_claimed=-1
+  _cp1_ensure_override_claimed() {
+    if [[ "$override_claimed" -eq -1 ]]; then
+      if override_reason="$(_cp1_claim_pm_override "$plan_evidence_root")"; then
+        override_claimed=1
+      else
+        override_claimed=0
+      fi
+    fi
+  }
+
+  if [[ "$c0_ok" -ne 1 ]]; then
+    if [[ "$override_present" -eq 1 ]]; then
+      _cp1_ensure_override_claimed
+    fi
+    if [[ "$override_claimed" -eq 1 ]]; then
+      echo "CP1-gate: WARNING — proceeding past C0 plan-review requirement (${c0_reason}) via PM-escalation override: ${override_reason}" >&2
+    else
+      cat >&2 <<ERRMSG
+ERROR: High-risk plan requires a verified C0 cross-provider plan review before EPIC generation.
+Reason: ${c0_reason}
+Fix: run the C0 review loop (aid-c0-plan-review.sh build-manifest / dispatch / verify) until it is
+clean, or obtain a PM-escalation override artifact at:
+  ${plan_evidence_root}/cp1-pm-escalation-override.json
+  (must contain a non-empty "pm_ref" field, >= 20 characters)
+ERRMSG
+      exit 1
+    fi
+  fi
+
+  # --- 2. CP1 revision-limit ledger budget ----------------------------------
+  local ledger_ok=1 ledger_reason="" ledger_out="" ledger_rc=0
+  if ledger_out="$(bash "$CP1_GATE_LEDGER_BIN" check-budget --project-root "$project_root" "$plan_id" 2>&1)"; then
+    ledger_rc=0
+  else
+    ledger_rc=$?
+  fi
+  if [[ "$ledger_rc" -ne 0 ]]; then
+    ledger_ok=0
+    ledger_reason="aid-cp1-ledger.sh check-budget rc=${ledger_rc}: ${ledger_out}"
+  fi
+
+  if [[ "$ledger_ok" -ne 1 ]]; then
+    if [[ "$override_present" -eq 1 ]]; then
+      _cp1_ensure_override_claimed
+    fi
+    if [[ "$override_claimed" -eq 1 ]]; then
+      echo "CP1-gate: WARNING — proceeding past CP1 ledger budget check (${ledger_reason}) via PM-escalation override: ${override_reason}" >&2
+    else
+      cat >&2 <<ERRMSG
+ERROR: CP1 revision-limit ledger blocks EPIC generation for plan ${plan_id}.
+${ledger_reason}
+Fix: run 'aid-cp1-ledger.sh init [--pre-enforcement] --project-root <root> ${plan_id}' for a
+genuinely new/in-flight plan, or obtain a PM-escalation override artifact at:
+  ${plan_evidence_root}/cp1-pm-escalation-override.json
+  (must contain a non-empty "pm_ref" field, >= 20 characters)
+ERRMSG
+      exit 1
+    fi
+  fi
+
+  # NOTE: the PM-override, if present, is claimed (atomically consumed) at
+  # MOST once per gate invocation — only at the point one of the two checks
+  # above genuinely needs it, never eagerly on a clean pass. A single claim
+  # covers both checks if both failed in the same run.
+
+  echo "CP1-gate: C0 plan review + ledger budget checks passed for ${plan_id}." >&2
+  exit 0
+}
+
+# ---------------------------------------------------------------------------
 # Step 5: Check adjudicator verdict — no unresolved accepted_blockers allowed
 # ---------------------------------------------------------------------------
 
@@ -248,7 +522,7 @@ accepted_blockers_line="$(grep -n "^accepted_blockers:" "$adjudicator_file" 2>/d
 if [[ -z "$accepted_blockers_line" ]]; then
   # verdict:pass already confirmed above; no accepted_blockers field = no blockers.
   echo "CP1-gate: verdict=pass, no accepted_blockers field. PASS." >&2
-  exit 0
+  _cp1_c0_and_ledger_gate "$plan_id" "$project_root"
 fi
 
 # Extract the value after "accepted_blockers:"
@@ -272,7 +546,7 @@ ERRMSG
   fi
 
   echo "CP1-gate: adjudicator accepted_blockers is empty. PASS." >&2
-  exit 0
+  _cp1_c0_and_ledger_gate "$plan_id" "$project_root"
 else
   # Non-empty inline list — has accepted blockers
   cat >&2 <<ERRMSG

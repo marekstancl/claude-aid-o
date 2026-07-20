@@ -228,6 +228,54 @@ _build() {
   [ "$output" = "0" ]
 }
 
+@test "8th DONE-review audit fix ('gate evidence integrity'): manifest binds evidence-class allowlist entries to a sealed {path,sha256,size} digest" {
+  _build high
+  [ "$status" -eq 0 ]
+
+  # evidence_hashes[] must contain both evidence-class entries, matching
+  # the ACTUAL bytes on disk at build-manifest time.
+  local real_gates_sha; real_gates_sha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/gates_report.json" | awk '{print $1}')"
+  local real_gates_size; real_gates_size="$(wc -c < "$TEST_EVIDENCE_DIR/gates_report.json" | tr -d '[:space:]')"
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .sha256' "$MANIFEST"
+  [ "$output" = "$real_gates_sha" ]
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .size' "$MANIFEST"
+  [ "$output" = "$real_gates_size" ]
+
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="final_report.md") | .sha256' "$MANIFEST"
+  [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+  # Production source files (changed paths) are NOT in evidence_hashes —
+  # they're independently git-verifiable, unlike runtime evidence.
+  run jq -r '[.audit_input_manifest.evidence_hashes[] | select(.path=="src/app.ts")] | length' "$MANIFEST"
+  [ "$output" = "0" ]
+
+  # Full schema shape: every entry has path+sha256+size, sha256 well-formed.
+  run jq -e '.audit_input_manifest.evidence_hashes | all(has("path") and has("sha256") and has("size"))' "$MANIFEST"
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$MANIFEST"
+  [ "$status" -eq 0 ]
+
+  # A hash mismatch (post-seal tamper) is detectable: the manifest's stored
+  # value must NOT change just because the file on disk changes afterward.
+  printf 'TAMPERED AFTER SEAL\n' > "$TEST_EVIDENCE_DIR/gates_report.json"
+  run jq -r '.audit_input_manifest.evidence_hashes[] | select(.path=="gates_report.json") | .sha256' "$MANIFEST"
+  [ "$output" = "$real_gates_sha" ]
+  [ "$output" != "sha256:$(sha256sum "$TEST_EVIDENCE_DIR/gates_report.json" | awk '{print $1}')" ]
+}
+
+@test "8th DONE-review audit fix: the rendered C3 prompt exposes evidence_hashes as an authoritative binding" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  local prompt="$TEST_EVIDENCE_DIR/c3/codex-prompt.txt"
+  [ -f "$prompt" ]
+  run grep -c "AUTHORITATIVE evidence digests" "$prompt"
+  [ "$output" -ge 1 ]
+  run grep -c "gates_report.json=sha256:" "$prompt"
+  [ "$output" -ge 1 ]
+}
+
 @test "AC3: prior verifier-output-*.md are included in allowlist when present, omitted when absent" {
   # absent → not in allowlist
   _build high
@@ -1093,6 +1141,39 @@ EOF
   # and the stdout sha matches the captured event stream
   local ssha="sha256:$(sha256sum "$TEST_EVIDENCE_DIR/c3/codex-events.jsonl" | awk '{print $1}')"
   [ "$(jq -r '.dispatch.stdout_sha256' "$DJSON")" = "$ssha" ]
+}
+
+@test "post-merge fix ('control_protocol envelope' finding, 10th DONE-review audit): c3-dispatch.json carries the full protocol-v2 envelope and passes aid-protocol-validate.sh" {
+  _seed_manifest high
+  _dispatch_seams
+  FAKE_CODEX_MODE=valid run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$DJSON" ]
+
+  # Envelope fields aid-evidence-verify.sh's V2_ARTIFACTS scan requires on
+  # ANY schema_version:"aid-2.0" file, not just the ones with a dedicated
+  # payload schema (this artifact was missing ALL of these before the fix,
+  # not just control_protocol — the first-missing-field error only ever
+  # named control_protocol because it's earliest in the required-fields loop).
+  run jq -r '.control_protocol' "$DJSON"; [ "$output" = "aid-2.0" ]
+  run jq -r '.identity.project_id' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  run jq -r '.subject.subject_hash' "$DJSON"; [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.revision.head_sha' "$DJSON"; [ "$output" = "$HEAD_SHA" ]
+  run jq -r '.status' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  run jq -r '.verdict.kind' "$DJSON"; [ -n "$output" ] && [ "$output" != "null" ]
+  # provenance.dispatch_mode is the GENERAL protocol-v2 envelope concept
+  # (how was this artifact's content produced — deterministic script here),
+  # distinct from independence.*_level's C3-specific "cross_provider" — the
+  # bug fixed here was conflating the two under the same field.
+  run jq -r '.provenance.dispatch_mode' "$DJSON"; [ "$output" = "deterministic" ]
+  run jq -r '.independence.achieved_independence_level' "$DJSON"; [ "$output" = "cross_provider" ]
+
+  run bash "$VALIDATE" "$DJSON"
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$DJSON" --check-fingerprint
+  [ "$status" -eq 0 ]
+  run bash "$VALIDATE" "$DJSON" --current-head "$HEAD_SHA"
+  [ "$status" -eq 0 ]
 }
 
 @test "step5/AC2: prompt is rendered deterministically from the committed template (provenance recorded, no residual {{)" {

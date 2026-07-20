@@ -259,6 +259,11 @@ _drive_two_attempts() {
   # latest attempt (attempt-02) is clean → top-level outcome:"clean".
   run jq -r '.outcome' "$SUM"
   [ "$output" = "clean" ]
+
+  # P065 E-065-7_7 Finding B: current_attempt tracks whichever attempt is
+  # CURRENTLY canonical — after two sequential calls, that is attempt 2.
+  run jq -r '.current_attempt' "$SUM"
+  [ "$output" = "2" ]
 }
 
 # ─── AC4: `verify --reference` against an individual attempt directory ──────
@@ -282,6 +287,194 @@ _drive_two_attempts() {
   # committed historical attempt still verify after HEAD moves on.
   run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR/c3/attempt-01"
   [ "$status" -eq 2 ]
+}
+
+# ─── AC4b (P065 E-065-7_7 DONE-review Finding B): plain `verify` on the
+# canonical evidence_dir after attempt-mode dispatch ─────────────────────────
+# CP2 independently reproduced that BEFORE this fix, `verify <evidence_dir>`
+# (no --reference, no attempt path) failed with "required artifact missing"
+# for EVERY attempt-mode dispatch — including the very first one — because
+# raw dispatch artifacts live only under c3/attempt-NN/c3/, never mirrored to
+# the canonical c3/ root. This is exactly pipeline.md §6's documented standard
+# sequence (`AID_C3_ATTEMPT=1 dispatch` then plain `verify`), so this bug was
+# reachable on every ordinary C3 dispatch, not just multi-round fix-loops.
+
+@test "Finding B: plain verify succeeds immediately after a SINGLE attempt-mode dispatch (pipeline.md's documented sequence)" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-single-01" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session thread-single-01"* ]]
+}
+
+@test "Finding B: plain verify after two attempts checks attempt-02's raw evidence, not stale attempt-01's" {
+  _drive_two_attempts
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session thread-attempt-02"* ]]
+  [[ "$output" == *"$HEAD2"* ]]
+  [[ "$output" != *"thread-attempt-01"* ]]
+}
+
+@test "Finding B: tampering the CURRENT attempt's raw evidence makes plain verify fail" {
+  _drive_two_attempts
+
+  # Corrupt attempt-02's (the current one) raw last-message — a post-hoc edit.
+  jq '.findings = []' "$TEST_EVIDENCE_DIR/c3/attempt-02/c3/codex-last-message.json" \
+    > "$TEST_TMPDIR/tampered.json"
+  cp "$TEST_TMPDIR/tampered.json" "$TEST_EVIDENCE_DIR/c3/attempt-02/c3/codex-last-message.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"NOT verified"* ]]
+}
+
+@test "Finding B: tampering an OLD (non-current) attempt's raw evidence does NOT affect plain verify" {
+  _drive_two_attempts
+
+  # Corrupt attempt-01's (the OLD, non-current) raw last-message.
+  jq '.reviewed_head = "0000000000000000000000000000000000dead"' \
+    "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json" > "$TEST_TMPDIR/tampered.json"
+  cp "$TEST_TMPDIR/tampered.json" "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/codex-last-message.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session thread-attempt-02"* ]]
+}
+
+@test "Finding B: current_attempt pointing at a missing attempt directory fails closed" {
+  _drive_two_attempts
+  jq '.current_attempt = 9' "$TEST_EVIDENCE_DIR/c3/loop-summary.json" > "$TEST_TMPDIR/ls.json"
+  cp "$TEST_TMPDIR/ls.json" "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"attempt-09"* ]]
+  [[ "$output" == *"missing"* ]]
+}
+
+@test "Finding B: a non-integer current_attempt fails closed" {
+  _drive_two_attempts
+  jq '.current_attempt = "two"' "$TEST_EVIDENCE_DIR/c3/loop-summary.json" > "$TEST_TMPDIR/ls.json"
+  cp "$TEST_TMPDIR/ls.json" "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"not a positive integer"* ]]
+}
+
+@test "Finding B: a canonical report hand-edited out of sync with the pointed-at attempt fails closed" {
+  _drive_two_attempts
+  # Directly mutate the CANONICAL report only — neither attempt directory is
+  # touched, and the pointer (current_attempt:2) is left alone. Proves the
+  # new report<->attempt equality check, not the pre-existing raw-evidence
+  # checks (which only run AFTER this one).
+  jq '.audit_report.reviewed_head = "0000000000000000000000000000000000dead"' \
+    "$TEST_EVIDENCE_DIR/audit-report.json" > "$TEST_TMPDIR/canonical.json"
+  cp "$TEST_TMPDIR/canonical.json" "$TEST_EVIDENCE_DIR/audit-report.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"does not match"* ]]
+}
+
+@test "Finding B: current_attempt's own raw evidence missing (attempt dir present but empty) fails closed" {
+  _drive_two_attempts
+  rm -f "$TEST_EVIDENCE_DIR/c3/attempt-02/c3/c3-dispatch.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"required artifact missing"* ]]
+  [[ "$output" == *"attempt-02"* ]]
+}
+
+@test "Finding B regression: legacy (AID_C3_ATTEMPT unset) dispatch+verify is byte-for-byte unaffected" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-legacy-verify" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+
+  run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TEST_EVIDENCE_DIR/c3/loop-summary.json" ]
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified — codex session thread-legacy-verify"* ]]
+}
+
+# ─── CP2 round-9e finding: a corrupted c3/loop-summary.json must fail closed
+#     with a clean message in every reader, never crash under set -euo
+#     pipefail (found in cmd_verify, cmd_dispatch's bounded-loop check, and
+#     cmd_escalate — all three read loop-summary.json's fields via a jq
+#     command substitution that had no `|| var=default` guard, unlike every
+#     other jq read in this file) ────────────────────────────────────────────
+
+@test "CP2 round-9e: cmd_verify fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-verify" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Valid JSON, but not an object — models a realistic truncated/partial
+  # write, not a hand-crafted parse error (jq -e . alone would accept this).
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" verify "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"NOT verified"* ]]
+  [[ "$output" == *"loop-summary.json is not a valid JSON object"* ]]
+}
+
+@test "CP2 round-9e: cmd_dispatch's bounded-loop check fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-dispatch" \
+         FAKE_C3_BLOCKING=false FAKE_C3_FINDINGS='[]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  local head2; head2="$(_commit_change 2)"
+  _build_manifest "$BASE_SHA" "$head2"
+  local bh2; bh2="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head2" FAKE_C3_BRIEF_HASH="$bh2" FAKE_C3_THREAD_ID="thread-corrupt-dispatch-2"
+  AID_C3_ATTEMPT=2 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"not a valid JSON object"* ]]
+}
+
+@test "CP2 round-9e: cmd_escalate fails closed (not a crash) on a corrupted c3/loop-summary.json" {
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-corrupt-escalate" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Unchecked error path.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/loop-summary.json"
+
+  run bash "$DISPATCH" escalate "$TEST_EVIDENCE_DIR" "a genuinely long enough test reason here"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"not a valid JSON object"* ]]
 }
 
 # ─── AC5: canonical-copy failure → fail closed ──────────────────────────────
@@ -360,6 +553,36 @@ _drive_two_attempts() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"already recorded a completed dispatch"* ]]
+}
+
+@test "CP2 round-9f: collision guard on a CORRUPTED (torn-write) attempt c3-dispatch.json does not crash — treats it as retriable" {
+  # Deliberately BLOCKING (not clean), mirroring the sibling collision-guard
+  # test above — a "clean" outcome would hit the SEPARATE terminal-outcome
+  # guard (round-4/6 hardening) before ever reaching this test's own target
+  # code, and this test needs to isolate the collision guard specifically.
+  local head1; head1="$(_commit_change 1)"
+  _build_manifest "$BASE_SHA" "$head1"
+  local bh1; bh1="$(jq -r '.audit_input_manifest.codex_brief_hash' "$TEST_EVIDENCE_DIR/audit-input-manifest.json")"
+  export FAKE_C3_HEAD="$head1" FAKE_C3_BRIEF_HASH="$bh1" FAKE_C3_THREAD_ID="thread-torn" \
+         FAKE_C3_BLOCKING=true \
+         FAKE_C3_FINDINGS='[{"severity":"high","area":"correctness","finding":"Unchecked error path.","recommendation":"Add an explicit error branch.","action_owner":"implementer"}]'
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+
+  # Simulate a torn/interrupted write of THIS attempt's own dispatch.json —
+  # valid JSON, but not an object (a realistic partial-write shape, same
+  # class as the loop-summary.json corruption this round's sibling fixes
+  # address). The collision guard's read of .dispatch.outcome must not crash
+  # under set -euo pipefail; it must treat this as "not dispatched" (a
+  # corrupted file cannot possibly BE a genuinely completed dispatch) and
+  # allow the retry to proceed and overwrite it.
+  printf '[]\n' > "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/c3-dispatch.json"
+
+  AID_C3_ATTEMPT=1 run bash "$DISPATCH" dispatch "$TEST_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"PRECONDITION FAIL"* ]]
+  run jq -r '.dispatch.outcome' "$TEST_EVIDENCE_DIR/c3/attempt-01/c3/c3-dispatch.json"
+  [ "$output" = "dispatched" ]
 }
 
 # ─── AC3 (cont): "escalated" once recheck_count reaches the policy budget ───

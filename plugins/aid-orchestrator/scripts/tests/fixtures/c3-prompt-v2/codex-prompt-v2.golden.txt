@@ -30,7 +30,24 @@ is defined ONLY by this prompt and the output schema.
 - Brief hash you MUST echo back verbatim: `sha256:3333333333333333333333333333333333333333333333333333333333333333`
 - Diff: `c3/bundle-diff.patch` — Changed-file scope: `c3/bundle-scope.txt`
 - Acceptance criteria: `c3/bundle-plan-ac.md` — Review profile: `c3/bundle-review-profile.json`
-- Allow-listed evidence you may cite: `final_report.md, gates_report.json, verifier-output-1.md`
+- Allow-listed evidence you may cite: `final_report.md, gates_report.json, verifier-output-1.md`. Path base: entries under this run's
+  evidence directory, `.aid-o/work/evidence/E-065-4_7/R-E065-4` (e.g. `gates_report.json`, `gates/gates_report.json`,
+  `final_report.md`, `verifier-output-*.md`) are relative to `.aid-o/work/evidence/E-065-4_7/R-E065-4` — resolve them
+  as `.aid-o/work/evidence/E-065-4_7/R-E065-4/<entry>`. Every OTHER entry is a changed production source file and is
+  already relative to the repository root you are `--cd`'d into. If an allow-listed evidence
+  artifact is genuinely absent even after resolving it against `.aid-o/work/evidence/E-065-4_7/R-E065-4`, that is a
+  real finding — do not silently assume you resolved the path wrong instead.
+- AUTHORITATIVE evidence digests, sealed at manifest-build time: `final_report.md=sha256:4444444444444444444444444444444444444444444444444444444444444444 (100 bytes); gates_report.json=sha256:5555555555555555555555555555555555555555555555555555555555555555 (200 bytes)` (format
+  `<path>=sha256:<hex> (<size> bytes)`, one per evidence-class entry above — NOT the changed
+  production source files, which you can independently verify via `git show bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:<path>`
+  since they are committed). These evidence-class files (gate reports, final report, verifier
+  output) are runtime artifacts, not committed source, so this sealed digest is the ONLY thing
+  that can bind a claimed PASS to an immutable value: hash the file you actually read (an
+  always-allowed read-only operation) and compare it to the matching `final_report.md=sha256:4444444444444444444444444444444444444444444444444444444444444444 (100 bytes); gates_report.json=sha256:5555555555555555555555555555555555555555555555555555555555555555 (200 bytes)` entry.
+  A mismatch means the file changed after this manifest was sealed — treat that as a HIGH finding
+  regardless of what the file currently says. A file with NO matching `final_report.md=sha256:4444444444444444444444444444444444444444444444444444444444444444 (100 bytes); gates_report.json=sha256:5555555555555555555555555555555555555555555555555555555555555555 (200 bytes)` entry
+  (e.g. it did not exist yet at build-manifest time) cannot have its PASS claim bound this way —
+  that absence is itself something to weigh when deciding how much to trust it.
 - The ONLY commands you may run to RE-EXECUTE a named test/gate: `[]` (an
   explicit list — see check-table step 3; this is separate from, and stronger than, the always-
   allowed reads below)
@@ -66,9 +83,13 @@ the plan boundary, not by you, unless a specific command is explicitly listed in
    operation, e.g. `sha256sum`) and compare to the input manifest; emit a finding on any mismatch.
    Cite ONLY allow-listed paths + the repo.
 3. Verify gate results WITHOUT re-running their suites: for every gate result whose PASS a
-   merge-blocking acceptance criterion or a critical/high area depends on, check the committed gate
-   artifact against the reviewed HEAD, its recorded exit code, and its command fingerprint (all
-   always-allowed reads) — emit a finding on any mismatch or missing artifact. `[]`
+   merge-blocking acceptance criterion or a critical/high area depends on, check the gate artifact
+   against the reviewed HEAD, its recorded exit code, and its command fingerprint (all always-allowed
+   reads) — emit a finding on any mismatch or missing artifact. If the gate artifact is one of the
+   evidence-class entries listed in `final_report.md=sha256:4444444444444444444444444444444444444444444444444444444444444444 (100 bytes); gates_report.json=sha256:5555555555555555555555555555555555555555555555555555555555555555 (200 bytes)`, also hash it yourself and compare against
+   its `final_report.md=sha256:4444444444444444444444444444444444444444444444444444444444444444 (100 bytes); gates_report.json=sha256:5555555555555555555555555555555555555555555555555555555555555555 (200 bytes)` entry (see above) — this is what makes "committed" meaningful for a
+   NOT-git-tracked runtime artifact; a hash mismatch is itself a finding, independent of what the
+   file currently claims. `[]`
    governs ONLY re-executing a specific named test/gate command in full — it does NOT govern the
    ordinary reads this step otherwise requires. You may re-run a gate ONLY if its exact command is
    listed in `[]`, and only within `max_commands=10 max_seconds=120`. Do NOT

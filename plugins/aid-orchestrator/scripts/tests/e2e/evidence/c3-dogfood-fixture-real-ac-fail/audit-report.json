@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_report",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T12:12:24Z",
+  "created_at": "2026-07-20T08:27:04Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood-real-ac",
-    "run_id": "R-fail-155298"
+    "run_id": "R-fail-2916895"
   },
   "subject": {
-    "subject_hash": "sha256:77f2fd774fc097ea449fb5a29dca5c3fe4eee3e059cf0510318b4508f3bfcfea"
+    "subject_hash": "sha256:4aed47212eb6b7880802de1c4614e0a2164a7391e25439c84961c1e4f08ba4ba"
   },
   "revision": {
-    "head_sha": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "head_sha": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -28,39 +28,21 @@
   },
   "findings": [
     {
-      "fingerprint": "sha256:7b07777d31afa4e51214c00bdd1d4b1a898c235295e7939a8e2ece5b3362f1c3",
+      "fingerprint": "sha256:ff4fc35f0d0b43098a23f5393d7b77919a008ceb71ec533b1425d50bf08820de",
       "occurrence_id": "c3-E-c3-dogfood-real-ac-0",
       "severity": "high",
       "action_owner": "implementer",
-      "area": "acceptance behavior",
-      "finding": "Allow-listed `scripts/e2e-ac-demo/increment.sh` computes `$1 + 2`, not the required input integer plus exactly 1.",
-      "recommendation": "Change the arithmetic to add exactly 1 and provide evidence that exercises the required behavior."
+      "area": "acceptance criteria / scripts/e2e-ac-demo/increment.sh",
+      "finding": "The reviewed HEAD adds the only changed file as claimed, but increment_by_one echoes its argument plus 2 rather than plus exactly 1, and it has no one-line comment directly above the function. The sealed gates/gates_report.json matches its authoritative SHA-256 and records the HEAD, the exact smoke-check command, and exit code 1.",
+      "recommendation": "Change the arithmetic to add exactly 1 and add the required one-line explanatory comment immediately above the function definition; regenerate passing gate evidence."
     },
     {
-      "fingerprint": "sha256:3fd9bc74deeabd76c8840f49bd8c0c6a16d88a2eabcf612f32bc64864906eaaf",
+      "fingerprint": "sha256:998ed1ef3d8f3496fa868c70f96e1263d1b824bf7fea61fa1d5f1a80cca793d8",
       "occurrence_id": "c3-E-c3-dogfood-real-ac-1",
-      "severity": "medium",
-      "action_owner": "implementer",
-      "area": "acceptance documentation",
-      "finding": "Allow-listed `scripts/e2e-ac-demo/increment.sh` has no one-line explanatory comment directly above `increment_by_one`.",
-      "recommendation": "Add the required one-line comment immediately above the function definition."
-    },
-    {
-      "fingerprint": "sha256:ce1c019f82babd47607657bcd8b9499c0a029944d1995e6b0552f1ec0e869e83",
-      "occurrence_id": "c3-E-c3-dogfood-real-ac-2",
-      "severity": "high",
-      "action_owner": "gate-fixer",
-      "area": "gate evidence",
-      "finding": "Repository inspection found no committed gate artifact for this run that binds a PASS to the reviewed HEAD with a recorded exit code and command fingerprint; the empty recheck allow-list prevents rerunning a gate.",
-      "recommendation": "Provide a committed, HEAD-bound gate artifact containing the exact command fingerprint and successful exit code, then re-audit after correcting the implementation."
-    },
-    {
-      "fingerprint": "sha256:1fe34df429d3a75389adcccbf5a3a7b678b39f69d11140d5c1526fb98bcee73b",
-      "occurrence_id": "c3-E-c3-dogfood-real-ac-3",
       "severity": "info",
-      "area": "lifecycle state matrix",
-      "finding": "No stateful mechanism is in scope: `increment_by_one` is stateless arithmetic, so no state-by-event transitions or inverse-edge tests apply.",
-      "recommendation": "No lifecycle action is required."
+      "area": "lifecycle state-matrix",
+      "finding": "No stateful mechanism is in scope: the changed artifact is a pure shell function with no lifecycle state, status field, enum, or transition edges. A state × event matrix is not applicable.",
+      "recommendation": "No lifecycle transition tests are required for this change."
     }
   ],
   "audit_report": {
@@ -71,9 +53,9 @@
     "provider": "codex",
     "model": "gpt-5.6-terra",
     "process_id": "00000000-0000-7000-8000-000000000000",
-    "input_manifest_hash": "sha256:a2fbcf041d47f03c4ff6563f1b672f610287e3ff3860c9e4a1b396ea684a4c47",
-    "codex_brief_hash": "sha256:b1c729bf2c54f39951995f70205fc4cd2c312920e2557d9449522e9bca98ddce",
-    "reviewed_head": "88f26978c56ada592cf14bbd2638dff85e0fd063",
+    "input_manifest_hash": "sha256:7e405ef5e9791347db1448159f3ea35336a9b1e3cc5ac550697bbe410ce59ecf",
+    "codex_brief_hash": "sha256:b760cce097b244046039deae6926516e4335132b037ea7efbd834527b993c3c2",
+    "reviewed_head": "fe94ccc7ba435830868acf1eea93d5ec46870e4d",
     "outcome": "dispatched"
   }
 }

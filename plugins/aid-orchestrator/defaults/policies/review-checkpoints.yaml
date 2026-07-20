@@ -22,6 +22,17 @@ review_checkpoints:
       - critical
       - high
 
+  # C0 cross-provider (Codex) plan review — bounded fix->reverify loop at
+  # plan level, mirrors c3-audit-policy.yaml's c3_fix_loop shape. Governs
+  # scripts/lib/aid-c0-plan-review.sh + the CP1 ledger
+  # (scripts/lib/aid-cp1-ledger.sh) + the aid-cp1-gate.sh enforcement wired
+  # in P065 E-065-7_7 Step 20 — see skills/review-checkpoint-contracts.md
+  # "C0 Cross-Provider Plan Review" for the full contract.
+  cp1_codex_review:
+    enabled_for: [high]            # risk profiles that require this review; low/docs/medium
+                                    # (no high-risk pattern match) never trigger it
+    max_rechecks: 2                # initial review + up to 2 rechecks = 3 Codex runs max
+
   # Trivial skip — skip CP2/CP6 for small changes
   skip_trivial: true
   trivial_threshold:

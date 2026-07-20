@@ -400,12 +400,39 @@ cmd_build_manifest() {
 
   # input_hash: per-path sha256("<path>:" + sha256(content)); sort lines
   # (LC_ALL=C); join with newlines; input_hash = "sha256:" + sha256(joined).
+  #
+  # evidence_hashes[] (8th DONE-review audit, P065 E-065-7_7: "Gate evidence
+  # integrity" finding): production source-file allowlist entries are
+  # already independently verifiable — Codex can `git show <head_sha>:<path>
+  # | sha256sum` them itself, since they're committed. Evidence-class
+  # entries (final_report.md / gates_report.json / gates/gates_report.json /
+  # verifier-output-*.md) are NOT git-tracked (runtime evidence, gitignored
+  # by design — see aid-cp1-ledger.sh's identical NOT COMMITTED rationale),
+  # so there was previously nothing in the SEALED manifest binding a claimed
+  # PASS to an immutable digest: Codex could hash the file itself but had no
+  # authoritative value to compare against, i.e. no way to distinguish a
+  # genuine result from one edited after manifest sealing. Mirrors
+  # codex_brief_files[]'s existing {path,sha256,size} shape (same schema
+  # entry type, audit-input-manifest.schema.json) rather than inventing a
+  # new one.
+  local evidence_hashes_json="[]"
   local input_lines=()
   local p rp inner
   for p in "${allow_sorted[@]}"; do
     rp="${read_path[$p]:-}"
     inner="$(_sha256_file "$rp")"
     input_lines+=("$(_sha256_str "${p}:${inner}")")
+    case "$p" in
+      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+        local ev_sz=0
+        [[ -f "$rp" ]] && ev_sz="$(wc -c < "$rp" | tr -d '[:space:]')"
+        [[ -n "$ev_sz" ]] || ev_sz=0
+        evidence_hashes_json="$(printf '%s' "$evidence_hashes_json" \
+          | jq -c --arg p "$p" --arg s "sha256:$inner" --argjson z "$ev_sz" \
+              '. + [{path: $p, sha256: $s, size: $z}]')" \
+          || _fail "cannot assemble evidence_hashes entry for $p"
+        ;;
+    esac
   done
 
   local joined="" input_hash
@@ -474,6 +501,7 @@ cmd_build_manifest() {
     --arg codex_brief_hash "$codex_brief_hash" \
     --argjson allowed_recheck_commands "$arc_json" \
     --argjson verification_budget "$vbudget_json" \
+    --argjson evidence_hashes "$evidence_hashes_json" \
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
@@ -496,7 +524,8 @@ cmd_build_manifest() {
         codex_brief_files: $codex_brief_files,
         codex_brief_hash: $codex_brief_hash,
         allowed_recheck_commands: $allowed_recheck_commands,
-        verification_budget: $verification_budget
+        verification_budget: $verification_budget,
+        evidence_hashes: $evidence_hashes
       }
     }' > "$manifest_tmp" \
     || { rm -f "$manifest_tmp"; _fail "jq failed to render the manifest"; }
@@ -572,22 +601,35 @@ _looks_rate_limited() {
 #   capture its --json stdout stream, stderr, and last-message. Independence is
 #   provider + fresh process + `--sandbox read-only` (NOT a filesystem jail).
 #
+#   SHARED TRANSPORT (P065 E-065-7_7 Step 18): this helper carries no C3-specific
+#   coupling — it takes only a project root + a pre-rendered prompt file and
+#   returns raw captures via the five output-file parameters. `aid-c0-plan-review.sh`
+#   sources this file (guarded by the BASH_SOURCE!=0 check at the bottom, so
+#   sourcing never runs C3's own CLI dispatcher) and reuses THIS function verbatim
+#   for the C0 plan-review Codex launch. The only knobs it reads are $CODEX_MODEL
+#   (a plain global, not a C3-only concept — a caller may repoint it before
+#   calling) and the timeout env var below (AID_C3_TIMEOUT_SECONDS is read FIRST,
+#   for exact backward compatibility with existing C3 tests/callers; the generic
+#   AID_CODEX_ISOLATED_TIMEOUT_SECONDS is the non-C3-named equivalent for new
+#   callers that should not need to know this transport started life in C3).
+#
 #   ⚠️ DISCOVERED ISSUE — `--output-schema` is deliberately NOT passed. Step 4's
 #   c3-codex-response.schema.json uses `if/then/else` + `allOf`, and Step 1's
 #   empirical finding (codex-stream-sample/fields.md §`--output-schema empirical
 #   behavior`) is that Codex forwards the schema to OpenAI strict structured
 #   output, which HARD-FAILS (HTTP 400 "'if' is not permitted") on any
 #   conditional keyword. Passing it would 400 every dispatch. The trusted gate
-#   is the bridge's own _validate_response (Step 6, next step), NOT the backend.
-#   We do NOT strip if/then from the schema to work around this — it is not ours
-#   to change, and the conditional rules are load-bearing for bridge validation.
+#   is the caller's own explicit jq response validator (_validate_response for
+#   C3, its C0 analogue for aid-c0-plan-review.sh), NOT the backend. We do NOT
+#   strip if/then from either schema to work around this — it is not ours to
+#   change, and the conditional rules are load-bearing for bridge validation.
 #
 #   Returns the codex/timeout exit code (124 = timed out).
 _run_codex_isolated() {
   local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
   local prompt rc=0
   prompt="$(cat "$prompt_file")"
-  timeout "${AID_C3_TIMEOUT_SECONDS:-900}" \
+  timeout "${AID_C3_TIMEOUT_SECONDS:-${AID_CODEX_ISOLATED_TIMEOUT_SECONDS:-900}}" \
     codex exec --json \
       --cd "$project_root" \
       --sandbox read-only \
@@ -606,22 +648,53 @@ _run_codex_isolated() {
 #   6 template_id  7 template_sha256  8 rendered_prompt_sha256  9 codex_version
 #   10 invoked(true|false)  11 exit_code(int|"")  12 outcome  13 session_id
 #   14 codex_model  15 events_valid(true|false)  16 stdout_sha256
-#   17 raw_response_sha256  18 achieved_level
+#   17 raw_response_sha256  18 achieved_level  19 manifest_path
+#
+# manifest_path (P065 E-065-7_7 post-merge fix, "control_protocol envelope"
+# finding — aid-evidence-verify.sh/aid-protocol-validate.sh require every
+# protocol-v2 artifact to carry the FULL envelope: schema_version,
+# artifact_type, producer, created_at, control_protocol, identity, subject,
+# revision, status, verdict, provenance. This writer had schema_version/
+# artifact_type/producer/created_at/provenance but was missing
+# control_protocol/identity/revision/status/verdict entirely — never caught
+# because aid-release-policy.sh's verification_report step (the ONLY thing
+# that runs aid-evidence-verify.sh against a real C3-active EPIC's evidence
+# pack) had itself never actually been exercised for real across any of
+# this plan's 7 EPICs until now. project_id/epic_id/run_id are read from
+# the manifest exactly like _write_unverifiable already does, for the same
+# reason: this function has no other source for them.
 _write_dispatch_json() {
   local out="$1" project_root="$2" head_sha="$3" codex_brief_hash="$4" required_level="$5"
   local template_id="$6" template_sha256="$7" rendered_prompt_sha256="$8" codex_version="$9"
   local invoked="${10}" exit_code="${11}" outcome="${12}" session_id="${13}" codex_model="${14}"
   local events_valid="${15}" stdout_sha256="${16}" raw_response_sha256="${17}" achieved_level="${18}"
+  local manifest_path="${19:-}"
 
   local iso_now tmp
   iso_now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   tmp="$out.tmp.$$"
+
+  local project_id="unknown" epic_id="" run_id=""
+  if [[ -n "$manifest_path" && -f "$manifest_path" ]]; then
+    project_id="$(jq -r '.identity.project_id // "unknown"' "$manifest_path" 2>/dev/null || echo unknown)"
+    [[ -n "$project_id" && "$project_id" != "null" ]] || project_id="unknown"
+    epic_id="$(jq -r '.identity.epic_id // ""' "$manifest_path" 2>/dev/null || echo "")"
+    run_id="$(jq -r '.identity.run_id // ""' "$manifest_path" 2>/dev/null || echo "")"
+    [[ "$epic_id" == "null" ]] && epic_id=""
+    [[ "$run_id" == "null" ]] && run_id=""
+  fi
+  local subject_hash="sha256:$(_sha256_str "$head_sha")"
 
   jq -n \
     --arg schema_version "aid-2.0" \
     --arg artifact_type "c3_dispatch" \
     --arg producer "$PRODUCER" \
     --arg created_at "$iso_now" \
+    --arg control_protocol "aid-2.0" \
+    --arg project_id "$project_id" \
+    --arg epic_id "$epic_id" \
+    --arg run_id "$run_id" \
+    --arg subject_hash "$subject_hash" \
     --arg generated_by_tool "aid-c3-dispatch.sh#dispatch" \
     --arg project_root "$project_root" \
     --arg head_sha "$head_sha" \
@@ -647,9 +720,16 @@ _write_dispatch_json() {
       artifact_type: $artifact_type,
       producer: $producer,
       created_at: $created_at,
-      provenance: {dispatch_mode: "cross_provider", generated_by_tool: $generated_by_tool},
+      control_protocol: $control_protocol,
+      identity: ({project_id: $project_id}
+                 + (if $epic_id != "" then {epic_id: $epic_id} else {} end)
+                 + (if $run_id  != "" then {run_id:  $run_id}  else {} end)),
+      subject: {subject_hash: $subject_hash, project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
+      revision: {head_sha: $head_sha, head_is_current: true, freshness: "current"},
+      status: "pass",
+      verdict: {kind: "none", ready: false},
+      provenance: {dispatch_mode: "deterministic", generated_by_tool: $generated_by_tool},
       executor: {kind: $executor_kind, reported_model: $codex_reported_model, codex_version: $codex_version},
-      subject: {project_root: $project_root, head_sha: $head_sha, codex_brief_hash: $codex_brief_hash},
       prompt: {template_id: $template_id, template_sha256: $template_sha256, rendered_prompt_sha256: $rendered_prompt_sha256},
       dispatch: {
         invoked: $invoked,
@@ -1403,16 +1483,23 @@ _c3_write_loop_summary() {
     *)    top_outcome='null' ;;
   esac
 
+  # current_attempt: which attempt-NN/ directory's raw evidence + report is
+  # CURRENTLY the one copied to the canonical evidence-root path — set
+  # unconditionally to $n on every call, since this function only ever runs
+  # from _c3_finalize_attempt right after attempt $n's canonical copy (P065
+  # E-065-7_7 DONE-review Finding B: cmd_verify needs this to resolve raw
+  # dispatch artifacts, which are never mirrored to the canonical root).
   jq -n \
     --argjson attempts "$attempts" \
     --argjson recheck_count "$recheck_count" \
     --argjson outcome "$top_outcome" \
     --argjson escalation_reason "$escalation_reason" \
+    --argjson current_attempt "$n" \
     --arg created_at "$iso_now" \
     '{schema_version:"aid-2.0", artifact_type:"c3_loop_summary",
       producer:"orchestrator@done-review", created_at:$created_at,
       attempts:$attempts, recheck_count:$recheck_count, outcome:$outcome,
-      escalation_reason:$escalation_reason}' \
+      escalation_reason:$escalation_reason, current_attempt:$current_attempt}' \
     > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp"; return 1; }
   return 0
@@ -1515,8 +1602,21 @@ cmd_dispatch() {
     # established `--force --reason '<>=20 chars>'` pattern.
     local existing_summary="$c3_dir/loop-summary.json"
     if [[ -f "$existing_summary" ]]; then
+      # CP2 round-9e finding: a corrupted/truncated loop-summary.json (valid
+      # JSON, wrong top-level type) crashed this UNGUARDED read under
+      # `set -euo pipefail` instead of failing closed. This check exists
+      # specifically to prevent an ambiguous/unprovable state from being
+      # treated as safe-to-proceed (rounds 1-6 hardening) — a corrupted file
+      # is exactly such a state, so it must PRECONDITION FAIL here, not
+      # silently fall through as prior_loop_outcome="" (which would mean
+      # "no history, proceed freely" — the opposite of what a corrupted file
+      # actually tells us).
+      if ! jq -e 'type == "object"' "$existing_summary" >/dev/null 2>&1; then
+        echo "PRECONDITION FAIL: c3/loop-summary.json exists but is not a valid JSON object — cannot determine loop state; refusing further automatic dispatch (bounded-loop requirement: state must be provably safe, never assumed)." >&2
+        exit 1
+      fi
       local prior_loop_outcome
-      prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)"
+      prior_loop_outcome="$(jq -r '.outcome // ""' "$existing_summary" 2>/dev/null)" || prior_loop_outcome=""
       if [[ "$prior_loop_outcome" != "" && "$prior_loop_outcome" != "unverifiable" ]]; then
         if [[ -z "${AID_C3_FORCE_BEYOND_ESCALATION:-}" || "${#AID_C3_FORCE_BEYOND_ESCALATION}" -lt 20 ]]; then
           echo "PRECONDITION FAIL: c3/loop-summary.json already recorded outcome=\"$prior_loop_outcome\" for this evidence dir — automatic further C3 dispatches are rejected (bounded-loop requirement: only an in-progress or \"unverifiable\" outcome may proceed without override; \"$prior_loop_outcome\" is treated as terminal, whether or not it is a recognized value)." >&2
@@ -1534,7 +1634,16 @@ cmd_dispatch() {
     # Collision guard — see header comment above.
     if [[ -f "$attempt_dir/c3/c3-dispatch.json" ]]; then
       local prior_outcome
-      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c3/c3-dispatch.json" 2>/dev/null)"
+      # CP2 round-9f finding: guarded like every other jq read in this file
+      # (`cmd || var=default` idiom). A corrupted/torn c3-dispatch.json (the
+      # exact torn-write scenario this collision guard exists to let a
+      # caller retry past — see "retrying a non-dispatched slot is allowed"
+      # below) cannot possibly BE a genuinely completed prior dispatch
+      # (_write_dispatch_json always writes valid JSON atomically via
+      # temp+mv), so falling back to "" (not dispatched, retry allowed) on a
+      # read failure is the semantically correct default here, not a
+      # fail-closed block — unlike loop-summary.json's bounded-loop checks.
+      prior_outcome="$(jq -r '.dispatch.outcome // ""' "$attempt_dir/c3/c3-dispatch.json" 2>/dev/null)" || prior_outcome=""
       if [[ "$prior_outcome" == "dispatched" ]]; then
         echo "PRECONDITION FAIL: c3/attempt-$attempt_nn already recorded a completed dispatch (outcome=dispatched); refusing to reuse — pass a new AID_C3_ATTEMPT" >&2
         exit 1
@@ -1603,7 +1712,7 @@ cmd_dispatch() {
     # bridge NEVER launches a fallback itself (that is a later orchestration EPIC).
     echo "aid-c3-dispatch: cross_provider unavailable this run (pre-check rc=$precheck_rc): $precheck_out" >&2
     _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
-      "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+      "$required_level" "" "" "" "" "false" "" "unavailable" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
     # Fail-closed: a non-dispatched run STILL gets an honest unverifiable report.
     _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
@@ -1621,10 +1730,61 @@ cmd_dispatch() {
   plan_sha256="$(jq -r '.audit_input_manifest.codex_brief_files[]? | select(.path=="c3/bundle-plan-ac.md") | .sha256' "$manifest" | head -n1)"
   [[ -n "$plan_sha256" ]] || plan_sha256="sha256:"
   input_manifest_hash="sha256:$(sha256sum "$manifest" | awk '{print $1}')"
-  evidence_paths="$(jq -r '.audit_input_manifest.allowlist // [] | join(", ")' "$manifest")"
+
+  # DONE-review #4 live-audit finding (P065 E-065-7_7): allowlist[] mixes TWO
+  # path bases with no marker — production-file entries (from
+  # AID_CHANGED_PATHS, Step 3 above) are already repo-root-relative; evidence-
+  # artifact entries (final_report.md / gates_report.json / gates/gates_
+  # report.json / verifier-output-*.md, written relative to evidence_dir by
+  # this same Step 3) are NOT. This is the exact IMP-245 bug class (Codex
+  # runs with --cd project_root, not --cd evidence_dir) on the one array that
+  # earlier IMP-245 fix never touched — a live audit tried to read an
+  # allow-listed evidence path, resolved it against project_root as every
+  # other sealed path here already correctly does, found nothing, and
+  # (correctly, given what it was told) reported the artifact absent. Rewrite
+  # just the evidence-artifact subset to be project_root-relative, matching
+  # bundle_diff_path_rel etc. below; production-file entries are left as-is
+  # (they are already correct).
+  local evidence_paths_arr=() evidence_paths_resolved=() _ep
+  mapfile -t evidence_paths_arr < <(jq -r '.audit_input_manifest.allowlist // [] | .[]' "$manifest")
+  for _ep in "${evidence_paths_arr[@]}"; do
+    case "$_ep" in
+      final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
+        evidence_paths_resolved+=("$(realpath -m --relative-to="$project_root" "$evidence_dir/$_ep" 2>/dev/null || echo "$_ep")") ;;
+      *)
+        evidence_paths_resolved+=("$_ep") ;;
+    esac
+  done
+  evidence_paths=""
+  if [[ ${#evidence_paths_resolved[@]} -gt 0 ]]; then
+    local _ep_first=true
+    for _ep in "${evidence_paths_resolved[@]}"; do
+      if [[ "$_ep_first" == true ]]; then evidence_paths="$_ep"; _ep_first=false
+      else evidence_paths="$evidence_paths, $_ep"; fi
+    done
+  fi
   arc_str="$(jq -c '.audit_input_manifest.allowed_recheck_commands // []' "$manifest")"
   vbudget_str="$(jq -c '.audit_input_manifest.verification_budget // {}' "$manifest")"
   output_schema_path="$(realpath -m --relative-to="$project_root" "$RESPONSE_SCHEMA" 2>/dev/null || echo "$RESPONSE_SCHEMA")"
+
+  # evidence_hashes (8th DONE-review audit, "gate evidence integrity" finding):
+  # human-readable rendering of audit_input_manifest.evidence_hashes[] — the
+  # sealed {path,sha256,size} digests for the NOT-git-tracked evidence-class
+  # allowlist entries, computed once by build-manifest and never touched
+  # again. Told to Codex as the AUTHORITATIVE value (see the prompt template
+  # body) so a PASS claim can be bound to an immutable digest instead of
+  # trusting whatever bytes happen to be on disk when the audit runs.
+  local evidence_hashes_str=""
+  local eh_arr=() eh_entry eh_p eh_s eh_z eh_first=true
+  mapfile -t eh_arr < <(jq -c '.audit_input_manifest.evidence_hashes // [] | .[]' "$manifest")
+  for eh_entry in "${eh_arr[@]}"; do
+    eh_p="$(jq -r '.path' <<<"$eh_entry")"
+    eh_s="$(jq -r '.sha256' <<<"$eh_entry")"
+    eh_z="$(jq -r '.size' <<<"$eh_entry")"
+    if [[ "$eh_first" == true ]]; then evidence_hashes_str="${eh_p}=${eh_s} (${eh_z} bytes)"; eh_first=false
+    else evidence_hashes_str="$evidence_hashes_str; ${eh_p}=${eh_s} (${eh_z} bytes)"; fi
+  done
+  [[ -n "$evidence_hashes_str" ]] || evidence_hashes_str="(none)"
 
   # IMP-245 path-resolution fix: Codex runs with `--cd "$project_root"` (the repo
   # root), NOT `--cd "$evidence_dir"` — so every sealed-artifact path handed to it
@@ -1634,12 +1794,16 @@ cmd_dispatch() {
   # surfaced this: once the prompt actually told Codex it's allowed to read these
   # files (fixing the OTHER half of IMP-245), Codex tried to and genuinely
   # couldn't find them from its own --cd anchor, correctly reporting them absent.
-  local plan_path_rel input_manifest_path_rel bundle_diff_path_rel bundle_scope_path_rel review_profile_path_rel
+  local plan_path_rel input_manifest_path_rel bundle_diff_path_rel bundle_scope_path_rel review_profile_path_rel evidence_dir_path_rel
   plan_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-plan-ac.md" 2>/dev/null || echo "c3/bundle-plan-ac.md")"
   input_manifest_path_rel="$(realpath -m --relative-to="$project_root" "$manifest" 2>/dev/null || echo "audit-input-manifest.json")"
   bundle_diff_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-diff.patch" 2>/dev/null || echo "c3/bundle-diff.patch")"
   bundle_scope_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-scope.txt" 2>/dev/null || echo "c3/bundle-scope.txt")"
   review_profile_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir/c3/bundle-review-profile.json" 2>/dev/null || echo "c3/bundle-review-profile.json")"
+  # DONE-review #4 finding: give the auditor the resolved evidence-dir root
+  # explicitly, so it does not have to infer which base each evidence_paths
+  # entry resolves against.
+  evidence_dir_path_rel="$(realpath -m --relative-to="$project_root" "$evidence_dir" 2>/dev/null || echo "$evidence_dir")"
 
   local vars_json="$work_c3_dir/codex-prompt-vars.json"
   jq -n \
@@ -1655,6 +1819,8 @@ cmd_dispatch() {
     --arg acceptance_criteria_path "$plan_path_rel" \
     --arg review_profile_path "$review_profile_path_rel" \
     --arg evidence_paths "$evidence_paths" \
+    --arg evidence_dir_path "$evidence_dir_path_rel" \
+    --arg evidence_hashes "$evidence_hashes_str" \
     --arg output_schema_path "$output_schema_path" \
     --arg allowed_recheck_commands "$arc_str" \
     --arg verification_budget "$vbudget_str" \
@@ -1663,6 +1829,7 @@ cmd_dispatch() {
       codex_brief_hash:$codex_brief_hash, bundle_diff_path:$bundle_diff_path,
       bundle_scope_path:$bundle_scope_path, acceptance_criteria_path:$acceptance_criteria_path,
       review_profile_path:$review_profile_path, evidence_paths:$evidence_paths,
+      evidence_dir_path:$evidence_dir_path, evidence_hashes:$evidence_hashes,
       output_schema_path:$output_schema_path, allowed_recheck_commands:$allowed_recheck_commands,
       verification_budget:$verification_budget}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }
@@ -1679,7 +1846,7 @@ cmd_dispatch() {
     # non-dispatched (not invoked) rather than launching Codex with no prompt.
     echo "aid-c3-dispatch: prompt render failed: $render_prov" >&2
     _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
-      "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable"
+      "$required_level" "" "" "" "" "false" "" "render_failed" "" "$CODEX_MODEL" "false" "" "" "unavailable" "$manifest_for_call"
     # Fail-closed: render is a precondition for invoking Codex; no trusted audit.
     _write_unverifiable "$work_evidence_dir" "$manifest_for_call" unavailable "unavailable" "" "" "" || true
     if [[ "$attempt_explicit" -eq 1 ]]; then
@@ -1734,7 +1901,7 @@ cmd_dispatch() {
   _write_dispatch_json "$work_c3_dir/c3-dispatch.json" "$project_root" "$head_sha" "$codex_brief_hash" \
     "$required_level" "$template_id" "$template_sha256" "$rendered_prompt_sha256" "$codex_version" \
     "true" "$codex_rc" "$outcome" "$session_id" "$CODEX_MODEL" "$events_valid" \
-    "$stdout_sha256" "$raw_response_sha256" "$achieved" \
+    "$stdout_sha256" "$raw_response_sha256" "$achieved" "$manifest_for_call" \
     || { echo "PRECONDITION FAIL: cannot write c3-dispatch.json" >&2; exit 1; }
 
   # --- Step 8 (E-065-2_7 Step 6): validate → normalize → write report ----------
@@ -1877,11 +2044,57 @@ cmd_verify() {
   [[ -d "$evidence_dir" ]] || _vfail "evidence_dir not a directory: $evidence_dir"
 
   local c3_dir="$evidence_dir/c3"
-  local dispatch_json="$c3_dir/c3-dispatch.json"
   local report="$evidence_dir/audit-report.json"
+  local manifest="$evidence_dir/audit-input-manifest.json"
+
+  # --- Step 0 (P065 E-065-7_7 DONE-review Finding B): resolve the CURRENT
+  # attempt's raw-evidence directory, if this evidence_dir has ever used
+  # AID_C3_ATTEMPT layering. Raw dispatch artifacts (c3-dispatch.json,
+  # codex-last-message.json, codex-events.jsonl, codex-prompt.txt) are
+  # written ONLY under c3/attempt-NN/c3/ — never mirrored to the canonical
+  # c3/ root — so a plain `verify <evidence_dir>` after an attempt-mode
+  # dispatch must read them from there, not from the legacy c3/ location.
+  # c3/loop-summary.json's current_attempt (set by _c3_write_loop_summary,
+  # unconditionally, on every _c3_finalize_attempt call) is the single
+  # source of truth for "which attempt is canonical right now." Absent
+  # entirely (this evidence_dir never used AID_C3_ATTEMPT) → unchanged
+  # legacy behavior.
+  local loop_summary="$c3_dir/loop-summary.json"
+  if [[ -f "$loop_summary" ]]; then
+    # CP2 round-9e finding: `jq -e .` alone accepts any syntactically-valid
+    # JSON — including a bare array/scalar/bool, e.g. from a truncated or
+    # partial write — which then crashed the UNGUARDED read below under
+    # `set -euo pipefail`. Require the top-level value to actually be an
+    # object, AND guard the read itself (belt + suspenders, matching every
+    # other jq call in this file's `cmd || var=default` idiom) so a
+    # corrupted file fails closed with a clean message, never a raw crash.
+    jq -e 'type == "object"' "$loop_summary" >/dev/null 2>&1 \
+      || _vfail "c3/loop-summary.json is not a valid JSON object"
+    local cur_attempt
+    cur_attempt="$(jq -r '.current_attempt // empty' "$loop_summary" 2>/dev/null)" || cur_attempt=""
+    if [[ -n "$cur_attempt" ]]; then
+      [[ "$cur_attempt" =~ ^[1-9][0-9]*$ ]] \
+        || _vfail "c3/loop-summary.json current_attempt is not a positive integer: $cur_attempt"
+      local cur_nn resolved_attempt_dir
+      cur_nn="$(printf '%02d' "$cur_attempt")"
+      resolved_attempt_dir="$c3_dir/attempt-$cur_nn"
+      [[ -d "$resolved_attempt_dir" ]] \
+        || _vfail "c3/loop-summary.json points at attempt-$cur_nn but c3/attempt-$cur_nn/ is missing"
+      # The canonical report must be EXACTLY this attempt's own report — a
+      # diverged pointer or a stale/hand-copied canonical report must fail
+      # closed rather than silently verify raw evidence against the wrong
+      # report.
+      [[ -f "$resolved_attempt_dir/audit-report.json" ]] \
+        || _vfail "c3/attempt-$cur_nn/audit-report.json is missing"
+      cmp -s "$resolved_attempt_dir/audit-report.json" "$report" \
+        || _vfail "canonical audit-report.json does not match c3/attempt-$cur_nn/audit-report.json (report and raw evidence must come from the same attempt)"
+      c3_dir="$resolved_attempt_dir/c3"
+    fi
+  fi
+
+  local dispatch_json="$c3_dir/c3-dispatch.json"
   local last_msg="$c3_dir/codex-last-message.json"
   local events="$c3_dir/codex-events.jsonl"
-  local manifest="$evidence_dir/audit-input-manifest.json"
 
   # --- Step 1: every required artifact must exist ---------------------------
   # The manifest is required too (steps 6a/7/8 read it); a hand-forged report
@@ -2132,6 +2345,11 @@ cmd_escalate() {
   local summary="$evidence_dir/c3/loop-summary.json"
   [[ -f "$summary" ]] \
     || _fail "no c3/loop-summary.json at $evidence_dir — nothing to escalate (escalate marks an IN-PROGRESS fix-loop terminal; it does not create one from nothing)"
+  # CP2 round-9e finding: guard against a corrupted/truncated file crashing
+  # the unguarded read below under `set -euo pipefail` — fail closed with a
+  # clean message instead (a corrupted file cannot be proven in-progress).
+  jq -e 'type == "object"' "$summary" >/dev/null 2>&1 \
+    || _fail "c3/loop-summary.json exists but is not a valid JSON object — cannot determine loop state, refusing to escalate"
 
   local cur_outcome
   # CORRECTNESS FIX (E-065-6_7 DONE-review C3 finding, round 5): the original
@@ -2146,7 +2364,7 @@ cmd_escalate() {
   # value: a JSON `null` outcome, which `jq -r '.outcome // ""'` reads back
   # as the empty string. Fail closed on every other value (clean, escalated,
   # unverifiable, or anything unrecognized).
-  cur_outcome="$(jq -r '.outcome // ""' "$summary" 2>/dev/null)"
+  cur_outcome="$(jq -r '.outcome // ""' "$summary" 2>/dev/null)" || cur_outcome=""
   [[ -z "$cur_outcome" ]] \
     || _fail "c3/loop-summary.json already recorded a terminal or non-actionable outcome (\"$cur_outcome\") — escalate only applies to an in-progress, still-blocking loop; refusing to overwrite \"$cur_outcome\""
 
