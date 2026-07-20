@@ -1,9 +1,9 @@
-diff --git a/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-3017212.txt b/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-3017212.txt
+diff --git a/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-239063.txt b/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-239063.txt
 new file mode 100644
-index 0000000..5da38fd
+index 0000000..5c4efcb
 --- /dev/null
-+++ b/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-3017212.txt
++++ b/plugins/aid-orchestrator/scripts/tests/e2e/c3-dogfood-throwaway-marker-239063.txt
 @@ -0,0 +1,3 @@
 +# C3 dogfood throwaway marker (P065 Step 13).
-+# Created 2026-07-16T06:36:48Z — this file and its commit are deleted with the branch
++# Created 2026-07-20T03:33:41Z — this file and its commit are deleted with the branch
 +# before this script exits; never merged into any real branch.

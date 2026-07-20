@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_report",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T06:38:22Z",
+  "created_at": "2026-07-20T03:34:50Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood",
-    "run_id": "R-3017212"
+    "run_id": "R-239063"
   },
   "subject": {
-    "subject_hash": "sha256:3a39fe15706e5a56ea0fae826bac6f9a990fc2051b3c5f6d95adbca1288f48fb"
+    "subject_hash": "sha256:2b3f51e790ee9e1101ff1ef2327bd38a0ba58a8fdb7ab9413def7d8ac388510f"
   },
   "revision": {
-    "head_sha": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
+    "head_sha": "4059b16d60fd2d5476aa836c8186a60f72887c75",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -36,12 +36,11 @@
     "model": "gpt-5.6-terra",
     "outcome": "review_unverifiable",
     "unverifiable_reasons": [
-      "The supplied acceptance-criteria artifact explicitly has no plan/AC source, so the change cannot be assessed against defined acceptance criteria.",
-      "No stateful mechanism is in the reviewed diff; therefore no lifecycle state-transition matrix applies."
+      "The sealed acceptance-criteria document supplies no plan or acceptance criteria, so merge correctness cannot be independently evaluated without assuming unstated requirements."
     ],
     "input_manifest_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "process_id": "00000000-0000-7000-8000-000000000000",
-    "reviewed_head": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
-    "codex_brief_hash": "sha256:0745e9316e18209a51fd43604dd3888c6cf1e44828f0f4ae97791964b22ee59a"
+    "reviewed_head": "4059b16d60fd2d5476aa836c8186a60f72887c75",
+    "codex_brief_hash": "sha256:d80cb20c83f4b64ca68b8c13245640d4bc766b8ec8a5175712c31137d4783167"
   }
 }

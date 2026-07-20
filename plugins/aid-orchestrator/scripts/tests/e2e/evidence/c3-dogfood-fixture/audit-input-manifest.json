@@ -2,18 +2,18 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@done-review",
-  "created_at": "2026-07-16T06:36:49Z",
+  "created_at": "2026-07-20T03:33:42Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "epic_id": "E-c3-dogfood",
-    "run_id": "R-3017212"
+    "run_id": "R-239063"
   },
   "subject": {
-    "subject_hash": "sha256:3a39fe15706e5a56ea0fae826bac6f9a990fc2051b3c5f6d95adbca1288f48fb"
+    "subject_hash": "sha256:2b3f51e790ee9e1101ff1ef2327bd38a0ba58a8fdb7ab9413def7d8ac388510f"
   },
   "revision": {
-    "head_sha": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
+    "head_sha": "4059b16d60fd2d5476aa836c8186a60f72887c75",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -31,18 +31,18 @@
     "input_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_model",
-    "base_sha": "a63fd0c0e95088471cd3a063b33a8df54fe4e997",
-    "head_sha": "db481c5f954f7f00ce8441e1cea055d7b53aee8d",
+    "base_sha": "46ff7b27fd3ca1b66aeea429ee37cdbcb8afdc99",
+    "head_sha": "4059b16d60fd2d5476aa836c8186a60f72887c75",
     "codex_brief_files": [
       {
         "path": "c3/bundle-diff.patch",
-        "sha256": "sha256:4dc7cda567322ed0d4a18023c8b4931955492dc0643be3a16ebbd42678b56b4e",
-        "size": 544
+        "sha256": "sha256:607e7870630819715b18cfc7b4b3f45404c7c9277ce38750836ee6c727089e2e",
+        "size": 541
       },
       {
         "path": "c3/bundle-plan-ac.md",
-        "sha256": "sha256:93aa81ea7001694d799f3aee7ddca50bb92b0197da1ee8f5846078887aed7b37",
-        "size": 118
+        "sha256": "sha256:76a3ae4132d07db6bae1eb5a2e6dce2bac8d89e3eec7ab1d0b07b4fafea9cd41",
+        "size": 117
       },
       {
         "path": "c3/bundle-review-profile.json",
@@ -51,11 +51,11 @@
       },
       {
         "path": "c3/bundle-scope.txt",
-        "sha256": "sha256:c8976788f3a83da13bd8dd82a8f6dbf62610e624ab43f9c2347b139ea4c23cb7",
-        "size": 83
+        "sha256": "sha256:0a0d0b91fccbb6130b6343596bbd15b6a6930273e4e9eb6996ecdc973324fc0a",
+        "size": 82
       }
     ],
-    "codex_brief_hash": "sha256:0745e9316e18209a51fd43604dd3888c6cf1e44828f0f4ae97791964b22ee59a",
+    "codex_brief_hash": "sha256:d80cb20c83f4b64ca68b8c13245640d4bc766b8ec8a5175712c31137d4783167",
     "allowed_recheck_commands": [],
     "verification_budget": {
       "max_commands": 10,
