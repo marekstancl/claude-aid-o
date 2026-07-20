@@ -575,3 +575,42 @@ _write_override() {
   [ "$(_ledger_field P166 '.pm_override.present')" = "true" ]
   [ "$(_ledger_field P166 '.pm_override.ref')" != "null" ]
 }
+
+# ─── concurrency (7th DONE-review audit, P065 E-065-7_7: "CP1 ledger concurrency") ─
+
+@test "increment: two concurrent new-hash increments for the SAME plan_id do not lose an attempt (flock-serialized)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P200
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P200 sha256:concurrent-a >/dev/null 2>&1 &
+  local pid_a=$!
+  bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P200 sha256:concurrent-b >/dev/null 2>&1 &
+  local pid_b=$!
+  wait "$pid_a"; local rc_a=$?
+  wait "$pid_b"; local rc_b=$?
+  [ "$rc_a" -eq 0 ]
+  [ "$rc_b" -eq 0 ]
+  # With the flock fix, both increments are strictly serialized — no
+  # interleaving is possible, so this is a deterministic assertion, not a
+  # probabilistic one: attempts must be exactly 2, both hashes recorded,
+  # regardless of which increment happened to acquire the lock first.
+  [ "$(_ledger_field P200 '.attempts')" = "2" ]
+  [ "$(_ledger_field P200 '.attempts_log | length')" = "2" ]
+  local hashes
+  hashes="$(_ledger_field P200 '.attempts_log | map(.plan_hash) | sort | join(",")')"
+  [ "$hashes" = "sha256:concurrent-a,sha256:concurrent-b" ]
+}
+
+@test "increment: an external holder of the ledger's .lock sidecar blocks a concurrent increment until released (proves flock is genuinely acquired around the read-modify-write)" {
+  bash "$LEDGER" init --project-root "$TEST_PROJECT_ROOT" P201
+  local lockfile; lockfile="$(_ledger_file P201).lock"
+  touch "$lockfile"
+  ( flock -x "$lockfile" sleep 2 ) &
+  local holder_pid=$!
+  sleep 0.3
+  local start; start=$(date +%s)
+  run bash "$LEDGER" increment --project-root "$TEST_PROJECT_ROOT" P201 sha256:blocked-then-through
+  local end; end=$(date +%s)
+  wait "$holder_pid"
+  [ "$status" -eq 0 ]
+  [ "$((end - start))" -ge 1 ]
+  [ "$(_ledger_field P201 '.attempts')" = "1" ]
+}

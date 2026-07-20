@@ -370,6 +370,28 @@ cmd_increment() {
   local ledger_path; ledger_path="$(_ledger_path "$project_root" "$plan_id")"
   [[ -f "$ledger_path" ]] || _fail "ledger not found for ${plan_id} at ${ledger_path} — run 'init' first (increment never auto-creates a ledger)."
 
+  # CONCURRENCY FIX (7th DONE-review audit, P065 E-065-7_7 — "CP1 ledger
+  # concurrency"): everything from the read below through the final write is
+  # an unlocked read-modify-write. Two concurrent new-hash `increment` calls
+  # for the SAME plan_id could both read attempts=N, both derive new_n=N+1,
+  # and the second write would silently clobber the first — losing an
+  # attempts_log entry and letting the bounded-review counter under-count,
+  # which is exactly the limit this ledger exists to enforce. Locked on a
+  # SEPARATE .lock sidecar (not the ledger file itself), matching
+  # aid-emit-dispatch.sh's established flock pattern: locking the data file
+  # itself would race against _write_ledger_json's mktemp+mv (a concurrent
+  # opener landing on the NEW inode after a rotation would acquire a
+  # different lock — the sidecar's inode is stable across rotations).
+  # `_fail` inside the subshell below only terminates the subshell (`exit 1`
+  # scoped to `( ... )`); the `sub_rc` check after the block re-exits the
+  # real process with that same code, preserving _fail's existing
+  # process-wide-failure contract for every caller/test that checks it.
+  local lockfile="${ledger_path}.lock"
+  touch "$lockfile"
+  (
+  flock -x -w 10 200 \
+    || { echo "PRECONDITION FAIL: increment lock timeout for ${plan_id} at ${lockfile} (another increment held it >10s)" >&2; exit 2; }
+
   local ledger_json
   ledger_json="$(_ledger_read_json "$ledger_path")" \
     || _fail "ledger for ${plan_id} at ${ledger_path} is missing/corrupt/unparseable — cannot safely increment (fail-closed; obtain a PM override or investigate before re-init)."
@@ -506,6 +528,9 @@ cmd_increment() {
   _write_ledger_json "$ledger_path" "$new_json" || _fail "cannot write updated ledger to ${ledger_path}"
 
   printf '%s\n' "$new_json"
+  ) 200>"$lockfile"
+  local sub_rc=$?
+  [[ "$sub_rc" -ne 0 ]] && exit "$sub_rc"
   return 0
 }
 
