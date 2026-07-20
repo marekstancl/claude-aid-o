@@ -493,17 +493,27 @@ EOF
   run jq -r '.findings[0].action_owner' "$REPORT"; [ "$output" = "implementer" ]
 }
 
-@test "dispatch: high-risk + Codex-reported unverifiable → status unverifiable with reasons" {
+@test "dispatch: high-risk + Codex-reported unverifiable → status unverifiable with reasons, exit 2" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
-  # NOTE (mirrors aid-c3-dispatch.sh's OWN contract, see its cmd_dispatch Step 9
-  # comment): dispatch's EXIT CODE reflects whether Codex genuinely dispatched a
-  # well-formed stream (transport-level), NOT whether the review content itself
-  # was trustworthy — an honestly-unverifiable-but-well-formed response is still
-  # exit 0; the untrustworthiness lives in c0-plan-review.json's own fields.
+  # 12th DONE-review audit fix ("C0 dispatch lifecycle / fail-closed exit
+  # contract"): this test previously asserted exit 0 here, on the theory
+  # that dispatch's exit code should reflect only transport-level success
+  # (mirroring aid-c3-dispatch.sh's OWN, deliberately more nuanced
+  # contract). That theory was never actually consistent with THIS file's
+  # own _c0_process_response, which already returns non-zero for EVERY
+  # unverifiable path uniformly — genuinely-Codex-reported unverifiable
+  # included (see its `status == "unverifiable"` branch) — with no
+  # distinction from a hash/head/schema-invalid response. C0's own spec
+  # never asked for C3's nuance (see _c0_write_loop_summary's header
+  # comment: "C0's spec never asked for that distinction"). The bug fixed
+  # here was that cmd_dispatch's final exit decision ignored that signal
+  # entirely; now that it doesn't, ANY unverifiable outcome — genuine or
+  # invalid — correctly exits 2, matching what _c0_process_response always
+  # intended to report.
   FAKE_C0_MODE=unverifiable run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   run jq -r '.unverifiable_reasons | length' "$REPORT"
   [ "$output" -ge 1 ]
@@ -560,38 +570,44 @@ EOF
   run jq -r '.outcome' "$REPORT"; [ "$output" = "invalid_output" ]
 }
 
-@test "dispatch: reviewed_plan_hash mismatch → hash_mismatch unverifiable" {
+@test "dispatch: reviewed_plan_hash mismatch → hash_mismatch unverifiable, exit 2" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
   FAKE_C0_MODE=hash_mismatch run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # 12th DONE-review audit fix: a content-invalid response must not report
+  # exit 0 just because the transport call itself succeeded.
+  [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   run jq -r '.outcome' "$REPORT"; [ "$output" = "hash_mismatch" ]
 }
 
-@test "dispatch: reviewed_head mismatch → head_mismatch unverifiable" {
+@test "dispatch: reviewed_head mismatch → head_mismatch unverifiable, exit 2" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
   FAKE_C0_MODE=head_mismatch run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   run jq -r '.outcome' "$REPORT"; [ "$output" = "head_mismatch" ]
 }
 
-@test "dispatch: a C3-shaped (audit_report) response is REJECTED by the C0 schema → invalid_output" {
+@test "dispatch: a C3-shaped (audit_report) response is REJECTED by the C0 schema → invalid_output, exit 2" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
   FAKE_C0_MODE=c3_shaped run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   run jq -r '.outcome' "$REPORT"; [ "$output" = "invalid_output" ]
 }
 
-@test "dispatch: missing action_owner on a high-severity finding → invalid_output" {
+@test "dispatch: missing action_owner on a high-severity finding → invalid_output, exit 2" {
   _build_high
   [ "$status" -eq 0 ]
   _seed_dispatch_env
   FAKE_C0_MODE=missing_action_owner run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 2 ]
   run jq -r '.review_status' "$REPORT"; [ "$output" = "unverifiable" ]
   run jq -r '.outcome' "$REPORT"; [ "$output" = "invalid_output" ]
 }
@@ -1133,6 +1149,9 @@ EOF
   [ "$status" -eq 0 ]
   _seed_dispatch_env
   AID_C0_ATTEMPT=1 FAKE_C0_MODE=hash_mismatch run bash "$DISPATCH" dispatch "$C0_EVIDENCE_DIR"
+  # 12th DONE-review audit fix: exit 2, not 0, for a content-invalid
+  # attempt-mode dispatch (transport-genuine, ledger correctly untouched).
+  [ "$status" -eq 2 ]
 
   run jq -r '.review_status' "$C0_EVIDENCE_DIR/c0/attempt-01/c0-plan-review.json"
   [ "$output" = "unverifiable" ]

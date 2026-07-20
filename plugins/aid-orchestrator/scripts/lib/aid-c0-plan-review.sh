@@ -1498,7 +1498,24 @@ cmd_dispatch() {
     fi
   fi
 
-  if [[ "$outcome" == "dispatched" ]]; then
+  # 12th DONE-review audit fix ("C0 dispatch lifecycle / fail-closed exit
+  # contract"): $presp_rc (captured above from _c0_process_response, "||
+  # presp_rc=$?") was computed but never checked here — the exit code
+  # decision looked ONLY at $outcome, a pure TRANSPORT-level signal (did
+  # the Codex CLI call itself succeed). A transport-genuine but
+  # content-invalid response (hash mismatch, head mismatch, C3-shaped
+  # output, missing action_owner, etc.) makes _c0_process_response write
+  # review_status:"unverifiable" to the report AND return non-zero — but
+  # this function still returned 0, telling the caller the dispatch was
+  # clean when the actual written report says otherwise. The ledger-
+  # increment gate a few lines above already correctly reads the WRITTEN
+  # report's review_status for exactly this reason (see FINDING 1 FIX
+  # comment above) — this closes the same gap for the function's own exit
+  # code. $report_review_status was already read from the CURRENT
+  # attempt's own report earlier in this function; reused here rather than
+  # re-read, since _c0_finalize_attempt only copies that report to the
+  # canonical root, it never mutates the attempt's own copy.
+  if [[ "$outcome" == "dispatched" && "$presp_rc" -eq 0 && "$report_review_status" != "unverifiable" ]]; then
     return 0
   else
     exit 2
