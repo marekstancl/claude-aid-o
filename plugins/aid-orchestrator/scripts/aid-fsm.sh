@@ -34,6 +34,18 @@ source "${SCRIPT_DIR}/lib/aid-cache-preflight.sh"
 # GATES:DONE risk-upgrade precondition below (D4 enforcement, not advisory).
 source "${SCRIPT_DIR}/lib/aid-gate-profile.sh"
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"  # IMP-232 v2.58.0 — canonical plan-level closure + D1 cross-plan gate
+# P064 E-064-1_2 Step 5 — plan-boundary-manifest reader (plan_manifest_path/
+# plan_manifest_get), for the new init-time plan-branch lineage precondition
+# below. Guarded (existence check + `|| true` on the source itself) rather
+# than an unconditional source: a missing/broken lib must NEVER abort this
+# entire CLI for every EPIC — only the new precondition's own runtime check
+# (`declare -F plan_manifest_path`) fails closed, and ONLY for plan_branch-
+# mode plans. Legacy-mode / no-manifest plans must stay unaffected even if
+# this file is absent.
+if [[ -f "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh" || true
+fi
 
 VALID_STATES="READY EXECUTE GATES ESCALATION DONE ERROR"
 
@@ -2158,6 +2170,148 @@ cmd_init() {
     echo "ERROR: jq not installed. Install: apt install jq / brew install jq" >&2
     echo "Run: bash \$AID_PLUGIN_PATH/scripts/aid-check-deps.sh  for full dependency report." >&2
     exit 1
+  fi
+
+  # ── P064 E-064-1_2 Step 5: plan-branch lineage precondition ───────────────
+  # Runs BEFORE the duplicate-state guard below (not after) so a resumed run
+  # on a wrong branch is caught too, not silently allowed to hit the generic
+  # "prevent duplicate init" error first. Deliberately does NOT reuse the
+  # PRE-FLIGHT branch enforcement's own `expected_branch` local — that var is
+  # computed further down, only inside the non-worktree arm — so it is empty
+  # on every worktree invocation. This block computes its own branch name so
+  # it fires identically inside a linked worktree too (mirrors
+  # aid-plan-fsm.sh's own worktree-independent lineage check, unlike THIS
+  # file's PRE-FLIGHT branch enforcement, which intentionally skips itself in
+  # a worktree via is_worktree()).
+  #
+  # Mode-gated: a no-op for `legacy_epic_release_mode` AND for an EPIC id that
+  # derives no plan id / a plan id with no lifecycle manifest at all (ad-hoc
+  # EPICs, every plan predating the lifecycle layer) — `aid_lifecycle_plan_mode`
+  # already documents "no manifest => legacy_epic_release_mode", so both cases
+  # collapse into the same no-op path.
+  #
+  # Fail-closed for a DECLARED `plan_branch` plan only: every way of "not
+  # knowing" (lib not sourced, runtime manifest missing, runtime manifest
+  # unparseable) is a hard block, never a silent downgrade to legacy behavior.
+  local _plan_expected_branch="task/${epic_id}/main"
+  local _pb_stripped="${epic_id%%_*}"
+  local _pb_nnn=""
+  # Same epic-id -> plan-id derivation as cmd_plan_close (search that name in
+  # this file) — reused verbatim, not reinvented. `|| true` keeps this safe
+  # under `set -e` when the epic_id has no digits after "E-" (ad-hoc EPIC,
+  # e.g. a bare "E-test" fixture id): grep finds nothing, _pb_nnn stays empty,
+  # and the block below is skipped entirely.
+  _pb_nnn="$(printf '%s' "$_pb_stripped" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  local _pb_plan_id=""
+  [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
+
+  if [[ -n "$_pb_plan_id" ]]; then
+    # `aid_lifecycle_plan_mode` reads .aid-lifecycle/manifests/<plan_id>.yaml
+    # off the WORKING TREE (root "." => a plain filesystem -f check), not off
+    # a specific git ref. That file is committed ONLY on target_branch — the
+    # plan branch (and every task branch cut from it) is created from
+    # target_branch's HEAD *before* that commit lands, so it is genuinely
+    # absent from their trees. cmd_init's own PRE-FLIGHT branch enforcement
+    # (below) checks out task/<epic_id>/main and LEAVES it checked out for
+    # the rest of the EPIC's lifecycle — so calling aid_lifecycle_plan_mode
+    # against "." directly would silently read legacy_epic_release_mode on
+    # every invocation except the very first (a fresh call still positioned
+    # on target_branch). Extract the file from target_branch's tree into a
+    # throwaway root via `git show` first, so the mode read is correct
+    # regardless of what is currently checked out — this still calls the
+    # real aid_lifecycle_plan_mode (its parsing/defaulting logic is reused
+    # verbatim), it just supplies the right root instead of trusting CWD.
+    local _pb_mode="" _pb_mode_root="" _pb_target_branch=""
+    _pb_target_branch="$(aid_target_branch)"
+    _pb_mode_root="$(mktemp -d 2>/dev/null)" || _pb_mode_root=""
+    if [[ -n "$_pb_mode_root" ]]; then
+      if git show "${_pb_target_branch}:.aid-lifecycle/manifests/${_pb_plan_id}.yaml" \
+           > "${_pb_mode_root}/manifest.yaml.tmp" 2>/dev/null; then
+        mkdir -p "${_pb_mode_root}/.aid-lifecycle/manifests"
+        mv "${_pb_mode_root}/manifest.yaml.tmp" "${_pb_mode_root}/.aid-lifecycle/manifests/${_pb_plan_id}.yaml"
+      fi
+      _pb_mode="$(aid_lifecycle_plan_mode "$_pb_plan_id" "$_pb_mode_root" 2>/dev/null)" || true
+      rm -rf "$_pb_mode_root" 2>/dev/null || true
+    else
+      # mktemp failure (e.g. no writable tmp) — fall back to the CWD read.
+      # Worse-case behavior is the SAME pre-existing legacy-mode default this
+      # whole precondition already treats as safe (no-op), never a false block.
+      _pb_mode="$(aid_lifecycle_plan_mode "$_pb_plan_id" "." 2>/dev/null)" || true
+    fi
+    [[ -z "$_pb_mode" ]] && _pb_mode="legacy_epic_release_mode"
+
+    if [[ "$_pb_mode" == "plan_branch" ]]; then
+      local _pb_reason="" _pb_detail=""
+
+      if ! declare -F plan_manifest_path >/dev/null 2>&1; then
+        _pb_reason="plan_manifest_unavailable"
+        _pb_detail="lib/aid-plan-manifest.sh could not be sourced (expected at ${SCRIPT_DIR}/lib/aid-plan-manifest.sh) — cannot verify plan-branch lineage for a plan declared plan_branch."
+      else
+        local _pb_manifest_path=""
+        _pb_manifest_path="$(plan_manifest_path "$_pb_plan_id")"
+        if [[ ! -f "$_pb_manifest_path" ]]; then
+          _pb_reason="plan_manifest_missing"
+          _pb_detail="Runtime plan-boundary-manifest.json missing for ${_pb_plan_id} at ${_pb_manifest_path} (mode=plan_branch is declared in .aid-lifecycle/manifests/${_pb_plan_id}.yaml, which survives this deletion). Repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
+        else
+          local _pb_entry="" _pb_get_rc=0
+          _pb_entry="$(plan_manifest_get "$_pb_plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")" 2>/dev/null)" || _pb_get_rc=$?
+          if [[ "$_pb_get_rc" -eq 5 ]]; then
+            _pb_reason="plan_manifest_corrupt"
+            _pb_detail="Runtime plan-boundary-manifest.json for ${_pb_plan_id} at ${_pb_manifest_path} is present but unparseable."
+          elif [[ -z "$_pb_entry" ]]; then
+            _pb_reason="plan_manifest_missing"
+            _pb_detail="No epic_runs[] entry for ${epic_id} in ${_pb_plan_id}'s plan-boundary-manifest.json (never epic-started under this plan, or the entry was lost). Run 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' first, or repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
+          else
+            local _pb_status="" _pb_task_branch="" _pb_base=""
+            _pb_status="$(jq -r '.status // empty' <<<"$_pb_entry" 2>/dev/null)" || true
+            _pb_task_branch="$(jq -r '.task_branch // empty' <<<"$_pb_entry" 2>/dev/null)" || true
+            _pb_base="$(jq -r '.epic_base_commit // empty' <<<"$_pb_entry" 2>/dev/null)" || true
+
+            if [[ "$_pb_status" == "abandoned" ]]; then
+              _pb_reason="epic_abandoned"
+              _pb_detail="${epic_id} is recorded status=abandoned in ${_pb_plan_id}'s plan-boundary-manifest.json — restarting an abandoned EPIC without a PM decision would silently resurrect it."
+            elif [[ "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
+              _pb_reason="plan_branch_mismatch"
+              _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."
+            else
+              local _pb_actual_base=""
+              _pb_actual_base="$(git merge-base "$_plan_expected_branch" "plan/${_pb_plan_id}" 2>/dev/null)" || _pb_actual_base=""
+              if [[ -z "$_pb_actual_base" ]]; then
+                _pb_reason="plan_branch_mismatch"
+                _pb_detail="Cannot compute merge-base(${_plan_expected_branch}, plan/${_pb_plan_id}) — lineage unverifiable."
+              elif [[ "$_pb_actual_base" != "$_pb_base" ]]; then
+                _pb_reason="plan_branch_mismatch"
+                _pb_detail="${_plan_expected_branch}'s actual base (${_pb_actual_base}) does not match its recorded epic_base_commit (${_pb_base:-<empty>}) in ${_pb_plan_id}'s plan-boundary-manifest.json — lineage broken (stale/foreign base, or the branch was not created via aid-plan-fsm.sh epic-start)."
+              fi
+            fi
+          fi
+        fi
+      fi
+
+      if [[ -n "$_pb_reason" ]]; then
+        # Use evidence_dir/timeline.jsonl directly (already known from cmd_init's
+        # own $epic_id/$run_id, computed before arg-parsing) rather than
+        # derive_timeline "$state_file" — at THIS point in cmd_init the state
+        # file legitimately does not exist yet on a fresh init (derive_timeline
+        # reads epic_id/run_id FROM the state file, so it would silently resolve
+        # to nothing here), which would make a --force override on a fresh run
+        # go unrecorded. mkdir -p mirrors fsm_handle_force_override's own
+        # same-situation safety net (evidence dir not yet materialized this
+        # early in cmd_init).
+        local _pb_timeline="${evidence_dir}/timeline.jsonl"
+        mkdir -p "$(dirname "$_pb_timeline")" 2>/dev/null || true
+        if [[ "$force" == "true" ]]; then
+          echo "WARNING: --force used, skipping the plan-branch lineage precondition (reason would have been: ${_pb_reason})." >&2
+          log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id" overridden="true"
+        else
+          echo "PRECONDITION FAIL: plan-branch lineage check failed for ${epic_id} (plan ${_pb_plan_id}, reason: ${_pb_reason})." >&2
+          echo "${_pb_detail}" >&2
+          echo "Override (audited): aid-fsm.sh init ${epic_id} ... --force --reason '<why this override is safe>'" >&2
+          log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id"
+          exit 1
+        fi
+      fi
+    fi
   fi
 
   if [[ -f "$state_file" ]]; then

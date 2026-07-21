@@ -47,7 +47,10 @@ setup() {
   LIFECYCLE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
   PLAN_FSM_CLI="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   FIXTURES_DIR="$AID_PLUGIN_PATH/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest"
-  export LOCK_LIB PLAN_STATE_LIB PLAN_MANIFEST_LIB LIFECYCLE_LIB PLAN_FSM_CLI FIXTURES_DIR
+  # Step 5 (E-064-1_2): the EPIC-level FSM entry point itself, now carrying
+  # the plan-branch lineage precondition.
+  FSM="$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  export LOCK_LIB PLAN_STATE_LIB PLAN_MANIFEST_LIB LIFECYCLE_LIB PLAN_FSM_CLI FIXTURES_DIR FSM
 
   # All three libraries are CWD/env-root-relative, never git-relative — point
   # them at this test's isolated project root (aid-lifecycle.sh's functions
@@ -1331,4 +1334,203 @@ _pfsm_bootstrap_plan() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"detached HEAD"* ]]
   [[ "$output" == *"$head_sha"* ]]
+}
+
+# =============================================================================
+# ─── aid-fsm.sh init — plan-branch lineage precondition (P064 E-064-1_2 Step 5)
+# =============================================================================
+# The EPIC-level FSM entry point (aid-fsm.sh, NOT aid-plan-fsm.sh) now refuses
+# a `plan_branch` EPIC's `init` when its task branch does not match the
+# runtime plan-boundary-manifest.json entry Step 4's epic-start recorded.
+# `_pfsm_bootstrap_plan`/`_write_legacy_plan` (above) are reused verbatim —
+# this section only adds the aid-fsm.sh `init` side of the same lineage
+# story Step 4 already covers on the aid-plan-fsm.sh side.
+
+@test "AC1: aid-fsm.sh init for a plan_branch EPIC whose actual base does not match the manifest exits non-zero and writes NO state file" {
+  # Same construction as the aid-plan-fsm.sh AC4 "stale base" test above: an
+  # earlier ancestor commit the branch gets force-reset onto after a
+  # legitimate epic-start already recorded a LATER base.
+  local root_sha; root_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  echo "advance main before plan-start" >> "$TEST_PROJECT_ROOT/.gitkeep"
+  git -C "$TEST_PROJECT_ROOT" add .gitkeep
+  git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
+
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Force the task branch onto the EARLIER root commit — an ancestor of, but
+  # not equal to, its recorded epic_base_commit.
+  git -C "$TEST_PROJECT_ROOT" branch -f task/E-064-1_1/main "$root_sha"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_branch_mismatch"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "AC2: aid-fsm.sh init for a plan in legacy_epic_release_mode succeeds unchanged" {
+  _pfsm_bootstrap_plan "P064" "legacy_epic_release_mode"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+  local current_branch; current_branch="$(git -C "$TEST_PROJECT_ROOT" rev-parse --abbrev-ref HEAD)"
+  [ "$current_branch" = "task/E-064-1_1/main" ]
+}
+
+@test "AC3: deleting the runtime plan-boundary-manifest.json does NOT downgrade to legacy — fails closed with plan_manifest_missing, mode still reads plan_branch from the lifecycle manifest" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  rm -f "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_manifest_missing"* ]]
+  [[ "$output" == *"aid-plan-fsm.sh plan-state P064 --repair"* ]]
+  [ ! -f "$state_file" ]
+
+  # The MODE ITSELF survives the deletion — it lives in the separate,
+  # git-tracked lifecycle manifest, never in the deleted runtime file.
+  run aid_lifecycle_plan_mode "P064" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan_branch" ]
+}
+
+@test "AC3b: a manifest present but with no epic_runs entry for this EPIC is ALSO plan_manifest_missing (never epic-started under this plan)" {
+  _pfsm_bootstrap_plan "P064"
+  # No epic-start call — the runtime manifest exists (plan-start always
+  # writes it) but carries no epic_runs[] entry for E-064-1_1.
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_manifest_missing"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "AC4: the lineage check fires on a RESUMED run (state file already present), caught before the generic duplicate-init guard" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+  [ -f "$state_file" ]
+
+  # Edge Case: the EPIC gets abandoned after work started.
+  run bash "$PLAN_MANIFEST_LIB" set-epic-status P064 E-064-1_1 abandoned
+  [ "$status" -eq 0 ]
+
+  # Re-invoking init with the SAME args (state file already exists) must be
+  # caught by the NEW block's epic_abandoned reason, not by the pre-existing
+  # generic "prevent duplicate init" guard further down.
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_abandoned"* ]]
+  [[ "$output" != *"prevent duplicate init"* ]]
+}
+
+@test "AC4: the lineage check fires inside a linked worktree too (is_worktree() short-circuits PRE-FLIGHT branch enforcement, but not this block)" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  run bash "$PLAN_MANIFEST_LIB" set-epic-status P064 E-064-1_1 abandoned
+  [ "$status" -eq 0 ]
+
+  mock_git_worktree
+  # build_default_init_args is not worktree-aware for non-"E-test" epic ids
+  # (it always resolves state_file under $TEST_PROJECT_ROOT, the MAIN
+  # worktree) — construct the state_file the same way aid-fsm.sh itself does
+  # internally (relative to CWD, which mock_git_worktree already cd'd into
+  # the linked worktree).
+  local run_id="R-064-1_1-wt" state_file
+  state_file="$(pwd)/.aid-o/work/evidence/E-064-1_1/${run_id}/fsm-state.yaml"
+  mkdir -p "$(dirname "$state_file")"
+
+  run "$FSM" init E-064-1_1 "$run_id" 3 manual main HEAD "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_abandoned"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "AC5: --force --reason overrides the new block and records the override in the timeline" {
+  local root_sha; root_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  echo "advance main before plan-start" >> "$TEST_PROJECT_ROOT/.gitkeep"
+  git -C "$TEST_PROJECT_ROOT" add .gitkeep
+  git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
+
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  git -C "$TEST_PROJECT_ROOT" branch -f task/E-064-1_1/main "$root_sha"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args --force --reason "manually verified override for legitimate re-init after epic base reset"
+  [ "$status" -eq 0 ]
+  [ -f "$state_file" ]
+
+  local timeline="$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-064-1_1/R-064-1_1-test/timeline.jsonl"
+  [ -f "$timeline" ]
+  run jq -s '[.[] | select(.event=="fsm_init_blocked" and .reason=="plan_branch_mismatch" and .overridden==true)] | length' "$timeline"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+}
+
+@test "Edge Case: an EPIC id that derives no plan id (ad-hoc EPIC) is a no-op, init succeeds normally" {
+  local args; args="$(build_default_init_args E-test)"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+}
+
+@test "Error Handling: lib/aid-plan-manifest.sh cannot be sourced -> fails CLOSED for a declared plan_branch plan (plan_manifest_unavailable), never a silent legacy fallback" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # A copy of aid-fsm.sh + lib/ with aid-plan-manifest.sh removed — proves
+  # the fail-closed path without mutating the real plugin install (which
+  # every other test in this suite, and the whole repo's test run, shares).
+  local dest="$TEST_TMPDIR/fsm-no-manifest-lib"
+  mkdir -p "$dest/lib"
+  cp "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" "$dest/aid-fsm.sh"
+  local f
+  for f in "$AID_PLUGIN_PATH/scripts/lib/"*.sh; do
+    [[ "$(basename "$f")" == "aid-plan-manifest.sh" ]] && continue
+    cp "$f" "$dest/lib/"
+  done
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run bash "$dest/aid-fsm.sh" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_manifest_unavailable"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "Error Handling: lib/aid-plan-manifest.sh missing does NOT affect a legacy_epic_release_mode plan (stays a no-op)" {
+  _pfsm_bootstrap_plan "P064" "legacy_epic_release_mode"
+
+  local dest="$TEST_TMPDIR/fsm-no-manifest-lib-legacy"
+  mkdir -p "$dest/lib"
+  cp "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" "$dest/aid-fsm.sh"
+  local f
+  for f in "$AID_PLUGIN_PATH/scripts/lib/"*.sh; do
+    [[ "$(basename "$f")" == "aid-plan-manifest.sh" ]] && continue
+    cp "$f" "$dest/lib/"
+  done
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  run bash "$dest/aid-fsm.sh" init $args
+  [ "$status" -eq 0 ]
 }
