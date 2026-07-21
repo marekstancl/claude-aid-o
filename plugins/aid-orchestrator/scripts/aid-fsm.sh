@@ -2221,10 +2221,11 @@ cmd_init() {
     # regardless of what is currently checked out — this still calls the
     # real aid_lifecycle_plan_mode (its parsing/defaulting logic is reused
     # verbatim), it just supplies the right root instead of trusting CWD.
-    local _pb_mode="" _pb_mode_root="" _pb_target_branch=""
+    local _pb_mode="" _pb_mode_root="" _pb_target_branch="" _pb_mode_unavailable=""
     _pb_target_branch="$(aid_target_branch)"
     _pb_mode_root="$(mktemp -d 2>/dev/null)" || _pb_mode_root=""
     if [[ -n "$_pb_mode_root" ]]; then
+      trap 'rm -rf "$_pb_mode_root" 2>/dev/null || true' RETURN
       if git show "${_pb_target_branch}:.aid-lifecycle/manifests/${_pb_plan_id}.yaml" \
            > "${_pb_mode_root}/manifest.yaml.tmp" 2>/dev/null; then
         mkdir -p "${_pb_mode_root}/.aid-lifecycle/manifests"
@@ -2232,15 +2233,36 @@ cmd_init() {
       fi
       _pb_mode="$(aid_lifecycle_plan_mode "$_pb_plan_id" "$_pb_mode_root" 2>/dev/null)" || true
       rm -rf "$_pb_mode_root" 2>/dev/null || true
+      trap - RETURN
     else
-      # mktemp failure (e.g. no writable tmp) — fall back to the CWD read.
-      # Worse-case behavior is the SAME pre-existing legacy-mode default this
-      # whole precondition already treats as safe (no-op), never a false block.
-      _pb_mode="$(aid_lifecycle_plan_mode "$_pb_plan_id" "." 2>/dev/null)" || true
+      # mktemp failure (e.g. no writable tmp) — this is NOT the same as "no
+      # lifecycle manifest exists": we genuinely cannot determine the mode at
+      # all. Falling back to the CWD-relative read here would silently
+      # reopen the exact bug this fix eliminates (misreads plan_branch as
+      # legacy on any resumed init, since PRE-FLIGHT branch enforcement
+      # leaves CWD on the task branch) — a silent fail-OPEN for precisely
+      # the case this precondition exists to catch. Treat "cannot determine"
+      # as its own hard-block reason instead of guessing legacy.
+      _pb_mode_unavailable="true"
     fi
-    [[ -z "$_pb_mode" ]] && _pb_mode="legacy_epic_release_mode"
+    [[ -z "$_pb_mode" && -z "$_pb_mode_unavailable" ]] && _pb_mode="legacy_epic_release_mode"
 
-    if [[ "$_pb_mode" == "plan_branch" ]]; then
+    if [[ -n "$_pb_mode_unavailable" ]]; then
+      local _pb_reason="plan_mode_unavailable"
+      local _pb_detail="Could not determine release mode for ${_pb_plan_id} (mktemp failed while reading .aid-lifecycle/manifests/${_pb_plan_id}.yaml off ${_pb_target_branch}'s tree) — refusing to guess legacy_epic_release_mode, since that would silently skip lineage verification for a plan that may actually be plan_branch."
+      local _pb_timeline="${evidence_dir}/timeline.jsonl"
+      mkdir -p "$(dirname "$_pb_timeline")" 2>/dev/null || true
+      if [[ "$force" == "true" ]]; then
+        echo "WARNING: --force used, skipping the plan-branch lineage precondition (reason would have been: ${_pb_reason})." >&2
+        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id" overridden="true"
+      else
+        echo "PRECONDITION FAIL: plan-branch lineage check failed for ${epic_id} (plan ${_pb_plan_id}, reason: ${_pb_reason})." >&2
+        echo "${_pb_detail}" >&2
+        echo "Override (audited): aid-fsm.sh init ${epic_id} ... --force --reason '<why this override is safe>'" >&2
+        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id"
+        exit 1
+      fi
+    elif [[ "$_pb_mode" == "plan_branch" ]]; then
       local _pb_reason="" _pb_detail=""
 
       if ! declare -F plan_manifest_path >/dev/null 2>&1; then

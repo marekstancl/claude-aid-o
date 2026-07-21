@@ -1416,6 +1416,37 @@ _pfsm_bootstrap_plan() {
   [ ! -f "$state_file" ]
 }
 
+@test "Regression: mktemp failure while reading the lifecycle mode fails CLOSED (plan_mode_unavailable), never silently falls back to legacy" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Shadow mktemp with a wrapper that always fails, simulating an
+  # unwritable/exhausted TMPDIR — the exact scenario the mode-read's
+  # throwaway-root construction depends on succeeding.
+  local fakebin="$TEST_TMPDIR/fakebin"
+  mkdir -p "$fakebin"
+  cat > "$fakebin/mktemp" <<'EOF'
+#!/bin/bash
+exit 1
+EOF
+  chmod +x "$fakebin/mktemp"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run env PATH="$fakebin:$PATH" "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unavailable"* ]]
+  [ ! -f "$state_file" ]
+
+  # Confirm this is NOT the same as a genuine legacy-mode no-op: the real
+  # mode is still plan_branch (mktemp works normally here, outside the
+  # shadowed PATH), so a real init call succeeds once mktemp works again.
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+  [ -f "$state_file" ]
+}
+
 @test "AC4: the lineage check fires on a RESUMED run (state file already present), caught before the generic duplicate-init guard" {
   _pfsm_bootstrap_plan "P064"
   run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
