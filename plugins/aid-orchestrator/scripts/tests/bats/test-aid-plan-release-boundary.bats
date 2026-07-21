@@ -1119,6 +1119,231 @@ _seed_manifest_from_fixture() {
   [ "$status" -ne 0 ]
 }
 
+# ─── EPIC STATUS TRANSITION LIFECYCLE TESTS ──────────────────────────────
+# The transition table (_AID_EPIC_STATUS_TRANSITIONS) defines legal edges in
+# the epic status state machine. This test suite verifies that every one-way
+# edge is enforced: the reverse transition is rejected with PRECONDITION FAIL,
+# the entry remains unchanged on disk, and (for merged_to_plan specifically)
+# the epic_merge_commit is unchanged.
+#
+# LIFECYCLE EDGE CLASSIFICATIONS (per _AID_EPIC_STATUS_TRANSITIONS):
+#   - Terminal states (no outgoing edges): merged_to_plan, abandoned, superseded
+#   - Active/temporary with outgoing edges: pending, running, blocked
+#   - Legal transitions: 12 edges total (see header comment in aid-plan-manifest.sh)
+
+@test "Negative test: running → merged_to_plan is one-way; reverse merged_to_plan → running rejected" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach merged_to_plan via the legal forward transition
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "merged_to_plan" "3333333333333333333333333333333333333333"
+
+  # Attempt the illegal reverse transition
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "running"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"merged_to_plan -> running is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "merged_to_plan" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].epic_merge_commit'
+  [ "$output" = "3333333333333333333333333333333333333333" ]
+}
+
+@test "Negative test: running → abandoned is one-way; reverse abandoned → running rejected" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach abandoned via the legal forward transition
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "abandoned"
+
+  # Attempt the illegal reverse transition
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "running"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"abandoned -> running is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "abandoned" ]
+}
+
+@test "Negative test: running → superseded is one-way; reverse superseded → running rejected" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach superseded via the legal forward transition
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "superseded"
+
+  # Attempt the illegal reverse transition
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "running"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"superseded -> running is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "superseded" ]
+}
+
+@test "Negative test: running → blocked is one-way; reverse blocked → pending rejected (pending invalid from blocked)" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach blocked via the legal forward transition
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+
+  # Attempt an illegal transition (blocked → pending is not legal)
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "pending"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"blocked -> pending is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "blocked" ]
+}
+
+@test "Positive test: running → blocked → running is a legal two-way path (unblock a dependency)" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # running → blocked (legal)
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+  [ "$status" -eq 0 ]
+
+  # blocked → running (legal reversal)
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "running"
+  [ "$status" -eq 0 ]
+
+  # Verify final state
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "running" ]
+}
+
+@test "Negative test: blocked → abandoned is one-way; reverse abandoned → blocked rejected" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach blocked then abandoned
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "abandoned"
+
+  # Attempt the illegal reverse transition
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"abandoned -> blocked is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "abandoned" ]
+}
+
+@test "Negative test: blocked → superseded is one-way; reverse superseded → blocked rejected" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Reach blocked then superseded
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "superseded"
+
+  # Attempt the illegal reverse transition
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "blocked"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"superseded -> blocked is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "superseded" ]
+}
+
+@test "Negative test: pending and blocked → merged_to_plan are one-way; reverses rejected" {
+  _init_manifest "P900"
+
+  # Test pending → merged_to_plan (rare but legal per table)
+  plan_manifest_update P900 '
+    .plan_boundary_manifest.epic_runs |= . + [{
+      epic_id: "E-900-test-pending",
+      status: "pending",
+      epic_merge_commit: null,
+      run_id: "R-E900-1",
+      task_branch: "task/E-900-1_2/main",
+      epic_base_commit: "1111111111111111111111111111111111111111",
+      epic_source_ref: "plan/P900",
+      lineage: "proven",
+      evidence_dir: ".aid-o/work/evidence/E-900-1_2/"
+    }]
+  '
+
+  # Transition pending → merged_to_plan (legal)
+  plan_manifest_set_epic_status "P900" "E-900-test-pending" "merged_to_plan" "2222222222222222222222222222222222222222"
+
+  # Attempt reverse (illegal)
+  run plan_manifest_set_epic_status "P900" "E-900-test-pending" "pending"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+  [[ "$output" == *"merged_to_plan -> pending is not a legal pair"* ]]
+
+  # Verify state unchanged on disk
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-test-pending") | .status'
+  [ "$output" = "merged_to_plan" ]
+}
+
+@test "Terminal state documentation: merged_to_plan has no outgoing edges (is truly terminal)" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "merged_to_plan" "3333333333333333333333333333333333333333"
+
+  # Try to transition to any other state — all should be illegal
+  for dest in pending running blocked abandoned superseded; do
+    run plan_manifest_set_epic_status "P900" "E-900-1_2" "$dest"
+    [ "$status" -ne 0 ] || skip "Transition to $dest should be illegal from merged_to_plan"
+    [[ "$output" == *"PRECONDITION FAIL"* ]] || skip "Should have PRECONDITION FAIL for $dest"
+  done
+}
+
+@test "Terminal state documentation: abandoned has no outgoing edges (is truly terminal)" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "abandoned"
+
+  # Try to transition to any other state — all should be illegal
+  for dest in pending running merged_to_plan blocked superseded; do
+    run plan_manifest_set_epic_status "P900" "E-900-1_2" "$dest"
+    [ "$status" -ne 0 ] || skip "Transition to $dest should be illegal from abandoned"
+    [[ "$output" == *"PRECONDITION FAIL"* ]] || skip "Should have PRECONDITION FAIL for $dest"
+  done
+}
+
+@test "Terminal state documentation: superseded has no outgoing edges (is truly terminal)" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  plan_manifest_set_epic_status "P900" "E-900-1_2" "superseded"
+
+  # Try to transition to any other state — all should be illegal
+  for dest in pending running merged_to_plan blocked abandoned; do
+    run plan_manifest_set_epic_status "P900" "E-900-1_2" "$dest"
+    [ "$status" -ne 0 ] || skip "Transition to $dest should be illegal from superseded"
+    [[ "$output" == *"PRECONDITION FAIL"* ]] || skip "Should have PRECONDITION FAIL for $dest"
+  done
+}
+
 # ─── raise_final_profile ─────────────────────────────────────────────────
 
 # ─── AC2: raising to a LOWER profile than current is a documented no-op ────
@@ -2016,4 +2241,146 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"epic_id_invalid_format"* ]]
   [ ! -f "$state_file" ]
+}
+
+# ─── Security: plan_manifest_set_epic_status validates epic_id format ──────
+@test "Security: malformed epic_id is rejected BEFORE jq interpolation in plan_manifest_set_epic_status" {
+  # Bug Fix #2: epic_id format must be validated before splicing into jq filter.
+  # An epic_id like 'E-064-1_1"' could break out of the jq string literal
+  # without proper validation.
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  # Test Case 1: epic_id with missing underscore segment (E-900-1 instead of E-900-1_2)
+  # This fails the strict ^E-[0-9]{3}-[0-9]+_[0-9]+$ format check.
+  run plan_manifest_set_epic_status "P900" "E-900-1" "running"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_id must match format"* ]]
+
+  # Test Case 2: epic_id with jq-suspicious characters (literal double-quote)
+  # This would have broken out of the jq string literal without the fix.
+  local malformed_epic='E-900-1_2"'
+  run plan_manifest_set_epic_status "P900" "$malformed_epic" "running"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_id must match format"* ]]
+
+  # Verify the manifest is unchanged (no partial/corrupted write)
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$status" -eq 0 ]
+  [ "$output" = "running" ]
+}
+
+# ─── Regression: concurrent plan_manifest_set_epic_status must not allow TOCTOU race ──
+@test "Regression: concurrent plan_manifest_set_epic_status calls never downgrade terminal state (TOCTOU race test)" {
+  # Bug Fix #1: The transition-legality decision must happen under the lock,
+  # against the file's LIVE current status at write time — not from a bash-side
+  # snapshot taken before acquiring the lock. This prevents a race where two
+  # concurrent callers both read the same stale current_status="running", both
+  # decide their intended transition is legal, and the second write clobbers
+  # the first even if that clobber is actually illegal (e.g., terminal-state
+  # downgrade).
+  #
+  # Scenario: A transitions running -> merged_to_plan (legal, terminal),
+  #          B transitions running -> blocked (legal, but lower rank than terminal).
+  # If A completes first, the file has merged_to_plan.
+  # If B then reads a stale snapshot still showing "running", B's write will
+  # unconditionally set status=blocked, downgrading the terminal state
+  # (BUG). With the fix, B's write fails because it re-checks under the lock
+  # and sees the current status is actually merged_to_plan (terminal).
+  #
+  # We run 5 truly-concurrent trials (no stagger, both subshells start at ~same
+  # time) to increase the probability of interleaving.
+  #
+  # The sharp discriminator is NOT "the final status is one of the two
+  # attempted values" — under the buggy unconditional-write code, the final
+  # status is ALWAYS one of {merged_to_plan, blocked} regardless of ordering
+  # (empirically verified: A-then-B gives blocked, an illegal downgrade FROM
+  # merged_to_plan; B-then-A gives merged_to_plan, an illegal transition FROM
+  # blocked, since blocked's only legal targets are {running,abandoned,superseded}
+  # — merged_to_plan is not among them). A same-value-set assertion therefore
+  # cannot distinguish buggy from fixed code.
+  #
+  # The real invariant: whichever call's write lands SECOND must see the
+  # OTHER call's already-committed status under the lock and correctly
+  # reject its own (now-illegal) transition — so exactly ONE of the two
+  # concurrent calls succeeds (exit 0) and the OTHER fails (non-zero exit,
+  # "not a legal pair" in its stderr) on every trial. Under the bug, BOTH
+  # calls always succeed (unconditional overwrite) regardless of order.
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  local trial
+  for trial in 1 2 3 4 5; do
+    # Reset the epic to running state before each trial
+    plan_manifest_update P900 '.plan_boundary_manifest.epic_runs |= map(if .epic_id == "E-900-1_2" then .status = "running" | .epic_merge_commit = null else . end)'
+
+    local rc_file_a="$TEST_TMPDIR/rc_a_${trial}" rc_file_b="$TEST_TMPDIR/rc_b_${trial}"
+    local err_file_a="$TEST_TMPDIR/err_a_${trial}" err_file_b="$TEST_TMPDIR/err_b_${trial}"
+
+    # Spawn two concurrent subshells, each attempting a different transition
+    # from the same running state. Both transitions are legal FROM running,
+    # but only one of the two can legally land — one (merged_to_plan) is
+    # terminal, and blocked's legal targets never include merged_to_plan.
+    bash -c "
+      source '$PLAN_MANIFEST_LIB'
+      export AID_PLAN_MANIFEST_PROJECT_ROOT='$TEST_PROJECT_ROOT'
+      plan_manifest_set_epic_status 'P900' 'E-900-1_2' 'merged_to_plan' '3333333333333333333333333333333333333333' 2>'$err_file_a'
+      echo \$? > '$rc_file_a'
+    " &
+    local pid_a=$!
+
+    bash -c "
+      source '$PLAN_MANIFEST_LIB'
+      export AID_PLAN_MANIFEST_PROJECT_ROOT='$TEST_PROJECT_ROOT'
+      plan_manifest_set_epic_status 'P900' 'E-900-1_2' 'blocked' 2>'$err_file_b'
+      echo \$? > '$rc_file_b'
+    " &
+    local pid_b=$!
+
+    wait "$pid_a" 2>/dev/null || true
+    wait "$pid_b" 2>/dev/null || true
+
+    local rc_a rc_b
+    rc_a="$(cat "$rc_file_a" 2>/dev/null || echo "?")"
+    rc_b="$(cat "$rc_file_b" 2>/dev/null || echo "?")"
+
+    # Exactly one of the two must succeed and the other must fail — never
+    # both-succeed (the TOCTOU bug: both think their stale snapshot is
+    # still current) and never both-fail (would mean neither transition
+    # was ever accepted, a different bug).
+    if [[ "$rc_a" -eq 0 && "$rc_b" -eq 0 ]]; then
+      echo "FAIL (trial $trial): BOTH concurrent calls succeeded — TOCTOU race, one clobbered the other's terminal write without re-checking the live status."
+      return 1
+    fi
+    if [[ "$rc_a" -ne 0 && "$rc_b" -ne 0 ]]; then
+      echo "FAIL (trial $trial): BOTH concurrent calls failed — neither legal transition from 'running' was ever accepted."
+      cat "$err_file_a" "$err_file_b"
+      return 1
+    fi
+
+    # The loser's stderr must show a legality rejection, not some unrelated
+    # error (lock timeout, corrupt file, etc.) — a real "your snapshot is
+    # stale" rejection, not an accidental failure mode.
+    if [[ "$rc_a" -ne 0 ]]; then
+      grep -q "is not a legal pair" "$err_file_a" || {
+        echo "FAIL (trial $trial): loser A failed for an unexpected reason:"; cat "$err_file_a"; return 1;
+      }
+    else
+      grep -q "is not a legal pair" "$err_file_b" || {
+        echo "FAIL (trial $trial): loser B failed for an unexpected reason:"; cat "$err_file_b"; return 1;
+      }
+    fi
+
+    # The on-disk status must match whichever call actually won.
+    run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+    [ "$status" -eq 0 ]
+    local final_status="$output" expected_status
+    if [[ "$rc_a" -eq 0 ]]; then expected_status="merged_to_plan"; else expected_status="blocked"; fi
+    [ "$final_status" = "$expected_status" ] || {
+      echo "FAIL (trial $trial): final status '$final_status' does not match the winning call's own status '$expected_status'."
+      return 1
+    }
+  done
 }

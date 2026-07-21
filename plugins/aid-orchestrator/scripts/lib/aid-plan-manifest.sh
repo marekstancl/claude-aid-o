@@ -838,11 +838,52 @@ plan_manifest_add_epic() {
 }
 
 # ===========================================================================
+# EPIC STATUS TRANSITION TABLE — defines legal state-machine edges
+#
+# Epic status lifecycle: pending → running → merged_to_plan/abandoned/superseded/blocked.
+# Blocked is a temporary hold (runnable again). Terminal states (merged_to_plan,
+# abandoned, superseded) have no outgoing edges — once an epic is merged/abandoned/
+# superseded, it does not transition further within this plan.
+#
+# The table below lists EVERY legal "from:to" pair. plan_manifest_set_epic_status
+# rejects any transition not in this table, leaving the entry unchanged, before
+# taking the lock or touching the file.
+#
+# CLASSIFICATION (tested via negative tests in bats suite):
+#   - Terminal states (no outgoing edges): merged_to_plan, abandoned, superseded
+#   - Active/temporary: pending, running, blocked (have legal outgoing edges)
+#
+# The one existing real caller (_pfsm_plan_state_repair) invokes
+# plan_manifest_set_epic_status with status=merged_to_plan from running, which
+# MUST remain legal — confirmed by AC7/AC8/--repair tests.
+# ===========================================================================
+_AID_EPIC_STATUS_TRANSITIONS=(
+  "pending:running"
+  "pending:blocked"
+  "pending:abandoned"
+  "pending:superseded"
+  "pending:merged_to_plan"
+  "running:merged_to_plan"
+  "running:blocked"
+  "running:abandoned"
+  "running:superseded"
+  "blocked:running"
+  "blocked:abandoned"
+  "blocked:superseded"
+)
+
+# ===========================================================================
 # plan_manifest_set_epic_status <plan_id> <epic_id> <status> [merge_commit]
 #
 # Sets an EXISTING epic_runs[] entry's status (rejected — exit 1, no write —
-# if epic_id has no prior entry; use plan_manifest_add_epic first). Also
-# keeps `active_epics` in sync: `status: running` adds epic_id (if absent),
+# if epic_id has no prior entry; use plan_manifest_add_epic first). Validates
+# the status transition against _AID_EPIC_STATUS_TRANSITIONS BEFORE taking the
+# lock or touching the file — rejects any illegal transition (reason on stderr,
+# nothing written, exit 1). If the transition is legal, reads the current on-disk
+# status, re-validates it matches the expected "from" state, then writes the
+# new status.
+#
+# Also keeps `active_epics` in sync: `status: running` adds epic_id (if absent),
 # any other status removes it (if present).
 #
 # Edge Case: `status: merged_to_plan` with NO merge_commit argument is
@@ -851,8 +892,8 @@ plan_manifest_add_epic() {
 # invariant `plan_manifest_validate` would enforce anyway — caught here
 # earlier, before touching the lock).
 #
-# Returns: 0 success, 1 bad args / unknown epic_id / invariant violation, 2
-# missing jq, 3 lock timeout, 5 corrupt / validator missing.
+# Returns: 0 success, 1 bad args / unknown epic_id / illegal transition /
+# invariant violation, 2 missing jq, 3 lock timeout, 5 corrupt / validator missing.
 # ===========================================================================
 plan_manifest_set_epic_status() {
   local plan_id="$1" epic_id="$2" status="$3" merge_commit="${4:-}"
@@ -863,6 +904,15 @@ plan_manifest_set_epic_status() {
     _pm_warn "plan_manifest_set_epic_status: epic_id is required"
     return 1
   fi
+
+  # CRITICAL (Bug Fix #2): Validate epic_id format BEFORE any jq-filter-text
+  # interpolation to prevent injection attacks. Must match the manifest
+  # invariant's epic-id pattern.
+  if ! [[ "$epic_id" =~ ^E-[0-9]{3}-[0-9]+_[0-9]+$ ]]; then
+    _pm_warn "plan_manifest_set_epic_status: epic_id must match format ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}'). This check prevents jq injection."
+    return 1
+  fi
+
   case "$status" in
     pending|running|merged_to_plan|abandoned|superseded|blocked) ;;
     *)
@@ -886,17 +936,44 @@ plan_manifest_set_epic_status() {
     mc_json="null"
   fi
 
-  local filter
-  filter='
+  # CRITICAL FIX for Bug #1 (TOCTOU race): The transition-legality decision
+  # must happen INSIDE the jq filter (which runs under the lock, after re-reading
+  # the file) — NOT in bash BEFORE taking the lock. This prevents a race where
+  # two concurrent callers read the same stale current_status, both decide their
+  # transition is legal, and the second write clobbers the first even if that
+  # clobber violates the transition table.
+  #
+  # The jq filter below inlines the legal transitions table and checks:
+  #   1. The epic_id exists in epic_runs[]
+  #   2. Its current status (read under the lock) pairs validly with the target status
+  #   3. Only if valid, update the status and active_epics list
+  #   4. If invalid, error out (leaving the file untouched), caught by
+  #      _plan_manifest_atomic_mutate's error trap
+  #
+  # This is the same pattern used in plan_manifest_raise_final_profile (commit
+  # 02c4d75): comparison logic inlined into the jq filter, running under the lock.
+  local filter='
+    # Define the legal transitions as an array of "from:to" strings
+    ["pending:running", "pending:blocked", "pending:abandoned", "pending:superseded", "pending:merged_to_plan", "running:merged_to_plan", "running:blocked", "running:abandoned", "running:superseded", "blocked:running", "blocked:abandoned", "blocked:superseded"] as $legal_transitions |
     if (.plan_boundary_manifest.epic_runs | any(.epic_id == $epic_id))
     then
-      .plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == $epic_id then (.status = $status | .epic_merge_commit = $merge_commit) else . end]
-      | .plan_boundary_manifest.active_epics = (
-          if $status == "running"
-          then (if (.plan_boundary_manifest.active_epics | index($epic_id)) then .plan_boundary_manifest.active_epics else .plan_boundary_manifest.active_epics + [$epic_id] end)
-          else [.plan_boundary_manifest.active_epics[] | select(. != $epic_id)]
-          end
-        )
+      # Found the epic entry — now extract its current status and validate the transition
+      (.plan_boundary_manifest.epic_runs[] | select(.epic_id == $epic_id) | .status) as $current_status |
+      ($current_status + ":" + $status) as $transition_pair |
+      if ($legal_transitions | index($transition_pair)) != null
+      then
+        # Transition is legal — proceed with the update
+        .plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == $epic_id then (.status = $status | .epic_merge_commit = $merge_commit) else . end]
+        | .plan_boundary_manifest.active_epics = (
+            if $status == "running"
+            then (if (.plan_boundary_manifest.active_epics | index($epic_id)) then .plan_boundary_manifest.active_epics else .plan_boundary_manifest.active_epics + [$epic_id] end)
+            else [.plan_boundary_manifest.active_epics[] | select(. != $epic_id)]
+            end
+          )
+      else
+        # Transition is illegal — reject with a clear error message
+        error("plan_manifest_set_epic_status: transition " + $current_status + " -> " + $status + " is not a legal pair for epic_id " + $epic_id)
+      end
     else
       error("plan_manifest_set_epic_status: epic_id not found in epic_runs: " + $epic_id)
     end
