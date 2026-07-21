@@ -1565,3 +1565,35 @@ EOF
   run bash "$dest/aid-fsm.sh" init $args
   [ "$status" -eq 0 ]
 }
+
+@test "Security: malformed epic_id is rejected BEFORE jq interpolation to prevent injection attacks (epic_id_invalid_format)" {
+  # The vulnerability (CP3 security finding): epic_id is spliced directly into
+  # a jq filter without validation, allowing jq double-quote breakout.
+  # This test proves the fix: an epic_id that passes the loose ^E-[0-9]+ check
+  # (used for plan_id derivation elsewhere in cmd_init) but fails the strict
+  # ^E-[0-9]{3}-[0-9]+_[0-9]+$ format check is rejected BEFORE reaching the
+  # vulnerable plan_manifest_get call.
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Test Case 1: epic_id with missing underscore segment (E-064-1 instead of E-064-1_1)
+  # This passes the loose check (has E- and digits) but fails the strict check.
+  local malformed_epic="E-064-1"
+  local args; args="$(build_default_init_args "$malformed_epic")"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_id_invalid_format"* ]]
+  [ ! -f "$state_file" ]
+
+  # Test Case 2: epic_id with jq-suspicious characters (literal double-quote)
+  # This would have broken out of the jq string literal without the fix.
+  malformed_epic='E-064-1_1"'
+  args="$(build_default_init_args "$malformed_epic")"
+  state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_id_invalid_format"* ]]
+  [ ! -f "$state_file" ]
+}

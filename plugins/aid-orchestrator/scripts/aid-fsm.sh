@@ -2275,8 +2275,15 @@ cmd_init() {
           _pb_reason="plan_manifest_missing"
           _pb_detail="Runtime plan-boundary-manifest.json missing for ${_pb_plan_id} at ${_pb_manifest_path} (mode=plan_branch is declared in .aid-lifecycle/manifests/${_pb_plan_id}.yaml, which survives this deletion). Repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair"
         else
-          local _pb_entry="" _pb_get_rc=0
-          _pb_entry="$(plan_manifest_get "$_pb_plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")" 2>/dev/null)" || _pb_get_rc=$?
+          # Validate epic_id format BEFORE jq interpolation to prevent injection.
+          # Must match the manifest invariant's own epic-id pattern (mirrors
+          # _pfsm_validate_epic_id in aid-plan-fsm.sh).
+          if ! [[ "$epic_id" =~ ^E-[0-9]{3}-[0-9]+_[0-9]+$ ]]; then
+            _pb_reason="epic_id_invalid_format"
+            _pb_detail="epic_id must match format ^E-[0-9]{3}-[0-9]+_[0-9]+\$ (got '${epic_id}'). This check prevents jq injection and ensures consistent lineage tracking."
+          else
+            local _pb_entry="" _pb_get_rc=0
+            _pb_entry="$(plan_manifest_get "$_pb_plan_id" ".plan_boundary_manifest.epic_runs[] | select(.epic_id==\"${epic_id}\")" 2>/dev/null)" || _pb_get_rc=$?
           if [[ "$_pb_get_rc" -eq 5 ]]; then
             _pb_reason="plan_manifest_corrupt"
             _pb_detail="Runtime plan-boundary-manifest.json for ${_pb_plan_id} at ${_pb_manifest_path} is present but unparseable."
@@ -2306,6 +2313,7 @@ cmd_init() {
                 _pb_detail="${_plan_expected_branch}'s actual base (${_pb_actual_base}) does not match its recorded epic_base_commit (${_pb_base:-<empty>}) in ${_pb_plan_id}'s plan-boundary-manifest.json — lineage broken (stale/foreign base, or the branch was not created via aid-plan-fsm.sh epic-start)."
               fi
             fi
+          fi
           fi
         fi
       fi
