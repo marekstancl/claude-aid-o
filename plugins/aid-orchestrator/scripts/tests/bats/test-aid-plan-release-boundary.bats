@@ -17,6 +17,20 @@
 # later step's Git-touching commands (`aid-plan-fsm.sh`) are where a real
 # repo starts mattering for this suite.
 #
+# Step 2 registers the `plan_boundary_manifest` protocol-v2 artifact type
+# (envelope + payload-key only) — its own coverage lives in
+# scripts/tests/test-protocol-validate.sh, not here.
+#
+# Step 3 adds:
+#   - lib/aid-plan-manifest.sh — the manifest producer/reader/updater +
+#     invariant enforcer (plan-boundary-manifest.json, gitignored runtime
+#     area — still no real Git needed for THESE tests either).
+#   - lib/aid-lifecycle.sh's NEW `aid_lifecycle_plan_mode` /
+#     `aid_lifecycle_set_plan_mode` (the git-tracked mode reader/durable
+#     writer) — THESE tests DO need a real repo on target_branch, which
+#     `setup_test_evidence_dir` already provides (git init + initial commit
+#     on main).
+#
 # This suite is intentionally NOT part of the aggregate `run-all-tests.sh`
 # job — see .github/workflows/ci.yml's dedicated `plan-boundary-tests` job
 # and run-all-tests.sh's DELEGATED exclusion (both added in this same step).
@@ -29,14 +43,25 @@ setup() {
   export AID_PLUGIN_PATH
   LOCK_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-lock.sh"
   PLAN_STATE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh"
-  export LOCK_LIB PLAN_STATE_LIB
+  PLAN_MANIFEST_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-plan-manifest.sh"
+  LIFECYCLE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  FIXTURES_DIR="$AID_PLUGIN_PATH/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest"
+  export LOCK_LIB PLAN_STATE_LIB PLAN_MANIFEST_LIB LIFECYCLE_LIB FIXTURES_DIR
 
-  # Both libraries are CWD/env-root-relative, never git-relative — point
-  # them at this test's isolated project root.
+  # All three libraries are CWD/env-root-relative, never git-relative — point
+  # them at this test's isolated project root (aid-lifecycle.sh's functions
+  # instead take an explicit `root` arg, which the lifecycle tests below pass
+  # as "." after cd-ing into TEST_PROJECT_ROOT, matching test-lifecycle.bats'
+  # own convention).
   export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$TEST_PROJECT_ROOT"
 
   # shellcheck disable=SC1090
-  source "$PLAN_STATE_LIB"   # also sources $LOCK_LIB (see its own header)
+  source "$PLAN_STATE_LIB"      # also sources $LOCK_LIB (see its own header)
+  # shellcheck disable=SC1090
+  source "$PLAN_MANIFEST_LIB"   # also sources $LOCK_LIB + aid-gate-profile.sh
+  # shellcheck disable=SC1090
+  source "$LIFECYCLE_LIB"
 }
 
 teardown() {
@@ -488,4 +513,428 @@ _init_plan() {
   run plan_op_reconcile "P064" "$op_b"
   [ "$status" -eq 5 ]
   [[ "$output" == *"state_committed"* ]]
+}
+
+# =============================================================================
+# ─── lib/aid-plan-manifest.sh ────────────────────────────────────────────
+# =============================================================================
+
+# ─── fixtures ────────────────────────────────────────────────────────────
+
+# _manifest_file <plan_id> — the canonical manifest path, reconstructed
+# independently of the library's own (private) path helper (matches
+# `_state_file`'s convention above).
+_manifest_file() {
+  echo "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${1}/plan-boundary-manifest.json"
+}
+
+# _init_manifest <plan_id> [mode] — convenience wrapper with sane defaults.
+_init_manifest() {
+  local plan_id="$1" mode="${2:-plan_branch}"
+  plan_manifest_init "$plan_id" "plan/${plan_id}" "main" \
+    "1111111111111111111111111111111111111111" \
+    "1111111111111111111111111111111111111111" "$mode"
+}
+
+# _seed_manifest_from_fixture <plan_id> <fixture_basename.json> — copies a
+# fixture from FIXTURES_DIR straight to the canonical runtime path (every
+# fixture already carries plan_id=P900, matching the default used below).
+_seed_manifest_from_fixture() {
+  local plan_id="$1" fixture="$2"
+  mkdir -p "$(dirname "$(_manifest_file "$plan_id")")"
+  cp "$FIXTURES_DIR/${fixture}" "$(_manifest_file "$plan_id")"
+}
+
+# ─── init / path / get ──────────────────────────────────────────────────
+
+@test "plan_manifest_init: seeds a fresh manifest with plan_state OPEN and the given mode" {
+  run _init_manifest "P900"
+  [ "$status" -eq 0 ]
+  [ -f "$(_manifest_file P900)" ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_state'
+  [ "$output" = "OPEN" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.mode'
+  [ "$output" = "plan_branch" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_branch'
+  [ "$output" = "plan/P900" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.total_epics'
+  [ "$output" = "0" ]
+}
+
+@test "plan_manifest_init: refuses to overwrite an existing manifest (never a silent reset)" {
+  _init_manifest "P900"
+  run _init_manifest "P900"
+  [ "$status" -ne 0 ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_state'
+  [ "$output" = "OPEN" ]
+}
+
+@test "plan_manifest_init: rejects a plan_branch that isn't exactly plan/<plan_id>" {
+  run plan_manifest_init "P900" "plan/WRONG" "main" \
+    "1111111111111111111111111111111111111111" \
+    "1111111111111111111111111111111111111111" "plan_branch"
+  [ "$status" -ne 0 ]
+  [ ! -f "$(_manifest_file P900)" ]
+}
+
+@test "plan_manifest_get: not_found on stdout + exit 1 when no manifest exists yet" {
+  run plan_manifest_get P999 '.plan_boundary_manifest.plan_state'
+  [ "$status" -eq 1 ]
+  [ "$output" = "not_found" ]
+}
+
+@test "plan_manifest_validate: not_found on stdout + exit 1 when no manifest exists yet" {
+  run plan_manifest_validate P999
+  [ "$status" -eq 1 ]
+  [ "$output" = "not_found" ]
+}
+
+@test "plan_manifest_init + plan_manifest_validate: a freshly-initialized manifest is valid" {
+  _init_manifest "P900"
+  run plan_manifest_validate P900
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC3: a jq filter producing invalid JSON leaves the manifest untouched ──
+@test "AC3: plan_manifest_update with a filter that errors leaves the on-disk manifest byte-identical" {
+  _init_manifest "P900"
+  local before after
+  before="$(cat "$(_manifest_file P900)")"
+
+  run plan_manifest_update P900 '. | error("boom")'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"boom"* || "$output" == *"filter"* ]]
+
+  after="$(cat "$(_manifest_file P900)")"
+  [ "$before" = "$after" ]
+}
+
+@test "plan_manifest_update: a well-formed filter mutates the canonical file atomically" {
+  _init_manifest "P900"
+  run plan_manifest_update P900 '.plan_boundary_manifest.plan_state = "EPIC_INTEGRATION"'
+  [ "$status" -eq 0 ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_state'
+  [ "$output" = "EPIC_INTEGRATION" ]
+}
+
+# ─── add_epic / set_epic_status ─────────────────────────────────────────
+
+@test "plan_manifest_add_epic: adds a new epic_runs entry and keeps epics/total_epics/active_epics in sync" {
+  _init_manifest "P900"
+  run plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.total_epics'
+  [ "$output" = "1" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epics | length'
+  [ "$output" = "1" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.active_epics | index("E-900-1_2")'
+  [ "$output" != "" ]
+
+  run plan_manifest_validate P900
+  [ "$status" -eq 0 ]
+}
+
+# ─── Edge Case: add_epic called twice for the same epic_id upserts, never
+#     duplicates ──────────────────────────────────────────────────────────
+@test "Edge Case: plan_manifest_add_epic called twice for the same epic_id updates in place, never duplicates" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  run plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1-retry" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.epics | length'
+  [ "$output" = "1" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs | length'
+  [ "$output" = "1" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].run_id'
+  [ "$output" = "R-E900-1-retry" ]
+}
+
+# ─── Edge Case: merged_to_plan with no merge_commit is rejected ────────────
+@test "Edge Case: plan_manifest_set_epic_status merged_to_plan without a merge_commit is rejected, no write" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  local before after
+  before="$(cat "$(_manifest_file P900)")"
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "merged_to_plan"
+  [ "$status" -ne 0 ]
+  after="$(cat "$(_manifest_file P900)")"
+  [ "$before" = "$after" ]
+}
+
+@test "plan_manifest_set_epic_status: merged_to_plan with a merge_commit succeeds and drops the epic from active_epics" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+
+  run plan_manifest_set_epic_status "P900" "E-900-1_2" "merged_to_plan" "3333333333333333333333333333333333333333"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].status'
+  [ "$output" = "merged_to_plan" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].epic_merge_commit'
+  [ "$output" = "3333333333333333333333333333333333333333" ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.active_epics | index("E-900-1_2")'
+  [ "$status" -ne 0 ]   # no longer active — index() on a miss is null -> plan_manifest_get returns 1
+
+  run plan_manifest_validate P900
+  [ "$status" -eq 0 ]
+}
+
+@test "plan_manifest_set_epic_status: unknown epic_id is rejected (no prior epic_runs entry)" {
+  _init_manifest "P900"
+  run plan_manifest_set_epic_status "P900" "E-900-9_9" "running"
+  [ "$status" -ne 0 ]
+}
+
+# ─── raise_final_profile ─────────────────────────────────────────────────
+
+# ─── AC2: raising to a LOWER profile than current is a documented no-op ────
+@test "AC2: plan_manifest_raise_final_profile to a LOWER profile than current is a no-op, current value unchanged" {
+  _init_manifest "P900"
+  plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
+
+  run plan_manifest_raise_final_profile "P900" "targeted"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "standard" ]
+}
+
+@test "plan_manifest_raise_final_profile: raising to a HIGHER profile actually raises it" {
+  _init_manifest "P900"
+  plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
+
+  run plan_manifest_raise_final_profile "P900" "full"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+}
+
+@test "plan_manifest_raise_final_profile: never decreases across two sequential calls (up then down)" {
+  _init_manifest "P900"
+  plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
+
+  plan_manifest_raise_final_profile "P900" "full"
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+
+  # A second call requesting something LOWER than the now-current "full"
+  # must leave it at "full" — the rank table never goes backwards.
+  run plan_manifest_raise_final_profile "P900" "targeted"
+  [ "$status" -eq 0 ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+}
+
+# ─── plan_manifest_validate: identity / containment / negative fixtures ──
+
+# ─── AC1: identity mismatch fails validation ────────────────────────────
+@test "AC1: a manifest whose payload plan_id differs from identity.plan_id fails plan_manifest_validate" {
+  _init_manifest "P900"
+  local f; f="$(_manifest_file P900)"
+  local tmp; tmp="$(mktemp)"
+  jq '.identity.plan_id = "P901"' "$f" > "$tmp" && mv "$tmp" "$f"
+
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"identity"* ]]
+}
+
+@test "plan_manifest_validate: plan_branch not equal to plan/<plan_id> fails validation" {
+  _init_manifest "P900"
+  local f; f="$(_manifest_file P900)"
+  local tmp; tmp="$(mktemp)"
+  jq '.plan_boundary_manifest.plan_branch = "plan/OTHER"' "$f" > "$tmp" && mv "$tmp" "$f"
+
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+}
+
+# ─── AC4: evidence_dir containing ".." is rejected ──────────────────────
+@test "AC4: an evidence_dir containing .. is rejected by containment validation" {
+  _seed_manifest_from_fixture P900 invalid-path-escape.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"containment"* ]]
+}
+
+@test "negative fixture: invalid-missing-field.json fails validation on the missing field" {
+  _seed_manifest_from_fixture P900 invalid-missing-field.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing"* ]]
+}
+
+@test "negative fixture: invalid-bad-sha.json fails validation on the malformed sha" {
+  _seed_manifest_from_fixture P900 invalid-bad-sha.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[0-9a-f]{40}"* ]]
+}
+
+@test "negative fixture: invalid-duplicate-epic.json fails validation on the duplicate" {
+  _seed_manifest_from_fixture P900 invalid-duplicate-epic.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"duplicate"* ]]
+}
+
+@test "negative fixture: invalid-active-not-subset.json fails validation (active_epics not a subset)" {
+  _seed_manifest_from_fixture P900 invalid-active-not-subset.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"subset"* ]]
+}
+
+@test "negative fixture: invalid-total-mismatch.json fails validation (total_epics mismatch)" {
+  _seed_manifest_from_fixture P900 invalid-total-mismatch.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"total_epics"* ]]
+}
+
+@test "negative fixture: invalid-candidate-early-state.json fails validation (candidate_sha too early)" {
+  _seed_manifest_from_fixture P900 invalid-candidate-early-state.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"candidate_sha"* ]]
+}
+
+@test "negative fixture: invalid-run-id-without-dir.json fails validation (run_id/evidence_dir not paired)" {
+  _seed_manifest_from_fixture P900 invalid-run-id-without-dir.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_final_run_id"* ]]
+}
+
+@test "negative fixture: invalid-merge-commit-wrong-status.json fails validation (merge_commit without merged_to_plan)" {
+  _seed_manifest_from_fixture P900 invalid-merge-commit-wrong-status.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"merged_to_plan"* ]]
+}
+
+@test "negative fixture: invalid-path-escape.json fails validation (containment)" {
+  _seed_manifest_from_fixture P900 invalid-path-escape.json
+  run plan_manifest_validate P900
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"containment"* ]]
+}
+
+@test "sanity: the Step 2 valid.json fixture passes plan_manifest_validate unchanged" {
+  _seed_manifest_from_fixture P900 valid.json
+  run plan_manifest_validate P900
+  [ "$status" -eq 0 ]
+}
+
+# ─── Error Handling: aid-protocol-validate.sh missing/non-executable fails
+#     CLOSED (exit 5), never treats the manifest as valid ─────────────────
+@test "Error Handling: aid-protocol-validate.sh missing fails CLOSED (exit 5), never a false valid" {
+  _init_manifest "P900"
+  local validator="$AID_PLUGIN_PATH/scripts/aid-protocol-validate.sh"
+  local moved="$TEST_TMPDIR/aid-protocol-validate.sh.moved"
+  mv "$validator" "$moved"
+
+  run plan_manifest_validate P900
+  [ "$status" -eq 5 ]
+
+  mv "$moved" "$validator"
+}
+
+# =============================================================================
+# ─── lib/aid-lifecycle.sh — aid_lifecycle_plan_mode / aid_lifecycle_set_plan_mode
+#     (P064 E-064-1_2 Step 3) ────────────────────────────────────────────
+# =============================================================================
+
+# _write_legacy_plan <plan_id> — a minimal strict-grammar plan file so
+# aid_lifecycle_ensure_manifest (called internally by
+# aid_lifecycle_set_plan_mode) has something to parse.
+_write_legacy_plan() {
+  local plan_id="$1"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/plans/${plan_id}-test.md" <<'MD'
+**EPIC 1: first**
+MD
+}
+
+@test "aid_lifecycle_plan_mode: no manifest at all reads back legacy_epic_release_mode (documented default)" {
+  run aid_lifecycle_plan_mode "P900" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "legacy_epic_release_mode" ]
+}
+
+# ─── AC5 (part 1): a manifest with no `mode` field reads back
+#     legacy_epic_release_mode ─────────────────────────────────────────────
+@test "AC5: a lifecycle manifest with no mode field reads back legacy_epic_release_mode" {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
+  cat > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" <<'YML'
+schema_version: aid-lifecycle-1.0
+repo_id: test-repo-id
+plan_id: P900
+declared_epics:
+  - {id: E-900-1_1, scope: required}
+YML
+
+  run aid_lifecycle_plan_mode "P900" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "legacy_epic_release_mode" ]
+}
+
+# ─── AC5 (part 2) + AC6: aid_lifecycle_set_plan_mode durably writes mode,
+#     the round-trip reads it back, and the amended schema (still
+#     additionalProperties:false) accepts it ────────────────────────────────
+@test "AC5+AC6: aid_lifecycle_set_plan_mode durably persists mode=plan_branch; round-trips via aid_lifecycle_plan_mode; passes the amended schema" {
+  _write_legacy_plan "P900"
+
+  run aid_lifecycle_set_plan_mode "P900" "plan_branch" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Durably committed on target_branch (main) — not just written to the
+  # worktree.
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:.aid-lifecycle/manifests/P900.yaml"
+  [ "$status" -eq 0 ]
+
+  run aid_lifecycle_plan_mode "P900" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan_branch" ]
+
+  # AC6: the manifest (now carrying `mode`) validates against
+  # plan-lifecycle-manifest.schema.json despite additionalProperties:false.
+  run bash "$AID_PLUGIN_PATH/scripts/aid-lifecycle.sh" validate \
+    "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" plan-lifecycle-manifest.schema.json
+  [ "$status" -eq 0 ]
+}
+
+@test "aid_lifecycle_set_plan_mode: idempotent no-op when the manifest already carries the requested mode (no new commit)" {
+  _write_legacy_plan "P900"
+  aid_lifecycle_set_plan_mode "P900" "plan_branch" "$TEST_PROJECT_ROOT"
+  local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+
+  run aid_lifecycle_set_plan_mode "P900" "plan_branch" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local after; after="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  [ "$before" = "$after" ]
+}
+
+@test "aid_lifecycle_set_plan_mode: rejects an unknown mode value, no write, no commit" {
+  _write_legacy_plan "P900"
+  local before_head; before_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+
+  run aid_lifecycle_set_plan_mode "P900" "not_a_real_mode" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [ ! -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" ]
+
+  local after_head; after_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  [ "$before_head" = "$after_head" ]
 }

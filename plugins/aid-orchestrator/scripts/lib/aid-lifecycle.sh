@@ -159,6 +159,101 @@ aid_target_branch() {
   echo "$tb"
 }
 
+# ── Plan mode (P064 E-064-1_2 Step 3) ────────────────────────────────────────
+# aid_lifecycle_plan_mode <plan_id> [root] — the AUTHORITATIVE reader for which
+# release model plan_id follows. Reads ONLY the git-tracked manifest
+# `.aid-lifecycle/manifests/<plan_id>.yaml` — never plan-state.yaml's own
+# `mode` cache (see aid-plan-state.sh's file header for that cache's own
+# explicit disclaimer: "THIS STEP DOES NOT IMPLEMENT THAT RE-READ" — this
+# function is the reader a later step wires plan_state_get's `mode` output
+# against, fail-closed on a mismatch).
+#
+# Always echoes exactly one of "plan_branch" / "legacy_epic_release_mode" and
+# always returns 0 — there is no "not_found"/"corrupt" exit code here on
+# purpose: a plan with no manifest, or a manifest with no `mode` key (every
+# manifest written before this step, or one `aid_lifecycle_ensure_manifest`
+# created without ever calling `aid_lifecycle_set_plan_mode`), is legitimately
+# "not yet declared plan_branch" — the documented default is the release
+# model that was already in effect before P064 introduced plan/Pxxx branches,
+# so absence is never ambiguous. A manifest that fails to parse as YAML is
+# treated the same way (fail SAFE to the pre-P064 model, not fail-open to the
+# newer, stricter one a caller might not be ready to enforce).
+aid_lifecycle_plan_mode() {
+  local plan_id="$1" root="${2:-.}"
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+  [[ -f "$manifest" ]] || { echo "legacy_epic_release_mode"; return 0; }
+  local mode; mode="$(yq -r '.mode // ""' "$manifest" 2>/dev/null || true)"
+  case "$mode" in
+    plan_branch) echo "plan_branch" ;;
+    *)           echo "legacy_epic_release_mode" ;;
+  esac
+  return 0
+}
+
+# aid_lifecycle_set_plan_mode <plan_id> <mode> [root] — the DURABLE mode-write
+# path `plan-start` (a LATER step, Step 4, not yet built) needs to persist the
+# authoritative release model into the git-tracked manifest BEFORE any EPIC
+# begins. Ensures the manifest exists first (aid_lifecycle_ensure_manifest —
+# creating it from a strict legacy parse of the prose plan if none exists
+# yet), then durably writes `.mode` via the SAME isolated-commit path every
+# other lifecycle mutator uses (never touches the user's index; fail-closed
+# entry precheck against a staged/unstaged collision on the manifest path).
+# Idempotent: a no-op (return 0, no write, no commit) when the manifest
+# already carries the requested mode.
+#
+# Returns: 0 durably written (or already correct), 1 bad mode arg / manifest
+# write or schema-validate failure, 2 ambiguous plan (legacy-unverifiable),
+# 3 plan not found / not on target_branch, 4 user staged/unstaged collision,
+# 5 commit not durable (recoverable — re-run).
+aid_lifecycle_set_plan_mode() {
+  local plan_id="$1" mode="$2" root="${3:-.}"
+  case "$mode" in
+    plan_branch|legacy_epic_release_mode) ;;
+    *)
+      echo "lifecycle: aid_lifecycle_set_plan_mode: mode must be 'plan_branch' or 'legacy_epic_release_mode' (got '${mode:-<empty>}')" >&2
+      return 1
+      ;;
+  esac
+
+  # Ensures the manifest is durably present (creates + commits it from the
+  # strict legacy parse if this is the plan's first lifecycle write). Any
+  # non-zero here (ambiguous/not-found/collision/commit-failure) propagates
+  # UNTOUCHED — a mode write must never proceed on a manifest that isn't
+  # itself durably in place.
+  local mrc=0
+  aid_lifecycle_ensure_manifest "$plan_id" "$root" >/dev/null 2>&1 || mrc=$?
+  [[ "$mrc" -ne 0 ]] && return "$mrc"
+
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+  local relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
+  # Entry precheck BEFORE mutating the (now durable) manifest: a user's
+  # staged/unstaged edit to the tracked manifest must never be swept into
+  # this commit (ensure_manifest early-returns for an already-durable
+  # manifest without re-prechecking, so this is the guard that catches that
+  # case — mirrors aid_lifecycle_record_delivery's own re-precheck).
+  _aid_lc_precheck_write "$root" "$relpath" || return $?
+
+  local current; current="$(yq -r '.mode // ""' "$manifest" 2>/dev/null || true)"
+  [[ "$current" == "$mode" ]] && return 0   # already correct — documented no-op
+
+  local tmp; tmp="$(mktemp)"
+  yq ".mode = \"${mode}\"" "$manifest" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  # Validate BEFORE placing into the worktree — fail-closed, mirrors every
+  # other lifecycle write in this file (never a partially-written, unvalidated
+  # tracked artifact).
+  if ! aid_lifecycle_validate_artifact "$tmp" "plan-lifecycle-manifest.schema.json"; then
+    rm -f "$tmp"; return 1
+  fi
+  mv "$tmp" "$manifest"
+
+  if ! _aid_lc_isolated_commit "$root" "lifecycle: mode=${mode} for ${plan_id}" "$relpath"; then
+    echo "lifecycle: aid_lifecycle_set_plan_mode: manifest mode write not committed for ${plan_id} (recoverable — re-run)" >&2
+    return 5
+  fi
+  git -C "$root" cat-file -e "$(aid_target_branch):${relpath}" 2>/dev/null || return 5
+  return 0
+}
+
 # ── Public-safe contract enforcement ─────────────────────────────────────────
 # aid_lifecycle_publicsafe_check <yaml_file>
 # Rejects (exit 1) any lifecycle artifact that carries content the public-safe
