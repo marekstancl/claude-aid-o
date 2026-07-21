@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/plan-boundary-manifest.schema.json",
+  "title": "AID Protocol v2 — PlanBoundaryManifest (P064 E-064-1_2)",
+  "$comment": "producer: FSM (plan-branch lifecycle), consumers: [lib/aid-plan-manifest.sh, C4, PM brief]. Descriptive/documentation contract only — NOT loaded or enforced by aid-protocol-validate.sh (that script only proves payload-key presence, step 12, exit 12). The conditional invariants noted below are enforced by a LATER step (lib/aid-plan-manifest.sh, hand-written jq -e checks), not by this schema.",
+  "description": "Type-specific schema for plan-boundary-manifest.json — the record tracking a plan branch's EPICs, task branches, and integration heads through the plan-branch lifecycle (plan/Pxxx as the integration branch for a plan's EPICs). Path: .aid-o/work/plan-state/<plan_id>/plan-boundary-manifest.json.",
+  "type": "object",
+  "allOf": [
+    {
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+    }
+  ],
+  "properties": {
+    "artifact_type": {
+      "const": "plan_boundary_manifest",
+      "$comment": "enforced — must equal this type"
+    },
+    "plan_boundary_manifest": {
+      "type": "object",
+      "$comment": "enforced — payload-key presence only (step 12, exit 12). Field-level shape below is descriptive/documentation, not runtime-enforced by aid-protocol-validate.sh.",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "pattern": "^P[0-9]{3}$",
+          "description": "Must equal identity.plan_id."
+        },
+        "plan_branch": {
+          "type": "string",
+          "pattern": "^plan/P[0-9]{3}$"
+        },
+        "target_branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_base_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "target_branch_head_at_start": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "target_branch_head_at_candidate_freeze": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "type": "null" }
+          ]
+        },
+        "plan_branch_head": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "candidate_sha": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+            { "type": "null" }
+          ],
+          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+        },
+        "plan_state": {
+          "enum": [
+            "OPEN",
+            "EPIC_INTEGRATION",
+            "PLAN_SYNC",
+            "PLAN_GATES",
+            "PLAN_REVIEW",
+            "PLAN_FIX",
+            "AWAITING_PM",
+            "PLAN_MERGING",
+            "CLOSED",
+            "ABORTED",
+            "CONFLICT"
+          ]
+        },
+        "mode": {
+          "enum": ["plan_branch", "legacy_epic_release_mode"]
+        },
+        "epics": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$"
+          }
+        },
+        "active_epics": {
+          "type": "array",
+          "description": "Must be a subset of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh).",
+          "items": {
+            "type": "string",
+            "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$"
+          }
+        },
+        "total_epics": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Must equal epics length. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+        },
+        "is_plan_final": {
+          "type": "boolean",
+          "description": "True only in PLAN_SYNC or later. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+        },
+        "epic_required_profile": {
+          "enum": ["quick", "targeted", "standard", "full", "release"]
+        },
+        "plan_final_required_profile": {
+          "enum": ["quick", "targeted", "standard", "full", "release"],
+          "description": "Monotonically non-decreasing relative to epic_required_profile. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+        },
+        "epic_runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "epic_id": {
+                "type": "string",
+                "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$",
+                "description": "Must be a member of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+              },
+              "run_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "task_branch": {
+                "type": "string",
+                "pattern": "^task/E-[0-9]{3}-[0-9]+_[0-9]+/main$"
+              },
+              "epic_base_commit": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$",
+                "description": "The plan head observed at epic-start."
+              },
+              "epic_source_ref": {
+                "type": ["string", "null"],
+                "description": "The ref the branch was created from; null only for a repaired entry that could not prove its origin."
+              },
+              "lineage": {
+                "enum": ["proven", "unproven"]
+              },
+              "epic_merge_commit": {
+                "oneOf": [
+                  { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+                  { "type": "null" }
+                ],
+                "description": "Non-null requires status: merged_to_plan. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+              },
+              "evidence_dir": {
+                "type": "string",
+                "pattern": "^\\.aid-o/work/evidence/E-[0-9]{3}-[0-9]+_[0-9]+/",
+                "description": "Must start with .aid-o/work/evidence/<epic_id>/. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
+              },
+              "status": {
+                "enum": ["pending", "running", "merged_to_plan", "abandoned", "superseded", "blocked"]
+              }
+            },
+            "required": ["epic_id", "run_id", "task_branch", "epic_base_commit", "lineage", "evidence_dir", "status"]
+          }
+        },
+        "plan_final_run_id": {
+          "oneOf": [
+            { "type": "string", "pattern": "^R-P[0-9]{3}-final-[0-9]+$" },
+            { "type": "null" }
+          ],
+          "description": "Non-null requires plan_final_evidence_dir non-null and vice versa. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+        },
+        "plan_final_evidence_dir": {
+          "oneOf": [
+            { "type": "string", "pattern": "^\\.aid-o/work/evidence/P[0-9]{3}/" },
+            { "type": "null" }
+          ],
+          "description": "Non-null requires plan_final_run_id non-null and vice versa. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
+        }
+      },
+      "required": [
+        "plan_id",
+        "plan_branch",
+        "target_branch",
+        "plan_base_commit",
+        "target_branch_head_at_start",
+        "plan_branch_head",
+        "plan_state",
+        "mode",
+        "epics",
+        "active_epics",
+        "total_epics",
+        "is_plan_final",
+        "epic_required_profile",
+        "plan_final_required_profile",
+        "epic_runs"
+      ]
+    }
+  },
+  "required": ["plan_boundary_manifest"]
+}

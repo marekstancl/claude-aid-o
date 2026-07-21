@@ -174,6 +174,7 @@ VALID_ARTIFACT_TYPES=(
   invalidation_map
   waiver
   c3_dispatch
+  plan_boundary_manifest
 )
 
 artifact_type=$(jq -r '.artifact_type' "$ARTIFACT_FILE")
@@ -391,6 +392,15 @@ TYPE_PAYLOAD_MAP[waiver]="waiver"
 # distinguishing content (invoked/exit_code/outcome/etc.) — no restructuring
 # of aid-c3-dispatch.sh's established shape was needed to satisfy this.
 TYPE_PAYLOAD_MAP[c3_dispatch]="dispatch"
+# P064 E-064-1_2 Step 2: plan-boundary-manifest.json (plan/Pxxx as the
+# integration branch for a plan's EPICs) becomes a first-class protocol-v2
+# artifact so identity/freshness/payload-presence are validated by this
+# generic validator rather than ad-hoc checks. The deeper field-level
+# invariants (uniqueness, subset, conditional requireds, path containment,
+# profile monotonicity) are enforced by a LATER step (lib/aid-plan-manifest.sh
+# via hand-written jq -e checks), not here — this step only proves the
+# payload key is present, same as every other type in this map.
+TYPE_PAYLOAD_MAP[plan_boundary_manifest]="plan_boundary_manifest"
 
 payload_key="${TYPE_PAYLOAD_MAP[$artifact_type]:-}"
 if [[ -n "$payload_key" ]]; then
