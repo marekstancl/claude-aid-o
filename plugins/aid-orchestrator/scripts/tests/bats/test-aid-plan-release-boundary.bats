@@ -274,6 +274,426 @@ _init_plan() {
   [ "$output" = "CLOSED" ]
 }
 
+# ─── Lifecycle Contract: comprehensive negative tests for one-way transitions ──
+# The state machine defines mandatory one-way edges that must reject their
+# reverse. This table-driven test verifies that every one-way edge A→B in the
+# transition table has its reverse B→A properly rejected and leaves state
+# unchanged.
+#
+# LIFECYCLE EDGE CLASSIFICATIONS (per _AID_PLAN_TRANSITIONS):
+#   - Self-loops (A→A, trivially their own inverse; test inapplicable):
+#     EPIC_INTEGRATION→EPIC_INTEGRATION, PLAN_SYNC→PLAN_SYNC
+#   - Genuinely bidirectional (both A→B and B→A legal; not inverse-illegal):
+#     EPIC_INTEGRATION↔CONFLICT, PLAN_SYNC↔CONFLICT
+#   - All other edges are one-way: reverse must be rejected, state unchanged.
+#
+# Test strategy: for each one-way edge A→B, reach B via shortest legal path,
+# then attempt B→A and assert failure + unchanged state.
+@test "Negative test: EPIC_INTEGRATION → PLAN_SYNC is one-way; reverse PLAN_SYNC → EPIC_INTEGRATION rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+
+  run plan_state_transition P064 PLAN_SYNC EPIC_INTEGRATION
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+@test "Negative test: PLAN_SYNC → PLAN_GATES is one-way; reverse PLAN_GATES → PLAN_SYNC rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+
+  run plan_state_transition P064 PLAN_GATES PLAN_SYNC
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_GATES" ]
+}
+
+@test "Negative test: PLAN_GATES → PLAN_REVIEW is one-way; reverse PLAN_REVIEW → PLAN_GATES rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+
+  run plan_state_transition P064 PLAN_REVIEW PLAN_GATES
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_REVIEW" ]
+}
+
+@test "Negative test: PLAN_REVIEW → AWAITING_PM is one-way; reverse AWAITING_PM → PLAN_REVIEW rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+
+  run plan_state_transition P064 AWAITING_PM PLAN_REVIEW
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "AWAITING_PM" ]
+}
+
+@test "Negative test: AWAITING_PM → PLAN_MERGING is one-way; reverse PLAN_MERGING → AWAITING_PM rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_MERGING
+
+  run plan_state_transition P064 PLAN_MERGING AWAITING_PM
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_MERGING" ]
+}
+
+@test "Negative test: PLAN_MERGING → CLOSED is one-way; reverse CLOSED → PLAN_MERGING rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_MERGING
+  plan_state_transition P064 PLAN_MERGING CLOSED
+
+  run plan_state_transition P064 CLOSED PLAN_MERGING
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "CLOSED" ]
+}
+
+@test "Negative test: PLAN_GATES → PLAN_FIX is one-way; reverse PLAN_FIX → PLAN_GATES rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_FIX
+
+  run plan_state_transition P064 PLAN_FIX PLAN_GATES
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_FIX" ]
+}
+
+@test "Negative test: PLAN_REVIEW → PLAN_FIX is one-way; reverse PLAN_FIX → PLAN_REVIEW rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW PLAN_FIX
+
+  run plan_state_transition P064 PLAN_FIX PLAN_REVIEW
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_FIX" ]
+}
+
+@test "Negative test: PLAN_FIX → PLAN_SYNC is one-way; reverse PLAN_SYNC → PLAN_FIX rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_FIX
+  plan_state_transition P064 PLAN_FIX PLAN_SYNC
+
+  run plan_state_transition P064 PLAN_SYNC PLAN_FIX
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+@test "Negative test: AWAITING_PM → PLAN_SYNC is one-way; reverse PLAN_SYNC → AWAITING_PM rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_SYNC
+
+  run plan_state_transition P064 PLAN_SYNC AWAITING_PM
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+@test "Negative test: AWAITING_PM → PLAN_FIX is one-way; reverse PLAN_FIX → AWAITING_PM rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_FIX
+
+  run plan_state_transition P064 PLAN_FIX AWAITING_PM
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_FIX" ]
+}
+
+@test "Negative test: AWAITING_PM → CONFLICT is one-way; reverse CONFLICT → AWAITING_PM rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM CONFLICT
+
+  run plan_state_transition P064 CONFLICT AWAITING_PM
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "CONFLICT" ]
+}
+
+@test "Negative test: PLAN_MERGING → CONFLICT is one-way; reverse CONFLICT → PLAN_MERGING rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_MERGING
+  plan_state_transition P064 PLAN_MERGING CONFLICT
+
+  run plan_state_transition P064 CONFLICT PLAN_MERGING
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "CONFLICT" ]
+}
+
+@test "Documented: EPIC_INTEGRATION → CONFLICT and CONFLICT → EPIC_INTEGRATION are bidirectional (both legal); no inverse-illegal test" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION CONFLICT
+
+  # Both directions are legal; this is a genuine bidirectional pair.
+  run plan_state_transition P064 CONFLICT EPIC_INTEGRATION
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "EPIC_INTEGRATION" ]
+}
+
+@test "Documented: PLAN_SYNC → CONFLICT and CONFLICT → PLAN_SYNC are bidirectional (both legal); no inverse-illegal test" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC CONFLICT
+
+  # Both directions are legal; this is a genuine bidirectional pair.
+  run plan_state_transition P064 CONFLICT PLAN_SYNC
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+@test "Documented: self-loops EPIC_INTEGRATION → EPIC_INTEGRATION and PLAN_SYNC → PLAN_SYNC are trivially their own inverse; no inverse-illegal test" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+
+  # Self-loop: A→A is legal and its own inverse.
+  run plan_state_transition P064 EPIC_INTEGRATION EPIC_INTEGRATION
+  [ "$status" -eq 0 ]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "EPIC_INTEGRATION" ]
+
+  # Likewise for PLAN_SYNC.
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  run plan_state_transition P064 PLAN_SYNC PLAN_SYNC
+  [ "$status" -eq 0 ]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+@test "Negative test: OPEN → EPIC_INTEGRATION is one-way; reverse EPIC_INTEGRATION → OPEN rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+
+  run plan_state_transition P064 EPIC_INTEGRATION OPEN
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "EPIC_INTEGRATION" ]
+}
+
+@test "Negative test: OPEN → ABORTED is one-way; reverse ABORTED → OPEN rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN ABORTED
+
+  run plan_state_transition P064 ABORTED OPEN
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: EPIC_INTEGRATION → ABORTED is one-way; reverse ABORTED → EPIC_INTEGRATION rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION ABORTED
+
+  run plan_state_transition P064 ABORTED EPIC_INTEGRATION
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: CONFLICT → ABORTED is one-way; reverse ABORTED → CONFLICT rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION CONFLICT
+  plan_state_transition P064 CONFLICT ABORTED
+
+  run plan_state_transition P064 ABORTED CONFLICT
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: PLAN_SYNC → ABORTED is one-way; reverse ABORTED → PLAN_SYNC rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC ABORTED
+
+  run plan_state_transition P064 ABORTED PLAN_SYNC
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: PLAN_GATES → ABORTED is one-way; reverse ABORTED → PLAN_GATES rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES ABORTED
+
+  run plan_state_transition P064 ABORTED PLAN_GATES
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: PLAN_REVIEW → ABORTED is one-way; reverse ABORTED → PLAN_REVIEW rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW ABORTED
+
+  run plan_state_transition P064 ABORTED PLAN_REVIEW
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: PLAN_FIX → ABORTED is one-way; reverse ABORTED → PLAN_FIX rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_FIX
+  plan_state_transition P064 PLAN_FIX ABORTED
+
+  run plan_state_transition P064 ABORTED PLAN_FIX
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: AWAITING_PM → ABORTED is one-way; reverse ABORTED → AWAITING_PM rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM ABORTED
+
+  run plan_state_transition P064 ABORTED AWAITING_PM
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
+@test "Negative test: PLAN_MERGING → ABORTED is one-way; reverse ABORTED → PLAN_MERGING rejected" {
+  _init_plan "P064"
+  plan_state_transition P064 OPEN EPIC_INTEGRATION
+  plan_state_transition P064 EPIC_INTEGRATION PLAN_SYNC
+  plan_state_transition P064 PLAN_SYNC PLAN_GATES
+  plan_state_transition P064 PLAN_GATES PLAN_REVIEW
+  plan_state_transition P064 PLAN_REVIEW AWAITING_PM
+  plan_state_transition P064 AWAITING_PM PLAN_MERGING
+  plan_state_transition P064 PLAN_MERGING ABORTED
+
+  run plan_state_transition P064 ABORTED PLAN_MERGING
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  run plan_state_get P064 plan_state
+  [ "$output" = "ABORTED" ]
+}
+
 # =============================================================================
 # ─── lib/aid-plan-state.sh — operation record ────────────────────────────
 # =============================================================================

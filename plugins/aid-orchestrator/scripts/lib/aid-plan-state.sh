@@ -159,6 +159,37 @@ AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S=10
 # subset Step 1's own callers exercise) — later steps (aid-plan-fsm.sh, P068's
 # plan-final runner) extend the COMMANDS that drive it, never this table's
 # shape.
+#
+# ── LIFECYCLE CONTRACT (tested in test-aid-plan-release-boundary.bats) ───────
+# This state machine defines three classes of edges:
+#
+#   1. SELF-LOOPS (inverse-illegal test inapplicable):
+#      - EPIC_INTEGRATION → EPIC_INTEGRATION
+#      - PLAN_SYNC → PLAN_SYNC
+#      A state looping to itself is trivially its own inverse; every test
+#      that asserts "reverse fails" would be redundant here.
+#
+#   2. BIDIRECTIONAL PAIRS (inverse-illegal test inapplicable):
+#      - EPIC_INTEGRATION ↔ CONFLICT (both EPIC_INTEGRATION→CONFLICT and
+#        CONFLICT→EPIC_INTEGRATION are legal)
+#      - PLAN_SYNC ↔ CONFLICT (both PLAN_SYNC→CONFLICT and CONFLICT→PLAN_SYNC
+#        are legal)
+#      In these pairs, both directions are intentionally permitted; there is
+#      no "illegal inverse" to test.
+#
+#   3. ONE-WAY EDGES (inverse-illegal test REQUIRED):
+#      Every other edge in the table is one-way: the reverse is NOT legal and
+#      must be rejected with PRECONDITION FAIL, leaving state unchanged.
+#      Examples: OPEN→EPIC_INTEGRATION (reverse EPIC_INTEGRATION→OPEN illegal),
+#                PLAN_GATES→PLAN_REVIEW (reverse PLAN_REVIEW→PLAN_GATES illegal).
+#
+# TEST COVERAGE: Every one-way edge has a corresponding negative test in
+# test-aid-plan-release-boundary.bats § "Lifecycle Contract". Each negative
+# test: (1) reaches the destination state via valid path, (2) attempts the
+# illegal reverse, (3) asserts non-zero exit and unchanged on-disk state.
+# Self-loops and bidirectional pairs are explicitly documented (test comments)
+# with "inapplicable" reasoning instead of having redundant/confusing negative
+# assertions that would appear to pass but test nothing meaningful.
 _AID_PLAN_TRANSITIONS=(
   "OPEN:EPIC_INTEGRATION"
   "OPEN:ABORTED"
