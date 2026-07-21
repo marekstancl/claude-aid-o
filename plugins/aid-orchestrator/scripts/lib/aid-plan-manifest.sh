@@ -908,15 +908,24 @@ plan_manifest_set_epic_status() {
 # ===========================================================================
 # plan_manifest_raise_final_profile <plan_id> <profile>
 #
-# Raises `plan_final_required_profile` to max(current, profile) using
-# `gate_profile_max` (aid-gate-profile.sh) — the profile can only move UP the
-# rank table (quick=0 < targeted=1 < standard=2 < full=3 < release=4). A
-# lower-or-equal-ranked `profile` is a documented NO-OP (return 0, no write,
-# no lock even taken) — never an error.
+# Raises `plan_final_required_profile` to max(current, profile) — the profile
+# can only move UP the rank table (quick=0 < targeted=1 < standard=2 <
+# full=3 < release=4). A lower-or-equal-ranked `profile` is a documented
+# NO-OP (no write) — never an error.
+#
+# The rank comparison happens INSIDE the jq filter passed to
+# _plan_manifest_atomic_mutate, i.e. under the lock, against the file's LIVE
+# value at write time — not via a lock-free bash-side pre-computation. This
+# is required for correctness: two concurrent callers racing to raise the
+# profile to different targets must never let the lower one clobber the
+# higher one once it lands (see the "Regression: concurrent
+# raise_final_profile calls never downgrade" bats test). Every call
+# therefore takes the lock, including a call whose outcome turns out to be a
+# no-op — the no-op is decided under the lock, not before it.
 #
 # Returns: 0 success or no-op, 1 bad profile name / not_found / corrupt
-# propagated from the read, 2 missing jq, 3 lock timeout (only reachable when
-# an actual raise is needed), 5 corrupt / validator missing.
+# propagated from the read, 2 missing jq, 3 lock timeout, 5 corrupt /
+# validator missing.
 # ===========================================================================
 plan_manifest_raise_final_profile() {
   local plan_id="$1" profile="$2"
@@ -928,28 +937,30 @@ plan_manifest_raise_final_profile() {
     return 1
   fi
 
-  local current grc=0
-  current="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_required_profile')" || grc=$?
-  if [[ "$grc" -ne 0 ]]; then
-    # not_found (grc=1, "not_found" already echoed by plan_manifest_get) or
-    # corrupt (grc=5) — nothing to raise on; propagate untouched.
-    return "$grc"
-  fi
+  # CRITICAL FIX for race condition: The profile comparison and max-computation
+  # must happen INSIDE the jq filter (which runs under the lock, after re-reading
+  # the file) — NOT in bash BEFORE taking the lock. This prevents a downgrade
+  # when two concurrent callers race (B writes "release", then A writes "full",
+  # downgrading the value from "release" to "full").
+  #
+  # The jq filter below inlines the profile rank table and does the comparison
+  # against the file's LIVE value at write time, under the lock. The filter is
+  # idempotent: if the target profile is already at or below the current rank,
+  # the filter leaves the file unchanged (via the `else .` branch).
+  #
+  # Profile rank table (matching aid-gate-profile.sh): quick=0 < targeted=1
+  # < standard=2 < full=3 < release=4.
+  local filter='
+    {quick:0,targeted:1,standard:2,full:3,release:4} as $ranks |
+    ((.plan_boundary_manifest.plan_final_required_profile as $current | $ranks[$current]) // 0) as $current_rank |
+    ($ranks[$profile] // 0) as $new_rank |
+    if $new_rank > $current_rank
+    then .plan_boundary_manifest.plan_final_required_profile = $profile
+    else .
+    end
+  '
 
-  local target
-  target="$(gate_profile_max "$current" "$profile")" || {
-    _pm_warn "plan_manifest_raise_final_profile: gate_profile_max failed for '$current'/'$profile'"
-    return 1
-  }
-
-  if [[ "$target" == "$current" ]]; then
-    # Downward-or-equal request: documented no-op, never an error, never a
-    # write (AC2: raising to a LOWER profile leaves the field unchanged).
-    return 0
-  fi
-
-  local filter='.plan_boundary_manifest.plan_final_required_profile = $target'
-  _plan_manifest_atomic_mutate "$plan_id" "$filter" --arg target "$target"
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" --arg profile "$profile"
 }
 
 # ===========================================================================

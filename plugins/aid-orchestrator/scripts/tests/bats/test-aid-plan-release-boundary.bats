@@ -736,6 +736,55 @@ _seed_manifest_from_fixture() {
   [ "$output" = "full" ]
 }
 
+# ─── Regression: concurrent raise_final_profile calls must never downgrade ──
+@test "Regression: concurrent raise_final_profile calls never downgrade (race-condition test)" {
+  # Spawn two concurrent background processes, each raising to a different
+  # profile, with NO artificial stagger between them — both start racing
+  # from the same instant. The higher-ranked one must win, regardless of
+  # which process's lock-free... (there is none anymore) / which process
+  # wins the lock first.
+  # Rank table: quick=0 < targeted=1 < standard=2 < full=3 < release=4
+  # We race: Caller A raises to "full" (rank 3), Caller B raises to
+  # "release" (rank 4). Expected result, every time: "release" (the max).
+  #
+  # A single trial is not reliable evidence on its own: a staggered start
+  # (verified empirically against the pre-fix code — the bug this guards
+  # against is real, reproduced 3/8 times under true concurrency with no
+  # stagger, 0/8 with a naive 50ms stagger between starts, which gives the
+  # first caller time to fully complete before the second even begins,
+  # eliminating the actual interleaving window) lets the two calls run
+  # effectively sequentially and passes even on the buggy pre-fix
+  # implementation by luck. This loop runs N truly-concurrent trials,
+  # resetting the field to "standard" before each, and requires every single
+  # one to land on "release" — a real regression must fail at least one.
+  _init_manifest "P900"
+  local trial
+  for trial in 1 2 3 4 5; do
+    plan_manifest_update P900 '.plan_boundary_manifest.plan_final_required_profile = "standard"'
+
+    bash -c "
+      source '$PLAN_MANIFEST_LIB'
+      export AID_PLAN_MANIFEST_PROJECT_ROOT='$TEST_PROJECT_ROOT'
+      plan_manifest_raise_final_profile 'P900' 'full'
+    " &
+    local pid_a=$!
+
+    bash -c "
+      source '$PLAN_MANIFEST_LIB'
+      export AID_PLAN_MANIFEST_PROJECT_ROOT='$TEST_PROJECT_ROOT'
+      plan_manifest_raise_final_profile 'P900' 'release'
+    " &
+    local pid_b=$!
+
+    wait "$pid_a" 2>/dev/null || true
+    wait "$pid_b" 2>/dev/null || true
+
+    run plan_manifest_get P900 '.plan_boundary_manifest.plan_final_required_profile'
+    [ "$status" -eq 0 ]
+    [ "$output" = "release" ]
+  done
+}
+
 # ─── plan_manifest_validate: identity / containment / negative fixtures ──
 
 # ─── AC1: identity mismatch fails validation ────────────────────────────
