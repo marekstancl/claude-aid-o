@@ -45,8 +45,9 @@ setup() {
   PLAN_STATE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-plan-state.sh"
   PLAN_MANIFEST_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-plan-manifest.sh"
   LIFECYCLE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  PLAN_FSM_CLI="$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh"
   FIXTURES_DIR="$AID_PLUGIN_PATH/scripts/tests/fixtures/protocol-v2/plan_boundary_manifest"
-  export LOCK_LIB PLAN_STATE_LIB PLAN_MANIFEST_LIB LIFECYCLE_LIB FIXTURES_DIR
+  export LOCK_LIB PLAN_STATE_LIB PLAN_MANIFEST_LIB LIFECYCLE_LIB PLAN_FSM_CLI FIXTURES_DIR
 
   # All three libraries are CWD/env-root-relative, never git-relative — point
   # them at this test's isolated project root (aid-lifecycle.sh's functions
@@ -986,4 +987,348 @@ YML
 
   local after_head; after_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
   [ "$before_head" = "$after_head" ]
+}
+
+# =============================================================================
+# ─── scripts/aid-plan-fsm.sh — plan-start / epic-start / plan-state
+#     (P064 E-064-1_2 Step 4) ────────────────────────────────────────────────
+# =============================================================================
+
+# _pfsm_bootstrap_plan <plan_id> [mode] — writes a minimal legacy plan file
+# and runs a REAL plan-start through the CLI (never a parallel "test mode"
+# shortcut — matches build_default_init_args's own convention of always
+# exercising the production signature). Asserts plan-start itself succeeded,
+# so a bootstrap failure can never masquerade as a lineage-check failure in
+# the test that calls it.
+_pfsm_bootstrap_plan() {
+  local plan_id="$1" mode="${2:-plan_branch}"
+  _write_legacy_plan "$plan_id"
+  run bash "$PLAN_FSM_CLI" plan-start "$plan_id" --mode "$mode" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC1: plan-start creates plan/<plan_id> at exactly the recorded target SHA and is a no-op on re-run" {
+  _write_legacy_plan "P064"
+  local target_sha; target_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+
+  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P064" ]
+  local branch_sha; branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  [ "$branch_sha" = "$target_sha" ]
+
+  # Re-run: idempotent no-op — same SHA, no error.
+  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local branch_sha2; branch_sha2="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  [ "$branch_sha2" = "$target_sha" ]
+}
+
+@test "AC2: after plan-start, the lifecycle manifest carries the requested mode, is schema-valid, committed on target_branch, and the mode survives deleting .aid-o/" {
+  _write_legacy_plan "P064"
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:.aid-lifecycle/manifests/P064.yaml"
+  [ "$status" -eq 0 ]
+
+  run bash "$AID_PLUGIN_PATH/scripts/aid-lifecycle.sh" validate \
+    "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml" plan-lifecycle-manifest.schema.json
+  [ "$status" -eq 0 ]
+
+  run yq -r '.mode' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  [ "$output" = "plan_branch" ]
+
+  # Delete the ENTIRE gitignored .aid-o/ tree — the mode lives in
+  # .aid-lifecycle/ (a sibling, git-tracked tree), so it must survive.
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o"
+  [ ! -d "$TEST_PROJECT_ROOT/.aid-o" ]
+
+  run aid_lifecycle_plan_mode "P064" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan_branch" ]
+}
+
+@test "AC3: epic-start records epic_base_commit equal to the plan head observed at that moment and creates the task branch from that SHA" {
+  _pfsm_bootstrap_plan "P064"
+  local plan_head; plan_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "task/E-064-1_1/main" ]
+
+  local branch_sha; branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse task/E-064-1_1/main)"
+  [ "$branch_sha" = "$plan_head" ]
+
+  local recorded_base
+  recorded_base="$(plan_manifest_get "P064" '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_base_commit')"
+  [ "$recorded_base" = "$plan_head" ]
+
+  # epic-start is idempotent on immediate re-run too.
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC4: a task branch created from main (not the plan head) is rejected — no manifest mutation" {
+  _pfsm_bootstrap_plan "P064"
+  # Advance main past the plan head so main != plan/P064.
+  echo more >> "$TEST_PROJECT_ROOT/.gitkeep"
+  git -C "$TEST_PROJECT_ROOT" add .gitkeep
+  git -C "$TEST_PROJECT_ROOT" commit -qm "advance main past the plan head"
+
+  local mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  local manifest_before; manifest_before="$(cat "$mp")"
+
+  git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_1/main main
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+
+  local manifest_after; manifest_after="$(cat "$mp")"
+  [ "$manifest_before" = "$manifest_after" ]
+}
+
+@test "AC4: a task branch whose ACTUAL base does not match its RECORDED epic_base_commit (stale) is rejected — no manifest mutation" {
+  # Root commit predates the plan base by construction — a genuine ancestor
+  # to reset the branch onto later.
+  local root_sha; root_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  echo "advance main before plan-start" >> "$TEST_PROJECT_ROOT/.gitkeep"
+  git -C "$TEST_PROJECT_ROOT" add .gitkeep
+  git -C "$TEST_PROJECT_ROOT" commit -qm "advance to the plan base"
+
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  local manifest_before; manifest_before="$(cat "$mp")"
+
+  # Force the branch onto the EARLIER root commit — an ancestor of, but not
+  # equal to, its recorded base — so merge-base with plan/P064 now resolves
+  # to that earlier commit, not the one epic-start actually recorded.
+  git -C "$TEST_PROJECT_ROOT" branch -f task/E-064-1_1/main "$root_sha"
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"lineage broken"* ]]
+
+  local manifest_after; manifest_after="$(cat "$mp")"
+  [ "$manifest_before" = "$manifest_after" ]
+}
+
+@test "AC4: a task branch belonging to a DIFFERENT plan has no manifest entry in the NAMED plan and is rejected" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot prove lineage"* ]]
+}
+
+@test "Edge Case: first EPIC of a plan where plan/Pxxx and target_branch share a SHA — a manually created branch at that SAME SHA is still rejected (check is on the manifest entry, not SHA)" {
+  _write_legacy_plan "P064"
+  local target_sha; target_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+
+  # Construct the exact "plan/Pxxx and target_branch share a SHA" moment
+  # directly via the libraries, bypassing the full plan-start CLI: a real
+  # plan-start's OWN lifecycle-mode commit (aid_lifecycle_set_plan_mode)
+  # would advance main past plan/P064 immediately afterward, making this
+  # moment unobservable as an external post-condition of a single
+  # plan-start invocation.
+  git -C "$TEST_PROJECT_ROOT" branch plan/P064 "$target_sha"
+  plan_state_init "P064" "plan_branch" "plan/P064" "main"
+  plan_manifest_init "P064" "plan/P064" "main" "$target_sha" "$target_sha" "plan_branch"
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" ]
+
+  git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_1/main "$target_sha"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no manifest entry"* ]]
+}
+
+@test "AC5: the same lineage checks fail identically inside a linked worktree" {
+  _pfsm_bootstrap_plan "P064"
+
+  # mock_git_worktree creates a REAL linked worktree and cd's into it.
+  # plan/P064 and .aid-lifecycle/ are git-tracked and so ARE visible there;
+  # .aid-o/work/plan-state/ is gitignored and would NOT be checked out into
+  # a fresh worktree by Git — exactly why aid-plan-fsm.sh resolves its
+  # runtime root via git's shared common-dir rather than the worktree's own
+  # toplevel (see aid-plan-fsm.sh's own header comment on
+  # _pfsm_resolve_project_root).
+  mock_git_worktree
+  local wt_dir; wt_dir="$(pwd)"
+
+  # A manually created branch is rejected identically inside the worktree.
+  git -C "$wt_dir" branch task/E-064-1_1/main main
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$wt_dir"
+  [ "$status" -ne 0 ]
+
+  # A legitimate epic-start still succeeds from inside the worktree.
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_2 --project-root "$wt_dir"
+  [ "$status" -eq 0 ]
+  [ "$output" = "task/E-064-1_2/main" ]
+}
+
+@test "AC6: a crash between branch creation and manifest write converges on re-run without creating a second branch" {
+  _pfsm_bootstrap_plan "P064"
+  local plan_head; plan_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  local op_id; op_id="$(plan_op_key "epic-start" "P064" "-" "0" "E-064-1_1")"
+
+  # Simulate the crash: intent + git_applied recorded, branch physically
+  # created, but the manifest write (state_committed) never ran.
+  plan_op_begin "P064" "$op_id" "epic-start" "E-064-1_1" ""
+  git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_1/main "$plan_head"
+  plan_op_mark_git_applied "P064" "$op_id" "$plan_head"
+
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "git_applied" ]
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "task/E-064-1_1/main" ]
+
+  # No second branch — exactly one ref by that name, at the SAME sha.
+  local ref_count
+  ref_count="$(git -C "$TEST_PROJECT_ROOT" for-each-ref --format='%(objectname)' refs/heads/task/E-064-1_1/main | wc -l | tr -d ' ')"
+  [ "$ref_count" -eq 1 ]
+  local final_sha; final_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse task/E-064-1_1/main)"
+  [ "$final_sha" = "$plan_head" ]
+
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "state_committed" ]
+
+  local recorded_base
+  recorded_base="$(plan_manifest_get "P064" '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_base_commit')"
+  [ "$recorded_base" = "$plan_head" ]
+}
+
+@test "AC7: plan-state --repair rebuilds a pruned workspace — merged EPICs restored merged_to_plan, unprovable EPICs marked unproven" {
+  _pfsm_bootstrap_plan "P064"
+
+  # Declare a second EPIC on the (git-tracked, prune-survivng) lifecycle
+  # manifest, mirroring a PM adding a declared EPIC after plan-start.
+  local lm="$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  yq -i '.declared_epics += [{"id": "E-064-1_2", "scope": "required"}]' "$lm"
+  git -C "$TEST_PROJECT_ROOT" add "$lm"
+  git -C "$TEST_PROJECT_ROOT" commit -qm "declare E-064-1_2"
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Give E-064-1_1's task branch a real commit, then merge it into
+  # plan/P064 for real — git's own default merge-commit message embeds the
+  # branch name, which is the heuristic repair relies on.
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
+  git -C "$TEST_PROJECT_ROOT" add epic-1.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-064-1_1/main -m "Merge branch 'task/E-064-1_1/main' into plan/P064"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  # E-064-1_2: a live, unmerged branch that was never actually run through
+  # epic-start (no manifest entry ever existed for it) — its origin is not
+  # provable from Git alone.
+  git -C "$TEST_PROJECT_ROOT" branch task/E-064-1_2/main main
+
+  # Prune: delete the entire runtime tree (simulates a fresh checkout).
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+
+  run bash "$PLAN_FSM_CLI" plan-state P064 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  [ -f "$mp" ]
+
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .status' "$mp"
+  [ "$output" = "merged_to_plan" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .lineage' "$mp"
+  [ "$output" = "proven" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_merge_commit' "$mp"
+  [ "$output" != "null" ]
+
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_2") | .epic_source_ref' "$mp"
+  [ "$output" = "null" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_2") | .lineage' "$mp"
+  [ "$output" = "unproven" ]
+
+  # The repaired manifest still passes the full invariant validator.
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "plan-state --repair refuses to run once the plan is past PLAN_SYNC" {
+  _pfsm_bootstrap_plan "P064"
+  plan_state_transition "P064" "OPEN" "EPIC_INTEGRATION"
+  plan_state_transition "P064" "EPIC_INTEGRATION" "PLAN_SYNC"
+  plan_state_transition "P064" "PLAN_SYNC" "PLAN_GATES"
+
+  run bash "$PLAN_FSM_CLI" plan-state P064 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"past PLAN_SYNC"* ]]
+}
+
+@test "AC8: --attest-source-ref promotes ONE unproven entry to proven, records the attestation in the op log, and is the only way to do so" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Manually flip E-064-1_1 to unproven (as --repair would for an
+  # unprovable EPIC) so there is something legitimate to attest.
+  plan_manifest_update "P064" \
+    '.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == "E-064-1_1" then (.lineage = "unproven" | .epic_source_ref = null) else . end]'
+
+  run bash "$PLAN_FSM_CLI" plan-state P064 --attest-source-ref "plan/P064" --reason "manually verified from git log" --epic E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .lineage' "$mp"
+  [ "$output" = "proven" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_source_ref' "$mp"
+  [ "$output" = "plan/P064" ]
+
+  # Recorded in the operation log.
+  local ops="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/operations.jsonl"
+  run bash -c "jq -s '[.[] | select(.command == \"plan-state-attest\")] | length' '$ops'"
+  [ "$status" -eq 0 ]
+  [ "$output" -ge 1 ]
+
+  # The ONLY way: re-attesting an already-proven entry is refused, never a
+  # silent no-op.
+  run bash "$PLAN_FSM_CLI" plan-state P064 --attest-source-ref "plan/P064" --reason "second attempt" --epic E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+}
+
+@test "plan-start on a plan whose state is already CLOSED exits 1; a closed plan is not reopened" {
+  _pfsm_bootstrap_plan "P064"
+  local sp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-state.yaml"
+  yq -i '.plan_state = "CLOSED"' "$sp"
+
+  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CLOSED"* ]]
+}
+
+@test "Error Handling: a dirty worktree at epic-start exits 1 before creating anything" {
+  _pfsm_bootstrap_plan "P064"
+  echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  local branch_sha
+  branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/task/E-064-1_1/main 2>/dev/null || true)"
+  [ -z "$branch_sha" ]
+}
+
+@test "Error Handling: a detached HEAD at plan-start exits 1 and prints the resolved SHA" {
+  _write_legacy_plan "P064"
+  local head_sha; head_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  git -C "$TEST_PROJECT_ROOT" checkout -q --detach "$head_sha"
+
+  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"detached HEAD"* ]]
+  [[ "$output" == *"$head_sha"* ]]
 }
