@@ -152,7 +152,7 @@ if [[ "$schema_version" != "aid-2.0" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: artifact_type enum (18 values)
+# Step 5: artifact_type enum (20 values)
 # ---------------------------------------------------------------------------
 VALID_ARTIFACT_TYPES=(
   plan_review
