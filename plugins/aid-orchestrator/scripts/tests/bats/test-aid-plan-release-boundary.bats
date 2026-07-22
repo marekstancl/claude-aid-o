@@ -2692,6 +2692,10 @@ _pfsm_epic_with_commit() {
   run bash "$PLAN_FSM_CLI" epic-start "$plan_id" "$epic_id" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   git -C "$TEST_PROJECT_ROOT" checkout -q "task/${epic_id}/main"
+  # `file` may be a nested path (Step 8's risk cases commit
+  # plugins/aid-orchestrator/scripts/aid-fsm.sh to exercise the high-risk
+  # classification) — create its parent, never assume repo root.
+  mkdir -p "$(dirname "$TEST_PROJECT_ROOT/$file")"
   echo "$content" > "$TEST_PROJECT_ROOT/$file"
   git -C "$TEST_PROJECT_ROOT" add "$file"
   git -C "$TEST_PROJECT_ROOT" commit -qm "${epic_id}: work"
@@ -3152,7 +3156,9 @@ _pfsm_merge_commit_count() {
   run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
   [ "$output" = "release" ]
 
-  run bash -c "jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .full_tests_exception.reason' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  # Field renamed to `epic_full_test_exception` by Step 8 (plan Step 8 names
+  # it; the `epic_` prefix keeps it distinct from a future plan-final one).
+  run bash -c "jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .epic_full_test_exception.reason' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
   [ "$output" = "PM asked for a one-off full run mid-plan" ]
   run plan_manifest_validate "P064"
   [ "$status" -eq 0 ]
@@ -4634,4 +4640,442 @@ YAML
   [ "$status" -eq 0 ]
   [ "$(_qw_field E-1 status)" = "running" ]
   [ "$(od -c "$(_qw_queue)" | tail -2)" = "$before_tail" ]
+}
+
+# =============================================================================
+# ─── Boundary-split gate profiles + self-host activation
+#     (P064 EPIC E-064-2_2 Step 3 = plan Step 8) ─────────────────────────────
+# =============================================================================
+# The risk resolver (lib/aid-gate-profile.sh) now answers TWO questions from
+# one call: "what should THIS EPIC's own gate run be" (stdout, capped at
+# `standard` when the caller passes boundary=epic) and "what must the
+# plan-final run be at minimum" (the accumulated floor, out-of-band via
+# AID_GATE_PROFILE_FLOOR / --floor-file). `epic-complete` records the second
+# into the plan-boundary manifest; P068's plan-final stage consumes it.
+#
+# TRACEABILITY — `ACn:` numbers this step's own AC list (plan Step 8):
+#   AC1  high-risk EPIC records plan_final_required_profile >= full while its
+#        own boundary runs targeted/standard
+#   AC2  no bats_all at an EPIC boundary without a recorded PM exception
+#   AC3  a PM `--full-tests` run is an audited exception and never lowers the floor
+#   AC4  an unknown production path fails the EPIC gate and raises the floor to full
+#   AC5  `release`'s include list is a superset of `full`'s
+#   AC6  a high-risk EPIC that ran `standard` still reaches DONE
+#   AC7  a docs-only EPIC resolves to `quick`, which exists as a gate_profiles key
+#   AC8  test-aid-fsm.bats / test-aid-gate-profile.bats stay green (run, not asserted here)
+
+# _gp_paths_file <path> [path ...] — a changed-paths file for the resolver.
+_gp_paths_file() {
+  local f="$TEST_TMPDIR/gp-paths-$$.txt"
+  printf '%s\n' "$@" > "$f"
+  echo "$f"
+}
+
+# _selfhost_execution_yaml — this repository's OWN .aid-o/config/execution.yaml
+# (the dogfood config Step 8 activates). AID_PLUGIN_PATH is <repo>/plugins/aid-orchestrator.
+_selfhost_execution_yaml() {
+  echo "$AID_PLUGIN_PATH/../../.aid-o/config/execution.yaml"
+}
+
+# NOTE on the four tests below that read the self-host config: `.aid-o/` is
+# gitignored (.gitignore:98), so that file genuinely does not exist on a fresh
+# checkout or in CI. They assert properties of the DELIVERED dogfood config,
+# and there is no honest fixture stand-in for "the file this repository
+# actually runs its gates against" — a copy would silently drift. So each one
+# `skip`s when the file is absent, INLINE in the test body (never from a
+# helper: `skip` inside a `$(...)` subshell cannot end the test, it just
+# returns, and the test then asserts against an empty path — a green test
+# proving nothing). Every config-INDEPENDENT half of the same ACs runs
+# unconditionally.
+
+# _gp_yq_jq <file> <jq_expr> — yq -> jq under `pipefail`, so a missing/broken
+# execution.yaml surfaces as a FAILING assertion instead of an empty stream
+# that jq happily accepts.
+_gp_yq_jq() {
+  bash -c "set -o pipefail; yq -o=json '.' '$1' | jq -e '$2'"
+}
+
+# _pfsm_write_gates_report <epic_id> <json> — the run's gates_report.json,
+# verbatim, for cases that need more than `_pfsm_write_epic_evidence`'s
+# `{profile}` (excluded_gates[], per-gate exit codes).
+_pfsm_write_gates_report() {
+  local epic_id="$1" json="$2"
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/R-${epic_id}-plan/gates"
+  mkdir -p "$dir"
+  printf '%s\n' "$json" > "$dir/gates_report.json"
+}
+
+# _pfsm_write_plan_json <epic_id> <gates_json_array> — the run's plan.json,
+# whose `gates[]` is the plan-declared hard floor.
+_pfsm_write_plan_json() {
+  local epic_id="$1" gates="$2"
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/R-${epic_id}-plan"
+  mkdir -p "$dir"
+  jq -nc --argjson g "$gates" '{gates: $g}' > "$dir/plan.json"
+}
+
+# ─── lib/aid-gate-profile.sh — the boundary split ──────────────────────────
+
+@test "AC1: gate_profile_resolve boundary=epic caps a high-risk diff at standard while the accumulated floor stays full" {
+  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
+
+  # Sourced caller (no command substitution) so AID_GATE_PROFILE_FLOOR is
+  # observable — that is the documented out-of-band channel.
+  AID_GATE_PROFILE_FLOOR=""
+  gate_profile_resolve "$paths" "" "" epic > "$TEST_TMPDIR/resolved.txt"
+  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "standard" ]
+  [ "$AID_GATE_PROFILE_FLOOR" = "full" ]
+
+  # stdout is still EXACTLY one line — both production callers use it as a
+  # single gate_profiles key.
+  [ "$(wc -l < "$TEST_TMPDIR/resolved.txt")" -eq 1 ]
+}
+
+@test "AC1: --floor-file writes the accumulated floor for a non-sourcing caller" {
+  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
+  local floor_file="$TEST_TMPDIR/floor.txt"
+
+  run bash "$AID_PLUGIN_PATH/scripts/lib/aid-gate-profile.sh" resolve \
+    "$paths" "" "" epic --floor-file "$floor_file"
+  [ "$status" -eq 0 ]
+  [ "$output" = "standard" ]
+  [ "$(cat "$floor_file")" = "full" ]
+}
+
+@test "Edge Case: boundary=epic suppresses the release escalation for the run profile while the floor still records release" {
+  local paths; paths="$(_gp_paths_file "docs/x.md")"
+  local state="$TEST_TMPDIR/fsm-state.yaml"
+  printf 'epic_id: E-064-1_1\ndone_phase: release\n' > "$state"
+
+  AID_GATE_PROFILE_FLOOR=""
+  gate_profile_resolve "$paths" "$state" "" epic > "$TEST_TMPDIR/resolved.txt"
+  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "quick" ]
+  [ "$AID_GATE_PROFILE_FLOOR" = "release" ]
+
+  # plan_final asks for the escalated run itself.
+  AID_GATE_PROFILE_FLOOR=""
+  gate_profile_resolve "$paths" "$state" "" plan_final > "$TEST_TMPDIR/resolved2.txt"
+  [ "$(cat "$TEST_TMPDIR/resolved2.txt")" = "release" ]
+  [ "$AID_GATE_PROFILE_FLOOR" = "release" ]
+}
+
+@test "Regression: a three-argument gate_profile_resolve call keeps today's unbounded behaviour byte-identical" {
+  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
+  local state="$TEST_TMPDIR/fsm-state.yaml"
+  printf 'epic_id: E-064-1_1\ndone_phase: release\n' > "$state"
+
+  # No boundary → no cap, no suppression: high-risk stays `full`, a release
+  # done_phase still escalates to `release`.
+  run gate_profile_resolve "$paths"
+  [ "$status" -eq 0 ]
+  [ "$output" = "full" ]
+
+  run gate_profile_resolve "$paths" "$state"
+  [ "$status" -eq 0 ]
+  [ "$output" = "release" ]
+
+  # Docs-only, no boundary → quick, exactly as before.
+  local docs; docs="$(_gp_paths_file "docs/a.md" "README.md")"
+  run gate_profile_resolve "$docs"
+  [ "$status" -eq 0 ]
+  [ "$output" = "quick" ]
+}
+
+@test "Edge Case: AID_GATE_PROFILE_OVERRIDE downward from full without the force variables is refused at the epic boundary" {
+  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh")"
+
+  AID_GATE_PROFILE_OVERRIDE=quick run gate_profile_resolve "$paths" "" "" epic
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"rejected"* ]]
+  [[ "$output" == *"standard"* ]]
+
+  # The waiver is honoured — and the cap still applies on top of it, so the
+  # EPIC boundary can never be talked into a broad suite either way.
+  AID_GATE_PROFILE_OVERRIDE=quick AID_GATE_PROFILE_FORCE=1 \
+    AID_GATE_PROFILE_FORCE_REASON="documented waiver for this one run, PM approved" \
+    run gate_profile_resolve "$paths" "" "" epic
+  [ "$status" -eq 0 ]
+  [ "$output" = "quick" ]
+
+  # A downward override never lowers the plan-final floor.
+  AID_GATE_PROFILE_FLOOR=""
+  AID_GATE_PROFILE_OVERRIDE=quick AID_GATE_PROFILE_FORCE=1 \
+    AID_GATE_PROFILE_FORCE_REASON="documented waiver for this one run, PM approved" \
+    gate_profile_resolve "$paths" "" "" epic --floor-file "$TEST_TMPDIR/floor.txt" >/dev/null
+  [ "$(cat "$TEST_TMPDIR/floor.txt")" = "full" ]
+}
+
+@test "Error Handling: gate_profile_resolve exits 2 on an unknown boundary and on --floor-file without a boundary" {
+  local paths; paths="$(_gp_paths_file "docs/a.md")"
+
+  run gate_profile_resolve "$paths" "" "" plan-final
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"boundary"* ]]
+
+  run gate_profile_resolve "$paths" "" "" epic extra
+  [ "$status" -eq 2 ]
+
+  run gate_profile_resolve "$paths" --floor-file "$TEST_TMPDIR/floor.txt"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--floor-file"* ]]
+  [ ! -f "$TEST_TMPDIR/floor.txt" ]
+
+  run gate_profile_resolve "$paths" "" "" epic --floor-file
+  [ "$status" -eq 2 ]
+
+  run gate_profile_resolve "$paths" "" "" epic --nope
+  [ "$status" -eq 2 ]
+}
+
+# ─── .aid-o/config/execution.yaml — the activated profile table ────────────
+
+@test "AC5: the release include list is a superset of the full include list in the self-host execution.yaml" {
+  local cfg; cfg="$(_selfhost_execution_yaml)"
+  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
+
+  run _gp_yq_jq "$cfg" '([.gate_profiles.full.include[]] - [.gate_profiles.release.include[]]) | length == 0'
+  [ "$status" -eq 0 ]
+  # Guard against the vacuous pass: both lists must actually be non-empty.
+  run _gp_yq_jq "$cfg" '(.gate_profiles.full.include | length) > 0 and (.gate_profiles.release.include | length) > 0'
+  [ "$status" -eq 0 ]
+}
+
+@test "AC7: every profile the resolver can return is a key under gate_profiles, and each include[] names only defined gates" {
+  local cfg; cfg="$(_selfhost_execution_yaml)"
+  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
+  local p
+  for p in quick targeted standard full release; do
+    run _gp_yq_jq "$cfg" "(.gate_profiles.${p}.include | length) > 0"
+    [ "$status" -eq 0 ]
+    run _gp_yq_jq "$cfg" "([.gate_profiles.${p}.include[]] - [.gates | keys[]] | length) == 0"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "AC2: no profile the epic boundary can resolve to includes bats_all — a broad suite needs a recorded PM exception" {
+  # The cap really is `standard`, even for the worst possible classification
+  # (high-risk paths AND a release done_phase) — config-independent, so this
+  # half runs everywhere.
+  local paths; paths="$(_gp_paths_file "plugins/aid-orchestrator/scripts/aid-fsm.sh" "plugins/aid-orchestrator/defaults/policies/x.yaml")"
+  local state="$TEST_TMPDIR/fsm-state.yaml"
+  printf 'done_phase: release\n' > "$state"
+  run gate_profile_resolve "$paths" "$state" "" epic
+  [ "$output" = "standard" ]
+
+  # …and none of the three profiles boundary=epic can return runs the broad
+  # suite (quick is classify_paths' floor, standard is the cap).
+  local cfg; cfg="$(_selfhost_execution_yaml)"
+  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
+  local p
+  for p in quick targeted standard; do
+    run _gp_yq_jq "$cfg" "([.gate_profiles.${p}.include[]] | index(\"bats_all\")) == null"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "AC7: a docs-only diff resolves to quick at the epic boundary and quick's include[] excludes the broad suite" {
+  local docs; docs="$(_gp_paths_file "docs/a.md" "CHANGELOG.md")"
+  AID_GATE_PROFILE_FLOOR=""
+  gate_profile_resolve "$docs" "" "" epic > "$TEST_TMPDIR/resolved.txt"
+  [ "$(cat "$TEST_TMPDIR/resolved.txt")" = "quick" ]
+  [ "$AID_GATE_PROFILE_FLOOR" = "quick" ]
+
+  local cfg; cfg="$(_selfhost_execution_yaml)"
+  [[ -f "$cfg" ]] || skip "self-host .aid-o/config/execution.yaml absent (gitignored workspace)"
+  run _gp_yq_jq "$cfg" '(.gate_profiles.quick.include | length) > 0'
+  [ "$status" -eq 0 ]
+}
+
+# ─── aid-plan-fsm.sh epic-complete — recording the floor ───────────────────
+
+@test "AC1: epic-complete records the plan-final floor full for a high-risk EPIC whose own boundary ran standard" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # The EPIC ran `standard` at its own boundary…
+  run _pfsm_entry_field P064 E-064-1_1 epic_completion_profile
+  [ "$output" = "standard" ]
+  # …but the plan-final floor records what the risk really demands.
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+
+  # Binding invariant: nothing in this path touches lineage.
+  run _pfsm_entry_field P064 E-064-1_1 lineage
+  [ "$output" = "proven" ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC4: an unknown production path (targeted_tests exit 3) raises the plan-final floor to full" {
+  _pfsm_bootstrap_plan "P064"
+  # A LOW-risk diff — without the exit-3 signal this run's floor would be
+  # `standard`, so the raise can only come from the unknown production path.
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE"
+  _pfsm_write_gates_report "E-064-1_1" '{"profile":"standard","overall":"pass","excluded_gates":[],"gates":{"targeted_tests":{"gate":"targeted_tests","result":"fail","exit_code":3}}}'
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+  run _pfsm_entry_field P064 E-064-1_1 unknown_production_path
+  [ "$output" = "true" ]
+}
+
+@test "Edge Case: a docs-only EPIC in a plan whose floor is already release keeps the floor at release" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
+  plan_manifest_raise_final_profile "P064" "release"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "release" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_final_profile_floor
+  [ "$output" = "quick" ]
+}
+
+@test "Edge Case: a plan-declared gate the active profile excluded is recorded as a mandatory plan-final gate, never silently dropped" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "src/thing.ts" "code"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE"
+  _pfsm_write_plan_json "E-064-1_1" '["docs_updated","bats_fsm"]'
+  _pfsm_write_gates_report "E-064-1_1" '{"profile":"standard","overall":"pass","excluded_gates":["docs_updated","shell_pipeline_smoke"],"gates":{}}'
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Recorded plan-wide (what P068's plan-final stage must run) …
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_gates'
+  [[ "$output" == *"docs_updated"* ]]
+  # … only the PLAN-declared one, not every profile exclusion.
+  [[ "$output" != *"shell_pipeline_smoke"* ]]
+  # … and with per-EPIC provenance.
+  run bash -c "jq -c '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .plan_final_required_gates' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  [ "$output" = '["docs_updated"]' ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC3: epic-complete --full-tests records epic_full_test_exception with reason and requesting boundary and never lowers the floor" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
+  plan_manifest_raise_final_profile "P064" "release"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --full-tests \
+    --reason "PM asked for a one-off full run mid-plan" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "release" ]
+  run bash -c "jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .epic_full_test_exception.reason' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  [ "$output" = "PM asked for a one-off full run mid-plan" ]
+  run bash -c "jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .epic_full_test_exception.boundary' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  [ "$output" = "epic" ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "Error Handling: epic-complete with no gate_profiles in execution.yaml still records the floor and reports gate_profiles_absent" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
+
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'gates:\n  bats_fsm:\n    command: "true"\n' > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"gate_profiles_absent"* ]]
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+
+  # With the block present, no such note.
+  printf 'gates:\n  bats_fsm:\n    command: "true"\ngate_profiles:\n  quick:\n    include: [bats_fsm]\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  _pfsm_epic_with_commit "P064" "E-064-1_2" "src/other.ts" "code"
+  _pfsm_write_epic_evidence "E-064-1_2" "DONE" "standard"
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_2 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"gate_profiles_absent"* ]]
+}
+
+# ─── aid-fsm.sh — the boundary-aware GATES:DONE recompute ──────────────────
+
+# _fsm_seed_gates_run <epic_id> <base_commit> <profile> — an EPIC run parked at
+# GATES with a gates_report.json naming <profile>, in the run directory
+# epic-start recorded. Mirrors seed_test_state_files' shape (that helper is
+# hardwired to TEST_EVIDENCE_DIR, which is a different EPIC here).
+_fsm_seed_gates_run() {
+  local epic_id="$1" base="$2" profile="$3"
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/R-${epic_id}-plan"
+  mkdir -p "$dir/gates"
+  cat > "$dir/fsm-state.yaml" <<EOF
+epic_id: ${epic_id}
+run_id: R-${epic_id}-plan
+state: GATES
+current_step: 1
+total_steps: 1
+created_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+base_commit: ${base}
+EOF
+  jq -nc --arg p "$profile" \
+    '{overall:"pass", profile:$p, profile_source:"auto_resolved", excluded_gates:[],
+      _generated_by:"aid-run-gates.sh", gates:{}}' > "$dir/gates/gates_report.json"
+  echo "$dir/fsm-state.yaml"
+}
+
+@test "AC6: a high-risk EPIC that ran standard at its own boundary reaches DONE in plan_branch mode" {
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  _pfsm_bootstrap_plan "P064" plan_branch
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
+
+  local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
+  local state_file; state_file="$(_fsm_seed_gates_run "E-064-1_1" "$base" "standard")"
+
+  # The recompute diffs base_commit..HEAD, so stand on the EPIC's own branch.
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^state:' "$state_file" | awk '{print $2}')" = "DONE" ]
+}
+
+@test "AC6: the same high-risk EPIC in a legacy-mode plan still requires full — the epic cap is plan_branch only" {
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  _pfsm_bootstrap_plan "P064" legacy_epic_release_mode
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
+
+  local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
+  local state_file; state_file="$(_fsm_seed_gates_run "E-064-1_1" "$base" "standard")"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_below_required"* ]]
+  [[ "$output" == *"'full'"* ]]
+  [ "$(grep '^state:' "$state_file" | awk '{print $2}')" = "GATES" ]
+}
+
+@test "AC6: a plan_branch EPIC that ran BELOW the epic-boundary requirement is still refused" {
+  export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  _pfsm_bootstrap_plan "P064" plan_branch
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "plugins/aid-orchestrator/scripts/aid-fsm.sh" "risk"
+
+  local base; base="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
+  local state_file; state_file="$(_fsm_seed_gates_run "E-064-1_1" "$base" "quick")"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+
+  AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" run "$FSM" transition GATES DONE "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"risk_profile_below_required"* ]]
+  [[ "$output" == *"'standard'"* ]]
 }

@@ -105,6 +105,51 @@ yaml_field() {
   return 0
 }
 
+# ─── Gate-profile boundary selector (P064 plan Step 8) ──────────────────────
+# _fsm_gate_profile_boundary <epic_id> — echoes the `boundary` positional to
+# hand gate_profile_resolve for THIS EPIC: "epic" when the EPIC belongs to a
+# plan declared `plan_branch`, "" (legacy, byte-identical to pre-Step-8
+# behaviour) otherwise. Always exits 0 — this is a routing decision, never an
+# enforcement point.
+#
+# WHY MODE-GATED. boundary=epic caps the resolved profile at `standard`,
+# which is only safe because a plan_branch plan has a plan-final run that
+# still executes the accumulated floor (recorded by `aid-plan-fsm.sh
+# epic-complete`, consumed by the plan-final stage). A legacy
+# `legacy_epic_release_mode` plan has no such second run: capping there would
+# silently drop `bats_all` and suppress the done_phase=release escalation
+# with nothing downstream to make up for it — a coverage regression, not a
+# split. Every "cannot tell" path therefore returns "" (no cap, more gates),
+# the conservative direction — the opposite of cmd_init's lineage check,
+# which fails CLOSED because there "cannot tell" would skip a security proof.
+#
+# BOTH gate_profile_resolve call sites in this file MUST route through this
+# one helper: advance-to-gates picks the profile a run executes and the
+# GATES:DONE precondition recomputes the requirement it is measured against.
+# If they disagreed, an EPIC that correctly ran the capped `standard` would
+# be compared against an uncapped `full` and could never reach DONE.
+_fsm_gate_profile_boundary() {
+  local epic_id="${1:-}" nnn="" plan_id="" manifest="" mode=""
+  # Same epic-id -> plan-id derivation as cmd_init's lineage check and
+  # cmd_plan_close — reused, not reinvented. `|| true` keeps this set -e safe
+  # for ad-hoc EPIC ids with no digits (e.g. "E-test"), which yield no plan.
+  nnn="$(printf '%s' "${epic_id%%_*}" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  [[ -n "$nnn" ]] || { echo ""; return 0; }
+  plan_id="P${nnn}"
+  # lib/aid-plan-manifest.sh is sourced guarded at the top of this file; a
+  # missing lib means "cannot tell" -> legacy.
+  declare -F plan_manifest_path >/dev/null 2>&1 || { echo ""; return 0; }
+  manifest="$(plan_manifest_path "$plan_id" 2>/dev/null)" || manifest=""
+  [[ -n "$manifest" && -f "$manifest" ]] || { echo ""; return 0; }
+  mode="$(jq -r '.plan_boundary_manifest.mode // empty' "$manifest" 2>/dev/null)" || mode=""
+  if [[ "$mode" == "plan_branch" ]]; then
+    echo "epic"
+  else
+    echo ""
+  fi
+  return 0
+}
+
 # Derive timeline.jsonl path from state_file fields (best-effort, never fails)
 derive_timeline() {
   local state_file="$1"
@@ -1929,16 +1974,26 @@ EOF
         # (legacy execution.yaml without gate_profiles, or a project that
         # hasn't opted in) — D9: behaves exactly like today, no-op (every
         # defined gate already ran, nothing weaker to catch).
+        #
+        # P064 plan Step 8: the recompute is BOUNDARY-AWARE. It passes the
+        # same boundary advance-to-gates used (via the single
+        # _fsm_gate_profile_boundary helper), so an EPIC that correctly ran
+        # the capped EPIC-boundary profile is compared against the
+        # EPIC-boundary requirement — not against the unbounded plan-final
+        # floor, which would hard-fail every high-risk EPIC at GATES:DONE.
+        # The plan-final floor is recorded into the plan-boundary manifest by
+        # `aid-plan-fsm.sh epic-complete`, not enforced at this transition.
         local active_profile
         active_profile=$(jq -r '.profile // empty' "$report" 2>/dev/null)
         if [[ -n "$active_profile" ]]; then
-          local risk_base_commit required_profile=""
+          local risk_base_commit required_profile="" _gp_boundary=""
           risk_base_commit=$(yaml_field "$state_file" base_commit)
+          _gp_boundary="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
           if [[ -n "$risk_base_commit" ]]; then
             local _gp_paths_file
             _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
             git -C "$PWD" diff --name-only "${risk_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
-            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
             rm -f "$_gp_paths_file"
           fi
           # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
@@ -2852,23 +2907,30 @@ cmd_advance_to_gates() {
     [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
       profile="$explicit_profile" source="explicit_caller"
   else
-    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined
+    # P064 plan Step 8: resolve at the EPIC BOUNDARY (mode-gated — see
+    # _fsm_gate_profile_boundary). In plan_branch mode this caps the run at
+    # `standard`, so no EPIC starts a broad suite on its own; the accumulated
+    # plan-final floor is recorded separately by `aid-plan-fsm.sh
+    # epic-complete`. The GATES:DONE risk precondition recomputes through the
+    # SAME helper, so the two can never disagree.
+    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined _gp_boundary
     _gp_base_commit=$(yaml_field "$state_file" base_commit)
+    _gp_boundary="$(_fsm_gate_profile_boundary "$epic_id")"
     _gp_paths_file=$(mktemp -t aid-gate-profile-paths.XXXXXX)
     if [[ -n "$_gp_base_commit" ]]; then
       git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
     fi
-    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
     rm -f "$_gp_paths_file"
 
     _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
     if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
       profile_arg=(--profile "$_gp_resolved")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
-        profile="$_gp_resolved" source="auto_resolved"
+        profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_auto_resolve_skipped" \
-        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles"
+        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles" boundary="${_gp_boundary:-legacy}"
     fi
   fi
 

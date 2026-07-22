@@ -35,11 +35,53 @@
 #       "if present" → nothing to apply). NEVER echoes empty for a file that
 #       DOES exist and fails to parse — that fails closed to "full" instead
 #       (see "REVIEW-PROFILE FLOOR" below).
-#   gate_profile_resolve <changed_paths_file|-> [<fsm_state_file>] [<review_profile_json>]
-#       The full resolver. Prints exactly one profile name to stdout. Never
-#       fails (always exit 0) — every input is optional/guardable by design.
+#   gate_profile_resolve <changed_paths_file|-> [<fsm_state_file>]
+#                        [<review_profile_json>] [<boundary>] [--floor-file <p>]
+#       The full resolver. Prints exactly one profile name to stdout. Returns
+#       0 for every real input combination; the ONLY non-zero return is 2, a
+#       USAGE error (unknown boundary, --floor-file without a boundary,
+#       unknown flag, too many positionals, unwritable floor file).
 #       Honors AID_GATE_PROFILE_OVERRIDE / AID_GATE_PROFILE_FORCE /
 #       AID_GATE_PROFILE_FORCE_REASON (see "MANUAL OVERRIDE" below).
+#       Also sets AID_GATE_PROFILE_FLOOR (see "BOUNDARY SPLIT" below).
+#
+# ── BOUNDARY SPLIT (P064 plan Step 8) ───────────────────────────────────────
+# One call answers TWO questions:
+#   (1) stdout — what THIS boundary should run. EXACTLY ONE LINE, always: both
+#       production callers (aid-fsm.sh's advance-to-gates auto-resolve and its
+#       GATES:DONE risk precondition) capture all of stdout into one variable
+#       and use it as a `gate_profiles` key / a `--profile` value, so a second
+#       line would make the active profile invalid and could stop a high-risk
+#       EPIC from ever reaching DONE.
+#   (2) the ACCUMULATED FLOOR — what the plan-final run must be at minimum.
+#       Returned OUT-OF-BAND: the shell variable AID_GATE_PROFILE_FLOOR (any
+#       sourcing caller can read it, provided it did not call this function
+#       inside a command substitution — that runs in a subshell) and, when
+#       `--floor-file <path>` is given, that file. A caller that ignores both
+#       — i.e. every caller that existed before this change — sees behaviour
+#       byte-identical to before.
+#
+# `boundary` is the optional FOURTH positional, `epic` or `plan_final`:
+#   (omitted/empty) LEGACY — byte-identical to the pre-Step-8 resolver: no
+#                   cap, release escalation applied to stdout as before.
+#   epic            The EPIC's own gate run. The release-boundary escalation
+#                   below is SUPPRESSED for stdout and the result is capped at
+#                   `standard` — an EPIC boundary never starts a broad suite;
+#                   a mid-plan broad run is a PM act recorded as an exception
+#                   at `aid-plan-fsm.sh epic-complete --full-tests`, not
+#                   something an env var can talk this resolver into. The cap
+#                   is applied AFTER the override layer, so an upward
+#                   AID_GATE_PROFILE_OVERRIDE cannot bypass it either, while
+#                   the override's own waiver gating still sees the TRUE
+#                   (uncapped) risk tier.
+#   plan_final      The plan-final run: max(accumulated floor, release).
+# The floor is always computed UNBOUNDED (release escalation included, cap not
+# applied) and is never lowered by a downward override — a waiver at the EPIC
+# boundary buys a cheaper EPIC run, never a cheaper plan-final run.
+#
+# Flags follow the positionals and are parsed only after them. `--floor-file`
+# is the sole flag and is valid ONLY together with an explicit boundary;
+# passing it without one is a usage error (exit 2) rather than a silent no-op.
 #
 # ── PROFILE ORDERING (the named hierarchy CHECKPOINT 2 needs) ───────────────
 #   quick=0 < targeted=1 < standard=2 < full=3 < release=4
@@ -132,8 +174,10 @@
 #   Sourced:
 #     source .../lib/aid-gate-profile.sh
 #     profile=$(gate_profile_resolve "$changed_paths_file" "$fsm_state" "$review_profile_json")
+#     # boundary split, floor read back through a file (works from a subshell):
+#     profile=$(gate_profile_resolve "$paths" "$fsm_state" "$rp" epic --floor-file "$f")
 #   Standalone:
-#     bash aid-gate-profile.sh resolve <changed_paths_file|-> [<fsm_state_file>] [<review_profile_json>]
+#     bash aid-gate-profile.sh resolve <changed_paths_file|-> [<fsm_state_file>] [<review_profile_json>] [<boundary>] [--floor-file <path>]
 #     bash aid-gate-profile.sh rank <name>
 #     bash aid-gate-profile.sh max <a> <b>
 #     bash aid-gate-profile.sh classify-paths <changed_paths_file|->
@@ -322,56 +366,46 @@ _aid_gp_read_paths() {
 
 # ─── The resolver ───────────────────────────────────────────────────────────
 
-# gate_profile_resolve <changed_paths_file|-> [<fsm_state_file>] [<review_profile_json>]
-# Prints exactly one profile name to stdout. Always returns 0. See header
-# "MANUAL OVERRIDE" for the AID_GATE_PROFILE_* env contract.
-gate_profile_resolve() {
-  local paths_input="${1:-}" fsm_state_file="${2:-}" review_profile_json="${3:-}"
+# _aid_gp_cap <value> <ceiling> — echo whichever of the two has the LOWER rank
+# (the boundary cap; the mirror image of gate_profile_max). An unknown name on
+# either side echoes <value> unchanged — capping is a tightening convenience,
+# never a place to lose the caller's answer.
+_aid_gp_cap() {
+  local v="${1:-}" c="${2:-}" rv rc
+  rv="$(gate_profile_rank "$v")" || { echo "$v"; return 0; }
+  rc="$(gate_profile_rank "$c")" || { echo "$v"; return 0; }
+  if (( rv > rc )); then echo "$c"; else echo "$v"; fi
+  return 0
+}
 
-  local -a paths=()
-  _aid_gp_read_paths paths "$paths_input"
-
-  local base
-  base="$(gate_profile_classify_paths "${paths[@]}")"
-
-  # Release boundary — ONLY evaluated when fsm_state_file is given AND exists.
-  # No-fsm-state guard: anything else (unset/empty/nonexistent path) skips
-  # this block entirely — documented fallback, not a crash.
-  if [[ -n "$fsm_state_file" && -f "$fsm_state_file" ]]; then
-    local done_phase
-    done_phase="$(_aid_gp_yaml_field "$fsm_state_file" done_phase)"
-    if [[ "$done_phase" == "release" ]]; then
-      base="$(gate_profile_max "$base" release)"
-    fi
-  fi
-
-  # review-profile.json floor (tighten-only, via max — never an independent
-  # branch that could lower the path-derived result).
-  local floor
-  floor="$(gate_profile_review_floor "$review_profile_json")"
-  local computed
-  computed="$(_aid_gp_apply_floor "$base" "$floor")"
-
-  # Manual override.
+# _aid_gp_apply_override <computed> [<risk_tier>] — the MANUAL OVERRIDE layer,
+# unchanged in behaviour and extracted verbatim except for the second
+# argument, which defaults to <computed> (i.e. to exactly today's semantics).
+# The boundary split passes the TRUE, unsuppressed risk profile as <risk_tier>
+# so the waiver gating below keeps meaning "is this diff high-risk" rather
+# than "is what this boundary would run high-risk". Echoes the result.
+_aid_gp_apply_override() {
+  local computed="${1:-}" risk_tier="${2:-${1:-}}"
   local final="$computed"
   local override="${AID_GATE_PROFILE_OVERRIDE:-}"
   local force="${AID_GATE_PROFILE_FORCE:-}"
   local force_reason="${AID_GATE_PROFILE_FORCE_REASON:-}"
 
   if [[ -n "$override" ]]; then
-    local ov_rank comp_rank full_rank
+    local ov_rank comp_rank full_rank risk_rank
     if ov_rank="$(gate_profile_rank "$override")"; then
       comp_rank="$(gate_profile_rank "$computed")"
       full_rank="$(gate_profile_rank full)"
+      risk_rank="$(gate_profile_rank "$risk_tier")" || risk_rank="$comp_rank"
       if (( ov_rank >= comp_rank )); then
         # Upward (or equal) — always allowed, no waiver needed.
         final="$override"
-      elif (( comp_rank >= full_rank )); then
+      elif (( risk_rank >= full_rank )); then
         # Downward from a high-risk-tier computed profile — waiver required.
         if [[ "$force" == "1" && ${#force_reason} -ge 20 ]]; then
           final="$override"
         else
-          echo "WARN: aid-gate-profile.sh: downward override to '${override}' rejected — computed profile '${computed}' is high-risk tier (full/release); set AID_GATE_PROFILE_FORCE=1 and AID_GATE_PROFILE_FORCE_REASON ('<>=20 chars>') to waive." >&2
+          echo "WARN: aid-gate-profile.sh: downward override to '${override}' rejected — computed profile '${risk_tier}' is high-risk tier (full/release); set AID_GATE_PROFILE_FORCE=1 and AID_GATE_PROFILE_FORCE_REASON ('<>=20 chars>') to waive." >&2
           final="$computed"
         fi
       else
@@ -383,8 +417,135 @@ gate_profile_resolve() {
       final="$computed"
     fi
   fi
-
   echo "$final"
+  return 0
+}
+
+# gate_profile_resolve <changed_paths_file|-> [<fsm_state_file>]
+#                      [<review_profile_json>] [<boundary>] [--floor-file <p>]
+# Prints exactly one profile name to stdout and sets AID_GATE_PROFILE_FLOOR.
+# Returns 0 except for usage errors, which return 2. See the header sections
+# "BOUNDARY SPLIT" and "MANUAL OVERRIDE".
+gate_profile_resolve() {
+  # ── argument parsing: positionals first, flags after (header contract) ──
+  local -a _pos=()
+  local floor_file="" flags_started=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --floor-file)
+        flags_started=true
+        if [[ $# -lt 2 ]]; then
+          echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: --floor-file requires a <path> argument." >&2
+          return 2
+        fi
+        floor_file="$2"
+        shift 2
+        ;;
+      --*)
+        echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: unknown flag '$1' (the only defined flag is --floor-file <path>)." >&2
+        return 2
+        ;;
+      *)
+        if $flags_started; then
+          echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: positional argument '$1' appears after a flag — positionals come first." >&2
+          return 2
+        fi
+        if (( ${#_pos[@]} >= 4 )); then
+          echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: too many positional arguments (max 4: <changed_paths_file|-> [fsm_state_file] [review_profile_json] [boundary])." >&2
+          return 2
+        fi
+        _pos+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  local paths_input="${_pos[0]:-}" fsm_state_file="${_pos[1]:-}"
+  local review_profile_json="${_pos[2]:-}" boundary="${_pos[3]:-}"
+
+  case "$boundary" in
+    ""|epic|plan_final) ;;
+    *)
+      echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: unknown boundary '${boundary}' (expected 'epic' or 'plan_final')." >&2
+      return 2
+      ;;
+  esac
+  if [[ -n "$floor_file" && -z "$boundary" ]]; then
+    echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: --floor-file is only valid together with an explicit boundary ('epic' or 'plan_final') as the 4th positional." >&2
+    return 2
+  fi
+
+  local -a paths=()
+  _aid_gp_read_paths paths "$paths_input"
+
+  local base
+  base="$(gate_profile_classify_paths "${paths[@]}")"
+
+  # Release boundary — ONLY evaluated when fsm_state_file is given AND exists.
+  # No-fsm-state guard: anything else (unset/empty/nonexistent path) skips
+  # this block entirely — documented fallback, not a crash. The signal always
+  # feeds the accumulated FLOOR; it is suppressed only for what boundary=epic
+  # prints (an EPIC boundary never runs the release suite on its own).
+  local release_boundary=false
+  if [[ -n "$fsm_state_file" && -f "$fsm_state_file" ]]; then
+    local done_phase
+    done_phase="$(_aid_gp_yaml_field "$fsm_state_file" done_phase)"
+    if [[ "$done_phase" == "release" ]]; then
+      release_boundary=true
+    fi
+  fi
+
+  # review-profile.json floor (tighten-only, via max — never an independent
+  # branch that could lower the path-derived result).
+  local rp_floor
+  rp_floor="$(gate_profile_review_floor "$review_profile_json")"
+
+  # UNBOUNDED view — what the risk really demands, cap and suppression aside.
+  local unbounded="$base"
+  if $release_boundary; then
+    unbounded="$(gate_profile_max "$unbounded" release)"
+  fi
+  unbounded="$(_aid_gp_apply_floor "$unbounded" "$rp_floor")"
+
+  # BOUNDARY view — identical to `unbounded` except at boundary=epic, where
+  # the release escalation is suppressed (the cap below handles the rest).
+  local computed="$base"
+  if [[ "$boundary" != "epic" ]] && $release_boundary; then
+    computed="$(gate_profile_max "$computed" release)"
+  fi
+  computed="$(_aid_gp_apply_floor "$computed" "$rp_floor")"
+
+  # Manual override, evaluated against the boundary view but waiver-gated on
+  # the TRUE risk tier (see _aid_gp_apply_override).
+  local final
+  final="$(_aid_gp_apply_override "$computed" "$unbounded")"
+  if [[ "$boundary" == "epic" ]]; then
+    # The cap is absolute and applied LAST: not even an upward
+    # AID_GATE_PROFILE_OVERRIDE may start a broad suite at an EPIC boundary.
+    # The sanctioned way to run one mid-plan is the audited PM exception at
+    # `aid-plan-fsm.sh epic-complete --full-tests --reason "<text>"`.
+    final="$(_aid_gp_cap "$final" standard)"
+  fi
+
+  # The accumulated floor: never below the unbounded risk, never lowered by a
+  # downward override, raised by an upward one.
+  local accumulated_floor
+  accumulated_floor="$(gate_profile_max "$unbounded" "$final")"
+
+  local result="$final"
+  if [[ "$boundary" == "plan_final" ]]; then
+    result="$(gate_profile_max "$accumulated_floor" release)"
+  fi
+
+  AID_GATE_PROFILE_FLOOR="$accumulated_floor"
+  if [[ -n "$floor_file" ]]; then
+    if ! printf '%s\n' "$accumulated_floor" > "$floor_file" 2>/dev/null; then
+      echo "ERROR: aid-gate-profile.sh: gate_profile_resolve: could not write the accumulated floor to '${floor_file}'." >&2
+      return 2
+    fi
+  fi
+
+  echo "$result"
   return 0
 }
 
@@ -406,10 +567,14 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       gate_profile_classify_paths "${_gp_cli_paths[@]}"
       ;;
     resolve)
-      gate_profile_resolve "${2:-}" "${3:-}" "${4:-}"
+      # Forward EVERY remaining argument (boundary positional + --floor-file)
+      # instead of the fixed three — the standalone path is the one a
+      # non-sourcing caller uses, which is exactly who needs --floor-file.
+      shift
+      gate_profile_resolve "$@"
       ;;
     *)
-      echo "Usage: aid-gate-profile.sh {resolve <changed_paths_file|-> [fsm_state_file] [review_profile_json] | rank <name> | max <a> <b> | classify-paths <changed_paths_file|->}" >&2
+      echo "Usage: aid-gate-profile.sh {resolve <changed_paths_file|-> [fsm_state_file] [review_profile_json] [boundary: epic|plan_final] [--floor-file <path>] | rank <name> | max <a> <b> | classify-paths <changed_paths_file|->}" >&2
       exit 1
       ;;
   esac

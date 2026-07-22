@@ -1095,6 +1095,91 @@ cmd_epic_complete() {
     profile="$(jq -r '.profile // empty' "$gates_report" 2>/dev/null)" || profile=""
   fi
 
+  # ═══ Plan-final floor (P064 plan Step 8) ═════════════════════════════════
+  # The EPIC boundary deliberately runs a CAPPED profile (lib/aid-gate-profile.sh,
+  # boundary=epic), so `gates_report.json.profile` is NOT the risk this EPIC
+  # carries — it is only the cheapest run that satisfied the EPIC boundary.
+  # The risk itself is recomputed here from the EPIC's real diff and recorded
+  # as the plan-final floor, which P068's plan-final stage consumes. The
+  # resolver returns that floor out-of-band; `--floor-file` is the channel
+  # that survives being read from a subshell.
+  local final_floor=""
+  local _ec_base _ec_task_branch
+  _ec_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || _ec_base=""
+  _ec_task_branch="$(jq -r '.task_branch // empty' <<<"$entry_json" 2>/dev/null)" || _ec_task_branch=""
+  if [[ -n "$_ec_base" && -n "$_ec_task_branch" ]] \
+     && git -C "$project_root" rev-parse --verify --quiet "$_ec_task_branch" >/dev/null 2>&1; then
+    local _ec_paths _ec_floor_file _ec_rc=0
+    _ec_paths="$(mktemp -t aid-epic-complete-paths.XXXXXX)"
+    _ec_floor_file="$(mktemp -t aid-epic-complete-floor.XXXXXX)"
+    git -C "$project_root" diff --name-only "${_ec_base}..${_ec_task_branch}" \
+      > "$_ec_paths" 2>/dev/null || true
+    gate_profile_resolve "$_ec_paths" "$state_file" \
+      "${project_root}/${evidence_dir}/review-profile.json" epic \
+      --floor-file "$_ec_floor_file" >/dev/null 2>/dev/null || _ec_rc=$?
+    if [[ "$_ec_rc" -eq 0 ]]; then
+      final_floor="$(head -n1 "$_ec_floor_file" 2>/dev/null)" || final_floor=""
+    else
+      # A usage error from the resolver is a bug in THIS call, never the
+      # operator's problem — but it must not silently mean "no floor".
+      echo "WARN: epic-complete: could not resolve the plan-final floor for ${epic_id} (rc=${_ec_rc}) — falling back to the run's recorded profile." >&2
+    fi
+    rm -f "$_ec_paths" "$_ec_floor_file"
+  fi
+
+  # An unknown production path (aid-select-tests.sh exit 3, surfaced as the
+  # `targeted_tests` gate row) means the selector could not prove WHICH tests
+  # cover the change — it can never be classified down to docs/trivial, so the
+  # plan-final floor goes to at least `full`.
+  local unknown_production_path=false
+  if [[ -f "$gates_report" ]]; then
+    local _ec_sel_exit
+    _ec_sel_exit="$(jq -r '.gates.targeted_tests.exit_code // empty' "$gates_report" 2>/dev/null)" || _ec_sel_exit=""
+    if [[ "$_ec_sel_exit" == "3" ]]; then
+      unknown_production_path=true
+      final_floor="$(gate_profile_max "${final_floor:-quick}" full 2>/dev/null)" || final_floor="full"
+    fi
+  fi
+
+  # The run's own profile is a lower bound too (it really executed) — but only
+  # when it is one of the five canonical names. A project-defined custom
+  # profile is legitimate (aid-fsm.sh's own risk_profile_unresolvable branch
+  # treats it as unrankable, not illegal), so it is reported and skipped
+  # rather than failing an otherwise complete EPIC.
+  if [[ -n "$profile" ]]; then
+    if gate_profile_rank "$profile" >/dev/null 2>&1; then
+      final_floor="$(gate_profile_max "${final_floor:-quick}" "$profile" 2>/dev/null)" || final_floor="$profile"
+    else
+      echo "NOTE: epic-complete: gates_report.json for ${epic_id} names a non-canonical gate profile '${profile}' (epic_completion_profile_unranked) — it cannot raise the plan-final floor; the floor comes from the resolver instead." >&2
+    fi
+  fi
+
+  # gate_profiles absent from execution.yaml: the floor is still recorded (it
+  # is a property of the DIFF, not of the config), only profile SELECTION is
+  # unavailable — the documented legacy behaviour for a project that has not
+  # upgraded its execution.yaml yet.
+  local _ec_exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  if [[ ! -f "$_ec_exec_yaml" ]] \
+     || ! yq -e '.gate_profiles' "$_ec_exec_yaml" >/dev/null 2>&1; then
+    echo "NOTE: epic-complete: gate_profiles_absent — no gate_profiles block in ${_ec_exec_yaml}; recording the plan-final floor '${final_floor:-<none>}' without profile selection." >&2
+  fi
+
+  # A gate the PLAN declared mandatory that the active profile excluded must
+  # never be silently dropped. It cannot even reach this point without a PM
+  # `--force` at GATES:DONE (`plan_gate_profile_excluded` blocks otherwise),
+  # so recording it as a mandatory plan-final gate is the compensating
+  # control for exactly that override.
+  local excluded_plan_gates='[]'
+  local _ec_plan_json="${project_root}/${evidence_dir}/plan.json"
+  if [[ -f "$gates_report" && -f "$_ec_plan_json" ]]; then
+    excluded_plan_gates="$(jq -nc \
+      --slurpfile p "$_ec_plan_json" --slurpfile r "$gates_report" \
+      '[ (($p[0].gates // []) | if type == "array" then . else [] end)[]
+         | select(. as $g | (($r[0].excluded_gates // [])) | index($g) != null) ]' \
+      2>/dev/null)" || excluded_plan_gates='[]'
+    [[ -n "$excluded_plan_gates" ]] || excluded_plan_gates='[]'
+  fi
+
   local brc=0
   plan_op_begin "$plan_id" "$op_id" "epic-complete" "$epic_id" "" || brc=$?
   if [[ "$brc" -ne 0 ]]; then
@@ -1102,26 +1187,47 @@ cmd_epic_complete() {
     exit "$brc"
   fi
 
-  if [[ -n "$profile" ]]; then
+  if [[ -n "$final_floor" ]]; then
     # Monotonic by construction (plan_manifest_raise_final_profile only ever
     # moves the floor UP), which is what makes `--full-tests` safe to record
     # as an exception "without lowering the plan-final floor": nothing here
-    # CAN lower it. Step 8 owns the epic/plan-final profile split.
+    # CAN lower it.
     local prc=0
-    plan_manifest_raise_final_profile "$plan_id" "$profile" >/dev/null || prc=$?
+    plan_manifest_raise_final_profile "$plan_id" "$final_floor" >/dev/null || prc=$?
     if [[ "$prc" -ne 0 ]]; then
-      echo "PRECONDITION FAIL: gates_report.json for ${epic_id} names profile '${profile}', which is not a known gate profile (rc=${prc})." >&2
+      echo "PRECONDITION FAIL: could not raise ${plan_id}'s plan-final floor to '${final_floor}' for ${epic_id} (rc=${prc})." >&2
       exit 1
+    fi
+  fi
+
+  # The plan-wide set of gates the plan-final run MUST execute — the union
+  # across EPICs, never a replacement (an earlier EPIC's recorded gate can
+  # only be added to).
+  if [[ "$excluded_plan_gates" != "[]" ]]; then
+    local grc=0
+    plan_manifest_update "$plan_id" \
+      "(.plan_boundary_manifest.plan_final_required_gates = ((.plan_boundary_manifest.plan_final_required_gates // []) + ${excluded_plan_gates} | unique))" \
+      >/dev/null || grc=$?
+    if [[ "$grc" -ne 0 ]]; then
+      # Never `|| true` here: this record IS the compensating control for a
+      # plan-required gate that did not run. Losing it silently is the exact
+      # "silently dropped" outcome the plan forbids.
+      echo "PRECONDITION FAIL: could not record the mandatory plan-final gate(s) ${excluded_plan_gates} for ${epic_id} (rc=${grc}) — retry converges." >&2
+      exit "$grc"
     fi
   fi
 
   local esc_profile="null"
   [[ -n "$profile" ]] && esc_profile="$(jq -Rn --arg s "$profile" '$s')"
-  local assign=".merge_status = \"pending\" | .epic_completed_at = ${esc_now} | .epic_completion_profile = ${esc_profile}"
+  local esc_floor="null"
+  [[ -n "$final_floor" ]] && esc_floor="$(jq -Rn --arg s "$final_floor" '$s')"
+  local assign=".merge_status = \"pending\" | .epic_completed_at = ${esc_now} | .epic_completion_profile = ${esc_profile} | .epic_final_profile_floor = ${esc_floor} | .unknown_production_path = ${unknown_production_path} | .plan_final_required_gates = ${excluded_plan_gates}"
   if [[ "$full_tests" -eq 1 ]]; then
-    # Step 8 owns what the floor DOES with this; Step 6 only records the
-    # PM-approved exception so the split has an audited input to read.
-    assign="${assign} | .full_tests_exception = {reason: ${esc_reason}, at: ${esc_now}}"
+    # The PM-approved mid-plan broad run, audited: reason + the boundary that
+    # requested it. Named `epic_full_test_exception` (plan Step 8) — the
+    # `epic_` prefix keeps it distinct from a plan-final exception, which is a
+    # different act by a different actor.
+    assign="${assign} | .epic_full_test_exception = {reason: ${esc_reason}, at: ${esc_now}, boundary: \"epic\"}"
   fi
 
   local urc=0
