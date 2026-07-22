@@ -115,7 +115,10 @@ Omit the section entirely if you found nothing to note.
 
 ## Git Discipline
 
-- Commit after each meaningful change — not at the end of all work
+- In an orchestrated `/aid-run`, the controller normally owns commits after validating agent output.
+  Do not commit unless the dispatch explicitly delegates that commit to you.
+- When a standalone dispatch explicitly delegates commits, commit after each meaningful change —
+  not at the end of all work.
 - Format: `type(scope): description` (conventional commits)
 - Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`
 - One logical change per commit — do not bundle unrelated changes

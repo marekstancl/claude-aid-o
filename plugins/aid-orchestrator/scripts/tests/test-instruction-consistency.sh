@@ -14,6 +14,8 @@
 #   5. File references in skills/commands point to existing files
 #   6. Step-verify template contains all required sections
 #   7. orchestration.yaml states match aid-fsm.sh
+#   8. Old command names do not return to active instructions
+#   9. AUTO liveness/ownership contract remains present and role boundaries do not drift
 # =============================================================================
 set -uo pipefail
 
@@ -242,6 +244,46 @@ for cmd in $OLD_COMMANDS; do
 done
 
 # ─── Summary ───────────────────────────────────────────────────────────────
+
+# AUTO liveness and role ownership
+echo ""
+echo "=== 9. AUTO Liveness and Role Ownership ==="
+
+assert_instruction() {
+  local file="$1"
+  local pattern="$2"
+  local description="$3"
+  if grep -qF -- "$pattern" "$file" 2>/dev/null; then
+    pass "$description"
+  else
+    fail "$description"
+  fi
+}
+
+assert_instruction "$PLUGIN_DIR/commands/aid-run.md" \
+  'Do not ask the PM to choose between technical A/B/C options.' \
+  "aid-run routes AUTO technical decisions away from PM"
+assert_instruction "$PLUGIN_DIR/commands/aid-run.md" \
+  '`tail -f` is forbidden as a completion detector.' \
+  "aid-run forbids non-terminating tail watcher"
+assert_instruction "$PLUGIN_DIR/commands/aid-run.md" \
+  'the pre-fix run cannot prove the post-fix HEAD.' \
+  "aid-run rejects stale aggregate evidence"
+assert_instruction "$PLUGIN_DIR/skills/pipeline.md" \
+  'Only the controller mutates FSM state,' \
+  "pipeline assigns FSM ownership to controller"
+assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+  'Do not call FSM transition/increment commands' \
+  "implementer cannot advance FSM"
+assert_instruction "$PLUGIN_DIR/skills/agent-protocol.md" \
+  'the controller normally owns commits after validating agent output.' \
+  "agent protocol assigns orchestrated commits to controller"
+assert_instruction "$PLUGIN_DIR/agents/implementer.md" \
+  'Do not detach long-running work with `nohup`, `disown`, `tail -f`' \
+  "implementer cannot orphan long-running work"
+assert_instruction "$PLUGIN_DIR/agents/verifier.md" \
+  'Review an immutable revision in an isolated worktree' \
+  "verifier reviews immutable isolated revision"
 
 echo ""
 echo "=================================="

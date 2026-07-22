@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.60.1] — 2026-07-22
+
+### Changed
+- **AUTO liveness and controller ownership contract** — autonomous runs now retain controller
+  ownership through a terminal outcome instead of stopping on recoverable technical forks or
+  indefinite "waiting" states. Technical recovery is routed to bounded Codex adjudication; PM
+  escalation is reserved for decisions that require new authority.
+- **Background-job and test-evidence discipline** — instructions now forbid `tail -f` completion
+  watchers, require explicit job identity/deadlines, bind test claims to the reviewed revision and
+  command, prevent pre-fix aggregate results from proving post-fix code, and avoid duplicate full
+  suites.
+- **Agent role boundaries** — the controller owns FSM changes, commits, aggregate gates, and
+  evidence finalization; implementers run targeted work without orphaning jobs, and verifiers use
+  immutable isolated revisions. Instruction-consistency tests protect these contracts from drift.
+
 ## [2.60.0] — 2026-07-20
 
 ### Added

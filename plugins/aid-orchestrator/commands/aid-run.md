@@ -30,12 +30,48 @@ Run the 6-state FSM controller to orchestrate an EPIC through its full lifecycle
 Escalation rules for `--auto`:
 - **S-effort fixes** → auto-approve, apply fix, continue
 - **M-effort decisions** → use default decision from `config/permissions.yaml`
-- **L-effort and security issues** → ALWAYS escalate to PM (never auto-approve)
+- **Recoverable technical decisions** (retry, repair, stale evidence, process failure,
+  test selection) → dispatch the configured Codex adjudicator, record its decision in
+  `timeline.jsonl`, then continue. Do not ask the PM to choose between technical A/B/C options.
+- **PM-authority decisions only** (product intent, material scope expansion, destructive or
+  externally visible action, security risk acceptance, secret/credential access) → pause for PM.
 - Gate retries → auto-retry up to configured max (default: 2)
 - Version bump on intermediate phase → auto-defer (bump only on final phase)
 
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
 If not set, `--auto` prints a warning and falls back to manual mode.
+
+### AUTO liveness and ownership contract
+
+`--auto` is a terminal-outcome contract, not merely automatic approval at READY. The controller
+MUST keep ownership until the EPIC completes, reaches a PM-authority decision, or encounters an
+unrecoverable external outage. A recoverable technical problem is not a reason to end the turn.
+
+- The controller is the sole owner of FSM mutations, commits, gates, evidence finalization, and
+  long-running/background processes. Dispatched implementers and verifiers never own these.
+- Never finish a turn with only "waiting for tests/agent". For every asynchronous process record
+  PID, log path, start HEAD, start tree hash, start time, expected p95, and hard deadline. Poll the
+  process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
+- If no owned process is alive and no repository/evidence progress occurred for 5 minutes, resume
+  or diagnose automatically. Do not wait indefinitely for a missing notification.
+- A test result is valid only for the recorded HEAD/tree and command fingerprint. If relevant files
+  change during or after the run, mark the result stale. Never report pass counts without a completed
+  result artifact containing command, start/end revision, timestamps, exit code, and counts.
+- Run step-scoped tests during implementation. Run the expensive aggregate suite once, on the final
+  immutable candidate HEAD. Do not run an aggregate gate together with another gate that recursively
+  executes the same suite. A failed aggregate run may be followed by targeted diagnosis, but a fix
+  requires one fresh final aggregate result; the pre-fix run cannot prove the post-fix HEAD.
+- Verifiers use an isolated worktree or immutable revision. Never run a mutating fixer concurrently
+  against the checkout a verifier is reviewing.
+- Codex adjudication and PM decisions are append-only audit events. The adjudicator may choose among
+  already-authorized technical recovery paths; it cannot grant PM authority or waive security risk.
+
+Until a dedicated adjudicator command is available, use the existing isolated Codex transport. Give
+it only: verified facts, current FSM state, attempted recoveries, an explicit allowlist of reversible
+in-scope actions, and forbidden authority-expanding actions. Require one selected action plus a short
+rationale and risk note. Reject an answer outside the allowlist, append the accepted decision and
+evidence paths to `timeline.jsonl`, and continue. This is a temporary dispatch convention, not a
+substitute for the project-scoped adjudicator configuration planned for INIT/SETUP.
 
 ## MECHANICAL ENFORCEMENT PROTOCOL
 
@@ -66,7 +102,10 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
 - Do NOT modify `fsm-state.yaml` directly to bypass checks
-- Present the error to PM and wait for guidance
+- **Manual mode:** present the error to PM and wait for guidance
+- **Auto mode:** preserve the failed state, diagnose the named precondition, and route recoverable
+  technical choices to Codex adjudication. Pause for PM only when the decision requires PM authority
+  under the AUTO contract above.
 - The error message tells you exactly what's missing
 
 ### Context window:
@@ -255,7 +294,9 @@ FSM initialized: READY
 3. In auto mode → apply auto-decision rules:
    - S-effort fix patterns → auto-fix
    - M-effort → use default action from permissions
-   - L-effort / security → escalate to PM (even in auto mode)
+   - Recoverable L-effort technical decisions → Codex adjudication + logged decision
+   - Security risk acceptance, product/scope decisions, destructive or externally visible actions
+     → PM (the adjudicator cannot authorize these)
 
 **Transition:**
 - Fix → EXECUTE (resume from failed point)

@@ -30,6 +30,35 @@ the appropriate script.
 
 For full details on each item, see sections below.
 
+### Controller ownership and AUTO liveness
+
+The controller, not a dispatched agent, owns the lifecycle. Only the controller mutates FSM state,
+creates commits, starts aggregate gates, finalizes evidence, and owns asynchronous jobs. An agent
+may return an explicit job handoff only when the dispatch asked for one; the controller then assumes
+ownership immediately.
+
+In autonomous mode, the controller does not yield merely because a subprocess, test, or reviewer is
+still running. Each asynchronous job must have a recorded PID, log path, start HEAD/tree hash,
+started-at timestamp, expected p95, and hard deadline. Determine completion from the process and its
+exit status. `tail -f` and notification arrival are not completion signals. If there is no live owned
+process and no repository/evidence progress for 5 minutes, resume or diagnose automatically.
+
+Recoverable technical forks go to the configured Codex adjudicator and are recorded in
+`timeline.jsonl`. Only a decision requiring new authority pauses for the PM: product intent, material
+scope expansion, destructive or externally visible action, security risk acceptance, or access to
+credentials/secrets. Codex adjudication cannot grant that authority.
+
+Until the dedicated adjudicator command lands, the controller uses the existing isolated Codex
+transport with a bounded decision payload: verified facts, current FSM state, attempted recoveries,
+allowed reversible actions, forbidden authority-expanding actions, and evidence paths. Accept only
+one of the supplied actions and record the chosen action, rationale, risks, and evidence paths. An
+answer outside the allowlist is not authorization.
+
+Test evidence is immutable-revision evidence. It must record the exact command fingerprint,
+start/end HEAD and relevant tree hash, timestamps, exit code, and pass/fail counts. Any relevant
+change invalidates the old result. Step agents run targeted tests; the controller runs one expensive
+aggregate suite on the final candidate HEAD and must not schedule duplicate aggregate gates.
+
 ---
 
 ## §1 FSM States
@@ -106,7 +135,7 @@ Six states. Scripts handle transitions. LLM acts within a state.
 | **READY** | PRE-FLIGHT complete | **Auto mode: validate schema → auto-GO immediately.** Manual: review plan, ask PM for GO | `aid-fsm.sh transition READY EXECUTE` |
 | **EXECUTE** | GO received or gate-fixer retry | Dispatch agent, verify output | `aid-fsm.sh transition EXECUTE GATES\|ESCALATION\|EXECUTE` |
 | **GATES** | All steps done | None — scripts run gates | `aid-fsm.sh transition GATES DONE\|ESCALATION\|EXECUTE` |
-| **ESCALATION** | EXECUTE or GATES failure | Present options A/B/C to PM, act on response | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |
+| **ESCALATION** | EXECUTE or GATES failure | Manual: PM. Auto: Codex adjudication for technical recovery; PM only when new authority is required | `aid-fsm.sh transition ESCALATION EXECUTE\|GATES` |
 | **DONE** | All gates pass | Auditor (C3) then Curator (serial), PM summary, merge on approval | — |
 | **ERROR** | Unrecoverable failure or PM abort | Preserve evidence, report to PM | — (terminal) |
 
@@ -1028,6 +1057,9 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
 - C+A (as a pair) may still run as background agents relative to the NEXT EPIC — OK to start the
   next EPIC in the same plan while this EPIC's Auditor→Curator sequence is in flight. Within the
   pair itself, Auditor completes before Curator dispatches (Curator consumes `audit-report.json`).
+- "Background" does not transfer ownership to a notification. The controller records the job
+  contract (PID/agent id, evidence path, start revision, deadline), checks it on every loop, and
+  collects the terminal result before using its evidence. It never uses `tail -f` as a watcher.
 - done_phase stays `review` until plan-level checkpoint
 
 **Per-Plan checkpoint (HARD STOP after last EPIC in plan):**
@@ -1851,11 +1883,16 @@ aid-fsm.sh get-state <state_file>   # Returns current state
 - `timeline.jsonl` — last event logged
 - `evidence/steps/` — which step outputs exist
 
-**Do NOT auto-resume after crash.** Report to PM:
+**Manual mode:** do not auto-resume after a crash. Report to PM:
 ```
 Stale state detected: {state} at step {current_step}/{total_steps}.
 Resume with: /aid-run --resume {run_id}
 ```
+
+**Auto mode:** run `verify-state`, validate the recorded revision and owned-job status, then resume
+from the last mechanically confirmed boundary. Route ambiguous technical recovery to Codex
+adjudication. Pause for PM only if repair would require new authority; never remain idle solely
+because the previous controller process disappeared.
 
 ---
 
