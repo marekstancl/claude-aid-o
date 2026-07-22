@@ -2273,7 +2273,7 @@ cmd_init() {
         _pb_manifest_path="$(plan_manifest_path "$_pb_plan_id")"
         if [[ ! -f "$_pb_manifest_path" ]]; then
           _pb_reason="plan_manifest_missing"
-          _pb_detail="Runtime plan-boundary-manifest.json missing for ${_pb_plan_id} at ${_pb_manifest_path} (mode=plan_branch is declared in .aid-lifecycle/manifests/${_pb_plan_id}.yaml, which survives this deletion). Repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair (note: repaired entries have lineage=unproven and must be attested separately with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} attest <epic_id>')"
+          _pb_detail="Runtime plan-boundary-manifest.json missing for ${_pb_plan_id} at ${_pb_manifest_path} (mode=plan_branch is declared in .aid-lifecycle/manifests/${_pb_plan_id}.yaml, which survives this deletion). Repair with: aid-plan-fsm.sh plan-state ${_pb_plan_id} --repair (note: repaired entries ALWAYS have lineage=unproven — repair can never mint proven — and must be attested separately with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}')"
         else
           # Validate epic_id format BEFORE jq interpolation to prevent injection.
           # Must match the manifest invariant's own epic-id pattern (mirrors
@@ -2303,7 +2303,7 @@ cmd_init() {
               _pb_detail="${epic_id} is recorded status=abandoned in ${_pb_plan_id}'s plan-boundary-manifest.json — restarting an abandoned EPIC without a PM decision would silently resurrect it."
             elif [[ "$_pb_lineage" != "proven" || "$_pb_epic_source_ref" != "plan/${_pb_plan_id}" ]]; then
               _pb_reason="epic_lineage_unproven"
-              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} attest ${epic_id}'."
+              _pb_detail="${epic_id}'s manifest entry has lineage='${_pb_lineage:-<empty>}' and epic_source_ref='${_pb_epic_source_ref:-<empty>}' — refusing to treat it as authoritative (must be proven with epic_source_ref=plan/${_pb_plan_id} to execute within this plan). Use 'aid-plan-fsm.sh epic-start ${_pb_plan_id} ${epic_id}' to create a new proven entry, or attest this entry with 'aid-plan-fsm.sh plan-state ${_pb_plan_id} --attest-source-ref <ref> --reason \"<reason>\" --epic ${epic_id}'."
             elif [[ "$_pb_task_branch" != "$_plan_expected_branch" ]]; then
               _pb_reason="plan_branch_mismatch"
               _pb_detail="${_pb_plan_id}'s manifest records task_branch=${_pb_task_branch:-<empty>} for ${epic_id}, but this run expects ${_plan_expected_branch}."

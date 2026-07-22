@@ -1866,7 +1866,7 @@ _pfsm_bootstrap_plan() {
   [ "$recorded_base" = "$plan_head" ]
 }
 
-@test "AC7: plan-state --repair rebuilds a pruned workspace — merged EPICs restored merged_to_plan, unprovable EPICs marked unproven" {
+@test "AC7: plan-state --repair rebuilds a pruned workspace — merged EPICs restored merged_to_plan, EVERY repaired entry lineage:unproven" {
   _pfsm_bootstrap_plan "P064"
 
   # Declare a second EPIC on the (git-tracked, prune-survivng) lifecycle
@@ -1906,8 +1906,12 @@ _pfsm_bootstrap_plan() {
 
   run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .status' "$mp"
   [ "$output" = "merged_to_plan" ]
+  # Security F-2: status + merge commit are DIAGNOSTIC facts repair may still
+  # record, but a merge commit never authorises lineage — repair cannot write
+  # proven on any path, so even the merged EPIC comes back unproven and needs
+  # an explicit attestation before init will run it.
   run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .lineage' "$mp"
-  [ "$output" = "proven" ]
+  [ "$output" = "unproven" ]
   run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_merge_commit' "$mp"
   [ "$output" != "null" ]
 
@@ -2458,6 +2462,199 @@ EOF
 
   # aid-fsm init for a proven entry must SUCCEED
   local args; args="$(build_default_init_args E-064-1_1)"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+}
+
+# ─── Security F-2: --repair may never mint lineage:proven ────────────────────
+# A merge-commit SUBJECT is attacker-controlled free text. Before this fix,
+# _pfsm_plan_state_repair took a `grep -F` substring hit on a merge subject as
+# proof of lineage and wrote `lineage: proven` + `epic_source_ref:
+# plan/<plan_id>`, which is exactly what aid-fsm.sh init accepts as
+# authorisation. Two ways in: a deliberately forged subject (Exploit A) and an
+# accidental substring collision with a sibling branch (Exploit B). The fix is
+# a systemic invariant — repair creates every entry ALREADY unproven, in one
+# atomic write — plus diagnostic-accuracy hardening on the candidate match.
+
+# _f2_repaired_field <plan_id> <epic_id> <field> — one field of a repaired
+# epic_runs[] entry, read straight off the canonical manifest file.
+_f2_repaired_field() {
+  local plan_id="$1" epic_id="$2" field="$3"
+  jq -r --arg e "$epic_id" --arg f "$field" \
+    '.plan_boundary_manifest.epic_runs[] | select(.epic_id==$e) | .[$f]' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
+}
+
+# _f2_assert_init_blocked <epic_id> — aid-fsm.sh init must refuse this EPIC
+# with the lineage block reason AND write no state file at all.
+_f2_assert_init_blocked() {
+  local epic_id="$1"
+  local args; args="$(build_default_init_args "$epic_id")"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_lineage_unproven"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "Security F-2 (Exploit A): a forged merge subject naming a victim branch cannot mint lineage:proven, and init stays blocked" {
+  _pfsm_bootstrap_plan "P900"
+  local base_sha; base_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P900)"
+
+  # Decoy branch forked at the plan base and merged into plan/P900 under a
+  # subject that NAMES a branch it has nothing to do with. The decoy is then
+  # deleted, so only the (attacker-authored) subject text survives.
+  git -C "$TEST_PROJECT_ROOT" checkout -q -b decoy "$base_sha"
+  echo decoy > "$TEST_PROJECT_ROOT/decoy.txt"
+  git -C "$TEST_PROJECT_ROOT" add decoy.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "decoy work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q decoy \
+    -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  git -C "$TEST_PROJECT_ROOT" branch -q -D decoy
+
+  # The victim branch is cut from main — it was never epic-started under this
+  # plan, and the merge above never touched it.
+  git -C "$TEST_PROJECT_ROOT" branch task/E-900-1_1/main main
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # THE invariant: repair produced an entry, and it is unproven.
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "unproven" ]
+
+  _f2_assert_init_blocked E-900-1_1
+}
+
+@test "Security F-2 (Exploit B): a legitimate sibling branch merge is not misattributed to the substring-matching entry, which stays unproven" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # No adversary here: a sibling branch whose name merely has the victim's
+  # name as a PREFIX. Its merge subject contains `task/E-900-1_1/main` as a
+  # substring, which is all the old grep -F needed.
+  git -C "$TEST_PROJECT_ROOT" checkout -q -b task/E-900-1_1/main-fixup task/E-900-1_1/main
+  echo fixup > "$TEST_PROJECT_ROOT/fixup.txt"
+  git -C "$TEST_PROJECT_ROOT" add fixup.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "fixup work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main-fixup \
+    -m "Merge branch 'task/E-900-1_1/main-fixup' into plan/P900"
+  local sibling_merge; sibling_merge="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P900)"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Diagnostic accuracy: the sibling's merge commit is NOT credited to
+  # E-900-1_1's entry, which is restored on the live-branch (no merge
+  # evidence) path instead.
+  run _f2_repaired_field P900 E-900-1_1 epic_merge_commit
+  [ "$output" = "null" ]
+  [ "$output" != "$sibling_merge" ]
+  run _f2_repaired_field P900 E-900-1_1 status
+  [ "$output" = "running" ]
+
+  # THE invariant, again.
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "unproven" ]
+
+  _f2_assert_init_blocked E-900-1_1
+}
+
+@test "Security F-2 (positive control): a fresh epic-start still writes lineage:proven and init still succeeds" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Built through the REAL epic-start, never a hand-written fixture — this is
+  # what proves the invariant did not break the happy path.
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "proven" ]
+  run _f2_repaired_field P900 E-900-1_1 epic_source_ref
+  [ "$output" = "plan/P900" ]
+
+  local args; args="$(build_default_init_args E-900-1_1)"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+}
+
+@test "Security F-2: BOTH repair paths (genuine merge commit, and no merge at all) produce lineage:unproven" {
+  _pfsm_bootstrap_plan "P900"
+
+  # Declare a second EPIC on the git-tracked lifecycle manifest.
+  local lm="$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml"
+  yq -i '.declared_epics += [{"id": "E-900-1_2", "scope": "required"}]' "$lm"
+  git -C "$TEST_PROJECT_ROOT" add "$lm"
+  git -C "$TEST_PROJECT_ROOT" commit -qm "declare E-900-1_2"
+
+  # Path 1: a genuine epic-start plus a genuine merge into the plan branch.
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-900-1_1/main
+  echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
+  git -C "$TEST_PROJECT_ROOT" add epic-1.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main \
+    -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  # Path 2: a live, never-merged branch.
+  git -C "$TEST_PROJECT_ROOT" branch task/E-900-1_2/main plan/P900
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Merge path: status + merge commit are kept as DIAGNOSTIC facts, but the
+  # lineage claim is not.
+  run _f2_repaired_field P900 E-900-1_1 status
+  [ "$output" = "merged_to_plan" ]
+  run _f2_repaired_field P900 E-900-1_1 epic_merge_commit
+  [ "$output" != "null" ]
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "unproven" ]
+
+  # No-merge path.
+  run _f2_repaired_field P900 E-900-1_2 status
+  [ "$output" = "running" ]
+  run _f2_repaired_field P900 E-900-1_2 lineage
+  [ "$output" = "unproven" ]
+
+  # A repaired manifest is still fully valid under the invariant checker.
+  run plan_manifest_validate "P900"
+  [ "$status" -eq 0 ]
+}
+
+@test "Security F-2: an explicit operator attestation is the ONLY way a repaired entry becomes proven, and then init succeeds" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "unproven" ]
+
+  # The real CLI, exactly as the aid-fsm.sh recovery message now prints it.
+  run bash "$PLAN_FSM_CLI" plan-state P900 --attest-source-ref "plan/P900" \
+    --reason "operator verified the branch origin from the reflog" \
+    --epic E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run _f2_repaired_field P900 E-900-1_1 lineage
+  [ "$output" = "proven" ]
+  run _f2_repaired_field P900 E-900-1_1 epic_source_ref
+  [ "$output" = "plan/P900" ]
+
+  local args; args="$(build_default_init_args E-900-1_1)"
   run "$FSM" init $args
   [ "$status" -eq 0 ]
 }

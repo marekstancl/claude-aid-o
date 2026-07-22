@@ -716,9 +716,13 @@ cmd_plan_state() {
 #
 # Promotes ONE epic_runs[] entry from lineage:unproven to lineage:proven.
 # THE ONLY code path in this file (or anywhere else in the manifest library)
-# that ever performs that flip — plan_manifest_add_epic always writes
-# lineage:proven (a fresh epic-start), and --repair only ever WRITES
-# unproven, never removes it (see _pfsm_plan_state_repair). Guarded by
+# that ever performs that flip. The only two sources of lineage:proven in the
+# whole system are (1) a normal epic-start, which passes the default
+# lineage=proven to plan_manifest_add_epic because it observed the branch's
+# origin at the moment it created it, and (2) this explicit operator
+# attestation, which carries a reason and an op-log audit trail. --repair
+# can only ever write unproven (see _pfsm_plan_state_repair) and never
+# clears it. Guarded by
 # requiring the on-disk lineage to already BE unproven before touching
 # anything, so re-attesting an already-proven entry, or an entry that was
 # never marked unproven, is rejected rather than silently no-op'd.
@@ -813,20 +817,40 @@ _pfsm_plan_state_attest() {
 # later stages depend on `candidate_sha`, which repair has no way to
 # reconstruct honestly).
 #
+# SECURITY INVARIANT (P064 E-064-1_2, finding F-2): repair NEVER writes
+# `lineage: proven`, on any path, not even transiently. A commit message is
+# attacker-controlled free text and can only ever be CANDIDATE DIAGNOSTIC
+# information, never authorisation proof — anyone able to push a merge (or
+# merely to name a branch confusingly) could otherwise mint a proven lineage
+# for a branch cut from anywhere. Every entry repair creates is created
+# ALREADY unproven, in the single atomic write that creates it
+# (_pfsm_repair_add_unproven below); there is deliberately no
+# write-proven-then-flip-to-unproven step, because a crash between those two
+# writes would leave a false `proven` on disk. Promotion to proven is only
+# ever a normal epic-start or an explicit operator attestation
+# (`--attest-source-ref ... --reason ...`, audited in operations.jsonl).
+#
 # EPIC restoration heuristic (documented here since it is a judgment call,
 # not a spec-mandated algorithm): the source of truth for WHICH epics belong
 # to this plan is the git-tracked declared_epics[] in
 # `.aid-lifecycle/manifests/<plan_id>.yaml` (survives a prune of `.aid-o/`).
 # For each declared epic:
 #   - a merge commit reachable from `plan/<plan_id>` whose subject line
-#     contains the literal branch name `task/<epic_id>/main` is taken as
-#     proof of a merge — git's own default merge-commit message embeds the
-#     source branch name (`Merge branch 'task/<epic_id>/main' [into
-#     plan/<plan_id>]`). Restored as `merged_to_plan`, `lineage: proven`,
-#     `epic_source_ref: plan/<plan_id>`, `epic_base_commit` reconstructed as
-#     `merge-base(<merge_commit>^1, <merge_commit>^2)` — provable from the
-#     merge commit's own two parents, not from anything that could have been
-#     pruned.
+#     quotes the literal branch name (`'task/<epic_id>/main'`, matching git's
+#     own default merge-commit message `Merge branch 'task/<epic_id>/main'
+#     [into plan/<plan_id>]`) AND which has `task/<epic_id>/main` as an
+#     ancestor is taken as a CANDIDATE record of a merge. Restored as
+#     `merged_to_plan` with that `epic_merge_commit` — a status/diagnostic
+#     claim, not a lineage claim — but still `lineage: unproven` per the
+#     invariant above, with `epic_source_ref: plan/<plan_id>` and
+#     `epic_base_commit` reconstructed as `merge-base(<merge_commit>^1,
+#     <merge_commit>^2)`, provable from the merge commit's own two parents
+#     rather than from anything that could have been pruned. The quoting and
+#     the ancestry check are DIAGNOSTIC-ACCURACY hardening (they stop a
+#     sibling branch such as `task/<epic_id>/main-fixup`, whose subject
+#     merely CONTAINS the victim's name as a substring, from misattributing
+#     its merge commit and base to the wrong entry); the lineage invariant,
+#     not these checks, is the actual security control.
 #   - otherwise, if `task/<epic_id>/main` still exists as a live branch, it
 #     is restored as `running`, `lineage: unproven`, `epic_source_ref: null`
 #     — its TRUE origin cannot be reconstructed (the queue records
@@ -845,7 +869,23 @@ _pfsm_plan_state_attest() {
 # placeholders (`R-repaired-<epic_id>` / `.aid-o/work/evidence/<epic_id>/repaired`)
 # — the originals are lost with the prune; only the LINEAGE fields carry
 # real evidentiary weight.
+#
+# _pfsm_repair_add_unproven <plan_id> <epic_id> <task_branch>
+#                           <epic_base_commit> <epic_source_ref>
+# (defined immediately below) is the ONE way repair is allowed to create an
+# epic_runs[] entry. It hardcodes lineage=unproven, which makes `proven`
+# structurally inexpressible inside repair: repair never calls
+# plan_manifest_add_epic directly, so no future edit to either of its two
+# call sites can accidentally reintroduce an authorisation claim. The write
+# is atomic and ALREADY unproven — never proven-then-flipped — so no crash
+# window can leave a false `proven` on disk.
 # ---------------------------------------------------------------------------
+_pfsm_repair_add_unproven() {
+  local plan_id="$1" eid="$2" task_branch="$3" base_commit="$4" source_ref="$5"
+  plan_manifest_add_epic "$plan_id" "$eid" "R-repaired-${eid}" "$task_branch" \
+    "$base_commit" "$source_ref" ".aid-o/work/evidence/${eid}/repaired" "unproven" >/dev/null
+}
+
 _pfsm_plan_state_repair() {
   local plan_id="$1" project_root="$2"
   local plan_branch="plan/${plan_id}"
@@ -919,15 +959,30 @@ _pfsm_plan_state_repair() {
     [[ -z "$eid" ]] && continue
     local task_branch="task/${eid}/main"
 
+    # Candidate merge commit: the subject must QUOTE the branch name exactly
+    # as git's own default merge message does, and the branch must actually
+    # be an ancestor of that commit. Both are diagnostic-accuracy checks (see
+    # the header) — a subject alone proves nothing, which is why every path
+    # below still writes lineage:unproven.
     local merge_commit=""
     merge_commit="$(git -C "$project_root" log --merges --format='%H%x09%s' "$plan_branch" 2>/dev/null \
-      | grep -F "$task_branch" | head -1 | cut -f1)" || merge_commit=""
+      | grep -F "'${task_branch}'" | head -1 | cut -f1)" || merge_commit=""
+
+    if [[ -n "$merge_commit" ]]; then
+      if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1 \
+         || ! git -C "$project_root" merge-base --is-ancestor "refs/heads/${task_branch}" "$merge_commit" >/dev/null 2>&1; then
+        # The named branch is gone, or is not reachable through that commit —
+        # the subject named it but Git does not corroborate it. Do not credit
+        # this entry with a merge commit / base it cannot be shown to own.
+        merge_commit=""
+      fi
+    fi
 
     if [[ -n "$merge_commit" ]]; then
       local ebc=""
       ebc="$(git -C "$project_root" merge-base "${merge_commit}^1" "${merge_commit}^2" 2>/dev/null)" || ebc=""
       if [[ -n "$ebc" ]]; then
-        plan_manifest_add_epic "$plan_id" "$eid" "R-repaired-${eid}" "$task_branch" "$ebc" "$plan_branch" ".aid-o/work/evidence/${eid}/repaired" >/dev/null || true
+        _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ebc" "$plan_branch" || true
         plan_manifest_set_epic_status "$plan_id" "$eid" "merged_to_plan" "$merge_commit" >/dev/null || true
         continue
       fi
@@ -940,14 +995,7 @@ _pfsm_plan_state_repair() {
       local ubc=""
       ubc="$(git -C "$project_root" merge-base "$task_branch" "$plan_branch" 2>/dev/null)" || ubc=""
       [[ -z "$ubc" ]] && continue
-      plan_manifest_add_epic "$plan_id" "$eid" "R-repaired-${eid}" "$task_branch" "$ubc" "" ".aid-o/work/evidence/${eid}/repaired" >/dev/null || true
-      # plan_manifest_add_epic always writes lineage:proven for a supplied
-      # (even empty->null) epic_source_ref — flip it explicitly. This is
-      # the ONLY place other than a hand-authored fixture that ever WRITES
-      # unproven; attest (above) is the only place that ever clears it.
-      local esc_eid; esc_eid="$(jq -Rn --arg s "$eid" '$s')"
-      local flip_filter="(.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == ${esc_eid} then (.lineage = \"unproven\") else . end])"
-      plan_manifest_update "$plan_id" "$flip_filter" >/dev/null || true
+      _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ubc" "" || true
     fi
   done
 
