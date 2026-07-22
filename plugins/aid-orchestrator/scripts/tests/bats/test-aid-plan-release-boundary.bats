@@ -2658,3 +2658,749 @@ _f2_assert_init_blocked() {
   run "$FSM" init $args
   [ "$status" -eq 0 ]
 }
+
+# =============================================================================
+# ─── scripts/aid-plan-fsm.sh — epic-complete / epic-merge-to-plan
+#     (P064 EPIC E-064-2_2 Step 1 = plan Step 6) ───────────────────────────────
+# =============================================================================
+# The merge half of the plan-branch substrate: an EPIC is finalized
+# (`epic-complete`) and then integrated into `plan/<plan_id>` inside one
+# reconcilable transaction (`epic-merge-to-plan`) whose ONLY accepted evidence
+# of completion is Git ancestry. `_pfsm_bootstrap_plan` / `_write_legacy_plan`
+# (Step 4's fixtures, above) are reused verbatim.
+#
+# TRACEABILITY — an `ACn:` prefix names the acceptance criterion that test
+# actually proves, numbered in the order of this step's own AC list in
+# .aid-o/tasks/E-064-2_2-…md (step-1 UI contract):
+#   AC1  only `plan/<plan_id>` moves; the `main` SHA is byte-identical
+#   AC2  a crash after the Git merge converges on re-run to merged_to_plan
+#   AC3  dirty worktree / MERGE_HEAD / unmerged path / stale expected-sha block
+#   AC4  merged_to_plan refused on `state: DONE` + a deleted task branch alone
+#   AC5  a merge conflict moves the plan to CONFLICT and records no completion
+#   AC6  `epic-complete --abandon` records the terminal status and reason
+# Everything else carries the suite's existing Edge Case / Error Handling /
+# Security / Regression prefixes — those cases harden the commands but are not
+# themselves acceptance criteria of this step.
+
+# _pfsm_epic_with_commit <plan_id> <epic_id> [file] [content]
+#   epic-start's the EPIC through the REAL CLI, then puts exactly one real
+#   commit on its task branch and returns the worktree to main — the normal
+#   pre-merge shape. Never fabricates the branch by hand: a hand-made branch
+#   has no provable lineage and epic-start would (correctly) reject it.
+_pfsm_epic_with_commit() {
+  local plan_id="$1" epic_id="$2" file="${3:-work-${2}.txt}" content="${4:-work}"
+  run bash "$PLAN_FSM_CLI" epic-start "$plan_id" "$epic_id" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  git -C "$TEST_PROJECT_ROOT" checkout -q "task/${epic_id}/main"
+  echo "$content" > "$TEST_PROJECT_ROOT/$file"
+  git -C "$TEST_PROJECT_ROOT" add "$file"
+  git -C "$TEST_PROJECT_ROOT" commit -qm "${epic_id}: work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+}
+
+# _pfsm_write_epic_evidence <epic_id> [state] [profile]
+#   Writes the EPIC run's own evidence exactly where epic-start recorded it
+#   (run_id defaults to R-<epic_id>-plan): the FSM state file epic-complete
+#   reads `state:` from, and optionally the gates_report.json it reads
+#   `.profile` from.
+_pfsm_write_epic_evidence() {
+  local epic_id="$1" state="${2:-DONE}" profile="${3:-}"
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/R-${epic_id}-plan"
+  mkdir -p "$dir/gates"
+  printf 'epic_id: %s\nstate: %s\n' "$epic_id" "$state" > "$dir/fsm-state.yaml"
+  if [[ -n "$profile" ]]; then
+    jq -nc --arg p "$profile" '{profile: $p}' > "$dir/gates/gates_report.json"
+  fi
+}
+
+# _pfsm_entry_field <plan_id> <epic_id> <field> — one field of the epic_runs[]
+# entry, read straight from the canonical manifest file.
+_pfsm_entry_field() {
+  local plan_id="$1" epic_id="$2" field="$3"
+  jq -r --arg e "$epic_id" --arg f "$field" \
+    '.plan_boundary_manifest.epic_runs[] | select(.epic_id==$e) | .[$f]' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${plan_id}/plan-boundary-manifest.json"
+}
+
+# _pfsm_merge_commit_count <plan_branch> — merge commits reachable from the
+# plan branch (the "exactly one merge commit" assertion).
+_pfsm_merge_commit_count() {
+  git -C "$TEST_PROJECT_ROOT" rev-list --merges --count "$1"
+}
+
+# ─── AC1: only plan/<plan_id> moves ────────────────────────────────────────
+@test "AC1: epic-merge-to-plan moves only plan/<plan_id>; the main SHA is byte-identical before and after" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  local task_tip; task_tip="$(git -C "$TEST_PROJECT_ROOT" rev-parse task/E-064-1_1/main)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local merge_commit="$output"
+
+  # main is untouched, byte for byte.
+  local main_after; main_after="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  [ "$main_before" = "$main_after" ]
+
+  # plan/P064 moved to a real two-parent merge commit.
+  local plan_after; plan_after="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  [ "$plan_after" = "$merge_commit" ]
+  [ "$plan_after" != "$plan_before" ]
+  local parents; parents="$(git -C "$TEST_PROJECT_ROOT" rev-list --parents -n1 "$plan_after" | wc -w | tr -d ' ')"
+  [ "$parents" -eq 3 ]
+  run git -C "$TEST_PROJECT_ROOT" log -1 --format=%s "$plan_after"
+  [ "$output" = "merge(epic): E-064-1_1 into plan/P064" ]
+
+  # Ancestry proof holds for both the merge commit and the task tip.
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$merge_commit" plan/P064
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$task_tip" plan/P064
+  [ "$status" -eq 0 ]
+
+  # Manifest records the status + the merge commit that proves it.
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "merged_to_plan" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "$merge_commit" ]
+
+  # HEAD is back where the operator left it.
+  run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "main" ]
+
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC2: crash after the Git merge converges on re-run ────────────────────
+@test "AC2: a crash after the Git merge converges on re-run to merged_to_plan with exactly one merge commit" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  local op_id; op_id="$(plan_op_key "epic-merge-to-plan" "P064" "-" "0" "E-064-1_1")"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  # Simulate the crash: intent + the real Git merge + git_applied recorded,
+  # but the manifest status write never ran.
+  plan_op_begin "P064" "$op_id" "epic-merge-to-plan" "E-064-1_1" "$plan_before"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-064-1_1/main -m "merge(epic): E-064-1_1 into plan/P064"
+  local merge_commit; merge_commit="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  plan_op_mark_git_applied "P064" "$op_id" "$merge_commit"
+
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "git_applied" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$merge_commit" ]
+
+  # Exactly ONE merge commit — the resume performed only the state write.
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "1" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$merge_commit" ]
+
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "merged_to_plan" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "$merge_commit" ]
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "state_committed" ]
+}
+
+# ─── Edge Case: already merged — converge, never a second merge ────────────
+@test "Edge Case: epic-merge-to-plan is idempotent — a second run converges without a second merge commit" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local merge_commit="$output"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$merge_commit" ]
+
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "1" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$merge_commit" ]
+}
+
+# ─── AC3: the four pre-merge blocks (dirty worktree, MERGE_HEAD, unmerged
+#          index path, stale --expected-plan-sha) ─────────────────────────────
+@test "AC3: a dirty plan worktree blocks epic-merge-to-plan with a non-zero exit and the porcelain output" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  echo dirty >> "$TEST_PROJECT_ROOT/.gitkeep"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"uncommitted changes"* ]]
+  [[ "$output" == *".gitkeep"* ]]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+}
+
+@test "AC3: a pre-existing MERGE_HEAD blocks epic-merge-to-plan with a non-zero exit" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  git -C "$TEST_PROJECT_ROOT" rev-parse main > "$TEST_PROJECT_ROOT/.git/MERGE_HEAD"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MERGE_HEAD"* ]]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+}
+
+@test "AC3: an unmerged index path blocks epic-merge-to-plan with a non-zero exit" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  # A stage-2 index entry with no stage-0 counterpart — an unmerged path
+  # without a MERGE_HEAD, so the MERGE_HEAD guard cannot be what fires.
+  local blob; blob="$(git -C "$TEST_PROJECT_ROOT" hash-object -w "$TEST_PROJECT_ROOT/.gitkeep")"
+  printf '100644 %s 2\t.gitkeep\n' "$blob" \
+    | git -C "$TEST_PROJECT_ROOT" update-index --index-info
+  [ -n "$(git -C "$TEST_PROJECT_ROOT" ls-files --unmerged)" ]
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unmerged index"* ]]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+}
+
+@test "AC3: a stale --expected-plan-sha blocks before the merge (concurrent-writer guard)" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  local stale; stale="$(git -C "$TEST_PROJECT_ROOT" rev-parse task/E-064-1_1/main)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 \
+    --expected-plan-sha "$stale" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected-plan-sha"* ]]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "0" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+
+  # The matching sha still merges — the guard is about staleness, not refusal.
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 \
+    --expected-plan-sha "$plan_before" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC4: state:DONE + a deleted task branch is NOT proof ──────────────────
+@test "AC4: merged_to_plan is refused when only state:DONE and a deleted task branch are present (unproven_merge)" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
+
+  # The exact failure mode aid-fsm.sh's _revalidate_one_dep fallback accepts:
+  # the branch is gone and the run says DONE, but nothing was ever merged.
+  git -C "$TEST_PROJECT_ROOT" branch -D task/E-064-1_1/main
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unproven_merge"* ]]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "null" ]
+}
+
+# ─── Edge Case: deleted branch + a proven merge commit is still merged ─────
+@test "Edge Case: a deleted task branch WITH a recorded, proven merge commit converges to exit 0" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local merge_commit="$output"
+
+  git -C "$TEST_PROJECT_ROOT" branch -D task/E-064-1_1/main
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/task/E-064-1_1/main
+  [ "$status" -ne 0 ]
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$merge_commit" ]
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "1" ]
+}
+
+# ─── AC5: a conflict transitions to CONFLICT and records NO completion ─────
+@test "AC5: a merge conflict transitions the plan to CONFLICT, records the op aborted, exits 4 and writes no completion" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "conflicted.txt" "from the task branch"
+
+  # A competing change to the SAME file directly on the plan branch.
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  echo "from the plan branch" > "$TEST_PROJECT_ROOT/conflicted.txt"
+  git -C "$TEST_PROJECT_ROOT" add conflicted.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "plan-side change to the same file"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"conflict"* ]]
+
+  # No completion, no moved branches, no leftover merge state.
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "null" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$main_before" ]
+  [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
+  run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "main" ]
+
+  # Plan state is CONFLICT and the operation record says aborted.
+  run plan_state_get P064 plan_state
+  [ "$output" = "CONFLICT" ]
+  local op_id; op_id="$(plan_op_key "epic-merge-to-plan" "P064" "-" "0" "E-064-1_1")"
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "aborted" ]
+}
+
+# ─── Security: the merge command never touches lineage ─────────────────────
+@test "Security: epic-merge-to-plan never writes lineage — the entry stays exactly as epic-start recorded it" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  local lineage_before; lineage_before="$(_pfsm_entry_field P064 E-064-1_1 lineage)"
+  local base_before; base_before="$(_pfsm_entry_field P064 E-064-1_1 epic_base_commit)"
+  local src_before; src_before="$(_pfsm_entry_field P064 E-064-1_1 epic_source_ref)"
+  [ "$lineage_before" = "proven" ]
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run _pfsm_entry_field P064 E-064-1_1 lineage
+  [ "$output" = "$lineage_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_base_commit
+  [ "$output" = "$base_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_source_ref
+  [ "$output" = "$src_before" ]
+}
+
+# ─── epic-complete ─────────────────────────────────────────────────────────
+
+@test "Error Handling: epic-complete requires the EPIC FSM state file to report state: DONE" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  # No state file at all.
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"fsm-state.yaml"* ]]
+
+  # Present, but not DONE.
+  _pfsm_write_epic_evidence "E-064-1_1" "GATES" "standard"
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"GATES"* ]]
+
+  run _pfsm_entry_field P064 E-064-1_1 merge_status
+  [ "$output" = "null" ]
+}
+
+@test "epic-complete raises the plan-final profile from gates_report.json and marks the entry pending merge" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "full"
+
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "standard" ]
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "full" ]
+  run _pfsm_entry_field P064 E-064-1_1 merge_status
+  [ "$output" = "pending" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_completion_profile
+  [ "$output" = "full" ]
+  # Still `running` in the manifest's own status vocabulary — only
+  # epic-merge-to-plan's ancestry proof may move it off that.
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC6: epic-complete --abandon records the terminal status and reason in the runtime manifest and makes no lifecycle write" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  # Stand where the command really runs: on the EPIC's own task branch.
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  local head_before; head_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
+  local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+
+  # A lifecycle write from here WOULD be refused — that is precisely why this
+  # step records the terminal status in the runtime manifest only.
+  run _aid_lc_require_target_branch "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 3 ]
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --abandon \
+    --reason "superseded by an infra change; no longer worth building" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "abandoned" ]
+  run _pfsm_entry_field P064 E-064-1_1 terminal_reason
+  [ "$output" = "superseded by an infra change; no longer worth building" ]
+
+  # No lifecycle write happened: no new commit anywhere, main untouched.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)" = "$head_before" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$main_before" ]
+  run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "task/E-064-1_1/main" ]
+
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+
+  # Re-running converges rather than failing on the terminal-state edge.
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --abandon \
+    --reason "superseded by an infra change; no longer worth building" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+}
+
+@test "epic-complete --supersede-by records superseded plus the superseding EPIC id" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 \
+    --supersede-by E-064-1_2 --reason "folded into the wider EPIC" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "superseded" ]
+  run _pfsm_entry_field P064 E-064-1_1 superseded_by
+  [ "$output" = "E-064-1_2" ]
+  run _pfsm_entry_field P064 E-064-1_1 terminal_reason
+  [ "$output" = "folded into the wider EPIC" ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "Error Handling: epic-complete terminal flags require --reason and are mutually exclusive (usage errors)" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --abandon --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--reason"* ]]
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --abandon --supersede-by E-064-1_2 \
+    --reason "both at once" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --full-tests --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--reason"* ]]
+
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+}
+
+@test "epic-complete --full-tests --reason records the PM exception without lowering the plan-final floor" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
+
+  # Raise the floor first, so a "quick" mid-plan run has something to lower.
+  plan_manifest_raise_final_profile "P064" "release"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --full-tests \
+    --reason "PM asked for a one-off full run mid-plan" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # The floor is monotonic — a lower-profile EPIC run can never pull it down.
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "release" ]
+
+  run bash -c "jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id==\"E-064-1_1\") | .full_tests_exception.reason' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  [ "$output" = "PM asked for a one-off full run mid-plan" ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "Registration: epic-complete and epic-merge-to-plan are registered subcommands with usage text" {
+  run bash "$PLAN_FSM_CLI" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"epic-complete"* ]]
+  [[ "$output" == *"epic-merge-to-plan"* ]]
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064
+  [ "$status" -eq 2 ]
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --nope --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+}
+
+# ─── CP2 fix regressions (E-064-2_2 Step 1) ────────────────────────────────
+# Five defects found by the CP2 review of the commands above. Each test here
+# fails against the pre-fix command and passes after it; none of them is an
+# acceptance criterion of the step, so none carries an `ACn:` prefix.
+
+# _pfsm_force_unproven <plan_id> <epic_id> — rewrite ONE entry into exactly
+# the shape `plan-state --repair` produces (lineage unproven, no source ref),
+# without going through the whole prune-and-repair cycle. Mirrors
+# `_pfsm_entry_update`'s single-entry jq shape.
+_pfsm_force_unproven() {
+  local plan_id="$1" epic_id="$2"
+  plan_manifest_update "$plan_id" \
+    "(.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == \"${epic_id}\" then (.lineage = \"unproven\" | .epic_source_ref = null) else . end])" \
+    >/dev/null
+}
+
+@test "Regression: an already-merged EPIC whose task branch moved on is refused, never re-merged behind the terminal status" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local first_merge="$output"
+
+  # More work lands on the task branch AFTER the merge, so its tip is no
+  # longer contained in plan/P064 — the pre-fix command took the real-merge
+  # path, created a SECOND merge commit, reported it on stdout, and left
+  # epic_merge_commit naming the first one.
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  echo "later work" > "$TEST_PROJECT_ROOT/later.txt"
+  git -C "$TEST_PROJECT_ROOT" add later.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "E-064-1_1: later work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  local moved_tip; moved_tip="$(git -C "$TEST_PROJECT_ROOT" rev-parse task/E-064-1_1/main)"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"already merged_to_plan"* ]]
+  [[ "$output" == *"$moved_tip"* ]]
+
+  # No second merge commit, and the manifest still agrees with Git.
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "1" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "$first_merge" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "merged_to_plan" ]
+  run plan_manifest_validate "P064"
+  [ "$status" -eq 0 ]
+}
+
+@test "Security: epic-merge-to-plan refuses an entry whose lineage is not proven (no merge, no merged_to_plan)" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_force_unproven "P064" "E-064-1_1"
+  run _pfsm_entry_field P064 E-064-1_1 lineage
+  [ "$output" = "unproven" ]
+
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"epic_lineage_unproven"* ]]
+  [[ "$output" == *"--attest-source-ref"* ]]
+
+  # Nothing merged, nothing recorded.
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "0" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "null" ]
+
+  # epic-start refuses the SAME entry — the two commands now agree.
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"lineage"* ]]
+}
+
+@test "Edge Case: an already-merged entry with unproven lineage still converges read-only (a repaired plan is not wedged)" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local merge_commit="$output"
+
+  # `plan-state --repair` rebuilds merged EPICs at merged_to_plan with EVERY
+  # entry lineage:unproven. Re-confirming that already-recorded fact must not
+  # be refused — and must not launder anything either: it writes NOTHING.
+  _pfsm_force_unproven "P064" "E-064-1_1"
+  local manifest="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  cp "$manifest" "$BATS_TEST_TMPDIR/manifest-before.json"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$merge_commit" ]
+
+  run cmp -s "$BATS_TEST_TMPDIR/manifest-before.json" "$manifest"
+  [ "$status" -eq 0 ]
+  run _pfsm_entry_field P064 E-064-1_1 lineage
+  [ "$output" = "unproven" ]
+  run _pfsm_merge_commit_count plan/P064
+  [ "$output" = "1" ]
+}
+
+@test "Error Handling: a non-conflict merge failure is not reported or state-machined as a conflict" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "collide.txt" "from the task branch"
+
+  # An UNTRACKED file at a path the merge must write: invisible to the
+  # preflight (`git status --untracked-files=no`), fatal to `git merge`, which
+  # refuses BEFORE writing anything — so no MERGE_HEAD and no unmerged index
+  # entry ever exists. The pre-fix command called this a MERGE CONFLICT, drove
+  # the plan to CONFLICT and exited 4.
+  echo "untracked local scratch" > "$TEST_PROJECT_ROOT/collide.txt"
+
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+  local main_before; main_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MERGE FAILED (not a conflict)"* ]]
+  [[ "$output" != *"MERGE CONFLICT"* ]]
+  [[ "$output" == *"untracked working tree files"* ]]
+
+  # The plan is NOT sent down the conflict-resolution path ...
+  run plan_state_get P064 plan_state
+  [ "$output" = "OPEN" ]
+
+  # ... and every safety property of the conflict path still holds.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$main_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+  run _pfsm_entry_field P064 E-064-1_1 epic_merge_commit
+  [ "$output" = "null" ]
+  [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
+  run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "main" ]
+  local op_id; op_id="$(plan_op_key "epic-merge-to-plan" "P064" "-" "0" "E-064-1_1")"
+  run plan_op_reconcile "P064" "$op_id"
+  [ "$output" = "aborted" ]
+
+  # The lock is released — a second run gets as far as the same refusal
+  # rather than timing out on a lock the aborted run never let go of.
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MERGE FAILED (not a conflict)"* ]]
+}
+
+@test "Error Handling: a checkout-back that fails on the conflict path is reported loudly, never claimed as restored" {
+  _pfsm_bootstrap_plan "P064"
+
+  # A file tracked on main and ABSENT from plan/P064 — checking out main again
+  # therefore has to write it.
+  echo "only on main" > "$TEST_PROJECT_ROOT/only-main.txt"
+  git -C "$TEST_PROJECT_ROOT" add only-main.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "main-only file"
+
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "conflicted.txt" "from the task branch"
+
+  # The same add/add conflict as the AC5 case.
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  echo "from the plan branch" > "$TEST_PROJECT_ROOT/conflicted.txt"
+  git -C "$TEST_PROJECT_ROOT" add conflicted.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "plan-side change to the same file"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  # Installed LAST so it only fires inside the command under test: the moment
+  # the command lands on plan/P064 it plants an untracked only-main.txt, which
+  # makes the checkout BACK to main fail ("would be overwritten by checkout").
+  # The pre-fix command swallowed that failure and still told the operator its
+  # position was restored.
+  cat > "$TEST_PROJECT_ROOT/.git/hooks/post-checkout" <<'HOOK'
+#!/bin/sh
+if [ "$(git symbolic-ref --short HEAD 2>/dev/null)" = "plan/P064" ]; then
+  echo "planted by the post-checkout hook" > only-main.txt
+fi
+HOOK
+  chmod +x "$TEST_PROJECT_ROOT/.git/hooks/post-checkout"
+
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
+
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  # Still a genuine conflict — exit code and plan state are unchanged.
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"MERGE CONFLICT"* ]]
+
+  # The restore failure is stated, and names where HEAD really is.
+  [[ "$output" == *"HEAD NOT RESTORED"* ]]
+  [[ "$output" == *"plan/P064"* ]]
+  run git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD
+  [ "$output" = "plan/P064" ]
+
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
+  run _pfsm_entry_field P064 E-064-1_1 status
+  [ "$output" = "running" ]
+  run plan_state_get P064 plan_state
+  [ "$output" = "CONFLICT" ]
+}
+
+@test "Error Handling: a value-less trailing option is a usage error (exit 2), never an infinite loop" {
+  # `timeout` bounds the PRE-fix behaviour: `shift 2` with a single argument
+  # left shifts nothing and returns 1, so the option loop re-matched the same
+  # arm forever (rc 124, no output). Every arm of both commands is covered.
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --expected-plan-sha
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--expected-plan-sha requires a value"* ]]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--project-root requires a value"* ]]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --op-id
+  [ "$status" -eq 2 ]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --abandon --reason
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--reason requires a value"* ]]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --supersede-by
+  [ "$status" -eq 2 ]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root
+  [ "$status" -eq 2 ]
+
+  run timeout 20 bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --op-id
+  [ "$status" -eq 2 ]
+}
