@@ -261,6 +261,93 @@ the affected FSM to orchestrate its own integrity repair. Land after P064 becaus
 modifies `aid-fsm.sh` and its gate/controller contracts, and before P068 so plan-final orchestration
 starts with replay-safe step evidence.
 
+### IMP-264 - Compute evidence freshness at read time instead of persisting `head_is_current`
+
+**Status:** ready
+**Priority:** medium
+**Class:** evidence integrity / stale derived state
+**Area:** review-profile and delivery-gate producers and consumers
+
+**Summary:** Evidence artifacts persist `head_is_current: true`, but the assertion becomes stale as
+soon as another commit lands. E-064-1_2 closed with both `review-profile.json` and
+`delivery-gate.json` claiming currentness for older revisions. Stop treating a frozen boolean as
+proof: persist the referenced SHA and compute freshness against the actual reviewed/current HEAD at
+read time. Add regression coverage for post-generation commits and remove or deprecate stored
+freshness booleans.
+
+### IMP-265 - Make lineage fail closed by default and keep healthy repair non-destructive
+
+**Status:** ready
+**Priority:** high
+**Class:** security / recovery correctness
+**Area:** `aid-plan-manifest.sh`, `aid-plan-fsm.sh --repair`
+
+**Summary:** `plan_manifest_add_epic` defaults an omitted lineage argument to `proven`, while
+`--repair` currently over-corrects in the opposite direction by degrading an already healthy
+manifest to `unproven` and discarding valid attestation metadata. Default omitted lineage to
+`unproven`; require the legitimate producer to pass `proven` explicitly. Make repair a no-op for a
+healthy manifest and preserve trustworthy fields when reconstructing only damaged portions. Cover
+omitted/malformed lineage values and healthy-repair idempotency.
+
+### IMP-266 - Define audited recovery from an incorrect terminal `merged_to_plan` state
+
+**Status:** idea — architecture decision required
+**Priority:** medium
+**Class:** architecture / lifecycle recovery
+**Area:** plan manifest EPIC status state machine
+
+**Summary:** `merged_to_plan` has no outgoing transition. If it is ever assigned incorrectly, the
+operator has no sanctioned correction path. Decide between a narrow audited reopen transition,
+gated by explicit operator attestation, and a deliberately terminal design with a documented
+manual recovery ceremony. Do not add an unlogged generic rollback.
+
+### IMP-267 - Re-derive ancestry fields when attesting repaired lineage
+
+**Status:** ready
+**Priority:** high
+**Class:** evidence integrity / attestation
+**Area:** `aid-plan-fsm.sh attest-source-ref`
+
+**Summary:** Attestation updates source reference, lineage, reason and timestamp but can retain
+incorrect `epic_merge_commit` or `epic_base_commit` values produced by repair. Re-derive those
+fields from real Git ancestry at attestation time and fail closed if they cannot be proven. The
+operator output must show the exact ancestry being attested, but display alone is not a substitute
+for mechanical derivation.
+
+### IMP-268 - Remove or harden the debug CLI path that can mint `lineage: proven`
+
+**Status:** ready
+**Priority:** medium
+**Class:** security hardening / contract accuracy
+**Area:** `aid-plan-manifest.sh add-epic` dispatcher
+
+**Summary:** The low-level `add-epic` CLI is an undocumented third writer of `lineage: proven`, so
+the code's claim that only `epic-start` and attestation can establish proven lineage is false.
+Remove the production-shaped debug path or require an explicit audited maintenance mode, and test
+that omission cannot inherit a fail-open default. Update the invariant documentation to enumerate
+every remaining writer.
+
+### IMP-269 - Bind C3 AC lenses to an explicit, recorded acceptance-criteria source
+
+**Status:** ready
+**Priority:** high
+**Class:** audit integrity / false-green prevention
+**Area:** C3 manifest builder, audit prompt bundle and profile enforcement
+
+**Summary:** E-064-1_2's terminal C3 run silently fell back from the real plan acceptance criteria
+to `final_report.md` because `AID_PLAN_AC_FILE` was unset. The AC bundle was therefore authored by
+the implementation under review, while mandatory `ac_to_test_identity` and
+`requirement_test_drift` lenses still appeared to run normally. Record `ac_source` as
+`plan|final_report_fallback|stub` in the sealed manifest. If the profile requires an AC lens,
+anything except an explicit plan source must fail closed; otherwise warn visibly and preserve the
+fallback classification in the final report. Tests must prove an unset, missing or unreadable AC
+path cannot produce an unqualified AC-review pass.
+
+**Interim operating rule:** Until this lands, every C3 dispatch with an AC-sensitive profile must
+set `AID_PLAN_AC_FILE` explicitly and verify that `bundle-plan-ac.md` is not byte-identical to the
+implementation-authored final report. This is required for E-064-2_2 but does not reopen the
+already adjudicated E-064-1_2 closure.
+
 ---
 
 ## Live probe observations (B-004 operating mode)
