@@ -4726,6 +4726,12 @@ cmd_plan_close() {
 #
 # New read path: aid-fsm.sh did not read the queue before this (cmd_init only
 # excluded queue.yaml from its dirty-tree guard). Registry: queue_dep_revalidation.
+#
+# P064 Step 7 amends outputs 1-3 for an entry that declares a `merge_target`
+# (written by lib/aid-queue-write.sh): ancestry is checked against THAT ref
+# instead of the main|master|HEAD guess, and outputs 3's evidence-based
+# fallback chain is unavailable — a plan-branch dependency is proven by
+# ancestry or it is blocked. Registry: plan_branch_merge_target.
 
 # _queue_parse_to_json <file> — awk parser copied from aid-queue-add.sh
 # (lines ~104-211). The live dogfood .aid-o/config/queue.yaml is NOT
@@ -4800,6 +4806,12 @@ _queue_parse_to_json() {
 
       if (key == "status") {
         printf ",\"status\":\"%s\"", val
+      } else if (key == "plan_id" || key == "merge_target") {
+        # P064 Step 7 — the two fields lib/aid-queue-write.sh adds. Emitted as
+        # strings exactly like `status` (the YAML literal `null` therefore
+        # arrives as the four-character string "null", which the bash side
+        # treats as absent — see _queue_entry_merge_target).
+        printf ",\"%s\":\"%s\"", key, val
       } else if (key == "depends_on") {
         printf ",\"depends_on\":"
         in_depends = 1
@@ -4856,10 +4868,29 @@ _queue_parse_to_json() {
 
 # _queue_merge_target — echo the ref the dep branch should be an ancestor of.
 # Prefers main, then master, else HEAD (detached/CI checkout).
+#
+# P064 Step 7 NOTE: this is now the FALLBACK only, used for a queue entry that
+# declares no `merge_target`. It is exactly the guess that made an EPIC merged
+# into `plan/Pxxx` but not yet released report `blocked` forever — see
+# _queue_entry_merge_target below for the declared-target path that supersedes
+# it.
 _queue_merge_target() {
   if git show-ref --verify --quiet refs/heads/main; then echo main
   elif git show-ref --verify --quiet refs/heads/master; then echo master
   else echo HEAD; fi
+}
+
+# _queue_entry_merge_target <dep> <queue_json> — the ref THIS dependency
+# declares it was (or will be) merged into: `plan/<plan_id>` while its plan is
+# open, the target branch once the plan is released to main. Empty when the
+# entry carries no merge_target (a legacy, pre-P064 entry) — that empty answer
+# is what re-enables the fallback chain below.
+_queue_entry_merge_target() {
+  local dep="$1" queue_json="$2" mt
+  mt=$(echo "$queue_json" | jq -r --arg d "$dep" \
+    '[.[] | select(.epic_id==$d) | (.merge_target // "")] | .[0] // ""' 2>/dev/null)
+  [[ "$mt" == "null" || "$mt" == "~" ]] && mt=""
+  printf '%s' "$mt"
 }
 
 # _dep_evidence_state <dep> — echo "DONE" if ANY of the dep's evidence runs is
@@ -4887,16 +4918,51 @@ _dep_evidence_branch() {
   echo ""
 }
 
+# _dep_valid_branch_ref <ref> — is <ref> a name git itself accepts?
+#
+# CONTRACT TWIN of lib/aid-queue-write.sh:_queue_valid_branch_ref, byte for
+# byte in behaviour (CP2 iteration 2, finding 2). The writer used to apply a
+# hand-rolled `^[A-Za-z0-9][A-Za-z0-9._/-]*$` here and this reader applied
+# NOTHING, so for a dep that ran on a git-legal but regex-illegal branch — the
+# verifier's repro is `_wip` — `queue-revalidate` said `unblocked` while
+# `queue_claim_next` wrote `dependency_no_ancestry_proof` on the same fact.
+# `git check-ref-format` is the authority precisely so neither half can drift
+# from git again. On top of it: a leading `-` is refused (git accepts it as a
+# ref name, but `git merge-base --is-ancestor "$ref" …` would read it as an
+# OPTION), as is a `"`/backslash/control character, so the name stays safe if
+# it is ever written back into the queue as a YAML scalar. CHANGE BOTH.
+_dep_valid_branch_ref() {
+  local r="${1:-}"
+  [[ -n "$r" ]]                     || return 1
+  [[ "$r" != -* ]]                  || return 1
+  [[ "$r" != *'"'* ]]               || return 1
+  [[ "$r" != *'\'* ]]               || return 1
+  [[ "$r" != *[$'\001'-$'\037']* ]] || return 1
+  [[ "$r" != *$'\177'* ]]           || return 1
+  git check-ref-format "refs/heads/${r}" >/dev/null 2>&1
+}
+
 # _resolve_dep_branch <dep> — echo the LIVE branch to ancestor-check for a dep:
 # the task/<dep>/main convention if it exists, else the evidence fsm-state
 # branch field if that ref exists (never main/master — a legacy branch:main
 # would false-unblock). Empty = branch deleted (merged-detection path).
+#
+# CONTRACT TWIN: lib/aid-queue-write.sh:_queue_resolve_dep_branch implements
+# this same rule for the WRITE side (queue_claim_next). The two halves must
+# answer the same question the same way — a writer that knew only the
+# task/<dep>/main convention wrote `blocked:…:dependency_no_ancestry_proof` on
+# a dep this reader reported `unblocked`, leaving the dependent unclaimable
+# through the queue while the FSM said it was ready (CP2 finding 3). aid-fsm.sh
+# is a command script, not a sourceable library, so the rule is duplicated
+# rather than shared: CHANGE BOTH.
 _resolve_dep_branch() {
   local dep="$1"
   local conv="task/${dep}/main"
-  if git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
+  if _dep_valid_branch_ref "$conv" \
+     && git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
   local ev; ev=$(_dep_evidence_branch "$dep")
   if [[ -n "$ev" && "$ev" != "main" && "$ev" != "master" ]] \
+     && _dep_valid_branch_ref "$ev" \
      && git show-ref --verify --quiet "refs/heads/${ev}"; then
     echo "$ev"; return 0
   fi
@@ -4910,7 +4976,40 @@ _resolve_dep_branch() {
 # aborts under `set -e` — it falls through to merged-detection.
 _revalidate_one_dep() {
   local dep="$1" queue_json="$2" timeline_path="$3"
-  local target; target=$(_queue_merge_target)
+
+  # ── P064 Step 7: a DECLARED merge_target changes both the ref and the rules ─
+  # For an entry that carries `merge_target`, ancestry against THAT ref is the
+  # only accepted answer. The evidence-based fallback chain further down (queue
+  # `status: completed`, an evidence `state: DONE`, a merge-log grep) is
+  # unavailable to it — every one of those is a claim ABOUT a merge rather than
+  # the merge itself, and `status: completed` in particular has only ever been
+  # written by hand. A queue entry is a derived view, never evidence.
+  local declared; declared=$(_queue_entry_merge_target "$dep" "$queue_json")
+
+  local target
+  if [[ -n "$declared" ]]; then
+    # A merge_target read out of the hand-editable queue file is untrusted
+    # input (CP2 iteration 2, LOW note): validate it with the same predicate as
+    # the writer BEFORE it becomes an argv element of `git`, where a leading
+    # `-` would be read as an option. An unusable target is the same broken
+    # record as a non-resolving one — reported, never treated as proof.
+    if ! _dep_valid_branch_ref "$declared"; then
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_invalid"
+      echo "failed"; return 1
+    fi
+    if ! git rev-parse --verify --quiet "${declared}^{commit}" >/dev/null 2>&1; then
+      # A declared target that does not resolve is a broken record, not a
+      # "blocked" answer — treating it as blocked would hide it forever.
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_missing" merge_target="$declared"
+      echo "failed"; return 1
+    fi
+    target="$declared"
+  else
+    target=$(_queue_merge_target)
+  fi
+
   local branch; branch=$(_resolve_dep_branch "$dep")
 
   if [[ -n "$branch" ]]; then
@@ -4919,15 +5018,30 @@ _revalidate_one_dep() {
     case "$rc" in
       0)  # output 1: branch exists + is ancestor → merged → unblock
         log_event "$timeline_path" "queue_dep_revalidated" \
-          epic_id="$dep" resolution="ancestor" branch="$branch"
+          epic_id="$dep" resolution="ancestor" branch="$branch" merge_target="$target"
         echo "unblocked"; return 0 ;;
       1)  # output 2: branch exists + NOT ancestor → genuinely unmerged → blocked
         log_event "$timeline_path" "queue_dep_blocked" \
-          epic_id="$dep" branch="$branch"
+          epic_id="$dep" branch="$branch" merge_target="$target"
         echo "blocked"; return 0 ;;
       *)  # 128 = bad-ref/fatal → do NOT crash; fall through to merged-detection
+        if [[ -n "$declared" ]]; then
+          log_event "$timeline_path" "queue_dep_unresolved" \
+            epic_id="$dep" reason="ancestry_check_failed" merge_target="$target" branch="$branch"
+          echo "failed"; return 1
+        fi
         : ;;
     esac
+  fi
+
+  if [[ -n "$declared" ]]; then
+    # Declared target, no live branch to prove ancestry with. A deleted branch
+    # is not proof, and neither is a hand-edited `completed`. This is a
+    # determinate "not merged", not a fail-loud: the answer is knowable and it
+    # is "no".
+    log_event "$timeline_path" "queue_dep_blocked" \
+      epic_id="$dep" merge_target="$target" reason="no_ancestry_proof"
+    echo "blocked"; return 0
   fi
 
   # output 3: branch deleted after merge (the NORM) → merged-detection fallback.

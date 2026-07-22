@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 294          # granular registry rows; recomputed via `.enforcements|length`. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
-  mapped_with_verdict: 130   # recomputed: entries with verdict != null and != "unmapped" (ALIGNED 112 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1); +1 vs 129 for plan_boundary_manifest (verdict: ALIGNED)
-  mapping_pending: 121       # recomputed: entries with verdict == "unmapped" (unchanged by this row)
-  verdict_distribution: {ALIGNED: 112, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 121}
+  enforcements: 302          # granular registry rows; recomputed via `.enforcements|length`. P064 E-064-2_2 Step 2's plan-aware queue is FOUR rows split by what is actually wired (CP2 finding 6): plan_branch_merge_target (reader, active) + plan_queue_append_locked (append LOCKING, active) + plan_queue_entry_block_structure (append CONTENT — charset guards + the library's own structural re-derivation of the entry block, active; CP2 iteration 2 finding 1) + plan_queue_scripted_transitions (transitions, PLANNED — built and tested but zero production callers, so it must not be recorded as active enforcement). Step 2 also adds the four E-064-2_2 Step 1 mechanisms that had no owning registry until now (epic_merge_ancestry_proof, epic_lineage_unproven_merge_gate, epic_merge_in_progress_guard, plan_branch_expected_sha_guard) — all verdict: ALIGNED. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
+  mapped_with_verdict: 137   # recomputed via `yq -o=json .enforcements | jq '[.[]|select(.verdict != null and .verdict != "unmapped")]|length'` (ALIGNED 119 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1)
+  mapping_pending: 122       # recomputed via `... select(.verdict == "unmapped") ...`; +1 for plan_queue_scripted_transitions, which is planned/unmapped until its callers land
+  verdict_distribution: {ALIGNED: 119, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 122}
 
 enforcements:
 
@@ -1113,3 +1113,101 @@ enforcements:
     verdict: ALIGNED
     description: "C3-required run must prove a real, faithfully-transformed codex audit at HEAD before release."
     test: "scripts/tests/bats/test-c3-audit.bats"
+
+  # ── P064 E-064-2_2 Step 2 (plan Step 7): plan-aware queue ──────────────────
+  # THREE rows, deliberately split by what is actually WIRED today (CP2
+  # finding 6, and AID-v3-principles.md §1 "Detector without Enforcement is
+  # Decoration"): the READER half runs on every dependency check, the APPEND
+  # half runs on every `aid-queue-add.sh`, and the TRANSITION half
+  # (queue_set_status / queue_set_plan / queue_claim_next) has no production
+  # caller yet — it must not be recorded as active enforcement until it does.
+  - id: plan_branch_merge_target
+    type: 1
+    source: "scripts/aid-fsm.sh (grep: '_queue_entry_merge_target')"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "READER half — wired: aid-fsm.sh `queue-revalidate` / `init` run it on every dependency check. Dependency readiness resolves ancestry against the ref the dependency's queue entry DECLARES in merge_target (plan/<plan_id> while its plan is open, the target branch once released) instead of _queue_merge_target()'s main|master|HEAD guess, which reported an EPIC merged into plan/Pxxx but not yet released as blocked forever. For an entry that carries a merge_target the evidence-based fallback chain is UNAVAILABLE: queue `status: completed`, an evidence `state: DONE` and the merge-log grep are all claims ABOUT a merge rather than the merge itself, and `completed` in particular has only ever been written by hand — a queue entry is a derived view, never evidence. A deleted task branch therefore yields `blocked` (reason no_ancestry_proof), and a declared merge_target that does not resolve yields fail-loud `failed` (reason merge_target_missing) rather than a comfortable blocked. Entries with no merge_target keep the pre-P064 behaviour byte for byte. Branch resolution (_resolve_dep_branch) is a CONTRACT TWIN of lib/aid-queue-write.sh:_queue_resolve_dep_branch — both halves must answer the same question the same way, or a dependent is unclaimable through the queue while the FSM reports it ready. The ref-charset half of that twin is now ONE predicate whose authority is `git check-ref-format` (aid-fsm.sh:_dep_valid_branch_ref == aid-queue-write.sh:_queue_valid_branch_ref, plus a leading-`-` and quote/control-character refusal): a hand-rolled regex on the writer with NOTHING on the reader made the two halves give opposite answers for every git-legal name outside the regex (repro: a dependency merged from branch `_wip` — reader `unblocked`, writer `dependency_no_ancestry_proof`). A merge_target read back out of the hand-editable queue file goes through the same predicate before it reaches git as an argv element."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_queue_append_locked
+    type: 4
+    source: "scripts/aid-queue-add.sh:529 (queue_append_entry)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "APPEND half — wired: aid-queue-add.sh delegates its only write to lib/aid-queue-write.sh:queue_append_entry, so the append and every later transition happen under the same <queue>.lock sidecar, and the duplicate check is re-run INSIDE the hold (aid-queue-add.sh's own pre-lock check cannot stop two concurrent adds). The write is mktemp-in-place + mv, so a crash never leaves a half-written queue."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_queue_entry_block_structure
+    type: 4
+    source: "scripts/lib/aid-queue-write.sh (_queue_validate_entry_block) + scripts/aid-queue-add.sh charset guards"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "APPEND-DOOR INTEGRITY — wired: runs on every aid-queue-add.sh invocation. The locking row above covers HOW the append is written; this row covers WHAT may be written. queue_append_entry used to emit its caller's pre-rendered YAML block byte-for-byte with no validation, while aid-queue-add.sh interpolated six argument-reachable values (epic_id, epic_path, plan_ref, plan_id, merge_target, each depends_on element) into that block with no charset guard, so a single value carrying a newline appended extra `key: value` lines to the entry. A smuggled second `status:` line split the two queue readers apart — queue_get_field is first-key-wins, aid-fsm.sh:_queue_parse_to_json is last-key-wins — and made `queue-revalidate` report `unblocked` for an EPIC with no branch, no evidence and no merge commit, i.e. a queue status substituting for git ancestry proof, arriving through a script. Two layers now: aid-queue-add.sh REJECTS (usage error, nothing written) any of the six values outside its charset (ids by _queue_valid_id, paths by the exhaustive double-quoted-scalar guard _queue_valid_scalar, refs by _queue_valid_branch_ref), and the library independently re-derives the block's STRUCTURE — every non-blank line must be the single leading `  - epic_id: \"<id>\"` or a `    <key>: <value>` whose value is one of the four shapes this library writes, exactly one epic_id line, no repeated key, and the declared id must equal the id the duplicate check ran against. The library layer is the class closer: it does not depend on any caller validating first, which is how this defect arrived twice."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_queue_scripted_transitions
+    type: 4
+    source: "scripts/lib/aid-queue-write.sh (queue_set_status / queue_set_plan / queue_claim_next)"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: planned
+    verdict: unmapped
+    deadline: "2026-09-30"
+    description: "TRANSITION half — BUILT AND TESTED, NOT YET WIRED. queue_set_status validates against the seven-value enum (exit 2, nothing written, for anything else — including the read-only legacy `queued`/`completed`), refuses to leave a terminal status, and rejects a `reason` outside its charset allowlist; queue_claim_next performs read-and-claim inside ONE hold of <queue>.lock so two concurrent callers cannot both win an entry, and records a durable blocked reason or reports rc 3. As of this row's creation these three functions have ZERO production callers outside the library, its own CLI and the bats suite — every non-`queued` status in the live queue still got there by hand, which is the very failure this is meant to abolish. Recorded `planned` rather than `active` so the registry does not overclaim: promotion to active requires aid-plan-fsm.sh's epic-start / epic-merge-to-plan / plan-merge-to-main to drive them (E-064-2_2 Step 4, else P068). Deadline aligned with the rest of the plan-boundary cohort."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  # ── P064 E-064-2_2 Step 1 (plan Step 6): epic-complete / epic-merge-to-plan.
+  # Registered here because Step 1's own allowed paths excluded this registry.
+  - id: epic_merge_ancestry_proof
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:724"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "_pfsm_is_ancestor (git merge-base --is-ancestor) is the ONE primitive epic-merge-to-plan accepts as proof that an EPIC's work is contained in plan/<plan_id>, and every path that writes the `merged_to_plan` status passes through it: the terminal-convergence read-back (:1250 recorded merge commit still an ancestor, :1256 task tip still contained), the deleted-branch path (:1292), the already-contained path (:1335-1337) and the post-merge verification (:1478) before _pfsm_record_merged commits. A deleted task branch, an evidence run at `state: DONE` and a queue entry claiming completion are explicitly NOT proof (unproven_merge, exit 1)."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: epic_lineage_unproven_merge_gate
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:1282"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "epic-merge-to-plan refuses (exit 1, epic_lineage_unproven) to record a merge for a manifest entry whose lineage is not `proven` — minting the delivery claim is at least as authoritative as epic-start's own entry guard, and a true ancestry statement about a branch of unestablished provenance is not a delivery proof. Deliberately NOT applied to the read-only terminal convergence above it, so a plan-state --repair recovery (whose entries are unproven by construction) is not wedged; the sanctioned way out is plan-state --attest-source-ref, never --repair."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: epic_merge_in_progress_guard
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:776"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "_pfsm_check_no_merge_in_progress blocks epic-merge-to-plan when the repository is already mid-merge, testing MERGE_HEAD and any unmerged (stage != 0) index entry as two SEPARATE signals so the message names the real one, and running BEFORE the dirty-worktree check so a conflicted tree reports its actual cause. The same two signals are re-read at :1421 after a failed merge to classify conflict (exit 4, plan -> CONFLICT) apart from a non-conflict merge failure (exit 1, nothing state-machined)."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_branch_expected_sha_guard
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:1231"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "epic-merge-to-plan's concurrent-writer guard: --expected-plan-sha is compared against the observed plan-branch head BEFORE anything is recorded or merged (:1231), and the same head is re-read and re-compared under the plan lock (:1391) so a racer that moved the branch between the pre-lock read and the lock acquisition is caught too. Either mismatch exits 1 with both SHAs named and no Git action performed."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
