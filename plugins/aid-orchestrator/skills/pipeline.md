@@ -1049,6 +1049,48 @@ Four telemetry mechanisms fire automatically during DONE state. Detail in [Telem
 - **Tiered Severity** — `done-advance review release` refuses transition on `severity: blocking` failures; soft-fail if `yq` missing. Override via `--force --reason`. Severity registry: `.aid-o/config/check-severity.yaml`.
 - **Compliance Recovery Alert** (P042) — Telegram `🛑` on block, `✅` on recovery. Config gate: `notifications.telegram.alert_on_compliance_recovery` (default `true`).
 
+### Specialist dispatch is plan-final in `plan_branch` mode
+
+The Auditor, Curator, Simplifier and Reporter dispatches described in this section are
+**plan-final only** when the owning plan declares `mode: plan_branch` in
+`.aid-lifecycle/manifests/{plan_id}.yaml`. An intermediate EPIC completion inside such a
+plan dispatches none of them, and the FSM enforces that structurally: `done-advance
+review release` skips CP4, the CP3 freshness re-check, the review-profile presence check,
+the Curator/Auditor report requirements, the C3 audit + dispatch-provenance chain and the
+EPIC-scoped C4 dual run (the authoritative list is `AID_PLAN_BRANCH_SKIPPED_STAGES` in
+`scripts/aid-fsm.sh`, echoed into the run's `done_advance_plan_branch_mode` timeline event).
+
+**The CP3 verifier pair is still dispatched per EPIC — it is NOT part of the skip.** Only
+the CP3 *freshness re-check* (a re-verification at `review → release`) and the
+*review-profile presence* check are skipped. The DONE-review CP3 code-review and CP3
+security verifiers run for every EPIC in both modes, and under `streamlined_mode: true`
+`fsm_check_streamlined_integration_review` — which runs ABOVE the skip guard and is
+retained in both modes — hard-fails `done-advance` when
+`verifier-output-cp3-code-review.md` or `verifier-output-cp3-security.md` is missing.
+Skipping the CP3 pair on a `/aid-run --streamlined` plan-branch EPIC leaves no clean
+recovery short of dispatching after the fact or forcing the transition.
+
+**The auditor's `blocking_findings` verdict is also retained.** If a mid-plan Auditor run
+(the exception below) writes an `audit-report`, its top-level `blocking_findings` field is
+read in BOTH modes and a non-`false` value blocks the advance. No `audit-report` at all —
+the normal shape of an intermediate EPIC — stays a silent no-op.
+
+**The one exception — `mid_plan_specialist_review_exception`.** A PM may explicitly ask for
+a specialist review mid-plan. Record it in the runtime plan manifest before dispatching:
+
+```bash
+bash -c 'source {plugin_path}/scripts/lib/aid-plan-manifest.sh
+  plan_manifest_update {plan_id} ".plan_boundary_manifest.mid_plan_specialist_review_exception \
+    = {\"epic_id\":\"{epic_id}\",\"reason\":\"<why the PM asked>\"}"'
+```
+
+The exception authorizes the dispatch; it does **not** re-enable the FSM release stack, and
+it is counted as an exception rather than as a default invocation. Never dispatch a
+mid-plan specialist without the recorded exception — an unrecorded dispatch is
+indistinguishable from the pre-P064 per-EPIC ritual this plan replaced.
+
+In `legacy_epic_release_mode` everything in this section runs exactly as before.
+
 ### C+A Execution Model: dispatch per EPIC, validate per Plan
 
 **Per-EPIC (non-blocking):**
@@ -1457,8 +1499,14 @@ After C+A review and fix cycle on plan boundary (all EPICs of a plan complete):
    `verifier-output-cp4-curator-validation.md` when `curator-report.md` exists and
    any commit in `base_commit..HEAD` touched production code; mode-aware skip
    (`cp4_skipped_streamlined_advisory`) when `streamlined_mode` is true.
-11. **CP5:** Check auditor `blocking_findings` flag. If `true` → flag in summary
-    (critical findings block MERGE option). Skip per `review-checkpoints.yaml`.
+11. **CP5** (`legacy_epic_release_mode`, and `plan_branch` only when a mid-plan Auditor
+    actually ran under a recorded `mid_plan_specialist_review_exception`)**:** Check
+    auditor `blocking_findings` flag. If `true` → flag in summary (critical findings block
+    MERGE option). Skip per `review-checkpoints.yaml`. On an intermediate `plan_branch`
+    EPIC with no Auditor dispatch there is no flag to read and CP5 is a no-op — do not
+    manufacture one, and do not treat its absence as a failed checkpoint. (The FSM's own
+    retained read behaves the same way: a present `audit-report` blocks on a non-`false`
+    verdict; an absent one is silence.)
 12. **PM Summary** (always shown, even in FIRST AID mode):
 
 ```
@@ -1528,8 +1576,16 @@ Options:
     aid-fsm.sh set-field pm_decision merge <state_file>
     aid-fsm.sh done-advance review release <state_file>
     ```
-    Preconditions: `curator-report` exists, `audit-report` exists, `pm_decision=merge`.
-    If any missing → script refuses (exit 1).
+    Preconditions in `legacy_epic_release_mode`: `curator-report` exists, `audit-report`
+    exists, `pm_decision=merge`. If any missing → script refuses (exit 1).
+
+    In `plan_branch` mode the Curator/Auditor/CP3/CP4/C3/C4 preconditions do not apply —
+    the FSM skips that whole stack and emits a `done_advance_plan_branch_mode` timeline
+    event naming every skipped stage. `pm_decision=merge`, the streamlined integration
+    review, the abandoned check, DG-07 and tiered-severity compliance still apply in both
+    modes. An **unresolvable** mode is a hard `plan_mode_unresolved` block, never a
+    fallback: guessing legacy here would route you into merging a single EPIC into the
+    target branch, which is exactly what `plan_branch` exists to prevent.
 
 ### §7.6 PM Machine Handoff — release-decision → PM brief (D9 coexistence)
 
@@ -1597,6 +1653,76 @@ skip).
 
 ### Sub-phase: `release`
 
+**Steps 14-16 fork on the plan's declared release mode.** Read the mode before you do
+anything in this sub-phase — it decides where this EPIC's work lands:
+
+```bash
+yq -r '.mode // "legacy_epic_release_mode"' .aid-lifecycle/manifests/{plan_id}.yaml
+```
+
+The FSM already resolved the same value during `done-advance review release` and recorded
+it as a `done_advance_plan_branch_mode` timeline event (payload `skipped_stages[]`). If
+`done-advance` exited non-zero with `plan_mode_unresolved`, **stop** — do not run either
+branch below and do not guess. Repair the manifest on the target branch first.
+
+#### `plan_branch` mode — an INTERMEDIATE EPIC completion
+
+The per-EPIC release stack does not run here. There is no version bump, no tag, no push,
+no target-branch merge and no plan-final release decision — those belong to the plan-final
+run (P068). The FSM enforces the skip structurally; these instructions must match it.
+
+14. **No release automation.** Do **not** call `aid-release.sh`, do not bump a version, do
+    not tag, do not push, and do not refresh the plugin cache. A version bump per EPIC
+    would advertise a release the plan has not made.
+15. **Complete the EPIC, then merge it into the plan branch** — two commands, in this
+    order, never a raw `git merge`:
+    ```bash
+    bash {plugin_path}/scripts/aid-plan-fsm.sh epic-complete {plan_id} {epic_id} \
+      --project-root {project_root}
+    bash {plugin_path}/scripts/aid-plan-fsm.sh epic-merge-to-plan {plan_id} {epic_id} \
+      --project-root {project_root}
+    ```
+    `epic-complete` records this EPIC's contribution to the plan-final gate floor and marks
+    the manifest entry pending merge. `epic-merge-to-plan` merges `task/{epic_id}/main`
+    into `plan/{plan_id}` only — the target branch never moves. Handle the exit codes:
+
+    | Exit | Meaning | What the controller does |
+    |------|---------|--------------------------|
+    | 0 | Merged, or already converged | Continue to step 16 |
+    | 1 | Precondition failed (state not DONE, `lineage` not `proven`, unproven merge, dirty worktree, stale `--expected-plan-sha`) | Stop. Report the printed reason to the PM. Never re-run with a weakened check |
+    | 2 | Usage error | Fix the invocation and re-run |
+    | 3 | Lock held by a concurrent plan operation | Retry once the holder finishes |
+    | 4 | Real Git conflict — the plan is now `CONFLICT` | Resolve on `plan/{plan_id}`, then re-run; the command is reconcilable |
+    | 5 | Divergence between recorded and actual state | Stop. Do not repair by hand — `plan-state --repair` marks entries `lineage: unproven` for a reason |
+
+15a. **Do NOT call `plan-record-delivery` here.** The hook writes the `.aid-lifecycle/`
+    delivery bindings and hard-refuses to run off the target branch — which in
+    `plan_branch` mode is never where an EPIC merge lands. Its responsibility moves to
+    `plan-merge-to-main` (P068), which writes every binding in one pass after the plan
+    branch reaches the target branch and a real target-branch merge SHA exists. **Skipping
+    it without that relocation is not optional bookkeeping:** `aid_lifecycle_plan_close`
+    refuses while any required EPIC lacks a binding, so a plan-branch plan would otherwise
+    be permanently unable to close.
+15b. **Report to the PM, in these words:** "EPIC complete and merged into
+    `plan/{plan_id}`; plan remains open; no plan-final release decision has run yet."
+    Do not describe this as a release, a delivery or a merge to `{target_branch}`.
+16. **Queue:** claim the next entry through the plan-aware writer rather than reading
+    `queue.yaml` by hand:
+    ```bash
+    source {plugin_path}/scripts/lib/aid-queue-write.sh
+    queue_claim_next {plan_id}     # exit 0 → prints the claimed <epic_id>
+                                   # exit 1 → "blocked:<epic_id>:<reason>" or "none"
+                                   # exit 2 → bad plan_id, exit 3 → lock unavailable
+    ```
+    ⚠️ **Honest wiring status:** `queue_claim_next` (with `queue_set_status` /
+    `queue_set_plan`) ships as a library only — **no production caller invokes it yet**,
+    which is why the enforcement registry records it `status: planned`. Until a later step
+    wires it into `aid-plan-fsm.sh`, the controller sources the library and calls it
+    directly as shown above. Do not describe queue pickup as automatic in `plan_branch`
+    mode.
+
+#### `legacy_epic_release_mode` — the per-EPIC release ritual
+
 14. **Release:** Call `aid-release.sh` — version bump
     - Standalone/last EPIC: mandatory bump
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)
@@ -1619,10 +1745,29 @@ skip).
 16. **Queue:** Read `config/queue.yaml` → auto-pickup next EPIC if queued.
     Metrics stored to Qdrant (`aid-orchestration-log`) or fallback JSONL.
 
-**Auto-mode (FIRST AID):** If no `blocking_findings` and auditor score ≥ 80 → auto-MERGE.
-If `blocking_findings` or score < 80 → show summary, require PM decision.
+**Auto-mode (FIRST AID) in `legacy_epic_release_mode`:** If no `blocking_findings` and
+auditor score ≥ 80 → auto-MERGE. If `blocking_findings` or score < 80 → show summary,
+require PM decision.
 
-**Evidence written:**
+**Auto-mode (FIRST AID) in `plan_branch` mode:** There is no auditor score and no
+`release-decision.json` for an intermediate EPIC — the specialists are plan-final. Applying
+the legacy rule here would fall through to "require PM decision" on every intermediate
+EPIC, defeating the autonomy the mode exists for. Evaluate instead, from artifacts an
+intermediate EPIC really has:
+
+1. `done-advance review release` exited 0 (it already enforced `pm_decision=merge`, the
+   archived task file, the streamlined integration review, the abandoned check, DG-07,
+   tiered compliance and — when a mid-plan `audit-report` exists — `blocking_findings`), and
+2. `gates_report.json` → `overall: pass`, and
+3. no `audit-report` was produced for this EPIC, or the one that was reports
+   `blocking_findings: false`.
+
+All three true → proceed automatically through steps 14-16 (`epic-complete` →
+`epic-merge-to-plan` → queue claim). Any one false → stop and show the summary; the
+merge into `plan/{plan_id}` needs a PM decision. **`epic-merge-to-plan` exiting 1/4/5 is
+never auto-retried** — report the printed reason as documented in step 15.
+
+**Evidence written (`legacy_epic_release_mode`):**
 ```
 evidence/{epic_id}/{run_id}/
   final_report.md              # Summary (steps, gates, duration, artifacts)
@@ -1635,6 +1780,15 @@ evidence/{epic_id}/{run_id}/
   pm-summary.md                # PM human summary, rendered from release-decision (§7.6)
 .aid-o/reports/{plan_id}-delivery.md   # Reporter delivery report (committed)
 ```
+
+**Evidence written (`plan_branch` mode, an intermediate EPIC):** only the per-EPIC
+artifacts — `final_report.md`, `gates_report.json`, the CP2/CP3 verifier outputs,
+`timeline.jsonl` (carrying `done_advance_plan_branch_mode`), `compliance.json` and
+`epic-summary.md`. **None** of `audit-report.md`, `curator_resolve_report.json`,
+`simplifier-report.md`, `reporter/`, `release-decision.json`, `pm-decision-brief.json`,
+`pm-summary.md` or `{plan_id}-delivery.md` exists yet — they are written once, by the
+plan-final run (P068). Do not report a missing one as a gap, and never read the previous
+EPIC's copy in its place.
 
 ### Telemetry Reference
 
@@ -2076,7 +2230,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-17
+**Last Updated:** 2026-07-22
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

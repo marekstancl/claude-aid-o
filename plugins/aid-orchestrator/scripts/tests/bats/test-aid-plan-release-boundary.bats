@@ -5079,3 +5079,719 @@ EOF
   [[ "$output" == *"risk_profile_below_required"* ]]
   [[ "$output" == *"'standard'"* ]]
 }
+
+# =============================================================================
+# ─── aid-fsm.sh done-advance review→release — the silenced per-EPIC release
+#     stack (P064 EPIC E-064-2_2 Step 4 = plan Step 9) ────────────────────────
+# =============================================================================
+# An INTERMEDIATE EPIC completion inside an open `plan_branch` plan must be
+# structurally incapable of invoking the per-EPIC release stack (CP3 full-diff
+# pair, Auditor, Curator, Simplifier, Reporter, EPIC-scoped C4, the PM release
+# summary, `aid-release.sh`). The proof is a spy harness — executables on a
+# PATH-prepended directory that log their argv — not the prose.
+#
+# TRACEABILITY — `ACn:` numbers this step's own AC list (plan Step 9):
+#   AC1  intermediate plan_branch completion → zero invocations of every spy
+#   AC2  the same fixture in legacy_epic_release_mode → the expected non-zero ones
+#   AC3  CP2-fed tiered compliance + the local checks still execute in plan_branch
+#   AC4  the timeline event's skipped-stage list == AID_PLAN_BRANCH_SKIPPED_STAGES
+#
+# MODE SOURCE — these tests exercise `_fsm_declared_plan_mode`, which reads the
+# git-tracked lifecycle manifest (the PM's DECLARATION), NOT Step 3's
+# `_fsm_gate_profile_boundary`, which reads the gitignored runtime manifest.
+
+# _rs_run_dir <epic_id> — the run directory epic-start records (run_id
+# R-<epic_id>-plan), matching _pfsm_write_epic_evidence's own convention.
+_rs_run_dir() {
+  echo "$TEST_PROJECT_ROOT/.aid-o/work/evidence/${1}/R-${1}-plan"
+}
+
+# _rs_seed_done_review <epic_id> [streamlined] — an EPIC parked at DONE/review
+# with pm_decision=merge and the minimum evidence done-advance always reads.
+# Deliberately writes NO curator-report / audit-report / review-profile.json:
+# that absence is what makes the legacy inverse (AC2) fail loudly and the
+# plan_branch path (AC1) pass, which is the whole behavioural difference.
+_rs_seed_done_review() {
+  local epic_id="$1" streamlined="${2:-false}"
+  local dir; dir="$(_rs_run_dir "$epic_id")"
+  mkdir -p "$dir/gates" "$TEST_PROJECT_ROOT/.aid-o/config" \
+           "$TEST_PROJECT_ROOT/.aid-o/work" "$TEST_PROJECT_ROOT/.aid-o/tasks"
+  cat > "$dir/fsm-state.yaml" <<YAML
+epic_id: ${epic_id}
+run_id: R-${epic_id}-plan
+branch: task/${epic_id}/main
+state: DONE
+done_phase: review
+streamlined_mode: ${streamlined}
+created_at: 2026-07-22T00:00:00Z
+total_steps: 1
+current_step: 1
+pm_decision: merge
+YAML
+  printf '{"overall":"pass","_generated_by":"aid-run-gates.sh@test","_generated_at":"2026-07-22T00:00:00Z","_command_log":[]}\n' \
+    > "$dir/gates/gates_report.json"
+  touch "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/plugin.yaml" <<YAML
+plugin_path: "$AID_PLUGIN_PATH"
+dispatch_mode: subagent
+YAML
+  echo "$dir/fsm-state.yaml"
+}
+
+# _rs_install_spies — the spy harness, following
+# scripts/tests/bats/test-aid-c3-dispatch.bats:1059-1068: a temp directory
+# prepended to PATH holding executables that append their argv to a log.
+#
+# ONLY SEAMS A `done-advance` CALL CAN GENUINELY REACH ARE INSTALLED, so that a
+# zero line count is EVIDENCE rather than decoration (Step 4 CP2 finding 3).
+#   RS_C4_LOG — the C4 release aggregator, spied through the PRODUCTION
+#               `AID_RELEASE_POLICY_BIN` seam the dual-run hook itself reads
+#               (aid-fsm.sh: `_c4_bin="${AID_RELEASE_POLICY_BIN:-...}"`). Live
+#               and discriminating: AC2's positive inverse shows it firing.
+#   RS_LOG    — `git tag` / `git push`, through a PATH wrapper. aid-fsm.sh
+#               really does shell out to git, so the wrapper is reachable.
+#
+# WHAT WAS REMOVED, AND WHY (Step 4 CP2 finding 3). The earlier version also
+# installed PATH spies for `aid-release.sh`, `aid-auditor-dispatch`,
+# `aid-curator-dispatch`, `aid-simplifier-dispatch`, `aid-reporter-dispatch`
+# and `claude`. None of them could ever log a line: `aid-release.sh` has no
+# caller under `scripts/` and the controller invokes it by ABSOLUTE path
+# (`bash {plugin_path}/scripts/aid-release.sh`), which a PATH spy cannot
+# intercept; the four dispatch markers are not executables that exist anywhere
+# in this repository (the specialists are agent dispatches, not processes); and
+# `claude` is never invoked from any script under `scripts/`. Their zero line
+# count was unconditionally true — it would have held with the entire skip
+# guard deleted. `_rs_static_release_stack_absence` is the honest replacement.
+#
+# Install AFTER the plan/EPIC bootstrap so bootstrap git traffic never lands
+# in the log — the assertion is a ZERO line count, and a dirty baseline would
+# make it either impossible or meaningless.
+_rs_install_spies() {
+  RS_SPY="$TEST_TMPDIR/release-spy"; mkdir -p "$RS_SPY"
+  RS_LOG="$TEST_TMPDIR/release-spy.log"; : > "$RS_LOG"
+  RS_C4_LOG="$TEST_TMPDIR/c4-spy.log"; : > "$RS_C4_LOG"
+  export RS_SPY RS_LOG RS_C4_LOG
+
+  # git wrapper: logs the two release-only verbs and delegates everything else
+  # untouched (done-advance legitimately runs rev-parse/log/status).
+  # Matches BOTH `git tag|push` and `git -C <dir> tag|push`: every git call
+  # inside aid-fsm.sh uses the `-C` form, so the old bare-$1 match could never
+  # have fired — a real harness bug independent of what it was asserting.
+  local real_git; real_git="$(command -v git)"
+  cat > "$RS_SPY/git" <<EOF
+#!/usr/bin/env bash
+_rs_verb="\$1"
+[ "\$1" = "-C" ] && _rs_verb="\$3"
+case "\$_rs_verb" in
+  tag|push) printf 'git %s\n' "\$*" >> "$RS_LOG" ;;
+esac
+exec "$real_git" "\$@"
+EOF
+  chmod +x "$RS_SPY/git"
+
+  cat > "$RS_SPY/aid-release-policy-spy.sh" <<EOF
+#!/usr/bin/env bash
+printf 'aid-release-policy.sh %s\n' "\$*" >> "$RS_C4_LOG"
+exit 0
+EOF
+  chmod +x "$RS_SPY/aid-release-policy-spy.sh"
+  export AID_RELEASE_POLICY_BIN="$RS_SPY/aid-release-policy-spy.sh"
+
+  PATH="$RS_SPY:$PATH"; export PATH
+}
+
+# _rs_static_release_stack_absence — the CONTROL-FLOW half of AC1's claim
+# (Step 4 CP2 finding 3). The release-stack invocations that no runtime seam can
+# observe from `aid-fsm.sh done-advance` are proven absent STATICALLY instead of
+# with spies that could never fire: the FSM does not invoke them at all, in
+# either mode, so a plan_branch run cannot reach them by construction.
+_rs_static_release_stack_absence() {
+  # `aid-release.sh` has ZERO callers under scripts/ — the only hits are inside
+  # the script's own header/usage lines. The controller invokes it by absolute
+  # path from pipeline.md, never through the FSM.
+  run bash -c "grep -rn 'aid-release\\.sh' '$AID_PLUGIN_PATH/scripts' --include='*.sh' \
+                 | grep -v '/aid-release\\.sh:' | grep -v '/tests/' || true"
+  [ -z "$output" ]
+  # The four specialist dispatches are AGENT dispatches, not executables: no
+  # such name exists anywhere in the plugin, least of all in the FSM.
+  run grep -c 'aid-auditor-dispatch\|aid-curator-dispatch\|aid-simplifier-dispatch\|aid-reporter-dispatch' "$FSM"
+  [ "$output" = "0" ]
+  # The plugin cache refresh (`claude ...`) is never invoked from the FSM.
+  run bash -c "grep -nE '(^|[^-a-zA-Z_/])claude ' '$FSM' || true"
+  [ -z "$output" ]
+}
+
+# _rs_skipped_stages_from_source — AID_PLAN_BRANCH_SKIPPED_STAGES parsed out of
+# aid-fsm.sh itself. The test NEVER keeps its own copy of the list (plan Step 9
+# is explicit: "the spy test can assert against the same source of truth").
+_rs_skipped_stages_from_source() {
+  sed -n '/^AID_PLAN_BRANCH_SKIPPED_STAGES=(/,/^)/p' "$FSM" \
+    | sed -e '1d' -e '$d' -e 's/#.*//' \
+    | tr -d '[:blank:]' \
+    | grep -v '^$'
+}
+
+# _rs_event <epic_id> <event> — the LAST timeline event of that name, as JSON.
+_rs_event() {
+  local dir; dir="$(_rs_run_dir "$1")"
+  jq -c --arg e "$2" 'select(.event==$e)' "$dir/timeline.jsonl" 2>/dev/null | tail -1
+}
+
+_rs_done_phase() {
+  grep '^done_phase:' "$1" | awk '{print $2}'
+}
+
+# _rs_plan_branch_epic <plan_id> <epic_id> [mode] — bootstrap + epic-start +
+# one real commit, then stand on the EPIC's own task branch (the production
+# shape: cmd_init leaves the run there, and the lifecycle manifest is committed
+# on target_branch only, so the mode read must go through target_branch's tree).
+_rs_plan_branch_epic() {
+  local plan_id="$1" epic_id="$2" mode="${3:-plan_branch}"
+  _pfsm_bootstrap_plan "$plan_id" "$mode"
+  _pfsm_epic_with_commit "$plan_id" "$epic_id"
+  git -C "$TEST_PROJECT_ROOT" checkout -q "task/${epic_id}/main"
+}
+
+# ─── AC1: zero invocations of the release stack ────────────────────────────
+
+# EXACTLY WHAT AC1 PROVES, AND HOW (Step 4 CP2 finding 3). Two different kinds
+# of evidence, kept apart on purpose:
+#   * BY A LIVE SEAM — the C4 release aggregator (`AID_RELEASE_POLICY_BIN`, the
+#     production seam the dual-run hook reads) and `git tag` / `git push` (a
+#     PATH wrapper over a binary the FSM really does invoke). Both are
+#     discriminating: AC2's complete legacy run shows the C4 seam firing on the
+#     same fixture, so a zero here is a fact about the mode, not about the
+#     harness.
+#   * BY CONTROL FLOW ONLY — the C4 dual-run BLOCK is never reached, therefore
+#     `aid-release-policy.sh` is not invoked; and `aid-release.sh`, the four
+#     specialist dispatches and the `claude` cache refresh are not invoked
+#     because the FSM contains no call to any of them in EITHER mode
+#     (`_rs_static_release_stack_absence`). No runtime spy can add anything to
+#     that: they are the controller's own steps in pipeline.md §7, guarded by
+#     the prose fork and by the plan-branch instructions, not by this binary.
+@test "AC1: an intermediate plan_branch completion invokes NO release-stack executable — every reachable seam is silent" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_done_phase "$state_file")" = "release" ]
+
+  # Proven BY A LIVE SEAM: zero line count in both reachable logs.
+  [ "$(wc -l < "$RS_LOG")" -eq 0 ]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+
+  # Proven BY A LIVE PRODUCTION EMITTER: `c3_review_profile_presence` is the
+  # first stage in AID_PLAN_BRANCH_SKIPPED_STAGES and emits
+  # `review_profile_would_block` whenever it runs without a review-profile.json.
+  # This fixture has none, so the event's ABSENCE here is discriminating — the
+  # AC2 complete-legacy run below asserts the same event IS emitted.
+  [ -z "$(_rs_event E-064-1_1 review_profile_would_block)" ]
+
+  # Proven BY CONTROL FLOW: the FSM cannot invoke the rest at all.
+  _rs_static_release_stack_absence
+
+  # ...and the transition succeeded with NO curator-report, NO audit-report and
+  # NO review-profile.json anywhere: the stack is not merely un-invoked, it is
+  # no longer a precondition.
+  [ ! -f "$(_rs_run_dir E-064-1_1)/curator-report.md" ]
+  [ ! -f "$(_rs_run_dir E-064-1_1)/audit-report.md" ]
+
+  local ev; ev="$(_rs_event E-064-1_1 done_advance_plan_branch_mode)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.mode')" = "plan_branch" ]
+  [ "$(echo "$ev" | jq -r '.plan_id')" = "P064" ]
+  [ "$(echo "$ev" | jq -r '.forced')" = "false" ]
+}
+
+# ─── AC2: the legacy-mode positive inverse ─────────────────────────────────
+
+@test "AC2: the same fixture in legacy_epic_release_mode is REFUSED — the release stack is demonstrably still live" {
+  _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Curator report not found"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+  # No plan_branch routing event was emitted for a legacy plan.
+  [ -z "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
+}
+
+@test "AC2: a COMPLETE legacy-mode run reaches release AND fires the C4 aggregator — the expected non-zero invocation" {
+  _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  printf 'blocking_findings: false\n' > "$dir/audit-report.md"
+  echo "curator report" > "$dir/curator-report.md"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_done_phase "$state_file")" = "release" ]
+  # The C4 dual-run hook ran: exactly the stage plan_branch mode skips.
+  [ "$(wc -l < "$RS_C4_LOG")" -ge 1 ]
+  [[ "$(cat "$RS_C4_LOG")" == *"E-064-1_1"* ]]
+  # ...and so did `c3_review_profile_presence`, the first skipped stage: its
+  # would_block telemetry fires here on the SAME fixture whose plan_branch run
+  # (AC1) emits nothing. That contrast is what makes AC1's silence evidence.
+  [ -n "$(_rs_event E-064-1_1 review_profile_would_block)" ]
+}
+
+@test "AC2: the identical EPIC id under plan_branch needs NEITHER report — mode, not evidence, is what differs" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Curator report not found"* ]]
+  [[ "$output" != *"Auditor report not found"* ]]
+}
+
+# ─── AC3: the skip is SCOPED, not blanket ──────────────────────────────────
+
+@test "AC3: the retained streamlined integration review still blocks a plan_branch EPIC missing its CP3 evidence" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1 true)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing required integration-review evidence"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+  # The routing event is still emitted (it describes routing, not completion),
+  # proving the block came from a RETAINED check and not from mode resolution.
+  [ -n "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
+}
+
+@test "AC3: the retained CP2-fed tiered-compliance precondition still evaluates in plan_branch mode" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  # branch_correct is a CP2-era compliance dimension; promote it to blocking and
+  # make it fail (branch value that is not ^task/E-). If tiered compliance were
+  # skipped along with the release stack, this run would sail through.
+  sed -i 's|^branch: .*|branch: feature/not-a-task-branch|' "$state_file"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/check-severity.yaml" <<'YAML'
+checks:
+  branch_correct:
+    severity: blocking
+    promoted_at: "2026-07-22"
+YAML
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking compliance failure"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+  # ...and even while a RETAINED check blocked, no release-stack spy fired.
+  [ "$(wc -l < "$RS_LOG")" -eq 0 ]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+}
+
+# ─── AC4: the emitted list IS the source constant ──────────────────────────
+
+@test "AC4: the skipped-stage list in the timeline event matches AID_PLAN_BRANCH_SKIPPED_STAGES read out of aid-fsm.sh" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+
+  local from_source emitted
+  from_source="$(_rs_skipped_stages_from_source)"
+  [ -n "$from_source" ]
+  emitted="$(_rs_event E-064-1_1 done_advance_plan_branch_mode | jq -r '.skipped_stages[]')"
+  [ "$emitted" = "$from_source" ]
+
+  # Every name the array claims is skipped is a stage this file really has.
+  local stage
+  while read -r stage; do
+    [ -n "$stage" ]
+  done <<< "$from_source"
+  [ "$(echo "$from_source" | wc -l)" -ge 8 ]
+}
+
+# ─── Step 4 CP2 finding 1: the auditor verdict is EPIC-LOCAL, not a release
+#     stage — it must block in BOTH modes ───────────────────────────────────
+# The legacy `blocking_findings` read used to sit INSIDE the skip guard while
+# appearing in neither AID_PLAN_BRANCH_SKIPPED_STAGES nor its "WHAT IS NOT
+# HERE, ON PURPOSE" list. A PM-blessed mid-plan Auditor run
+# (`mid_plan_specialist_review_exception`) reporting a critical finding was
+# therefore silently ungated for an intermediate plan-branch EPIC: it merged
+# into `plan/{plan_id}` with the finding unaddressed, and the
+# `done_advance_plan_branch_mode` event did not name the bypassed gate, so the
+# bypass left no auditable trace. AC4 structurally cannot catch this — it
+# compares the array against an event built from that same array.
+
+@test "CP2-1: a mid-plan audit-report with blocking_findings: true REFUSES a plan_branch advance" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  # Exactly the verifier's scenario: the PM records the exception, dispatches
+  # the Auditor mid-plan, and the Auditor reports a critical finding. Risk
+  # profile is low/medium (no review-profile.json at all), so the C3 hook would
+  # not have fired even in legacy mode — this .md read is the ONLY gate on the
+  # field, and before the hoist plan_branch mode skipped it.
+  plan_manifest_update P064 '.plan_boundary_manifest.mid_plan_specialist_review_exception = {"epic_id":"E-064-1_1","reason":"PM asked for an early architecture read"}'
+  printf 'blocking_findings: true\n' > "$dir/audit-report.md"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+  # The block came from a RETAINED EPIC-local check, not from mode resolution:
+  # the routing event is still emitted and no release-stack seam fired.
+  [ -n "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+  # ...and the check is deliberately NOT claimed as skipped.
+  ! _rs_skipped_stages_from_source | grep -q 'blocking_findings'
+}
+
+@test "CP2-1: the same blocking verdict still REFUSES in legacy_epic_release_mode" {
+  _rs_plan_branch_epic P064 E-064-1_1 legacy_epic_release_mode
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  printf 'blocking_findings: true\n' > "$dir/audit-report.md"
+  echo "curator report" > "$dir/curator-report.md"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"blocking_findings"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+}
+
+@test "CP2-1: a non-false value is fail-closed in plan_branch too (not just literal true)" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  # An audit-report that EXISTS but carries no line-start verdict: the field is
+  # unreadable, so "clean" cannot be confirmed. Fail-closed, same as legacy.
+  printf '# Audit\n\nNo blocking_findings: true were found in this EPIC.\n' > "$dir/audit-report.md"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"missing canonical top-level 'blocking_findings' field"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+}
+
+@test "CP2-1: the hoisted check is a NO-OP when no audit-report exists — the normal intermediate EPIC still advances" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  # The ordinary shape of an intermediate plan-branch EPIC: no auditor ran, so
+  # there is nothing to read. Absence must stay silence — never a new hard fail.
+  [ ! -f "$dir/audit-report.md" ]
+  [ ! -f "$dir/audit-report.yaml" ]
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_done_phase "$state_file")" = "release" ]
+  [[ "$output" != *"blocking_findings"* ]]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+}
+
+@test "CP2-1: a clean mid-plan verdict (blocking_findings: false) advances in plan_branch" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  local dir; dir="$(_rs_run_dir E-064-1_1)"
+  printf 'blocking_findings: false\n' > "$dir/audit-report.md"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_done_phase "$state_file")" = "release" ]
+}
+
+# ─── Step 4 CP2 finding 4: the no-jq fallback must not lie about its type ───
+# log_event (lib/aid-stage-log.sh) passes a value through as raw JSON only when
+# it starts with '[' or '{'. The old jq-less fallback produced
+# `c3_review_profile_presence,cp4_...`, which starts with 'c' and was emitted as
+# a QUOTED STRING — every consumer doing `.skipped_stages[]` (including AC4's
+# own assertion) broke on a jq-less host, silently degrading the telemetry
+# contract while every other jq-dependent check in this function fails closed.
+
+@test "CP2-4: with jq absent, done_advance_plan_branch_mode still emits skipped_stages as a JSON ARRAY" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  # A PATH holding every tool the FSM needs EXCEPT jq — genuinely absent, which
+  # is the case `command -v jq` guards (same construction as the yq test below).
+  local nobin="$TEST_TMPDIR/nojq"; mkdir -p "$nobin"
+  local t
+  for t in bash sh git grep sed awk cat date mktemp rm mkdir dirname basename \
+           printf tr wc head tail yq env chmod touch cp mv sort id find xargs; do
+    local p; p="$(command -v "$t" 2>/dev/null)" || continue
+    ln -sf "$p" "$nobin/$t"
+  done
+  [ ! -e "$nobin/jq" ]
+
+  # The trailing `|| true` is what makes "the exit code is not part of this
+  # assertion" explicit (and keeps bats from warning about a 127 the test
+  # deliberately tolerates) — see the note below.
+  run bash -c "PATH='$nobin' bash '$FSM' done-advance review release '$state_file' || true"
+  # NEITHER the exit code NOR done_phase is asserted here, on purpose. A jq-less
+  # host does not complete this transition at all: the invalidation-map
+  # expectation check further down runs `jq ... | wc -l` under
+  # `set -euo pipefail`, so the missing jq surfaces as an unguarded exit 127
+  # BEFORE the phase is written. That is a separate, pre-existing degradation of
+  # the jq-less path (reported, not fixed here — outside CP2 finding 4). What
+  # finding 4 is about, and what this test pins, is the SHAPE of the
+  # done_advance_plan_branch_mode payload: it is emitted long before that point
+  # and is exactly what a consumer reads back afterwards.
+
+  # Read back with the REAL jq (the test host has it): the payload must be an
+  # array, and its members must be the source-of-truth list, in order.
+  local ev; ev="$(_rs_event E-064-1_1 done_advance_plan_branch_mode)"
+  [ -n "$ev" ]
+  [ "$(echo "$ev" | jq -r '.skipped_stages | type')" = "array" ]
+  [ "$(echo "$ev" | jq -r '.skipped_stages[]')" = "$(_rs_skipped_stages_from_source)" ]
+}
+
+# ─── Step 4 CP2 finding 5: an unresolved-mode --force is AUDITABLE ─────────
+# The run timeline is not the surface a PM audits. `fsm_handle_force_override`
+# writes .aid-o/work/audit-log.jsonl with a GENERIC force carrying whatever
+# --blocked-checks the operator typed, so an audit of that file alone could not
+# tell that this EPIC advanced without knowing whether it was supposed to merge
+# to the target branch.
+
+@test "CP2-5: a --force over an unresolved mode names itself in audit-log.jsonl, not only in the timeline" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  run bash "$FSM" done-advance review release "$state_file" \
+    --force --reason "PM override: manifest repair is tracked separately"
+  [ "$status" -eq 0 ]
+
+  local al="$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
+  local entry
+  entry="$(jq -c 'select(.event=="plan_mode_unresolved_override")' "$al" | tail -1)"
+  [ -n "$entry" ]
+  [ "$(echo "$entry" | jq -r '.epic_id')" = "E-064-1_1" ]
+  [ "$(echo "$entry" | jq -r '.plan_id')" = "P064" ]
+  [ "$(echo "$entry" | jq -r '.unresolved_reason')" = "manifest_unparseable" ]
+  # The generic force entry is still written — the new one is ADDITIVE, so
+  # fsm_handle_force_override's contract is unchanged for its other callers.
+  [ -n "$(jq -c 'select(.event=="fsm_force_override")' "$al" | tail -1)" ]
+}
+
+# ─── Step 4 CP2 findings 2 + 7: the prose must match the FSM ───────────────
+
+@test "CP2-2: the controller instructions do NOT claim the FSM skips CP3 itself" {
+  # `fsm_check_streamlined_integration_review` runs ABOVE the skip guard and
+  # hard-dies when streamlined_mode is true and the two CP3 outputs are absent
+  # (asserted by the AC3 test above). A controller told that "CP3" is skipped
+  # would not dispatch it and would hit an unrecoverable done-advance.
+  ! grep -q 'Curator/Auditor/CP3/CP4/C3/C4 stack' "$AID_PLUGIN_PATH/commands/aid-run.md"
+  grep -q 'CP3 freshness re-check' "$AID_PLUGIN_PATH/commands/aid-run.md"
+  # pipeline.md must say plainly that the CP3 pair is still dispatched per EPIC
+  # and stays mandatory under streamlined_mode.
+  grep -q 'CP3 verifier pair is still dispatched per EPIC' "$AID_PLUGIN_PATH/skills/pipeline.md"
+}
+
+@test "CP2-7: the release sub-phase's auto-merge rule and evidence list are mode-qualified" {
+  # The `plan_branch` branch must carry its OWN auto-mode rule, evaluable from
+  # artifacts an intermediate EPIC actually has — an auditor score cannot be
+  # required where no auditor ran.
+  grep -q 'Auto-mode (FIRST AID) in `plan_branch` mode' "$AID_PLUGIN_PATH/skills/pipeline.md"
+  grep -q 'Auto-mode (FIRST AID) in `legacy_epic_release_mode`' "$AID_PLUGIN_PATH/skills/pipeline.md"
+  # ...and the evidence block must be scoped to the legacy branch rather than
+  # listing artifacts an intermediate plan-branch EPIC never produces.
+  grep -q 'Evidence written (`legacy_epic_release_mode`)' "$AID_PLUGIN_PATH/skills/pipeline.md"
+  grep -q 'Evidence written (`plan_branch` mode' "$AID_PLUGIN_PATH/skills/pipeline.md"
+}
+
+# ─── Edge Case: --force must not reintroduce the skipped stages ────────────
+
+@test "Edge Case: --force done-advance in plan_branch mode still fires zero release-stack spies" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file" \
+    --force --reason "PM override for the plan-branch force-path regression test"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_done_phase "$state_file")" = "release" ]
+  [ "$(wc -l < "$RS_LOG")" -eq 0 ]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+  [ "$(_rs_event E-064-1_1 done_advance_plan_branch_mode | jq -r '.forced')" = "true" ]
+}
+
+# ─── Edge Case: mode is resolved PER PLAN, never globally ──────────────────
+
+@test "Edge Case: a legacy plan and a plan_branch plan in ONE repository resolve independently" {
+  _pfsm_bootstrap_plan P064 plan_branch
+  _pfsm_bootstrap_plan P077 legacy_epic_release_mode
+  _pfsm_epic_with_commit P064 E-064-1_1
+  _pfsm_epic_with_commit P077 E-077-1_1
+  local pb_state lg_state
+  pb_state="$(_rs_seed_done_review E-064-1_1)"
+  lg_state="$(_rs_seed_done_review E-077-1_1)"
+  _rs_install_spies
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  run bash "$FSM" done-advance review release "$pb_state"
+  [ "$status" -eq 0 ]
+  [ -n "$(_rs_event E-064-1_1 done_advance_plan_branch_mode)" ]
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-077-1_1/main
+  run bash "$FSM" done-advance review release "$lg_state"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Curator report not found"* ]]
+  [ -z "$(_rs_event E-077-1_1 done_advance_plan_branch_mode)" ]
+}
+
+# ─── Edge Case: a PM-requested mid-plan specialist review ──────────────────
+
+@test "Edge Case: a recorded mid_plan_specialist_review_exception never re-enables the FSM release stack" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  # The PM exception is recorded in the runtime manifest — it authorizes a
+  # CONTROLLER dispatch, it is not an FSM precondition. The structural skip is
+  # unchanged by its presence, which is exactly what makes the exception
+  # countable separately rather than a default invocation.
+  plan_manifest_update P064 '.plan_boundary_manifest.mid_plan_specialist_review_exception = {"epic_id":"E-064-1_1","reason":"PM asked for an early architecture read"}'
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(wc -l < "$RS_LOG")" -eq 0 ]
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+  [ "$(_rs_event E-064-1_1 done_advance_plan_branch_mode | jq -r '.skipped_stages | length')" \
+    = "$(_rs_skipped_stages_from_source | wc -l)" ]
+
+  # The exception is durable and separately attributable.
+  run bash -c "jq -r '.plan_boundary_manifest.mid_plan_specialist_review_exception.epic_id' '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "E-064-1_1" ]
+}
+
+@test "Edge Case: the mid-plan specialist exception is named in the controller instructions" {
+  grep -q 'mid_plan_specialist_review_exception' "$AID_PLUGIN_PATH/skills/pipeline.md"
+}
+
+# ─── Error Handling: an unresolvable mode BLOCKS, never falls back to legacy ─
+
+@test "Error Handling: a corrupt lifecycle manifest blocks with plan_mode_unresolved — never a silent legacy fallback" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+  _rs_install_spies
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [[ "$output" == *"P064"* ]]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+  [ "$(_rs_event E-064-1_1 plan_mode_unresolved | jq -r '.reason')" = "manifest_unparseable" ]
+  # A fallback to legacy would have run the release stack; it did not.
+  [ "$(wc -l < "$RS_C4_LOG")" -eq 0 ]
+}
+
+@test "Error Handling: a manifest declaring an UNKNOWN mode value blocks rather than defaulting either way" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  yq -i '.mode = "plan_branch_v2"' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "unknown mode value"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ "$(_rs_event E-064-1_1 plan_mode_unresolved | jq -r '.reason')" = "mode_unknown_value_plan_branch_v2" ]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+}
+
+@test "Error Handling: an UNREADABLE lifecycle manifest in the working tree blocks with manifest_unreadable" {
+  if [ "$(id -u)" -eq 0 ]; then skip "running as root — chmod 000 does not deny reads"; fi
+  _pfsm_bootstrap_plan P064 plan_branch
+  _pfsm_epic_with_commit P064 E-064-1_1
+  # Stay on main, where the manifest IS in the working tree, then deny reads.
+  chmod 000 "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  local rc="$status" out="$output"
+  chmod 644 "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  [ "$rc" -ne 0 ]
+  [[ "$out" == *"plan_mode_unresolved"* ]]
+  [ "$(_rs_event E-064-1_1 plan_mode_unresolved | jq -r '.reason')" = "manifest_unreadable" ]
+}
+
+@test "Error Handling: yq absent while a declaration may exist blocks with yq_unavailable" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  # A PATH holding every tool the resolver needs EXCEPT yq. Not a stub that
+  # exits non-zero — genuinely absent, which is the case `command -v yq` guards.
+  local nobin="$TEST_TMPDIR/nobin"; mkdir -p "$nobin"
+  local t
+  for t in bash sh git grep sed awk cat date mktemp rm mkdir dirname basename \
+           printf tr wc head tail jq env chmod touch cp mv sort id find xargs; do
+    local p; p="$(command -v "$t" 2>/dev/null)" || continue
+    ln -sf "$p" "$nobin/$t"
+  done
+  [ ! -e "$nobin/yq" ]
+
+  run env PATH="$nobin" bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ "$(_rs_event E-064-1_1 plan_mode_unresolved | jq -r '.reason')" = "yq_unavailable" ]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+}
+
+@test "Error Handling: --force converts the unresolved-mode block into an AUDITED override, not a silent one" {
+  _rs_plan_branch_epic P064 E-064-1_1 plan_branch
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-064-1_1/main
+  local state_file; state_file="$(_rs_seed_done_review E-064-1_1)"
+
+  run bash "$FSM" done-advance review release "$state_file" \
+    --force --reason "PM override: manifest repair is tracked separately"
+  [ "$status" -eq 0 ]
+  [ "$(_rs_event E-064-1_1 plan_mode_unresolved | jq -r '.overridden')" = "true" ]
+}
+
+# ─── Documented non-blocks: absence is a DECLARATION, not ambiguity ────────
+
+@test "Documented: an EPIC id that derives no plan id resolves legacy (never a block) — same rule as cmd_init" {
+  local state_file; state_file="$(_rs_seed_done_review E-test)"
+  local dir; dir="$(_rs_run_dir E-test)"
+  printf 'blocking_findings: false\n' > "$dir/audit-report.md"
+  echo "curator report" > "$dir/curator-report.md"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ -z "$(_rs_event E-test plan_mode_unresolved)" ]
+  [ -z "$(_rs_event E-test done_advance_plan_branch_mode)" ]
+}
+
+@test "Documented: no lifecycle manifest at all resolves legacy (never a block) — the pre-P064 model" {
+  local state_file; state_file="$(_rs_seed_done_review E-064-9_9)"
+  local dir; dir="$(_rs_run_dir E-064-9_9)"
+  printf 'blocking_findings: false\n' > "$dir/audit-report.md"
+  echo "curator report" > "$dir/curator-report.md"
+
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -eq 0 ]
+  [ -z "$(_rs_event E-064-9_9 plan_mode_unresolved)" ]
+  [ -z "$(_rs_event E-064-9_9 done_advance_plan_branch_mode)" ]
+}

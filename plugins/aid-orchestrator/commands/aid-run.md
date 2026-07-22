@@ -357,13 +357,40 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     bash {plugin_path}/scripts/aid-fsm.sh set-field pm_decision merge <state_file>
     bash {plugin_path}/scripts/aid-fsm.sh done-advance review release <state_file>
     ```
-    Preconditions enforced: `curator-report` exists, `audit-report` exists, `pm_decision=merge`.
+    Preconditions enforced in `legacy_epic_release_mode`: `curator-report` exists,
+    `audit-report` exists, `pm_decision=merge`. In `plan_branch` mode the FSM skips the
+    Curator/Auditor/CP4/C3/C4 stack plus the **CP3 freshness re-check** and the
+    **review-profile presence** check. It does **not** skip CP3 itself — the CP3
+    code-review + CP3 security verifiers are still dispatched per EPIC, and under
+    `--streamlined` their two outputs remain a hard precondition of `done-advance`.
+    `pm_decision=merge`, the archived-task-file check, the auditor's `blocking_findings`
+    verdict whenever an `audit-report` exists at all, and the other EPIC-local checks
+    (streamlined integration review, abandoned check, DG-07, tiered compliance) still apply.
 
 **Sub-phase: `release`** (after `done-advance review release`)
+
+Steps 14-16 fork on the plan's declared release mode
+(`.aid-lifecycle/manifests/{plan_id}.yaml` → `mode`). Full instructions in
+`pipeline.md §7` — "Sub-phase: `release`".
+
+*In `plan_branch` mode (an intermediate EPIC inside an open plan):*
+
+14. No release automation — no `aid-release.sh`, no version bump, no tag, no push
+15. `aid-plan-fsm.sh epic-complete`, then `aid-plan-fsm.sh epic-merge-to-plan` — only
+    `plan/{plan_id}` moves; the target branch is never touched, and
+    `plan-record-delivery` is deferred to `plan-merge-to-main` (P068)
+16. Queue pickup via `queue_claim_next {plan_id}` from `lib/aid-queue-write.sh` (library
+    only — nothing wires it automatically yet), then report: "EPIC complete and merged into
+    `plan/{plan_id}`; plan remains open; no plan-final release decision has run yet"
+
+*In `legacy_epic_release_mode` (pre-P064):*
 
 14. Release automation (`aid-release.sh`)
 15. Branch merge: `git merge task/{epic_id}/main --no-ff` → delete run branch
 16. Queue pickup + metrics logging
+
+*Mode unresolvable:* `done-advance` exits non-zero with `plan_mode_unresolved`. Stop and
+repair the lifecycle manifest — never fall back to the legacy branch.
 
 ### State: ERROR
 
@@ -436,4 +463,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-07-10
+**Last Updated:** 2026-07-22
