@@ -8,6 +8,244 @@ plan via `/aid-plan`.
 
 ---
 
+## Improvement items
+
+### IMP-261 - Project-scoped configuration and INIT/SETUP redesign (analysis first)
+
+**Status:** idea — analysis required before implementation
+**Priority:** high
+**Class:** architecture / configuration / operator UX
+**Area:** `/aid-init`, project setup, policy loading, Codex dispatch, gates and lifecycle defaults
+
+**Summary:** AID currently mixes plugin defaults, hard-coded constants, environment
+variables, policy YAML and project-local configuration without one explicit precedence
+model. Important behavior therefore cannot always be selected durably per project. As a
+confirmed example, C0 and C3 normally both run `gpt-5.6-terra`; their model can be
+overridden independently through `AID_C0_CODEX_MODEL` and `AID_C3_CODEX_MODEL`, but the
+shared Codex transport hard-codes `model_reasoning_effort=high`. The planned Codex
+adjudicator does not yet have a separate model/reasoning profile. Similar fixed or
+ambiently-configured choices exist elsewhere in review budgets, timeouts, gate profiles,
+parallelism, lifecycle behavior and release orchestration.
+
+**Why it matters:** A consumer project should be able to choose, review and reproduce its
+AID operating profile without patching the plugin or remembering shell environment
+variables. Today two projects using the same plugin version may behave differently because
+of hidden environment state, while other behavior cannot be changed at all because it is
+compiled into a script. This is especially problematic for self-hosting, automation and
+audits: the effective model, reasoning effort, timeout or enforcement profile may not be
+obvious from the project's tracked configuration or resulting evidence.
+
+**Confirmed motivating case:**
+
+- C0 model: invocation override `AID_C0_CODEX_MODEL`; otherwise inherits the C3 default.
+- C3 model: invocation override `AID_C3_CODEX_MODEL`; default `gpt-5.6-terra`.
+- C0 and C3 reasoning: shared transport currently hard-codes `high`, with no per-action
+  project setting.
+- Desired initial profiles: C0 plan review = `gpt-5.6-sol` / `medium`; C3 implementation
+  audit = `gpt-5.6-terra` / `high`; Codex auto-mode adjudication =
+  `gpt-5.6-sol` / `medium`.
+- The actually resolved model and reasoning must be written to evidence for every dispatch.
+
+**Required analysis before planning implementation:**
+
+1. Inventory every behavior-affecting constant and override across commands, scripts,
+   defaults, policies, environment variables and `.aid-o/config`. For each item record:
+   current source, default, existing override, consumers, whether it is safe to configure,
+   and whether it belongs to project, host/user, invocation or immutable protocol scope.
+2. Identify duplicate and conflicting sources of truth, including settings that are
+   documented as configurable but are shadowed by a hard-coded CLI argument.
+3. Classify settings. Not every constant should become a knob: protocol invariants and
+   fail-closed security properties remain immutable; credentials and machine paths remain
+   untracked host-local values; operating policy belongs in reviewable project config.
+4. Propose a versioned project configuration schema and an explicit precedence chain. A
+   candidate chain to validate is: immutable protocol invariant -> plugin default -> tracked
+   project profile -> untracked host/user override -> invocation override. The analysis must
+   define which layers are allowed for every setting and reject unknown keys.
+5. Decide the durable tracked location for project policy. Do not assume that today's
+   gitignored `.aid-o/config` is suitable as the sole source of truth; compare a tracked root
+   `aid.yaml`/`.aid/config.yaml` with a deliberate tracked subset plus untracked local
+   overrides.
+6. Inventory what `/aid-init` and the existing setup path currently create, merge, overwrite
+   or silently preserve, including re-init and plugin-upgrade behavior.
+7. Design migration and compatibility for existing projects that have no new config file or
+   rely on current environment variables. Existing behavior must remain an explicit legacy
+   default, not an accidental fallback.
+
+**Recommended command model to evaluate:**
+
+- `/aid-setup` owns interactive discovery and configuration. It offers `--analyze` to inspect
+  the repository and propose a project profile without mutating it, and `--write` to create
+  or update the chosen configuration after validation.
+- `/aid-init` remains deterministic, non-interactive and idempotent. It consumes the resolved
+  project profile, installs/scaffolds runtime files and prints an effective-configuration
+  summary. It must not silently replace explicit project choices on re-init or upgrade.
+- `/aid-init --setup` may be a convenience entry that runs setup first, then init, but setup
+  and init should remain separately callable and testable. This gives users one easy command
+  without mixing analysis/prompts into every automated init.
+- Add a read-only `config explain`/`config effective` surface showing each effective value,
+  its source layer and whether an invocation override changed it.
+
+**Initial configuration domains to cover:**
+
+- Codex actions: independent C0, C3 and adjudication model, reasoning effort, timeout and
+  availability/fallback policy.
+- Review and repair loops: attempt budgets, terminal behavior and which outcomes require
+  human risk acceptance.
+- Gates and tests: named gate profile, test concurrency/batching, per-gate and aggregate
+  timeouts, expensive-suite policy and evidence requirements.
+- Lifecycle/orchestration: release mode, branch conventions, auto-mode continuation policy,
+  dependency behavior and safe self-dogfood/cache-preflight policy.
+- Execution resources: agent concurrency and other project-wide resource ceilings, while
+  keeping credentials, account limits and machine-specific paths out of tracked policy.
+
+**Safety and UX constraints:**
+
+- Configuration must not turn a security invariant into a silent fail-open switch. Any
+  configurable enforcement reduction must be explicit in effective config and evidence, and
+  risk-acceptance decisions remain separately auditable.
+- Missing, malformed or unknown configuration must produce a precise diagnostic. Define
+  fail-closed versus backward-compatible fallback per field; do not use one blanket rule.
+- Model/reasoning selection must be action-specific rather than one global model for all
+  Codex work.
+- Environment variables remain useful for CI and one-off runs, but must not be the only
+  durable project configuration surface.
+- INIT/SETUP must be safe to repeat and must show a diff before overwriting tracked project
+  configuration.
+
+**Analysis deliverable:** A standalone design/inventory document under `docs/plans/` that
+contains the full setting matrix, proposed schema, precedence rules, INIT/SETUP state
+transitions, migration plan, security classification and an implementation breakdown. It
+must be independently reviewed against the real call sites before `/aid-plan` turns it into
+EPICs.
+
+**Candidate acceptance criteria for the later implementation:**
+
+- A project can durably select different model and reasoning profiles for C0, C3 and Codex
+  adjudication without editing plugin source.
+- A clean init, re-init and plugin upgrade resolve the same effective configuration unless an
+  explicit project change is made.
+- `config effective` identifies the winning value and source for every supported setting.
+- Every Codex evidence artifact records the resolved action profile, concrete model and
+  reasoning effort.
+- Tests prove precedence, unknown-key rejection, legacy migration, re-init preservation and
+  immutable-invariant protection.
+- A repository check prevents newly introduced behavior-affecting hard-coded values from
+  bypassing the configuration registry without an explicit immutable-constant annotation.
+
+**Open questions:**
+
+- Which project configuration path should be tracked and public-safe?
+- Should INIT automatically accept analysis recommendations, or require an explicit
+  `--write`/confirmation step outside non-interactive AUTO mode?
+- Which current environment variables remain supported aliases, and for how many releases?
+- Should resource profiles be a small named preset plus overrides, or fully field-by-field?
+
+### IMP-262 - Controller-owned background job supervisor and AUTO liveness recovery
+
+**Status:** ready — implement manually outside AID after P064, before P068
+**Priority:** critical
+**Class:** reliability / autonomous execution / process ownership
+**Area:** `/aid-run`, pipeline controller, long-running gates and agent dispatch
+
+**Summary:** Replace ad-hoc background execution and notification-based waiting with a small
+controller-owned job supervisor. A long-running command must have a durable identity and a
+terminal result that a resumed AUTO controller can collect without relying on `tail -f`, an
+agent notification or the original shell remaining alive.
+
+**Observed failure:** During E-064-1_2, a completed test process was followed by an orphaned
+`tail -f` monitor. The controller treated the absent notification as unfinished work and AUTO
+remained idle for hours even though no useful process was running. Other runs lost results when
+the controller killed a wrapper while child processes continued. Instructions now forbid those
+patterns in v2.60.1, but instruction-only ownership is not sufficient durable recovery.
+
+**Required implementation:**
+
+- Add a small `aid-job-run`/`aid-job-status`/`aid-job-collect` surface, preferably one script
+  with subcommands, that starts the command in an identifiable process group and atomically
+  writes a job record under `.aid-o/work/jobs/`.
+- Record job id, PID and process-start identity, command fingerprint, log/result paths,
+  start HEAD and relevant tree hash, start time, expected p95, hard deadline, owner run/EPIC,
+  state and terminal exit code.
+- Determine completion from the owned process and exit status. `tail -f`, output growth and
+  notification delivery must never be treated as process liveness or completion.
+- Make `status` safe against PID reuse and make `collect` idempotent. A controller restart must
+  rediscover running work or collect its existing terminal result without relaunching it.
+- Add a no-progress watchdog: in AUTO, no live owned job plus no repository/evidence mutation
+  for the configured interval triggers automatic resume/diagnosis rather than a PM question.
+- Bind a successful result to the recorded command and revision. A tree change marks the result
+  stale instead of silently reusing it.
+- Integrate only at the controller boundary; this helper enables liveness and must not become a
+  new release-blocking ceremony.
+
+**Acceptance criteria:**
+
+- A synthetic hour-long job can outlive and survive replacement of its controller process; a
+  resumed controller discovers it and collects exactly one terminal result.
+- A job that has already exited is never reported as running because a log watcher still exists.
+- Killing the wrapper cannot leave an unowned child process; cancellation targets the recorded
+  process group and writes a terminal cancellation result.
+- PID reuse, missing result files, timeout and tree drift have explicit tested outcomes.
+- AUTO makes progress without PM input after a recoverable controller restart or lost agent
+  notification.
+
+**Delivery constraint:** Codex implements and verifies this manually outside `/aid-run`; do not
+dogfood an unreliable background controller to build its own recovery mechanism. Land after both
+P064 EPICs because E-064-2_2 changes gate execution/controller instructions, and before P068 so
+the plan-final workflow dogfoods the supervisor.
+
+### IMP-263 - Idempotent increment-step with step-bound evidence binding
+
+**Status:** ready — implement manually outside AID after P064, before P068
+**Priority:** critical
+**Class:** integrity / FSM correctness / replay safety
+**Area:** `aid-fsm.sh increment-step`, step verification evidence, controller output contract
+
+**Summary:** Make step advancement idempotent and cryptographically/logically bound to the exact
+plan step and reviewed commit. Repeating a successful invocation must return `already_applied`
+without advancing again, and evidence created for step N must be structurally incapable of
+completing step N+1.
+
+**Observed failure:** During E-064-1_2, the controller interpreted stdout `1` from a successful
+increment as a possible error and invoked `increment-step` again. A duplicate verification file
+with the next numerical filename was accepted as evidence for a step that had never run, so the
+FSM advanced twice and temporarily claimed unimplemented work was complete.
+
+**Required implementation:**
+
+- Extend step verification evidence with canonical `step_index`, stable `step_id`, hash of the
+  corresponding `plan.json` step, reviewed HEAD/commit and an invocation/idempotency token.
+- Require `increment-step` to validate every binding against the current plan and FSM state before
+  mutation. Filename and `## Result: PASS` alone are insufficient evidence.
+- Persist the accepted token and transition atomically with the state mutation. Replaying the same
+  token returns success with `already_applied` and never changes `current_step`.
+- Reject a different token carrying stale, future-step, wrong-plan, wrong-commit or mismatched-step
+  evidence. A copied/renamed prior verification file must fail.
+- Replace ambiguous bare numeric stdout with a stable machine-readable result such as
+  `status=advanced advanced_from=0 advanced_to=1` or equivalent JSON; define exit codes separately
+  from displayed step numbers.
+- Preserve and test recovery across interruption before write, after temporary write and after the
+  durable state replacement. Never require direct manual editing of `fsm-state.yaml`.
+- Define compatibility for legacy evidence explicitly; do not silently accept unbound evidence in
+  strict/new runs.
+
+**Acceptance criteria:**
+
+- Two identical sequential or concurrent increment requests produce one transition and one
+  `already_applied` result.
+- A real step-0 verification copied to the step-1 filename cannot complete step 1.
+- Evidence whose plan-step hash or reviewed commit differs from current state is rejected before
+  mutation with a precise diagnostic.
+- Fault injection at every write boundary leaves either the old valid state or the new valid state,
+  never a double advance or partially updated evidence ledger.
+- Controller tests prove that stdout cannot be mistaken for an exit code or trigger a retry.
+
+**Delivery constraint:** Codex implements and verifies this manually outside `/aid-run`; do not use
+the affected FSM to orchestrate its own integrity repair. Land after P064 because E-064-2_2 also
+modifies `aid-fsm.sh` and its gate/controller contracts, and before P068 so plan-final orchestration
+starts with replay-safe step evidence.
+
+---
+
 ## Live probe observations (B-004 operating mode)
 
 ### OBS-20260702-01 - Re-scope re-init reuses run_id, overwrites plan evidence, bypasses duplicate-init guard without audit event
