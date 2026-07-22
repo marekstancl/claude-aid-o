@@ -1270,32 +1270,46 @@ _seed_manifest_from_fixture() {
 @test "Negative test: pending and blocked → merged_to_plan are one-way; reverses rejected" {
   _init_manifest "P900"
 
-  # Test pending → merged_to_plan (rare but legal per table)
+  # Test pending → merged_to_plan (rare but legal per table). epic_id must
+  # match ^E-[0-9]{3}-[0-9]+_[0-9]+$ (the Bug 2 / CP3 jq-injection fix added
+  # this validation to plan_manifest_set_epic_status after this test was
+  # first written with a non-conforming id — "E-900-test-pending" — which
+  # made this test start failing for the wrong reason: rejected on format,
+  # never reaching the transition-legality assertion it was actually meant
+  # to exercise. Caught live by bats_all, not by this file in isolation —
+  # revealing this test was never actually exercised successfully end to
+  # end even before that fix: the manual epic_runs[] splice below also
+  # skipped registering the id in .epics/.active_epics/.total_epics, which
+  # plan_manifest_add_epic normally does and _pm_check_invariants requires
+  # (every epic_runs[].epic_id must be a member of .epics) — fixed here too.
   plan_manifest_update P900 '
-    .plan_boundary_manifest.epic_runs |= . + [{
-      epic_id: "E-900-test-pending",
+    .plan_boundary_manifest.epics += ["E-900-9_9"]
+    | .plan_boundary_manifest.active_epics += ["E-900-9_9"]
+    | .plan_boundary_manifest.total_epics = (.plan_boundary_manifest.epics | length)
+    | .plan_boundary_manifest.epic_runs |= . + [{
+      epic_id: "E-900-9_9",
       status: "pending",
       epic_merge_commit: null,
       run_id: "R-E900-1",
-      task_branch: "task/E-900-1_2/main",
+      task_branch: "task/E-900-9_9/main",
       epic_base_commit: "1111111111111111111111111111111111111111",
       epic_source_ref: "plan/P900",
       lineage: "proven",
-      evidence_dir: ".aid-o/work/evidence/E-900-1_2/"
+      evidence_dir: ".aid-o/work/evidence/E-900-9_9/"
     }]
   '
 
   # Transition pending → merged_to_plan (legal)
-  plan_manifest_set_epic_status "P900" "E-900-test-pending" "merged_to_plan" "2222222222222222222222222222222222222222"
+  plan_manifest_set_epic_status "P900" "E-900-9_9" "merged_to_plan" "2222222222222222222222222222222222222222"
 
   # Attempt reverse (illegal)
-  run plan_manifest_set_epic_status "P900" "E-900-test-pending" "pending"
+  run plan_manifest_set_epic_status "P900" "E-900-9_9" "pending"
   [ "$status" -ne 0 ]
   [[ "$output" == *"PRECONDITION FAIL"* ]]
   [[ "$output" == *"merged_to_plan -> pending is not a legal pair"* ]]
 
   # Verify state unchanged on disk
-  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-test-pending") | .status'
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-9_9") | .status'
   [ "$output" = "merged_to_plan" ]
 }
 
