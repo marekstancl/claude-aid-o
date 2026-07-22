@@ -158,6 +158,13 @@ remained idle for hours even though no useful process was running. Other runs lo
 the controller killed a wrapper while child processes continued. Instructions now forbid those
 patterns in v2.60.1, but instruction-only ownership is not sufficient durable recovery.
 
+**Additional recurrence (E-064-1_2 F-2 closure):** An implementer claimed red-green coverage in
+its commit message but returned while the proof command was only "in flight" and supplied no
+terminal artifact. The controller correctly rejected the claim and independently reproduced the
+five selected tests against the pre-fix and post-fix revisions. Three defect tests failed only on
+the pre-fix tree while two positive controls passed on both, which is the required polarity. A
+started command, agent assertion or commit message is never test evidence.
+
 **Required implementation:**
 
 - Add a small `aid-job-run`/`aid-job-status`/`aid-job-collect` surface, preferably one script
@@ -174,6 +181,13 @@ patterns in v2.60.1, but instruction-only ownership is not sufficient durable re
   for the configured interval triggers automatic resume/diagnosis rather than a PM question.
 - Bind a successful result to the recorded command and revision. A tree change marks the result
   stale instead of silently reusing it.
+- Distinguish `started`, `running`, `terminal_pass`, `terminal_fail`, `timed_out` and `cancelled`.
+  Only a terminal record carrying the exit code and output digest may satisfy an evidence claim;
+  an agent returning "in flight" transfers job ownership but proves no test outcome.
+- For red-green claims, store separate baseline and fixed receipts: exact revision/tree, selected
+  test filter, command fingerprint, expected polarity, observed exit code and pass/fail counts.
+  Positive controls that should pass on both sides must be identified separately from defect tests
+  expected to fail only on the baseline.
 - Integrate only at the controller boundary; this helper enables liveness and must not become a
   new release-blocking ceremony.
 
@@ -187,6 +201,9 @@ patterns in v2.60.1, but instruction-only ownership is not sufficient durable re
 - PID reuse, missing result files, timeout and tree drift have explicit tested outcomes.
 - AUTO makes progress without PM input after a recoverable controller restart or lost agent
   notification.
+- A fabricated pass claim backed only by a commit message or non-terminal `in_flight` job is
+  rejected; paired red-green receipts with the expected negative and positive-control polarity are
+  accepted.
 
 **Delivery constraint:** Codex implements and verifies this manually outside `/aid-run`; do not
 dogfood an unreliable background controller to build its own recovery mechanism. Land after both
