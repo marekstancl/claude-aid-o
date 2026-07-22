@@ -122,6 +122,17 @@
 # invent one. It relies on this done_phase=release signal plus the high-risk
 # path upgrade above instead.
 #
+# WHOSE `done_phase` IT HAS TO BE (CP3 integration review finding 3). The
+# signal means "the run being resolved is AT a release boundary". A caller that
+# resolves an EPIC's risk AFTER that EPIC's own FSM already advanced to
+# `done_phase: release` must NOT pass that state file: the EPIC's release
+# sub-phase is its own tail, not the plan's final boundary, and inheriting it
+# makes the escalation unconditional — every accumulated floor comes out
+# `release` regardless of the diff, which is not a risk signal at all.
+# `aid-plan-fsm.sh epic-complete` therefore passes "" here on purpose (see its
+# own comment). Nothing is lost: boundary=plan_final re-adds `release`
+# unconditionally below.
+#
 # ── NO-FSM-STATE CONTRACT (the gap both CP1 review passes flagged) ─────────
 # fsm_state_file is OPTIONAL. Missing arg, empty arg, or a path that doesn't
 # exist on disk are all treated identically: the release-boundary check above

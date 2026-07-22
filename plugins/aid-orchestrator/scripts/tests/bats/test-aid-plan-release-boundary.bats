@@ -2707,11 +2707,23 @@ _pfsm_epic_with_commit() {
 #   (run_id defaults to R-<epic_id>-plan): the FSM state file epic-complete
 #   reads `state:` from, and optionally the gates_report.json it reads
 #   `.profile` from.
+#
+#   `done_phase: release` IS WRITTEN FOR A DONE STATE (CP3 integration review
+#   finding 3). It used to be omitted, which made every epic-complete test run
+#   against a state file no production run can ever produce: epic-complete is
+#   only reachable AFTER `done-advance review release`, so a real EPIC's state
+#   file always carries `done_phase: release` at that point. The omission is
+#   what let the acceptance level assert a risk-derived floor while the
+#   library level asserted `release` for the same input — one of them had to be
+#   describing something other than production, and it was this fixture.
 _pfsm_write_epic_evidence() {
   local epic_id="$1" state="${2:-DONE}" profile="${3:-}"
   local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${epic_id}/R-${epic_id}-plan"
   mkdir -p "$dir/gates"
   printf 'epic_id: %s\nstate: %s\n' "$epic_id" "$state" > "$dir/fsm-state.yaml"
+  # Only a DONE run has advanced through the DONE phases at all; a GATES-state
+  # fixture must not claim a done_phase it could not have reached.
+  [[ "$state" == "DONE" ]] && printf 'done_phase: release\n' >> "$dir/fsm-state.yaml"
   if [[ -n "$profile" ]]; then
     jq -nc --arg p "$profile" '{profile: $p}' > "$dir/gates/gates_report.json"
   fi
@@ -4742,6 +4754,15 @@ _pfsm_write_plan_json() {
   [ "$(cat "$floor_file")" = "full" ]
 }
 
+# WHAT THIS PINS, AND WHAT IT DOES NOT (CP3 integration review finding 3).
+# This is a LIBRARY-level statement: "given an fsm-state whose done_phase is
+# `release`, boundary=epic suppresses the escalation in the printed profile and
+# keeps it in the floor". It is NOT a statement about what `epic-complete`
+# records — that command deliberately passes NO fsm-state (aid-plan-fsm.sh,
+# "THE EPIC'S OWN fsm-state IS DELIBERATELY NOT PASSED"), because an EPIC's own
+# `done_phase: release` is its FSM tail, not the plan's final boundary. The
+# acceptance-level tests below therefore expect a RISK-derived floor, and the
+# contract test "CP3-F3 (contract)" holds the two levels together.
 @test "Edge Case: boundary=epic suppresses the release escalation for the run profile while the floor still records release" {
   local paths; paths="$(_gp_paths_file "docs/x.md")"
   local state="$TEST_TMPDIR/fsm-state.yaml"
@@ -4940,6 +4961,49 @@ _pfsm_write_plan_json() {
   [ "$output" = "release" ]
   run _pfsm_entry_field P064 E-064-1_1 epic_final_profile_floor
   [ "$output" = "quick" ]
+}
+
+# ─── CP3 integration review finding 3: the floor reflects RISK, not the
+#     EPIC's own done_phase ────────────────────────────────────────────────
+@test "CP3-F3: the recorded floor is risk-derived even though the EPIC's own done_phase is release" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1" "docs/notes.md" "docs"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "quick"
+
+  # THE PREMISE, MADE EXPLICIT: epic-complete is only reachable after
+  # `done-advance review release`, so the state file it reads always says
+  # `done_phase: release`. That is production, not a fixture quirk.
+  grep -q '^done_phase: release$' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-064-1_1/R-E-064-1_1-plan/fsm-state.yaml"
+
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # A docs-only EPIC contributes `quick`, NOT `release`. Before the fix the
+  # done_phase was inherited and every EPIC — this one included — recorded
+  # `release`, which made AC4's discriminating premise (targeted_tests exit 3
+  # RAISES the floor) impossible to observe: the floor was already maxed.
+  run _pfsm_entry_field P064 E-064-1_1 epic_final_profile_floor
+  [ "$output" = "quick" ]
+  # The PLAN-wide value is raise-only from the manifest's own `standard`
+  # seed, so the observable claim here is that this EPIC did not push it to
+  # `release` — which is exactly what inheriting done_phase used to do.
+  run plan_manifest_get "P064" '.plan_boundary_manifest.plan_final_required_profile'
+  [ "$output" = "standard" ]
+}
+
+@test "CP3-F3 (contract): epic-complete passes NO fsm-state to gate_profile_resolve" {
+  # The structural half of the same claim, so the two test LEVELS cannot drift
+  # apart again: the library keeps escalating on a `release` done_phase (see
+  # "Edge Case: boundary=epic suppresses the release escalation…"), and this
+  # pins that epic-complete never hands it one.
+  local call
+  call="$(grep -n -A 2 'gate_profile_resolve "\$_ec_paths"' "$PLAN_FSM_CLI")"
+  [ -n "$call" ]
+  [[ "$call" == *'gate_profile_resolve "$_ec_paths" ""'* ]]
+  [[ "$call" != *'gate_profile_resolve "$_ec_paths" "$state_file"'* ]]
+  # …and the reason is written down next to it, not only here.
+  grep -q 'DELIBERATELY NOT PASSED' "$PLAN_FSM_CLI"
 }
 
 @test "Edge Case: a plan-declared gate the active profile excluded is recorded as a mandatory plan-final gate, never silently dropped" {
@@ -5794,4 +5858,385 @@ YAML
   [ "$status" -eq 0 ]
   [ -z "$(_rs_event E-064-9_9 plan_mode_unresolved)" ]
   [ -z "$(_rs_event E-064-9_9 done_advance_plan_branch_mode)" ]
+}
+
+# =============================================================================
+# ─── ONE AUTHORITY for the plan's release mode
+#     (CP3 integration review finding 2, adjudicated action A3) ──────────────
+# =============================================================================
+# Before A3 the two mode resolvers in aid-fsm.sh read two INDEPENDENTLY STALE
+# sources: `_fsm_gate_profile_boundary` read the gitignored RUNTIME manifest
+# (.aid-o/work/plan-state/<plan>/plan-boundary-manifest.json) and
+# `_fsm_declared_plan_mode` read the git-tracked DECLARATION
+# (.aid-lifecycle/manifests/<plan>.yaml), preferring the working-tree copy.
+# They could therefore disagree while BOTH returned a confident answer:
+#
+#   Direction A  runtime=plan_branch + no declaration -> gates capped at
+#                `standard` while the LEGACY release stack merged the EPIC into
+#                the target branch and ran the bump/tag/push. Reduced
+#                verification on a shipping EPIC, and no accumulated floor
+#                (only `epic-complete` writes one, and the legacy path never
+#                reaches it).
+#   Direction B  an UNTRACKED .aid-lifecycle manifest saying plan_branch
+#                silenced all nine AID_PLAN_BRANCH_SKIPPED_STAGES with nothing
+#                committed anywhere.
+#
+# A3: the DECLARATION is the sole authority for both, and it only counts when it
+# is present in target_branch's COMMITTED tree. Each helper keeps its own
+# reaction to "cannot tell" — gate-profile routing answers "" (no cap => more
+# gates), release routing hard-blocks — which is a difference in CONSEQUENCE,
+# never in the verdict itself.
+
+# _mode_probe <epic_id> — the two resolvers, called on the SAME input inside one
+# sourced aid-fsm.sh, from TEST_PROJECT_ROOT (the CWD a real run has).
+# Prints "<mode>|<reason>|<boundary>"; `<boundary>` is the literal `<nocap>`
+# when _fsm_gate_profile_boundary returns "" (legacy, no cap).
+_mode_probe() {
+  local epic_id="$1"
+  local script="$TEST_TMPDIR/mode-probe.sh"
+  cat > "$script" <<'SH'
+# shellcheck disable=SC1090
+source "$1" >/dev/null 2>&1
+set +e +u +o pipefail
+m=""; p=""; r=""
+IFS=$'\t' read -r m p r < <(_fsm_declared_plan_mode "$2")
+b="$(_fsm_gate_profile_boundary "$2")"
+printf '%s|%s|%s\n' "$m" "$r" "${b:-<nocap>}"
+SH
+  ( cd "$TEST_PROJECT_ROOT" && bash "$script" "$FSM" "$epic_id" )
+}
+
+# _decl_write <plan_id> <yaml-body...> — a lifecycle declaration in the WORKING
+# TREE only (deliberately never committed).
+_decl_write() {
+  local plan_id="$1"; shift
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
+  printf '%s\n' "$@" > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/${plan_id}.yaml"
+}
+
+# _decl_commit <plan_id> — commit whatever _decl_write left, on main.
+_decl_commit() {
+  local plan_id="$1"
+  git -C "$TEST_PROJECT_ROOT" add ".aid-lifecycle/manifests/${plan_id}.yaml"
+  git -C "$TEST_PROJECT_ROOT" commit -qm "declare ${plan_id}"
+}
+
+@test "CP3-F2 Direction A: a runtime manifest declaring plan_branch is NOT a mode input — no cap, and release routing stays legacy" {
+  # The runtime manifest is the ONLY thing that says plan_branch here…
+  run _init_manifest "P901" plan_branch
+  [ "$status" -eq 0 ]
+  run plan_manifest_get P901 '.plan_boundary_manifest.mode'
+  [ "$output" = "plan_branch" ]
+  # …and no declaration exists anywhere.
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P901.yaml" ]
+
+  # Both resolvers answer from the declaration: absent => the documented
+  # pre-P064 default, and NO gate cap. Before A3 the boundary said `epic`
+  # (gates capped at standard) while release routing said legacy (full release
+  # stack, EPIC merged to the target branch) — a confident disagreement.
+  run _mode_probe E-901-1_1
+  [ "$status" -eq 0 ]
+  [ "$output" = "legacy_epic_release_mode|no_manifest_on_main|<nocap>" ]
+}
+
+@test "CP3-F2 Direction B: an UNTRACKED declaration is 'unresolved', never an answer — no cap, and done-advance blocks" {
+  _decl_write P902 'schema_version: aid-lifecycle-1.0' 'plan_id: P902' 'mode: plan_branch'
+  # Untracked: git does not know this file at all.
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:.aid-lifecycle/manifests/P902.yaml"
+  [ "$status" -ne 0 ]
+
+  run _mode_probe E-902-1_1
+  [ "$status" -eq 0 ]
+  [ "$output" = "unresolved|manifest_not_committed_on_main|<nocap>" ]
+
+  # Release routing turns the same verdict into a hard block: nine release
+  # stages can no longer be silenced by a file that was never committed.
+  local state_file; state_file="$(_rs_seed_done_review E-902-1_1)"
+  _rs_install_spies
+  run bash "$FSM" done-advance review release "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ "$(_rs_event E-902-1_1 plan_mode_unresolved | jq -r '.reason')" = "manifest_not_committed_on_main" ]
+  [ -z "$(_rs_event E-902-1_1 done_advance_plan_branch_mode)" ]
+  [ "$(_rs_done_phase "$state_file")" = "review" ]
+}
+
+@test "CP3-F2: the 'cannot tell' matrix — both resolvers answer from the SAME verdict on every input shape" {
+  # Six declaration shapes, one plan id each, all present at once. The
+  # assertion is a PAIR per row: the release-routing mode AND the gate-profile
+  # boundary. They can no longer disagree, because the boundary helper computes
+  # nothing of its own.
+
+  # (1) absent everywhere -> the documented legacy default, no cap.
+  local row1="legacy_epic_release_mode|no_manifest_on_main|<nocap>"
+
+  # (2) committed, mode: plan_branch -> the only shape that caps gates.
+  _decl_write P912 'schema_version: aid-lifecycle-1.0' 'plan_id: P912' 'mode: plan_branch'
+  _decl_commit P912
+  local row2="plan_branch||epic"
+
+  # (2b) committed, mode: plan_branch, ABSENT from the working tree — the shape
+  #      every real plan_branch run has (cmd_init leaves the task branch checked
+  #      out and the manifest is committed on target_branch only).
+  _decl_write P922 'schema_version: aid-lifecycle-1.0' 'plan_id: P922' 'mode: plan_branch'
+  _decl_commit P922
+  rm -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P922.yaml"
+  local row2b="plan_branch||epic"
+
+  # (3) committed, no `mode` key -> "not yet declared plan_branch" (legacy).
+  _decl_write P913 'schema_version: aid-lifecycle-1.0' 'plan_id: P913'
+  _decl_commit P913
+  local row3="legacy_epic_release_mode||<nocap>"
+
+  # (4) working tree only (untracked) -> unresolved, never an answer.
+  _decl_write P914 'schema_version: aid-lifecycle-1.0' 'plan_id: P914' 'mode: plan_branch'
+  local row4="unresolved|manifest_not_committed_on_main|<nocap>"
+
+  # (5) committed but UNPARSEABLE -> unresolved.
+  _decl_write P915 'mode: [unclosed' '  : : :'
+  _decl_commit P915
+  rm -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P915.yaml"
+  local row5="unresolved|manifest_unparseable|<nocap>"
+
+  # (6) committed but an UNKNOWN mode value -> unresolved (never defaulted
+  #     either way), and the untrusted value is sanitised into the reason.
+  _decl_write P916 'schema_version: aid-lifecycle-1.0' 'plan_id: P916' 'mode: plan_branch_v2'
+  _decl_commit P916
+  rm -f "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P916.yaml"
+  local row6="unresolved|mode_unknown_value_plan_branch_v2|<nocap>"
+
+  run _mode_probe E-911-1_1; [ "$output" = "$row1" ]
+  run _mode_probe E-912-1_1; [ "$output" = "$row2" ]
+  run _mode_probe E-922-1_1; [ "$output" = "$row2b" ]
+  run _mode_probe E-913-1_1; [ "$output" = "$row3" ]
+  run _mode_probe E-914-1_1; [ "$output" = "$row4" ]
+  run _mode_probe E-915-1_1; [ "$output" = "$row5" ]
+  run _mode_probe E-916-1_1; [ "$output" = "$row6" ]
+
+  # The invariant behind every row: boundary == "epic" IFF mode == plan_branch.
+  local e
+  for e in E-911-1_1 E-912-1_1 E-922-1_1 E-913-1_1 E-914-1_1 E-915-1_1 E-916-1_1; do
+    run _mode_probe "$e"
+    local mode="${output%%|*}" boundary="${output##*|}"
+    if [ "$mode" = "plan_branch" ]; then [ "$boundary" = "epic" ]; else [ "$boundary" = "<nocap>" ]; fi
+  done
+}
+
+@test "CP3-F2: a PRESENT but UNREADABLE working-tree declaration is unresolved for BOTH resolvers, even with a readable committed copy" {
+  if [ "$(id -u)" -eq 0 ]; then skip "running as root — chmod 000 does not deny reads"; fi
+  # The committed copy is perfectly readable and says plan_branch…
+  _decl_write P917 'schema_version: aid-lifecycle-1.0' 'plan_id: P917' 'mode: plan_branch'
+  _decl_commit P917
+  # …but the working-tree copy cannot be read, so we cannot prove the two agree.
+  # Silently resolving from the committed copy here is exactly what the
+  # in-source comment at _fsm_declared_plan_mode warned against.
+  chmod 000 "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P917.yaml"
+  run _mode_probe E-917-1_1
+  local out="$output"
+  chmod 644 "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P917.yaml"
+  [ "$out" = "unresolved|manifest_unreadable|<nocap>" ]
+}
+
+@test "CP3-F2: _fsm_gate_profile_boundary reads no manifest of its own — the runtime manifest is not a mode input anywhere in aid-fsm.sh" {
+  # Structural half of "they cannot disagree": the boundary helper's body
+  # contains no source of its own, only the delegation.
+  local body; body="$(sed -n '/^_fsm_gate_profile_boundary() {/,/^}/p' "$FSM")"
+  [ -n "$body" ]
+  [[ "$body" == *"_fsm_declared_plan_mode"* ]]
+  [[ "$body" != *"plan_manifest_path"* ]]
+  [[ "$body" != *"plan_boundary_manifest"* ]]
+  # And nothing else in the FSM reads the runtime manifest for a MODE.
+  run bash -c "grep -n 'plan_boundary_manifest.mode' '$FSM' || true"
+  [ -z "$output" ]
+}
+
+# =============================================================================
+# ─── The documented plan_branch release hand-off, END TO END
+#     (CP3 integration review finding 1) ─────────────────────────────────────
+# =============================================================================
+# skills/pipeline.md §7 "Sub-phase: release" prescribes step 15
+# (`epic-complete` -> `epic-merge-to-plan`) and step 16 (queue). Between them,
+# NOTHING used to write the queue: the `queue_set_status <epic> merged_to_plan`
+# call that step-1-verify.md assigned to "Step 4 of this EPIC or P068" was
+# neither wired into aid-plan-fsm.sh nor documented anywhere. The sequence the
+# controller was told to run therefore stalled every multi-EPIC plan at its
+# second EPIC. These tests walk the DOCUMENTED sequence and assert the plan
+# keeps moving.
+
+@test "CP3-F1: the documented plan_branch sequence claims the next EPIC end to end" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_epic_with_commit "P064" "E-064-2_1"
+  _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
+
+  # The queue in the shape `aid-queue-add.sh` really writes for a plan whose
+  # branch did not exist yet at queue-add time (the `aid-auto-pipeline.sh`
+  # ordering): plan_id recorded, merge_target still null.
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: running
+    plan_id: "P064"
+    merge_target: null
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: null
+    depends_on: ["E-064-1_1"]
+YAML
+
+  # ── step 15 ──
+  run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # The premise: the work IS on plan/P064 and is provably NOT on main — the
+  # exact state this plan exists to create.
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main plan/P064
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main main
+  [ "$status" -ne 0 ]
+
+  # …and step 15 alone leaves the queue entry at `running`.
+  [ "$(_qw_field E-064-1_1 status)" = "running" ]
+
+  # ── what step 16 does WITHOUT 16a: the hand-off refuses ──
+  _qw claim-next P064
+  [ "$status" -eq 1 ]
+  [ "$output" = "blocked:E-064-2_1:dependency_unmerged:E-064-1_1" ]
+  [ "$(_qw_field E-064-2_1 status)" = "blocked" ]
+
+  # ── step 16a: mirror the merge into the queue ──
+  _qw set-status E-064-1_1 merged_to_plan
+  [ "$status" -eq 0 ]
+  [ "$(_qw_field E-064-1_1 status)" = "merged_to_plan" ]
+
+  # ── step 16b: the next EPIC is claimable ──
+  _qw claim-next P064
+  [ "$status" -eq 0 ]
+  [ "$output" = "E-064-2_1" ]
+  [ "$(_qw_field E-064-2_1 status)" = "running" ]
+}
+
+@test "CP3-F1: 16a cannot unblock a dependency that did not really merge — ancestry still decides" {
+  # The compensating half: mirroring is a DERIVED VIEW. For an entry that
+  # declares a merge_target, the status field is ignored and ancestry is the
+  # only proof, so a hand-written (or wrongly-scripted) `merged_to_plan`
+  # unblocks nothing.
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  _pfsm_epic_with_commit "P064" "E-064-2_1"
+
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: running
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+
+  # No epic-merge-to-plan ran: the work is NOT on plan/P064.
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main plan/P064
+  [ "$status" -ne 0 ]
+
+  _qw set-status E-064-1_1 merged_to_plan
+  [ "$status" -eq 0 ]
+  _qw claim-next P064
+  [ "$status" -eq 1 ]
+  [ "$output" = "blocked:E-064-2_1:dependency_unmerged:E-064-1_1" ]
+}
+
+@test "CP3-F1: the controller instructions write the queue BETWEEN the merge and the claim" {
+  # The fix is a documented sequence, so the documentation is what regresses.
+  local pm="$AID_PLUGIN_PATH/skills/pipeline.md"
+  local rn="$AID_PLUGIN_PATH/commands/aid-run.md"
+  local f set_line claim_line
+
+  for f in "$pm" "$rn"; do
+    # The status write is named as an explicit aid-queue-write.sh call…
+    grep -q 'aid-queue-write.sh set-status' "$f"
+    grep -q 'merged_to_plan' "$f"
+    # …and it comes BEFORE the claim, not after it.
+    set_line="$(grep -n 'aid-queue-write.sh set-status' "$f" | head -1 | cut -d: -f1)"
+    claim_line="$(grep -nE 'claim-next|queue_claim_next' "$f" | head -1 | cut -d: -f1)"
+    [ -n "$set_line" ]
+    [ -n "$claim_line" ]
+    [ "$set_line" -lt "$claim_line" ]
+    # The consequence of skipping it is stated, not left to be rediscovered.
+    grep -q 'dependency_unmerged' "$f"
+  done
+
+  # The CLI shape the instructions print must be the one the library exposes.
+  grep -q 'set-status <epic_id> <status> \[reason\]' \
+    "$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
+  grep -q 'claim-next <plan_id>' "$AID_PLUGIN_PATH/scripts/lib/aid-queue-write.sh"
+}
+
+# ─── CP3 integration review, "also fix while you are here" ─────────────────
+
+@test "CP3-small: the epic-id -> plan-id derivation needs no external tool at all (no grep -oP)" {
+  # `grep -oP` is a GNU build option. On a grep without PCRE support it does not
+  # "not match" — it FAILS, and because both mode helpers swallowed that with
+  # `|| true`, three controls (the gate-profile cap, the release-mode block and
+  # cmd_init's lineage precondition) silently degraded to legacy on such a host.
+  # The replacement is pure bash: prove it with an EMPTY PATH.
+  run bash -c '
+    source "$1" >/dev/null 2>&1
+    set +e
+    printf "%s|" "$(PATH= _fsm_epic_plan_nnn "E-064-2_2")"
+    printf "%s|" "$(PATH= _fsm_epic_plan_nnn "E-013-1")"
+    printf "%s|" "$(PATH= _fsm_epic_plan_nnn "E-test")"
+    printf "%s"  "$(PATH= _fsm_epic_plan_nnn "")"
+    echo
+  ' _ "$FSM"
+  [ "$status" -eq 0 ]
+  [ "$output" = "064|013||" ]
+
+  # Every epic-id -> plan-id site routes through the one helper…
+  run bash -c "grep -c '_fsm_epic_plan_nnn' '$FSM'"
+  [ "$output" -ge 4 ]
+  # …and neither mode helper nor cmd_init's lineage block spells `grep -oP` any more.
+  local body
+  body="$(sed -n '/^_fsm_gate_profile_boundary() {/,/^}/p' "$FSM")"
+  [[ "$body" != *"grep -oP"* ]]
+  body="$(sed -n '/^_fsm_declared_plan_mode() {/,/^}/p' "$FSM")"
+  [[ "$body" != *"grep -oP"* ]]
+  # No CODE line anywhere in the FSM still derives a plan id with `grep -oP`
+  # (the one remaining mention is the comment that explains why not).
+  run bash -c "grep -n 'grep -oP' '$FSM' | grep -v ':[[:space:]]*#' | grep -c '(?<=^E-)' || true"
+  [ "$output" = "0" ]
+}
+
+@test "CP3-small: the C3 hook's comments no longer claim the legacy blocking_findings read is 'below'" {
+  # The legacy .md/.yaml read was hoisted ~250 lines ABOVE the C3 hook by the
+  # P064 Step 9 CP2 review; the comments still said "directly below", which
+  # sends a reader (or a future fixer) to the wrong end of the function.
+  local legacy_line c3_line
+  legacy_line="$(grep -n 'blk=\$(yaml_field "\$audit_file" blocking_findings)' "$FSM" | head -1 | cut -d: -f1)"
+  c3_line="$(grep -n 'E-057-1_2 Step 4: C3 independent-audit hook' "$FSM" | head -1 | cut -d: -f1)"
+  [ -n "$legacy_line" ]
+  [ -n "$c3_line" ]
+  # The premise the comments have to describe: legacy read FIRST, C3 hook after.
+  [ "$legacy_line" -lt "$c3_line" ]
+  run bash -c "grep -n 'blocking_findings read directly below' '$FSM' || true"
+  [ -z "$output" ]
+  run bash -c "grep -n 'legacy blocking_findings check below' '$FSM' || true"
+  [ -z "$output" ]
+  grep -q 'HOISTED it ~250 lines ABOVE this block' "$FSM"
 }

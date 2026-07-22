@@ -1103,6 +1103,33 @@ cmd_epic_complete() {
   # as the plan-final floor, which P068's plan-final stage consumes. The
   # resolver returns that floor out-of-band; `--floor-file` is the channel
   # that survives being read from a subshell.
+  #
+  # ── THE EPIC'S OWN fsm-state IS DELIBERATELY NOT PASSED ──────────────────
+  # (CP3 integration review finding 3.) `gate_profile_resolve` reads exactly
+  # one field out of an fsm-state file: `done_phase`. `done_phase == release`
+  # escalates the UNBOUNDED view — and the unbounded view IS the accumulated
+  # floor. But `epic-complete` runs AFTER `done-advance review release`, so
+  # this EPIC's state file ALWAYS says `done_phase: release` by the time we get
+  # here. Passing it would have recorded the floor `release` for every EPIC
+  # whatever its diff: a docs-only EPIC would pin the whole plan at the release
+  # suite, `epic_final_profile_floor` would carry no information at all, and
+  # the `targeted_tests` exit-3 escalation below could never raise anything
+  # because the floor was already at the ceiling by construction.
+  #
+  # An EPIC's `done_phase: release` describes THAT EPIC's own FSM tail — its
+  # release sub-phase — not the PLAN's final release boundary. Nothing is lost
+  # by not inheriting it: the plan-final boundary re-adds the release
+  # escalation UNCONDITIONALLY (`boundary=plan_final` -> max(accumulated_floor,
+  # release), lib/aid-gate-profile.sh), so the plan-final run still executes
+  # the release suite. What is recorded here is then exactly what it claims to
+  # be: the risk of THIS EPIC's own epic_base_commit..task_branch diff.
+  #
+  # WHY AN EMPTY fsm-state POSITIONAL rather than a new flag or a different
+  # boundary name: "" is already the library's documented "no release-phase
+  # signal to inherit" input (its no-fsm-state guard is an explicit, tested
+  # fallback), it needs no change to a resolver shared with aid-fsm.sh's two
+  # call sites, and it keeps ONE way to express the release escalation instead
+  # of a second, boundary-specific one that would have to be kept in sync.
   local final_floor=""
   local _ec_base _ec_task_branch
   _ec_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)" || _ec_base=""
@@ -1114,7 +1141,7 @@ cmd_epic_complete() {
     _ec_floor_file="$(mktemp -t aid-epic-complete-floor.XXXXXX)"
     git -C "$project_root" diff --name-only "${_ec_base}..${_ec_task_branch}" \
       > "$_ec_paths" 2>/dev/null || true
-    gate_profile_resolve "$_ec_paths" "$state_file" \
+    gate_profile_resolve "$_ec_paths" "" \
       "${project_root}/${evidence_dir}/review-profile.json" epic \
       --floor-file "$_ec_floor_file" >/dev/null 2>/dev/null || _ec_rc=$?
     if [[ "$_ec_rc" -eq 0 ]]; then

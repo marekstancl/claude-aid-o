@@ -105,12 +105,35 @@ yaml_field() {
   return 0
 }
 
+# ─── epic-id -> plan-id digits (ONE derivation, portable) ───────────────────
+# _fsm_epic_plan_nnn <epic_id> — echoes the NNN digit block of an EPIC id
+# ("E-064-2_2" -> "064"), or nothing for an ad-hoc id with no digits after
+# "E-" (e.g. "E-test"). Always exits 0, so every caller can stay `set -e` safe
+# without an `|| true` dance.
+#
+# WHY NOT `grep -oP` (CP3 integration review, "also fix while you are here").
+# Every call site used to spell this as
+# `printf '%s' "${id%%_*}" | grep -oP '(?<=^E-)\d+'`. `-P` is a GNU-grep build
+# option: on a grep without PCRE support (BusyBox, macOS/BSD grep, a minimal
+# container image) it does not "not match", it FAILS — and because the two mode
+# helpers swallowed that with `|| true`, three controls (the gate-profile cap,
+# the release-mode block, cmd_init's lineage precondition) silently degraded to
+# their legacy/no-op branch on a host where no EPIC id could ever derive a plan.
+# A bash-native match has no external dependency to probe at all.
+_fsm_epic_plan_nnn() {
+  local id="${1:-}"
+  id="${id%%_*}"
+  [[ "$id" =~ ^E-([0-9]+) ]] || return 0
+  printf '%s' "${BASH_REMATCH[1]}"
+  return 0
+}
+
 # ─── Gate-profile boundary selector (P064 plan Step 8) ──────────────────────
 # _fsm_gate_profile_boundary <epic_id> — echoes the `boundary` positional to
 # hand gate_profile_resolve for THIS EPIC: "epic" when the EPIC belongs to a
-# plan declared `plan_branch`, "" (legacy, byte-identical to pre-Step-8
-# behaviour) otherwise. Always exits 0 — this is a routing decision, never an
-# enforcement point.
+# plan whose DECLARED release model is `plan_branch`, "" (legacy, byte-identical
+# to pre-Step-8 behaviour) otherwise. Always exits 0 — this is a routing
+# decision, never an enforcement point.
 #
 # WHY MODE-GATED. boundary=epic caps the resolved profile at `standard`,
 # which is only safe because a plan_branch plan has a plan-final run that
@@ -123,28 +146,40 @@ yaml_field() {
 # the conservative direction — the opposite of cmd_init's lineage check,
 # which fails CLOSED because there "cannot tell" would skip a security proof.
 #
+# ── ONE AUTHORITY (CP3 integration review finding 2, adjudicated action A3) ──
+# This function computes NOTHING of its own: it asks `_fsm_declared_plan_mode`
+# (below, the release-routing resolver) and maps its verdict. It USED to read
+# the gitignored RUNTIME manifest `plan-boundary-manifest.json` while
+# `_fsm_declared_plan_mode` read the git-tracked DECLARATION
+# `.aid-lifecycle/manifests/<plan_id>.yaml` — two sources that go stale
+# independently and could therefore disagree while BOTH returned a confident,
+# non-error answer:
+#   * runtime=plan_branch + declaration absent -> gates capped at `standard`
+#     while the LEGACY release stack merged the EPIC into the target branch and
+#     ran the bump/tag/push. A high-risk EPIC shipped with reduced verification,
+#     and the accumulated floor was discarded (only `epic-complete` writes one,
+#     and the legacy path never reaches it).
+#   * an UNTRACKED declaration saying plan_branch confidently silenced all nine
+#     AID_PLAN_BRANCH_SKIPPED_STAGES with nothing committed anywhere.
+# The runtime manifest is no longer a mode input anywhere in this file. The two
+# helpers still REACT differently to "cannot tell" — here "" (no cap => MORE
+# gates), there a hard block — but that is a difference in CONSEQUENCE, chosen
+# per call site, never a difference in the verdict.
+#
 # BOTH gate_profile_resolve call sites in this file MUST route through this
 # one helper: advance-to-gates picks the profile a run executes and the
 # GATES:DONE precondition recomputes the requirement it is measured against.
 # If they disagreed, an EPIC that correctly ran the capped `standard` would
 # be compared against an uncapped `full` and could never reach DONE.
 _fsm_gate_profile_boundary() {
-  local epic_id="${1:-}" nnn="" plan_id="" manifest="" mode=""
-  # Same epic-id -> plan-id derivation as cmd_init's lineage check and
-  # cmd_plan_close — reused, not reinvented. `|| true` keeps this set -e safe
-  # for ad-hoc EPIC ids with no digits (e.g. "E-test"), which yield no plan.
-  nnn="$(printf '%s' "${epic_id%%_*}" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
-  [[ -n "$nnn" ]] || { echo ""; return 0; }
-  plan_id="P${nnn}"
-  # lib/aid-plan-manifest.sh is sourced guarded at the top of this file; a
-  # missing lib means "cannot tell" -> legacy.
-  declare -F plan_manifest_path >/dev/null 2>&1 || { echo ""; return 0; }
-  manifest="$(plan_manifest_path "$plan_id" 2>/dev/null)" || manifest=""
-  [[ -n "$manifest" && -f "$manifest" ]] || { echo ""; return 0; }
-  mode="$(jq -r '.plan_boundary_manifest.mode // empty' "$manifest" 2>/dev/null)" || mode=""
-  if [[ "$mode" == "plan_branch" ]]; then
+  local epic_id="${1:-}" _gb_mode="" _gb_plan="" _gb_reason=""
+  # `|| true`: the read itself is never allowed to abort a routing decision.
+  IFS=$'\t' read -r _gb_mode _gb_plan _gb_reason \
+    < <(_fsm_declared_plan_mode "$epic_id") || true
+  if [[ "$_gb_mode" == "plan_branch" ]]; then
     echo "epic"
   else
+    # legacy_epic_release_mode AND every `unresolved` reason land here: no cap.
     echo ""
   fi
   return 0
@@ -2249,14 +2284,14 @@ cmd_init() {
   # knowing" (lib not sourced, runtime manifest missing, runtime manifest
   # unparseable) is a hard block, never a silent downgrade to legacy behavior.
   local _plan_expected_branch="task/${epic_id}/main"
-  local _pb_stripped="${epic_id%%_*}"
   local _pb_nnn=""
-  # Same epic-id -> plan-id derivation as cmd_plan_close (search that name in
-  # this file) — reused verbatim, not reinvented. `|| true` keeps this safe
-  # under `set -e` when the epic_id has no digits after "E-" (ad-hoc EPIC,
-  # e.g. a bare "E-test" fixture id): grep finds nothing, _pb_nnn stays empty,
-  # and the block below is skipped entirely.
-  _pb_nnn="$(printf '%s' "$_pb_stripped" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  # Same epic-id -> plan-id derivation as _fsm_declared_plan_mode and
+  # _fsm_gate_profile_boundary — ONE helper (`_fsm_epic_plan_nnn`, top of this
+  # file), not three copies of a `grep -oP` that fails outright on a grep
+  # without PCRE support. Empty for an epic_id with no digits after "E-"
+  # (ad-hoc EPIC, e.g. a bare "E-test" fixture id), and the block below is then
+  # skipped entirely.
+  _pb_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   local _pb_plan_id=""
   [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
 
@@ -3547,43 +3582,70 @@ AID_PLAN_BRANCH_SKIPPED_STAGES=(
 #   mode ∈ { plan_branch, legacy_epic_release_mode, unresolved }
 # Always exits 0; the CALLER decides what to do with `unresolved`.
 #
-# THIS READS THE DECLARED MODE, NOT THE RUNTIME MANIFEST. It resolves through
+# THIS IS THE SINGLE AUTHORITY FOR THE PLAN'S RELEASE MODE (CP3 integration
+# review finding 2, adjudicated action A3). It resolves through
 # `aid_lifecycle_plan_mode` (lib/aid-lifecycle.sh), whose only input is the
 # git-tracked `.aid-lifecycle/manifests/<plan_id>.yaml` — the PM's durable
-# declaration of which release model the plan follows. That is deliberately a
-# DIFFERENT source from `_fsm_gate_profile_boundary` (this file, P064 Step 8),
-# which reads the gitignored RUNTIME manifest `plan-boundary-manifest.json`:
-# the runtime file is per-workspace bookkeeping that a pruned or repaired
-# workspace can legitimately lack, and gate-profile routing may safely fall
-# back to "no cap" when it is missing. Release routing may not: it decides
-# whether an individual EPIC gets merged into the target branch.
+# declaration of which release model the plan follows. `_fsm_gate_profile_boundary`
+# (top of this file) now DELEGATES here instead of reading the gitignored
+# RUNTIME manifest `plan-boundary-manifest.json`, so the two can no longer
+# return confidently different answers for the same repository state; see that
+# function's header for the two disagreement directions this closed. The
+# runtime manifest is no longer a mode input anywhere in this file.
+#
+# ── THE DECLARATION ONLY COUNTS WHEN IT IS COMMITTED ────────────────────────
+# The answer is read out of `target_branch`'s COMMITTED tree, and nowhere else.
+# A working-tree-only (untracked) manifest is `unresolved`, never an answer:
+# it is not durable, not auditable, not visible to any other clone, and
+# `cmd_init`'s dirty-tree guard uses `--untracked-files=no`, so nothing else
+# would catch it either — an untracked file must not be able to silence the
+# nine `AID_PLAN_BRANCH_SKIPPED_STAGES`. The committed manifest is what
+# `aid_lifecycle_set_plan_mode` writes (atomically, on target_branch), so the
+# intended workflow already satisfies this.
+#
+# The working tree is still READ, as a GUARD rather than as a source: a
+# manifest that is present there but unreadable/unparseable makes the whole
+# resolution `unresolved`. Resolving it silently from the committed copy would
+# be exactly the "an unreadable manifest is silently satisfied from elsewhere"
+# hazard the previous working-tree-preference existed to avoid. A working-tree
+# copy that IS readable and parseable is then ignored — including when it
+# differs from the committed one: the committed declaration is the authority,
+# and a local edit that has not been committed has not been declared.
+#
+# RESIDUAL RISK, NAMED: an incorrect (or maliciously) COMMITTED declaration
+# remains authoritative here. That is a code-review/branch-protection problem,
+# not one this resolver can close.
 #
 # WHY THE "CANNOT TELL" SPLIT IS WHERE IT IS.
 #   -> legacy_epic_release_mode (documented default, never a block):
 #      * epic_id derives no plan id (ad-hoc EPIC — it belongs to no plan, so
 #        no plan can have declared plan_branch for it; identical to cmd_init's
 #        and _fsm_gate_profile_boundary's own handling of this input);
-#      * no manifest in the working tree AND none on target_branch, or no Git
-#        repository at all — `aid_lifecycle_plan_mode`'s own file header
-#        documents absence as "not yet declared plan_branch", the pre-P064
-#        model, which is unambiguous rather than unknown;
-#      * a manifest that parses but carries no `mode` key (same reason).
+#      * NO manifest anywhere — none on target_branch and none in the working
+#        tree, or no Git repository at all and none in the working tree.
+#        `aid_lifecycle_plan_mode`'s own file header documents absence as "not
+#        yet declared plan_branch", the pre-P064 model, which is unambiguous
+#        rather than unknown;
+#      * a committed manifest that parses but carries no `mode` key (same
+#        reason).
 #   -> unresolved (hard block at the caller):
-#      every case where a DECLARATION MAY EXIST AND WE CANNOT READ IT — the
-#      lifecycle lib is not sourced, mktemp gave us nowhere to extract the
-#      manifest, the manifest is unreadable, `yq` is absent, the manifest does
-#      not parse, or it declares a `mode` value outside the known enum.
+#      every case where a DECLARATION MAY EXIST AND WE CANNOT HONESTLY READ IT
+#      — the lifecycle lib is not sourced; the manifest exists in the working
+#      tree but is NOT COMMITTED on target_branch (it was never declared, only
+#      typed); it is present in the working tree but unreadable or not a
+#      regular file; mktemp gave us nowhere to extract the committed copy; the
+#      extracted copy is unreadable; `yq` is absent; the manifest does not
+#      parse; or it declares a `mode` value outside the known enum.
 #      Guessing legacy for any of these would route the controller into
 #      skills/pipeline.md's legacy action 15 — `git merge task/{epic_id}/main`
 #      into the target branch — i.e. it would ship an individual EPIC to main,
 #      which is precisely what P064 exists to prevent. Fail closed.
 _fsm_declared_plan_mode() {
   local epic_id="${1:-}" nnn="" plan_id="" tb="" root="" manifest="" relpath=""
-  local cleanup_root="" raw=""
+  local cleanup_root="" raw="" wt_present=false
   # Same epic-id -> plan-id derivation as cmd_init's lineage check,
-  # cmd_plan_close and _fsm_gate_profile_boundary — reused, not reinvented.
-  # `|| true` keeps this `set -e` safe for ad-hoc ids with no digits.
-  nnn="$(printf '%s' "${epic_id%%_*}" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  # cmd_plan_close and _fsm_gate_profile_boundary — ONE helper, reused.
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   [[ -n "$nnn" ]] || { printf 'legacy_epic_release_mode\t\tno_plan_id_derivable\n'; return 0; }
   plan_id="P${nnn}"
   relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
@@ -3591,42 +3653,59 @@ _fsm_declared_plan_mode() {
   declare -F aid_lifecycle_plan_mode >/dev/null 2>&1 || {
     printf 'unresolved\t%s\tlifecycle_lib_unavailable\n' "$plan_id"; return 0; }
 
-  # Prefer the working tree when the manifest is genuinely there (a run still
-  # standing on target_branch). Otherwise read it out of target_branch's tree:
+  # ── STEP 1: the working tree is a GUARD, never a source ──────────────────
+  # A manifest sitting in the working tree that we cannot read or cannot parse
+  # makes the whole resolution `unresolved`. It is NOT answered from the
+  # committed copy: "there is a declaration here and I cannot read it" is
+  # exactly the state where guessing is unsafe, and silently satisfying it from
+  # elsewhere is the hazard the old working-tree preference existed to avoid.
+  # A readable, parseable working-tree copy contributes nothing beyond passing
+  # this guard — Step 2 is the only place an ANSWER comes from.
+  if [[ -e "$relpath" ]]; then
+    wt_present=true
+    if [[ ! -f "$relpath" || ! -r "$relpath" ]]; then
+      printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+      printf 'unresolved\t%s\tyq_unavailable\n' "$plan_id"; return 0
+    fi
+    if ! yq -r '.' "$relpath" >/dev/null 2>&1; then
+      printf 'unresolved\t%s\tmanifest_unparseable\n' "$plan_id"; return 0
+    fi
+  fi
+
+  # ── STEP 2: the ANSWER comes from target_branch's COMMITTED tree ─────────
   # cmd_init checks out task/<epic_id>/main and LEAVES it checked out for the
   # rest of the EPIC's lifecycle, and the manifest is committed on
   # target_branch only — so a CWD-relative read would misreport every
-  # plan_branch EPIC as legacy at exactly this decision point.
-  #
-  # KNOWN, DELIBERATE NUANCE: preferring the working tree means an UNCOMMITTED
-  # edit to a checked-out manifest is honoured here, while cmd_init's lineage
-  # precondition always reads target_branch's committed tree. They can only
-  # disagree while a mode change sits uncommitted — a transient state that
-  # `aid_lifecycle_set_plan_mode` never produces (it commits durably). The
-  # working-tree read is kept because it is `aid_lifecycle_plan_mode`'s own
-  # native semantics (root "."), and because dropping it would make an
-  # unreadable manifest silently resolvable from the committed copy.
-  if [[ -f "$relpath" ]]; then
-    root="."
-  else
-    if ! git rev-parse --git-dir >/dev/null 2>&1; then
-      # No repository at all: there is no target_branch tree to consult and no
-      # manifest in the working tree — nothing was ever declared.
-      printf 'legacy_epic_release_mode\t%s\tno_manifest_no_repo\n' "$plan_id"; return 0
+  # plan_branch EPIC as legacy at exactly this decision point. Reading
+  # target_branch's tree is therefore both the correct source AND the
+  # committed-only rule: an untracked file cannot be in it.
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    if [[ "$wt_present" == "true" ]]; then
+      # A manifest exists here but there is no repository to have committed it
+      # in: it is a typed file, not a declaration.
+      printf 'unresolved\t%s\tmanifest_not_committed_no_repo\n' "$plan_id"; return 0
     fi
-    tb="$(aid_target_branch 2>/dev/null)" || tb=""
-    [[ -n "$tb" ]] || tb="main"
-    if ! git cat-file -e "${tb}:${relpath}" 2>/dev/null; then
-      printf 'legacy_epic_release_mode\t%s\tno_manifest_on_%s\n' "$plan_id" "$tb"; return 0
+    # No repository at all and no manifest in the working tree — nothing was
+    # ever declared.
+    printf 'legacy_epic_release_mode\t%s\tno_manifest_no_repo\n' "$plan_id"; return 0
+  fi
+  tb="$(aid_target_branch 2>/dev/null)" || tb=""
+  [[ -n "$tb" ]] || tb="main"
+  if ! git cat-file -e "${tb}:${relpath}" 2>/dev/null; then
+    if [[ "$wt_present" == "true" ]]; then
+      printf 'unresolved\t%s\tmanifest_not_committed_on_%s\n' "$plan_id" "$tb"; return 0
     fi
-    root="$(mktemp -d 2>/dev/null)" || root=""
-    [[ -n "$root" ]] || { printf 'unresolved\t%s\tmode_root_unavailable\n' "$plan_id"; return 0; }
-    cleanup_root="$root"
-    if ! mkdir -p "${root}/.aid-lifecycle/manifests" 2>/dev/null \
-       || ! git show "${tb}:${relpath}" > "${root}/${relpath}" 2>/dev/null; then
-      rm -rf "$cleanup_root" 2>/dev/null || true
-      printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
-    fi
+    printf 'legacy_epic_release_mode\t%s\tno_manifest_on_%s\n' "$plan_id" "$tb"; return 0
+  fi
+  root="$(mktemp -d 2>/dev/null)" || root=""
+  [[ -n "$root" ]] || { printf 'unresolved\t%s\tmode_root_unavailable\n' "$plan_id"; return 0; }
+  cleanup_root="$root"
+  if ! mkdir -p "${root}/.aid-lifecycle/manifests" 2>/dev/null \
+     || ! git show "${tb}:${relpath}" > "${root}/${relpath}" 2>/dev/null; then
+    rm -rf "$cleanup_root" 2>/dev/null || true
+    printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
   fi
   manifest="${root}/${relpath}"
 
@@ -4402,16 +4481,20 @@ EOF
 
       # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
       # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
-      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
-      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
-      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
+      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). For any run whose risk
+      # profile requires C3, this REPLACES the legacy yaml_field()-based .md/.yaml
+      # blocking_findings read — ONE source of truth, not two parallel checks
       # (M2 fix). Risk profile comes from review-profile.json (produced by
       # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
       # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
       # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
       # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
       # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
-      # no-op and falls through unchanged to the legacy blocking_findings check below.
+      # no-op — and the legacy blocking_findings check has ALREADY RUN by then. The
+      # P064 Step 9 CP2 review HOISTED it ~250 lines ABOVE this block, out of the
+      # release stack and into the EPIC-local checks that execute in BOTH modes, so it
+      # is no longer "below" as the comments here used to say (search: "The auditor's
+      # `blocking_findings` verdict (EPIC-LOCAL, BOTH modes)").
       #
       # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
       # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
@@ -5029,12 +5112,13 @@ cmd_plan_close() {
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
 
-  # Derive plan_id: strip trailing _N run suffix, extract first NNN digit block after E-
-  # E-046-2_3 -> stripped=E-046-2 -> nnn=046 -> plan_id=P046
-  # E-013-1   -> stripped=E-013-1 -> nnn=013 -> plan_id=P013
-  local stripped="${epic_id%%_*}"           # remove _N suffix if present
-  local nnn
-  nnn=$(echo "$stripped" | grep -oP '(?<=^E-)\d+')
+  # Derive plan_id through the ONE shared helper (`_fsm_epic_plan_nnn`, top of
+  # this file): E-046-2_3 -> 046 -> P046, E-013-1 -> 013 -> P013. This used to
+  # be a fourth copy of `grep -oP '(?<=^E-)\d+'`, which FAILS (not "no match")
+  # on a grep without PCRE support — here that surfaced as a bare grep error
+  # under `set -e`. An id that derives no digits is now refused by name.
+  local nnn; nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || { echo "ERROR: plan-close: cannot derive a plan id from epic_id '${epic_id}' (expected E-<NNN>-...)." >&2; exit 1; }
   local plan_id="P${nnn}"
 
   # Read execution.yaml toggles — grep-only, no yq dependency.

@@ -379,9 +379,17 @@ Steps 14-16 fork on the plan's declared release mode
 15. `aid-plan-fsm.sh epic-complete`, then `aid-plan-fsm.sh epic-merge-to-plan` — only
     `plan/{plan_id}` moves; the target branch is never touched, and
     `plan-record-delivery` is deferred to `plan-merge-to-main` (P068)
-16. Queue pickup via `queue_claim_next {plan_id}` from `lib/aid-queue-write.sh` (library
-    only — nothing wires it automatically yet), then report: "EPIC complete and merged into
-    `plan/{plan_id}`; plan remains open; no plan-final release decision has run yet"
+16. Queue, in this order, both direct calls to `lib/aid-queue-write.sh` (library only —
+    `aid-plan-fsm.sh` does not write the queue yet):
+    **16a** `aid-queue-write.sh set-status {epic_id} merged_to_plan` — mirrors the merge
+    step 15 proved in Git. **Never skip it:** `epic-merge-to-plan` leaves the entry at
+    `running`, and a dependent whose dependency has no `merge_target` is resolved from
+    that status, so the next EPIC is recorded `blocked:…:dependency_unmerged` and the
+    plan stalls at EPIC 2.
+    **16b** `aid-queue-write.sh claim-next {plan_id}` — exit 0 prints the claimed id,
+    exit 1 is `blocked:<id>:<reason>` or `none`, exit 2 usage, exit 3 lock.
+    Then report: "EPIC complete and merged into `plan/{plan_id}`; plan remains open; no
+    plan-final release decision has run yet"
 
 *In `legacy_epic_release_mode` (pre-P064):*
 
