@@ -254,10 +254,15 @@ _pfsm_last_resulting_sha() {
 _pfsm_verify_epic_lineage() {
   local root="$1" plan_id="$2" epic_id="$3" task_branch="$4" entry_json="$5"
   local expect_ref="plan/${plan_id}"
-  local source_ref recorded_base
+  local lineage source_ref recorded_base
+  lineage="$(jq -r '.lineage // empty' <<<"$entry_json" 2>/dev/null)"
   source_ref="$(jq -r '.epic_source_ref // empty' <<<"$entry_json" 2>/dev/null)"
   recorded_base="$(jq -r '.epic_base_commit // empty' <<<"$entry_json" 2>/dev/null)"
 
+  if [[ "$lineage" != "proven" ]]; then
+    echo "PRECONDITION FAIL: ${task_branch}'s manifest entry has lineage='${lineage:-<empty>}' (must be proven) — refusing to treat it as authoritative." >&2
+    return 1
+  fi
   if [[ "$source_ref" != "$expect_ref" ]]; then
     echo "PRECONDITION FAIL: ${task_branch}'s manifest entry has epic_source_ref='${source_ref:-<null>}' (unproven or foreign lineage) — refusing to treat it as authoritative." >&2
     return 1

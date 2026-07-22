@@ -2398,3 +2398,66 @@ EOF
     }
   done
 }
+
+# ─── Regression: lineage and epic_source_ref enforcement ─────────────────────
+@test "Regression: unproven entry (after repair) is rejected by aid-fsm init with epic_lineage_unproven block reason" {
+  # This test reproduces the security finding F-1: a task branch created
+  # outside the plan's epic-start (simulated by repo recovery after prune) has
+  # lineage:unproven + epic_source_ref:null. aid-fsm init must REJECT it with
+  # block reason epic_lineage_unproven until it is explicitly attested.
+
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Prune .aid-o/work to simulate a recovered workspace (evidence lost)
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work"
+
+  # Run plan-state --repair to rebuild entries from Git evidence
+  # The repaired entry has lineage:unproven + epic_source_ref:null
+  run bash "$PLAN_FSM_CLI" plan-state P064 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Verify the repaired entry is indeed unproven
+  local mp; mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .lineage' "$mp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unproven" ]
+
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_source_ref' "$mp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "null" ]
+
+  # aid-fsm init for an unproven entry must FAIL with epic_lineage_unproven block reason
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_lineage_unproven"* ]]
+  [ ! -f "$state_file" ]
+}
+
+@test "Regression: proven entry (lineage:proven, epic_source_ref:plan/P064) passes aid-fsm init" {
+  # Positive control: a properly proven entry (created via epic-start without
+  # being pruned) passes init successfully.
+  _pfsm_bootstrap_plan "P064"
+
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Verify the entry is proven from the start
+  local mp; mp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-boundary-manifest.json"
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .lineage' "$mp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "proven" ]
+
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-064-1_1") | .epic_source_ref' "$mp"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P064" ]
+
+  # aid-fsm init for a proven entry must SUCCEED
+  local args; args="$(build_default_init_args E-064-1_1)"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+}
