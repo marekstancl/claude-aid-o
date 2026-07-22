@@ -23,6 +23,26 @@ jobs:
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
         timeout-minutes: 5
 
+  plan-boundary-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        # This suite (test-aid-plan-release-boundary.bats) creates a real Git
+        # repository per test and runs a crash/resume matrix and multi-EPIC
+        # fixtures — the last green bash-tests run spent 264s of its 300s
+        # budget elsewhere, leaving ~36s of headroom, while
+        # test-aid-fsm.bats alone measures ~106s locally. Adding this suite
+        # to that job would make unrelated suites fail on timeout, so it
+        # gets its own job with its own budget instead (P064 E-064-1_2 Step 1).
+        run: |
+          sudo apt-get install -y jq bats
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - name: Run plan boundary suite
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats
+        timeout-minutes: 15
+
   vitest:
     runs-on: ubuntu-latest
     steps:

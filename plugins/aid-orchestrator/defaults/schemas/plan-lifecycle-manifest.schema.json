@@ -11,6 +11,10 @@
     "plan_id": { "type": "string", "pattern": "^P[0-9]+$" },
     "source_plan_sha": { "type": "string" },
     "target_branch": { "type": "string" },
+    "mode": {
+      "enum": ["plan_branch", "legacy_epic_release_mode"],
+      "description": "P064 E-064-1_2 Step 3: the authoritative release model for this plan. Absent on a manifest created before P064 (or by ensure_manifest without an explicit mode write) — absence means legacy_epic_release_mode (aid_lifecycle_plan_mode's documented default), never a hard failure. Written durably by aid_lifecycle_set_plan_mode (lib/aid-lifecycle.sh) so a hand-edited/deleted runtime plan-state.yaml can never silently change which model a plan follows."
+    },
     "declared_epics": {
       "type": "array",
       "items": {

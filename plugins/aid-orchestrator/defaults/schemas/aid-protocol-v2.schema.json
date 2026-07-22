@@ -41,7 +41,9 @@
         "delivery_report",
         "verification_report",
         "invalidation_map",
-        "waiver"
+        "waiver",
+        "c3_dispatch",
+        "plan_boundary_manifest"
       ],
       "$comment": "enforced — must stay in sync with VALID_ARTIFACT_TYPES in aid-protocol-validate.sh (test-protocol-validate.sh --consistency)"
     },

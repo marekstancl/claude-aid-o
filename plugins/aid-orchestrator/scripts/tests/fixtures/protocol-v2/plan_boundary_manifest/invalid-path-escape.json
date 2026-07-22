@@ -1,0 +1,46 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "plan_boundary_manifest",
+  "producer": "aid-test@1.0.0",
+  "created_at": "2026-06-23T10:00:00Z",
+  "control_protocol": "aid-2.0",
+  "identity": {"project_id": "test-project", "plan_id": "P900"},
+  "subject": {"subject_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000001"},
+  "revision": {"head_sha": "abc123def456", "head_is_current": true, "freshness": "current"},
+  "status": "pass",
+  "verdict": {"kind": "none", "ready": false},
+  "provenance": {"dispatch_mode": "deterministic", "generated_by_tool": "aid-test"},
+  "plan_boundary_manifest": {
+    "plan_id": "P900",
+    "plan_branch": "plan/P900",
+    "target_branch": "main",
+    "plan_base_commit": "1111111111111111111111111111111111111111",
+    "target_branch_head_at_start": "1111111111111111111111111111111111111111",
+    "target_branch_head_at_candidate_freeze": null,
+    "plan_branch_head": "2222222222222222222222222222222222222222",
+    "candidate_sha": null,
+    "plan_state": "EPIC_INTEGRATION",
+    "mode": "plan_branch",
+    "epics": ["E-900-1_2", "E-900-2_2"],
+    "active_epics": ["E-900-1_2"],
+    "total_epics": 2,
+    "is_plan_final": false,
+    "epic_required_profile": "standard",
+    "plan_final_required_profile": "full",
+    "epic_runs": [
+      {
+        "epic_id": "E-900-1_2",
+        "run_id": "R-E900-1",
+        "task_branch": "task/E-900-1_2/main",
+        "epic_base_commit": "1111111111111111111111111111111111111111",
+        "epic_source_ref": "plan/P900",
+        "lineage": "proven",
+        "epic_merge_commit": null,
+        "evidence_dir": ".aid-o/work/evidence/E-900-1_2/../secret/",
+        "status": "running"
+      }
+    ],
+    "plan_final_run_id": null,
+    "plan_final_evidence_dir": null
+  }
+}
