@@ -15,8 +15,12 @@
 #                             it legibly shows evidence/Reporter/Simplifier/waiver status even in an
 #                             auto-merge run, so an auto-merge is never silent.
 #
-# CYCLE-BREAK (D6/D9): the brief is derived deterministically from release-decision.json and NOTHING
-# else. It reads NO sibling evidence files — not epic-summary.md, not final_report.md, not gates.
+# CYCLE-BREAK (D6/D9): the brief's PAYLOAD is derived deterministically from release-decision.json and
+# NOTHING else. It reads NO sibling evidence files — not epic-summary.md, not final_report.md, not gates.
+# The SINGLE non-file read is `git rev-parse HEAD` (in the decision's own dir) used ONLY to compute the
+# envelope's revision freshness at read time (IMP-264, see _compute_revision_freshness) — the brief must
+# not echo the decision's frozen `head_is_current`/`freshness`, which become false claims once a commit
+# lands. This adds no sibling-file read and is deterministic within a fixed git state.
 # `delivered_summary_ref` is an ALREADY-RESOLVED path inside release-decision.json (the aggregator
 # resolved it in Step 4); this script only ECHOES that string — it never opens or re-derives it.
 #
@@ -129,6 +133,31 @@ build_brief_payload() {
       }'
 }
 
+# _compute_revision_freshness <recorded_head_sha> <decision_file> — echoes two space-separated
+# tokens: `<head_is_current true|false> <freshness current|stale>`, computed AT READ TIME (IMP-264).
+#
+# The brief must NOT echo the decision's stored `revision.head_is_current`/`freshness` — those are a
+# creation-time snapshot that becomes a false claim the instant another commit lands (E-064-1_2: a
+# brief kept claiming currentness for an older revision). Freshness is TRUTH computed here: fresh iff
+# the recorded reference SHA equals the repo's current HEAD. `head_sha` (the reference) is preserved
+# verbatim by the caller; only the boolean/enum are recomputed.
+#
+# Fail toward stale (never silently fresh): a recorded SHA that is not 40-hex, or an unresolvable
+# current HEAD, yields `false stale`. Both SHAs are hex-validated before the comparison (a garbage
+# revision.head_sha can never reach git and can only produce a `stale` verdict).
+_compute_revision_freshness() {
+  local recorded="$1" decision="$2" current=""
+  local hexre='^[0-9a-f]{40}$'
+  # HEAD is resolved from the decision file's own directory (the evidence dir lives inside the
+  # project repo), mirroring how fsm_check_cp3_freshness / c3-dispatch resolve "current".
+  current="$(git -C "$(dirname "$decision")" rev-parse HEAD 2>/dev/null || echo "")"
+  if [[ "$recorded" =~ $hexre && "$current" =~ $hexre && "$recorded" == "$current" ]]; then
+    echo "true current"
+  else
+    echo "false stale"
+  fi
+}
+
 # emit_full_brief <payload> <decision_file> <comm_status> <out_json> — wraps the payload in the
 # protocol-v2 envelope and writes it. Returns non-zero iff the write fails (the redirect is the
 # LAST statement, so its status is the function's status → write-failure is detectable).
@@ -143,7 +172,15 @@ emit_full_brief() {
     id_input="$(jq -c '.identity // null' "$decision" 2>/dev/null || echo null)"
     rev_input="$(jq -c '.revision // null' "$decision" 2>/dev/null || echo null)"
   fi
+  # IMP-264: freshness is computed at read time, not echoed from the decision's frozen snapshot.
+  local recorded_head hic_fresh head_is_current freshness
+  recorded_head="$(printf '%s' "$rev_input" | jq -r '.head_sha // ""' 2>/dev/null || echo "")"
+  hic_fresh="$(_compute_revision_freshness "$recorded_head" "$decision")"
+  head_is_current="${hic_fresh%% *}"   # true|false
+  freshness="${hic_fresh##* }"         # current|stale
   jq -n \
+    --argjson head_is_current "$head_is_current" \
+    --arg freshness "$freshness" \
     --arg schema_version "aid-2.0" \
     --arg artifact_type "pm_decision_brief" \
     --arg producer "aid-pm-brief.sh@1.0" \
@@ -169,8 +206,8 @@ emit_full_brief() {
       subject: {subject_hash: $subject_hash},
       revision: {
         head_sha: (($rev.head_sha // "unknown") | tostring),
-        head_is_current: ($rev.head_is_current // false),
-        freshness: (($rev.freshness // "stale") | tostring)
+        head_is_current: $head_is_current,
+        freshness: $freshness
       },
       status: $status,
       verdict: {kind: "none", ready: false},

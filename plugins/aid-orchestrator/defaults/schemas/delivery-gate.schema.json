@@ -75,7 +75,7 @@
       "properties": {
         "head_sha": {
           "type": "string",
-          "description": "Git HEAD SHA at time of artifact creation"
+          "description": "Git HEAD SHA the gate was produced against — the AUTHORITATIVE reference for freshness (IMP-264). Consumers compute freshness at read time by comparing this against current HEAD."
         },
         "base_sha": {
           "type": "string",
@@ -83,12 +83,12 @@
         },
         "head_is_current": {
           "type": "boolean",
-          "description": "Protocol-level staleness: true if this artifact reflects the current HEAD"
+          "description": "DEPRECATED, NON-AUTHORITATIVE creation-time snapshot (IMP-264): true only because head_sha equalled HEAD at creation. Becomes a false claim once another commit lands; consumers MUST recompute freshness from head_sha, never trust this boolean."
         },
         "freshness": {
           "type": "string",
           "enum": ["current", "stale"],
-          "description": "Protocol-level freshness (current = head_sha matches current HEAD)"
+          "description": "DEPRECATED, NON-AUTHORITATIVE creation-time snapshot (IMP-264). Recompute from head_sha at read time."
         }
       }
     },

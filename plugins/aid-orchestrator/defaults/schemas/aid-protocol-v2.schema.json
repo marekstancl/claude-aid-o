@@ -125,17 +125,17 @@
         "head_sha": {
           "type": "string",
           "minLength": 1,
-          "description": "Git commit SHA of HEAD at time of artifact production. Validator compares against --current-head argument.",
+          "description": "Git commit SHA the artifact was produced against — the AUTHORITATIVE reference for freshness (IMP-264). Consumers compute freshness at READ TIME by comparing this against the current/reviewed HEAD; a post-generation commit makes the artifact stale regardless of the stored head_is_current/freshness. Validator compares against --current-head argument.",
           "$comment": "enforced"
         },
         "head_is_current": {
           "type": "boolean",
-          "description": "Must match the result of comparing head_sha against --current-head. Enforced by validator.",
+          "description": "DEPRECATED, NON-AUTHORITATIVE creation-time snapshot (IMP-264). Reflects only whether head_sha equalled HEAD at production time; it becomes a false claim the instant another commit lands. Consumers MUST NOT trust it as proof of currentness — derive freshness from head_sha at read time. The validator only cross-checks it is consistent with head_sha vs --current-head; it is never the source of truth.",
           "$comment": "enforced"
         },
         "freshness": {
           "enum": ["current", "stale"],
-          "description": "Must be consistent with head_is_current: 'current' iff head_is_current is true.",
+          "description": "DEPRECATED, NON-AUTHORITATIVE creation-time snapshot (IMP-264). Consistent with head_is_current at production time only; recompute from head_sha at read time.",
           "$comment": "enforced"
         }
       },

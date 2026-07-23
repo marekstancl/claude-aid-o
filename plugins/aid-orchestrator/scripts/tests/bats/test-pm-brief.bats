@@ -267,3 +267,52 @@ _d() { jq -r "$1" "$DEC"; }
   [ -f "$BJ" ]
   [ "$(_b '.pm_decision_brief.communication_status')" == "incomplete" ]
 }
+
+# ─── IMP-264: revision freshness is computed at READ TIME, not echoed from the frozen snapshot ──
+#
+@test "IMP-264: recorded head_sha == current HEAD → brief revision is fresh (true/current)" {
+  local GDIR="$TEST_TMPDIR/gitrepo"
+  rm -rf "$GDIR"; mkdir -p "$GDIR/ev"
+  git -C "$GDIR" init -q; git -C "$GDIR" config user.email t@t; git -C "$GDIR" config user.name t
+  git -C "$GDIR" commit -q --allow-empty -m base
+  local head; head="$(git -C "$GDIR" rev-parse HEAD)"
+  jq --arg h "$head" '.release_decision.pm_brief_status="pending" | .revision.head_sha=$h | .revision.head_is_current=true | .revision.freshness="current"' \
+     "$FIXTURE" > "$GDIR/ev/release-decision.json"
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash "$BRIEF" "$GDIR/ev"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.revision.head_is_current' "$GDIR/ev/pm-decision-brief.json")" == "true" ]
+  [ "$(jq -r '.revision.freshness' "$GDIR/ev/pm-decision-brief.json")" == "current" ]
+}
+
+@test "IMP-264: post-generation commit (recorded != current HEAD) → brief revision is stale, head_sha preserved" {
+  local GDIR="$TEST_TMPDIR/gitrepo"
+  rm -rf "$GDIR"; mkdir -p "$GDIR/ev"
+  git -C "$GDIR" init -q; git -C "$GDIR" config user.email t@t; git -C "$GDIR" config user.name t
+  git -C "$GDIR" commit -q --allow-empty -m A
+  local a; a="$(git -C "$GDIR" rev-parse HEAD)"
+  # decision generated at A, claiming currentness (frozen true/current)
+  jq --arg h "$a" '.release_decision.pm_brief_status="pending" | .revision.head_sha=$h | .revision.head_is_current=true | .revision.freshness="current"' \
+     "$FIXTURE" > "$GDIR/ev/release-decision.json"
+  git -C "$GDIR" commit -q --allow-empty -m B    # post-generation commit lands → HEAD moves off A
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash "$BRIEF" "$GDIR/ev"
+  [ "$status" -eq 0 ]
+  # frozen true/current is NOT trusted: read-time freshness against current HEAD → stale
+  [ "$(jq -r '.revision.head_is_current' "$GDIR/ev/pm-decision-brief.json")" == "false" ]
+  [ "$(jq -r '.revision.freshness' "$GDIR/ev/pm-decision-brief.json")" == "stale" ]
+  # the referenced SHA (commit A) is preserved verbatim — freshness is computed, the reference is not rewritten
+  [ "$(jq -r '.revision.head_sha' "$GDIR/ev/pm-decision-brief.json")" == "$a" ]
+}
+
+@test "IMP-264: non-hex / unresolvable recorded head_sha → fail-closed stale (never silently fresh)" {
+  local GDIR="$TEST_TMPDIR/gitrepo"
+  rm -rf "$GDIR"; mkdir -p "$GDIR/ev"
+  git -C "$GDIR" init -q; git -C "$GDIR" config user.email t@t; git -C "$GDIR" config user.name t
+  git -C "$GDIR" commit -q --allow-empty -m base
+  jq '.release_decision.pm_brief_status="pending" | .revision.head_sha="abc123def456" | .revision.head_is_current=true | .revision.freshness="current"' \
+     "$FIXTURE" > "$GDIR/ev/release-decision.json"
+  run env AID_PLUGIN_PATH="$AID_PLUGIN_PATH" bash "$BRIEF" "$GDIR/ev"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.revision.head_is_current' "$GDIR/ev/pm-decision-brief.json")" == "false" ]
+  [ "$(jq -r '.revision.freshness' "$GDIR/ev/pm-decision-brief.json")" == "stale" ]
+  [ "$(jq -r '.revision.head_sha' "$GDIR/ev/pm-decision-brief.json")" == "abc123def456" ]
+}
