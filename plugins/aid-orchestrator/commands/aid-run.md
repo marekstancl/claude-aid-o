@@ -54,6 +54,12 @@ unrecoverable external outage. A recoverable technical problem is not a reason t
   process itself and collect its exit status; `tail -f` is forbidden as a completion detector.
 - If no owned process is alive and no repository/evidence progress occurred for 5 minutes, resume
   or diagnose automatically. Do not wait indefinitely for a missing notification.
+- The concrete supervisor for this contract is `scripts/aid-job.sh` (IMP-262), opt-in at the
+  controller boundary — not a hard precondition and not a release gate. `aid-job.sh run` starts a
+  command in its own process group with a durable record; `status`/`collect` read completion from
+  the owned process + terminal result (PID-reuse-safe, `tail -f` is never liveness, a started
+  job is not evidence); `cancel` signals the recorded group so no child is orphaned; `watchdog`
+  answers `resume_needed` when no owned job is live and no progress occurred within the interval.
 - A test result is valid only for the recorded HEAD/tree and command fingerprint. If relevant files
   change during or after the run, mark the result stale. Never report pass counts without a completed
   result artifact containing command, start/end revision, timestamps, exit code, and counts.

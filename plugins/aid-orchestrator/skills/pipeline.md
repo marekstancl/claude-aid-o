@@ -43,6 +43,31 @@ started-at timestamp, expected p95, and hard deadline. Determine completion from
 exit status. `tail -f` and notification arrival are not completion signals. If there is no live owned
 process and no repository/evidence progress for 5 minutes, resume or diagnose automatically.
 
+The concrete helper implementing this contract is `scripts/aid-job.sh` (IMP-262) — a standalone,
+opt-in supervisor used at the controller boundary in place of `tail -f`/notification waiting. It is
+never a hard FSM/gate precondition and never a release-blocking ceremony:
+
+- `aid-job.sh run --jobs-dir .aid-o/work/jobs [--deadline S] [--repo DIR] -- <cmd>` starts `<cmd>` in
+  its own session/process-group and writes a durable record (id, PID + `/proc` starttime, command
+  fingerprint, start HEAD/tree, timestamps, hard deadline) before exec. The record survives the
+  launching controller: a resumed controller rediscovers the work without relaunching it.
+- `aid-job.sh status --id <id>` derives state from the owned process + terminal result ONLY —
+  `started` / `running` / `terminal_pass` / `terminal_fail` / `timed_out` / `cancelled` / `lost`.
+  It is PID-reuse-safe: an alive-but-reused PID whose `/proc` starttime no longer matches is `lost`,
+  never `running`, and a surviving `tail -f` never makes an exited job look live.
+- `aid-job.sh collect --id <id> [--require-current]` idempotently returns the terminal result and
+  never relaunches. A non-terminal job exits 3 — a started/in-flight job is not test evidence.
+  `--require-current` marks the result `stale` (exit 4) when the tree moved, matching the
+  immutable-revision evidence rule below.
+- `aid-job.sh cancel --id <id>` signals the recorded process group (no orphaned child) and writes a
+  terminal cancellation result.
+- `aid-job.sh watchdog --jobs-dir DIR --last-progress EPOCH --interval S` is the queryable
+  AUTO-liveness half: no live owned job plus no progress within the interval yields `resume_needed`
+  (a query, not a daemon).
+- `aid-job.sh redgreen --baseline <id> --fixed <id>` accepts only paired receipts where the SAME
+  command fails at the baseline revision and passes at the fixed revision; a commit-message-only or
+  non-terminal claim is rejected.
+
 Recoverable technical forks go to the configured Codex adjudicator and are recorded in
 `timeline.jsonl`. Only a decision requiring new authority pauses for the PM: product intent, material
 scope expansion, destructive or externally visible action, security risk acceptance, or access to
