@@ -1114,6 +1114,14 @@ EOF
 }
 
 # Helper: structured lifecycle manifest declaring depends_on_plans.
+# COMMITTED on the target branch (like plan-start writes it in production):
+# IMP-273 routes cmd_init's mode decision through the committed-tree authority
+# `_fsm_declared_plan_mode`, which treats an uncommitted (working-tree-only)
+# manifest as `unresolved` and hard-blocks BEFORE the D1 dependency gate. A real
+# plan's lifecycle manifest is always committed, so committing here keeps this a
+# faithful legacy-plan fixture: the committed manifest carries no plan_branch
+# mode, so the authority resolves legacy_epic_release_mode (a no-op) and control
+# reaches the depends_on_plans gate these tests exercise.
 _seed_manifest() {
   local plan_id="$1" deps_yaml="$2"   # deps_yaml e.g. "[P045]" or "[]"
   mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
@@ -1121,10 +1129,13 @@ _seed_manifest() {
 schema_version: aid-lifecycle-1.0
 repo_id: test
 plan_id: ${plan_id}
+mode: legacy_epic_release_mode
 declared_epics:
   - {id: E-${plan_id#P}-1_1, scope: required}
 depends_on_plans: ${deps_yaml}
 EOF
+  git -C "$TEST_PROJECT_ROOT" add ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "lifecycle manifest ${plan_id}"
 }
 
 # Helper: committed closed receipt (=> aid_plan_closure_state == closed).

@@ -2296,60 +2296,45 @@ cmd_init() {
   [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
 
   if [[ -n "$_pb_plan_id" ]]; then
-    # `aid_lifecycle_plan_mode` reads .aid-lifecycle/manifests/<plan_id>.yaml
-    # off the WORKING TREE (root "." => a plain filesystem -f check), not off
-    # a specific git ref. That file is committed ONLY on target_branch — the
-    # plan branch (and every task branch cut from it) is created from
-    # target_branch's HEAD *before* that commit lands, so it is genuinely
-    # absent from their trees. cmd_init's own PRE-FLIGHT branch enforcement
-    # (below) checks out task/<epic_id>/main and LEAVES it checked out for
-    # the rest of the EPIC's lifecycle — so calling aid_lifecycle_plan_mode
-    # against "." directly would silently read legacy_epic_release_mode on
-    # every invocation except the very first (a fresh call still positioned
-    # on target_branch). Extract the file from target_branch's tree into a
-    # throwaway root via `git show` first, so the mode read is correct
-    # regardless of what is currently checked out — this still calls the
-    # real aid_lifecycle_plan_mode (its parsing/defaulting logic is reused
-    # verbatim), it just supplies the right root instead of trusting CWD.
-    local _pb_mode="" _pb_mode_root="" _pb_target_branch="" _pb_mode_unavailable=""
-    _pb_target_branch="$(aid_target_branch)"
-    _pb_mode_root="$(mktemp -d 2>/dev/null)" || _pb_mode_root=""
-    if [[ -n "$_pb_mode_root" ]]; then
-      trap 'rm -rf "$_pb_mode_root" 2>/dev/null || true' RETURN
-      if git show "${_pb_target_branch}:.aid-lifecycle/manifests/${_pb_plan_id}.yaml" \
-           > "${_pb_mode_root}/manifest.yaml.tmp" 2>/dev/null; then
-        mkdir -p "${_pb_mode_root}/.aid-lifecycle/manifests"
-        mv "${_pb_mode_root}/manifest.yaml.tmp" "${_pb_mode_root}/.aid-lifecycle/manifests/${_pb_plan_id}.yaml"
-      fi
-      _pb_mode="$(aid_lifecycle_plan_mode "$_pb_plan_id" "$_pb_mode_root" 2>/dev/null)" || true
-      rm -rf "$_pb_mode_root" 2>/dev/null || true
-      trap - RETURN
-    else
-      # mktemp failure (e.g. no writable tmp) — this is NOT the same as "no
-      # lifecycle manifest exists": we genuinely cannot determine the mode at
-      # all. Falling back to the CWD-relative read here would silently
-      # reopen the exact bug this fix eliminates (misreads plan_branch as
-      # legacy on any resumed init, since PRE-FLIGHT branch enforcement
-      # leaves CWD on the task branch) — a silent fail-OPEN for precisely
-      # the case this precondition exists to catch. Treat "cannot determine"
-      # as its own hard-block reason instead of guessing legacy.
-      _pb_mode_unavailable="true"
-    fi
-    [[ -z "$_pb_mode" && -z "$_pb_mode_unavailable" ]] && _pb_mode="legacy_epic_release_mode"
+    # Resolve the plan's DECLARED release mode through the ONE committed-tree,
+    # fail-closed authority — `_fsm_declared_plan_mode` (bottom of this file) —
+    # the exact resolver `done-advance` uses (registry row
+    # plan_mode_single_authority). cmd_init PREVIOUSLY called
+    # `aid_lifecycle_plan_mode` directly, which fails OPEN: a missing `yq`, an
+    # unparseable manifest, or an out-of-enum `mode` value all collapsed to
+    # legacy_epic_release_mode, silently skipping THIS security precondition
+    # (the plan-branch lineage check) while done-advance's stronger reader would
+    # have blocked on the same repository state. Routing through the authority
+    # makes every "cannot determine the mode" outcome `unresolved` -> a hard
+    # block with the same audited --force --reason override this block already
+    # uses for its other reasons, never a silent legacy downgrade.
+    #
+    # The authority reads target_branch's COMMITTED tree via `git cat-file` /
+    # `git show` (an untracked working-tree-only manifest is `unresolved`, never
+    # an answer — a tightening over the old reader, which treated it as legacy),
+    # so the happy paths are unchanged: a committed `mode: plan_branch` still
+    # returns plan_branch regardless of what task branch cmd_init has checked
+    # out, and genuine absence (no plan id, no manifest anywhere, no `mode` key)
+    # still returns legacy_epic_release_mode -> no-op. It derives its own plan id
+    # from epic_id with the same `_fsm_epic_plan_nnn` helper this block used, so
+    # its verdict and `_pb_plan_id` always name the same plan.
+    local _pb_mode="" _pb_mode_plan="" _pb_mode_reason=""
+    IFS=$'\t' read -r _pb_mode _pb_mode_plan _pb_mode_reason \
+      < <(_fsm_declared_plan_mode "$epic_id") || true
 
-    if [[ -n "$_pb_mode_unavailable" ]]; then
-      local _pb_reason="plan_mode_unavailable"
-      local _pb_detail="Could not determine release mode for ${_pb_plan_id} (mktemp failed while reading .aid-lifecycle/manifests/${_pb_plan_id}.yaml off ${_pb_target_branch}'s tree) — refusing to guess legacy_epic_release_mode, since that would silently skip lineage verification for a plan that may actually be plan_branch."
+    if [[ "$_pb_mode" == "unresolved" ]]; then
+      local _pb_reason="plan_mode_unresolved"
+      local _pb_detail="Could not determine the release mode for ${_pb_plan_id} (resolver reason: ${_pb_mode_reason:-<none>}) while a plan_branch declaration may exist — refusing to guess legacy_epic_release_mode, since that would silently skip lineage verification for a plan that may actually be plan_branch. Fix the underlying cause (install yq, or repair/commit .aid-lifecycle/manifests/${_pb_plan_id}.yaml on the target branch) rather than overriding."
       local _pb_timeline="${evidence_dir}/timeline.jsonl"
       mkdir -p "$(dirname "$_pb_timeline")" 2>/dev/null || true
       if [[ "$force" == "true" ]]; then
         echo "WARNING: --force used, skipping the plan-branch lineage precondition (reason would have been: ${_pb_reason})." >&2
-        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id" overridden="true"
+        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id" mode_reason="$_pb_mode_reason" overridden="true"
       else
         echo "PRECONDITION FAIL: plan-branch lineage check failed for ${epic_id} (plan ${_pb_plan_id}, reason: ${_pb_reason})." >&2
         echo "${_pb_detail}" >&2
         echo "Override (audited): aid-fsm.sh init ${epic_id} ... --force --reason '<why this override is safe>'" >&2
-        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id"
+        log_event "$_pb_timeline" "fsm_init_blocked" reason="$_pb_reason" epic_id="$epic_id" plan_id="$_pb_plan_id" mode_reason="$_pb_mode_reason"
         exit 1
       fi
     elif [[ "$_pb_mode" == "plan_branch" ]]; then

@@ -2245,7 +2245,13 @@ _pfsm_bootstrap_plan() {
   [ ! -f "$state_file" ]
 }
 
-@test "Regression: mktemp failure while reading the lifecycle mode fails CLOSED (plan_mode_unavailable), never silently falls back to legacy" {
+@test "Regression: mktemp failure while reading the lifecycle mode fails CLOSED (plan_mode_unresolved), never silently falls back to legacy" {
+  # IMP-273: cmd_init now routes its mode decision through the single
+  # committed-tree authority `_fsm_declared_plan_mode`, so an mktemp failure
+  # while it extracts the committed manifest surfaces as `unresolved`
+  # (mode_root_unavailable) -> the unified `plan_mode_unresolved` hard block,
+  # not the old cmd_init-local `plan_mode_unavailable`. Same fail-closed
+  # guarantee, now one authority instead of a second reader.
   _pfsm_bootstrap_plan "P064"
   run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
@@ -2265,7 +2271,7 @@ EOF
   local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
   run env PATH="$fakebin:$PATH" "$FSM" init $args
   [ "$status" -ne 0 ]
-  [[ "$output" == *"plan_mode_unavailable"* ]]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
   [ ! -f "$state_file" ]
 
   # Confirm this is NOT the same as a genuine legacy-mode no-op: the real
@@ -2274,6 +2280,134 @@ EOF
   run "$FSM" init $args
   [ "$status" -eq 0 ]
   [ -f "$state_file" ]
+}
+
+# ─── IMP-273: cmd_init routes its mode decision through the ONE committed-tree,
+#     fail-closed authority (_fsm_declared_plan_mode) — the same resolver
+#     done-advance uses. Every "cannot determine the mode" becomes
+#     `plan_mode_unresolved` (a hard block with the audited --force override),
+#     never a silent legacy downgrade that would skip THIS lineage precondition.
+#     _fsm_init_timeline <state_file> — the timeline cmd_init writes for a block,
+#     derived from the state file's own evidence dir (state file itself is absent
+#     on a fresh init, so its DIRECTORY is the stable anchor).
+_fsm_init_timeline() { echo "$(dirname "$1")/timeline.jsonl"; }
+
+@test "IMP-273: yq absent while a plan_branch declaration is committed blocks cmd_init with plan_mode_unresolved (was a silent legacy downgrade)" {
+  _pfsm_bootstrap_plan "P064"
+  run bash "$PLAN_FSM_CLI" epic-start P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # A PATH holding every tool cmd_init's preamble needs EXCEPT yq — genuinely
+  # absent, the exact case `command -v yq` in the mode authority guards. Not a
+  # stub exiting non-zero; missing entirely.
+  local nobin="$TEST_TMPDIR/nobin-init"; mkdir -p "$nobin"
+  local t p
+  for t in bash sh git grep sed awk cat date mktemp rm mkdir dirname basename \
+           printf tr wc head tail jq env chmod touch cp mv sort id find xargs cut readlink; do
+    p="$(command -v "$t" 2>/dev/null)" || continue
+    ln -sf "$p" "$nobin/$t"
+  done
+  [ ! -e "$nobin/yq" ]
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run env PATH="$nobin" "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ ! -f "$state_file" ]
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .reason' "$tl" | tail -1)" = "plan_mode_unresolved" ]
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "yq_unavailable" ]
+}
+
+@test "IMP-273: an unparseable committed lifecycle manifest blocks cmd_init with plan_mode_unresolved, never a legacy fallback" {
+  _pfsm_bootstrap_plan "P064"
+  # Corrupt the committed declaration on the target branch (main).
+  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ ! -f "$state_file" ]
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "manifest_unparseable" ]
+}
+
+@test "IMP-273: a committed manifest declaring an UNKNOWN mode value blocks cmd_init rather than defaulting to legacy" {
+  _pfsm_bootstrap_plan "P064"
+  yq -i '.mode = "plan_branch_v2"' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "unknown mode value"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ ! -f "$state_file" ]
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "mode_unknown_value_plan_branch_v2" ]
+}
+
+@test "IMP-273: a working-tree-only (uncommitted) plan_branch manifest is 'unresolved' and blocks cmd_init — the intended tightening over the old legacy-treating reader" {
+  # No bootstrap: the declaration exists ONLY in the working tree, never
+  # committed. The old cmd_init reader treated an uncommitted manifest as
+  # legacy/no-op; the unified authority treats a manifest that was typed but
+  # never declared (committed) as unresolved -> a hard block.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests"
+  printf 'schema_version: aid-lifecycle-1.0\nplan_id: P064\nmode: plan_branch\n' \
+    > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  # Untracked: the target branch's committed tree does not know it.
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:.aid-lifecycle/manifests/P064.yaml"
+  [ "$status" -ne 0 ]
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"plan_mode_unresolved"* ]]
+  [ ! -f "$state_file" ]
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .mode_reason' "$tl" | tail -1)" = "manifest_not_committed_on_main" ]
+}
+
+@test "IMP-273: genuine absence (no lifecycle manifest anywhere) resolves legacy and cmd_init proceeds — the pre-P064 no-op is unchanged" {
+  # No plan-start, no lifecycle manifest for P064 anywhere: the authority
+  # returns legacy_epic_release_mode (no_manifest_on_main), so the mode gate is
+  # a no-op and init proceeds exactly as before P064 (mirrors AC2, minus even a
+  # declared legacy manifest).
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml" ]
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args
+  [ "$status" -eq 0 ]
+  [ -f "$state_file" ]
+  local current_branch; current_branch="$(git -C "$TEST_PROJECT_ROOT" rev-parse --abbrev-ref HEAD)"
+  [ "$current_branch" = "task/E-064-1_1/main" ]
+  # The mode gate did NOT fire.
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ ! -f "$tl" ] || [ -z "$(jq -rc 'select(.event=="fsm_init_blocked" and .reason=="plan_mode_unresolved")' "$tl")" ]
+}
+
+@test "IMP-273: --force converts the plan_mode_unresolved block into an AUDITED override, and init proceeds" {
+  _pfsm_bootstrap_plan "P064"
+  printf 'mode: [unclosed\n  : : :\n' > "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P064.yaml"
+  git -C "$TEST_PROJECT_ROOT" add .aid-lifecycle/manifests/P064.yaml
+  git -C "$TEST_PROJECT_ROOT" commit -qm "corrupt the manifest"
+
+  local args; args="$(build_default_init_args E-064-1_1)"
+  local state_file; state_file="$(awk '{print $NF}' <<<"$args")"
+  run "$FSM" init $args --force --reason "IMP-273 test: manifest repair is tracked separately"
+  [ "$status" -eq 0 ]
+  [ -f "$state_file" ]
+  local tl; tl="$(_fsm_init_timeline "$state_file")"
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .reason' "$tl" | tail -1)" = "plan_mode_unresolved" ]
+  [ "$(jq -r 'select(.event=="fsm_init_blocked") | .overridden' "$tl" | tail -1)" = "true" ]
 }
 
 @test "AC4: the lineage check fires on a RESUMED run (state file already present), caught before the generic duplicate-init guard" {
