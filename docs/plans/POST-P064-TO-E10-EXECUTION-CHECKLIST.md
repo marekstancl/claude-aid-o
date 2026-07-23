@@ -3,14 +3,15 @@
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
 **Status:** active PM checklist — P064 complete, Phase 1 is next
-**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–270
+**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–274
 
 ## Current checkpoint
 
 | Item | State |
 |---|---|
 | P064 | **DONE** — both EPICs merged |
-| Main | `2a1ca60` |
+| P064 delivery baseline | `2a1ca60` |
+| Checklist handoff on `main` | `e1341be` |
 | Local release | `v2.61.0` at `193fd4a` |
 | Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
