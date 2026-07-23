@@ -4125,6 +4125,164 @@ YAML
   [[ "$output" == "blocked:E-064-2_1:dependency_merge_target_missing:E-063-1_1" ]]
 }
 
+# ─── IMP-272: merge_target authorization — both twins refuse an illegal anchor ─
+# The Auditor's attack: a hand-edited dependency whose `merge_target` names a
+# resolvable ref OTHER than the entry's own plan branch or the target branch —
+# most sharply, the dependency's OWN task branch, whose ancestry against itself
+# is trivially true. That self-satisfied the ancestry proof and unblocked work
+# provably never in plan/P064. `_dep_valid_branch_ref`/`_queue_valid_branch_ref`
+# only prove the value is a legal ref NAME; they do not constrain WHICH ref, so
+# the constraint lives in a dedicated CHANGE-BOTH twin
+# (aid-fsm.sh:_dep_merge_target_authorized ⇄
+#  lib/aid-queue-write.sh:_queue_merge_target_authorized).
+@test "IMP-272: a merge_target that is neither the own plan branch nor the target branch is refused by both twins" {
+  _pfsm_bootstrap_plan "P064"
+  # task/E-064-1_1/main carries a commit that is provably NOT in plan/P064.
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main plan/P064
+  [ "$status" -ne 0 ]
+
+  # Two more resolvable refs that DO contain the work — so ancestry against them
+  # is genuinely true and the attack would otherwise succeed — yet neither is an
+  # authorized anchor: another plan's branch, and an arbitrary feature branch.
+  git -C "$TEST_PROJECT_ROOT" branch plan/P063 task/E-064-1_1/main
+  git -C "$TEST_PROJECT_ROOT" branch feature/rogue task/E-064-1_1/main
+
+  # _neg <merge_target> — write the fixture, assert BOTH twins refuse.
+  _neg() {
+    local mt="$1"
+    _qw_write_queue <<YAML
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: merged_to_plan
+    plan_id: "P064"
+    merge_target: "${mt}"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+
+    # WRITER (queue_claim_next): the dependent is BLOCKED, never claimed, and
+    # the illegal value class is named in a durable reason.
+    _qw claim-next P064
+    [ "$status" -eq 1 ]
+    [[ "$output" == "blocked:E-064-2_1:dependency_merge_target_unauthorized:E-064-1_1" ]]
+    [ "$(_qw_field E-064-2_1 status)" = "blocked" ]
+
+    # READER (aid-fsm queue-revalidate): fail-loud, not a comfortable blocked.
+    _qw_revalidate "E-064-2_1"
+    [ "$status" -eq 1 ]
+    [ "$output" = "failed" ]
+    grep -q '"reason":"merge_target_unauthorized"' "$TEST_TMPDIR/queue-tl.jsonl"
+  }
+
+  _neg "task/E-064-1_1/main"   # the demonstrated self-branch attack
+  _neg "plan/P063"             # another plan's branch
+  _neg "feature/rogue"         # an arbitrary feature branch
+}
+
+# ─── IMP-272: the guard does not over-block — legal anchors still resolve ──
+@test "IMP-272: an own plan branch, the target branch, and a legacy absent merge_target all still resolve; a null-plan_id plan target does not" {
+  _pfsm_bootstrap_plan "P064"
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  # Land the work on plan/P064 (own plan branch) AND on main (target branch),
+  # so both legal anchors are genuine ancestors.
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "release plan/P064" plan/P064
+
+  # _pos <plan_id_yaml> <merge_target> — both twins must UNBLOCK/claim.
+  _pos() {
+    local pid="$1" mt="$2"
+    _qw_write_queue <<YAML
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: merged_to_plan
+    plan_id: ${pid}
+    merge_target: "${mt}"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+    _qw_revalidate "E-064-2_1"
+    [ "$status" -eq 0 ]
+    [ "$output" = "unblocked" ]
+    _qw claim-next P064
+    [ "$status" -eq 0 ]
+    [ "$output" = "E-064-2_1" ]
+  }
+
+  _pos '"P064"' "plan/P064"   # legal same-plan own plan branch
+  _pos '"P064"' "main"        # legal cross-plan target branch
+  _pos 'null'   "main"        # null plan_id: only the target branch is legal
+
+  # Legacy absent-merge_target path is unchanged: the pre-P064 status fallback
+  # still governs, with no authorization gate in the way.
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: completed
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+  # No merge_target on the dependency → the legacy `completed` synonym still
+  # reads as delivered (the pre-P064 behaviour this fix must not disturb).
+  run bash -c 'source "$1"; _queue_dep_state "E-064-1_1" "$2" "$3"' _ \
+    "$(_qw_lib)" "$(_qw_queue)" "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "merged" ]
+
+  # null-plan_id with a plan/<x> target is the honest rejection: an entry that
+  # belongs to no plan cannot legitimately declare plan/<anything>, so only the
+  # target branch is legal there.
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: merged_to_plan
+    plan_id: null
+    merge_target: "plan/P064"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+  _qw claim-next P064
+  [ "$status" -eq 1 ]
+  [[ "$output" == "blocked:E-064-2_1:dependency_merge_target_unauthorized:E-064-1_1" ]]
+  _qw_revalidate "E-064-2_1"
+  [ "$status" -eq 1 ]
+  [ "$output" = "failed" ]
+}
+
 # ─── queue_set_status: terminal statuses have no way out ──────────────────
 @test "queue_set_status refuses to move an entry out of a terminal status" {
   _qw_write_queue <<'YAML'
@@ -6406,3 +6564,4 @@ YAML
   [ -z "$output" ]
   grep -q 'HOISTED it ~250 lines ABOVE this block' "$FSM"
 }
+

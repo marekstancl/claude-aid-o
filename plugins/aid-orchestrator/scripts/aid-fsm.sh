@@ -5383,6 +5383,47 @@ _queue_entry_merge_target() {
   printf '%s' "$mt"
 }
 
+# _queue_entry_plan_id <dep> <queue_json> — the `plan_id` THIS dependency
+# declares it belongs to. Empty when the entry carries no plan_id, or carries
+# the YAML literal `null` (which _queue_parse_to_json emits as the four-char
+# string "null" — see the awk block above). Used only to decide, in
+# _dep_merge_target_authorized, whether a declared `plan/<x>` target names the
+# entry's OWN plan.
+_queue_entry_plan_id() {
+  local dep="$1" queue_json="$2" pid
+  pid=$(echo "$queue_json" | jq -r --arg d "$dep" \
+    '[.[] | select(.epic_id==$d) | (.plan_id // "")] | .[0] // ""' 2>/dev/null)
+  [[ "$pid" == "null" || "$pid" == "~" ]] && pid=""
+  printf '%s' "$pid"
+}
+
+# _dep_merge_target_authorized <declared> <own_plan_id> — IMP-272.
+#
+# A `merge_target` is read straight out of the hand-editable queue file, and
+# ancestry is proven AGAINST it — so a value the attacker controls is the ref
+# the proof is anchored to. `_dep_valid_branch_ref` only asks "is this a legal
+# ref name?"; it happily accepts the dependency's OWN task branch, whose
+# ancestry against itself is trivially true, so pointing a dependency at
+# `task/<its own id>/main` self-satisfied the check and unblocked work that was
+# provably never in `plan/<plan>`. This predicate constrains the value to the
+# only two refs the substrate ever legitimately writes there:
+#   * `plan/<own_plan_id>` — a same-plan dependency, still on its plan branch;
+#   * the resolved target branch (`_queue_merge_target`) — a cross-plan
+#     dependency already released to main/master.
+# Any OTHER ref that resolves (an EPIC task branch, another plan's branch, an
+# arbitrary feature branch) is refused fail-loud by the caller, never treated
+# as proof. An entry with `plan_id: null` has no owning plan, so `plan/<...>` is
+# impossible for it and only the target branch is legal.
+#
+# CONTRACT TWIN of lib/aid-queue-write.sh:_queue_merge_target_authorized, which
+# enforces the same rule for the WRITE side (queue_claim_next). CHANGE BOTH.
+_dep_merge_target_authorized() {
+  local declared="$1" own_plan="$2"
+  [[ "$declared" == "$(_queue_merge_target)" ]] && return 0
+  [[ -n "$own_plan" && "$declared" == "plan/${own_plan}" ]] && return 0
+  return 1
+}
+
 # _dep_evidence_state <dep> — echo "DONE" if ANY of the dep's evidence runs is
 # state: DONE, else the last-seen state, else empty. Never fails (find on a
 # missing dir yields nothing).
@@ -5493,6 +5534,21 @@ _revalidate_one_dep() {
       # "blocked" answer — treating it as blocked would hide it forever.
       log_event "$timeline_path" "queue_dep_unresolved" \
         epic_id="$dep" reason="merge_target_missing" merge_target="$declared"
+      echo "failed"; return 1
+    fi
+    # IMP-272: syntactic legality is not authorization. A merge_target may only
+    # be the entry's own plan branch or the resolved target branch; any OTHER
+    # resolvable ref (the dep's own task branch, another plan's branch, a
+    # feature branch) would self-satisfy the ancestry check, so it is refused
+    # fail-loud rather than believed. reason names the illegal value class.
+    # ORDER MATTERS (IMP-272 review finding): resolvability is checked FIRST,
+    # exactly like the writer twin (_queue_dep_state), so a target that is both
+    # unauthorized and non-resolving yields the SAME reason class on both
+    # halves (target_missing/merge_target_missing), never divergent codes for
+    # one queue state. CHANGE BOTH.
+    if ! _dep_merge_target_authorized "$declared" "$(_queue_entry_plan_id "$dep" "$queue_json")"; then
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_unauthorized" merge_target="$declared"
       echo "failed"; return 1
     fi
     target="$declared"

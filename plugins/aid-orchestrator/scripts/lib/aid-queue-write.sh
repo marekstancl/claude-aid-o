@@ -180,7 +180,7 @@
 #       transaction failure at the `intent` phase — no Git action has happened
 #       at the point where these functions are called.
 #
-# **Last Updated:** 2026-07-22
+# **Last Updated:** 2026-07-23
 # =============================================================================
 
 _AID_QUEUE_WRITE_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -706,22 +706,67 @@ _queue_resolve_dep_branch() {
   return 0
 }
 
+# _queue_target_branch <root> — the resolved cross-plan target branch: the ref
+# a RELEASED dependency's merge_target is rewritten to (plan-merge-to-main).
+# CONTRACT TWIN of aid-fsm.sh:_queue_merge_target (main → master → HEAD). Used
+# only by _queue_merge_target_authorized to recognise the target-branch case.
+_queue_target_branch() {
+  local root="$1"
+  if git -C "$root" show-ref --verify --quiet refs/heads/main; then echo main
+  elif git -C "$root" show-ref --verify --quiet refs/heads/master; then echo master
+  else echo HEAD; fi
+}
+
+# _queue_merge_target_authorized <declared> <own_plan> <root> — IMP-272.
+#
+# A `merge_target` is read straight out of the hand-editable queue file, and
+# `git merge-base --is-ancestor <branch> <merge_target>` is proven AGAINST it —
+# so a value the attacker controls is the very ref the proof is anchored to.
+# `_queue_valid_branch_ref` only asks "is this a legal ref name?"; it accepts
+# the dependency's OWN task branch, whose ancestry against itself is trivially
+# true, so pointing a dependency at `task/<its own id>/main` self-satisfied the
+# check and marked work `merged` that was provably never in `plan/<plan>`. This
+# predicate constrains the value to the only two refs the substrate ever
+# legitimately writes there:
+#   * `plan/<own_plan>` — a same-plan dependency, still on its plan branch;
+#   * the resolved target branch (_queue_target_branch) — a cross-plan
+#     dependency already released to main/master.
+# Any OTHER ref that resolves (an EPIC task branch, another plan's branch, an
+# arbitrary feature branch) is refused by _queue_dep_state, never treated as
+# proof. An entry with no plan_id (`plan_id: null`, read back as empty) has no
+# owning plan, so `plan/<...>` is impossible for it and only the target branch
+# is legal.
+#
+# CONTRACT TWIN of aid-fsm.sh:_dep_merge_target_authorized, which enforces the
+# same rule for the READ side (queue-revalidate). CHANGE BOTH.
+_queue_merge_target_authorized() {
+  local declared="$1" own_plan="$2" root="$3"
+  [[ "$declared" == "$(_queue_target_branch "$root")" ]] && return 0
+  [[ -n "$own_plan" && "$declared" == "plan/${own_plan}" ]] && return 0
+  return 1
+}
+
 # ---------------------------------------------------------------------------
 # _queue_dep_state <dep> <file> <root> — is this dependency delivered?
 # Echoes exactly one of:
-#   merged           proven: its branch is an ancestor of its declared
-#                    merge_target (or, for a LEGACY entry with no
-#                    merge_target, its status says so).
-#   unmerged         branch exists, is not contained in merge_target.
-#   no_proof         merge_target declared but no live branch to prove
-#                    ancestry with — a deleted branch is NOT proof, and
-#                    neither is a status field (see the header).
-#   abandoned        terminal-not-delivered (abandoned/superseded).
-#   target_missing   the declared merge_target ref does not resolve.
-#   invalid_id       <dep> is not a well-formed id — the queue file is corrupt
-#                    or hand-edited. NEVER interpolated anywhere (CP2 finding
-#                    1: a dep id is read straight out of a hand-editable file
-#                    and is untrusted input, exactly like a caller argument).
+#   merged             proven: its branch is an ancestor of its declared
+#                      merge_target (or, for a LEGACY entry with no
+#                      merge_target, its status says so).
+#   unmerged           branch exists, is not contained in merge_target.
+#   no_proof           merge_target declared but no live branch to prove
+#                      ancestry with — a deleted branch is NOT proof, and
+#                      neither is a status field (see the header).
+#   abandoned          terminal-not-delivered (abandoned/superseded).
+#   target_missing     the declared merge_target ref is unusable or does not
+#                      resolve.
+#   target_unauthorized  the declared merge_target resolves but is neither the
+#                      entry's own plan branch nor the target branch (IMP-272):
+#                      an illegal anchor for the ancestry proof, refused rather
+#                      than believed.
+#   invalid_id         <dep> is not a well-formed id — the queue file is corrupt
+#                      or hand-edited. NEVER interpolated anywhere (CP2 finding
+#                      1: a dep id is read straight out of a hand-editable file
+#                      and is untrusted input, exactly like a caller argument).
 # Lock-free; git reads only.
 # ---------------------------------------------------------------------------
 _queue_dep_state() {
@@ -756,6 +801,19 @@ _queue_dep_state() {
   if ! _queue_valid_branch_ref "$mt" \
      || ! git -C "$root" rev-parse --verify --quiet "${mt}^{commit}" >/dev/null 2>&1; then
     echo "target_missing"; return 0
+  fi
+
+  # IMP-272: a resolvable ref is not yet an AUTHORIZED anchor for the ancestry
+  # proof. Constrain it to the entry's own plan branch or the resolved target
+  # branch; any other resolvable ref (the dep's own task branch — the demonstrated
+  # attack — another plan's branch, an arbitrary feature branch) is refused, so a
+  # dependent is never claimed on a self-satisfying anchor. `plan_id` is read from
+  # the same hand-editable entry; queue_get_field maps a `null`/absent plan_id to
+  # empty, which leaves only the target branch legal (an entry with no owning plan
+  # cannot legitimately declare `plan/<x>`).
+  local own_plan; own_plan="$(queue_get_field "$dep" plan_id "$file")"
+  if ! _queue_merge_target_authorized "$mt" "$own_plan" "$root"; then
+    echo "target_unauthorized"; return 0
   fi
 
   # Contract twin of aid-fsm.sh:_resolve_dep_branch — see the block comment
@@ -1085,6 +1143,10 @@ queue_claim_next() {
           local dep_plan; dep_plan="$(queue_get_field "$dep" plan_id "$file")"
           reason="dependency_abandoned:${dep}:plan=${dep_plan:-none}" ;;
         target_missing) reason="dependency_merge_target_missing:${dep}" ;;
+        # IMP-272: the declared merge_target resolves but is an illegal anchor
+        # (its own task branch / another plan's branch / a feature branch). Keep
+        # the dependent BLOCKED with the illegal value class named, never claim it.
+        target_unauthorized) reason="dependency_merge_target_unauthorized:${dep}" ;;
         no_proof)       reason="dependency_no_ancestry_proof:${dep}" ;;
         *)              reason="dependency_unmerged:${dep}" ;;
       esac
