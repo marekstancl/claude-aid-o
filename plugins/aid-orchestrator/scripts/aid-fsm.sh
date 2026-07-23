@@ -3115,6 +3115,34 @@ cmd_verify_state() {
   echo "{\"state\":\"${state}\",\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"current_step\":${current_step},\"total_steps\":${total_steps},\"allowed_transitions\":${allowed_json}${done_phase_json}}"
 }
 
+# ─── IMP-263: idempotent, step-bound step-transition helpers ────────────────
+# Canonical sha256 of plan.json steps[idx] (sorted keys, compact) — the hash a
+# step-verify binding pins itself to. Empty (exit 0) when plan.json/jq/idx are
+# unavailable, so every caller stays set -e safe and degrades gracefully.
+_increment_plan_step_hash() {
+  local plan_json="${1:-}" idx="${2:-}"
+  [[ -f "$plan_json" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  [[ "$idx" =~ ^[0-9]+$ ]] || return 0
+  local canon
+  canon=$(jq -S -c --argjson i "$idx" '.steps[$i] // null' "$plan_json" 2>/dev/null) || return 0
+  [[ -z "$canon" || "$canon" == "null" ]] && return 0
+  printf '%s' "$canon" | sha256sum | awk '{print $1}'
+}
+
+# Look up an idempotency token in the append-only transition ledger. Prints the
+# LAST matching entry's "from<TAB>to" (empty when absent / jq unavailable / no
+# ledger). Last-wins so a legitimately re-appended token reads its final target.
+_increment_ledger_lookup() {
+  local ledger="${1:-}" token="${2:-}"
+  [[ -n "$token" && -f "$ledger" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+  jq -rs --arg t "$token" \
+    'map(select(.token == $t)) | last
+     | if . == null then "" else "\(.from)\t\(.to)" end' \
+    "$ledger" 2>/dev/null || return 0
+}
+
 cmd_increment_step() {
   local state_file="$1"
   local force="false"
@@ -3147,6 +3175,43 @@ cmd_increment_step() {
     fi
   done
   blocked_checks="${blocked_checks// /}"; blocked_checks="${blocked_checks#,}"; blocked_checks="${blocked_checks%,}"
+
+  # ── IMP-263: idempotent, step-bound transition (replay + crash recovery) ────
+  # The transition ledger records every applied step advance keyed by the
+  # idempotency_token carried in the step-verify evidence. This short-circuit
+  # runs BEFORE the preconditions and mutation, for BOTH --force and normal
+  # calls, so:
+  #   * A REPLAY (the E-064-1_2 double-advance: the controller misread the old
+  #     bare-numeric stdout as an error and re-invoked; a copied prior verify
+  #     file carried the SAME already-applied token) returns `already_applied`
+  #     with exit 0 and NEVER advances current_step again.
+  #   * CRASH RECOVERY: if a prior invocation appended the ledger entry but died
+  #     before the current_step bump, current_step still reads `from`. We repair
+  #     it to the recorded `to` (self-heal) and report already_applied — so the
+  #     ledger-then-state pair is effectively atomic (old-valid or new-valid),
+  #     never a double advance, and never requires manual fsm-state.yaml editing.
+  local _idem_verify="${evidence_dir}/step-${step}-verify.md"
+  local _idem_ledger="${evidence_dir}/step-transition-ledger.jsonl"
+  local _idem_token _idem_hit
+  _idem_token=$(yaml_field "$_idem_verify" idempotency_token)
+  _idem_hit=$(_increment_ledger_lookup "$_idem_ledger" "$_idem_token")
+  if [[ -n "$_idem_hit" ]]; then
+    local _idem_from="${_idem_hit%%$'\t'*}" _idem_to="${_idem_hit##*$'\t'}"
+    # IMP-263 review MEDIUM: the ledger is not hash-guarded (unlike plan.json),
+    # so a forged row {from,to} must not let self-heal jump current_step by more
+    # than one. A legitimate record path ALWAYS writes to = from+1; enforce that
+    # exactly here, so a `{from:1,to:99}` row can never skip steps 2..N.
+    if [[ "$_idem_from" =~ ^[0-9]+$ && "$_idem_to" =~ ^[0-9]+$ \
+          && "$step" == "$_idem_from" && "$_idem_to" -eq $(( _idem_from + 1 )) ]]; then
+      local _heal_tmp="${state_file}.tmp"
+      sed "s/^current_step: .*/current_step: ${_idem_to}/" "$state_file" > "$_heal_tmp" && mv "$_heal_tmp" "$state_file"
+      local _idem_tl; _idem_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_idem_tl" ]] && log_event "$_idem_tl" "step_transition_recovered" \
+        token="$_idem_token" from="$_idem_from" to="$_idem_to"
+    fi
+    echo "status=already_applied step=${_idem_to} token=${_idem_token}"
+    return 0
+  fi
 
   # Precondition: step verification evidence must exist + content checks.
   # Each failure goes through _increment_fail (message → timeline event → exit 1).
@@ -3315,6 +3380,93 @@ Reason: Mid-EPIC plan.json edits could expand step.outputs to allow scope creep.
 Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       fi
     fi
+
+    # ── IMP-263: step-bound evidence binding (fresh, non-replay token) ────────
+    # Validate the binding carried in step-${step}-verify.md against the LIVE
+    # plan.json + fsm-state BEFORE any mutation. Filename + `## Result: PASS` are
+    # not sufficient: a step-0 verify copied to step-1-verify.md fails here
+    # because its step_index / step_id / plan_step_hash / reviewed_commit still
+    # name step 0. (A copied file whose token was already applied never reaches
+    # this point — the idempotency short-circuit returned already_applied first.)
+    #
+    # LEGACY COMPAT: a verify file with NO binding fields (runs created before
+    # this change) is accepted by default and emits a `step_binding_absent`
+    # observe event. AID_STEP_BINDING=strict requires the binding on every
+    # non-grandfathered run — unbound evidence is then rejected, so new/strict
+    # runs never silently accept it.
+    local _bind_index _bind_id _bind_hash _bind_commit _bind_token
+    _bind_index=$(yaml_field "$verify_file" step_index)
+    _bind_id=$(yaml_field "$verify_file" step_id)
+    _bind_hash=$(yaml_field "$verify_file" plan_step_hash)
+    _bind_commit=$(yaml_field "$verify_file" reviewed_commit)
+    _bind_token=$(yaml_field "$verify_file" idempotency_token)
+
+    if [[ -z "$_bind_token" && -z "$_bind_index" && -z "$_bind_hash" && -z "$_bind_commit" ]]; then
+      local _bind_mode="${AID_STEP_BINDING:-observe}"
+      if [[ "$_bind_mode" == "strict" ]] && ! fsm_check_grandfather; then
+        _increment_fail missing_step_binding \
+          "PRECONDITION FAIL: step verification carries no IMP-263 binding (strict mode)." \
+          "File: ${verify_file}" \
+          "Required fields: step_index, step_id, plan_step_hash, reviewed_commit, idempotency_token." \
+          "A strict run must bind evidence to the exact plan step and reviewed commit."
+      fi
+      local _bind_tl; _bind_tl=$(derive_timeline "$state_file") || true
+      [[ -n "$_bind_tl" ]] && log_event "$_bind_tl" "step_binding_absent" step="$step" mode="$_bind_mode"
+    else
+      # A partial binding (any field present) MUST carry a non-empty token — the
+      # replay/ledger key — otherwise it can neither be deduped nor recorded.
+      [[ -n "$_bind_token" ]] || _increment_fail binding_missing_token \
+        "PRECONDITION FAIL: partial step binding present but idempotency_token is empty." \
+        "File: ${verify_file}" \
+        "Supply a non-empty idempotency_token alongside the binding fields."
+
+      # step_index must name the CURRENT step (rejects a copied/renamed file for
+      # another step, and any stale/future-step evidence).
+      if [[ -n "$_bind_index" && "$_bind_index" != "$step" ]]; then
+        _increment_fail binding_step_index_mismatch \
+          "PRECONDITION FAIL: binding step_index=${_bind_index} != current_step=${step}." \
+          "File: ${verify_file}" \
+          "A verify file bound to another step (e.g. a copied step-${_bind_index} file) cannot complete step ${step}."
+      fi
+
+      # step_id + plan_step_hash must match the LIVE plan.json step (rejects
+      # wrong-plan / mismatched-step evidence). Skipped only when plan.json/jq
+      # are unavailable — step_index + token still bind in that degraded case.
+      if [[ -f "$_plan_json" ]] && command -v jq >/dev/null 2>&1; then
+        local _live_id _live_hash
+        _live_id=$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$_plan_json" 2>/dev/null || echo "")
+        _live_hash=$(_increment_plan_step_hash "$_plan_json" "$step")
+        if [[ -n "$_bind_id" && -n "$_live_id" && "$_bind_id" != "$_live_id" ]]; then
+          _increment_fail binding_step_id_mismatch \
+            "PRECONDITION FAIL: binding step_id='${_bind_id}' != plan step ${step} id='${_live_id}'." \
+            "File: ${verify_file}" \
+            "The evidence is bound to a different plan step (stale/copied/wrong-plan)."
+        fi
+        if [[ -n "$_bind_hash" && -n "$_live_hash" && "$_bind_hash" != "$_live_hash" ]]; then
+          _increment_fail binding_plan_step_hash_mismatch \
+            "PRECONDITION FAIL: binding plan_step_hash does not match plan.json step ${step}." \
+            "File: ${verify_file}" \
+            "binding hash: ${_bind_hash}" \
+            "live hash:    ${_live_hash}" \
+            "The evidence is bound to a different plan-step definition (wrong-plan / mutated step)."
+        fi
+      fi
+
+      # reviewed_commit must be the current HEAD (the step's own commit) —
+      # rejects wrong-commit / stale evidence bound to an earlier step's commit.
+      # Skipped when HEAD is unresolvable (no git / detached) — degraded, other
+      # bindings still hold.
+      if [[ -n "$_bind_commit" ]]; then
+        local _head_commit
+        _head_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+        if [[ -n "$_head_commit" && "$_bind_commit" != "$_head_commit" ]]; then
+          _increment_fail binding_wrong_commit \
+            "PRECONDITION FAIL: binding reviewed_commit=${_bind_commit} is not current HEAD=${_head_commit}." \
+            "File: ${verify_file}" \
+            "The reviewed commit must be this step's commit at HEAD (wrong-commit / stale evidence rejected)."
+        fi
+      fi
+    fi
   else
     fsm_handle_force_override "step-${step}" "step-$((step + 1))" "$state_file" "increment-step" "${@:3}"
     echo "WARNING: --force used, skipping step verification check" >&2
@@ -3386,6 +3538,33 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       --evidence-dir "$evidence_dir" --reason "explicit_blocked_checks_waiver"
   else
     fsm_check_orphan_dispatches "$evidence_dir"   # dies on orphan
+  fi
+
+  # ── IMP-263: record the transition in the ledger, THEN bump current_step ────
+  # Ledger append first (durable temp+mv → never a partially-written ledger),
+  # current_step bump second. A crash BETWEEN the two is repaired on the next
+  # invocation by the idempotency short-circuit above (ledger → state self-heal),
+  # so the pair is effectively atomic: old-valid or new-valid, never a double
+  # advance. Force transitions are ledgered too, so a forced replay is idempotent.
+  # Only runs when the evidence carries a token and step is numeric.
+  if [[ "$step" =~ ^[0-9]+$ ]] && command -v jq >/dev/null 2>&1; then
+    local _rec_verify="${evidence_dir}/step-${step}-verify.md"
+    local _rec_ledger="${evidence_dir}/step-transition-ledger.jsonl"
+    local _rec_token
+    _rec_token=$(yaml_field "$_rec_verify" idempotency_token)
+    if [[ -n "$_rec_token" ]]; then
+      local _rec_id _rec_hash _rec_commit _rec_line _rec_tmp
+      _rec_id=$(yaml_field "$_rec_verify" step_id)
+      _rec_hash=$(yaml_field "$_rec_verify" plan_step_hash)
+      _rec_commit=$(yaml_field "$_rec_verify" reviewed_commit)
+      _rec_line=$(jq -cn --arg tok "$_rec_token" --argjson si "$step" --arg sid "$_rec_id" \
+        --arg ph "$_rec_hash" --arg rc "$_rec_commit" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{token:$tok, step_index:$si, step_id:$sid, plan_step_hash:$ph, reviewed_commit:$rc, from:$si, to:($si + 1), applied_at:$at}' 2>/dev/null) || _rec_line=""
+      if [[ -n "$_rec_line" ]]; then
+        _rec_tmp="${_rec_ledger}.tmp.$$"
+        { [[ -f "$_rec_ledger" ]] && cat "$_rec_ledger"; printf '%s\n' "$_rec_line"; } > "$_rec_tmp" && mv "$_rec_tmp" "$_rec_ledger"
+      fi
+    fi
   fi
 
   local tmp="${state_file}.tmp"
@@ -3483,7 +3662,12 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
     fi
   fi
 
-  echo "$((step + 1))"
+  # ── IMP-263: machine-readable stdout contract ────────────────────────────
+  # Was `echo "$((step + 1))"` — a bare integer the controller misread as an
+  # exit/error code (the E-064-1_2 double-advance trigger). The result is now a
+  # stable key=value line; the controller parses `status=`, never bare stdout.
+  # Exit code stays 0 here; preconditions exit non-zero via _increment_fail/die.
+  echo "status=advanced advanced_from=${step} advanced_to=$((step + 1))"
 }
 
 cmd_get_field() {

@@ -426,10 +426,44 @@ Verdict: MATCH / PARTIAL / MISMATCH
 - type: {component|pattern|convention} — {summary} (source_file: {path})
 - N/A — no new reusable patterns introduced (reason: {why})
 
+step_index: {N}
+step_id: {plan.json steps[N].id}
+plan_step_hash: {see recipe below}
+reviewed_commit: {git rev-parse HEAD — the step's own commit}
+idempotency_token: {a token unique to this step's evidence, e.g. {epic_id}-{run_id}-step-{N}-{short-HEAD}}
+
 ## Result: PASS / FAIL
 ```
 
-On PASS: `aid-fsm.sh increment-step <state_file>` (refuses without step-verify.md)
+**Step-binding block (IMP-263, required for new/strict runs).** The five
+`key: value` lines above bind the evidence to the exact plan step and reviewed
+commit so a copied/renamed prior verify file cannot complete a later step, and
+so a re-invoked `increment-step` is idempotent. Compute `plan_step_hash` the
+same way the FSM validates it (canonical, no trailing newline):
+
+```bash
+plan_step_hash=$(printf '%s' "$(jq -S -c ".steps[$N]" "$evidence_dir/plan.json")" | sha256sum | awk '{print $1}')
+```
+
+`reviewed_commit` MUST be the current `HEAD` (this step's own commit — write the
+verify file AFTER the per-step commit). `idempotency_token` is the replay key:
+it is recorded in `step-transition-ledger.jsonl` on advance, and a second call
+carrying an already-recorded token returns `already_applied` without advancing.
+
+On PASS: `aid-fsm.sh increment-step <state_file>` (refuses without step-verify.md).
+**Read the machine-readable stdout, never a bare number:**
+- `status=advanced advanced_from=<N> advanced_to=<N+1>` (exit 0) — the step advanced.
+- `status=already_applied step=<N+1> token=<tok>` (exit 0) — this transition was
+  already recorded (replay or crash-recovery self-heal); current_step is unchanged
+  or repaired to the recorded target. **This is success, not an error — do NOT
+  re-invoke** (the E-064-1_2 double-advance came from misreading the old bare `1`
+  stdout as an error and calling `increment-step` again).
+- Non-zero exit — a precondition failed (see stderr). Fix and retry; do not force
+  past a `binding_*` rejection (stale/wrong-plan/wrong-commit/mismatched-step evidence).
+
+Legacy compatibility: a verify file with no step-binding block still advances by
+default (a `step_binding_absent` observe event is logged). Set
+`AID_STEP_BINDING=strict` to require the binding on every non-grandfathered run.
 On FAIL: resume agent with specific failures (max 2 attempts → ESCALATION)
 
 **Visual verification protocol (frontend steps with visual_refs):**
@@ -519,6 +553,16 @@ After step implementation + step-N-verify.md write, before `aid-fsm.sh increment
      consumers (EXECUTE→GATES) still accept `checkpoint: cp3`.
    - **Produces a `step_commit` event** at the step-advance tail (`step_n`, `commit_sha=HEAD`) — the
      boundary marker the next step's cp2 classify consumes for its diff range.
+   - **Validates the IMP-263 step-binding** when present: `step_index` must equal `current_step`,
+     `step_id`/`plan_step_hash` must match the live `plan.json` step, `reviewed_commit` must be
+     current HEAD. A copied/renamed prior verify file is rejected (`binding_*` reasons) before any
+     mutation. Absent binding → `step_binding_absent` observe event (or hard fail under
+     `AID_STEP_BINDING=strict` on a non-grandfathered run).
+   - **Idempotent + crash-safe**: the accepted `idempotency_token` and the `current_step` bump commit
+     together via `step-transition-ledger.jsonl` (ledger append, then state bump). A replayed token
+     returns `status=already_applied` without advancing; a crash between ledger and state is repaired
+     on the next call (`step_transition_recovered`), so the pair is old-valid or new-valid — never a
+     double advance. The controller reads `status=`, never bare stdout.
 
 4. **Repeated-fail telemetry**:
    - `fsm_precondition_repeated_fail_step` (same step + same precondition × 3) → step is structurally problematic.
@@ -2260,7 +2304,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-07-23
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

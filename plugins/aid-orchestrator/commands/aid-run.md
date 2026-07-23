@@ -90,6 +90,8 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 8. **`--force` is PM-only** — never use without explicit PM instruction; logged to audit trail
 9. **Multi-layer defense** — `aid-release.sh` and git pre-commit hook independently verify `done_phase` before allowing release/commit on FSM branches
 10. **Step verification evidence** — `increment-step` REFUSES to advance without `step-{N}-verify.md` containing `## Result: PASS` in evidence dir
+10a. **Read `status=` from increment-step, never a bare number** — success prints `status=advanced advanced_from=N advanced_to=N+1` (exit 0). `status=already_applied ...` (exit 0) means the transition was already recorded (replay/crash-recovery) — it is SUCCESS, do NOT re-invoke. A bare-numeric misread as an error is exactly what caused the E-064-1_2 double advance. Non-zero exit = a real precondition failure (see stderr); never `--force` past a `binding_*` rejection.
+10b. **Step-binding (IMP-263)** — write `step_index` / `step_id` / `plan_step_hash` / `reviewed_commit` (=HEAD) / `idempotency_token` into `step-{N}-verify.md` AFTER the per-step commit. The binding is validated against the live `plan.json` + FSM state before any mutation, so a copied prior verify file cannot complete a later step. See `skills/pipeline.md` for the `plan_step_hash` recipe and `AID_STEP_BINDING=strict`.
 
 ### Agent dispatch rules (non-negotiable but instruction-enforced):
 11. **Verbatim plan content** — NEVER send agents "read the plan". Extract relevant section and paste VERBATIM into agent prompt. Include code snippets, AC, mockups.
@@ -471,4 +473,4 @@ Both streamlined checks are PM-overridable via
 (or `streamlined_abandoned`), which writes an audited override entry.
 
 
-**Last Updated:** 2026-07-22
+**Last Updated:** 2026-07-23

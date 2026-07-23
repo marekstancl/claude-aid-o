@@ -1928,3 +1928,236 @@ YAML
   [ "$status" -ne 0 ]
   [[ "$output" == *"illegal done_phase transition"* ]]
 }
+
+# ─── IMP-263: idempotent increment-step + step-bound evidence binding ────────
+# Repro: E-064-1_2 double-advance. The controller misread the old bare-numeric
+# stdout as an error and re-invoked; a copied prior verify file (next numerical
+# filename) was accepted as evidence for a step that never ran, so the FSM
+# advanced twice. These tests pin: (1) machine-readable stdout, (2) copied-file
+# rejection, (3) wrong-plan-hash / wrong-commit / wrong-step rejection,
+# (4) replay → already_applied, (5) crash-recovery across each write boundary.
+
+# Canonical plan-step hash — MUST match _increment_plan_step_hash in aid-fsm.sh
+# (jq -S -c of steps[i], sha256 of the string with NO trailing newline).
+_imp263_plan_step_hash() {
+  local plan_json="$1" idx="$2"
+  printf '%s' "$(jq -S -c --argjson i "$idx" '.steps[$i]' "$plan_json")" | sha256sum | awk '{print $1}'
+}
+
+# Seed a 2-step plan.json under the evidence dir.
+_imp263_write_plan() {
+  cat > "$TEST_EVIDENCE_DIR/plan.json" <<'PLAN'
+{"epic_id":"E-test","version":"1.0","steps":[
+  {"id":"step_0_backend","role":"backend","objective":"a"},
+  {"id":"step_1_backend","role":"backend","objective":"b"}
+],"dependencies":[]}
+PLAN
+}
+
+# Write a fully-bound step-verify.md. Args: file step_index step_id plan_hash commit token
+_imp263_write_bound_verify() {
+  local file="$1" idx="$2" sid="$3" ph="$4" commit="$5" token="$6"
+  mkdir -p "$(dirname "$file")"
+  cat > "$file" <<VERIFY
+# Step ${idx} Verification
+## Result: PASS
+- [x] acceptance criterion met
+Commit: ${commit:0:12}
+step_index: ${idx}
+step_id: ${sid}
+plan_step_hash: ${ph}
+reviewed_commit: ${commit}
+idempotency_token: ${token}
+## Memory Used
+N/A — none
+## Memory Written
+N/A — none
+VERIFY
+}
+
+# Write a SKIP verifier-output for a step (satisfies the CP2 precondition).
+_imp263_write_verifier_output() {
+  local step="$1"
+  printf '_generated_by: aid-pre-filter.sh@test\n_generated_at: 2026-06-18T10:00:00Z\nclassification: SKIP\nreason: docs_only\n' \
+    > "$TEST_EVIDENCE_DIR/verifier-output-step-${step}.md"
+}
+
+# Common setup: post-deploy state at current_step=0 + valid step-0 binding.
+_imp263_seed_step0() {
+  local state_file="$1" token="${2:-TOK-0}"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  _imp263_write_plan
+  local ph0 head0
+  ph0=$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)
+  head0=$(git rev-parse HEAD)
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_0_backend "$ph0" "$head0" "$token"
+  _imp263_write_verifier_output 0
+}
+
+@test "IMP-263: valid step-0 binding advances + writes ledger + machine-readable stdout" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "status=advanced advanced_from=0 advanced_to=1" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+  [ -f "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl" ]
+  [ "$(jq -r '.token' "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "TOK-0" ]
+  [ "$(jq -r '.to' "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "1" ]
+}
+
+@test "IMP-263: stdout is a status= line (exit 0), never a bare integer mistakable for an exit code" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  # Not a bare integer, and the exit code is decoupled from the displayed step.
+  [[ ! "$output" =~ ^[0-9]+$ ]]
+  [[ "$output" =~ ^status= ]]
+  [[ "$output" =~ advanced_to=1 ]]
+}
+
+@test "IMP-263 (AC): real step-0 verification copied to step-1 filename cannot complete step 1" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  run "$FSM" increment-step "$state_file"          # step 0 → 1, records TOK-0
+  [ "$status" -eq 0 ]
+  # Attacker copies step-0 evidence to the next numerical filename.
+  cp "$TEST_EVIDENCE_DIR/step-0-verify.md" "$TEST_EVIDENCE_DIR/step-1-verify.md"
+  _imp263_write_verifier_output 1
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ already_applied ]]
+  # DID NOT double-advance: current_step stays 1.
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+}
+
+@test "IMP-263: fresh token with wrong step_index (copied file rebranded) is rejected" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  run "$FSM" increment-step "$state_file"          # now at step 1
+  [ "$status" -eq 0 ]
+  local ph0 head; ph0=$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0); head=$(git rev-parse HEAD)
+  # step_index still names 0 but placed at step-1 filename with a fresh token.
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-1-verify.md" 0 step_0_backend "$ph0" "$head" TOK-1-new
+  _imp263_write_verifier_output 1
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "step_index=0 != current_step=1" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+}
+
+@test "IMP-263: evidence bound to a different plan-step hash is rejected before mutation" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  _imp263_write_plan
+  local head0; head0=$(git rev-parse HEAD)
+  # step_index/id correct for step 0, but plan_step_hash is wrong (tampered).
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_0_backend "deadbeefdeadbeef" "$head0" TOK-0
+  _imp263_write_verifier_output 0
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "plan_step_hash does not match" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
+}
+
+@test "IMP-263: evidence bound to a stale reviewed_commit (not HEAD) is rejected" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  _imp263_write_plan
+  local ph0; ph0=$(_imp263_plan_step_hash "$TEST_EVIDENCE_DIR/plan.json" 0)
+  _imp263_write_bound_verify "$TEST_EVIDENCE_DIR/step-0-verify.md" 0 step_0_backend "$ph0" "0000000000000000000000000000000000000000" TOK-0
+  _imp263_write_verifier_output 0
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "is not current HEAD" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
+}
+
+@test "IMP-263 (AC): two identical sequential requests → one transition + one already_applied" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  # Pre-stage the copied file at step-1 (the real incident: it already existed).
+  cp "$TEST_EVIDENCE_DIR/step-0-verify.md" "$TEST_EVIDENCE_DIR/step-1-verify.md"
+  _imp263_write_verifier_output 1
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]; [[ "$output" =~ ^status=advanced ]]
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]; [[ "$output" =~ already_applied ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+  # Exactly one applied transition recorded.
+  [ "$(wc -l < "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "1" ]
+}
+
+@test "IMP-263: crash after ledger append, before current_step bump → self-heals, no double advance" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  # Simulate the crash: ledger says 0→1 applied, but current_step is still 0.
+  printf '%s\n' '{"token":"TOK-0","step_index":0,"step_id":"step_0_backend","from":0,"to":1,"applied_at":"2026-07-01T00:00:00Z"}' \
+    > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ already_applied ]]
+  # Self-healed to the recorded target, and did NOT append a duplicate entry.
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+  [ "$(wc -l < "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "1" ]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_transition_recovered"
+}
+
+@test "IMP-263: crash before ledger append → single advance on re-invocation (old-valid → new-valid)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  # No ledger, current_step 0 = the old-valid state after a pre-write crash.
+  [ ! -f "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl" ]
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]; [[ "$output" =~ ^status=advanced ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+  [ "$(wc -l < "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "1" ]
+}
+
+@test "IMP-263: legacy evidence with NO binding advances by default (observe grandfather)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # current_step 3
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  _imp263_write_verifier_output 3
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "status=advanced advanced_from=3 advanced_to=4" ]]
+  assert_timeline_event "$TEST_EVIDENCE_DIR/timeline.jsonl" "step_binding_absent"
+}
+
+@test "IMP-263: AID_STEP_BINDING=strict rejects unbound evidence on a non-grandfathered run" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # created_at now > deploy date → not grandfathered
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  _imp263_write_verifier_output 3
+  AID_STEP_BINDING=strict run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ "no IMP-263 binding" ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
+}
+
+@test "IMP-263 (review MEDIUM): a forged ledger row cannot self-heal current_step by more than one" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  _imp263_seed_step0 "$state_file" TOK-0
+  # A hand-forged ledger row claims token TOK-0 advanced from 1 to 99. The
+  # verify file for the CURRENT step (0) also carries TOK-0, so the idempotency
+  # lookup hits — but from=1 does not match current_step=0, and even a matching
+  # from must have to == from+1. Either way self-heal must NOT jump to 99.
+  printf '{"token":"TOK-0","from":1,"to":99}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
+  run "$FSM" increment-step "$state_file"
+  local cs; cs=$(grep '^current_step:' "$state_file" | awk '{print $2}')
+  [ "$cs" != "99" ]
+  [ "$cs" -le 2 ]
+
+  # The legitimate self-heal (from=0, to=1) still works: a crash after the
+  # ledger append but before the bump repairs current_step to exactly 1.
+  printf '{"token":"TOK-0","from":0,"to":1}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ status=already_applied ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+}
