@@ -717,7 +717,7 @@ _queue_target_branch() {
   else echo HEAD; fi
 }
 
-# _queue_merge_target_authorized <declared> <own_plan> <root> — IMP-272.
+# _queue_merge_target_authorized <declared> <dep> <root> — IMP-272 (+ HIGH hardening).
 #
 # A `merge_target` is read straight out of the hand-editable queue file, and
 # `git merge-base --is-ancestor <branch> <merge_target>` is proven AGAINST it —
@@ -728,7 +728,7 @@ _queue_target_branch() {
 # check and marked work `merged` that was provably never in `plan/<plan>`. This
 # predicate constrains the value to the only two refs the substrate ever
 # legitimately writes there:
-#   * `plan/<own_plan>` — a same-plan dependency, still on its plan branch;
+#   * `plan/<id-derived plan>` — a same-plan dependency, still on its plan branch;
 #   * the resolved target branch (_queue_target_branch) — a cross-plan
 #     dependency already released to main/master.
 # Any OTHER ref that resolves (an EPIC task branch, another plan's branch, an
@@ -737,12 +737,26 @@ _queue_target_branch() {
 # owning plan, so `plan/<...>` is impossible for it and only the target branch
 # is legal.
 #
+# IMP-272 HARDENING (post-review HIGH): the owning plan is DERIVED from the
+# dependency's epic id — the record KEY bound to the identity the ancestry
+# check runs against — never read from the entry's hand-editable `plan_id`
+# field. Trusting `plan_id` let `plan_id: P999` + `merge_target: plan/P999`
+# self-authorize the anchor one field over. `_queue_dep_derived_plan` derives
+# `P<nnn>` from the id (empty for an ad-hoc id); the entry's declared plan_id,
+# when present, is fail-closed cross-checked against it by _queue_dep_state.
+# Byte-for-byte the same derivation as aid-fsm.sh:_fsm_epic_plan_nnn.
+#
 # CONTRACT TWIN of aid-fsm.sh:_dep_merge_target_authorized, which enforces the
 # same rule for the READ side (queue-revalidate). CHANGE BOTH.
+_queue_dep_derived_plan() {
+  local id="${1:-}"; id="${id%%_*}"
+  [[ "$id" =~ ^E-([0-9]+) ]] && printf 'P%s' "${BASH_REMATCH[1]}"
+}
 _queue_merge_target_authorized() {
-  local declared="$1" own_plan="$2" root="$3"
+  local declared="$1" dep="$2" root="$3"
   [[ "$declared" == "$(_queue_target_branch "$root")" ]] && return 0
-  [[ -n "$own_plan" && "$declared" == "plan/${own_plan}" ]] && return 0
+  local derived; derived="$(_queue_dep_derived_plan "$dep")"
+  [[ -n "$derived" && "$declared" == "plan/${derived}" ]] && return 0
   return 1
 }
 
@@ -811,8 +825,14 @@ _queue_dep_state() {
   # the same hand-editable entry; queue_get_field maps a `null`/absent plan_id to
   # empty, which leaves only the target branch legal (an entry with no owning plan
   # cannot legitimately declare `plan/<x>`).
+  # Fail-closed cross-check (post-review HIGH): a declared plan_id must agree
+  # with the id-derived plan, or it was set to launder an unauthorized target.
   local own_plan; own_plan="$(queue_get_field "$dep" plan_id "$file")"
-  if ! _queue_merge_target_authorized "$mt" "$own_plan" "$root"; then
+  local derived_plan; derived_plan="$(_queue_dep_derived_plan "$dep")"
+  if [[ -n "$own_plan" && "$own_plan" != "$derived_plan" ]]; then
+    echo "target_unauthorized"; return 0
+  fi
+  if ! _queue_merge_target_authorized "$mt" "$dep" "$root"; then
     echo "target_unauthorized"; return 0
   fi
 

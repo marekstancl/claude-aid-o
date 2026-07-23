@@ -5434,7 +5434,7 @@ _queue_entry_plan_id() {
   printf '%s' "$pid"
 }
 
-# _dep_merge_target_authorized <declared> <own_plan_id> — IMP-272.
+# _dep_merge_target_authorized <declared> <dep> — IMP-272 (+ HIGH hardening).
 #
 # A `merge_target` is read straight out of the hand-editable queue file, and
 # ancestry is proven AGAINST it — so a value the attacker controls is the ref
@@ -5444,7 +5444,7 @@ _queue_entry_plan_id() {
 # `task/<its own id>/main` self-satisfied the check and unblocked work that was
 # provably never in `plan/<plan>`. This predicate constrains the value to the
 # only two refs the substrate ever legitimately writes there:
-#   * `plan/<own_plan_id>` — a same-plan dependency, still on its plan branch;
+#   * `plan/<id-derived plan>` — a same-plan dependency, still on its plan branch;
 #   * the resolved target branch (`_queue_merge_target`) — a cross-plan
 #     dependency already released to main/master.
 # Any OTHER ref that resolves (an EPIC task branch, another plan's branch, an
@@ -5452,12 +5452,28 @@ _queue_entry_plan_id() {
 # as proof. An entry with `plan_id: null` has no owning plan, so `plan/<...>` is
 # impossible for it and only the target branch is legal.
 #
+# IMP-272 HARDENING (post-review HIGH): the owning plan MUST be derived from
+# the dependency's epic id — the record KEY, bound to the very identity the
+# ancestry check runs against — NOT read from the entry's own `plan_id` field.
+# Both `merge_target` and `plan_id` are hand-editable values in the same entry,
+# so trusting `plan_id` let an attacker set `plan_id: P999` + `merge_target:
+# plan/P999` and have the substrate agree `plan/P999` was "its own" plan branch,
+# self-authorizing the anchor again one field over. `_dep_derived_plan` derives
+# `P<nnn>` from the epic id (empty for an ad-hoc id that names no plan), and the
+# entry's declared `plan_id`, when present, is fail-closed cross-checked against
+# that derivation by the caller — a disagreement is corruption/attack, refused.
+#
 # CONTRACT TWIN of lib/aid-queue-write.sh:_queue_merge_target_authorized, which
 # enforces the same rule for the WRITE side (queue_claim_next). CHANGE BOTH.
+_dep_derived_plan() {
+  local nnn; nnn="$(_fsm_epic_plan_nnn "${1:-}")"
+  [[ -n "$nnn" ]] && printf 'P%s' "$nnn"
+}
 _dep_merge_target_authorized() {
-  local declared="$1" own_plan="$2"
+  local declared="$1" dep="$2"
   [[ "$declared" == "$(_queue_merge_target)" ]] && return 0
-  [[ -n "$own_plan" && "$declared" == "plan/${own_plan}" ]] && return 0
+  local derived; derived="$(_dep_derived_plan "$dep")"
+  [[ -n "$derived" && "$declared" == "plan/${derived}" ]] && return 0
   return 1
 }
 
@@ -5583,7 +5599,30 @@ _revalidate_one_dep() {
     # unauthorized and non-resolving yields the SAME reason class on both
     # halves (target_missing/merge_target_missing), never divergent codes for
     # one queue state. CHANGE BOTH.
-    if ! _dep_merge_target_authorized "$declared" "$(_queue_entry_plan_id "$dep" "$queue_json")"; then
+    # Fail-closed cross-check (post-review HIGH): if the entry declares a
+    # plan_id, it MUST agree with the id-derived plan; a disagreement means the
+    # hand-editable plan_id was set to launder an unauthorized merge_target and
+    # is refused. An absent plan_id (legacy entry) skips this and relies on the
+    # derivation-based authorization below.
+    local _decl_pid _der_plan
+    _decl_pid="$(_queue_entry_plan_id "$dep" "$queue_json")"
+    _der_plan="$(_dep_derived_plan "$dep")"
+    if [[ -n "$_decl_pid" && "$_decl_pid" != "$_der_plan" ]]; then
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_unauthorized" merge_target="$declared" \
+        declared_plan="$_decl_pid" derived_plan="$_der_plan"
+      echo "failed"; return 1
+    fi
+    # IMP-272: syntactic legality is not authorization. A merge_target may only
+    # be the entry's own (id-DERIVED) plan branch or the resolved target branch;
+    # any OTHER resolvable ref (the dep's own task branch, another plan's branch,
+    # a feature branch) would self-satisfy the ancestry check, so it is refused
+    # fail-loud rather than believed. The owning plan is derived from the epic
+    # id, never read from the entry's own plan_id field. ORDER MATTERS (IMP-272
+    # review finding): resolvability is checked FIRST, exactly like the writer
+    # twin (_queue_dep_state), so a target that is both unauthorized and
+    # non-resolving yields the SAME reason class on both halves. CHANGE BOTH.
+    if ! _dep_merge_target_authorized "$declared" "$dep"; then
       log_event "$timeline_path" "queue_dep_unresolved" \
         epic_id="$dep" reason="merge_target_unauthorized" merge_target="$declared"
       echo "failed"; return 1

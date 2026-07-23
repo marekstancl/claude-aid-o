@@ -4323,7 +4323,7 @@ YAML
 }
 
 # ─── IMP-272: the guard does not over-block — legal anchors still resolve ──
-@test "IMP-272: an own plan branch, the target branch, and a legacy absent merge_target all still resolve; a null-plan_id plan target does not" {
+@test "IMP-272: an own plan branch, the target branch, a legacy absent merge_target, and a null-plan_id target that the epic id still resolves to, all resolve" {
   _pfsm_bootstrap_plan "P064"
   _pfsm_epic_with_commit "P064" "E-064-1_1"
   # Land the work on plan/P064 (own plan branch) AND on main (target branch),
@@ -4389,9 +4389,11 @@ YAML
   [ "$status" -eq 0 ]
   [ "$output" = "merged" ]
 
-  # null-plan_id with a plan/<x> target is the honest rejection: an entry that
-  # belongs to no plan cannot legitimately declare plan/<anything>, so only the
-  # target branch is legal there.
+  # HARDENING (post-review HIGH): the owning plan is DERIVED from the epic id,
+  # not read from the entry's plan_id field, so a MISSING plan_id no longer
+  # rejects a legitimate same-plan dependency — E-064-1_1's identity names P064
+  # regardless of the (absent) field, and plan/P064 is genuinely its plan
+  # branch. The field is redundant, not authoritative.
   _qw_write_queue <<'YAML'
 paused: false
 last_modified: "2026-01-01T00:00:00Z"
@@ -4400,6 +4402,91 @@ queue:
   - epic_id: E-064-1_1
     status: merged_to_plan
     plan_id: null
+    merge_target: "plan/P064"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+  _qw_revalidate "E-064-2_1"
+  [ "$status" -eq 0 ]
+  [ "$output" = "unblocked" ]
+  _qw claim-next P064
+  [ "$status" -eq 0 ]
+  [ "$output" = "E-064-2_1" ]
+}
+
+# ─── IMP-272 HARDENING (post-review HIGH): plan_id from the same hand-editable
+# entry is not authority. Deriving the owning plan from the entry's own plan_id
+# let plan_id: P999 + merge_target: plan/P999 self-authorize the anchor one
+# field over. The owning plan must come from the epic id (the record key), and
+# a declared plan_id that disagrees with the id-derived plan is refused. ──────
+@test "IMP-272 HARDENING: a plan_id colluding with merge_target cannot self-authorize an unowned plan branch" {
+  _pfsm_bootstrap_plan "P064"
+  # E-064-1_1's work is on its own task branch, provably NOT in plan/P064.
+  _pfsm_epic_with_commit "P064" "E-064-1_1"
+
+  # The attacker forges a whole plan branch that DOES contain the work, so
+  # ancestry against it is trivially true — the only thing standing between the
+  # attack and a false claim is the authorization rule.
+  git -C "$TEST_PROJECT_ROOT" branch plan/P999 task/E-064-1_1/main
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor task/E-064-1_1/main plan/P999
+  [ "$status" -eq 0 ]
+
+  # The PM attack: plan_id AND merge_target both point at P999, so an
+  # own-plan-from-the-field check would agree plan/P999 is "its own" plan.
+  # E-064-1_1's id derives P064, so the collusion is refused.
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: merged_to_plan
+    plan_id: "P999"
+    merge_target: "plan/P999"
+    depends_on: []
+
+  - epic_id: E-064-2_1
+    status: pending
+    plan_id: "P064"
+    merge_target: "plan/P064"
+    depends_on: ["E-064-1_1"]
+YAML
+
+  # WRITER (queue_claim_next): dependent BLOCKED, never claimed.
+  _qw claim-next P064
+  [ "$status" -eq 1 ]
+  [[ "$output" == "blocked:E-064-2_1:dependency_merge_target_unauthorized:E-064-1_1" ]]
+  [ "$(_qw_field E-064-2_1 status)" = "blocked" ]
+
+  # READER (aid-fsm queue-revalidate): fail-loud with the mismatch surfaced.
+  _qw_revalidate "E-064-2_1"
+  [ "$status" -eq 1 ]
+  [ "$output" = "failed" ]
+  grep -q '"reason":"merge_target_unauthorized"' "$TEST_TMPDIR/queue-tl.jsonl"
+  grep -q '"declared_plan":"P999"' "$TEST_TMPDIR/queue-tl.jsonl"
+  grep -q '"derived_plan":"P064"' "$TEST_TMPDIR/queue-tl.jsonl"
+
+  # And the sharper variant: plan_id lies but merge_target names the REAL
+  # id-derived plan branch (plan/P064). merge_target is legal, but the lying
+  # plan_id is still refused fail-closed — corruption is not trusted, one field
+  # cannot vouch for another.
+  git -C "$TEST_PROJECT_ROOT" branch plan/P064-real task/E-064-1_1/main 2>/dev/null || true
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P064
+  git -C "$TEST_PROJECT_ROOT" merge -q --no-ff -m "merge(epic): E-064-1_1 into plan/P064" task/E-064-1_1/main
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+  _qw_write_queue <<'YAML'
+paused: false
+last_modified: "2026-01-01T00:00:00Z"
+
+queue:
+  - epic_id: E-064-1_1
+    status: merged_to_plan
+    plan_id: "P999"
     merge_target: "plan/P064"
     depends_on: []
 
