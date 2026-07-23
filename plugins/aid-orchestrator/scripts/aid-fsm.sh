@@ -105,6 +105,86 @@ yaml_field() {
   return 0
 }
 
+# ─── epic-id -> plan-id digits (ONE derivation, portable) ───────────────────
+# _fsm_epic_plan_nnn <epic_id> — echoes the NNN digit block of an EPIC id
+# ("E-064-2_2" -> "064"), or nothing for an ad-hoc id with no digits after
+# "E-" (e.g. "E-test"). Always exits 0, so every caller can stay `set -e` safe
+# without an `|| true` dance.
+#
+# WHY NOT `grep -oP` (CP3 integration review, "also fix while you are here").
+# Every call site used to spell this as
+# `printf '%s' "${id%%_*}" | grep -oP '(?<=^E-)\d+'`. `-P` is a GNU-grep build
+# option: on a grep without PCRE support (BusyBox, macOS/BSD grep, a minimal
+# container image) it does not "not match", it FAILS — and because the two mode
+# helpers swallowed that with `|| true`, three controls (the gate-profile cap,
+# the release-mode block, cmd_init's lineage precondition) silently degraded to
+# their legacy/no-op branch on a host where no EPIC id could ever derive a plan.
+# A bash-native match has no external dependency to probe at all.
+_fsm_epic_plan_nnn() {
+  local id="${1:-}"
+  id="${id%%_*}"
+  [[ "$id" =~ ^E-([0-9]+) ]] || return 0
+  printf '%s' "${BASH_REMATCH[1]}"
+  return 0
+}
+
+# ─── Gate-profile boundary selector (P064 plan Step 8) ──────────────────────
+# _fsm_gate_profile_boundary <epic_id> — echoes the `boundary` positional to
+# hand gate_profile_resolve for THIS EPIC: "epic" when the EPIC belongs to a
+# plan whose DECLARED release model is `plan_branch`, "" (legacy, byte-identical
+# to pre-Step-8 behaviour) otherwise. Always exits 0 — this is a routing
+# decision, never an enforcement point.
+#
+# WHY MODE-GATED. boundary=epic caps the resolved profile at `standard`,
+# which is only safe because a plan_branch plan has a plan-final run that
+# still executes the accumulated floor (recorded by `aid-plan-fsm.sh
+# epic-complete`, consumed by the plan-final stage). A legacy
+# `legacy_epic_release_mode` plan has no such second run: capping there would
+# silently drop `bats_all` and suppress the done_phase=release escalation
+# with nothing downstream to make up for it — a coverage regression, not a
+# split. Every "cannot tell" path therefore returns "" (no cap, more gates),
+# the conservative direction — the opposite of cmd_init's lineage check,
+# which fails CLOSED because there "cannot tell" would skip a security proof.
+#
+# ── ONE AUTHORITY (CP3 integration review finding 2, adjudicated action A3) ──
+# This function computes NOTHING of its own: it asks `_fsm_declared_plan_mode`
+# (below, the release-routing resolver) and maps its verdict. It USED to read
+# the gitignored RUNTIME manifest `plan-boundary-manifest.json` while
+# `_fsm_declared_plan_mode` read the git-tracked DECLARATION
+# `.aid-lifecycle/manifests/<plan_id>.yaml` — two sources that go stale
+# independently and could therefore disagree while BOTH returned a confident,
+# non-error answer:
+#   * runtime=plan_branch + declaration absent -> gates capped at `standard`
+#     while the LEGACY release stack merged the EPIC into the target branch and
+#     ran the bump/tag/push. A high-risk EPIC shipped with reduced verification,
+#     and the accumulated floor was discarded (only `epic-complete` writes one,
+#     and the legacy path never reaches it).
+#   * an UNTRACKED declaration saying plan_branch confidently silenced all nine
+#     AID_PLAN_BRANCH_SKIPPED_STAGES with nothing committed anywhere.
+# The runtime manifest is no longer a mode input anywhere in this file. The two
+# helpers still REACT differently to "cannot tell" — here "" (no cap => MORE
+# gates), there a hard block — but that is a difference in CONSEQUENCE, chosen
+# per call site, never a difference in the verdict.
+#
+# BOTH gate_profile_resolve call sites in this file MUST route through this
+# one helper: advance-to-gates picks the profile a run executes and the
+# GATES:DONE precondition recomputes the requirement it is measured against.
+# If they disagreed, an EPIC that correctly ran the capped `standard` would
+# be compared against an uncapped `full` and could never reach DONE.
+_fsm_gate_profile_boundary() {
+  local epic_id="${1:-}" _gb_mode="" _gb_plan="" _gb_reason=""
+  # `|| true`: the read itself is never allowed to abort a routing decision.
+  IFS=$'\t' read -r _gb_mode _gb_plan _gb_reason \
+    < <(_fsm_declared_plan_mode "$epic_id") || true
+  if [[ "$_gb_mode" == "plan_branch" ]]; then
+    echo "epic"
+  else
+    # legacy_epic_release_mode AND every `unresolved` reason land here: no cap.
+    echo ""
+  fi
+  return 0
+}
+
 # Derive timeline.jsonl path from state_file fields (best-effort, never fails)
 derive_timeline() {
   local state_file="$1"
@@ -1929,16 +2009,26 @@ EOF
         # (legacy execution.yaml without gate_profiles, or a project that
         # hasn't opted in) — D9: behaves exactly like today, no-op (every
         # defined gate already ran, nothing weaker to catch).
+        #
+        # P064 plan Step 8: the recompute is BOUNDARY-AWARE. It passes the
+        # same boundary advance-to-gates used (via the single
+        # _fsm_gate_profile_boundary helper), so an EPIC that correctly ran
+        # the capped EPIC-boundary profile is compared against the
+        # EPIC-boundary requirement — not against the unbounded plan-final
+        # floor, which would hard-fail every high-risk EPIC at GATES:DONE.
+        # The plan-final floor is recorded into the plan-boundary manifest by
+        # `aid-plan-fsm.sh epic-complete`, not enforced at this transition.
         local active_profile
         active_profile=$(jq -r '.profile // empty' "$report" 2>/dev/null)
         if [[ -n "$active_profile" ]]; then
-          local risk_base_commit required_profile=""
+          local risk_base_commit required_profile="" _gp_boundary=""
           risk_base_commit=$(yaml_field "$state_file" base_commit)
+          _gp_boundary="$(_fsm_gate_profile_boundary "$(yaml_field "$state_file" epic_id)")"
           if [[ -n "$risk_base_commit" ]]; then
             local _gp_paths_file
             _gp_paths_file=$(mktemp -t aid-gate-profile-risk.XXXXXX)
             git -C "$PWD" diff --name-only "${risk_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
-            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+            required_profile=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
             rm -f "$_gp_paths_file"
           fi
           # risk_base_commit empty (fsm-state unreadable/malformed) → required_profile
@@ -2194,14 +2284,14 @@ cmd_init() {
   # knowing" (lib not sourced, runtime manifest missing, runtime manifest
   # unparseable) is a hard block, never a silent downgrade to legacy behavior.
   local _plan_expected_branch="task/${epic_id}/main"
-  local _pb_stripped="${epic_id%%_*}"
   local _pb_nnn=""
-  # Same epic-id -> plan-id derivation as cmd_plan_close (search that name in
-  # this file) — reused verbatim, not reinvented. `|| true` keeps this safe
-  # under `set -e` when the epic_id has no digits after "E-" (ad-hoc EPIC,
-  # e.g. a bare "E-test" fixture id): grep finds nothing, _pb_nnn stays empty,
-  # and the block below is skipped entirely.
-  _pb_nnn="$(printf '%s' "$_pb_stripped" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  # Same epic-id -> plan-id derivation as _fsm_declared_plan_mode and
+  # _fsm_gate_profile_boundary — ONE helper (`_fsm_epic_plan_nnn`, top of this
+  # file), not three copies of a `grep -oP` that fails outright on a grep
+  # without PCRE support. Empty for an epic_id with no digits after "E-"
+  # (ad-hoc EPIC, e.g. a bare "E-test" fixture id), and the block below is then
+  # skipped entirely.
+  _pb_nnn="$(_fsm_epic_plan_nnn "$epic_id")"
   local _pb_plan_id=""
   [[ -n "$_pb_nnn" ]] && _pb_plan_id="P${_pb_nnn}"
 
@@ -2852,23 +2942,30 @@ cmd_advance_to_gates() {
     [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
       profile="$explicit_profile" source="explicit_caller"
   else
-    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined
+    # P064 plan Step 8: resolve at the EPIC BOUNDARY (mode-gated — see
+    # _fsm_gate_profile_boundary). In plan_branch mode this caps the run at
+    # `standard`, so no EPIC starts a broad suite on its own; the accumulated
+    # plan-final floor is recorded separately by `aid-plan-fsm.sh
+    # epic-complete`. The GATES:DONE risk precondition recomputes through the
+    # SAME helper, so the two can never disagree.
+    local _gp_base_commit _gp_paths_file _gp_resolved _gp_defined _gp_boundary
     _gp_base_commit=$(yaml_field "$state_file" base_commit)
+    _gp_boundary="$(_fsm_gate_profile_boundary "$epic_id")"
     _gp_paths_file=$(mktemp -t aid-gate-profile-paths.XXXXXX)
     if [[ -n "$_gp_base_commit" ]]; then
       git -C "$PWD" diff --name-only "${_gp_base_commit}..HEAD" > "$_gp_paths_file" 2>/dev/null || true
     fi
-    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json")
+    _gp_resolved=$(gate_profile_resolve "$_gp_paths_file" "$state_file" "${evidence_dir}/review-profile.json" "$_gp_boundary")
     rm -f "$_gp_paths_file"
 
     _gp_defined=$(PROFILE="$_gp_resolved" yq '.gate_profiles[strenv(PROFILE)]' "$execution_yaml" 2>/dev/null || echo "")
     if [[ -n "$_gp_defined" && "$_gp_defined" != "null" ]]; then
       profile_arg=(--profile "$_gp_resolved")
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_selected" \
-        profile="$_gp_resolved" source="auto_resolved"
+        profile="$_gp_resolved" source="auto_resolved" boundary="${_gp_boundary:-legacy}"
     else
       [[ -n "$timeline" ]] && log_event "$timeline" "gate_profile_auto_resolve_skipped" \
-        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles"
+        resolved="$_gp_resolved" reason="not_defined_in_gate_profiles" boundary="${_gp_boundary:-legacy}"
     fi
   fi
 
@@ -3447,6 +3544,207 @@ _c4_divergence_class() {
   printf 'unclassified'; return 0
 }
 
+# ─── Plan-branch release-stack skip list (P064 plan Step 9) ──────────────────
+# THE single source of truth for which review→release stages cmd_done_advance
+# skips when the completing EPIC's owning plan is DECLARED `plan_branch`. The
+# spy test (scripts/tests/bats/test-aid-plan-release-boundary.bats) parses THIS
+# array out of THIS file and asserts the `done_advance_plan_branch_mode`
+# timeline event lists exactly these names — it never keeps its own copy, so
+# the emitted list can never drift from what the code actually skips.
+#
+# Order = execution order inside cmd_done_advance's review→release arm.
+#
+# WHAT IS NOT HERE, ON PURPOSE. The EPIC-LOCAL validations still run in
+# plan_branch mode: the streamlined integration review (which, under
+# `streamlined_mode: true`, still HARD-REQUIRES this EPIC's own CP3 code-review
+# + CP3 security outputs — only the CP3 FRESHNESS RE-CHECK is skipped, never
+# the CP3 pair itself), the abandoned-but-shipped check, the DG-07 delivery
+# gate, the tiered-severity compliance precondition (which is what reads the
+# run's CP2 verifier outputs), `pm_decision == merge`, the archived-task-file
+# check, and the auditor's `blocking_findings` verdict when an audit-report
+# exists at all (Step 4 CP2 finding 1 — a PM-blessed mid-plan Auditor run must
+# still be able to block). The skip is scoped to the per-EPIC RELEASE stack —
+# the stages that only make sense once, at the plan boundary — not to local
+# verification.
+AID_PLAN_BRANCH_SKIPPED_STAGES=(
+  c3_review_profile_presence
+  cp4_curator_validation
+  cp3_freshness_recheck
+  curator_report_presence
+  auditor_report_presence
+  c3_independent_audit
+  curator_content_ref_sequencing
+  c3_dispatch_provenance
+  c4_release_decision_dual_run
+)
+
+# _fsm_declared_plan_mode <epic_id> — echoes `<mode>\t<plan_id>\t<reason>`.
+#   mode ∈ { plan_branch, legacy_epic_release_mode, unresolved }
+# Always exits 0; the CALLER decides what to do with `unresolved`.
+#
+# THIS IS THE SINGLE AUTHORITY FOR THE PLAN'S RELEASE MODE (CP3 integration
+# review finding 2, adjudicated action A3). It resolves through
+# `aid_lifecycle_plan_mode` (lib/aid-lifecycle.sh), whose only input is the
+# git-tracked `.aid-lifecycle/manifests/<plan_id>.yaml` — the PM's durable
+# declaration of which release model the plan follows. `_fsm_gate_profile_boundary`
+# (top of this file) now DELEGATES here instead of reading the gitignored
+# RUNTIME manifest `plan-boundary-manifest.json`, so the two can no longer
+# return confidently different answers for the same repository state; see that
+# function's header for the two disagreement directions this closed. The
+# runtime manifest is no longer a mode input anywhere in this file.
+#
+# ── THE DECLARATION ONLY COUNTS WHEN IT IS COMMITTED ────────────────────────
+# The answer is read out of `target_branch`'s COMMITTED tree, and nowhere else.
+# A working-tree-only (untracked) manifest is `unresolved`, never an answer:
+# it is not durable, not auditable, not visible to any other clone, and
+# `cmd_init`'s dirty-tree guard uses `--untracked-files=no`, so nothing else
+# would catch it either — an untracked file must not be able to silence the
+# nine `AID_PLAN_BRANCH_SKIPPED_STAGES`. The committed manifest is what
+# `aid_lifecycle_set_plan_mode` writes (atomically, on target_branch), so the
+# intended workflow already satisfies this.
+#
+# The working tree is still READ, as a GUARD rather than as a source: a
+# manifest that is present there but unreadable/unparseable makes the whole
+# resolution `unresolved`. Resolving it silently from the committed copy would
+# be exactly the "an unreadable manifest is silently satisfied from elsewhere"
+# hazard the previous working-tree-preference existed to avoid. A working-tree
+# copy that IS readable and parseable is then ignored — including when it
+# differs from the committed one: the committed declaration is the authority,
+# and a local edit that has not been committed has not been declared.
+#
+# RESIDUAL RISK, NAMED: an incorrect (or maliciously) COMMITTED declaration
+# remains authoritative here. That is a code-review/branch-protection problem,
+# not one this resolver can close.
+#
+# WHY THE "CANNOT TELL" SPLIT IS WHERE IT IS.
+#   -> legacy_epic_release_mode (documented default, never a block):
+#      * epic_id derives no plan id (ad-hoc EPIC — it belongs to no plan, so
+#        no plan can have declared plan_branch for it; identical to cmd_init's
+#        and _fsm_gate_profile_boundary's own handling of this input);
+#      * NO manifest anywhere — none on target_branch and none in the working
+#        tree, or no Git repository at all and none in the working tree.
+#        `aid_lifecycle_plan_mode`'s own file header documents absence as "not
+#        yet declared plan_branch", the pre-P064 model, which is unambiguous
+#        rather than unknown;
+#      * a committed manifest that parses but carries no `mode` key (same
+#        reason).
+#   -> unresolved (hard block at the caller):
+#      every case where a DECLARATION MAY EXIST AND WE CANNOT HONESTLY READ IT
+#      — the lifecycle lib is not sourced; the manifest exists in the working
+#      tree but is NOT COMMITTED on target_branch (it was never declared, only
+#      typed); it is present in the working tree but unreadable or not a
+#      regular file; mktemp gave us nowhere to extract the committed copy; the
+#      extracted copy is unreadable; `yq` is absent; the manifest does not
+#      parse; or it declares a `mode` value outside the known enum.
+#      Guessing legacy for any of these would route the controller into
+#      skills/pipeline.md's legacy action 15 — `git merge task/{epic_id}/main`
+#      into the target branch — i.e. it would ship an individual EPIC to main,
+#      which is precisely what P064 exists to prevent. Fail closed.
+_fsm_declared_plan_mode() {
+  local epic_id="${1:-}" nnn="" plan_id="" tb="" root="" manifest="" relpath=""
+  local cleanup_root="" raw="" wt_present=false
+  # Same epic-id -> plan-id derivation as cmd_init's lineage check,
+  # cmd_plan_close and _fsm_gate_profile_boundary — ONE helper, reused.
+  nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || { printf 'legacy_epic_release_mode\t\tno_plan_id_derivable\n'; return 0; }
+  plan_id="P${nnn}"
+  relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
+
+  declare -F aid_lifecycle_plan_mode >/dev/null 2>&1 || {
+    printf 'unresolved\t%s\tlifecycle_lib_unavailable\n' "$plan_id"; return 0; }
+
+  # ── STEP 1: the working tree is a GUARD, never a source ──────────────────
+  # A manifest sitting in the working tree that we cannot read or cannot parse
+  # makes the whole resolution `unresolved`. It is NOT answered from the
+  # committed copy: "there is a declaration here and I cannot read it" is
+  # exactly the state where guessing is unsafe, and silently satisfying it from
+  # elsewhere is the hazard the old working-tree preference existed to avoid.
+  # A readable, parseable working-tree copy contributes nothing beyond passing
+  # this guard — Step 2 is the only place an ANSWER comes from.
+  if [[ -e "$relpath" ]]; then
+    wt_present=true
+    if [[ ! -f "$relpath" || ! -r "$relpath" ]]; then
+      printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+      printf 'unresolved\t%s\tyq_unavailable\n' "$plan_id"; return 0
+    fi
+    if ! yq -r '.' "$relpath" >/dev/null 2>&1; then
+      printf 'unresolved\t%s\tmanifest_unparseable\n' "$plan_id"; return 0
+    fi
+  fi
+
+  # ── STEP 2: the ANSWER comes from target_branch's COMMITTED tree ─────────
+  # cmd_init checks out task/<epic_id>/main and LEAVES it checked out for the
+  # rest of the EPIC's lifecycle, and the manifest is committed on
+  # target_branch only — so a CWD-relative read would misreport every
+  # plan_branch EPIC as legacy at exactly this decision point. Reading
+  # target_branch's tree is therefore both the correct source AND the
+  # committed-only rule: an untracked file cannot be in it.
+  if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    if [[ "$wt_present" == "true" ]]; then
+      # A manifest exists here but there is no repository to have committed it
+      # in: it is a typed file, not a declaration.
+      printf 'unresolved\t%s\tmanifest_not_committed_no_repo\n' "$plan_id"; return 0
+    fi
+    # No repository at all and no manifest in the working tree — nothing was
+    # ever declared.
+    printf 'legacy_epic_release_mode\t%s\tno_manifest_no_repo\n' "$plan_id"; return 0
+  fi
+  tb="$(aid_target_branch 2>/dev/null)" || tb=""
+  [[ -n "$tb" ]] || tb="main"
+  if ! git cat-file -e "${tb}:${relpath}" 2>/dev/null; then
+    if [[ "$wt_present" == "true" ]]; then
+      printf 'unresolved\t%s\tmanifest_not_committed_on_%s\n' "$plan_id" "$tb"; return 0
+    fi
+    printf 'legacy_epic_release_mode\t%s\tno_manifest_on_%s\n' "$plan_id" "$tb"; return 0
+  fi
+  root="$(mktemp -d 2>/dev/null)" || root=""
+  [[ -n "$root" ]] || { printf 'unresolved\t%s\tmode_root_unavailable\n' "$plan_id"; return 0; }
+  cleanup_root="$root"
+  if ! mkdir -p "${root}/.aid-lifecycle/manifests" 2>/dev/null \
+     || ! git show "${tb}:${relpath}" > "${root}/${relpath}" 2>/dev/null; then
+    rm -rf "$cleanup_root" 2>/dev/null || true
+    printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
+  fi
+  manifest="${root}/${relpath}"
+
+  if [[ ! -r "$manifest" ]]; then
+    [[ -n "$cleanup_root" ]] && rm -rf "$cleanup_root" 2>/dev/null
+    printf 'unresolved\t%s\tmanifest_unreadable\n' "$plan_id"; return 0
+  fi
+  if ! command -v yq >/dev/null 2>&1; then
+    [[ -n "$cleanup_root" ]] && rm -rf "$cleanup_root" 2>/dev/null
+    printf 'unresolved\t%s\tyq_unavailable\n' "$plan_id"; return 0
+  fi
+  if ! yq -r '.' "$manifest" >/dev/null 2>&1; then
+    [[ -n "$cleanup_root" ]] && rm -rf "$cleanup_root" 2>/dev/null
+    printf 'unresolved\t%s\tmanifest_unparseable\n' "$plan_id"; return 0
+  fi
+  raw="$(yq -r '.mode // ""' "$manifest" 2>/dev/null)" || raw="__yq_read_failed__"
+  case "$raw" in
+    ""|null|plan_branch|legacy_epic_release_mode) ;;
+    *)
+      # Untrusted manifest content: never echo it raw into a timeline payload.
+      local safe="${raw//[^A-Za-z0-9_.-]/_}"
+      [[ -n "$cleanup_root" ]] && rm -rf "$cleanup_root" 2>/dev/null
+      printf 'unresolved\t%s\tmode_unknown_value_%s\n' "$plan_id" "${safe:0:40}"; return 0
+      ;;
+  esac
+
+  # Delegate the actual answer to the authoritative reader — its parsing and
+  # defaulting logic is reused verbatim, this function only supplies the right
+  # root and refuses the inputs it cannot honestly hand over.
+  local resolved=""
+  resolved="$(aid_lifecycle_plan_mode "$plan_id" "$root" 2>/dev/null)" || resolved=""
+  [[ -n "$cleanup_root" ]] && rm -rf "$cleanup_root" 2>/dev/null
+  case "$resolved" in
+    plan_branch|legacy_epic_release_mode) printf '%s\t%s\t\n' "$resolved" "$plan_id" ;;
+    *) printf 'unresolved\t%s\tmode_reader_returned_no_answer\n' "$plan_id" ;;
+  esac
+  return 0
+}
+
 cmd_done_advance() {
   local from_phase="$1" to_phase="$2" state_file="$3"
   local force="false"
@@ -3486,6 +3784,93 @@ cmd_done_advance() {
     echo "ERROR: illegal done_phase transition: $from_phase -> $to_phase (only review -> release is allowed)" >&2
     exit 1
   }
+
+  # ── P064 plan Step 9: resolve the owning plan's DECLARED release model ────
+  # Runs on the review→release edge and nowhere else (it is the only legal
+  # edge, checked immediately above). `plan_branch` means this is an
+  # INTERMEDIATE EPIC completion inside an open plan: the per-EPIC release
+  # stack in AID_PLAN_BRANCH_SKIPPED_STAGES is not merely optional here, it is
+  # structurally skipped, because those stages belong to the plan-final run.
+  # `unresolved` is a hard block — see _fsm_declared_plan_mode's header for why
+  # falling back to legacy would be the unsafe direction.
+  local _pb_mode="" _pb_mode_plan="" _pb_mode_reason="" _pb_plan_branch="false"
+  local _pb_epic_id _pb_run_id _pb_mode_timeline
+  _pb_epic_id=$(yaml_field "$state_file" epic_id)
+  _pb_run_id=$(yaml_field "$state_file" run_id)
+  _pb_mode_timeline=".aid-o/work/evidence/${_pb_epic_id}/${_pb_run_id}/timeline.jsonl"
+  IFS=$'\t' read -r _pb_mode _pb_mode_plan _pb_mode_reason \
+    < <(_fsm_declared_plan_mode "$_pb_epic_id") || true
+  [[ "$_pb_mode" == "plan_branch" ]] && _pb_plan_branch="true"
+
+  if [[ "$_pb_mode" == "unresolved" ]]; then
+    mkdir -p "$(dirname "$_pb_mode_timeline")" 2>/dev/null || true
+    if [[ "$force" == "true" ]]; then
+      echo "WARNING: --force used, advancing with an UNRESOLVED release mode for plan ${_pb_mode_plan} (reason: ${_pb_mode_reason})." >&2
+      log_event "$_pb_mode_timeline" "plan_mode_unresolved" \
+        epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" reason="$_pb_mode_reason" overridden="true"
+      # Step 4 CP2 finding 5: the run timeline above is not the surface a PM
+      # audits. fsm_handle_force_override (called further down) writes
+      # .aid-o/work/audit-log.jsonl with a GENERIC force carrying whatever
+      # --blocked-checks the operator happened to type, so an audit of that file
+      # alone could not tell that THIS advance happened without knowing whether
+      # the EPIC was supposed to merge to the target branch at all. Emit the
+      # named override into the audit log directly — a SEPARATE, additional
+      # entry, leaving fsm_handle_force_override's contract untouched for the
+      # many other callers that share it. Best-effort like every other
+      # fsm_emit_audit_log call; it never aborts the advance.
+      #
+      # epic_id/run_id/project_root are read from caller scope by
+      # fsm_emit_audit_log and are not declared until the force branch below, so
+      # bind them here (both branches re-declare + reassign them from the state
+      # file afterwards, so this cannot leak a stale value into them).
+      local epic_id="$_pb_epic_id" run_id="$_pb_run_id" project_root="$PWD"
+      fsm_emit_audit_log "plan_mode_unresolved_override" \
+        --from "$from_phase" --to "$to_phase" --caller "done-advance" \
+        --operator "${USER:-unknown}" \
+        --plan-id "$_pb_mode_plan" --unresolved-reason "$_pb_mode_reason"
+    else
+      echo "PRECONDITION FAIL: plan_mode_unresolved — cannot determine the declared release model for plan ${_pb_mode_plan} (EPIC ${_pb_epic_id}, reason: ${_pb_mode_reason})." >&2
+      echo "Refusing to guess. A wrong guess of legacy_epic_release_mode here routes the controller into merging task/${_pb_epic_id}/main straight into the target branch, which a plan_branch plan must never do." >&2
+      echo "Fix: restore/repair .aid-lifecycle/manifests/${_pb_mode_plan}.yaml on the target branch (or install the missing tool), then retry." >&2
+      echo "Override (audited): aid-fsm.sh done-advance ${from_phase} ${to_phase} ${state_file} --force --reason '<why this override is safe>'" >&2
+      log_event "$_pb_mode_timeline" "plan_mode_unresolved" \
+        epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" reason="$_pb_mode_reason"
+      exit 1
+    fi
+  fi
+
+  if [[ "$_pb_plan_branch" == "true" ]]; then
+    # Routing telemetry, emitted BEFORE the skipped stages would have run so it
+    # is present even when a RETAINED local check later blocks the transition.
+    # The payload lists AID_PLAN_BRANCH_SKIPPED_STAGES verbatim — the spy test
+    # asserts against that same array read out of this file.
+    local _pb_stages_json
+    if command -v jq >/dev/null 2>&1; then
+      _pb_stages_json="$(printf '%s\n' "${AID_PLAN_BRANCH_SKIPPED_STAGES[@]}" \
+        | jq -Rsc 'split("\n") | map(select(length > 0))')"
+    else
+      # No jq: hand-build the JSON array rather than emitting a comma-joined
+      # STRING (Step 4 CP2 finding 4). log_event (lib/aid-stage-log.sh) passes a
+      # value through as raw JSON only when its first character is '[' or '{';
+      # the old `c3_review_profile_presence,cp4_...` form started with 'c', so it
+      # was emitted as a QUOTED STRING and every consumer doing
+      # `.skipped_stages[]` — including AC4's own assertion — broke on a
+      # jq-less host. The array holds a fixed list of [a-z0-9_] identifiers
+      # written literally three lines apart in this same file, so plain quoting
+      # is sufficient; there is no escaping case to get wrong.
+      local _pb_stage _pb_sep=""
+      _pb_stages_json="["
+      for _pb_stage in "${AID_PLAN_BRANCH_SKIPPED_STAGES[@]}"; do
+        _pb_stages_json+="${_pb_sep}\"${_pb_stage}\""
+        _pb_sep=","
+      done
+      _pb_stages_json+="]"
+    fi
+    mkdir -p "$(dirname "$_pb_mode_timeline")" 2>/dev/null || true
+    log_event "$_pb_mode_timeline" "done_advance_plan_branch_mode" \
+      epic_id="$_pb_epic_id" plan_id="$_pb_mode_plan" mode="plan_branch" \
+      forced="$force" skipped_stages="$_pb_stages_json"
+  fi
 
   # Precondition checks (skip with --force)
   if [[ "$force" == "true" ]]; then
@@ -3630,6 +4015,21 @@ cmd_done_advance() {
       fi
 
       # ── C3 activation: review-profile.json presence check (producer wiring). ──
+      # P064 plan Step 9 — SKIPPED in plan_branch mode (`c3_review_profile_presence`
+      # in AID_PLAN_BRANCH_SKIPPED_STAGES).
+      #
+      # PRECISION (Step 4 CP2 finding 2): what an intermediate plan-branch EPIC
+      # stops producing is the C3 PRODUCER HOOK's `review-profile.json` (the
+      # aid-prefilter.sh risk profile over the full base_commit..HEAD diff that
+      # feeds the plan-final C3/Curator/Auditor chain) — NOT the CP3 verifier
+      # pair. The CP3 code-review + CP3 security verifiers are still dispatched
+      # per EPIC in plan_branch mode, and under `streamlined_mode: true`
+      # fsm_check_streamlined_integration_review (above the skip guard, retained
+      # in both modes) still hard-`die`s when their two outputs are absent. Only
+      # this presence check and the CP3 FRESHNESS re-check are skipped, so that
+      # under enforcement=blocking a plan-branch EPIC is not failed for missing
+      # an artifact the mode deliberately stopped producing.
+      if [[ "$_pb_plan_branch" != "true" ]]; then
       # review-profile.json is produced in the DONE review sub-phase (pipeline.md,
       # aid-prefilter.sh profile over the full base_commit..HEAD diff). Its ABSENCE
       # means the C3 producer wiring did not run for this EPIC. OBSERVE by default:
@@ -3649,7 +4049,8 @@ cmd_done_advance() {
           log_warn "review_profile presence would_block (enforcement=observe, non-blocking): review-profile.json absent in ${evidence_dir}"
         fi
       fi
-      # End C3 activation review-profile presence check
+      fi
+      # End C3 activation review-profile presence check (+ plan_branch skip guard)
 
       # ── C3 activation (IMP-177 / E-059-1_2 Step 2): invalidation-map expectation
       # check (OBSERVE). Closes the OTHER half of IMP-177: aid-invalidation-map.sh
@@ -3768,6 +4169,119 @@ EOF
           "✅ ${epic_id}: compliance cleared, release unblocked."
       fi
       # End P038/P042 compliance block. Falls through to existing curator/auditor checks.
+
+      # ── EPIC-LOCAL checks that run in BOTH modes ────────────────────────────
+      # Relocated here by P064 plan Step 9 from inside the release stack below
+      # (they used to sit between the Curator sequencing guard and the C3
+      # audit hook). Neither depends on a Curator/Auditor/C3/C4 artifact, and
+      # both are exactly as meaningful for an EPIC merging into `plan/Pxxx` as
+      # for one merging into the target branch — so the mode fork must not
+      # swallow them. Pure `errors` contributors: order-independent.
+
+      # PM decision must be set to merge
+      local pm_decision
+      pm_decision=$(yaml_field "$state_file" pm_decision)
+      [[ "$pm_decision" == "merge" ]] || {
+        echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
+        errors=$((errors + 1))
+      }
+
+      # EPIC task file must be archived (moved to tasks/archive/)
+      local task_file
+      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
+      if [[ -n "$task_file" ]]; then
+        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
+        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
+        errors=$((errors + 1))
+      fi
+
+      # ── The auditor's `blocking_findings` verdict (EPIC-LOCAL, BOTH modes) ───
+      # HOISTED out of the release stack by the Step 4 CP2 review (finding 1). It
+      # used to sit inside the skip guard while appearing in NEITHER the skipped
+      # list nor the "WHAT IS NOT HERE" list — so a PM-blessed mid-plan Auditor
+      # run (skills/pipeline.md, `mid_plan_specialist_review_exception`) that
+      # reported a critical finding was silently ungated for an intermediate
+      # plan-branch EPIC: it merged into `plan/{plan_id}` with the finding
+      # unaddressed and nothing named the bypass. The verdict is about THIS
+      # EPIC's own diff, not about the plan boundary, so it belongs here with
+      # the other EPIC-local checks and is deliberately NOT in
+      # AID_PLAN_BRANCH_SKIPPED_STAGES.
+      #
+      # NO-OP WHEN NO REPORT EXISTS. An intermediate plan-branch EPIC normally
+      # produces no audit-report at all; absence remains exactly what it was
+      # before the hoist — silence, never a new hard failure. Only the PRESENCE
+      # of audit-report.md/.yaml arms the fail-closed read.
+      #
+      # Blocks on the auditor's CANONICAL top-level `blocking_findings` field
+      # (agents/auditor.md: emitted as the first line of the YAML, E-046-1_3 Step
+      # 3 producer→consumer migration). yaml_field() matches only line-start keys
+      # — indented/nested values and prose body lines are INVISIBLE, preventing
+      # the old grep-ciE false-positive on negations ("No blocking_findings: true
+      # ..."). Fail-closed: report present + field absent → cannot confirm clean
+      # → block.
+      #
+      # C3 SSOT PRECEDENCE (E-057-1_2 Step 4) — PRESERVED, BUT SCOPED. In legacy
+      # mode this .md/.yaml read still defers to the C3 independent-audit hook
+      # further down, which reads `.audit_report.blocking_findings` out of
+      # audit-report.json: ONE source of truth, not two parallel checks. The
+      # deferral is now scoped to the case where that hook CAN actually run.
+      #   * plan_branch mode → the whole C3 chain is skipped, so deferring to it
+      #     would leave the verdict ungated. This read always applies there.
+      #   * legacy mode → defer exactly when the C3 hook's own secondary trigger
+      #     would fire (review-profile.json AND a non-empty `.audit_report`
+      #     object in audit-report.json). A run whose PRIMARY risk-gate fires
+      #     without a readable audit-report.json no longer skips this read: the
+      #     C3 hook has no JSON verdict to substitute, so the .md/.yaml verdict
+      #     is the only one there is (fail-closed direction, deliberate).
+      local audit_file=""
+      [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
+      [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
+
+      local _bf_json_is_ssot="false"
+      if [[ "$_pb_plan_branch" != "true" \
+            && -f "${evidence_dir}/review-profile.json" \
+            && -f "${evidence_dir}/audit-report.json" ]] && command -v jq >/dev/null 2>&1; then
+        # Same shape probe as the C3 hook's secondary trigger below (a non-empty
+        # `.audit_report` OBJECT is what makes that hook adopt the JSON as SSOT).
+        # Guarded against `set -euo pipefail` abort like every other jq read here.
+        local _bf_shape="" _bf_shape_ec=0
+        _bf_shape=$(jq -r 'if (.audit_report | type) == "object" and (.audit_report | length) > 0 then "true" else "false" end' \
+          "${evidence_dir}/audit-report.json" 2>/dev/null) || _bf_shape_ec=$?
+        [[ $_bf_shape_ec -eq 0 && "$_bf_shape" == "true" ]] && _bf_json_is_ssot="true"
+      fi
+
+      if [[ -n "$audit_file" && "$_bf_json_is_ssot" != "true" ]]; then
+        local blk
+        blk=$(yaml_field "$audit_file" blocking_findings)
+        if [[ -z "$blk" ]]; then
+          echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
+          echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
+          errors=$((errors + 1))
+        elif [[ "$blk" != "false" ]]; then
+          # Fail-closed on any non-false value: true, maybe, "true", comment, garbage.
+          # Only exact scalar 'false' (after quote-stripping by yaml_field) is clean.
+          echo "PRECONDITION FAIL: blocking_findings value '${blk}' is not 'false' — treating as blocking (fail-closed on any non-false value)." >&2
+          echo "Address the finding or correct the field value. See: $audit_file" >&2
+          errors=$((errors + 1))
+        fi
+        # blk == "false" → no blocking findings; passes silently.
+      fi
+
+      # ══ P064 plan Step 9: THE per-EPIC RELEASE STACK ════════════════════════
+      # Everything from here to "End of the plan_branch-skipped release stack"
+      # is the stack an INTERMEDIATE plan-branch EPIC completion must be
+      # structurally incapable of invoking: CP4 curator validation, the CP3
+      # freshness re-check, the Curator/Auditor report requirements, the C3
+      # independent-audit chain, the C3 dispatch-provenance hook and the
+      # EPIC-scoped C4 dual run. Their names are listed, in this order, in
+      # AID_PLAN_BRANCH_SKIPPED_STAGES near the top of cmd_done_advance's
+      # section of this file — that array is the single source of truth the
+      # timeline event and the spy test both read.
+      #
+      # The body below is UNINDENTED on purpose: this guard is a pure skip, and
+      # re-indenting ~625 lines would bury the behavioural change in whitespace
+      # and make every future `git blame` on the release stack point at Step 9.
+      if [[ "$_pb_plan_branch" != "true" ]]; then
 
       # P040 Component C: CP4 enforcement (must run before existing curator-report check)
       if ! fsm_check_cp4_curator_validation "$evidence_dir" "$project_root" "$state_file"; then
@@ -3960,35 +4474,27 @@ EOF
       fi
       # If file missing AND c3_hook_fired == "false": silent no-op (pre-C3 run)
 
-      # PM decision must be set to merge
-      local pm_decision
-      pm_decision=$(yaml_field "$state_file" pm_decision)
-      [[ "$pm_decision" == "merge" ]] || {
-        echo "PRECONDITION FAIL: pm_decision must be 'merge', found: '${pm_decision:-<not set>}'." >&2
-        errors=$((errors + 1))
-      }
-
-      # EPIC task file must be archived (moved to tasks/archive/)
-      local task_file
-      task_file=$(find .aid-o/tasks/ -maxdepth 1 -name "${epic_id}*" 2>/dev/null | head -1)
-      if [[ -n "$task_file" ]]; then
-        echo "PRECONDITION FAIL: EPIC task file still in tasks/ (not archived): $(basename "$task_file")" >&2
-        echo "Move to tasks/archive/ before advancing: mv $task_file .aid-o/tasks/archive/" >&2
-        errors=$((errors + 1))
-      fi
+      # (P064 plan Step 9 moved the pm_decision and task-file-archived checks OUT
+      # of this block to just ABOVE the plan_branch skip guard — they are
+      # EPIC-local validations, not release-stack stages, and must keep running
+      # in both modes. Search: "EPIC-LOCAL checks that run in BOTH modes".)
 
       # E-057-1_2 Step 4: C3 independent-audit hook (risk-gated, JSON source of truth).
       # Reads `.audit_report.blocking_findings` from audit-report.json (protocol-v2
-      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). This REPLACES the legacy
-      # yaml_field()-based .md/.yaml blocking_findings read directly below for any run
-      # whose risk profile requires C3 — ONE source of truth, not two parallel checks
+      # envelope, agents/auditor.md C3 mode, E-057-1_2 Step 2). For any run whose risk
+      # profile requires C3, this REPLACES the legacy yaml_field()-based .md/.yaml
+      # blocking_findings read — ONE source of truth, not two parallel checks
       # (M2 fix). Risk profile comes from review-profile.json (produced by
       # aid-prefilter.sh profile / skills/pipeline.md's C3 producer hook, E-057-1_2 Step
       # 3); this hook only fires when that profile is "high" or "unverifiable" — the two
       # (and only two) `c3_required: true` profiles in c3-audit-policy.yaml (D8/D9). Any
       # other profile (docs_trivial/low/medium), or a run with no review-profile.json at
       # all (pre-C3 runs never subjected to this pipeline stage), leaves this hook a
-      # no-op and falls through unchanged to the legacy blocking_findings check below.
+      # no-op — and the legacy blocking_findings check has ALREADY RUN by then. The
+      # P064 Step 9 CP2 review HOISTED it ~250 lines ABOVE this block, out of the
+      # release stack and into the EPIC-local checks that execute in BOTH modes, so it
+      # is no longer "below" as the comments here used to say (search: "The auditor's
+      # `blocking_findings` verdict (EPIC-LOCAL, BOTH modes)").
       #
       # Fail-closed (D4): missing/unreadable/unparseable audit-report.json, a missing
       # `.audit_report.input_manifest_hash` (provenance), a `status` of "unverifiable"
@@ -4263,36 +4769,13 @@ EOF
         fi
       fi
 
-      # Block release on critical-severity findings via the auditor's CANONICAL top-level
-      # `blocking_findings` field (agents/auditor.md: emitted as first line of the YAML,
-      # E-046-1_3 Step 3 producer→consumer migration). yaml_field() matches only line-start
-      # keys — indented/nested values and prose body lines are INVISIBLE, preventing the
-      # old grep-ciE false-positive on negations ("No blocking_findings: true ...").
-      # Fail-closed: absent field → field is indented/missing → cannot confirm clean → block.
-      # E-057-1_2 Step 4: this legacy .md/.yaml read is SKIPPED when the C3 hook above
-      # already fired (risk profile high/unverifiable) — audit-report.json is the single
-      # source of truth for those profiles; this remains the only check for all others.
-      if [[ "$c3_hook_fired" != "true" ]]; then
-      local audit_file=""
-      [[ -f "${evidence_dir}/audit-report.md" ]] && audit_file="${evidence_dir}/audit-report.md"
-      [[ -f "${evidence_dir}/audit-report.yaml" ]] && audit_file="${evidence_dir}/audit-report.yaml"
-      if [[ -n "$audit_file" ]]; then
-        local blk
-        blk=$(yaml_field "$audit_file" blocking_findings)
-        if [[ -z "$blk" ]]; then
-          echo "PRECONDITION FAIL: audit-report is missing canonical top-level 'blocking_findings' field (fail-closed)." >&2
-          echo "Re-dispatch auditor so it emits 'blocking_findings: false' or 'true' at line start. See: $audit_file" >&2
-          errors=$((errors + 1))
-        elif [[ "$blk" != "false" ]]; then
-          # Fail-closed on any non-false value: true, maybe, "true", comment, garbage.
-          # Only exact scalar 'false' (after quote-stripping by yaml_field) is clean.
-          echo "PRECONDITION FAIL: blocking_findings value '${blk}' is not 'false' — treating as blocking (fail-closed on any non-false value)." >&2
-          echo "Address the finding or correct the field value. See: $audit_file" >&2
-          errors=$((errors + 1))
-        fi
-        # blk == "false" → no blocking findings; passes silently.
-      fi
-      fi
+      # (Step 4 CP2 finding 1 moved the legacy `blocking_findings` .md/.yaml read
+      # OUT of this block to just ABOVE the plan_branch skip guard, beside the
+      # pm_decision and task-file-archived checks — it is an EPIC-LOCAL verdict
+      # about this EPIC's own diff and must keep blocking in BOTH modes. Its C3
+      # SSOT deferral is preserved there, scoped to the legacy path where the C3
+      # hook above actually runs. Search: "the auditor's `blocking_findings`
+      # verdict (EPIC-LOCAL, BOTH modes)".)
 
       # ─── C4 release-decision dual-run hook (E-059-2_2 Step 5) ───────────────
       # Runs the C4 release aggregator (aid-release-policy.sh) HERE — after every
@@ -4395,6 +4878,12 @@ EOF
         fi
       fi
       # ─── End C4 dual-run hook ───────────────────────────────────────────────
+
+      fi
+      # ══ End of the plan_branch-skipped release stack (P064 plan Step 9) ═════
+      # `errors` below is still the complete verdict: in plan_branch mode the
+      # retained EPIC-local checks are the only contributors to it, and every
+      # one of them either sets `errors` or hard-exits on its own.
 
       if [[ $errors -gt 0 ]]; then
         local timeline
@@ -4623,12 +5112,13 @@ cmd_plan_close() {
   [[ -z "$evidence_dir" ]]  && echo "Missing: evidence_dir"  >&2 && exit 1
   [[ -z "$project_root" ]]  && echo "Missing: project_root"  >&2 && exit 1
 
-  # Derive plan_id: strip trailing _N run suffix, extract first NNN digit block after E-
-  # E-046-2_3 -> stripped=E-046-2 -> nnn=046 -> plan_id=P046
-  # E-013-1   -> stripped=E-013-1 -> nnn=013 -> plan_id=P013
-  local stripped="${epic_id%%_*}"           # remove _N suffix if present
-  local nnn
-  nnn=$(echo "$stripped" | grep -oP '(?<=^E-)\d+')
+  # Derive plan_id through the ONE shared helper (`_fsm_epic_plan_nnn`, top of
+  # this file): E-046-2_3 -> 046 -> P046, E-013-1 -> 013 -> P013. This used to
+  # be a fourth copy of `grep -oP '(?<=^E-)\d+'`, which FAILS (not "no match")
+  # on a grep without PCRE support — here that surfaced as a bare grep error
+  # under `set -e`. An id that derives no digits is now refused by name.
+  local nnn; nnn="$(_fsm_epic_plan_nnn "$epic_id")"
+  [[ -n "$nnn" ]] || { echo "ERROR: plan-close: cannot derive a plan id from epic_id '${epic_id}' (expected E-<NNN>-...)." >&2; exit 1; }
   local plan_id="P${nnn}"
 
   # Read execution.yaml toggles — grep-only, no yq dependency.
@@ -4726,6 +5216,12 @@ cmd_plan_close() {
 #
 # New read path: aid-fsm.sh did not read the queue before this (cmd_init only
 # excluded queue.yaml from its dirty-tree guard). Registry: queue_dep_revalidation.
+#
+# P064 Step 7 amends outputs 1-3 for an entry that declares a `merge_target`
+# (written by lib/aid-queue-write.sh): ancestry is checked against THAT ref
+# instead of the main|master|HEAD guess, and outputs 3's evidence-based
+# fallback chain is unavailable — a plan-branch dependency is proven by
+# ancestry or it is blocked. Registry: plan_branch_merge_target.
 
 # _queue_parse_to_json <file> — awk parser copied from aid-queue-add.sh
 # (lines ~104-211). The live dogfood .aid-o/config/queue.yaml is NOT
@@ -4800,6 +5296,12 @@ _queue_parse_to_json() {
 
       if (key == "status") {
         printf ",\"status\":\"%s\"", val
+      } else if (key == "plan_id" || key == "merge_target") {
+        # P064 Step 7 — the two fields lib/aid-queue-write.sh adds. Emitted as
+        # strings exactly like `status` (the YAML literal `null` therefore
+        # arrives as the four-character string "null", which the bash side
+        # treats as absent — see _queue_entry_merge_target).
+        printf ",\"%s\":\"%s\"", key, val
       } else if (key == "depends_on") {
         printf ",\"depends_on\":"
         in_depends = 1
@@ -4856,10 +5358,29 @@ _queue_parse_to_json() {
 
 # _queue_merge_target — echo the ref the dep branch should be an ancestor of.
 # Prefers main, then master, else HEAD (detached/CI checkout).
+#
+# P064 Step 7 NOTE: this is now the FALLBACK only, used for a queue entry that
+# declares no `merge_target`. It is exactly the guess that made an EPIC merged
+# into `plan/Pxxx` but not yet released report `blocked` forever — see
+# _queue_entry_merge_target below for the declared-target path that supersedes
+# it.
 _queue_merge_target() {
   if git show-ref --verify --quiet refs/heads/main; then echo main
   elif git show-ref --verify --quiet refs/heads/master; then echo master
   else echo HEAD; fi
+}
+
+# _queue_entry_merge_target <dep> <queue_json> — the ref THIS dependency
+# declares it was (or will be) merged into: `plan/<plan_id>` while its plan is
+# open, the target branch once the plan is released to main. Empty when the
+# entry carries no merge_target (a legacy, pre-P064 entry) — that empty answer
+# is what re-enables the fallback chain below.
+_queue_entry_merge_target() {
+  local dep="$1" queue_json="$2" mt
+  mt=$(echo "$queue_json" | jq -r --arg d "$dep" \
+    '[.[] | select(.epic_id==$d) | (.merge_target // "")] | .[0] // ""' 2>/dev/null)
+  [[ "$mt" == "null" || "$mt" == "~" ]] && mt=""
+  printf '%s' "$mt"
 }
 
 # _dep_evidence_state <dep> — echo "DONE" if ANY of the dep's evidence runs is
@@ -4887,16 +5408,51 @@ _dep_evidence_branch() {
   echo ""
 }
 
+# _dep_valid_branch_ref <ref> — is <ref> a name git itself accepts?
+#
+# CONTRACT TWIN of lib/aid-queue-write.sh:_queue_valid_branch_ref, byte for
+# byte in behaviour (CP2 iteration 2, finding 2). The writer used to apply a
+# hand-rolled `^[A-Za-z0-9][A-Za-z0-9._/-]*$` here and this reader applied
+# NOTHING, so for a dep that ran on a git-legal but regex-illegal branch — the
+# verifier's repro is `_wip` — `queue-revalidate` said `unblocked` while
+# `queue_claim_next` wrote `dependency_no_ancestry_proof` on the same fact.
+# `git check-ref-format` is the authority precisely so neither half can drift
+# from git again. On top of it: a leading `-` is refused (git accepts it as a
+# ref name, but `git merge-base --is-ancestor "$ref" …` would read it as an
+# OPTION), as is a `"`/backslash/control character, so the name stays safe if
+# it is ever written back into the queue as a YAML scalar. CHANGE BOTH.
+_dep_valid_branch_ref() {
+  local r="${1:-}"
+  [[ -n "$r" ]]                     || return 1
+  [[ "$r" != -* ]]                  || return 1
+  [[ "$r" != *'"'* ]]               || return 1
+  [[ "$r" != *'\'* ]]               || return 1
+  [[ "$r" != *[$'\001'-$'\037']* ]] || return 1
+  [[ "$r" != *$'\177'* ]]           || return 1
+  git check-ref-format "refs/heads/${r}" >/dev/null 2>&1
+}
+
 # _resolve_dep_branch <dep> — echo the LIVE branch to ancestor-check for a dep:
 # the task/<dep>/main convention if it exists, else the evidence fsm-state
 # branch field if that ref exists (never main/master — a legacy branch:main
 # would false-unblock). Empty = branch deleted (merged-detection path).
+#
+# CONTRACT TWIN: lib/aid-queue-write.sh:_queue_resolve_dep_branch implements
+# this same rule for the WRITE side (queue_claim_next). The two halves must
+# answer the same question the same way — a writer that knew only the
+# task/<dep>/main convention wrote `blocked:…:dependency_no_ancestry_proof` on
+# a dep this reader reported `unblocked`, leaving the dependent unclaimable
+# through the queue while the FSM said it was ready (CP2 finding 3). aid-fsm.sh
+# is a command script, not a sourceable library, so the rule is duplicated
+# rather than shared: CHANGE BOTH.
 _resolve_dep_branch() {
   local dep="$1"
   local conv="task/${dep}/main"
-  if git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
+  if _dep_valid_branch_ref "$conv" \
+     && git show-ref --verify --quiet "refs/heads/${conv}"; then echo "$conv"; return 0; fi
   local ev; ev=$(_dep_evidence_branch "$dep")
   if [[ -n "$ev" && "$ev" != "main" && "$ev" != "master" ]] \
+     && _dep_valid_branch_ref "$ev" \
      && git show-ref --verify --quiet "refs/heads/${ev}"; then
     echo "$ev"; return 0
   fi
@@ -4910,7 +5466,40 @@ _resolve_dep_branch() {
 # aborts under `set -e` — it falls through to merged-detection.
 _revalidate_one_dep() {
   local dep="$1" queue_json="$2" timeline_path="$3"
-  local target; target=$(_queue_merge_target)
+
+  # ── P064 Step 7: a DECLARED merge_target changes both the ref and the rules ─
+  # For an entry that carries `merge_target`, ancestry against THAT ref is the
+  # only accepted answer. The evidence-based fallback chain further down (queue
+  # `status: completed`, an evidence `state: DONE`, a merge-log grep) is
+  # unavailable to it — every one of those is a claim ABOUT a merge rather than
+  # the merge itself, and `status: completed` in particular has only ever been
+  # written by hand. A queue entry is a derived view, never evidence.
+  local declared; declared=$(_queue_entry_merge_target "$dep" "$queue_json")
+
+  local target
+  if [[ -n "$declared" ]]; then
+    # A merge_target read out of the hand-editable queue file is untrusted
+    # input (CP2 iteration 2, LOW note): validate it with the same predicate as
+    # the writer BEFORE it becomes an argv element of `git`, where a leading
+    # `-` would be read as an option. An unusable target is the same broken
+    # record as a non-resolving one — reported, never treated as proof.
+    if ! _dep_valid_branch_ref "$declared"; then
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_invalid"
+      echo "failed"; return 1
+    fi
+    if ! git rev-parse --verify --quiet "${declared}^{commit}" >/dev/null 2>&1; then
+      # A declared target that does not resolve is a broken record, not a
+      # "blocked" answer — treating it as blocked would hide it forever.
+      log_event "$timeline_path" "queue_dep_unresolved" \
+        epic_id="$dep" reason="merge_target_missing" merge_target="$declared"
+      echo "failed"; return 1
+    fi
+    target="$declared"
+  else
+    target=$(_queue_merge_target)
+  fi
+
   local branch; branch=$(_resolve_dep_branch "$dep")
 
   if [[ -n "$branch" ]]; then
@@ -4919,15 +5508,30 @@ _revalidate_one_dep() {
     case "$rc" in
       0)  # output 1: branch exists + is ancestor → merged → unblock
         log_event "$timeline_path" "queue_dep_revalidated" \
-          epic_id="$dep" resolution="ancestor" branch="$branch"
+          epic_id="$dep" resolution="ancestor" branch="$branch" merge_target="$target"
         echo "unblocked"; return 0 ;;
       1)  # output 2: branch exists + NOT ancestor → genuinely unmerged → blocked
         log_event "$timeline_path" "queue_dep_blocked" \
-          epic_id="$dep" branch="$branch"
+          epic_id="$dep" branch="$branch" merge_target="$target"
         echo "blocked"; return 0 ;;
       *)  # 128 = bad-ref/fatal → do NOT crash; fall through to merged-detection
+        if [[ -n "$declared" ]]; then
+          log_event "$timeline_path" "queue_dep_unresolved" \
+            epic_id="$dep" reason="ancestry_check_failed" merge_target="$target" branch="$branch"
+          echo "failed"; return 1
+        fi
         : ;;
     esac
+  fi
+
+  if [[ -n "$declared" ]]; then
+    # Declared target, no live branch to prove ancestry with. A deleted branch
+    # is not proof, and neither is a hand-edited `completed`. This is a
+    # determinate "not merged", not a fail-loud: the answer is knowable and it
+    # is "no".
+    log_event "$timeline_path" "queue_dep_blocked" \
+      epic_id="$dep" merge_target="$target" reason="no_ancestry_proof"
+    echo "blocked"; return 0
   fi
 
   # output 3: branch deleted after merge (the NORM) → merged-detection fallback.

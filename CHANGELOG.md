@@ -3,6 +3,26 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.61.0] — 2026-07-23
+
+### Added
+- **`epic-complete` and `epic-merge-to-plan` (`aid-plan-fsm.sh`)** — an EPIC is finalized and integrated into `plan/Pxxx` inside one reconcilable transaction, where Git ancestry is the only accepted proof that the work landed and a manifest `lineage: proven` is the only accepted authority to record it; `state: DONE`, a deleted task branch and a queue entry claiming completion are explicitly not proof, `merged_to_plan` is terminal, and the target branch is never read or written.
+- **`lib/aid-queue-write.sh` — the single queue writer** — enum-validated status transitions, an atomic next-EPIC claim performed inside one lock hold, structural validation of every appended entry block, and the new `plan_id` / `merge_target` fields; `queued` stays accepted on read so entries written by older plugin versions remain parseable.
+- **Boundary-split gate profiles** — `gate_profile_resolve` gained a `boundary` parameter so an EPIC boundary caps at `standard` while the unbounded result is preserved out of band as the accumulated plan-final floor; the self-host `gate_profiles` table is activated with `docs_updated` in every include list.
+- **Five canonical enforcement registry rows** for the EPIC-boundary cap, the plan-final gate record, the `plan_branch` release skip, the unresolved-mode block and the single mode authority.
+
+### Changed
+- **Dependency readiness proves ancestry against a declared `merge_target`** instead of guessing `main|master|HEAD`, which reported an EPIC merged into `plan/Pxxx` but not yet released as blocked forever; for an entry carrying a `merge_target` the evidence-based fallback chain is unreachable, so a hand-edited `completed` status can no longer unblock dependent work — a queue entry is a derived view, never evidence.
+- **The per-EPIC release stack is structurally silent in `plan_branch` mode** — `cmd_done_advance` resolves the plan's declared mode and skips every stage named in one `AID_PLAN_BRANCH_SKIPPED_STAGES` constant, emitting that list in the timeline; an unresolvable mode is a hard block rather than a fallback, because falling back would merge an individual EPIC into the target branch.
+- **One mode authority** — both mode resolvers read the declared lifecycle manifest from the target branch's committed tree; the gitignored runtime manifest is no longer a mode input, an uncommitted or unreadable declaration is `unresolved` rather than an answer, and each resolver keeps its own fail-safe direction (gate routing degrades toward more gates, release routing hard-blocks).
+- **`skills/pipeline.md` and `commands/aid-run.md`** carry the mode fork, a full exit-code table for the two new commands, and an honest statement of which parts are wired versus documented.
+
+### Fixed
+- **Queue write injection via `awk -v`** — `awk -v` is not a literal channel on either mawk or gawk, so a two-character backslash-n in a free-text reason smuggled a second assignment into the write payload and landed an entry on a terminal status the caller never requested, destroying a neighbouring key and leaving the file unparseable as YAML while the reader kept consuming it; attacker-influenced values now travel through `ENVIRON`, the parse layer aborts the whole write on a malformed payload, and reasons plus ids read back out of the file are charset-validated.
+- **The queue append door** — `aid-queue-add.sh` interpolated every argument-reachable field unvalidated, and matched `depends_on` with a BRE instead of a literal so `--depends-on 'E-81.'` bound a dependency on an id that does not exist.
+- **Plan id derivation no longer depends on `grep -oP`** — `-P` is a GNU-grep build option that fails outright rather than failing to match, which wrote `plan_id: null` and silently stopped a multi-EPIC plan after its first EPIC on any host without PCRE support.
+- **Contract twins agree** — writer and reader resolve a dependency's branch by one rule validated with `git check-ref-format`, so a git-legal branch name can no longer be unclaimable through the queue while the FSM reports it ready.
+
 ## [2.60.1] — 2026-07-22
 
 ### Changed
