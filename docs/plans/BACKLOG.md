@@ -348,6 +348,15 @@ set `AID_PLAN_AC_FILE` explicitly and verify that `bundle-plan-ac.md` is not byt
 implementation-authored final report. This is required for E-064-2_2 but does not reopen the
 already adjudicated E-064-1_2 closure.
 
+**E-064-2_2 extension — targeted test evidence:** The explicit AC source worked, but exposed the
+next fixed-allowlist gap. A PM-authorized targeted suite produced a real revision-bound,
+command-fingerprinted receipt at the reviewed HEAD, yet C3 still returned `unverifiable` because
+`build-manifest` could seal only `gates_report.json` and `allowed_recheck_commands` was empty.
+Extend the same source-binding principle to test evidence: either seal a typed targeted-run receipt
+into `evidence_hashes`, or seal a narrowly scoped recheck command that C3 may execute. Preserve
+`unverifiable` as distinct from `fail`, and do not promote C3 to blocking while a quarantined gate
+has no truthful hash-bound evidence channel.
+
 ### IMP-270 - Gate-scoped PM waiver without broad FSM precondition bypass
 
 **Status:** ready — implement manually outside AID after P064, before P068
@@ -365,6 +374,58 @@ remain enforced. Missing, stale, forged, reused or cross-run authorizations fail
 **Required tests:** one waiver cannot authorize a different gate, HEAD, run or command; a waived
 required gate remains visible in release/PM evidence; non-waived failures still block; replay of a
 single-use authorization is rejected or idempotently returns its already-consumed disposition.
+
+### IMP-271 - Require an explicit plan mode until the plan-final compensating control exists
+
+**Status:** ready — required before P068 enables `plan_branch`
+**Priority:** high
+**Class:** lifecycle safety / fail-safe default
+**Area:** `aid-plan-fsm.sh plan-start`
+
+**Summary:** `plan-start` currently defaults an omitted `--mode` to `plan_branch`. P064 made that
+mode structurally skip the per-EPIC release stack, while `plan-finalize` and `plan-merge-to-main`
+do not exist until P068. Make mode explicit with no silent default, or reject `plan_branch` until
+the compensating plan-final commands are installed. Tests must prove omission and incomplete
+installation cannot create a plan that skips verification yet cannot close.
+
+### IMP-272 - Constrain queue `merge_target` to an authorized plan or target branch
+
+**Status:** ready — required before P068 enables `plan_branch`
+**Priority:** high
+**Class:** lineage integrity / semantic validation
+**Area:** queue dependency revalidation and claim contract twins
+
+**Summary:** Queue dependency checks prove ancestry against the `merge_target` named by a
+hand-editable queue entry, but validate only Git-ref syntax. Pointing the dependency at its own task
+branch can therefore self-satisfy the ancestry check. Both readers must constrain the value to the
+owning `plan/Pxxx` branch or the resolved target branch and reject any other resolvable ref. Add the
+demonstrated self-branch attack as a negative test in both twins.
+
+### IMP-273 - Use one fail-closed committed-manifest authority for plan mode
+
+**Status:** ready — required before P068 enables `plan_branch`
+**Priority:** high
+**Class:** authority integrity / fail-open removal
+**Area:** `aid-fsm.sh cmd_init` and done-advance mode resolution
+
+**Summary:** `done-advance` uses the fail-closed committed-manifest resolver, but `cmd_init` has a
+separate reader that can turn missing `yq`, malformed manifests or unknown modes into legacy mode
+and skip the plan-branch lineage precondition. Route every mode decision through one committed-tree
+authority. Every inability to determine the mode becomes `unresolved` with the existing audited
+override path, never a silent legacy downgrade.
+
+### IMP-274 - Enforce the no-`grep -oP` portability invariant across all shell sources
+
+**Status:** ready
+**Priority:** medium
+**Class:** regression coverage / portability
+**Area:** shell portability guard
+
+**Summary:** E-064-2_2 removed `grep -oP` from `aid-fsm.sh` but introduced the same construct in
+`aid-queue-add.sh`; the test inspected only the first file. The second code instance was fixed in
+`f60efab`, but the detector remains narrow. Scan every relevant shell source under
+`plugins/aid-orchestrator/scripts/**` (with an explicit allowlist only if a justified PCRE
+dependency exists) so the same class cannot move between files and remain green.
 
 ---
 

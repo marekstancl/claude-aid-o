@@ -2,8 +2,27 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist
+**Status:** active PM checklist — P064 complete, Phase 1 is next
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–270
+
+## Current checkpoint
+
+| Item | State |
+|---|---|
+| P064 | **DONE** — both EPICs merged |
+| Main | `2a1ca60` |
+| Local release | `v2.61.0` at `193fd4a` |
+| Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
+| E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
+| Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
+| C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
+| Next work | Phase 1 manual maintenance; **do not start P068 yet** |
+
+The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
+branch that did not contain the canonical backlog update. Canonical `IMP-270`
+is already the gate-scoped waiver. Do not copy those provisional numbers into
+the project backlog; deduplicate and renumber any surviving Curator proposals
+from `IMP-271` onward.
 
 ## Outcome
 
@@ -47,15 +66,18 @@ explicitly removes it.
 
 ## Phase 0 — close P064 honestly
 
-- [ ] Finish the single targeted
+- [x] Finish the single targeted
   `test-aid-plan-release-boundary.bats` run on the reviewed HEAD.
-- [ ] Store its terminal exit code, test counts, command fingerprint and HEAD.
-- [ ] Perform at most one C3 recheck focused on the corrected AC evidence.
-- [ ] Do not open another broad exploratory review loop from that recheck.
-- [ ] Run Curator, Auditor and CP4 against the same frozen revision.
-- [ ] Close and merge E-064-2_2, then close P064.
-- [ ] Publish the resulting release/tag and refresh the plugin cache.
-- [ ] Preserve all quarantine/waiver evidence in the delivery report.
+- [x] Store its terminal exit code, test counts, command fingerprint and HEAD.
+- [x] Perform at most one C3 recheck focused on the corrected AC evidence.
+- [x] Do not open another broad exploratory review loop from that recheck.
+- [x] Run Curator, Auditor and CP4 against the same frozen revision.
+- [x] Close and merge E-064-2_2, then close P064.
+- [x] Create the local `v2.61.0` release/tag.
+- [ ] Push `main` and `v2.61.0` only when explicitly authorized.
+- [ ] Confirm the installed plugin cache resolves `v2.61.0` before Phase 1
+  implementation starts.
+- [x] Preserve all quarantine/waiver evidence in the delivery report.
 
 **GO to Phase 1:** P064 is merged and closed; main and the plugin cache resolve
 the same released plugin code.
@@ -93,6 +115,13 @@ plan.
 - [ ] **IMP-269:** C3 records and enforces
   `ac_source: plan|final_report_fallback|stub`; required AC lenses accept only
   the explicit plan source.
+- [ ] Extend **IMP-269** to bind test evidence as well as AC evidence:
+  accept a revision-bound, command-fingerprinted targeted-run receipt in the
+  sealed manifest, or seal a narrowly allow-listed recheck command. A
+  quarantined gate must not force C3 to `unverifiable` merely because valid
+  targeted evidence has no manifest channel.
+- [ ] Preserve `unverifiable` as distinct from `fail`; C3 must not be promoted
+  to blocking while the quarantine/targeted-evidence contract is unresolved.
 - [ ] **IMP-264:** compute evidence freshness at read time; stop trusting a
   persisted `head_is_current: true`.
 - [ ] **IMP-265:** lineage omission defaults to `unproven`; healthy repair is
@@ -102,6 +131,29 @@ plan.
   them through `|| true`.
 - [ ] Decide **IMP-266:** audited reopen from an incorrect
   `merged_to_plan`, or a documented deliberately terminal recovery ceremony.
+
+### 1D — P064 dormant-path blockers owed before P068
+
+These were non-blocking for P064 because its lifecycle manifest remained
+`legacy_epic_release_mode`. They become live the moment P068 enables the new
+path.
+
+- [ ] Make `plan-start --mode` explicit. Omission must not silently default
+  to `plan_branch`; alternatively refuse `plan_branch` until
+  `plan-finalize` and `plan-merge-to-main` are installed.
+- [ ] Constrain queue `merge_target` semantically, in both contract twins, to
+  the owning `plan/Pxxx` branch or resolved target branch. A hand-edited
+  dependency branch must not self-satisfy ancestry.
+- [ ] Route `cmd_init` through the same fail-closed committed-manifest mode
+  authority as `done-advance`. Missing `yq`, malformed manifests and unknown
+  modes must resolve to `unresolved`, never silently to legacy.
+- [x] Replace the second `grep -oP` in `aid-queue-add.sh` (`f60efab`).
+- [ ] Widen the regression guard from one `$FSM` file to every relevant
+  `plugins/aid-orchestrator/scripts/**` shell source so the same portability
+  defect cannot be reintroduced elsewhere.
+- [ ] Correct the new enforcement rows that claim `active` behavior whose
+  P068 reader does not exist yet; writer-only controls remain
+  `planned`/`unmapped`.
 
 **Verification policy:** targeted red-green suites only. The quarantined
 `bats_all` is not a required implementation check for this maintenance.
@@ -285,3 +337,15 @@ These do not block the path to E10 unless reclassified by a fresh finding:
 - A direct regression of the invariant currently being fixed remains a
   blocker.
 - Any proposed removal of test coverage requires explicit PM approval.
+
+## Implementer progress log
+
+The implementer owns this section during Phase 1. Append one row after every
+independently reviewable commit; do not rewrite earlier rows.
+
+| UTC date | Batch | Commit | Targeted red/green evidence | Independent review | Remaining blocker |
+|---|---|---|---|---|---|
+| 2026-07-23 | P064 baseline | `2a1ca60` | boundary 241/241; three waivers remain visible | Auditor 89/100, no merge blocker | Phase 1 not started |
+
+When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
+completed checkboxes, and record the released version plus cache SHA.
