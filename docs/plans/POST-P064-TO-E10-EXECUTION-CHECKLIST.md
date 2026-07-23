@@ -2,7 +2,8 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064 complete, Phase 1 is next
+**Status:** active PM checklist — P064 complete; Phase 1 in progress (1A + 1D
+done, 1B + 1C next). Not pushed; identity corrected to Marek Stancl for new commits.
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–274
 
 ## Current checkpoint
@@ -90,17 +91,21 @@ own broken implementation. Implement and verify them manually outside
 `/aid-run`, in small independent commits. Do not combine them into one large
 plan.
 
-### 1A — gate-scoped waiver (file as IMP-270)
+### 1A — gate-scoped waiver (file as IMP-270) — DONE `3f08c80`
 
-- [ ] Replace broad transition `--force` for gate exceptions with a
-  gate-scoped authorization.
-- [ ] Bind authorization to project, plan/EPIC, run, exact HEAD, gate ID,
+- [x] Replace broad transition `--force` for gate exceptions with a
+  gate-scoped authorization. (`aid-gate-waiver.sh` issue/check/consume.)
+- [x] Bind authorization to project, plan/EPIC, run, exact HEAD, gate ID,
   command fingerprint, authorizer, reason and expiry/single use.
-- [ ] A waived required gate is reported as `waived`, never `pass`.
-- [ ] Every unrelated gate and FSM precondition remains enforced.
-- [ ] Missing, stale, forged or mismatched authorization fails immediately.
-- [ ] Add negative tests proving a `bats_all` waiver cannot waive
-  `plan_diff`, CP3 freshness, another HEAD or another run.
+- [x] A waived required gate is reported as `waived`, never `pass`. (Two teeth:
+  run-gates stamps `waived` + top-level `waived_gates[]`; FSM re-validates each
+  waived row at read time and fails closed on a bare `waived`.)
+- [x] Every unrelated gate and FSM precondition remains enforced. (`--force`
+  unchanged and still the only path for non-gate preconditions.)
+- [x] Missing, stale, forged or mismatched authorization fails immediately.
+- [x] Add negative tests proving a `bats_all` waiver cannot waive
+  `plan_diff`, CP3 freshness, another HEAD or another run. (22 waiver cases;
+  security review pass, F1 durable-consume folded in.)
 
 ### 1B — AUTO liveness and replay safety
 
@@ -139,22 +144,31 @@ These were non-blocking for P064 because its lifecycle manifest remained
 `legacy_epic_release_mode`. They become live the moment P068 enables the new
 path.
 
-- [ ] Make `plan-start --mode` explicit. Omission must not silently default
+- [x] Make `plan-start --mode` explicit. Omission must not silently default
   to `plan_branch`; alternatively refuse `plan_branch` until
-  `plan-finalize` and `plan-merge-to-main` are installed.
-- [ ] Constrain queue `merge_target` semantically, in both contract twins, to
+  `plan-finalize` and `plan-merge-to-main` are installed. (IMP-271 `c82be23`;
+  the self-asserted `--allow-incomplete-plan-final` escape hatch was then found
+  bypassable in AUTO and **removed** by Codex-adjudicated A1, `23fe72e` — the
+  refusal is now hard, lifted only by the mechanical P068-subcommand probe.)
+- [x] Constrain queue `merge_target` semantically, in both contract twins, to
   the owning `plan/Pxxx` branch or resolved target branch. A hand-edited
-  dependency branch must not self-satisfy ancestry.
-- [ ] Route `cmd_init` through the same fail-closed committed-manifest mode
+  dependency branch must not self-satisfy ancestry. (IMP-272 `e544715`; the
+  owning plan was still read from the hand-editable `plan_id` field — a HIGH
+  self-authorization bypass — **hardened** in `a18b183` to derive the plan from
+  the epic id and fail-closed cross-check `plan_id`.)
+- [x] Route `cmd_init` through the same fail-closed committed-manifest mode
   authority as `done-advance`. Missing `yq`, malformed manifests and unknown
-  modes must resolve to `unresolved`, never silently to legacy.
+  modes must resolve to `unresolved`, never silently to legacy. (IMP-273 `48270af`.)
 - [x] Replace the second `grep -oP` in `aid-queue-add.sh` (`f60efab`).
-- [ ] Widen the regression guard from one `$FSM` file to every relevant
+- [x] Widen the regression guard from one `$FSM` file to every relevant
   `plugins/aid-orchestrator/scripts/**` shell source so the same portability
-  defect cannot be reintroduced elsewhere.
-- [ ] Correct the new enforcement rows that claim `active` behavior whose
+  defect cannot be reintroduced elsewhere. (IMP-274 `214a9fc` — repo-wide scan
+  with a per-file allowlist of the seven pre-existing instances and a detector
+  self-test.)
+- [x] Correct the new enforcement rows that claim `active` behavior whose
   P068 reader does not exist yet; writer-only controls remain
-  `planned`/`unmapped`.
+  `planned`/`unmapped`. (IMP-274 `214a9fc` — `plan_final_required_gates_record`
+  demoted to `planned`/`unmapped`.)
 
 **Verification policy:** targeted red-green suites only. The quarantined
 `bats_all` is not a required implementation check for this maintenance.
@@ -347,6 +361,13 @@ independently reviewable commit; do not rewrite earlier rows.
 | UTC date | Batch | Commit | Targeted red/green evidence | Independent review | Remaining blocker |
 |---|---|---|---|---|---|
 | 2026-07-23 | P064 baseline | `2a1ca60` | boundary 241/241; three waivers remain visible | Auditor 89/100, no merge blocker | Phase 1 not started |
+| 2026-07-23 | 1D IMP-271 | `c82be23` | 7 red-green cases; boundary 248/248; Security F-2 5/5 | verifier pass, 1 LOW to P068 | superseded by A1 below |
+| 2026-07-23 | 1D IMP-272 | `e544715` | attack repro both twins; queue/dep 30/30; revalidation 8/8 | verifier pass; ordering note applied | HIGH bypass found post-review → a18b183 |
+| 2026-07-23 | 1D IMP-273 | `48270af` | 6 red-green cases; test-aid-fsm 88/88; registry 13/13 | verifier pass | — |
+| 2026-07-23 | 1D IMP-274 | `214a9fc` | repo-wide grep-oP guard + self-test; registry honesty (307, TTL green) | controller self-check | — |
+| 2026-07-23 | 1A IMP-270 | `3f08c80` | 22 waiver cases; run-gates 41/41; F1 folded; registry 308 | security review pass, no HIGH | — |
+| 2026-07-23 | HIGH IMP-272 hardening | `a18b183` | PM collusion attack (plan_id+merge_target) refused both twins; derive plan from epic id | security review pass, bypass closed | — |
+| 2026-07-23 | HIGH IMP-271 A1 | `23fe72e` | Codex-adjudicated bypass removal; bootstrap stub refactor; full boundary 258/258, tree clean | Codex A1 + full-suite green | — |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.
