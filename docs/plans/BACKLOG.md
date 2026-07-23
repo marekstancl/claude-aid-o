@@ -348,6 +348,24 @@ set `AID_PLAN_AC_FILE` explicitly and verify that `bundle-plan-ac.md` is not byt
 implementation-authored final report. This is required for E-064-2_2 but does not reopen the
 already adjudicated E-064-1_2 closure.
 
+### IMP-270 - Gate-scoped PM waiver without broad FSM precondition bypass
+
+**Status:** ready — implement manually outside AID after P064, before P068
+**Priority:** critical
+**Class:** governance / scoped risk acceptance / FSM integrity
+**Area:** gate runner, FSM GATES→DONE transition, waiver schema and evidence
+
+**Summary:** The current FSM `--force` records a visible waiver but skips every precondition of the
+transition. E-064-2_2 needed to accept the temporary absence of `bats_all` and the timed-out
+`plan_diff`, yet the only available mechanism also bypassed unrelated checks. Add a gate-scoped
+authorization bound to the exact project, plan/EPIC, run, HEAD, gate ID and command fingerprint.
+The named gate is reported as `waived`, never `pass`; all unrelated gates and FSM preconditions
+remain enforced. Missing, stale, forged, reused or cross-run authorizations fail immediately.
+
+**Required tests:** one waiver cannot authorize a different gate, HEAD, run or command; a waived
+required gate remains visible in release/PM evidence; non-waived failures still block; replay of a
+single-use authorization is rejected or idempotently returns its already-consumed disposition.
+
 ---
 
 ## Live probe observations (B-004 operating mode)
