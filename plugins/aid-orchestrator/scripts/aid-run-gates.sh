@@ -303,6 +303,11 @@ run_all_gates() {
   # Gate keys excluded by the active profile (P061 E1 Step 2). Populated
   # only when --profile is set; stays empty otherwise.
   declare -a excluded_gates=()
+  # Gate keys whose failed result was WAIVED by a valid gate-scoped PM waiver
+  # (IMP-270). Populated inline when a failing gate has a check-valid waiver at
+  # the current HEAD+command. Surfaces top-level as waived_gates[] so nothing
+  # downstream can miss that a required gate was accepted without passing.
+  declare -a waived_gates=()
   # Gates whose runtime baseline (P063 Step 2) already has enough data
   # (non_censored_samples_count >= 5) to be worth a human-readable summary
   # line after the run — populated inline at merge time below (reusing the
@@ -442,6 +447,53 @@ run_all_gates() {
 
     local final_result
     final_result=$(echo "$gate_result" | jq -r '.result')
+
+    # ─── Gate-scoped PM waiver (IMP-270) ───────────────────────────────────
+    # A failed gate becomes `waived` (NEVER `pass`) iff a gate-scoped waiver
+    # exists for it AND aid-gate-waiver.sh check returns `valid` for the exact
+    # (project, epic, run, HEAD, gate, command fingerprint) tuple. A waiver
+    # file alone changes nothing — the check must pass. On valid: consume the
+    # single-use waiver, stamp result=waived + waiver_ref, and record the gate
+    # in waived_gates[]. overall then treats it like a pass (the required-fail
+    # branch below is skipped because final_result is no longer "fail"), but
+    # the top-level waived_gates[] array keeps it visible in PM/release
+    # evidence. A waiver present but failing check for ANY reason leaves the
+    # result "fail" and records waiver_rejected:<verdict> on the row.
+    if [[ "$final_result" == "fail" ]]; then
+      local _wv_ev_dir=".aid-o/work/evidence/${epic_id}/${run_id}"
+      local _wv_file="${_wv_ev_dir}/waivers/gate-waiver-${gate_name}.json"
+      if [[ -f "$_wv_file" ]]; then
+        local _wv_head _wv_cmd_sha _wv_verdict _wv_rc
+        _wv_head=$(git rev-parse HEAD 2>/dev/null || echo "")
+        _wv_cmd_sha=$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)
+        _wv_rc=0
+        _wv_verdict=$("${SCRIPT_DIR}/aid-gate-waiver.sh" check "$gate_name" \
+          --evidence-dir "$_wv_ev_dir" --head "$_wv_head" \
+          --command-sha "$_wv_cmd_sha" --epic "$epic_id" --run "$run_id" 2>/dev/null) || _wv_rc=$?
+        if [[ "$_wv_rc" -eq 0 && "$_wv_verdict" == "valid" ]]; then
+          # IMP-270 review F1: consumption must be DURABLE before we waive. If
+          # consume fails (read-only dir, ENOSPC, lock lost) the single-use
+          # waiver is not spent and would be replayable, so fail closed —
+          # leave the gate `fail` with waiver_rejected:consume_failed rather
+          # than stamping a waived result on an unconsumed waiver.
+          local _wv_consume_rc=0
+          "${SCRIPT_DIR}/aid-gate-waiver.sh" consume "$gate_name" \
+            --evidence-dir "$_wv_ev_dir" --by-run "$run_id" >/dev/null 2>&1 || _wv_consume_rc=$?
+          if [[ "$_wv_consume_rc" -ne 0 ]]; then
+            gate_result=$(echo "$gate_result" | jq '.waiver_rejected = "consume_failed"')
+          else
+            gate_result=$(echo "$gate_result" | jq \
+              --arg ref "waivers/gate-waiver-${gate_name}.json" \
+              '.result = "waived" | .waiver_ref = $ref')
+            final_result="waived"
+            waived_gates+=("$gate_name")
+          fi
+        else
+          gate_result=$(echo "$gate_result" | jq --arg v "$_wv_verdict" '.waiver_rejected = $v')
+        fi
+      fi
+    fi
+
     log_event "$timeline_file" "gate_complete" gate="$gate_name" result="$final_result" attempt="$attempt"
 
     # Add to gates JSON aggregate. `runtime_baseline` (P063 Step 2) is purely
@@ -600,6 +652,18 @@ run_all_gates() {
     excluded_gates_json=$(printf '%s\n' "${excluded_gates[@]}" | jq -R . | jq -s '.')
   fi
 
+  # ─── waived_gates[] (IMP-270) ──────────────────────────────────────────
+  # Always an array; empty when no gate was waived. A required gate reported
+  # `waived` never flips overall to fail, so this is the one place PM/release
+  # evidence can see, at a glance, that a required gate was accepted without
+  # passing — surfaced top-level so nothing downstream can miss it.
+  local waived_gates_json
+  if (( ${#waived_gates[@]} == 0 )); then
+    waived_gates_json="[]"
+  else
+    waived_gates_json=$(printf '%s\n' "${waived_gates[@]}" | jq -R . | jq -s '.')
+  fi
+
   report=$(jq --arg gen "$generated_by" \
               --arg ts  "$generated_at" \
               --argjson cl "$command_log_array" \
@@ -612,7 +676,8 @@ run_all_gates() {
               --argjson profsrc "$profile_source_val_json" \
               --argjson profreason "$profile_reason_val_json" \
               --argjson excl "$excluded_gates_json" \
-              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl}' \
+              --argjson waived "$waived_gates_json" \
+              '. + {_generated_by: $gen, _generated_at: $ts, _command_log: $cl, covered_paths: $cp, changed_paths_covered: $ccov, relevance: $rel, plan_gates_reconciled: $pgr, revision: $rev, profile: $prof, profile_source: $profsrc, profile_reason: $profreason, excluded_gates: $excl, waived_gates: $waived}' \
               <<< "$report")
 
   echo "$report"

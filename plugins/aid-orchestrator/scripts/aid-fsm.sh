@@ -1930,6 +1930,58 @@ EOF
           return 1
         }
 
+        # IMP-270: gate-scoped waiver re-validation (defense in depth). ─────────
+        # A gate row with result=="waived" was accepted by aid-run-gates.sh in
+        # place of a pass. overall=="pass" alone is NOT sufficient proof — a
+        # forged report could hand-write result:waived + overall:pass. So the
+        # FSM re-validates EVERY waived row here, at read time, against the
+        # report's own revision.head_sha: the row MUST carry a non-empty
+        # waiver_ref AND aid-gate-waiver.sh check must return `valid` for the
+        # exact (project, epic, run, HEAD, gate) tuple. The waiver is
+        # single-use and was consumed by THIS run during the gate run, so check
+        # accepts it as self-consumed evidence; a stale HEAD, a forged/tampered
+        # waiver, a cross-run copy, or a missing waiver_ref each fail closed.
+        # This waives exactly one gate's result — every OTHER precondition below
+        # (plan-gate floor, risk profile, cp3 freshness) stays fully enforced.
+        local waived_rows report_head
+        report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
+        waived_rows=$(jq -r '(.gates // {}) | to_entries[] | select(.value.result == "waived") | .key' "$report" 2>/dev/null)
+        if [[ -n "$waived_rows" ]]; then
+          local waived_gate wv_ref wv_verdict wv_rc
+          while IFS= read -r waived_gate; do
+            [[ -z "$waived_gate" ]] && continue
+            wv_ref=$(jq -r --arg g "$waived_gate" '.gates[$g].waiver_ref // empty' "$report" 2>/dev/null)
+            if [[ -z "$wv_ref" ]]; then
+              _PRECONDITION_FAIL_REASON="waived_row_no_ref"
+              echo "PRECONDITION FAIL: gate '${waived_gate}' is reported result:waived but carries no waiver_ref — refusing to trust a bare waived row." >&2
+              return 1
+            fi
+            wv_rc=0
+            wv_verdict=$("${SCRIPT_DIR}/aid-gate-waiver.sh" check "$waived_gate" \
+              --evidence-dir "$evidence_dir" --head "$report_head" \
+              --epic "$epic_id" --run "$run_id" 2>/dev/null) || wv_rc=$?
+            if [[ "$wv_rc" -ne 0 || "$wv_verdict" != "valid" ]]; then
+              _PRECONDITION_FAIL_REASON="waiver_revalidation_failed"
+              cat <<EOF >&2
+PRECONDITION FAIL: waiver_revalidation_failed — gate '${waived_gate}' is reported result:waived, but its waiver did not re-validate (verdict: ${wv_verdict:-error}).
+
+Reason: IMP-270 — a waived required gate is accepted only when its gate-scoped
+        waiver still validates against the report's HEAD (${report_head:-<none>}). A
+        moved HEAD, a tampered/forged waiver, a cross-run copy, or a missing
+        waiver all fail closed here. A waiver waives exactly one gate — it never
+        bypasses any other precondition.
+
+Fix: re-issue a valid waiver for '${waived_gate}' at the current HEAD and re-run
+     gates, or genuinely fix the gate so it passes. As a last resort a
+     non-gate-scoped PM override remains:
+  aid-fsm.sh transition GATES DONE ${state_file} --force --reason \\
+      '<≥20 chars why bypassing every precondition is acceptable>'
+EOF
+              return 1
+            fi
+          done <<< "$waived_rows"
+        fi
+
         # P061 E1 Step 3: plan-gate floor (plan_gate_profile_excluded). ─────────
         # plan.json.gates[] (Step 1) is a hard floor: the active gate profile
         # (Step 2, aid-run-gates.sh --profile) must never silently exclude a
