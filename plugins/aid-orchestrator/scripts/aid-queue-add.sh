@@ -542,9 +542,17 @@ fi
 if [[ -n "$plan_id_opt" ]]; then
   plan_id_val="$plan_id_opt"
 else
+  # Bash-native, deliberately NOT `grep -oP` (Curator IMP-270 / Auditor F-3).
+  # `-P` is a GNU-grep BUILD option: on a grep without PCRE support the command
+  # FAILS rather than "not matching", `|| true` swallows it, plan_id/merge_target
+  # are written null, and queue_claim_next then skips the entry forever — a
+  # multi-EPIC plan stops silently after its first EPIC. aid-fsm.sh removed the
+  # identical construct in this same EPIC (_fsm_epic_plan_nnn); this file kept a
+  # second copy that the regression test could not see because it greps only
+  # aid-fsm.sh. Same rule, no external dependency to probe.
   epic_stripped="${epic_id%%_*}"
   plan_nnn=""
-  plan_nnn="$(printf '%s' "$epic_stripped" | grep -oP '(?<=^E-)\d+' 2>/dev/null)" || true
+  if [[ "$epic_stripped" =~ ^E-([0-9]+) ]]; then plan_nnn="${BASH_REMATCH[1]}"; fi
   if [[ -n "$plan_nnn" ]]; then plan_id_val="P${plan_nnn}"; else plan_id_val="null"; fi
 fi
 
