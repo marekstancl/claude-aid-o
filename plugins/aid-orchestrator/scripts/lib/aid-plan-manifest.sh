@@ -168,7 +168,7 @@
 #   "not_found" case (manifest doesn't exist yet) — see each function's own
 #   doc comment for the exact stdout contract.
 #
-# **Last Updated:** 2026-07-21
+# **Last Updated:** 2026-07-23
 # =============================================================================
 
 _AID_PLAN_MANIFEST_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -791,15 +791,20 @@ plan_manifest_update() {
 # and ensures `epics`/`active_epics`/`total_epics` reflect it. New entries
 # start `status: running`, `epic_merge_commit: null`.
 #
-# The OPTIONAL 8th positional `lineage` defaults to "proven" (the historical
-# behaviour: the caller is epic-start and supplied an explicit
-# epic_source_ref it observed at branch-creation time). Callers that cannot
-# authorise a lineage claim — repair above all — MUST pass "unproven"
+# The OPTIONAL 8th positional `lineage` defaults to "unproven" (IMP-265:
+# fail-closed by default). An omitted lineage argument is NOT an authorisation
+# claim — only the legitimate producer that actually observed the branch's
+# origin at branch-creation time (epic-start, via `_pfsm_epic_finish_write`)
+# may assert "proven", and it now does so EXPLICITLY by passing the 8th
+# positional. A forgetful or future caller that omits it gets "unproven", so a
+# missing argument can never silently mint provenance. Callers that cannot
+# authorise a lineage claim — repair above all — also pass "unproven"
 # explicitly, so the entry is created ALREADY unproven in a single atomic
 # write. Writing proven first and flipping afterwards is forbidden: a crash
 # between the two writes would leave a false `proven` on disk, which is
 # exactly the authorisation state an attacker wants. Only "proven" and
-# "unproven" are accepted; anything else returns 1 and writes nothing.
+# "unproven" are accepted; anything else (including a malformed value) returns
+# 1 and writes nothing — never coerced to proven.
 #
 # Returns: 0 success, 1 bad args / not_found / invariant violation, 2
 # missing jq, 3 lock timeout, 5 corrupt / validator missing.
@@ -807,7 +812,7 @@ plan_manifest_update() {
 plan_manifest_add_epic() {
   local plan_id="$1" epic_id="$2" run_id="$3" task_branch="$4" \
         epic_base_commit="$5" epic_source_ref="$6" evidence_dir="$7" \
-        lineage="${8:-proven}"
+        lineage="${8:-unproven}"
 
   _plan_manifest_require_jq || return 2
   _pm_validate_plan_id_charset "$plan_id" || return 1

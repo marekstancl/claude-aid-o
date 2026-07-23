@@ -42,10 +42,10 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 311          # granular registry rows; recomputed via `.enforcements|length`. IMP-269 adds c3_ac_source_binding (type 4, active/ALIGNED, blocking — build-manifest records+enforces ac_source and seals a HEAD-bound targeted-run receipt). IMP-262 adds job_supervisor_liveness (type 3, active/ALIGNED, advisory — the opt-in controller-boundary background job supervisor + AUTO liveness helper aid-job.sh). IMP-263 adds increment_step_binding (active/ALIGNED). IMP-270 adds gate_scoped_waiver (active/ALIGNED). P064 E-064-2_2 Step 3 (plan Step 8) adds gate_profile_epic_boundary_cap (active/ALIGNED) + plan_final_required_gates_record (PLANNED/unmapped since the IMP-274 honesty pass — writer-only until P068's plan-final reader exists); Step 4 (plan Step 9) adds plan_branch_release_skip + plan_mode_unresolved_block; the CP3 integration fix adds plan_mode_single_authority — verdict: ALIGNED unless noted. Step 2's plan-aware queue is FOUR rows split by what is actually wired (CP2 finding 6): plan_branch_merge_target (reader, active) + plan_queue_append_locked (append LOCKING, active) + plan_queue_entry_block_structure (append CONTENT — charset guards + the library's own structural re-derivation of the entry block, active; CP2 iteration 2 finding 1) + plan_queue_scripted_transitions (transitions, PLANNED — built and tested but zero production callers, so it must not be recorded as active enforcement). Step 2 also adds the four E-064-2_2 Step 1 mechanisms that had no owning registry until now (epic_merge_ancestry_proof, epic_lineage_unproven_merge_gate, epic_merge_in_progress_guard, plan_branch_expected_sha_guard) — all verdict: ALIGNED. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
-  mapped_with_verdict: 145   # recomputed via `yq -o=json .enforcements | jq '[.[]|select(.verdict != null and .verdict != "unmapped")]|length'` (ALIGNED 127 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1)
+  enforcements: 314          # granular registry rows; recomputed via `.enforcements|length`. IMP-265/IMP-258/IMP-267 add three lineage-integrity rows (plan_manifest_lineage_fail_closed — omitted lineage now fail-closes to unproven, malformed rejected; plan_repair_nondestructive_fail_closed — healthy repair byte-identical no-op + per-entry write failures propagated, F-2 no-mint invariant preserved; attest_ancestry_rederive_fail_closed — attest re-derives epic_base_commit/epic_merge_commit from Git and fails closed), all type 1, active/ALIGNED, blocking, internal-guard. IMP-269 adds c3_ac_source_binding (type 4, active/ALIGNED, blocking — build-manifest records+enforces ac_source and seals a HEAD-bound targeted-run receipt). IMP-262 adds job_supervisor_liveness (type 3, active/ALIGNED, advisory — the opt-in controller-boundary background job supervisor + AUTO liveness helper aid-job.sh). IMP-263 adds increment_step_binding (active/ALIGNED). IMP-270 adds gate_scoped_waiver (active/ALIGNED). P064 E-064-2_2 Step 3 (plan Step 8) adds gate_profile_epic_boundary_cap (active/ALIGNED) + plan_final_required_gates_record (PLANNED/unmapped since the IMP-274 honesty pass — writer-only until P068's plan-final reader exists); Step 4 (plan Step 9) adds plan_branch_release_skip + plan_mode_unresolved_block; the CP3 integration fix adds plan_mode_single_authority — verdict: ALIGNED unless noted. Step 2's plan-aware queue is FOUR rows split by what is actually wired (CP2 finding 6): plan_branch_merge_target (reader, active) + plan_queue_append_locked (append LOCKING, active) + plan_queue_entry_block_structure (append CONTENT — charset guards + the library's own structural re-derivation of the entry block, active; CP2 iteration 2 finding 1) + plan_queue_scripted_transitions (transitions, PLANNED — built and tested but zero production callers, so it must not be recorded as active enforcement). Step 2 also adds the four E-064-2_2 Step 1 mechanisms that had no owning registry until now (epic_merge_ancestry_proof, epic_lineage_unproven_merge_gate, epic_merge_in_progress_guard, plan_branch_expected_sha_guard) — all verdict: ALIGNED. P064 E-064-1_2 Step 5 adds plan_boundary_manifest (verdict: ALIGNED). v2.59.0 adds c3_cross_provider_dispatch (verdict: ALIGNED). v2.58.3 added plan_files_shape_lint (verdict: ALIGNED). v2.58.1 added the 5 IMP-232 lifecycle-wiring rows. Verified directly via `yq '.enforcements|length'`, not hand-incremented.
+  mapped_with_verdict: 148   # recomputed via `yq -o=json .enforcements | jq '[.[]|select(.verdict != null and .verdict != "unmapped")]|length'` (ALIGNED 130 + GAP 14 + UNREACHABLE 3 + CONTRADICTORY 1)
   mapping_pending: 123       # recomputed via `... select(.verdict == "unmapped") ...`; includes the two planned/unmapped writer-only P064 rows (plan_queue_scripted_transitions, plan_final_required_gates_record) until their callers/readers land
-  verdict_distribution: {ALIGNED: 127, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 123}
+  verdict_distribution: {ALIGNED: 130, GAP: 14, ORPHAN: 0, CONTRADICTORY: 1, UNREACHABLE: 3, unmapped: 123}
 
 enforcements:
 
@@ -1212,6 +1212,39 @@ enforcements:
     status: active
     verdict: ALIGNED
     description: "epic-merge-to-plan refuses (exit 1, epic_lineage_unproven) to record a merge for a manifest entry whose lineage is not `proven` — minting the delivery claim is at least as authoritative as epic-start's own entry guard, and a true ancestry statement about a branch of unestablished provenance is not a delivery proof. Deliberately NOT applied to the read-only terminal convergence above it, so a plan-state --repair recovery (whose entries are unproven by construction) is not wedged; the sanctioned way out is plan-state --attest-source-ref, never --repair."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_manifest_lineage_fail_closed
+    type: 1
+    source: "scripts/lib/aid-plan-manifest.sh:810"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-265: plan_manifest_add_epic defaults an OMITTED lineage argument to `unproven` (fail-closed), not `proven` — only the legitimate producer epic-start (_pfsm_epic_finish_write) may assert `proven`, and it now does so EXPLICITLY, so a forgetful or future caller can never silently mint provenance. A malformed lineage value (anything but `proven`/`unproven`) is rejected (exit 1, nothing written), never coerced to proven."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: plan_repair_nondestructive_fail_closed
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:2003"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-265b + IMP-258: plan-state --repair is non-destructive on a healthy manifest (a manifest that already passes the three-layer validator, with an existing plan-state file, round-trips BYTE-IDENTICAL — no proven entry degraded to unproven, no attestation metadata discarded; only genuinely missing/damaged portions are reconstructed) AND fail-closed on write: every per-entry manifest write during a rebuild is checked, and a write that could not durably land aborts the whole repair with a precise reason and a non-zero exit (replacing the `|| true` that silently swallowed per-entry failures and reported success over a partially-written manifest). The Security F-2 invariant is preserved: any entry repair does reconstruct is written ALREADY unproven — repair never mints `lineage: proven` on any path."
+    test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
+
+  - id: attest_ancestry_rederive_fail_closed
+    type: 1
+    source: "scripts/aid-plan-fsm.sh:1799"
+    instruction: n/a
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    description: "IMP-267: plan-state --attest-source-ref RE-DERIVES epic_base_commit and epic_merge_commit from real Git ancestry (git rev-parse / merge-base / --is-ancestor, the same primitives epic-merge-to-plan uses) before promoting an entry to lineage:proven, overwriting any wrong values repair may have left. A stored merge commit must be a real two-parent merge reachable from plan/<plan_id> and (if the task branch still exists) contain it; with no merge recorded the base is merge-base(task_branch, plan_branch) and the task branch must exist. If the ancestry cannot be proven the attestation FAILS CLOSED (exit 1, nothing written) — the operator display of the exact ancestry is a courtesy, the mechanical derivation is the gate."
     test: "scripts/tests/bats/test-aid-plan-release-boundary.bats"
 
   - id: epic_merge_in_progress_guard

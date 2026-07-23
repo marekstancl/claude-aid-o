@@ -311,9 +311,13 @@ _pfsm_epic_finish_write() {
   local plan_id="$1" epic_id="$2" run_id="$3" task_branch="$4" \
         epic_base_commit="$5" plan_branch_ref="$6" evidence_dir="$7" op_id="$8"
 
+  # IMP-265: epic-start is the legitimate producer that observed this branch's
+  # origin at creation time, so it asserts lineage=proven EXPLICITLY — the
+  # 8th positional is no longer defaulted (an omitted lineage now fails closed
+  # to "unproven" in plan_manifest_add_epic).
   local arc=0
   plan_manifest_add_epic "$plan_id" "$epic_id" "$run_id" "$task_branch" \
-    "$epic_base_commit" "$plan_branch_ref" "$evidence_dir" >/dev/null || arc=$?
+    "$epic_base_commit" "$plan_branch_ref" "$evidence_dir" "proven" >/dev/null || arc=$?
   if [[ "$arc" -ne 0 ]]; then
     echo "PRECONDITION FAIL: could not write manifest entry for ${epic_id} (rc=${arc}) — op remains at git_applied, retry to converge." >&2
     return "$arc"
@@ -1467,7 +1471,7 @@ cmd_epic_merge_to_plan() {
   local lineage=""
   lineage="$(jq -r '.lineage // empty' <<<"$entry_json" 2>/dev/null)"
   if [[ "$lineage" != "proven" ]]; then
-    echo "PRECONDITION FAIL: epic_lineage_unproven — ${epic_id}'s manifest entry has lineage='${lineage:-<empty>}' (must be proven); refusing to record a merge into ${plan_branch} on unestablished provenance. Sanctioned recovery: attest the origin explicitly — 'aid-plan-fsm.sh plan-state ${plan_id} --attest-source-ref ${plan_branch} --reason <text> --epic ${epic_id}'. Do NOT run 'plan-state --repair' first: attestation's precondition IS an unproven entry, and --repair rebuilds every epic_runs[] entry as unproven with placeholder run_id/evidence_dir, discarding the attestation of healthy siblings." >&2
+    echo "PRECONDITION FAIL: epic_lineage_unproven — ${epic_id}'s manifest entry has lineage='${lineage:-<empty>}' (must be proven); refusing to record a merge into ${plan_branch} on unestablished provenance. Sanctioned recovery: attest the origin explicitly — 'aid-plan-fsm.sh plan-state ${plan_id} --attest-source-ref ${plan_branch} --reason <text> --epic ${epic_id}'. You do not need '--repair' first: attestation's precondition IS an unproven entry. (Since IMP-265, --repair is a byte-identical no-op on a healthy manifest and preserves proven siblings' attestation — it only reconstructs genuinely damaged entries, always as unproven; it is neither required nor harmful here, but attestation is the direct fix.)" >&2
     exit 1
   fi
 
@@ -1745,12 +1749,13 @@ cmd_plan_state() {
 # Promotes ONE epic_runs[] entry from lineage:unproven to lineage:proven.
 # THE ONLY code path in this file (or anywhere else in the manifest library)
 # that ever performs that flip. The only two sources of lineage:proven in the
-# whole system are (1) a normal epic-start, which passes the default
-# lineage=proven to plan_manifest_add_epic because it observed the branch's
-# origin at the moment it created it, and (2) this explicit operator
-# attestation, which carries a reason and an op-log audit trail. --repair
-# can only ever write unproven (see _pfsm_plan_state_repair) and never
-# clears it. Guarded by
+# whole system are (1) a normal epic-start, which passes lineage=proven
+# EXPLICITLY to plan_manifest_add_epic (IMP-265: the default is now the
+# fail-closed "unproven") because it observed the branch's origin at the
+# moment it created it, and (2) this explicit operator attestation, which
+# carries a reason and an op-log audit trail AND (IMP-267) re-derives the
+# ancestry fields from real Git before promoting. --repair can only ever
+# write unproven (see _pfsm_plan_state_repair) and never clears it. Guarded by
 # requiring the on-disk lineage to already BE unproven before touching
 # anything, so re-attesting an already-proven entry, or an entry that was
 # never marked unproven, is rejected rather than silently no-op'd.
@@ -1791,6 +1796,50 @@ _pfsm_plan_state_attest() {
     return 1
   fi
 
+  # ── IMP-267: RE-DERIVE ancestry from real Git before attesting ───────────
+  # The stored epic_merge_commit / epic_base_commit may have been reconstructed
+  # by --repair and can be wrong (e.g. a misattributed merge). Attestation is
+  # the point at which an entry becomes authoritative (lineage:proven), so it
+  # MUST NOT carry ancestry it cannot prove from Git. We re-derive both fields
+  # with the SAME primitives epic-merge-to-plan uses (git rev-parse /
+  # merge-base / --is-ancestor) and FAIL CLOSED when the ancestry cannot be
+  # proven — the operator display below is a courtesy, the mechanical
+  # derivation is the gate.
+  local plan_branch="plan/${plan_id}" task_branch="task/${epic_id}/main"
+  local stored_mc=""; stored_mc="$(jq -r '.epic_merge_commit // empty' <<<"$entry_json" 2>/dev/null)"
+  local derived_base="" derived_mc=""
+  if [[ -n "$stored_mc" ]]; then
+    # A stored merge commit must be a real two-parent merge, reachable from the
+    # plan branch, and (if the task branch still exists) contain it — otherwise
+    # it is not a merge we can vouch for.
+    if ! git -C "$project_root" rev-parse -q --verify "${stored_mc}^2" >/dev/null 2>&1 \
+       || ! _pfsm_is_ancestor "$project_root" "$stored_mc" "$plan_branch"; then
+      echo "PRECONDITION FAIL: ${epic_id}'s recorded epic_merge_commit '${stored_mc}' cannot be proven from Git (not a two-parent merge reachable from ${plan_branch}) — refusing to attest ancestry that repair may have left wrong." >&2
+      return 1
+    fi
+    if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1 \
+       && ! _pfsm_is_ancestor "$project_root" "refs/heads/${task_branch}" "$stored_mc"; then
+      echo "PRECONDITION FAIL: ${epic_id}'s recorded epic_merge_commit '${stored_mc}' does not contain ${task_branch} — refusing to attest a misattributed merge." >&2
+      return 1
+    fi
+    derived_mc="$stored_mc"
+    derived_base="$(git -C "$project_root" merge-base "${stored_mc}^1" "${stored_mc}^2" 2>/dev/null)" || derived_base=""
+  else
+    # No merge recorded: the base is the merge-base of the task branch and the
+    # plan branch, which requires the task branch to still exist.
+    if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
+      echo "PRECONDITION FAIL: cannot re-derive ${epic_id}'s ancestry — no epic_merge_commit recorded and ${task_branch} no longer exists; refusing to attest on unprovable ancestry." >&2
+      return 1
+    fi
+    derived_base="$(git -C "$project_root" merge-base "$task_branch" "$plan_branch" 2>/dev/null)" || derived_base=""
+  fi
+  if ! [[ "$derived_base" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "PRECONDITION FAIL: could not re-derive a valid epic_base_commit for ${epic_id} from Git (got '${derived_base:-<empty>}') — failing closed rather than attesting a stored value." >&2
+    return 1
+  fi
+  # Operator display of the EXACT ancestry being attested (courtesy, not gate).
+  echo "attesting ${epic_id}: source_ref=${ref} epic_base_commit=${derived_base} epic_merge_commit=${derived_mc:-<none>}" >&2
+
   local op_id; op_id="$(plan_op_key "plan-state-attest" "$plan_id" "-" "0" "$plan_id")"
   local brc=0
   plan_op_begin "$plan_id" "$op_id" "plan-state-attest" "$plan_id" "" || brc=$?
@@ -1805,14 +1854,20 @@ _pfsm_plan_state_attest() {
   # string with no --arg binding support, so this is the safe way to embed
   # arbitrary --reason / --attest-source-ref text without risking a filter
   # injection via an embedded quote/backslash.
-  local esc_ref esc_reason esc_epic esc_now now
+  local esc_ref esc_reason esc_epic esc_now now esc_base esc_mc
   esc_ref="$(jq -Rn --arg s "$ref" '$s')"
   esc_reason="$(jq -Rn --arg s "$reason" '$s')"
   esc_epic="$(jq -Rn --arg s "$epic_id" '$s')"
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   esc_now="$(jq -Rn --arg s "$now" '$s')"
+  # IMP-267: persist the RE-DERIVED ancestry (never the stored value). A null
+  # merge commit is written as the JSON literal `null` (invariant: a non-null
+  # epic_merge_commit requires status merged_to_plan, which the stored value
+  # already satisfied whenever it was non-null).
+  esc_base="$(jq -Rn --arg s "$derived_base" '$s')"
+  if [[ -n "$derived_mc" ]]; then esc_mc="$(jq -Rn --arg s "$derived_mc" '$s')"; else esc_mc="null"; fi
 
-  local filter="(.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == ${esc_epic} then (.epic_source_ref = ${esc_ref} | .lineage = \"proven\" | .attestation_reason = ${esc_reason} | .attested_at = ${esc_now}) else . end])"
+  local filter="(.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == ${esc_epic} then (.epic_source_ref = ${esc_ref} | .lineage = \"proven\" | .epic_base_commit = ${esc_base} | .epic_merge_commit = ${esc_mc} | .attestation_reason = ${esc_reason} | .attested_at = ${esc_now}) else . end])"
 
   local urc=0
   plan_manifest_update "$plan_id" "$filter" >/dev/null || urc=$?
@@ -1945,6 +2000,30 @@ _pfsm_plan_state_repair() {
     return 1
   fi
 
+  # ── IMP-265b: healthy repair is a NON-DESTRUCTIVE no-op ──────────────────
+  # Repair exists to reconstruct a runtime tree that was pruned/checked-out
+  # fresh — NOT to overwrite an intact one. A manifest that already passes the
+  # full three-layer invariant validator (and a plan-state file that already
+  # exists) is not damaged, so repair must round-trip it BYTE-FOR-BYTE: it must
+  # never degrade a healthy `proven` entry to `unproven`, and never discard
+  # valid attestation metadata (epic_source_ref / attestation_reason /
+  # attested_at). We decide this BEFORE recording any repair intent — a no-op
+  # is not an operation. When only PART of the tree is damaged (e.g. the
+  # manifest is healthy but plan-state.yaml was pruned) we still reconstruct
+  # the missing part below, but leave the healthy manifest untouched (see the
+  # `manifest_healthy` guard around the epic-bookkeeping rebuild).
+  local manifest_healthy=0
+  if [[ -f "$(plan_manifest_path "$plan_id")" ]] \
+     && plan_manifest_validate "$plan_id" >/dev/null 2>&1; then
+    manifest_healthy=1
+  fi
+  if [[ "$manifest_healthy" -eq 1 && -f "$(plan_state_path "$plan_id")" ]]; then
+    # Fully healthy — reconstruct nothing, mint nothing, record nothing. Emit
+    # the same summary shape as a real repair for a stable caller contract.
+    jq -c '{plan_state: .plan_boundary_manifest.plan_state, mode: .plan_boundary_manifest.mode, epics: .plan_boundary_manifest.epics, epic_runs: .plan_boundary_manifest.epic_runs}' "$(plan_manifest_path "$plan_id")"
+    return 0
+  fi
+
   local op_id; op_id="$(plan_op_key "plan-state-repair" "$plan_id" "-" "0" "$plan_id")"
   local brc=0
   plan_op_begin "$plan_id" "$op_id" "plan-state-repair" "$plan_id" "" || brc=$?
@@ -1967,65 +2046,87 @@ _pfsm_plan_state_repair() {
     }
   fi
 
-  # Repair always fully recomputes epic bookkeeping from Git — never layers
-  # incrementally on top of a possibly-stale prior epic_runs[].
-  plan_manifest_update "$plan_id" \
-    '.plan_boundary_manifest.epics = [] | .plan_boundary_manifest.active_epics = [] | .plan_boundary_manifest.total_epics = 0 | .plan_boundary_manifest.epic_runs = []' \
-    >/dev/null || {
-      echo "PRECONDITION FAIL: could not reset epic bookkeeping while repairing ${plan_id}." >&2
-      return 1
-    }
+  # IMP-265b: only a DAMAGED manifest is rebuilt from Git. A healthy manifest
+  # (validated above) is preserved as-is — repair never resets its
+  # epic_runs[]/epics bookkeeping and never re-derives (and thus never
+  # downgrades) an entry it did not have to reconstruct. The rebuild below is
+  # deliberately fail-CLOSED (IMP-258): every per-entry manifest write is
+  # checked, and a write that could not durably land aborts the whole repair
+  # with a precise reason and a non-zero exit — repair must NEVER report
+  # success over a partially-written manifest.
+  if [[ "$manifest_healthy" -eq 0 ]]; then
+    # A damaged manifest is fully recomputed from Git — never layered
+    # incrementally on top of a possibly-stale prior epic_runs[].
+    plan_manifest_update "$plan_id" \
+      '.plan_boundary_manifest.epics = [] | .plan_boundary_manifest.active_epics = [] | .plan_boundary_manifest.total_epics = 0 | .plan_boundary_manifest.epic_runs = []' \
+      >/dev/null || {
+        echo "PRECONDITION FAIL: could not reset epic bookkeeping while repairing ${plan_id}." >&2
+        return 1
+      }
 
-  local lifecycle_manifest; lifecycle_manifest="$(aid_manifest_path "$plan_id" "$project_root")"
-  local -a declared_epics=()
-  if [[ -f "$lifecycle_manifest" ]]; then
-    mapfile -t declared_epics < <(yq -r '.declared_epics[].id' "$lifecycle_manifest" 2>/dev/null)
+    local lifecycle_manifest; lifecycle_manifest="$(aid_manifest_path "$plan_id" "$project_root")"
+    local -a declared_epics=()
+    if [[ -f "$lifecycle_manifest" ]]; then
+      mapfile -t declared_epics < <(yq -r '.declared_epics[].id' "$lifecycle_manifest" 2>/dev/null)
+    fi
+
+    local eid
+    for eid in "${declared_epics[@]:-}"; do
+      [[ -z "$eid" ]] && continue
+      local task_branch="task/${eid}/main"
+
+      # Candidate merge commit: the subject must QUOTE the branch name exactly
+      # as git's own default merge message does, and the branch must actually
+      # be an ancestor of that commit. Both are diagnostic-accuracy checks (see
+      # the header) — a subject alone proves nothing, which is why every path
+      # below still writes lineage:unproven.
+      local merge_commit=""
+      merge_commit="$(git -C "$project_root" log --merges --format='%H%x09%s' "$plan_branch" 2>/dev/null \
+        | grep -F "'${task_branch}'" | head -1 | cut -f1)" || merge_commit=""
+
+      if [[ -n "$merge_commit" ]]; then
+        if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1 \
+           || ! git -C "$project_root" merge-base --is-ancestor "refs/heads/${task_branch}" "$merge_commit" >/dev/null 2>&1; then
+          # The named branch is gone, or is not reachable through that commit —
+          # the subject named it but Git does not corroborate it. Do not credit
+          # this entry with a merge commit / base it cannot be shown to own.
+          merge_commit=""
+        fi
+      fi
+
+      if [[ -n "$merge_commit" ]]; then
+        local ebc=""
+        ebc="$(git -C "$project_root" merge-base "${merge_commit}^1" "${merge_commit}^2" 2>/dev/null)" || ebc=""
+        if [[ -n "$ebc" ]]; then
+          # IMP-258: propagate — a swallowed failure here would leave the merged
+          # entry silently absent while repair still claimed success.
+          if ! _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ebc" "$plan_branch"; then
+            echo "PRECONDITION FAIL: repair could not durably write the merged epic_runs[] entry for ${eid} in ${plan_id}'s manifest — refusing to report success over a partially-written manifest." >&2
+            return 1
+          fi
+          if ! plan_manifest_set_epic_status "$plan_id" "$eid" "merged_to_plan" "$merge_commit" >/dev/null; then
+            echo "PRECONDITION FAIL: repair wrote the ${eid} entry but could not durably record its merged_to_plan status in ${plan_id}'s manifest — refusing to report success over a partially-written manifest." >&2
+            return 1
+          fi
+          continue
+        fi
+        # A merge commit matched by name but isn't a real two-parent merge
+        # (e.g. squashed) — fall through to the unproven/no-evidence paths
+        # below rather than fabricating a base.
+      fi
+
+      if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
+        local ubc=""
+        ubc="$(git -C "$project_root" merge-base "$task_branch" "$plan_branch" 2>/dev/null)" || ubc=""
+        [[ -z "$ubc" ]] && continue
+        # IMP-258: propagate the live-branch entry write failure identically.
+        if ! _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ubc" ""; then
+          echo "PRECONDITION FAIL: repair could not durably write the live-branch epic_runs[] entry for ${eid} in ${plan_id}'s manifest — refusing to report success over a partially-written manifest." >&2
+          return 1
+        fi
+      fi
+    done
   fi
-
-  local eid
-  for eid in "${declared_epics[@]:-}"; do
-    [[ -z "$eid" ]] && continue
-    local task_branch="task/${eid}/main"
-
-    # Candidate merge commit: the subject must QUOTE the branch name exactly
-    # as git's own default merge message does, and the branch must actually
-    # be an ancestor of that commit. Both are diagnostic-accuracy checks (see
-    # the header) — a subject alone proves nothing, which is why every path
-    # below still writes lineage:unproven.
-    local merge_commit=""
-    merge_commit="$(git -C "$project_root" log --merges --format='%H%x09%s' "$plan_branch" 2>/dev/null \
-      | grep -F "'${task_branch}'" | head -1 | cut -f1)" || merge_commit=""
-
-    if [[ -n "$merge_commit" ]]; then
-      if ! git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1 \
-         || ! git -C "$project_root" merge-base --is-ancestor "refs/heads/${task_branch}" "$merge_commit" >/dev/null 2>&1; then
-        # The named branch is gone, or is not reachable through that commit —
-        # the subject named it but Git does not corroborate it. Do not credit
-        # this entry with a merge commit / base it cannot be shown to own.
-        merge_commit=""
-      fi
-    fi
-
-    if [[ -n "$merge_commit" ]]; then
-      local ebc=""
-      ebc="$(git -C "$project_root" merge-base "${merge_commit}^1" "${merge_commit}^2" 2>/dev/null)" || ebc=""
-      if [[ -n "$ebc" ]]; then
-        _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ebc" "$plan_branch" || true
-        plan_manifest_set_epic_status "$plan_id" "$eid" "merged_to_plan" "$merge_commit" >/dev/null || true
-        continue
-      fi
-      # A merge commit matched by name but isn't a real two-parent merge
-      # (e.g. squashed) — fall through to the unproven/no-evidence paths
-      # below rather than fabricating a base.
-    fi
-
-    if git -C "$project_root" rev-parse --verify --quiet "refs/heads/${task_branch}" >/dev/null 2>&1; then
-      local ubc=""
-      ubc="$(git -C "$project_root" merge-base "$task_branch" "$plan_branch" 2>/dev/null)" || ubc=""
-      [[ -z "$ubc" ]] && continue
-      _pfsm_repair_add_unproven "$plan_id" "$eid" "$task_branch" "$ubc" "" || true
-    fi
-  done
 
   # Only advance plan_state past OPEN if Git evidence actually showed epic
   # activity — never fabricate progress.

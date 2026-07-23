@@ -1061,6 +1061,34 @@ _seed_manifest_from_fixture() {
   [ "$status" -eq 0 ]
 }
 
+# ─── IMP-265: lineage defaults fail-closed to unproven ───────────────────
+@test "IMP-265: plan_manifest_add_epic defaults an OMITTED lineage to unproven (fail-closed)" {
+  _init_manifest "P900"
+  run plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/"
+  [ "$status" -eq 0 ]
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].lineage'
+  [ "$output" = "unproven" ]
+}
+
+@test "IMP-265: plan_manifest_add_epic writes proven ONLY when the caller passes it explicitly" {
+  _init_manifest "P900"
+  plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/" "proven"
+  run plan_manifest_get P900 '.plan_boundary_manifest.epic_runs[0].lineage'
+  [ "$output" = "proven" ]
+}
+
+@test "IMP-265: plan_manifest_add_epic rejects a malformed lineage value, writing nothing (never coerced to proven)" {
+  _init_manifest "P900"
+  local before; before="$(cat "$(_manifest_file P900)")"
+  run plan_manifest_add_epic "P900" "E-900-1_2" "R-E900-1" "task/E-900-1_2/main" \
+    "1111111111111111111111111111111111111111" "plan/P900" ".aid-o/work/evidence/E-900-1_2/" "bogus"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"lineage must be exactly"* ]]
+  [ "$(cat "$(_manifest_file P900)")" = "$before" ]
+}
+
 # ─── Edge Case: add_epic called twice for the same epic_id upserts, never
 #     duplicates ──────────────────────────────────────────────────────────
 @test "Edge Case: plan_manifest_add_epic called twice for the same epic_id updates in place, never duplicates" {
@@ -2013,6 +2041,137 @@ _pfsm_bootstrap_plan() {
   # silent no-op.
   run bash "$PLAN_FSM_CLI" plan-state P064 --attest-source-ref "plan/P064" --reason "second attempt" --epic E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
+}
+
+# ─── IMP-265b: healthy repair is a non-destructive no-op ─────────────────────
+@test "IMP-265b: plan-state --repair on a HEALTHY manifest is a non-destructive no-op — proven + attestation metadata preserved, byte-identical" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Decorate the healthy proven entry with attestation-style metadata that
+  # repair MUST preserve (the pre-IMP-265b repair discarded exactly this).
+  plan_manifest_update "P900" \
+    '.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == "E-900-1_1" then (.attestation_reason = "operator verified" | .attested_at = "2026-01-01T00:00:00Z") else . end]'
+
+  local mp; mp="$(_manifest_file P900)"
+  local before; before="$(cat "$mp")"
+
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Byte-identical round-trip: nothing degraded, nothing discarded.
+  [ "$(cat "$mp")" = "$before" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .lineage' "$mp"
+  [ "$output" = "proven" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .epic_source_ref' "$mp"
+  [ "$output" = "plan/P900" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .attestation_reason' "$mp"
+  [ "$output" = "operator verified" ]
+}
+
+@test "IMP-265b: a second plan-state --repair is idempotent — the rebuilt manifest round-trips byte-identical" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # A real merge so the first repair restores a merged_to_plan (unproven) entry.
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-900-1_1/main
+  echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
+  git -C "$TEST_PROJECT_ROOT" add epic-1.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local mp; mp="$(_manifest_file P900)"
+  local after_first; after_first="$(cat "$mp")"
+
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$mp")" = "$after_first" ]
+}
+
+# ─── IMP-258: repair propagates per-entry write failures ─────────────────────
+@test "IMP-258: a per-entry write failure during --repair fails the whole repair with a non-zero exit (never success over a partial manifest)" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+
+  # Drive repair in-process so we can force the per-entry writer to fail
+  # exactly the way an unwritable manifest would. The `|| true` that IMP-258
+  # replaced would have swallowed this and still exited 0.
+  # shellcheck disable=SC1090
+  source "$PLAN_FSM_CLI"
+  _pfsm_repair_add_unproven() { echo "forced durable-write failure for $2" >&2; return 1; }
+  run _pfsm_plan_state_repair "P900" "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"partially-written manifest"* ]]
+}
+
+# ─── IMP-267: attestation re-derives ancestry from Git ───────────────────────
+@test "IMP-267: attesting a repaired entry RE-DERIVES epic_base_commit from Git, overwriting a wrong stored value" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  git -C "$TEST_PROJECT_ROOT" checkout -q task/E-900-1_1/main
+  echo work > "$TEST_PROJECT_ROOT/epic-1.txt"
+  git -C "$TEST_PROJECT_ROOT" add epic-1.txt
+  git -C "$TEST_PROJECT_ROOT" commit -qm "epic 1 work"
+  git -C "$TEST_PROJECT_ROOT" checkout -q plan/P900
+  git -C "$TEST_PROJECT_ROOT" merge --no-ff -q task/E-900-1_1/main -m "Merge branch 'task/E-900-1_1/main' into plan/P900"
+  git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  rm -rf "$TEST_PROJECT_ROOT/.aid-o/work/plan-state"
+  run bash "$PLAN_FSM_CLI" plan-state P900 --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local mp; mp="$(_manifest_file P900)"
+  # Corrupt the stored base to a WRONG (but well-formed) value, as a
+  # misattributing repair could have.
+  local wrong=2222222222222222222222222222222222222222
+  local tmp="$mp.x"
+  jq --arg w "$wrong" '.plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id=="E-900-1_1" then (.epic_base_commit=$w) else . end]' "$mp" > "$tmp"
+  mv "$tmp" "$mp"
+
+  run bash "$PLAN_FSM_CLI" plan-state P900 --attest-source-ref "plan/P900" --reason "verified from reflog" --epic E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  local plan_head; plan_head="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P900)"
+  local real_base; real_base="$(git -C "$TEST_PROJECT_ROOT" merge-base "${plan_head}^1" "${plan_head}^2")"
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .epic_base_commit' "$mp"
+  [ "$output" = "$real_base" ]
+  [ "$output" != "$wrong" ]
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .lineage' "$mp"
+  [ "$output" = "proven" ]
+}
+
+@test "IMP-267: attestation FAILS CLOSED when the stored ancestry cannot be proven from Git" {
+  _pfsm_bootstrap_plan "P900"
+  run bash "$PLAN_FSM_CLI" epic-start P900 E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Flip to unproven and plant a bogus (well-formed but non-existent) merge
+  # commit with a merged_to_plan status — the shape --repair could leave.
+  local fake=deadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+  plan_manifest_update "P900" \
+    ".plan_boundary_manifest.epic_runs = [.plan_boundary_manifest.epic_runs[] | if .epic_id == \"E-900-1_1\" then (.lineage = \"unproven\" | .epic_source_ref = null | .status = \"merged_to_plan\" | .epic_merge_commit = \"${fake}\") else . end]"
+
+  run bash "$PLAN_FSM_CLI" plan-state P900 --attest-source-ref "plan/P900" --reason "attempt" --epic E-900-1_1 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be proven from Git"* ]]
+
+  # Unchanged: still unproven, never promoted on unprovable ancestry.
+  local mp; mp="$(_manifest_file P900)"
+  run jq -r '.plan_boundary_manifest.epic_runs[] | select(.epic_id=="E-900-1_1") | .lineage' "$mp"
+  [ "$output" = "unproven" ]
 }
 
 @test "plan-start on a plan whose state is already CLOSED exits 1; a closed plan is not reopened" {
