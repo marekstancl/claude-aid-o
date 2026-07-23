@@ -6699,3 +6699,82 @@ YAML
   grep -q 'HOISTED it ~250 lines ABOVE this block' "$FSM"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# IMP-274 — repo-wide `grep -oP` portability guard.
+#
+# WHY REPO-WIDE. E-064-2_2 removed `grep -oP` from aid-fsm.sh (CP3 fix,
+# 936322f) and in the SAME EPIC reintroduced the identical construct in
+# aid-queue-add.sh (61ddef2, fixed in f60efab) — the regression test above
+# inspects only $FSM, so the defect class simply moved to a file the detector
+# could not see. `-P` is a GNU-grep BUILD option: on a grep without PCRE
+# support the command FAILS (it does not "not match"), and every historical
+# call site swallowed that failure with `|| true`, silently disabling the
+# control it fed.
+#
+# THE ALLOWLIST is per-file MAX counts for the seven PRE-EXISTING instances
+# that predate the invariant (verified present at the P064 base 2a51a2f).
+# Each runs only on the GNU reference host today — release tooling, an
+# advisory `|| true` diagnostic, and the dev-only instruction-consistency
+# harness — which is the "justified PCRE dependency" the backlog entry allows,
+# tracked to shrink, never to grow:
+#   aid-release.sh                              3  (CHANGELOG/pyproject version extraction)
+#   lib/delivery-checks/dg08-runtime-env.sh     1  (advisory engines probe, || true)
+#   tests/test-instruction-consistency.sh       2  (dev harness, GNU host only)
+#   aid-fsm.sh                                  1  (:1411 step_n counter — pre-existing,
+#                                                   named as known in E-064-2_2 CP2)
+# A NEW instance in any other file fails; an INCREASE in an allowlisted file
+# fails; a decrease is progress and passes.
+# ─────────────────────────────────────────────────────────────────────────────
+# _imp274_scan <scripts_dir> — emit "relpath<TAB>count" for every *.sh under
+# <scripts_dir> containing at least one NON-COMMENT `grep -oP` line.
+_imp274_scan() {
+  local dir="$1" f rel n
+  while IFS= read -r f; do
+    n="$(grep -n 'grep -oP' "$f" 2>/dev/null | grep -cv ':[[:space:]]*#')" || true
+    [[ "${n:-0}" -gt 0 ]] || continue
+    rel="${f#"$dir"/}"
+    printf '%s\t%s\n' "$rel" "$n"
+  done < <(find "$dir" -name '*.sh' -type f | LC_ALL=C sort)
+}
+
+@test "IMP-274: grep -oP cannot be reintroduced anywhere under scripts/ (repo-wide guard, allowlisted pre-existing only)" {
+  local scripts_dir; scripts_dir="$(cd "$(dirname "$FSM")" && pwd)"
+
+  declare -A allow=(
+    ["aid-release.sh"]=3
+    ["lib/delivery-checks/dg08-runtime-env.sh"]=1
+    ["tests/test-instruction-consistency.sh"]=2
+    ["aid-fsm.sh"]=1
+  )
+
+  local violations="" rel n
+  while IFS=$'\t' read -r rel n; do
+    [[ -n "$rel" ]] || continue
+    if [[ -z "${allow[$rel]:-}" ]]; then
+      violations+="NEW FILE: $rel has $n non-comment grep -oP line(s)"$'\n'
+    elif [[ "$n" -gt "${allow[$rel]}" ]]; then
+      violations+="GREW: $rel has $n (allowlisted max ${allow[$rel]})"$'\n'
+    fi
+  done < <(_imp274_scan "$scripts_dir")
+
+  if [[ -n "$violations" ]]; then
+    echo "grep -oP portability violations (IMP-274):" >&2
+    printf '%s' "$violations" >&2
+    return 1
+  fi
+}
+
+@test "IMP-274: the guard itself detects an injected instance (detector self-test)" {
+  # A guard that can only ever pass is decoration. Prove the scanner fires on
+  # a synthetic violation, and stays quiet on a comment-only mention.
+  local fixture; fixture="$(mktemp -d "$TEST_TMPDIR/imp274.XXXXXX")"
+  mkdir -p "$fixture/lib"
+  printf '#!/usr/bin/env bash\n# grep -oP only in this comment\necho ok\n' > "$fixture/clean.sh"
+  printf '#!/usr/bin/env bash\nx="$(printf %%s "$1" | grep -oP "\\d+")" || true\n' > "$fixture/lib/bad.sh"
+
+  run _imp274_scan "$fixture"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"lib/bad.sh"* ]]
+  [[ "$output" != *"clean.sh"* ]]
+}
+
