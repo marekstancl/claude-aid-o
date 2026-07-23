@@ -64,6 +64,29 @@
 #   AID_PLAN_AC_FILE    — explicit source for c3/bundle-plan-ac.md. If set but
 #                         unreadable → PRECONDITION FAIL. If unset, falls back to
 #                         <evidence_dir>/final_report.md, then a deterministic stub.
+#                         (IMP-269 Half 1) The manifest RECORDS which branch was
+#                         taken as audit_input_manifest.ac_source:
+#                           plan                  — AID_PLAN_AC_FILE set + readable;
+#                           final_report_fallback — fell back to final_report.md;
+#                           stub                  — neither source available.
+#                         If the run's review-profile.json requires an AC lens
+#                         (required_lenses[] includes ac_to_test_identity or
+#                         requirement_test_drift) and ac_source != plan, build-manifest
+#                         FAILS CLOSED (exit 1) — the AC lenses must never run over an
+#                         implementation-authored fallback bundle. If no AC lens is
+#                         required, a non-plan source only WARNS and the ac_source
+#                         classification is preserved through to audit-report.json.
+#   AID_TEST_RECEIPT_FILE — (IMP-269 Half 2) explicit path to a typed targeted-run
+#                         receipt (a JSON object with command / command_sha256 /
+#                         a head field == the reviewed head_sha / exit_code /
+#                         passed / failed / log_sha256). If set but unreadable, or
+#                         malformed, or NOT bound to the reviewed HEAD → PRECONDITION
+#                         FAIL (a stale or forged receipt must never become evidence).
+#                         On success the receipt is sealed into the manifest's
+#                         allowlist[] + evidence_hashes[] (hash-bound at the reviewed
+#                         HEAD) so C3 may consume PM-authorized targeted-run evidence
+#                         instead of returning a false `unverifiable`. Must resolve
+#                         within <evidence_dir> (path traversal / out-of-tree rejected).
 #   AID_C3_ATTEMPT      — (P065 Step 17, E-065-6_7) optional positive integer
 #                         identifying which fix->reverify loop attempt (pipeline.md
 #                         §6a, Step 16) THIS `dispatch` call is (01 = initial audit,
@@ -77,7 +100,7 @@
 #                         evidence-root path afterward. See cmd_dispatch's own
 #                         header comment for the full contract.
 #
-# **Last Updated:** 2026-07-17
+# **Last Updated:** 2026-07-23
 # =============================================================================
 set -euo pipefail
 
@@ -195,6 +218,53 @@ _path_is_within() {
   esac
 }
 
+# _validate_test_receipt <receipt_file> <reviewed_head>  — (IMP-269 Half 2) return 0
+# iff <receipt_file> is a single, well-formed, HEAD-BOUND targeted-run receipt. The
+# whole point of this channel is a receipt that C3 can trust as hash-bound evidence
+# at the exact reviewed commit — so a receipt whose head field(s) do NOT equal the
+# reviewed HEAD, or that is missing any required field, is rejected here (a stale or
+# forged receipt must never become evidence). Prints the precise reason on stderr and
+# returns non-zero (fail-closed) on any violation OR any jq error.
+#
+# Required fields (mirrors the real gates/*.receipt.json the boundary suites emit):
+#   command        — non-empty string (the exact targeted command run);
+#   command_sha256 — 64-hex (optionally "sha256:"-prefixed) fingerprint of that command;
+#   log_sha256     — 64-hex (optionally "sha256:"-prefixed) digest of the run log;
+#   exit_code      — number; passed — number; failed — number;
+#   head binding   — at least one of {head_sha, head_sha_before, head_sha_after} is
+#                    present, and EVERY present one equals <reviewed_head>.
+_validate_test_receipt() {
+  local f="$1" head="$2"
+  [[ -f "$f" && -r "$f" ]] || { echo "test-receipt unreadable: $f" >&2; return 1; }
+  command -v jq >/dev/null 2>&1 || { echo "jq unavailable — cannot validate test-receipt" >&2; return 1; }
+  jq -e 'type == "object"' "$f" >/dev/null 2>&1 \
+    || { echo "test-receipt is not a single JSON object: $f" >&2; return 1; }
+  jq -e --arg head "$head" '
+      (.command        | type == "string" and (length > 0))
+      and (.command_sha256 | type == "string" and test("^(sha256:)?[0-9a-f]{64}$"))
+      and (.log_sha256     | type == "string" and test("^(sha256:)?[0-9a-f]{64}$"))
+      and (.exit_code | type == "number")
+      and (.passed    | type == "number")
+      and (.failed    | type == "number")
+      and (([.head_sha, .head_sha_before, .head_sha_after] | map(select(. != null))) as $heads
+           | ($heads | length > 0) and ($heads | all(. == $head)))
+  ' "$f" >/dev/null 2>&1 \
+    || { echo "test-receipt malformed or not bound to the reviewed HEAD ($head): $f" >&2; return 1; }
+  # Review F3: the command_sha256 must actually be the sha256 of .command, or
+  # the fingerprint is decorative and a receipt could name one command while
+  # claiming another ran. Recompute and compare (strip an optional sha256:
+  # prefix on the recorded value).
+  local _rc_cmd _rc_claimed _rc_actual
+  _rc_cmd="$(jq -r '.command' "$f")"
+  _rc_claimed="$(jq -r '.command_sha256' "$f" | sed 's/^sha256://')"
+  _rc_actual="$(printf '%s' "$_rc_cmd" | sha256sum | cut -d' ' -f1)"
+  if [[ "$_rc_claimed" != "$_rc_actual" ]]; then
+    echo "test-receipt command_sha256 does not match sha256(.command) — fingerprint is not of the recorded command: $f" >&2
+    return 1
+  fi
+  return 0
+}
+
 # ===========================================================================
 # cmd_build_manifest <evidence_dir> <base_sha> <head_sha> <risk_profile>
 # ===========================================================================
@@ -285,6 +355,12 @@ cmd_build_manifest() {
     || _fail "git diff --name-only failed for ${base_sha}..${head_sha}"
 
   # (c) bundle-plan-ac.md — plan + acceptance criteria brief.
+  # IMP-269 Half 1: record which branch authored the bundle as `ac_source`
+  # (plan | final_report_fallback | stub). The fallback to final_report.md is
+  # the E-064-1_2 failure mode — the AC lenses silently reading the
+  # implementation's own summary of itself — so the manifest must carry the
+  # classification, and (below) fail closed when an AC lens is required.
+  local ac_source="stub"
   if [[ -n "${AID_PLAN_AC_FILE:-}" ]]; then
     [[ -f "$AID_PLAN_AC_FILE" && -r "$AID_PLAN_AC_FILE" ]] \
       || _fail "AID_PLAN_AC_FILE set but unreadable: $AID_PLAN_AC_FILE"
@@ -292,13 +368,71 @@ cmd_build_manifest() {
       || _fail "AID_PLAN_AC_FILE escapes the repo (path traversal / absolute path rejected): $AID_PLAN_AC_FILE"
     cat "$AID_PLAN_AC_FILE" > "$c3_dir/bundle-plan-ac.md" \
       || _fail "cannot write bundle-plan-ac.md from $AID_PLAN_AC_FILE"
+    ac_source="plan"
+    # Review F1 (the exact E-064-1_2 laundering vector): a caller can point
+    # AID_PLAN_AC_FILE AT final_report.md itself (same path) or at a byte-
+    # identical copy, turning the implementation's own summary into a "plan"
+    # classification and slipping past the fail-closed gate below. `plan` must
+    # be genuinely distinct from the implementation-authored report — otherwise
+    # downgrade to final_report_fallback, which the gate treats as non-plan.
+    if [[ -f "$evidence_dir/final_report.md" ]]; then
+      local _ac_rp _fr_rp
+      _ac_rp="$(realpath -m "$AID_PLAN_AC_FILE" 2>/dev/null || echo "$AID_PLAN_AC_FILE")"
+      _fr_rp="$(realpath -m "$evidence_dir/final_report.md" 2>/dev/null || echo "$evidence_dir/final_report.md")"
+      if [[ "$_ac_rp" == "$_fr_rp" ]] || cmp -s "$AID_PLAN_AC_FILE" "$evidence_dir/final_report.md"; then
+        echo "aid-c3-dispatch: WARNING — AID_PLAN_AC_FILE resolves to (or is byte-identical to) final_report.md; the AC bundle would be the implementation's own summary. Downgrading ac_source plan -> final_report_fallback." >&2
+        ac_source="final_report_fallback"
+      fi
+    fi
   elif [[ -f "$evidence_dir/final_report.md" ]]; then
     cat "$evidence_dir/final_report.md" > "$c3_dir/bundle-plan-ac.md" \
       || _fail "cannot write bundle-plan-ac.md from final_report.md"
+    ac_source="final_report_fallback"
   else
     printf '# Plan / Acceptance Criteria\n\n_No plan/AC source available at build-manifest time (epic=%s run=%s)._\n' \
       "$epic_id" "$run_id" > "$c3_dir/bundle-plan-ac.md" \
       || _fail "cannot write bundle-plan-ac.md stub"
+    ac_source="stub"
+  fi
+
+  # IMP-269 Half 1 (cont): "AC lens required" is derived from the run's
+  # review-profile.json required_lenses[] (the authoritative per-run lens set;
+  # ac_to_test_identity / requirement_test_drift are the AC lenses). If an AC
+  # lens is required and the bundle was NOT authored from the real plan, FAIL
+  # CLOSED here — never proceed to a normal-looking audit over an
+  # implementation-authored bundle. If no AC lens is required, a non-plan
+  # source only warns; the ac_source classification is sealed into the manifest
+  # regardless so a downstream reader never silently trusts a fallback.
+  # 0 = no AC lens required (profile parsed with no AC lens, OR no profile — the
+  # common case for a non-AC audit, kept fail-OPEN so ordinary C3 runs are not
+  # broken); 1 = required; 2 = the profile EXISTS but is unparseable, so it
+  # cannot be trusted to say "not required". Review F2 narrowed to the real
+  # attack/corruption surface: a PRESENT-but-unparseable review-profile.json is
+  # suspect and must not launder a fallback bundle through an unproven "not
+  # required" — fail closed there. An absent profile stays not-required (most
+  # C3 audits have none and need no AC lens); the fail-closed AC gate exists to
+  # catch a run that DOES declare an AC lens, which requires a parseable profile.
+  local ac_lens_required=0
+  local rp_file="$evidence_dir/review-profile.json"
+  if [[ -f "$rp_file" ]]; then
+    if jq -e . "$rp_file" >/dev/null 2>&1; then
+      local ac_lens_hit
+      ac_lens_hit="$(jq -r '
+        [.review_profile.required_lenses[]? // empty]
+        | map(select(. == "ac_to_test_identity" or . == "requirement_test_drift"))
+        | length' "$rp_file" 2>/dev/null || echo 0)"
+      [[ "$ac_lens_hit" =~ ^[0-9]+$ && "$ac_lens_hit" -gt 0 ]] && ac_lens_required=1
+    else
+      ac_lens_required=2
+    fi
+  fi
+  if [[ "$ac_source" != "plan" ]]; then
+    if [[ "$ac_lens_required" -eq 1 ]]; then
+      _fail "AC lens required (review-profile.json required_lenses[] includes ac_to_test_identity / requirement_test_drift) but the acceptance-criteria bundle fell back to ac_source='$ac_source' (AID_PLAN_AC_FILE unset/unreadable/degenerate) — refusing to run the AC lenses over an implementation-authored bundle. Set AID_PLAN_AC_FILE to the real plan/AC source and re-run build-manifest."
+    elif [[ "$ac_lens_required" -eq 2 ]]; then
+      _fail "review-profile.json exists at ${rp_file} but is unparseable, so whether an AC lens is required CANNOT be determined, and the acceptance-criteria bundle is a non-plan fallback (ac_source='$ac_source'). Failing closed rather than admitting an implementation-authored AC bundle on an unproven 'not required'. Repair review-profile.json, or set AID_PLAN_AC_FILE to the real plan."
+    fi
+    echo "aid-c3-dispatch: WARNING — acceptance-criteria bundle ac_source='$ac_source' (not the real plan). No AC lens is required for this run, so the audit proceeds, but the fallback classification is sealed in the manifest (audit_input_manifest.ac_source) and preserved through to audit-report.json — do not trust it as a plan-authored AC review." >&2
   fi
 
   # (d) bundle-review-profile.json — the run's review profile (verbatim if
@@ -313,6 +447,32 @@ cmd_build_manifest() {
       '{risk_profile: $rp, required_independence_level: $lvl}' \
       > "$c3_dir/bundle-review-profile.json" \
       || _fail "cannot synthesise bundle-review-profile.json"
+  fi
+
+  # --- IMP-269 Half 2: resolve + validate the optional targeted-run receipt --
+  # A PM-authorized targeted-run receipt (revision-bound, command-fingerprinted,
+  # log-hashed) becomes hash-bound evidence C3 can consume — closing the
+  # E-064-2_2 gap where a real receipt existed but build-manifest could seal
+  # only gates_report.json, so C3 returned a false `unverifiable`. Rejected at
+  # BUILD time (never sealed) if unreadable, out-of-tree, malformed, or not
+  # bound to the reviewed HEAD. test_receipt_rel is the evidence-dir-relative
+  # stored path added to allowlist[] + evidence_hashes[] in Step 3 below.
+  local test_receipt_rel="" test_receipt_abs=""
+  if [[ -n "${AID_TEST_RECEIPT_FILE:-}" ]]; then
+    [[ -f "$AID_TEST_RECEIPT_FILE" && -r "$AID_TEST_RECEIPT_FILE" ]] \
+      || _fail "AID_TEST_RECEIPT_FILE set but unreadable: $AID_TEST_RECEIPT_FILE"
+    _path_is_within "$repo_root" "$AID_TEST_RECEIPT_FILE" \
+      || _fail "AID_TEST_RECEIPT_FILE escapes the repo (path traversal / absolute path rejected): $AID_TEST_RECEIPT_FILE"
+    _validate_test_receipt "$AID_TEST_RECEIPT_FILE" "$head_sha" \
+      || _fail "AID_TEST_RECEIPT_FILE is not a valid HEAD-bound targeted-run receipt (see reason above): $AID_TEST_RECEIPT_FILE"
+    test_receipt_abs="$(realpath -m -- "$AID_TEST_RECEIPT_FILE" 2>/dev/null)" \
+      || _fail "cannot resolve AID_TEST_RECEIPT_FILE: $AID_TEST_RECEIPT_FILE"
+    test_receipt_rel="$(realpath -m --relative-to="$evidence_abs" "$test_receipt_abs" 2>/dev/null || echo "")"
+    [[ -n "$test_receipt_rel" ]] \
+      || _fail "cannot resolve AID_TEST_RECEIPT_FILE relative to evidence dir"
+    case "$test_receipt_rel" in
+      ../*|/*) _fail "AID_TEST_RECEIPT_FILE must resolve within the evidence dir (got '$test_receipt_rel'): $AID_TEST_RECEIPT_FILE" ;;
+    esac
   fi
 
   # --- Step 4 (cont): codex_brief_files[] + codex_brief_hash ---------------
@@ -392,6 +552,14 @@ cmd_build_manifest() {
   done
   shopt -u nullglob
 
+  # IMP-269 Half 2: the validated targeted-run receipt joins the evidence-class
+  # allowlist so its bytes feed input_hash AND get a sealed evidence_hashes[]
+  # entry below — the same hash-bound treatment gates_report.json already gets.
+  if [[ -n "$test_receipt_rel" ]]; then
+    allow_arr+=("$test_receipt_rel")
+    read_path["$test_receipt_rel"]="$test_receipt_abs"
+  fi
+
   # Deterministic stored order (LC_ALL=C), deduped.
   local allow_sorted=()
   if [[ ${#allow_arr[@]} -gt 0 ]]; then
@@ -422,17 +590,25 @@ cmd_build_manifest() {
     rp="${read_path[$p]:-}"
     inner="$(_sha256_file "$rp")"
     input_lines+=("$(_sha256_str "${p}:${inner}")")
+    # Evidence-class allowlist entries (NOT git-tracked) get a sealed
+    # {path,sha256,size} digest so a claimed PASS binds to an immutable value.
+    # IMP-269 Half 2: the validated targeted-run receipt (test_receipt_rel) is
+    # an evidence-class entry too.
+    local is_evidence_class=0
     case "$p" in
       final_report.md|gates_report.json|gates/gates_report.json|verifier-output-*.md)
-        local ev_sz=0
-        [[ -f "$rp" ]] && ev_sz="$(wc -c < "$rp" | tr -d '[:space:]')"
-        [[ -n "$ev_sz" ]] || ev_sz=0
-        evidence_hashes_json="$(printf '%s' "$evidence_hashes_json" \
-          | jq -c --arg p "$p" --arg s "sha256:$inner" --argjson z "$ev_sz" \
-              '. + [{path: $p, sha256: $s, size: $z}]')" \
-          || _fail "cannot assemble evidence_hashes entry for $p"
-        ;;
+        is_evidence_class=1 ;;
     esac
+    [[ -n "$test_receipt_rel" && "$p" == "$test_receipt_rel" ]] && is_evidence_class=1
+    if [[ "$is_evidence_class" -eq 1 ]]; then
+      local ev_sz=0
+      [[ -f "$rp" ]] && ev_sz="$(wc -c < "$rp" | tr -d '[:space:]')"
+      [[ -n "$ev_sz" ]] || ev_sz=0
+      evidence_hashes_json="$(printf '%s' "$evidence_hashes_json" \
+        | jq -c --arg p "$p" --arg s "sha256:$inner" --argjson z "$ev_sz" \
+            '. + [{path: $p, sha256: $s, size: $z}]')" \
+        || _fail "cannot assemble evidence_hashes entry for $p"
+    fi
   done
 
   local joined="" input_hash
@@ -502,6 +678,7 @@ cmd_build_manifest() {
     --argjson allowed_recheck_commands "$arc_json" \
     --argjson verification_budget "$vbudget_json" \
     --argjson evidence_hashes "$evidence_hashes_json" \
+    --arg ac_source "$ac_source" \
     '{
       schema_version: $schema_version,
       artifact_type: $artifact_type,
@@ -525,7 +702,8 @@ cmd_build_manifest() {
         codex_brief_hash: $codex_brief_hash,
         allowed_recheck_commands: $allowed_recheck_commands,
         verification_budget: $verification_budget,
-        evidence_hashes: $evidence_hashes
+        evidence_hashes: $evidence_hashes,
+        ac_source: $ac_source
       }
     }' > "$manifest_tmp" \
     || { rm -f "$manifest_tmp"; _fail "jq failed to render the manifest"; }
@@ -1012,6 +1190,12 @@ _write_unverifiable() {
   case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
   manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
 
+  # IMP-269 Half 1: carry the sealed ac_source classification through to the
+  # report so a downstream reader sees a fallback bundle, never silently trusts it.
+  local ac_source
+  ac_source="$(jq -r '.audit_input_manifest.ac_source // ""' "$manifest" 2>/dev/null || echo "")"
+  [[ "$ac_source" == "null" ]] && ac_source=""
+
   local raw_head="" raw_brief_hash=""
   if [[ -n "$last_msg" && -f "$last_msg" ]] && jq -e . "$last_msg" >/dev/null 2>&1; then
     raw_head="$(jq -r '.reviewed_head // ""' "$last_msg" 2>/dev/null || echo "")"
@@ -1041,6 +1225,7 @@ _write_unverifiable() {
     --arg reviewed_head "$raw_head" \
     --arg codex_brief_hash "$raw_brief_hash" \
     --arg outcome "$outcome" \
+    --arg ac_source "$ac_source" \
     --argjson reasons "$reasons_json" \
     '{
       schema_version: "aid-2.0",
@@ -1070,6 +1255,7 @@ _write_unverifiable() {
         + (if $input_manifest_hash != "" then {input_manifest_hash: $input_manifest_hash} else {} end)
         + (if $process_id != ""          then {process_id: $process_id}                   else {} end)
         + (if $reviewed_head != ""       then {reviewed_head: $reviewed_head}             else {} end)
+        + (if $ac_source != ""           then {ac_source: $ac_source}                     else {} end)
         + (if $codex_brief_hash != ""    then {codex_brief_hash: $codex_brief_hash}       else {} end))
     }' > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$report" 2>/dev/null || { rm -f "$tmp"; return 1; }
@@ -1097,6 +1283,11 @@ _write_report() {
   required_level="$(jq -r '.audit_input_manifest.required_independence_level // "cross_provider"' "$manifest" 2>/dev/null || echo cross_provider)"
   case "$required_level" in context_only|cross_model|cross_provider) ;; *) required_level="cross_provider" ;; esac
   manifest_input_hash="$(jq -r '.audit_input_manifest.input_hash // ""' "$manifest" 2>/dev/null || echo "")"
+
+  # IMP-269 Half 1: preserve the sealed ac_source classification into the report.
+  local ac_source
+  ac_source="$(jq -r '.audit_input_manifest.ac_source // ""' "$manifest" 2>/dev/null || echo "")"
+  [[ "$ac_source" == "null" ]] && ac_source=""
 
   local raw_head raw_brief_hash raw_blocking
   raw_head="$(jq -r '.reviewed_head' "$last_msg" 2>/dev/null)" || raw_head=""
@@ -1153,6 +1344,7 @@ _write_report() {
     --arg input_manifest_hash "$manifest_input_hash" \
     --arg codex_brief_hash "$raw_brief_hash" \
     --arg reviewed_head "$raw_head" \
+    --arg ac_source "$ac_source" \
     '{
       schema_version: "aid-2.0",
       artifact_type: "audit_report",
@@ -1168,7 +1360,7 @@ _write_report() {
       verdict: {kind: "none", ready: false},
       provenance: {dispatch_mode: "deterministic", generated_by_tool: "aid-c3-dispatch.sh#normalize"},
       findings: $findings,
-      audit_report: {
+      audit_report: ({
         review_status: $review_status,
         blocking_findings: $blocking,
         independence_level: $achieved,
@@ -1180,7 +1372,7 @@ _write_report() {
         codex_brief_hash: $codex_brief_hash,
         reviewed_head: $reviewed_head,
         outcome: "dispatched"
-      }
+      } + (if $ac_source != "" then {ac_source: $ac_source} else {} end))
     }' > "$tmp" 2>/dev/null \
     || { rm -f "$tmp"; _write_unverifiable "$evidence_dir" "$manifest" invalid_output "$achieved" "$session_id" "$last_msg" ""; return 2; }
   mv "$tmp" "$report" 2>/dev/null \

@@ -78,7 +78,12 @@
               "size": {"type": "number"}
             }
           },
-          "$comment": "P065 E-065-7_7 8th DONE-review audit ('gate evidence integrity'): authoritative digest+size for the NOT-git-tracked evidence-class allowlist entries (final_report.md, gates_report.json, gates/gates_report.json, verifier-output-*.md) — these are runtime artifacts, not committed source, so unlike other allowlist entries C3 cannot independently verify them via `git show <head_sha>:<path>`. This is what binds a claimed PASS to an immutable value sealed at manifest-build time. Step 6 emits it at build-manifest time; formalised here, NOT required (empty when no evidence-class file exists yet)."
+          "$comment": "P065 E-065-7_7 8th DONE-review audit ('gate evidence integrity'): authoritative digest+size for the NOT-git-tracked evidence-class allowlist entries (final_report.md, gates_report.json, gates/gates_report.json, verifier-output-*.md, and — IMP-269 Half 2 — a PM-authorized targeted-run receipt) — these are runtime artifacts, not committed source, so unlike other allowlist entries C3 cannot independently verify them via `git show <head_sha>:<path>`. This is what binds a claimed PASS to an immutable value sealed at manifest-build time. Step 6 emits it at build-manifest time; formalised here, NOT required (empty when no evidence-class file exists yet)."
+        },
+        "ac_source": {
+          "type": "string",
+          "enum": ["plan", "final_report_fallback", "stub"],
+          "$comment": "IMP-269 Half 1: which source authored c3/bundle-plan-ac.md — plan (AID_PLAN_AC_FILE set + readable), final_report_fallback (fell back to the implementation's final_report.md — the E-064-1_2 failure mode), or stub (no source). If the run's review-profile.json required_lenses[] includes an AC lens (ac_to_test_identity / requirement_test_drift), build-manifest FAILS CLOSED unless ac_source == plan; otherwise a non-plan source only warns and this classification is preserved through to audit-report.json. Emitted at build-manifest time; formalised here, NOT required."
         }
       }
     }
