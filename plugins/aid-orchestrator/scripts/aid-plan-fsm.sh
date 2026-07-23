@@ -19,10 +19,10 @@
 #
 # ── SUBCOMMANDS (this step implements exactly these three) ──────────────────
 #   aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode
-#                    [--allow-incomplete-plan-final --reason <text>]
 #                    [--project-root <path>] [--op-id <id>]
 #     (--mode is MANDATORY — IMP-271; plan_branch is refused until the P068
-#      plan-final commands are installed, unless the audited escape hatch is used)
+#      plan-final commands are installed — no override, the refusal lifts
+#      automatically when those commands land)
 #   aid-plan-fsm.sh epic-start <plan_id> <epic_id> [--run-id <id>]
 #                    [--project-root <path>] [--op-id <id>]
 #   aid-plan-fsm.sh plan-state <plan_id>
@@ -350,60 +350,26 @@ _pfsm_plan_final_installed() {
   return 0
 }
 
-# ---------------------------------------------------------------------------
-# _pfsm_record_plan_final_bypass <plan_id> <reason> — append ONE audited record
-# to the plan's operation log documenting an explicit
-# `--allow-incomplete-plan-final` escape-hatch use (IMP-271). Written under its
-# OWN op_id (a distinct plan_op_key) so it never perturbs the plan-start op's
-# crash-reconcile phase. Requires AID_PLAN_STATE_PROJECT_ROOT already exported
-# (every caller sets it before this runs). Returns 0 on success; non-zero
-# leaves the caller to refuse rather than proceed unaudited.
-# ---------------------------------------------------------------------------
-_pfsm_record_plan_final_bypass() {
-  local plan_id="$1" reason="$2"
-  local ops_path lock_path
-  ops_path="$(_pfsm_ops_path "$plan_id")"
-  lock_path="$(_pfsm_plan_lock_path "$plan_id")"
-  mkdir -p -- "$(dirname "$ops_path")" 2>/dev/null || return 1
-  local op_id now line
-  op_id="$(plan_op_key "plan-start-allow-incomplete-plan-final" "$plan_id" "-" "0" "$plan_id")"
-  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  line="$(jq -nc --arg op_id "$op_id" --arg subject "$plan_id" \
-    --arg reason "$reason" --arg at "$now" \
-    '{op_id: $op_id, command: "plan-start", subject: $subject,
-      phase: "allow_incomplete_plan_final", reason: $reason, at: $at}')" || return 1
-  [[ -n "$line" ]] || return 1
-  aid_lock_acquire "$lock_path" "$AID_PLAN_STATE_DEFAULT_LOCK_TIMEOUT_S" || return 3
-  local fd="$AID_LOCK_FD"
-  if ! printf '%s\n' "$line" >> "$ops_path"; then
-    aid_lock_release "$fd"
-    return 1
-  fi
-  aid_lock_release "$fd"
-  return 0
-}
-
 # =============================================================================
-# cmd_plan_start <plan_id> --mode <...> [--allow-incomplete-plan-final --reason <...>]
-#                [--project-root ...] [--op-id ...]
+# cmd_plan_start <plan_id> --mode <...> [--project-root ...] [--op-id ...]
 #
 # `--mode` is MANDATORY (IMP-271): there is deliberately no silent default,
 # because a defaulted `plan_branch` would create a plan that skips the per-EPIC
 # release stack yet cannot be closed until P068 installs the plan-final
-# commands. `--mode plan_branch` is additionally refused while those commands
-# are not installed, unless the operator takes the explicit, audited
-# `--allow-incomplete-plan-final --reason '<>=20 chars>'` escape hatch (needed
-# by P068's own dogfood run, which must create a plan_branch plan before
-# everything is installed).
+# commands. `--mode plan_branch` is additionally HARD-REFUSED while those
+# commands are not installed — there is no override flag (the earlier
+# `--allow-incomplete-plan-final` escape hatch was removed: in AUTO mode the
+# controller agent supplied it itself, so it was self-asserted, not
+# authorization, and bypassed the very refusal it was meant to constrain). The
+# refusal lifts automatically, with no edit here, once the mechanical probe
+# `_pfsm_plan_final_installed` sees both plan-final subcommands in the
+# dispatcher (i.e. when P068 lands them).
 # =============================================================================
 cmd_plan_start() {
-  local plan_id="" mode="" project_root_opt="" op_id_opt="" \
-        allow_incomplete=0 reason=""
+  local plan_id="" mode="" project_root_opt="" op_id_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --mode) mode="${2:-}"; shift 2 ;;
-      --allow-incomplete-plan-final) allow_incomplete=1; shift ;;
-      --reason) reason="${2:-}"; shift 2 ;;
       --project-root) project_root_opt="${2:-}"; shift 2 ;;
       --op-id) op_id_opt="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-start: unknown flag: $1" >&2; exit 2 ;;
@@ -413,7 +379,7 @@ cmd_plan_start() {
     esac
   done
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--allow-incomplete-plan-final --reason <text>] [--project-root <path>] [--op-id <id>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -431,18 +397,6 @@ cmd_plan_start() {
     plan_branch|legacy_epic_release_mode) ;;
     *) echo "ERROR: plan-start: --mode must be 'plan_branch' or 'legacy_epic_release_mode' (got '${mode}')" >&2; exit 2 ;;
   esac
-  # IMP-271: escape-hatch argument shape — validated here (usage errors, no
-  # side effects) independent of whether the refusal actually fires below.
-  if [[ "$allow_incomplete" -eq 1 ]]; then
-    if [[ "$mode" != "plan_branch" ]]; then
-      echo "ERROR: plan-start: --allow-incomplete-plan-final only applies to '--mode plan_branch' (got '--mode ${mode}')." >&2
-      exit 2
-    fi
-    if [[ "${#reason}" -lt 20 ]]; then
-      echo "ERROR: plan-start: --allow-incomplete-plan-final requires --reason with an explanation of at least 20 characters (got ${#reason}) — this use is audited to the operation log." >&2
-      exit 2
-    fi
-  fi
 
   local invoke_root project_root
   invoke_root="$(_pfsm_resolve_invoke_root "$project_root_opt")"
@@ -464,19 +418,17 @@ cmd_plan_start() {
     exit 1
   fi
 
-  # IMP-271: refuse a plan_branch plan while the compensating plan-final close
-  # commands are not installed, unless the operator takes the explicit audited
-  # escape hatch. Placed AFTER preflight + the closed-plan check (both read
-  # only), so a refusal still creates nothing.
+  # IMP-271: HARD-REFUSE a plan_branch plan while the compensating plan-final
+  # close commands are not installed. There is no override — the earlier
+  # `--allow-incomplete-plan-final` escape hatch was removed because in AUTO mode
+  # the controller agent minted it itself, so it was self-asserted, not
+  # authorization, and defeated this fail-closed refusal. The refusal lifts
+  # automatically, with no edit here, once `_pfsm_plan_final_installed` sees both
+  # subcommands in the dispatcher (P068). Placed AFTER preflight + the
+  # closed-plan check (both read only), so a refusal still creates nothing.
   if [[ "$mode" == "plan_branch" ]] && ! _pfsm_plan_final_installed; then
-    if [[ "$allow_incomplete" -ne 1 ]]; then
-      echo "PRECONDITION FAIL: plan-start ${plan_id} --mode plan_branch is refused (IMP-271): the compensating plan-final commands 'plan-finalize' and 'plan-merge-to-main' are not yet installed in this aid-plan-fsm.sh (they arrive with P068). A plan_branch plan structurally skips the per-EPIC release stack (P064) but can only be closed by those commands — creating one now would strand it (skips verification yet cannot close). Use '--mode legacy_epic_release_mode', or, if you are deliberately bootstrapping plan_branch before P068 completes, pass '--allow-incomplete-plan-final --reason \"<why, >=20 chars>\"' to take the explicit audited escape hatch." >&2
-      exit 1
-    fi
-    if ! _pfsm_record_plan_final_bypass "$plan_id" "$reason"; then
-      echo "PRECONDITION FAIL: plan-start ${plan_id}: could not record the --allow-incomplete-plan-final escape hatch to the operation log — refusing to proceed unaudited (IMP-271)." >&2
-      exit 1
-    fi
+    echo "PRECONDITION FAIL: plan-start ${plan_id} --mode plan_branch is unavailable (IMP-271): the compensating plan-final commands 'plan-finalize' and 'plan-merge-to-main' are not yet installed in this aid-plan-fsm.sh (they arrive with P068). A plan_branch plan structurally skips the per-EPIC release stack (P064) but can only be closed by those commands — creating one now would strand it (skips verification yet cannot close). Use '--mode legacy_epic_release_mode'. plan_branch becomes available automatically once the P068 plan-final commands are installed; there is deliberately no override." >&2
+    exit 1
   fi
 
   local target_branch plan_branch="plan/${plan_id}"
@@ -2108,7 +2060,7 @@ _aid_plan_fsm_usage() {
 Usage: aid-plan-fsm.sh <subcommand> [args...]
 
 Subcommands:
-  plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--allow-incomplete-plan-final --reason <text>] [--project-root <path>] [--op-id <id>]
+  plan-start <plan_id> --mode plan_branch|legacy_epic_release_mode [--project-root <path>] [--op-id <id>]
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
