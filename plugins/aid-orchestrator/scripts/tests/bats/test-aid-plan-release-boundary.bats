@@ -1665,7 +1665,16 @@ YML
 _pfsm_bootstrap_plan() {
   local plan_id="$1" mode="${2:-plan_branch}"
   _write_legacy_plan "$plan_id"
-  run bash "$PLAN_FSM_CLI" plan-start "$plan_id" --mode "$mode" --project-root "$TEST_PROJECT_ROOT"
+  # IMP-271: plan_branch is refused until the P068 plan-final commands are
+  # installed, so a plan_branch bootstrap must take the explicit audited escape
+  # hatch. This preserves plan_branch coverage for every downstream test
+  # (mode-specific assertions are unchanged); legacy_epic_release_mode needs no
+  # hatch.
+  local extra=()
+  if [[ "$mode" == "plan_branch" ]]; then
+    extra=(--allow-incomplete-plan-final --reason "test bootstrap: plan-final commands (plan-finalize / plan-merge-to-main) not yet installed in fixture")
+  fi
+  run bash "$PLAN_FSM_CLI" plan-start "$plan_id" --mode "$mode" "${extra[@]}" --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 }
 
@@ -1673,14 +1682,16 @@ _pfsm_bootstrap_plan() {
   _write_legacy_plan "P064"
   local target_sha; target_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
 
-  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  # IMP-271: --mode is mandatory. This test is about lineage, not mode, so it
+  # uses legacy_epic_release_mode (needs no plan-final escape hatch).
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode legacy_epic_release_mode --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [ "$output" = "plan/P064" ]
   local branch_sha; branch_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
   [ "$branch_sha" = "$target_sha" ]
 
   # Re-run: idempotent no-op — same SHA, no error.
-  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode legacy_epic_release_mode --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   local branch_sha2; branch_sha2="$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)"
   [ "$branch_sha2" = "$target_sha" ]
@@ -1688,7 +1699,11 @@ _pfsm_bootstrap_plan() {
 
 @test "AC2: after plan-start, the lifecycle manifest carries the requested mode, is schema-valid, committed on target_branch, and the mode survives deleting .aid-o/" {
   _write_legacy_plan "P064"
-  run bash "$PLAN_FSM_CLI" plan-start P064 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
+  # IMP-271: plan_branch mode is the point of this test; it requires the audited
+  # escape hatch until the P068 plan-final commands are installed.
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode plan_branch \
+    --allow-incomplete-plan-final --reason "AC2 fixture: plan-final commands not installed pre-P068" \
+    --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
 
   run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:.aid-lifecycle/manifests/P064.yaml"
@@ -1972,7 +1987,9 @@ _pfsm_bootstrap_plan() {
   local sp="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P064/plan-state.yaml"
   yq -i '.plan_state = "CLOSED"' "$sp"
 
-  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  # IMP-271: --mode is mandatory; legacy mode reaches the closed-plan check
+  # (the plan_branch refusal would otherwise pre-empt it with a different msg).
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode legacy_epic_release_mode --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"CLOSED"* ]]
 }
@@ -1993,10 +2010,159 @@ _pfsm_bootstrap_plan() {
   local head_sha; head_sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"
   git -C "$TEST_PROJECT_ROOT" checkout -q --detach "$head_sha"
 
-  run bash "$PLAN_FSM_CLI" plan-start P064 --project-root "$TEST_PROJECT_ROOT"
+  # IMP-271: --mode is mandatory; legacy mode reaches the detached-HEAD preflight
+  # check (the plan_branch refusal runs after preflight, but is mode-gated off here).
+  run bash "$PLAN_FSM_CLI" plan-start P064 --mode legacy_epic_release_mode --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"detached HEAD"* ]]
   [[ "$output" == *"$head_sha"* ]]
+}
+
+# =============================================================================
+# ─── IMP-271: plan-start requires an explicit --mode, and refuses plan_branch
+#     until the compensating plan-final commands (P068) are installed ─────────
+#
+# F-2 (Auditor): plan-start defaulted an omitted --mode to plan_branch, which
+# P064 makes structurally skip the per-EPIC release stack while the commands
+# that could close such a plan (plan-finalize / plan-merge-to-main) do not
+# exist until P068 — a defaulted plan_branch created a plan that skipped
+# verification yet could never close. These tests prove omission and incomplete
+# installation cannot create such a plan, and that the audited escape hatch
+# lets P068's own dogfood run bootstrap plan_branch before everything exists.
+# =============================================================================
+
+@test "IMP-271: plan-start with no --mode exits 2 and creates nothing (no default)" {
+  _write_legacy_plan "P900"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--mode is REQUIRED"* ]]
+  [[ "$output" == *"IMP-271"* ]]
+  [[ "$output" == *"P068"* ]]
+
+  # Nothing created: no runtime state, no plan branch, no lifecycle manifest,
+  # nothing committed beyond the fixture's own initial commit.
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900" ]
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/plan/P900
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" ]
+}
+
+@test "IMP-271: --mode plan_branch without the escape hatch is refused (exit 1) naming both missing plan-final subcommands, and creates nothing" {
+  _write_legacy_plan "P900"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refused"* ]]
+  [[ "$output" == *"plan-finalize"* ]]
+  [[ "$output" == *"plan-merge-to-main"* ]]
+  [[ "$output" == *"IMP-271"* ]]
+
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900" ]
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/plan/P900
+  [ "$status" -ne 0 ]
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" ]
+}
+
+@test "IMP-271: --mode plan_branch --allow-incomplete-plan-final --reason succeeds and records the reason in the op log" {
+  _write_legacy_plan "P900"
+  local reason="P068 dogfood bootstrap: plan-final commands not yet installed"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --mode plan_branch \
+    --allow-incomplete-plan-final --reason "$reason" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P900" ]
+
+  # The plan is really created as plan_branch...
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/plan/P900
+  [ "$status" -eq 0 ]
+  run yq -r '.mode' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml"
+  [ "$output" = "plan_branch" ]
+
+  # ...and the escape-hatch use is audited to the operation log with its reason,
+  # under its OWN op_id (not perturbing the plan-start op's reconcile phase).
+  local ops; ops="$(_ops_file P900)"
+  [ -f "$ops" ]
+  local matches
+  matches="$(jq -c --arg r "$reason" \
+    'select(.phase == "allow_incomplete_plan_final" and .reason == $r)' "$ops" | wc -l)"
+  [ "$matches" -eq 1 ]
+  # The plan-start op's own last phase is still state_committed (unperturbed).
+  local last_phase
+  last_phase="$(jq -r 'select(.op_id == "plan-start:P900:-:0:P900") | .phase' "$ops" | tail -1)"
+  [ "$last_phase" = "state_committed" ]
+}
+
+@test "IMP-271: --allow-incomplete-plan-final with a reason shorter than 20 chars exits 2 and creates nothing" {
+  _write_legacy_plan "P900"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --mode plan_branch \
+    --allow-incomplete-plan-final --reason "too short" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"at least 20 characters"* ]]
+
+  [ ! -e "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900" ]
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify --quiet refs/heads/plan/P900
+  [ "$status" -ne 0 ]
+}
+
+@test "IMP-271: --allow-incomplete-plan-final with --mode legacy_epic_release_mode is a usage error (exit 2)" {
+  _write_legacy_plan "P900"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --mode legacy_epic_release_mode \
+    --allow-incomplete-plan-final --reason "this only applies to plan_branch mode, not legacy" \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"only applies to '--mode plan_branch'"* ]]
+}
+
+@test "IMP-271: --mode legacy_epic_release_mode is unaffected — succeeds and records legacy mode, no escape hatch needed" {
+  _write_legacy_plan "P900"
+
+  run bash "$PLAN_FSM_CLI" plan-start P900 --mode legacy_epic_release_mode --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P900" ]
+  run yq -r '.mode' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml"
+  [ "$output" = "legacy_epic_release_mode" ]
+
+  # No escape-hatch record — legacy never touches the plan-final guard.
+  local ops; ops="$(_ops_file P900)"
+  run grep -c 'allow_incomplete_plan_final' "$ops"
+  [ "$output" = "0" ]
+}
+
+@test "IMP-271: mechanical detection — a fixture aid-plan-fsm.sh whose dispatcher declares plan-finalize + plan-merge-to-main lifts the plan_branch refusal (not a hardcoded false)" {
+  _write_legacy_plan "P900"
+
+  # Build an isolated fixture copy of the CLI that DOES install both plan-final
+  # subcommands in its dispatcher (simulating post-P068), sourcing the real lib/
+  # via a symlink so SCRIPT_DIR resolution still works.
+  local sdir="$TEST_TMPDIR/imp271-scripts"
+  mkdir -p "$sdir"
+  ln -s "$AID_PLUGIN_PATH/scripts/lib" "$sdir/lib"
+  sed 's|    plan-state) cmd_plan_state "$@" ;;|    plan-finalize) echo "stub plan-finalize" ;;\n    plan-merge-to-main) echo "stub plan-merge-to-main" ;;\n    plan-state) cmd_plan_state "$@" ;;|' \
+    "$PLAN_FSM_CLI" > "$sdir/aid-plan-fsm.sh"
+
+  # Sanity: the stub arms are actually present in the fixture source.
+  run grep -Eq '^[[:space:]]*plan-finalize\)' "$sdir/aid-plan-fsm.sh"
+  [ "$status" -eq 0 ]
+  run grep -Eq '^[[:space:]]*plan-merge-to-main\)' "$sdir/aid-plan-fsm.sh"
+  [ "$status" -eq 0 ]
+
+  # plan_branch WITHOUT the escape hatch now succeeds — the refusal lifted
+  # purely because the dispatcher recognises the subcommands.
+  run bash "$sdir/aid-plan-fsm.sh" plan-start P900 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P900" ]
+  run yq -r '.mode' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml"
+  [ "$output" = "plan_branch" ]
+
+  # And no escape-hatch record was written (the refusal never fired).
+  local ops; ops="$(_ops_file P900)"
+  run grep -c 'allow_incomplete_plan_final' "$ops"
+  [ "$output" = "0" ]
 }
 
 # =============================================================================
