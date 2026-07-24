@@ -2843,3 +2843,22 @@ EPIC, or explicitly mark truncated ACs with a pointer to the plan's AC id.
 **Open question:** is the first-line-only behaviour deliberate (EPIC as a
 deliberately condensed index) or incidental? Check `_aid_extract_*` in
 `lib/aid-scoping.sh` before changing.
+
+### C0 plan-review requires a dependency graph that no pre-generation producer creates
+
+**Status:** idea — raised by the C0 review of P068, 2026-07-24. **Owner: the C0
+bridge (P065), not P068.**
+**Context:** `lib/aid-c0-plan-review.sh` seals
+`<evidence_dir>/c0/plan-graph.json` into its input manifest and the C0 prompt
+asks for graph-based acyclicity / output-producer analysis. The graph is produced
+by `aid-c0-contract.sh` from `plan.json`, which only exists *after* EPIC
+generation — so at plan-review time the file is genuinely absent. The bridge
+currently seals it as a zero-byte entry (empty-string sha256, size 0), which stops
+the review failing but leaves the mandatory graph analysis with no artifact.
+**Proposed change:** either (a) add a pre-generation graph producer with an
+explicit schema-valid output and make the review depend on it, or (b) remove the
+graph from the required C0 input contract and define the text-derived dependency
+analysis that replaces it.
+**Open question:** does any consumer rely on the zero-byte-seal representation?
+Changing it shifts every sealed `input_hash` and the golden fixture in
+`test-c0-plan-review.bats`.

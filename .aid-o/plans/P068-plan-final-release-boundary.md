@@ -194,20 +194,24 @@ EPIC generation. Six consecutive C0 runs on the combined plan returned
 optional at plan-review time or generate it from the plan document, and the
 fix belongs to the C0 bridge rather than to any consumer of it.
 
-> **Re-grounding note (2026-07-24):** CF3's **blocking** half is already resolved
-> in code at v2.62.1 — a missing `plan-graph.json` no longer makes the review
-> `unverifiable`: `_c0_manifest_entry` (`lib/aid-c0-plan-review.sh:~242`) seals an
-> absent input as a zero-byte manifest entry (empty-string sha256, size 0, no
-> fail), and `test-c0-plan-review.bats` already carries an absent-graph fixture.
-> So **P068 CAN run its own C0 today** — CF3 is no longer an execution blocker.
-> What Step 1 still owns is a refinement, not a block-fix: (a) plugin-relative
-> contract-path resolution (`lib/aid-c0-plan-review.sh:~305-308`), and (b) the
-> optional semantic improvement of recording `plan_graph: absent_pre_generation`
-> instead of the current opaque zero-byte seal (so a legitimately-not-yet-generated
-> graph is distinguishable from a truncated one). Neither is blocking. Step 1's
-> body and AC below are re-grounded to this: the absent-graph fixture already
-> exists (extend it, do not re-add), and "absence no longer blocks" is the
-> starting point, not the step's deliverable.
+> **Re-grounding note (2026-07-24, revised after C0).** Observed repository state,
+> stated declaratively — this note prescribes no review treatment and cannot relax
+> any mandatory C0 input or dependency check:
+>
+> - `_c0_manifest_entry` (`lib/aid-c0-plan-review.sh:~242`) seals an absent input
+>   as a zero-byte manifest entry (empty-string sha256, size 0) rather than
+>   failing; `test-c0-plan-review.bats` carries an absent-graph fixture.
+> - **No `plan-graph.json` producer exists at plan-review time, and no step of this
+>   plan creates one.** The graph is produced by `aid-c0-contract.sh` from
+>   `plan.json`, which exists only after EPIC generation. Consequently the
+>   graph-based acyclicity / output-producer analysis has no graph artifact to run
+>   over. That is a **C0-input-contract gap owned by the C0 bridge (P065), not by
+>   P068**; it is recorded in the backlog and is not claimed to be resolved here.
+> - Step 1's scope regarding the bridge is therefore limited to: (a) plugin-relative
+>   contract-path resolution (`lib/aid-c0-plan-review.sh:~305-308`), and (b)
+>   recording `plan_graph: absent_pre_generation` in place of the opaque zero-byte
+>   seal, so an unproduced graph is distinguishable from a truncated one. The
+>   absent-graph fixture is extended, not re-added.
 
 ## Handoff carried into P068 from P064 / Phase 1 (2026-07-24)
 
@@ -439,11 +443,11 @@ validated `decided_at` against "the candidate freeze recorded in the manifest",
 but no such timestamp existed in the plan-boundary manifest schema and no step
 wrote one, so the check was unimplementable as specified. One authoritative
 source is now defined: **Step 1's freeze stage writes `candidate_frozen_at`
-(RFC 3339 UTC) into the plan-boundary manifest atomically, in the same write that
-sets `candidate_sha`**, and Step 5 validates against exactly that field. The
-field is schema-approved (Step 5 already modifies
-`plan-lifecycle-manifest.schema.json`; the property is added there with
-`additionalProperties: false` still holding). Validation rules, all fail-closed:
+(RFC 3339 UTC) into the RUNTIME plan-boundary manifest atomically, in the same
+write that sets `candidate_sha`** (owned by `lib/aid-plan-manifest.sh`, declared in
+`plan-boundary-manifest.schema.json`), and Step 5 reads exactly that runtime field
+— not the `.aid-lifecycle` manifest, which is a separate artifact that cannot
+establish atomicity with the candidate write. Validation rules, all fail-closed:
 `candidate_frozen_at` absent or not a valid RFC 3339 UTC timestamp → exit 1
 (never "assume old enough"); `decided_at` malformed → exit 1;
 `decided_at < candidate_frozen_at` → exit 1 with the target branch unchanged. A
@@ -577,8 +581,10 @@ target head.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — implement `plan-finalize --stage sync` and `--stage freeze`.
+- Modify: `plugins/aid-orchestrator/defaults/schemas/plan-boundary-manifest.schema.json` — declare `candidate_frozen_at` (RFC 3339 UTC string, nullable) beside the existing `candidate_sha` in the RUNTIME plan-boundary manifest, with the same nullability rule so the pair is legal only together.
+- Modify: `plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh` — initialize, validate, atomically set and atomically clear `candidate_frozen_at` in the same write that sets or clears `candidate_sha` (this library owns `candidate_sha`; the timestamp must never be written or cleared independently of it).
 - Create: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — this plan's mandatory integration suite; every later step extends it.
-- Modify: `plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh` (lines ~242-360) — re-grep by symbol first; resolve plugin-relative contract paths, and refine the already-non-blocking absent-graph handling to record `plan_graph: absent_pre_generation` in place of the current opaque zero-byte seal. Absence is already non-blocking (see the CF3 re-grounding note); this step improves the semantics, it does not fix a block.
+- Modify: `plugins/aid-orchestrator/scripts/lib/aid-c0-plan-review.sh` (lines ~242-360) — re-grep by symbol first; resolve plugin-relative contract paths, and refine the already-non-blocking absent-graph handling to record `plan_graph: absent_pre_generation` in place of the current opaque zero-byte seal. This step improves how an unproduced graph is represented; it does not add a graph producer and makes no claim about how a review must treat its absence.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-c0-plan-review.bats` (lines ~383) — re-grep by symbol; extend the golden manifest fixture and expected `input_hash` for the `absent_pre_generation` `plan_graph` shape and the plugin-relative contract paths. The absent-graph fixture already exists — extend it, do not re-add it.
 - Modify: `.github/workflows/ci.yml` (lines ~7-30) — add a `plan-final-tests` job for the new suite with its own timeout and `yq`.
 - Modify: `plugins/aid-orchestrator/scripts/tests/run-all-tests.sh` (lines ~49-57) — add the new suite to the dedicated-CI-job exclusion list P064 introduced.
@@ -637,10 +643,16 @@ the resulting plan branch head and the state moves to `PLAN_GATES`. So
 `prepare-plan` runs while the state is still `PLAN_SYNC` and never requires a
 `candidate_sha` that does not yet exist. **The freeze write is atomic and
 two-field: `candidate_sha` and `candidate_frozen_at` (RFC 3339 UTC) are written
-into the plan-boundary manifest in the same operation** — the authoritative
-freeze-time source Step 5 validates `decided_at` against (see *PM decision
-artifact*). A `PLAN_FIX` refreeze rewrites both together, so a decision bound to
-the previous candidate can never satisfy the new one. `aid-release.sh prepare-plan
+into the RUNTIME plan-boundary manifest in the same operation**, by
+`lib/aid-plan-manifest.sh` — the library that already owns `candidate_sha` — and
+declared in `plan-boundary-manifest.schema.json` beside it. That runtime field is
+the authoritative freeze-time source Step 5 validates `decided_at` against (see
+*PM decision artifact*). It is deliberately NOT placed in the `.aid-lifecycle`
+manifest: that is a different artifact with its own write path, and it cannot
+establish atomicity with the runtime candidate write. A `PLAN_FIX` refreeze
+rewrites both fields together and an invalidation clears both together, so a
+decision bound to the previous candidate can never satisfy the new one and a
+candidate can never exist without its freeze time. `aid-release.sh prepare-plan
 <plan_id> --bump auto --plan-branch plan/<plan_id>` applies the version-file
 edits driven by
 `.aid-o/config/project.yaml` `versioning.files[]` and the CHANGELOG entry,
@@ -735,8 +747,10 @@ legal transition precisely for this loop (see `## Data Model`).
       `target_branch_head_at_candidate_freeze` are both exact 40-hex values in
       the manifest and a new immutable run directory exists.
 - [ ] The same freeze write records `candidate_frozen_at` as a valid RFC 3339
-      UTC timestamp in the manifest, atomically with `candidate_sha`; a refreeze
-      rewrites both together (never one without the other).
+      UTC timestamp in the RUNTIME plan-boundary manifest, atomically with
+      `candidate_sha`; a refreeze rewrites both together and an invalidation
+      clears both together — the manifest is never valid with one field set and
+      the other absent, in either direction.
 - [ ] A candidate change after freeze transitions the plan to `PLAN_FIX` and
       clears all four plan-final fields.
 - [ ] A second freeze creates `R-<plan_id>-final-2` and leaves
@@ -755,6 +769,7 @@ excluded and no broad suite ran twice.
 
 **Files:**
 - Modify: `plugins/aid-orchestrator/scripts/aid-plan-fsm.sh` — implement `plan-finalize --stage gates`.
+- Modify: `.aid-o/config/execution.yaml` — add a `release_quarantine` gate profile: every gate in `release` EXCEPT `bats_all` (i.e. `bats_fsm`, `shell_pipeline_smoke`, `plan_diff`, `docs_updated`). The existing `bats_all_quarantine` profile is EPIC-boundary-scoped and omits `shell_pipeline_smoke`, so it cannot serve a plan-final release run without silently dropping a non-quarantined release gate.
 - Modify: `plugins/aid-orchestrator/scripts/aid-run-gates.sh` (lines ~177-260) — add the additive `--base-commit` and `--plan-path` flags so a plan-final run can supply the substitution tokens an EPIC state file would otherwise provide.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — add AC2 gate-report assertions.
 
@@ -771,11 +786,14 @@ as `gate_profile_max(plan_final_required_profile, release)` (the resolver and
 the `gate_profiles` table, including `release` as a strict superset of
 `full`, are delivered by **P064** Step 8; this plan only consumes them). **When a
 gate in the resolved profile carries a declared `quarantine:` block, the stage
-runs the pre-declared substitute profile that excludes it instead** — at v2.62.1
-that is `bats_all_quarantine` for the single quarantined gate `bats_all` (see
-*Test Execution Cadence and Quarantine*). This is a profile selection, not a
-runner-level transformation: `aid-run-gates.sh` has no quarantine awareness and
-this plan adds none. It then invokes:
+runs the pre-declared release-derived substitute profile that excludes exactly
+that gate and retains every other release gate** — at v2.62.1 that is the
+`release_quarantine` profile this step adds (`release` minus `bats_all`). It is
+NOT `bats_all_quarantine`: that profile is EPIC-boundary-scoped and omits
+`shell_pipeline_smoke`, so using it for a plan-final run would silently drop a
+non-quarantined release gate and fail this stage's own post-run assertion. This
+is a profile selection, not a runner-level transformation: `aid-run-gates.sh` has
+no quarantine awareness and this plan adds none. It then invokes:
 
 ```bash
 aid-run-gates.sh run-all .aid-o/config/execution.yaml <plan_id> <plan_final_run_id> \
@@ -926,6 +944,10 @@ does not retry it.
       the quarantined gate (one receipt cannot satisfy another gate) or whose
       `head_sha != candidate_sha`, and never rewrites the broad gate's own row to
       `pass`.
+- [ ] The substitute profile is release-derived: `release_quarantine` contains
+      every gate in `release` except `bats_all`, and the plan-final report shows
+      each of them with a real result — no non-quarantined release gate (notably
+      `shell_pipeline_smoke`) is dropped by the substitution.
 - [ ] Exactly one `gate_runner_start` event exists for the plan-final run —
       no second broad run under a `full` label.
 - [ ] `plan_diff` runs for real against the plan file and the candidate range —
@@ -1227,7 +1249,7 @@ target head, verify the resulting tree, and publish exactly once.
 - Modify: `plugins/aid-orchestrator/defaults/hooks/pre-push` (lines ~30-50) — exempt `plan/*` and `task/*` branches from the version-bump push block.
 - Create: `plugins/aid-orchestrator/defaults/schemas/pm-plan-decision.schema.json` — the PM authorization contract validated before any merge action.
 - Modify: `plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh` (lines ~36-50, ~470-700) — teach the five binding-path functions a plan-mode that advances the target ref by plumbing (`commit-tree` + CAS `update-ref`) instead of requiring a checkout, so delivery bindings and the receipt commit in one post-merge pass even when the target branch is checked out in another worktree.
-- Modify: `plugins/aid-orchestrator/defaults/schemas/plan-lifecycle-manifest.schema.json` — widen `declared_epics[].scope` from `[required, backlog]` to include `abandoned` and `superseded`, add a top-level `status` property (`active | closed | aborted`), and add `candidate_frozen_at` (RFC 3339 UTC string) as the authoritative freeze-time source Step 1 writes and this step validates `decided_at` against; the schema is `additionalProperties: false`, so none of the CF1 re-scope, the abort record, or the freeze timestamp can produce a valid manifest without these changes.
+- Modify: `plugins/aid-orchestrator/defaults/schemas/plan-lifecycle-manifest.schema.json` — widen `declared_epics[].scope` from `[required, backlog]` to include `abandoned` and `superseded`, and add a top-level `status` property (`active | closed | aborted`); the schema is `additionalProperties: false`, so neither the CF1 re-scope nor the abort record can produce a valid manifest without both changes. (`candidate_frozen_at` is deliberately NOT added here — it is a RUNTIME plan-boundary-manifest field owned by Step 1; see below.)
 - Modify: `plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh` (lines ~730-808) — exclude the two new scopes from the closure predicate's required set.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — add AC5 and AC6 cases.
 
@@ -1429,8 +1451,8 @@ revert or hotfix, never a destructive reset).
       and wrong-target decisions each exit non-zero with the target branch
       unchanged.
 - [ ] A decision artifact that fails `pm-plan-decision.schema.json`, or whose
-      `decided_at` precedes the manifest's `candidate_frozen_at`, is rejected
-      before any Git action.
+      `decided_at` precedes the RUNTIME plan-boundary manifest's
+      `candidate_frozen_at`, is rejected before any Git action.
 - [ ] The freeze-time validation is fail-closed on every degenerate input: a
       manifest missing `candidate_frozen_at`, a `candidate_frozen_at` that is not
       valid RFC 3339 UTC, and a malformed `decided_at` each exit 1 with the
