@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.62.1] — 2026-07-24
+
+### Fixed
+- **IMP-263 increment-step is now fail-closed** — strict binding is the default for a new (non-grandfathered) run so unbound evidence is rejected without any env, a partial binding (any missing field) is rejected instead of skipping the id/hash/commit checks, and a hand-inserted transition-ledger row can no longer masquerade as crash recovery: self-heal runs only when the live step-verify carries a complete, plan/HEAD-verified binding matching the ledger row.
+- **IMP-269 C3 fail-closed checks the AC source location and receipt consistency** — `ac_source: plan` is earned only by a file under the canonical `.aid-o/plans`/`.aid-o/tasks` tree (any other in-repo file downgrades to `final_report_fallback`); a git-tracked plan is read from the reviewed HEAD, while a gitignored `.aid-o` plan is a canonical worktree artifact sealed into the bundle; and a targeted-run receipt is checked for consistency with its named command, the reviewed HEAD, and a named in-repo log (`log_sha256` must equal that log's recomputed hash). This is consistency-checking, not cryptographic provenance against an actor who can directly edit the evidence files — such an actor is outside this local AID trust model.
+- **IMP-270 waiver re-validation cannot fall back to the current HEAD** — a report that declares a waived gate but omits or malforms its `revision.head_sha` now fails closed immediately instead of passing an empty HEAD to the waiver tool, which would have validated the waiver against whatever was checked out rather than the reviewed revision.
+- **IMP-262 cancel-before-PID race closed** — a cancel landing before the job wrapper records its pid/pgid is no longer lost: cancel drops a durable request marker and the wrapper self-cancels at entry and immediately before exec, so a job can never start after a cancellation is recorded.
+
 ## [2.62.0] — 2026-07-24
 
 ### Added

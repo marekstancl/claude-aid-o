@@ -2,8 +2,10 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064 complete; Phase 1 in progress (1A + 1D
-done, 1B + 1C next). Not pushed; identity corrected to Marek Stancl for new commits.
+**Status:** active PM checklist — P064 complete; Phase 1 (1A–1D) complete and
+released locally as v2.62.0, plus a fail-closed hardening batch (IMP-263/269/270/262)
+from the 2026-07-24 PM review. Not pushed; identity corrected to Marek Stancl for
+new commits.
 **Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–274
 
 ## Current checkpoint
@@ -15,9 +17,10 @@ done, 1B + 1C next). Not pushed; identity corrected to Marek Stancl for new comm
 | Checklist handoff on `main` | `e1341be` |
 | P064 local release | `v2.61.0` at `193fd4a` |
 | **Phase 1 (1A–1D)** | **DONE** — see per-item progress log; 1B + 1C completed 2026-07-24 |
-| **Phase 1 version** | `2.62.0` (local, untagged; source of truth = CHANGELOG header) |
-| **Phase 1 close commit** | `a6a3363` (version bump to 2.62.0 + both CHANGELOGs + this checklist) |
-| **Plugin-cache after refresh** | reset to `a6a3363`; version `2.62.0`; scripts-tree `1bf86b3` (local-only, mirrors unpushed `main`) |
+| **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
+| **Current version** | `2.62.1` (local, untagged; source of truth = CHANGELOG header) |
+| **Close commit** | recorded below in the progress log (v2.62.1 bump + both CHANGELOGs + registry + README + this checklist + the IMP-269 wording correction) |
+| **Plugin-cache after refresh** | recorded below once the local cache is reset to the corrected 2.62.1 HEAD |
 | Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
@@ -81,9 +84,10 @@ explicitly removes it.
 - [x] Run Curator, Auditor and CP4 against the same frozen revision.
 - [x] Close and merge E-064-2_2, then close P064.
 - [x] Create the local `v2.61.0` release/tag.
-- [ ] Push `main` and `v2.61.0` only when explicitly authorized.
-- [ ] Confirm the installed plugin cache resolves `v2.61.0` before Phase 1
-  implementation starts.
+- [ ] Push `main` and the local releases (`v2.61.0`, `v2.62.0`) only when
+  explicitly authorized.
+- [x] Installed plugin cache refreshed and resolves the current local release
+  `v2.62.0` (scripts-tree recorded in the checkpoint); re-confirm after any push.
 - [x] Preserve all quarantine/waiver evidence in the delivery report.
 
 **GO to Phase 1:** P064 is merged and closed; main and the plugin cache resolve
@@ -380,6 +384,11 @@ independently reviewable commit; do not rewrite earlier rows.
 | 2026-07-23 | 1C IMP-264 | `0263276` | staleness repro; pm-brief 23/23; protocol-validate 60/60 | controller-verified (display-only, low risk) | — |
 | 2026-07-24 | 1C IMP-266 | `e40f9ca` | decision brief only — NOT implemented; recommends Option B | Codex adjudication hung; deferred to PM ratification | PM ratifies A or B |
 | 2026-07-24 | Phase-1 close | `a6a3363` | v2.62.0 bump (8 files), CHANGELOGs identical, checkpoint + 1B/1C boxes; cache reset to `a6a3363` (scripts-tree `1bf86b3`) | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy decision; P068 start |
+| 2026-07-24 | Hardening IMP-263 | `cfdaed4` | 3 bypasses repro'd RED (forged-ledger self-heal, partial binding, no-binding default); fix; test-aid-fsm 103/103 | strict-by-default, partial rejected, self-heal binding-gated | — |
+| 2026-07-24 | Hardening IMP-269 | `d1bf7f0` | 5 gaps repro'd RED (2 canonical, 1 revision, 2 log); fix; test-c3-audit 50/50 | canonical-only AC source; git-tracked plan read from reviewed HEAD (else canonical worktree artifact); receipt consistency-checked vs named command/HEAD/log — consistency, not provenance against direct evidence tampering | — |
+| 2026-07-24 | Hardening IMP-262 | `8e94dd4` | 3 pre-PID fault tests; handshake; set-e/pipefail abort also fixed; test-aid-job 21/21 | marker + wrapper self-cancel; job never starts after cancel | — |
+| 2026-07-24 | Hardening IMP-270 | `6751157` | 2 tests repro'd RED on pre-fix (empty + malformed head); fix; test-aid-gate-waiver 24/24 | missing/malformed report HEAD fails closed, no current-HEAD fallback | — |
+| 2026-07-24 | Hardening review + close | recorded at commit time | one independent adversarial review of all 4 boundaries → no residual bypass; registry 4 rows updated; v2.62.1 bump; two stale intro lines fixed; IMP-269 wording corrected (consistency-check, not provenance) folded into the local release | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy; P068 start |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.
