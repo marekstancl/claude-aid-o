@@ -3,6 +3,26 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.62.0] — 2026-07-24
+
+### Added
+- **Controller-owned background job supervisor (`aid-job.sh`)** — opt-in `run|status|collect|cancel|watchdog|redgreen` giving a long-running command a durable identity and a terminal result a resumed controller can collect without `tail -f`, a notification, or the launcher staying alive; `/proc` starttime pins process identity against PID reuse, `collect` returns `in_flight` never a pass, and `redgreen` stores revision-bound paired receipts that reject a fabricated pass. Advisory/opt-in — no FSM or gate path depends on it.
+- **Gate-scoped single-use waiver (`aid-gate-waiver.sh`)** — a per-gate waiver bound to project/epic/run/exact-HEAD/gate-id/command-fingerprint that reports a failed required gate as `waived` (never `pass`) for exactly one gate, replacing the broad FSM `--force` that skipped every precondition; the FSM re-validates each waived row at read time and fails closed on a bare `waived`.
+- **C3 test-evidence channel** — `build-manifest` seals a validated, HEAD-bound targeted-run receipt into `evidence_hashes`, so a truthful targeted suite at the reviewed HEAD is consumable rather than forcing a false `unverifiable`.
+
+### Changed
+- **Idempotent, step-bound `increment-step`** — step-verify evidence carries a binding (step index/id, plan-step hash, reviewed commit, idempotency token) validated against the live plan before any mutation, a durable ledger makes advancement replay-safe (`status=already_applied` on replay), and machine-readable `status=` stdout replaces the bare number the controller once misread as an error.
+- **One committed-tree mode authority** — `cmd_init` now resolves plan mode through the same fail-closed committed-manifest resolver as `done-advance`; missing `yq`, an unparseable manifest or an unknown mode resolve to `unresolved`, never silently to legacy.
+- **PM-brief evidence freshness is computed at read time** — the brief no longer echoes a frozen `head_is_current`; it preserves the referenced SHA and reports freshness by comparing it to the current HEAD, so a post-generation commit reads as stale.
+
+### Fixed
+- **C3 AC source is explicit and enforced** — the manifest records `ac_source` (`plan|final_report_fallback|stub`); when a run requires an AC lens and the source is not the real plan the build fails closed, and pointing the AC file at (or a byte-identical copy of) `final_report.md` is downgraded rather than laundered into a `plan` classification.
+- **Fail-closed lineage** — an omitted lineage argument now defaults to `unproven` (was `proven`), `--repair` on a healthy manifest is a byte-identical no-op that preserves attestation, repair per-write failures propagate instead of being swallowed, and attestation re-derives ancestry from Git and fails closed when it cannot be proven. Repair still never mints `proven`.
+- **Plan mode must be explicit at `plan-start`** — an omitted `--mode` is a usage error and `plan_branch` is hard-refused until the P068 plan-final commands exist (the self-asserted `--allow-incomplete-plan-final` bypass was removed as unauthenticated).
+- **Queue `merge_target` is authorized, not just parsed** — a dependency's owning plan is derived from its epic id, not read from the same hand-editable `plan_id` field, so `plan_id: P999` + `merge_target: plan/P999` can no longer self-authorize an ancestry anchor; a declared `plan_id` that disagrees with the derivation is refused.
+- **`grep -oP` portability guard is repo-wide** — the epic-id derivation is pure bash and a scanner refuses any new non-comment `grep -oP` under `scripts/` outside an explicit allowlist, so the portability defect cannot move between files and stay green.
+- **Enforcement-registry honesty** — writer-only controls whose P068 reader does not exist yet are recorded `planned`/`unmapped`, not `active`.
+
 ## [2.61.0] — 2026-07-23
 
 ### Added

@@ -13,12 +13,17 @@ done, 1B + 1C next). Not pushed; identity corrected to Marek Stancl for new comm
 | P064 | **DONE** — both EPICs merged |
 | P064 delivery baseline | `2a1ca60` |
 | Checklist handoff on `main` | `e1341be` |
-| Local release | `v2.61.0` at `193fd4a` |
+| P064 local release | `v2.61.0` at `193fd4a` |
+| **Phase 1 (1A–1D)** | **DONE** — see per-item progress log; 1B + 1C completed 2026-07-24 |
+| **Phase 1 version** | `2.62.0` (local, untagged; source of truth = CHANGELOG header) |
+| **Phase 1 close commit** | recorded below in progress log (version bump + CHANGELOG + this checklist) |
+| **Plugin-cache SHA after refresh** | recorded below in progress log once the local cache is reset to this HEAD |
 | Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
+| Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
-| Next work | Phase 1 manual maintenance; **do not start P068 yet** |
+| Next work | **P068 not started** (deferred per brief); IMP-266 awaits PM ratification (A or B) |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -109,34 +114,34 @@ plan.
 
 ### 1B — AUTO liveness and replay safety
 
-- [ ] **IMP-262:** controller-owned job supervisor with durable terminal
-  receipts, process-group ownership, resume/collect and no orphan watchers.
-- [ ] **IMP-263:** idempotent `increment-step`, bound to the exact step,
-  plan-step hash, reviewed commit and idempotency token.
-- [ ] Prove that duplicate invocation advances once and that a renamed
-  previous-step verifier cannot complete the next step.
+- [x] **IMP-262:** controller-owned job supervisor with durable terminal
+  receipts, process-group ownership, resume/collect and no orphan watchers. (`a02e866` — opt-in `aid-job.sh`.)
+- [x] **IMP-263:** idempotent `increment-step`, bound to the exact step,
+  plan-step hash, reviewed commit and idempotency token. (`c3d493c`.)
+- [x] Prove that duplicate invocation advances once and that a renamed
+  previous-step verifier cannot complete the next step. (`c3d493c` — double-advance + copied-file tests.)
 
 ### 1C — audit and lineage integrity
 
-- [ ] **IMP-269:** C3 records and enforces
+- [x] **IMP-269:** C3 records and enforces
   `ac_source: plan|final_report_fallback|stub`; required AC lenses accept only
-  the explicit plan source.
-- [ ] Extend **IMP-269** to bind test evidence as well as AC evidence:
+  the explicit plan source. (`00ef981`; F1 laundering vector closed.)
+- [x] Extend **IMP-269** to bind test evidence as well as AC evidence:
   accept a revision-bound, command-fingerprinted targeted-run receipt in the
   sealed manifest, or seal a narrowly allow-listed recheck command. A
   quarantined gate must not force C3 to `unverifiable` merely because valid
-  targeted evidence has no manifest channel.
-- [ ] Preserve `unverifiable` as distinct from `fail`; C3 must not be promoted
-  to blocking while the quarantine/targeted-evidence contract is unresolved.
-- [ ] **IMP-264:** compute evidence freshness at read time; stop trusting a
-  persisted `head_is_current: true`.
-- [ ] **IMP-265:** lineage omission defaults to `unproven`; healthy repair is
-  idempotent and preserves valid attestations.
-- [ ] **IMP-267:** attestation re-derives merge/base ancestry from Git.
-- [ ] **IMP-258:** repair propagates per-write failures instead of swallowing
-  them through `|| true`.
-- [ ] Decide **IMP-266:** audited reopen from an incorrect
-  `merged_to_plan`, or a documented deliberately terminal recovery ceremony.
+  targeted evidence has no manifest channel. (`00ef981` — `AID_TEST_RECEIPT_FILE` sealed into `evidence_hashes`.)
+- [x] Preserve `unverifiable` as distinct from `fail`; C3 must not be promoted
+  to blocking while the quarantine/targeted-evidence contract is unresolved. (`00ef981` — enforcement stays `observe`.)
+- [x] **IMP-264:** compute evidence freshness at read time; stop trusting a
+  persisted `head_is_current: true`. (`0263276` — pm-brief was the sole read-time leak.)
+- [x] **IMP-265:** lineage omission defaults to `unproven`; healthy repair is
+  idempotent and preserves valid attestations. (`45ae9aa`.)
+- [x] **IMP-267:** attestation re-derives merge/base ancestry from Git. (`45ae9aa` — fails closed when unprovable.)
+- [x] **IMP-258:** repair propagates per-write failures instead of swallowing
+  them through `|| true`. (`45ae9aa`.)
+- [x] Decide **IMP-266:** audited reopen from an incorrect
+  `merged_to_plan`, or a documented deliberately terminal recovery ceremony. (`e40f9ca` — decision brief prepared, recommends Option B, deferred to PM ratification; NOT implemented.)
 
 ### 1D — P064 dormant-path blockers owed before P068
 
@@ -368,6 +373,12 @@ independently reviewable commit; do not rewrite earlier rows.
 | 2026-07-23 | 1A IMP-270 | `3f08c80` | 22 waiver cases; run-gates 41/41; F1 folded; registry 308 | security review pass, no HIGH | — |
 | 2026-07-23 | HIGH IMP-272 hardening | `a18b183` | PM collusion attack (plan_id+merge_target) refused both twins; derive plan from epic id | security review pass, bypass closed | — |
 | 2026-07-23 | HIGH IMP-271 A1 | `23fe72e` | Codex-adjudicated bypass removal; bootstrap stub refactor; full boundary 258/258, tree clean | Codex A1 + full-suite green | — |
+| 2026-07-23 | 1B IMP-263 | `c3d493c` | double-advance repro + fix; forged-ledger bound; test-aid-fsm 100/100 | verifier pass; MEDIUM (self-heal bound) folded | — |
+| 2026-07-23 | 1B IMP-262 | `a02e866` | job supervisor 18/18; no process/jobs leak; PID-reuse/cancel/redgreen | security review pass; 2 MEDIUM + LOW folded | — |
+| 2026-07-23 | 1C IMP-269 | `00ef981` | both-gap repro; test-c3-audit 45/45; F-2 5/5 | security review pass; borderline-HIGH F1 + F2 + F3 folded | — |
+| 2026-07-23 | 1C IMP-265/258/267 | `45ae9aa` | lineage repro; 8 new cases + AC7/AC8; Security F-2 5/5 unmodified | security review pass; invariant holds every path; LOW folded | — |
+| 2026-07-23 | 1C IMP-264 | `0263276` | staleness repro; pm-brief 23/23; protocol-validate 60/60 | controller-verified (display-only, low risk) | — |
+| 2026-07-24 | 1C IMP-266 | `e40f9ca` | decision brief only — NOT implemented; recommends Option B | Codex adjudication hung; deferred to PM ratification | PM ratifies A or B |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.
