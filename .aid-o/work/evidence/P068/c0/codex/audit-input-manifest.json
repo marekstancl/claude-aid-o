@@ -1,0 +1,92 @@
+{
+  "schema_version": "aid-2.0",
+  "artifact_type": "audit_input_manifest",
+  "producer": "orchestrator@cp1-deep",
+  "created_at": "2026-07-24T10:52:19Z",
+  "control_protocol": "aid-2.0",
+  "identity": {
+    "project_id": "unknown",
+    "plan_id": "P068"
+  },
+  "subject": {
+    "subject_hash": "sha256:d5f2ea33da9576083541978b58e24da7bdbbc2b11763b25a054be8d377ed4be1"
+  },
+  "revision": {
+    "head_sha": "9401ff16f77c947ced5929d86855d6f25764e053",
+    "head_is_current": true,
+    "freshness": "current"
+  },
+  "status": "pass",
+  "verdict": {
+    "kind": "none",
+    "ready": false
+  },
+  "provenance": {
+    "dispatch_mode": "deterministic",
+    "generated_by_tool": "aid-c0-plan-review.sh#build-manifest"
+  },
+  "audit_input_manifest": {
+    "allowlist": [
+      ".aid-o/plans/P068-plan-final-release-boundary.md",
+      ".aid-o/work/evidence/P068/c0/plan-graph.json",
+      ".aid-o/work/evidence/P068/cp1-deep/cp1-adjudicator.md",
+      ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L1-behavior.md",
+      ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L2-feasibility.md",
+      ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L3-enforcement.md"
+    ],
+    "input_hash": "sha256:5746b4da7e0a645a3349751fc0afa5518a31ef2d749734b2788c8f16ade6fff7",
+    "prior_pass_summaries": "untrusted",
+    "required_independence_level": "cross_provider",
+    "c0_plan_review_input": {
+      "plan_file": ".aid-o/plans/P068-plan-final-release-boundary.md",
+      "reviewed_plan_hash": "sha256:a7b6862918ae68e71f040ad56261523855d53797f609413af32b02c4b1dd2915",
+      "reviewed_head": "9401ff16f77c947ced5929d86855d6f25764e053",
+      "plan_id": "P068",
+      "risk_profile": "high",
+      "contracts": [],
+      "plan_graph": {
+        "path": ".aid-o/work/evidence/P068/c0/plan-graph.json",
+        "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "size": 0
+      },
+      "c0_evidence": [
+        ".aid-o/work/evidence/P068/cp1-deep/cp1-adjudicator.md",
+        ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L1-behavior.md",
+        ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L2-feasibility.md",
+        ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L3-enforcement.md"
+      ],
+      "files": [
+        {
+          "path": ".aid-o/plans/P068-plan-final-release-boundary.md",
+          "sha256": "sha256:a7b6862918ae68e71f040ad56261523855d53797f609413af32b02c4b1dd2915",
+          "size": 176086
+        },
+        {
+          "path": ".aid-o/work/evidence/P068/c0/plan-graph.json",
+          "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0
+        },
+        {
+          "path": ".aid-o/work/evidence/P068/cp1-deep/cp1-adjudicator.md",
+          "sha256": "sha256:9aa96b94e299db30bdfe9241e1fe00ccf51e0310a963f31aaa2064fb47950ae7",
+          "size": 4479
+        },
+        {
+          "path": ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L1-behavior.md",
+          "sha256": "sha256:16b3b8aadf52c7206ab7bca13932470cf74efd7526ddf11bbfa4e8d3b32b13e6",
+          "size": 28977
+        },
+        {
+          "path": ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L2-feasibility.md",
+          "sha256": "sha256:b84f93e4d878272122b275f4e37c77856e23ca994d54bff82f48e6be511437b0",
+          "size": 23921
+        },
+        {
+          "path": ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L3-enforcement.md",
+          "sha256": "sha256:6caa2e8ecf19da8de408b1e1955c2aa2a1c2730518557a38aa039818a5d5129c",
+          "size": 12508
+        }
+      ]
+    }
+  }
+}
