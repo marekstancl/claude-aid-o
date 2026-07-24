@@ -466,12 +466,34 @@ This section is binding on every step that runs gates or tests. It reflects the
 state of the suite at v2.62.1, not the pre-P064 assumptions the draft was first
 written against (2026-07-20, before the 2026-07-23 quarantine and Phase 1).
 
-### Quarantine — `bats_all` and `plan_diff`
+### Quarantine — `bats_all` only (corrected 2026-07-24 after C0)
 
-`bats_all` and `plan_diff` are under a **PM quarantine** (interim, until the
-P066 test-audit/scheduler work). In `.aid-o/config/execution.yaml` `bats_all`'s
-command is replaced with a fail-fast (`exit 86`) while it stays `required: true`,
-and `plan_diff` reaches a `timeout_policy_block`. While quarantined:
+**Exactly one gate carries a declared quarantine: `bats_all`.** In
+`.aid-o/config/execution.yaml` it has a real `quarantine:` block
+(`enabled: true`, `authorized_by: "PM 2026-07-23"`, `tracked_by: "P066"`), its
+command is replaced with a fail-fast (`exit 86`), and it stays `required: true`
+so an automatic full/release run fails fast instead of silently treating it as a
+pass. The quarantine is interim, until the P066 test-audit/scheduler work.
+
+**`plan_diff` is NOT quarantined.** It carries no `quarantine:` block: it is an
+ordinary deterministic gate, `required: false` in `execution.yaml`, whose
+`pass_criteria` accepts exit 0 or the exit-2 Fast-Mode skip. The
+`timeout_policy_block` it hit during E-064-2_2 was a *runtime outcome of that
+run*, not a declared quarantine. This plan therefore treats `plan_diff` as an
+ordinary release gate that Step 2 additionally makes plan-required, and
+`--plan-path` is what makes its evaluation real. (An earlier draft of this
+section wrongly generalised both gates as quarantined; the C0 review caught it.)
+
+**Mechanism.** The runner has no quarantine awareness — `aid-run-gates.sh`
+contains no exclusion or substitution logic, and this plan does not add any
+(its only runner changes are the additive `--base-commit` / `--plan-path`
+flags). The sanctioned path is the one the config's own quarantine comment
+states: **run a pre-declared profile that excludes the quarantined gate**
+(`bats_all_quarantine` already exists in the `gate_profiles` table), verify every
+included gate, then record an explicit audited PM waiver for the excluded one.
+There is no runner-level "subtract every `quarantine.enabled` gate" step.
+
+While a gate is quarantined:
 
 - Neither may EVER be reported as `pass`. Their honest states are `waived`,
   `profile_excluded`, `timeout_policy_block`, or `fail` — never green.
@@ -721,11 +743,13 @@ manifest floor rather than from an EPIC's diff.
 state or verifies the plan branch head still equals it, resolves the profile
 as `gate_profile_max(plan_final_required_profile, release)` (the resolver and
 the `gate_profiles` table, including `release` as a strict superset of
-`full`, are delivered by **P064** Step 8; this plan only consumes them), **then
-subtracts every gate whose `quarantine.enabled: true` and runs the PM-sanctioned
-substitute profile in its place** (see *Test Execution Cadence and Quarantine* —
-at v2.62.1 that removes `bats_all` and `plan_diff`, whose broad forms are
-quarantined and can never be reported green), and invokes:
+`full`, are delivered by **P064** Step 8; this plan only consumes them). **When a
+gate in the resolved profile carries a declared `quarantine:` block, the stage
+runs the pre-declared substitute profile that excludes it instead** — at v2.62.1
+that is `bats_all_quarantine` for the single quarantined gate `bats_all` (see
+*Test Execution Cadence and Quarantine*). This is a profile selection, not a
+runner-level transformation: `aid-run-gates.sh` has no quarantine awareness and
+this plan adds none. It then invokes:
 
 ```bash
 aid-run-gates.sh run-all .aid-o/config/execution.yaml <plan_id> <plan_final_run_id> \
@@ -752,21 +776,16 @@ unaffected: when they are absent the runner falls back to `--state-file`
 exactly as today.
 
 **A required gate may not be satisfied by a skip — and `plan_diff` is made
-required here, subject to quarantine.** In `execution.yaml` today `plan_diff` is
-`required: false` and its Fast-Mode exit 2 counts as an accepted *pass*, so an
-assertion over `result: skip` alone would not bind. The plan-final runner
-therefore treats `plan_diff` as a plan-required gate for the release profile
-regardless of its `execution.yaml` default (recorded in the manifest's
-plan-required gate set, the mechanism P064 Step 8 established). **While `plan_diff`
-is quarantined** (v2.62.1), the runner does not — and cannot — assert its broad
-form `result: pass`: instead its plan-required evidence is supplied as a **marked
-targeted substitute** (a revision-bound, command-fingerprinted `plan_diff`-scoped
-receipt over `plan_base_commit..candidate_sha`, sealed per the Quarantine
-section), and the quarantined broad gate is recorded `waived`/`unverifiable`,
-never `pass`. **When the quarantine is lifted** (P066), the runner asserts
-`plan_diff` `result: pass` with a non-empty diff evaluation over the plan file —
-an exit-2 Fast-Mode skip against `--plan null` fails the stage. The `--plan-path`
-flag (above) is what makes a real evaluation possible in both modes. Note
+required here.** In `execution.yaml` today `plan_diff` is `required: false` and
+its Fast-Mode exit 2 counts as an accepted *pass*, so an assertion over
+`result: skip` alone would not bind. The plan-final runner therefore treats
+`plan_diff` as a plan-required gate for the release profile regardless of its
+`execution.yaml` default (recorded in the manifest's plan-required gate set, the
+mechanism P064 Step 8 established), and asserts its `result` is `pass` with a
+non-empty diff evaluation over the plan file — an exit-2 Fast-Mode skip against
+`--plan null` fails the stage. `plan_diff` carries no `quarantine:` block and is
+**not** subject to the substitute path; the `--plan-path` flag (above) is what
+makes a real evaluation possible. Note
 `--report-file` is also mandatory: `aid-run-gates.sh` only writes the report when
 that flag is supplied, and the default path it would otherwise compute assumes an
 EPIC evidence layout.
@@ -779,14 +798,14 @@ Each entry has at minimum:
 
 ```json
 {
-  "gate_id": "plan_diff",
+  "gate_id": "bats_all",
   "targeted_substitute": "accepted",
-  "receipt_path": "gates/plan_diff-substitute.receipt.json",
+  "receipt_path": "gates/bats_all-substitute.receipt.json",
   "receipt_sha256": "sha256:<64-hex>",
   "command_sha256": "sha256:<64-hex>",
   "base_sha": "<40-hex plan_base_commit>",
   "head_sha": "<40-hex, MUST equal candidate_sha>",
-  "substitute_scope": "plan_diff over plan_base_commit..candidate_sha",
+  "substitute_scope": "targeted bats suites covering the candidate range, in place of the quarantined bats_all aggregate",
   "exit_code": 0,
   "failed": 0
 }
@@ -866,7 +885,7 @@ does not retry it.
 - [ ] No gate that is `required: true` or plan-declared appears in
       `excluded_gates`, **except a `quarantine.enabled` gate**, which may be
       excluded/waived and instead carries its marked targeted-substitute evidence.
-- [ ] No quarantined gate (`bats_all`, `plan_diff` at v2.62.1) is reported
+- [ ] No quarantined gate (`bats_all` — the only one at v2.62.1) is reported
       `pass`; each is `waived`/`profile_excluded`/`unverifiable` and **carries its
       marked targeted-substitute receipt as the verification signal**. A
       gate-scoped waiver (`revision.head_sha`-bound, fail-closed) may
@@ -883,10 +902,9 @@ does not retry it.
       `pass`.
 - [ ] Exactly one `gate_runner_start` event exists for the plan-final run —
       no second broad run under a `full` label.
-- [ ] `plan_diff` evidence covers the candidate range for real: when
-      un-quarantined it runs against the plan file (not `--plan null`, no Fast
-      Mode exit-2 skip); while quarantined it is proven by the marked
-      `plan_diff`-scoped targeted substitute over `plan_base_commit..candidate_sha`.
+- [ ] `plan_diff` runs for real against the plan file and the candidate range —
+      it does not receive `--plan null` and does not take its Fast Mode exit-2
+      skip. (`plan_diff` is not quarantined; it has no substitute path.)
 - [ ] A `result: skip` on any non-quarantined gate that is `required: true`
       fails the stage rather than counting as satisfied.
 - [ ] Existing EPIC-scoped `aid-run-gates.sh` callers are unaffected when the
@@ -2426,7 +2444,7 @@ template P063 adopted after PM review and it is reused verbatim here.
 
 **Quarantine-aware green bar (v2.62.1).** While the P066 quarantine holds, the
 green bar for this plan is the **relevant targeted / non-quarantined suites**,
-never the broad `bats_all` or `plan_diff` gates. Concretely: `test-aid-plan-final-boundary.bats`,
+never the broad quarantined `bats_all` aggregate. Concretely: `test-aid-plan-final-boundary.bats`,
 `test-aid-plan-release-boundary.bats`, and the touched-file suites named in each
 step's acceptance criteria (`test-aid-fsm.bats`, `test-release-policy.bats`,
 `test-aid-run-gates.bats`, `test-queue-revalidation.bats`, `test-plan-close.bats`,
@@ -2468,8 +2486,8 @@ quarantine, the broad gates run normally and this carve-out is inert.
   semantic `absent_pre_generation` refinement.
 - `test-aid-plan-final-boundary.bats` passes, `test-aid-plan-release-boundary.bats`
   from P064 stays green, and every relevant targeted / non-quarantined bats suite
-  stays green. **While the P066 quarantine holds, the broad `bats_all` and
-  `plan_diff` gates are NOT required green** — they are recorded honestly
+  stays green. **While the P066 quarantine holds, the broad `bats_all` aggregate is
+  NOT required green** — it is recorded honestly
   (`waived` / `profile_excluded` / `unverifiable`, never `pass`) with their marked
   targeted substitutes, per *Test Execution Cadence and Quarantine*.
 
