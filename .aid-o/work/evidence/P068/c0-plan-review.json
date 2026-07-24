@@ -2,57 +2,22 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c0_plan_review",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-07-24T10:55:51Z",
+  "created_at": "2026-07-24T11:04:59Z",
   "identity": {
     "plan_id": "P068"
   },
-  "reviewed_plan_hash": "sha256:a7b6862918ae68e71f040ad56261523855d53797f609413af32b02c4b1dd2915",
-  "reviewed_head": "9401ff16f77c947ced5929d86855d6f25764e053",
-  "input_manifest_hash": "sha256:7bffc083f871ddd36ea3cc11a8f608bc441ea50a16c82be853a52109bb0bdc90",
-  "review_status": "findings",
-  "blocking_findings": true,
-  "findings": [
-    {
-      "fingerprint": "sha256:696324b0429e425ad429e232c2f47b31c9eb8514ccc210d31d757dd1760a1771",
-      "occurrence_id": "c0-P068-0",
-      "severity": "high",
-      "action_owner": "implementer",
-      "area": "contracts",
-      "finding": "The freeze-time contract is internally contradictory and has no declared implementation path. Step 1 says candidate_frozen_at is atomically written with candidate_sha in the runtime plan-boundary manifest, but Step 5 adds the field only to plan-lifecycle-manifest.schema.json. At reviewed HEAD, candidate_sha is owned by lib/aid-plan-manifest.sh and plan-boundary-manifest.schema.json; neither contains candidate_frozen_at nor validates its timestamp. The lifecycle manifest is a different artifact and cannot establish atomicity with the runtime candidate write.",
-      "recommendation": "Make Step 1 modify plan-boundary-manifest.schema.json and lib/aid-plan-manifest.sh to initialize, validate, atomically set, and atomically clear candidate_frozen_at with candidate_sha. Have Step 5 read that runtime field for PM-decision validation; do not add it to the lifecycle manifest unless a separately justified durable-copy contract and synchronization rule are defined."
-    },
-    {
-      "fingerprint": "sha256:08ff3f0f2f49c13847e7493778779d20eeef14b5ddc937246349a28ef9d65098",
-      "occurrence_id": "c0-P068-1",
-      "severity": "high",
-      "action_owner": "implementer",
-      "area": "feasibility",
-      "finding": "Step 2 cannot pass under the current declared quarantine configuration. The release profile includes bats_fsm, bats_all, shell_pipeline_smoke, plan_diff, and docs_updated, while the only declared exclusion profile, bats_all_quarantine, includes only bats_fsm, plan_diff, and docs_updated. The plan prohibits runner-level profile transformation, requires every non-quarantined release gate to appear in the report, and identifies bats_all_quarantine as the current substitute. Therefore shell_pipeline_smoke is omitted whenever bats_all is quarantined, making the stage's own post-run assertion fail.",
-      "recommendation": "Add an explicitly created release-derived quarantine profile that includes every release gate except bats_all, or specify and test a separate execution of the omitted non-quarantined release gates with one combined, candidate-bound report. Declare the execution.yaml change in Step 2 and update the profile/AC wording accordingly."
-    },
-    {
-      "fingerprint": "sha256:3bb884a8f9b801e0f7127c40e3b0948f63403886471a14a70e1e4febaefaad59",
-      "occurrence_id": "c0-P068-2",
-      "severity": "medium",
-      "action_owner": "gate-fixer",
-      "area": "dependencies",
-      "finding": "The sealed dependency-graph input does not exist at the reviewed HEAD and no plan step creates it. The manifest records .aid-o/work/evidence/P068/c0/plan-graph.json as a zero-byte absent input, while the physical file is absent. Step 1 only changes its absent-input representation; it does not produce a graph. This leaves the mandatory graph-based acyclicity/output-producer review without an actual graph artifact.",
-      "recommendation": "Either add a pre-generation graph producer with an explicit schema-valid output and dependency on it, or remove this graph from the required C0 input contract and define the text-derived dependency analysis that replaces it."
-    },
-    {
-      "fingerprint": "sha256:4dcdaa8d2e5517aa407bef6a33e38346517e8830320027e4968c5b9e9aa29291",
-      "occurrence_id": "c0-P068-3",
-      "severity": "low",
-      "area": "trust_boundary",
-      "finding": "Several re-grounding notes prescribe C0 treatment of the missing graph (for example, that CF3 is not blocking and that P068 can run C0) and characterize themselves as not being review instructions. These assertions cannot relax the mandatory resource and dependency checks.",
-      "recommendation": "Keep implementation context separate from reviewer-directed verdict language; let the C0 input contract and independently verifiable repository state determine reviewability."
-    }
-  ],
+  "reviewed_plan_hash": "sha256:bb460abb215b0e8760c7c32e1dfa96e02a94eb4a1f51efac32d4cd90901ca2f7",
+  "reviewed_head": "ceea5635b9b8bdb00cd851e45d5de5ec59cb198c",
+  "input_manifest_hash": "sha256:7e58f07a3664b6cd87bbef251d597a2b8fdcd93d388c44056328afa85d9858d8",
+  "review_status": "unverifiable",
+  "blocking_findings": false,
+  "unverifiable_reasons": [],
+  "findings": [],
   "codex": {
     "provider": "codex",
     "model": "gpt-5.6-terra",
-    "session_id": "019f93c1-5126-7c42-a648-5b7f3ce310b1",
-    "achieved_independence_level": "cross_provider"
+    "session_id": "019f93cc-ba58-7de1-ad1f-0011dc3ebd88",
+    "achieved_independence_level": "unavailable"
   },
-  "outcome": "dispatched"
+  "outcome": "unavailable"
 }

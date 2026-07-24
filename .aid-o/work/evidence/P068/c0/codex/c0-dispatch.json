@@ -2,7 +2,7 @@
   "schema_version": "aid-2.0",
   "artifact_type": "c0_dispatch",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-07-24T10:55:49Z",
+  "created_at": "2026-07-24T11:04:59Z",
   "provenance": {
     "dispatch_mode": "cross_provider",
     "generated_by_tool": "aid-c0-plan-review.sh#dispatch"
@@ -14,26 +14,26 @@
   },
   "subject": {
     "project_root": "/opt/eco/projects/aid-orchestrator",
-    "reviewed_head": "9401ff16f77c947ced5929d86855d6f25764e053",
-    "input_manifest_hash": "sha256:7bffc083f871ddd36ea3cc11a8f608bc441ea50a16c82be853a52109bb0bdc90"
+    "reviewed_head": "ceea5635b9b8bdb00cd851e45d5de5ec59cb198c",
+    "input_manifest_hash": "sha256:7e58f07a3664b6cd87bbef251d597a2b8fdcd93d388c44056328afa85d9858d8"
   },
   "prompt": {
     "template_id": "c0-plan-review-prompt",
     "template_sha256": "sha256:843bca8df3267673a0f47fbebe1b7ce544f2b52b63cf63393872451e2fa43ba6",
-    "rendered_prompt_sha256": "sha256:fb531105b49213a979f0895ede474ddcff63782fdfd783c4c41d94526e27dbdd"
+    "rendered_prompt_sha256": "sha256:6a87b4ba53f602f631e1aa184bea0370fad4fe6fc7845a7c0dd126805b8f63fe"
   },
   "dispatch": {
     "invoked": true,
-    "exit_code": 0,
-    "outcome": "dispatched",
-    "events_valid": true,
-    "codex_session_id": "019f93c1-5126-7c42-a648-5b7f3ce310b1",
-    "stdout_sha256": "sha256:e7a40b021518066a433a4e9da99ffd26510380f688947b0e563ad2f0914b4fb9",
-    "raw_response_sha256": "sha256:859bf7328f21ae0333e38bfa00fa8f9aab6ddb886c4a5831f9ab7245b52d5bfd"
+    "exit_code": 1,
+    "outcome": "failed",
+    "events_valid": false,
+    "codex_session_id": "019f93cc-ba58-7de1-ad1f-0011dc3ebd88",
+    "stdout_sha256": "sha256:e82dd55b0a3a244cde9da412cdfd0c9a21f2e6e2643f8f88d3455531fc40dca6",
+    "raw_response_sha256": null
   },
   "independence": {
     "required_independence_level": "cross_provider",
     "probed_independence_level": "cross_provider",
-    "achieved_independence_level": "cross_provider"
+    "achieved_independence_level": "unavailable"
   }
 }

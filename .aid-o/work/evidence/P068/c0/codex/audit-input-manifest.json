@@ -2,17 +2,17 @@
   "schema_version": "aid-2.0",
   "artifact_type": "audit_input_manifest",
   "producer": "orchestrator@cp1-deep",
-  "created_at": "2026-07-24T10:52:19Z",
+  "created_at": "2026-07-24T11:04:46Z",
   "control_protocol": "aid-2.0",
   "identity": {
     "project_id": "unknown",
     "plan_id": "P068"
   },
   "subject": {
-    "subject_hash": "sha256:d5f2ea33da9576083541978b58e24da7bdbbc2b11763b25a054be8d377ed4be1"
+    "subject_hash": "sha256:69c601732d3904f187e4dfec49acaa20d62e55a6e5d027c255f06b3249de1700"
   },
   "revision": {
-    "head_sha": "9401ff16f77c947ced5929d86855d6f25764e053",
+    "head_sha": "ceea5635b9b8bdb00cd851e45d5de5ec59cb198c",
     "head_is_current": true,
     "freshness": "current"
   },
@@ -34,13 +34,13 @@
       ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L2-feasibility.md",
       ".aid-o/work/evidence/P068/cp1-deep/cp1-lens-L3-enforcement.md"
     ],
-    "input_hash": "sha256:5746b4da7e0a645a3349751fc0afa5518a31ef2d749734b2788c8f16ade6fff7",
+    "input_hash": "sha256:7aa77316ae79949594d5be309e48084cb43c7e17541ac78ae454674045acdc2e",
     "prior_pass_summaries": "untrusted",
     "required_independence_level": "cross_provider",
     "c0_plan_review_input": {
       "plan_file": ".aid-o/plans/P068-plan-final-release-boundary.md",
-      "reviewed_plan_hash": "sha256:a7b6862918ae68e71f040ad56261523855d53797f609413af32b02c4b1dd2915",
-      "reviewed_head": "9401ff16f77c947ced5929d86855d6f25764e053",
+      "reviewed_plan_hash": "sha256:bb460abb215b0e8760c7c32e1dfa96e02a94eb4a1f51efac32d4cd90901ca2f7",
+      "reviewed_head": "ceea5635b9b8bdb00cd851e45d5de5ec59cb198c",
       "plan_id": "P068",
       "risk_profile": "high",
       "contracts": [],
@@ -58,8 +58,8 @@
       "files": [
         {
           "path": ".aid-o/plans/P068-plan-final-release-boundary.md",
-          "sha256": "sha256:a7b6862918ae68e71f040ad56261523855d53797f609413af32b02c4b1dd2915",
-          "size": 176086
+          "sha256": "sha256:bb460abb215b0e8760c7c32e1dfa96e02a94eb4a1f51efac32d4cd90901ca2f7",
+          "size": 178540
         },
         {
           "path": ".aid-o/work/evidence/P068/c0/plan-graph.json",
