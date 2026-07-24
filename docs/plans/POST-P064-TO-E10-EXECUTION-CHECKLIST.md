@@ -19,8 +19,8 @@ new commits.
 | **Phase 1 (1A–1D)** | **DONE** — see per-item progress log; 1B + 1C completed 2026-07-24 |
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
 | **Current version** | `2.62.1` (local, untagged; source of truth = CHANGELOG header) |
-| **Close commit** | recorded below in the progress log (v2.62.1 bump + both CHANGELOGs + registry + README + this checklist + the IMP-269 wording correction) |
-| **Plugin-cache after refresh** | recorded below once the local cache is reset to the corrected 2.62.1 HEAD |
+| **Close commit** | `cee4685` (v2.62.1 bump + both CHANGELOGs + registry + README + this checklist + the IMP-269 wording correction folded into the local release) |
+| **Plugin-cache after refresh** | reset to `cee4685`; version `2.62.1`; scripts-tree `6aea929` (local-only, mirrors unpushed `main`) |
 | Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
@@ -388,7 +388,7 @@ independently reviewable commit; do not rewrite earlier rows.
 | 2026-07-24 | Hardening IMP-269 | `d1bf7f0` | 5 gaps repro'd RED (2 canonical, 1 revision, 2 log); fix; test-c3-audit 50/50 | canonical-only AC source; git-tracked plan read from reviewed HEAD (else canonical worktree artifact); receipt consistency-checked vs named command/HEAD/log — consistency, not provenance against direct evidence tampering | — |
 | 2026-07-24 | Hardening IMP-262 | `8e94dd4` | 3 pre-PID fault tests; handshake; set-e/pipefail abort also fixed; test-aid-job 21/21 | marker + wrapper self-cancel; job never starts after cancel | — |
 | 2026-07-24 | Hardening IMP-270 | `6751157` | 2 tests repro'd RED on pre-fix (empty + malformed head); fix; test-aid-gate-waiver 24/24 | missing/malformed report HEAD fails closed, no current-HEAD fallback | — |
-| 2026-07-24 | Hardening review + close | recorded at commit time | one independent adversarial review of all 4 boundaries → no residual bypass; registry 4 rows updated; v2.62.1 bump; two stale intro lines fixed; IMP-269 wording corrected (consistency-check, not provenance) folded into the local release | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy; P068 start |
+| 2026-07-24 | Hardening review + close | `cee4685` | one independent adversarial review of all 4 boundaries → no residual bypass; registry 4 rows updated; v2.62.1 bump; two stale intro lines fixed; IMP-269 wording corrected (consistency-check, not provenance) folded into the local release; cache reset to `cee4685` (scripts-tree `6aea929`) | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy; P068 start |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.
