@@ -1,0 +1,5 @@
+{
+  "pm_ref": "PM instruction 2026-07-20/21 (session): generate P068 EPICs, ask Codex for contradictions, do not ask me. 17 C0 rounds + L1/L2/L3 CP1-deep drove design and enforcement findings to zero; L3 F1 (unanchored docs/ gitignore) and F2 (test-runner discovery) fixed and verified via git check-ignore. Only remaining blocker is structural CF3 plan-graph circular precondition + incremental P064 grounding, both carried in Next Steps. Scope: plan-graph availability + pre-P064 grounding.",
+  "plan_id": "P068", "granted_at": "2026-07-21", "granted_by": "PM",
+  "scope": "c0_plan_graph_unavailable_pre_generation", "phase": "1"
+}

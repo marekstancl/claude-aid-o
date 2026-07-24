@@ -1,0 +1,3 @@
+{
+  "pm_ref": "PM decision 2026-07-24 (conversation, option B, transcribed by controller): authorize EPIC-spec generation for P068 WITHOUT a fresh C0 review. Accepted risk: the sealed c0-plan-review.json (sha256:445f8c5a91260eabb358d49c37ef527c88cdb84d098b51f64d8483928be924e5) records blocking_findings=true and is bound to plan hash e2e1674, which is now SUPERSEDED. All 5 findings (4 HIGH + 1 LOW) were fixed in commits 642271f and 596b669, taking the plan to hash a7b6862, but NO review has independently confirmed those fixes. PM explicitly declined a new C0 run and chose this override instead. Scope: EPIC specification generation only - no implementation, no /aid-run, no push."
+}

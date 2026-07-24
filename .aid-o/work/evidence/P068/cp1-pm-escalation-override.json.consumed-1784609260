@@ -1,0 +1,5 @@
+{
+  "pm_ref": "PM instruction 2026-07-20/21 (session): generate P068 EPICs, ask Codex for contradictions, do not ask me. CP1-deep L1/L2/L3 + 17 C0 rounds resolved all design/enforcement findings; only structural CF3 plan-graph circular + incremental P064 grounding remain (carried in Next Steps). Scope: plan-graph availability. Phase 2.",
+  "plan_id": "P068", "granted_at": "2026-07-21", "granted_by": "PM",
+  "scope": "c0_plan_graph_unavailable_pre_generation", "phase": "2"
+}

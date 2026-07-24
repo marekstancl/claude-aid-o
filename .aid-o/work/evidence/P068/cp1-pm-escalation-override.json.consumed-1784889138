@@ -1,0 +1,3 @@
+{
+  "pm_ref": "PM decision 2026-07-24 (conversation, option B) - SECOND AND FINAL CLAIM OF THE SAME SINGLE AUTHORIZATION, transcribed by controller. Not an independent second authorization: the PM authorized regenerating BOTH P068 EPIC specs (EPIC 1 then EPIC 2) without a fresh C0; the override primitive is single-use per generation call, so EPIC 2 requires its own claim. Same accepted risk as the first claim: sealed c0-plan-review.json (sha256:445f8c5a91260eabb358d49c37ef527c88cdb84d098b51f64d8483928be924e5) records blocking_findings=true bound to superseded plan hash e2e1674; all 5 findings fixed in 642271f and 596b669 (plan now a7b6862) but unconfirmed by any review. Scope: EPIC 2 specification generation only - no implementation, no /aid-run, no push."
+}

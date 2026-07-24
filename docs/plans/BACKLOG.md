@@ -2822,3 +2822,24 @@ expected to author it. If the former, it is a P064-scope defect to fix in P064,
 not worked around in P068.
 **Open question:** is this already tracked under a P064/P066 item? Dedup before
 filing.
+
+### EPIC generator truncates multi-line acceptance criteria to their first line
+
+**Status:** idea — observed 2026-07-24 during P068 EPIC regeneration.
+**Context:** `aid-plan-to-epic.sh` copies each plan AC into the EPIC's
+`## Acceptance Criteria` list but keeps only the FIRST LINE. A multi-line AC
+loses everything after it — e.g. the P068 Step 2 criterion "Every quarantined
+gate satisfied by a substitute has a matching `quarantine_substitutes[]` entry
+carrying gate_id, receipt_sha256, command_sha256, head_sha == candidate_sha …"
+appears in the EPIC as just "Every quarantined gate satisfied by a substitute has
+a matching". The field list, the binding rules and the fail-closed conditions are
+all dropped.
+**Why it matters:** an implementer working from the EPIC alone gets an
+incomplete, sometimes mid-sentence criterion. The full text survives only in the
+plan (reachable via `plan_ref`), so nothing is lost from the record — but the
+EPIC is the artifact the role pipeline reads.
+**Proposed change:** carry the full AC block (all continuation lines) into the
+EPIC, or explicitly mark truncated ACs with a pointer to the plan's AC id.
+**Open question:** is the first-line-only behaviour deliberate (EPIC as a
+deliberately condensed index) or incidental? Check `_aid_extract_*` in
+`lib/aid-scoping.sh` before changing.
