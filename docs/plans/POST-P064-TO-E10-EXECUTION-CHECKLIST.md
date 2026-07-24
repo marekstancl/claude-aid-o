@@ -16,8 +16,8 @@ done, 1B + 1C next). Not pushed; identity corrected to Marek Stancl for new comm
 | P064 local release | `v2.61.0` at `193fd4a` |
 | **Phase 1 (1A–1D)** | **DONE** — see per-item progress log; 1B + 1C completed 2026-07-24 |
 | **Phase 1 version** | `2.62.0` (local, untagged; source of truth = CHANGELOG header) |
-| **Phase 1 close commit** | recorded below in progress log (version bump + CHANGELOG + this checklist) |
-| **Plugin-cache SHA after refresh** | recorded below in progress log once the local cache is reset to this HEAD |
+| **Phase 1 close commit** | `a6a3363` (version bump to 2.62.0 + both CHANGELOGs + this checklist) |
+| **Plugin-cache after refresh** | reset to `a6a3363`; version `2.62.0`; scripts-tree `1bf86b3` (local-only, mirrors unpushed `main`) |
 | Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
@@ -379,6 +379,7 @@ independently reviewable commit; do not rewrite earlier rows.
 | 2026-07-23 | 1C IMP-265/258/267 | `45ae9aa` | lineage repro; 8 new cases + AC7/AC8; Security F-2 5/5 unmodified | security review pass; invariant holds every path; LOW folded | — |
 | 2026-07-23 | 1C IMP-264 | `0263276` | staleness repro; pm-brief 23/23; protocol-validate 60/60 | controller-verified (display-only, low risk) | — |
 | 2026-07-24 | 1C IMP-266 | `e40f9ca` | decision brief only — NOT implemented; recommends Option B | Codex adjudication hung; deferred to PM ratification | PM ratifies A or B |
+| 2026-07-24 | Phase-1 close | `a6a3363` | v2.62.0 bump (8 files), CHANGELOGs identical, checkpoint + 1B/1C boxes; cache reset to `a6a3363` (scripts-tree `1bf86b3`) | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy decision; P068 start |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.
