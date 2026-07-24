@@ -33,8 +33,9 @@ document too large for one review pass to ground end to end. PM decision
 P068 consumes P064's contracts and produces no new shared contract flowing
 backwards.
 
-**This plan is authored while P064 is still landing**, which is a scheduling
-fact the reader should weigh rather than discount. P064's EPIC 1 delivers the
+**This plan was authored while P064 was still landing**, which is an execution
+precondition, not a reviewing instruction: P064 is now DONE and merged, and every
+artifact this plan consumes exists at v2.62.1. P064's EPIC 1 delivers the
 substrate incrementally, so at any given review some artifacts already exist
 (`lib/aid-plan-manifest.sh`, `lib/aid-lock.sh`,
 `test-aid-plan-release-boundary.bats`) while others do not yet
@@ -429,9 +430,26 @@ release-critical input.
 
 `decision` is one of `MERGE`, `FIX`, `ABORT`. Any mismatch between the
 artifact's `candidate_sha`/`target_head_sha` and observed reality exits 1 with
-the target branch unchanged. `decided_at` must be no earlier than the
-candidate freeze recorded in the manifest — an authorization predating the
-candidate it claims to approve is rejected.
+the target branch unchanged. `decided_at` must be no earlier than the candidate
+freeze — an authorization predating the candidate it claims to approve is
+rejected.
+
+**Authoritative freeze-time source (added 2026-07-24 after C0 HIGH).** The draft
+validated `decided_at` against "the candidate freeze recorded in the manifest",
+but no such timestamp existed in the plan-boundary manifest schema and no step
+wrote one, so the check was unimplementable as specified. One authoritative
+source is now defined: **Step 1's freeze stage writes `candidate_frozen_at`
+(RFC 3339 UTC) into the plan-boundary manifest atomically, in the same write that
+sets `candidate_sha`**, and Step 5 validates against exactly that field. The
+field is schema-approved (Step 5 already modifies
+`plan-lifecycle-manifest.schema.json`; the property is added there with
+`additionalProperties: false` still holding). Validation rules, all fail-closed:
+`candidate_frozen_at` absent or not a valid RFC 3339 UTC timestamp → exit 1
+(never "assume old enough"); `decided_at` malformed → exit 1;
+`decided_at < candidate_frozen_at` → exit 1 with the target branch unchanged. A
+freeze that rewrites `candidate_sha` (a `PLAN_FIX` refreeze) rewrites
+`candidate_frozen_at` in the same atomic write, so a decision authorising the
+previous candidate can never satisfy the new one.
 
 **Non-merge decisions clear the candidate before leaving the state.** A `FIX`
 transitions to `PLAN_FIX` and a stale-authorization advance transitions to
@@ -617,7 +635,12 @@ on: the plan is already in `PLAN_SYNC` (from `--stage sync`); `prepare-plan`
 makes the version commit on the plan branch; the candidate is then frozen at
 the resulting plan branch head and the state moves to `PLAN_GATES`. So
 `prepare-plan` runs while the state is still `PLAN_SYNC` and never requires a
-`candidate_sha` that does not yet exist. `aid-release.sh prepare-plan
+`candidate_sha` that does not yet exist. **The freeze write is atomic and
+two-field: `candidate_sha` and `candidate_frozen_at` (RFC 3339 UTC) are written
+into the plan-boundary manifest in the same operation** — the authoritative
+freeze-time source Step 5 validates `decided_at` against (see *PM decision
+artifact*). A `PLAN_FIX` refreeze rewrites both together, so a decision bound to
+the previous candidate can never satisfy the new one. `aid-release.sh prepare-plan
 <plan_id> --bump auto --plan-branch plan/<plan_id>` applies the version-file
 edits driven by
 `.aid-o/config/project.yaml` `versioning.files[]` and the CHANGELOG entry,
@@ -711,6 +734,9 @@ legal transition precisely for this loop (see `## Data Model`).
 - [ ] After `--stage freeze`, `candidate_sha` and
       `target_branch_head_at_candidate_freeze` are both exact 40-hex values in
       the manifest and a new immutable run directory exists.
+- [ ] The same freeze write records `candidate_frozen_at` as a valid RFC 3339
+      UTC timestamp in the manifest, atomically with `candidate_sha`; a refreeze
+      rewrites both together (never one without the other).
 - [ ] A candidate change after freeze transitions the plan to `PLAN_FIX` and
       clears all four plan-final fields.
 - [ ] A second freeze creates `R-<plan_id>-final-2` and leaves
@@ -1201,7 +1227,7 @@ target head, verify the resulting tree, and publish exactly once.
 - Modify: `plugins/aid-orchestrator/defaults/hooks/pre-push` (lines ~30-50) — exempt `plan/*` and `task/*` branches from the version-bump push block.
 - Create: `plugins/aid-orchestrator/defaults/schemas/pm-plan-decision.schema.json` — the PM authorization contract validated before any merge action.
 - Modify: `plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh` (lines ~36-50, ~470-700) — teach the five binding-path functions a plan-mode that advances the target ref by plumbing (`commit-tree` + CAS `update-ref`) instead of requiring a checkout, so delivery bindings and the receipt commit in one post-merge pass even when the target branch is checked out in another worktree.
-- Modify: `plugins/aid-orchestrator/defaults/schemas/plan-lifecycle-manifest.schema.json` — widen `declared_epics[].scope` from `[required, backlog]` to include `abandoned` and `superseded`, and add a top-level `status` property (`active | closed | aborted`); the schema is `additionalProperties: false`, so neither the CF1 re-scope nor the abort record can produce a valid manifest without both changes.
+- Modify: `plugins/aid-orchestrator/defaults/schemas/plan-lifecycle-manifest.schema.json` — widen `declared_epics[].scope` from `[required, backlog]` to include `abandoned` and `superseded`, add a top-level `status` property (`active | closed | aborted`), and add `candidate_frozen_at` (RFC 3339 UTC string) as the authoritative freeze-time source Step 1 writes and this step validates `decided_at` against; the schema is `additionalProperties: false`, so none of the CF1 re-scope, the abort record, or the freeze timestamp can produce a valid manifest without these changes.
 - Modify: `plugins/aid-orchestrator/scripts/lib/aid-lifecycle.sh` (lines ~730-808) — exclude the two new scopes from the closure predicate's required set.
 - Modify: `plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats` — add AC5 and AC6 cases.
 
@@ -1403,8 +1429,13 @@ revert or hotfix, never a destructive reset).
       and wrong-target decisions each exit non-zero with the target branch
       unchanged.
 - [ ] A decision artifact that fails `pm-plan-decision.schema.json`, or whose
-      `decided_at` precedes the candidate freeze, is rejected before any Git
-      action.
+      `decided_at` precedes the manifest's `candidate_frozen_at`, is rejected
+      before any Git action.
+- [ ] The freeze-time validation is fail-closed on every degenerate input: a
+      manifest missing `candidate_frozen_at`, a `candidate_frozen_at` that is not
+      valid RFC 3339 UTC, and a malformed `decided_at` each exit 1 with the
+      target branch unchanged (never "assume old enough"). A decision bound to a
+      pre-refreeze candidate fails against the rewritten `candidate_frozen_at`.
 - [ ] A concurrent target-branch advance loses the compare-and-swap and
       forces revalidation — asserted by moving the target ref between the
       head check and the publish, which `git update-ref <new> <expected-old>`
@@ -1501,6 +1532,22 @@ that process. An earlier draft said "no `MERGE_HEAD`, lock file or
 transaction intent remains", which read as file absence; the C0
 cross-provider review caught the contradiction against Step 1.
 
+**Owned-lock exception (added 2026-07-24 after C0 HIGH).** The close transaction
+itself acquires the plan lock first, so a naive "no relevant lock is held" probe
+would contend with its *own* descriptor and always fail — and releasing it before
+the receipt and marker commit would destroy the transaction boundary the step
+exists to provide. The check therefore **excludes exactly one lock: its own.**
+The close transaction retains its lock FD and records that sidecar's identity
+(canonical path, plus the FD it holds); the contention probe skips that one path
+and `flock -n`-probes every *other* relevant sidecar. The exclusion is by exact
+canonical path, not by "any lock this process holds", so a *different* lock held
+by the same process still blocks. The lock is released only after the receipt and
+the close marker are durably committed. Tests: (a) close succeeds while the
+transaction holds its own plan lock; (b) close is blocked, naming the holder, when
+a *separate* live process holds any other relevant sidecar; (c) close is blocked
+when a different lock is held by the same process, proving the exclusion is
+path-scoped rather than process-scoped.
+
 The receipt bridge: after those checks pass, the close transaction commits
 `.aid-lifecycle/receipts/<plan_id>.yaml` via `aid_lifecycle_plan_close`
 (`lib/aid-lifecycle.sh:361-373`) **in the plan-mode plumbing path Step 5
@@ -1584,6 +1631,13 @@ exits 1.
 - [ ] A plan whose `.lock` sidecar files exist but are not held closes
       successfully; a plan whose lock is held by a live process is blocked
       with that process named.
+- [ ] The owned-lock exception holds: close succeeds while the close
+      transaction itself holds the plan lock (its own sidecar is excluded from
+      the contention probe by exact canonical path); close is blocked when a
+      separate live process holds any other relevant sidecar; and close is
+      blocked when a *different* lock is held by the same process — proving the
+      exclusion is path-scoped, not process-scoped. The lock is released only
+      after the receipt and close marker are durably committed.
 - [ ] `plan-close-complete` is absent until the final merge or a recorded
       abort exists.
 - [ ] A committed `.aid-lifecycle` receipt is present after close for every
@@ -2207,6 +2261,37 @@ runs on a separate, small follow-up plan (PM decision), exercising
 `plan-start` through `plan-close-complete` on real branches in this
 repository.
 
+**Dogfood bootstrap topology (added 2026-07-24 after C0 HIGH) — resolves the
+chicken-and-egg.** Before P068 is released, `main` does not yet contain
+`plan-finalize` / `plan-merge-to-main`, and `aid-plan-fsm.sh` explicitly refuses
+`--mode plan_branch` while they are absent. That creates a cycle the draft left
+open: a P067 branch cut from `plan/P068` would carry P068's *unapproved*
+implementation commits into `main` when the dogfood merges, while a P067 branch
+cut from `main` would lack the commands the dogfood needs. Neither is acceptable.
+The dogfood therefore uses an explicit **two-checkout isolation**:
+
+1. **Tool worktree (P068 candidate, never merged by the dogfood).** A separate
+   `git worktree` of the P068 candidate provides the *executables only*. Every
+   dogfood command is invoked as
+   `<p068-worktree>/plugins/aid-orchestrator/scripts/aid-plan-fsm.sh … --project-root <dogfood-checkout>`,
+   so the new commands exist without their commits being present in the tree the
+   dogfood merges.
+2. **Dogfood checkout (clean, `main`-based).** P067's plan branch and EPIC
+   branches are cut from `main`, contain only P067's own small tracked payload,
+   and are what actually merges to `main`.
+3. **Isolation proof, asserted not assumed.** Before the dogfood merge:
+   `git log --oneline main..plan/P067` contains only P067 payload commits and
+   **zero** P068 implementation commits, verified by asserting the P068 candidate
+   commit range is disjoint from `main..plan/P067`
+   (`git merge-base --is-ancestor` on each P068 commit must fail). The report
+   records both SHAs and the command output.
+4. **Resynchronise after.** Once the dogfood advances `main`, `plan/P068` is
+   re-synchronised onto the new `main` (its own Step 1 `--stage sync`), so P068's
+   candidate is re-frozen against reality rather than a pre-dogfood `main`.
+
+This keeps the release boundary honest: the tool under test never smuggles itself
+into the target branch as a side effect of testing itself.
+
 **Implementation Detail:** Before anything else, reinstall the Git hooks in
 the working repository. `defaults/hooks/pre-push` and
 `defaults/hooks/pre-commit` are templates that `/aid-init` copies into
@@ -2340,6 +2425,13 @@ branch.
 - Blocks: nothing — this is the last step.
 
 **Acceptance Criteria:**
+- [ ] Dogfood isolation is proven, not assumed: every dogfood command runs from
+      the separate P068 tool worktree via `--project-root <dogfood-checkout>`;
+      `git log --oneline main..plan/P067` contains only P067 payload commits and
+      zero P068 implementation commits (each P068 candidate commit fails
+      `git merge-base --is-ancestor` against `plan/P067`); and `plan/P068` is
+      re-synchronised onto the advanced `main` after the dogfood merge. The
+      report records the SHAs and the command output.
 - [ ] The dogfood report's `## Authorization` section exists and is committed
       before the run, naming the chosen plan, the per-candidate criteria
       evaluation and a PM `authorized_by` value.
