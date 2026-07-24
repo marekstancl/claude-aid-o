@@ -240,6 +240,38 @@ cmd_run() {
   echo "$job_id"
 }
 
+# IMP-262 handshake (PM review 2026-07-24): a cancel that lands in the pre-PID
+# window (the wrapper is launched but has not yet recorded pid/pgid) must not be
+# lost. `cancel` drops a `.cancel_requested` marker and also writes a terminal
+# cancelled result if the wrapper is absent; the wrapper checks BOTH at entry and
+# again immediately before exec, and self-cancels (writes a terminal cancelled
+# result, never execs) if either is present. So a job can never START after a
+# cancel has been recorded, closing the orphan-after-cancel race.
+_wrap_cancel_pending() {
+  local job_dir="$1"
+  [[ -f "$job_dir/.cancel_requested" ]] && return 0
+  [[ -f "$job_dir/result.json" ]] && return 0
+  return 1
+}
+_wrap_write_cancelled_result() {
+  local job_dir="$1"
+  [[ -f "$job_dir/result.json" ]] && return 0   # never clobber a terminal result
+  local now_iso; now_iso="$(_iso_now)"
+  local result
+  result="$(jq -nc \
+    --arg id "$(jq -r '.id' "$job_dir/job.json")" \
+    --arg started_at "$(jq -r '.started_at' "$job_dir/job.json")" \
+    --arg ended_at "$now_iso" \
+    --arg fp "$(jq -r '.command_fingerprint' "$job_dir/job.json")" \
+    --arg sh "$(jq -r '.start_head' "$job_dir/job.json")" \
+    --arg st "$(jq -r '.start_tree' "$job_dir/job.json")" \
+    '{schema:"aid-job-result/1", id:$id, state:"cancelled", exit_code:143,
+      command_fingerprint:$fp, start_head:$sh, start_tree:$st,
+      end_head:$sh, end_tree:$st, started_at:$started_at, ended_at:$ended_at,
+      stdout_sha256:null, cookie:null, note:"cancelled before exec (pre-PID handshake) — command never ran"}')"
+  _atomic_write "$job_dir/result.json" "$result"
+}
+
 # ── __wrap (internal supervised process) ─────────────────────────────────────
 cmd_wrap() {
   local job_dir="${1:?__wrap requires job_dir}"
@@ -258,6 +290,13 @@ cmd_wrap() {
   # Reconstruct the command array from the record.
   local -a command=()
   mapfile -t command < <(jq -r '.command[]' "$job_dir/job.json")
+
+  # IMP-262 handshake (entry): a cancel already requested before we recorded our
+  # identity → self-cancel now and NEVER exec.
+  if _wrap_cancel_pending "$job_dir"; then
+    _wrap_write_cancelled_result "$job_dir"
+    exit 0
+  fi
 
   # Record running identity: our own pid, pgid, starttime, and a cookie.
   local mypid mypgid mystart cookie
@@ -282,6 +321,15 @@ cmd_wrap() {
   # shellcheck disable=SC2317
   _on_term() { _cancelled=1; kill -KILL "${cmd_pid:-0}" 2>/dev/null || true; }
   trap _on_term TERM INT
+
+  # IMP-262 handshake (post-identity, pre-exec): re-check AFTER recording pid/pgid
+  # and arming the TERM trap, immediately before launching the command, to close
+  # the pre-PID window — a cancel recorded before this point self-cancels here and
+  # the command never runs.
+  if _wrap_cancel_pending "$job_dir"; then
+    _wrap_write_cancelled_result "$job_dir"
+    exit 0
+  fi
 
   ( exec "${command[@]}" ) >"$job_dir/stdout.log" 2>&1 &
   cmd_pid=$!
@@ -487,29 +535,40 @@ cmd_cancel() {
     jq -r '.state' "$job_dir/result.json"; exit 0
   fi
 
-  local pid pgid starttime
-  pid="$(jq -r '.pid // empty' "$job_dir/job.json")"
-  pgid="$(jq -r '.pgid // empty' "$job_dir/job.json")"
-  starttime="$(jq -r '.proc_starttime // empty' "$job_dir/job.json")"
+  # IMP-262 handshake: record the cancel request BEFORE reading identity. A
+  # wrapper still in the pre-PID window sees this marker at its entry/pre-exec
+  # checks and self-cancels instead of racing ahead to exec — so a cancel is
+  # never lost to the window between wrapper launch and pid/pgid recording.
+  : > "$job_dir/.cancel_requested" 2>/dev/null || true
 
-  # Review MEDIUM (sharpest weapon): reject pgid 0 (kill -0 targets the CALLER's
-  # own group) and 1 (broadcast), and require the recorded pgid to still be the
-  # live pid's ACTUAL process group — a corrupted/forged job.json cannot redirect
-  # the signal at another group. setsid guarantees pgid==pid>1 for a real job.
-  local _live_pgid=""
-  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && _live_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
-  if [[ "$pgid" =~ ^[1-9][0-9]*$ && "$pgid" -gt 1 ]] \
-     && _proc_alive "$pid" "$starttime" \
-     && [[ "$pgid" == "$_live_pgid" ]]; then
-    # Signal the whole recorded PROCESS GROUP — no child is left unowned. The
-    # wrapper traps TERM and writes a terminal cancellation result.
-    kill -TERM -"$pgid" 2>/dev/null || true
-    local i
-    for i in $(seq 1 50); do
-      [[ -f "$job_dir/result.json" ]] && break
-      sleep 0.1
-    done
-  fi
+  # Signal a live process group, retrying briefly so a pid that is recorded just
+  # AFTER the marker (the pre-PID window closing) is still signalled. Stops as
+  # soon as a terminal result appears (the wrapper self-cancelled via the marker,
+  # or the group signal took effect).
+  local pid pgid starttime _live_pgid i
+  for i in $(seq 1 50); do
+    [[ -f "$job_dir/result.json" ]] && break
+    pid="$(jq -r '.pid // empty' "$job_dir/job.json")"
+    pgid="$(jq -r '.pgid // empty' "$job_dir/job.json")"
+    starttime="$(jq -r '.proc_starttime // empty' "$job_dir/job.json")"
+    # Review MEDIUM (sharpest weapon): reject pgid 0 (kill -0 targets the CALLER's
+    # own group) and 1 (broadcast), and require the recorded pgid to still be the
+    # live pid's ACTUAL process group — a corrupted/forged job.json cannot
+    # redirect the signal at another group. setsid guarantees pgid==pid>1.
+    _live_pgid=""
+    # `|| true` INSIDE the substitution: on a later iteration the pid may already
+    # be dead (the signal took effect), so `ps` fails; without this the pipefail
+    # would trip set -e and abort cancel before it prints the terminal state.
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] && _live_pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    if [[ "$pgid" =~ ^[1-9][0-9]*$ && "$pgid" -gt 1 ]] \
+       && _proc_alive "$pid" "$starttime" \
+       && [[ "$pgid" == "$_live_pgid" ]]; then
+      # Signal the whole recorded PROCESS GROUP — no child is left unowned. The
+      # wrapper traps TERM and writes a terminal cancellation result.
+      kill -TERM -"$pgid" 2>/dev/null || true
+    fi
+    sleep 0.1
+  done
 
   if [[ -f "$job_dir/result.json" ]]; then
     jq -r '.state' "$job_dir/result.json"; exit 0

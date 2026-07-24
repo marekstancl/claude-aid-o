@@ -140,6 +140,54 @@ _await_terminal() {
   [ "$output" = "terminal_pass" ]
 }
 
+# -- 7b. IMP-262 cancel-before-PID handshake (PM review 2026-07-24) -------------
+# A cancel that lands in the pre-PID window (wrapper launched, pid not yet
+# recorded) must not be lost: the wrapper self-cancels and NEVER execs. These
+# drive the wrapper directly with a hand-built started/pid-null job so the race
+# is deterministic.
+
+_imp262_started_job() {   # <job_dir> <sentinel_path>
+  local jd="$1" sentinel="$2"
+  mkdir -p "$jd"
+  jq -n --arg repo "$REPO" --arg sh "$(git -C "$REPO" rev-parse HEAD)" --arg out "$sentinel" '{
+    schema:"aid-job/1", id:"precancel", repo:$repo, state:"started",
+    command_fingerprint:"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    start_head:$sh, start_tree:"x", deadline_sec:0, polarity:"", expect:"", filter:"",
+    started_at:"2026-07-24T00:00:00Z", started_epoch:0,
+    pid:null, pgid:null, proc_starttime:null, cookie:null,
+    command:["bash","-c","touch \($out)"]
+  }' > "$jd/job.json"
+}
+
+@test "cancel (IMP-262): a .cancel_requested marker present at wrapper entry → self-cancel, command never runs" {
+  local jd="$JOBS/precancel"; local sentinel="$TMP/ran.sentinel"
+  _imp262_started_job "$jd" "$sentinel"
+  : > "$jd/.cancel_requested"
+  run bash "$SCRIPT" __wrap "$jd"
+  [ "$status" -eq 0 ]
+  jq -e '.state == "cancelled"' "$jd/result.json"
+  [ ! -f "$sentinel" ]           # the command NEVER ran
+}
+
+@test "cancel (IMP-262): a terminal cancelled result at wrapper entry → job cannot start, command never runs" {
+  local jd="$JOBS/precancel"; local sentinel="$TMP/ran.sentinel"
+  _imp262_started_job "$jd" "$sentinel"
+  jq -n '{schema:"aid-job-result/1", id:"precancel", state:"cancelled", exit_code:143}' > "$jd/result.json"
+  run bash "$SCRIPT" __wrap "$jd"
+  [ "$status" -eq 0 ]
+  jq -e '.state == "cancelled"' "$jd/result.json"   # still cancelled, not overwritten
+  [ ! -f "$sentinel" ]
+}
+
+@test "cancel (IMP-262): cancel in the pre-PID window records the request marker and a cancelled result" {
+  local jd="$JOBS/precancel"; local sentinel="$TMP/ran.sentinel"
+  _imp262_started_job "$jd" "$sentinel"   # state=started, pid:null (pre-PID window)
+  run bash "$SCRIPT" cancel --jobs-dir "$JOBS" --id precancel
+  [ "$status" -eq 0 ]; [ "$output" = "cancelled" ]
+  [ -f "$jd/.cancel_requested" ]
+  jq -e '.state == "cancelled"' "$jd/result.json"
+}
+
 # -- 8. PID-reuse safety: alive PID with a different starttime is not "running" -
 @test "a reused PID (alive but wrong starttime) is reported lost, never running" {
   mkdir -p "$JOBS/forged"
