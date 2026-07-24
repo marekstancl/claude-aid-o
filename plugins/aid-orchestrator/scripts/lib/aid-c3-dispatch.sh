@@ -66,8 +66,17 @@
 #                         <evidence_dir>/final_report.md, then a deterministic stub.
 #                         (IMP-269 Half 1) The manifest RECORDS which branch was
 #                         taken as audit_input_manifest.ac_source:
-#                           plan                  — AID_PLAN_AC_FILE set + readable;
-#                           final_report_fallback — fell back to final_report.md;
+#                           plan                  — AID_PLAN_AC_FILE set + readable
+#                                                   AND under the canonical
+#                                                   .aid-o/plans or .aid-o/tasks tree
+#                                                   (PM review 2026-07-24); when it is
+#                                                   tracked at head_sha the bundle is
+#                                                   read from that revision, not the
+#                                                   worktree;
+#                           final_report_fallback — fell back to final_report.md, OR a
+#                                                   NON-canonical AID_PLAN_AC_FILE was
+#                                                   downgraded (an arbitrary in-repo
+#                                                   file is not a trusted plan);
 #                           stub                  — neither source available.
 #                         If the run's review-profile.json requires an AC lens
 #                         (required_lenses[] includes ac_to_test_identity or
@@ -79,9 +88,14 @@
 #   AID_TEST_RECEIPT_FILE — (IMP-269 Half 2) explicit path to a typed targeted-run
 #                         receipt (a JSON object with command / command_sha256 /
 #                         a head field == the reviewed head_sha / exit_code /
-#                         passed / failed / log_sha256). If set but unreadable, or
-#                         malformed, or NOT bound to the reviewed HEAD → PRECONDITION
-#                         FAIL (a stale or forged receipt must never become evidence).
+#                         passed / failed / log / log_sha256). `command_sha256` must
+#                         equal sha256(.command), and `.log` must name a real,
+#                         in-repo run log whose sha256 equals `log_sha256` (PM review
+#                         2026-07-24) — the log hash proves the run actually ran, not
+#                         a free 64-hex string. If set but unreadable, malformed, NOT
+#                         bound to the reviewed HEAD, or whose log hash does not match
+#                         its named log → PRECONDITION FAIL (a stale, forged, or
+#                         unbacked receipt must never become evidence).
 #                         On success the receipt is sealed into the manifest's
 #                         allowlist[] + evidence_hashes[] (hash-bound at the reviewed
 #                         HEAD) so C3 may consume PM-authorized targeted-run evidence
@@ -228,13 +242,16 @@ _path_is_within() {
 #
 # Required fields (mirrors the real gates/*.receipt.json the boundary suites emit):
 #   command        — non-empty string (the exact targeted command run);
-#   command_sha256 — 64-hex (optionally "sha256:"-prefixed) fingerprint of that command;
-#   log_sha256     — 64-hex (optionally "sha256:"-prefixed) digest of the run log;
+#   command_sha256 — 64-hex (optionally "sha256:"-prefixed) fingerprint of that command,
+#                    which MUST equal sha256(.command);
+#   log            — path (next to the receipt, within the repo) to the real run log;
+#   log_sha256     — 64-hex (optionally "sha256:"-prefixed) digest that MUST equal the
+#                    sha256 of the file named by .log (proves the run actually ran);
 #   exit_code      — number; passed — number; failed — number;
 #   head binding   — at least one of {head_sha, head_sha_before, head_sha_after} is
 #                    present, and EVERY present one equals <reviewed_head>.
 _validate_test_receipt() {
-  local f="$1" head="$2"
+  local f="$1" head="$2" repo_root="${3:-}"
   [[ -f "$f" && -r "$f" ]] || { echo "test-receipt unreadable: $f" >&2; return 1; }
   command -v jq >/dev/null 2>&1 || { echo "jq unavailable — cannot validate test-receipt" >&2; return 1; }
   jq -e 'type == "object"' "$f" >/dev/null 2>&1 \
@@ -260,6 +277,36 @@ _validate_test_receipt() {
   _rc_actual="$(printf '%s' "$_rc_cmd" | sha256sum | cut -d' ' -f1)"
   if [[ "$_rc_claimed" != "$_rc_actual" ]]; then
     echo "test-receipt command_sha256 does not match sha256(.command) — fingerprint is not of the recorded command: $f" >&2
+    return 1
+  fi
+  # PM review 2026-07-24: log_sha256 must be the digest of a REAL log, not a free
+  # 64-hex string. A receipt proves "the test ran" only if its log_sha256 is the
+  # sha256 of an actual captured run log. The receipt names that log via `.log`
+  # (resolved next to the receipt, kept within the repo); recompute and compare.
+  # Absent/unreadable/out-of-tree log, or a hash mismatch, is fail-closed.
+  local _rc_log _rc_log_abs _rc_dir _rc_log_claimed _rc_log_actual
+  _rc_log="$(jq -r '.log // ""' "$f")"
+  [[ -n "$_rc_log" ]] \
+    || { echo "test-receipt has no .log field — log_sha256 is unbacked, so the run is unproven: $f" >&2; return 1; }
+  _rc_dir="$(cd "$(dirname "$f")" && pwd)" \
+    || { echo "cannot resolve receipt directory: $f" >&2; return 1; }
+  case "$_rc_log" in
+    /*) _rc_log_abs="$_rc_log" ;;
+    *)  _rc_log_abs="$_rc_dir/$_rc_log" ;;
+  esac
+  _rc_log_abs="$(realpath -m -- "$_rc_log_abs" 2>/dev/null || echo "")"
+  [[ -n "$_rc_log_abs" ]] \
+    || { echo "cannot resolve receipt .log path ('$_rc_log'): $f" >&2; return 1; }
+  if [[ -n "$repo_root" ]]; then
+    _path_is_within "$repo_root" "$_rc_log_abs" \
+      || { echo "receipt .log escapes the repo (path traversal / absolute path rejected): $_rc_log" >&2; return 1; }
+  fi
+  [[ -f "$_rc_log_abs" && -r "$_rc_log_abs" ]] \
+    || { echo "receipt .log not found or unreadable ('$_rc_log') — cannot verify log_sha256: $f" >&2; return 1; }
+  _rc_log_claimed="$(jq -r '.log_sha256' "$f" | sed 's/^sha256://')"
+  _rc_log_actual="$(sha256sum "$_rc_log_abs" | awk '{print $1}')"
+  if [[ "$_rc_log_claimed" != "$_rc_log_actual" ]]; then
+    echo "test-receipt log_sha256 does not match sha256(.log) — the recorded log hash is not of the named log ('$_rc_log'): $f" >&2
     return 1
   fi
   return 0
@@ -366,21 +413,53 @@ cmd_build_manifest() {
       || _fail "AID_PLAN_AC_FILE set but unreadable: $AID_PLAN_AC_FILE"
     _path_is_within "$repo_root" "$AID_PLAN_AC_FILE" \
       || _fail "AID_PLAN_AC_FILE escapes the repo (path traversal / absolute path rejected): $AID_PLAN_AC_FILE"
-    cat "$AID_PLAN_AC_FILE" > "$c3_dir/bundle-plan-ac.md" \
-      || _fail "cannot write bundle-plan-ac.md from $AID_PLAN_AC_FILE"
-    ac_source="plan"
-    # Review F1 (the exact E-064-1_2 laundering vector): a caller can point
-    # AID_PLAN_AC_FILE AT final_report.md itself (same path) or at a byte-
-    # identical copy, turning the implementation's own summary into a "plan"
-    # classification and slipping past the fail-closed gate below. `plan` must
-    # be genuinely distinct from the implementation-authored report — otherwise
-    # downgrade to final_report_fallback, which the gate treats as non-plan.
-    if [[ -f "$evidence_dir/final_report.md" ]]; then
-      local _ac_rp _fr_rp
-      _ac_rp="$(realpath -m "$AID_PLAN_AC_FILE" 2>/dev/null || echo "$AID_PLAN_AC_FILE")"
-      _fr_rp="$(realpath -m "$evidence_dir/final_report.md" 2>/dev/null || echo "$evidence_dir/final_report.md")"
-      if [[ "$_ac_rp" == "$_fr_rp" ]] || cmp -s "$AID_PLAN_AC_FILE" "$evidence_dir/final_report.md"; then
-        echo "aid-c3-dispatch: WARNING — AID_PLAN_AC_FILE resolves to (or is byte-identical to) final_report.md; the AC bundle would be the implementation's own summary. Downgrading ac_source plan -> final_report_fallback." >&2
+
+    # PM review 2026-07-24 — CANONICAL location gate. Only a file under the
+    # PM-owned .aid-o/plans or .aid-o/tasks tree may earn ac_source=plan. ANY
+    # other readable in-repo file (a source file, a scratch note, the impl's own
+    # output) is NOT a plan; treating it as one let an arbitrary file become the
+    # trusted AC source. A non-canonical AC file downgrades to the same non-plan
+    # fallback path below, so the fail-closed AC-lens gate rejects it rather than
+    # auditing the AC lenses over an untrusted bundle.
+    local _ac_rel
+    _ac_rel="$(realpath -m --relative-to="$repo_root" "$AID_PLAN_AC_FILE" 2>/dev/null || echo "")"
+    local _ac_canonical=0
+    case "$_ac_rel" in
+      .aid-o/plans/*|.aid-o/tasks/*) _ac_canonical=1 ;;
+    esac
+
+    if [[ "$_ac_canonical" -ne 1 ]]; then
+      echo "aid-c3-dispatch: WARNING — AID_PLAN_AC_FILE ('${_ac_rel:-$AID_PLAN_AC_FILE}') is not under the canonical .aid-o/plans or .aid-o/tasks tree, so it cannot be trusted as the plan/AC source. Downgrading ac_source plan -> final_report_fallback (a non-plan source the fail-closed AC-lens gate rejects)." >&2
+      if [[ -f "$evidence_dir/final_report.md" ]]; then
+        cat "$evidence_dir/final_report.md" > "$c3_dir/bundle-plan-ac.md" \
+          || _fail "cannot write bundle-plan-ac.md from final_report.md"
+        ac_source="final_report_fallback"
+      else
+        printf '# Plan / Acceptance Criteria\n\n_AID_PLAN_AC_FILE was non-canonical and no final_report.md is available (epic=%s run=%s)._\n' \
+          "$epic_id" "$run_id" > "$c3_dir/bundle-plan-ac.md" \
+          || _fail "cannot write bundle-plan-ac.md stub"
+        ac_source="stub"
+      fi
+    else
+      # Canonical → author the bundle bound to the REVISION when the plan is
+      # tracked at head_sha (git show reads the committed content, never a
+      # mutable/dirtied worktree copy). When the canonical tree is untracked
+      # (e.g. .aid-o gitignored — the only place the plan lives), fall back to the
+      # worktree file, which is still a canonical PM artifact.
+      if git cat-file -e "${head_sha}:${_ac_rel}" 2>/dev/null; then
+        git show "${head_sha}:${_ac_rel}" > "$c3_dir/bundle-plan-ac.md" \
+          || _fail "cannot read canonical AC file at ${head_sha}:${_ac_rel}"
+      else
+        cat "$AID_PLAN_AC_FILE" > "$c3_dir/bundle-plan-ac.md" \
+          || _fail "cannot write bundle-plan-ac.md from $AID_PLAN_AC_FILE"
+      fi
+      ac_source="plan"
+      # Review F1 (the exact E-064-1_2 laundering vector): even a canonical file
+      # whose authored bundle is byte-identical to the implementation's own
+      # final_report.md is not a genuine plan — downgrade to final_report_fallback.
+      if [[ -f "$evidence_dir/final_report.md" ]] \
+         && cmp -s "$c3_dir/bundle-plan-ac.md" "$evidence_dir/final_report.md"; then
+        echo "aid-c3-dispatch: WARNING — the canonical AC bundle is byte-identical to final_report.md; it would be the implementation's own summary. Downgrading ac_source plan -> final_report_fallback." >&2
         ac_source="final_report_fallback"
       fi
     fi
@@ -463,7 +542,7 @@ cmd_build_manifest() {
       || _fail "AID_TEST_RECEIPT_FILE set but unreadable: $AID_TEST_RECEIPT_FILE"
     _path_is_within "$repo_root" "$AID_TEST_RECEIPT_FILE" \
       || _fail "AID_TEST_RECEIPT_FILE escapes the repo (path traversal / absolute path rejected): $AID_TEST_RECEIPT_FILE"
-    _validate_test_receipt "$AID_TEST_RECEIPT_FILE" "$head_sha" \
+    _validate_test_receipt "$AID_TEST_RECEIPT_FILE" "$head_sha" "$repo_root" \
       || _fail "AID_TEST_RECEIPT_FILE is not a valid HEAD-bound targeted-run receipt (see reason above): $AID_TEST_RECEIPT_FILE"
     test_receipt_abs="$(realpath -m -- "$AID_TEST_RECEIPT_FILE" 2>/dev/null)" \
       || _fail "cannot resolve AID_TEST_RECEIPT_FILE: $AID_TEST_RECEIPT_FILE"

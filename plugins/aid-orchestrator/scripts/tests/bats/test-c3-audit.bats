@@ -599,15 +599,23 @@ _imp269_write_review_profile() {
 }
 
 # _imp269_write_receipt <path> <head_before> <head_after>  — write a well-formed
-# targeted-run receipt whose head fields are the given SHAs.
+# targeted-run receipt whose head fields are the given SHAs. Writes a REAL run
+# log next to the receipt and records its true sha256, so the receipt genuinely
+# proves the run (PM review 2026-07-24 log-binding).
 _imp269_write_receipt() {
-  jq -n --arg hb "$2" --arg ha "$3" '{
+  local dir; dir="$(dirname "$1")"
+  local log="$dir/$(basename "$1" .receipt.json).log"
+  printf 'TAP version 13\n1..241\nok 241 done\n' > "$log"
+  local logsha; logsha="$(sha256sum "$log" | awk '{print $1}')"
+  local cmd="bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats"
+  local cmdsha; cmdsha="$(printf '%s' "$cmd" | sha256sum | awk '{print $1}')"
+  jq -n --arg hb "$2" --arg ha "$3" --arg c "$cmd" --arg cs "$cmdsha" \
+    --arg lg "$(basename "$log")" --arg ls "$logsha" '{
     purpose:"PM-authorized targeted run",
-    command:"bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats",
-    command_sha256:"a751dfbbe41d0d14e0c06902ecccdb04cfb763ddb925baab05bd2c56f23bea77",
+    command:$c, command_sha256:$cs,
     head_sha_before:$hb, head_sha_after:$ha, exit_code:0, plan_line:"1..241",
     passed:241, failed:0, skipped:2,
-    log_sha256:"e838b8e381bac6a532bb51e31736b50ef1231271167860547ca2545fa6964325"
+    log:$lg, log_sha256:$ls
   }' > "$1"
 }
 
@@ -761,7 +769,12 @@ CODEXEOF
   local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
   _imp269_two_commit_repo
   mkdir -p "$TEST_EVIDENCE_DIR/gates"
-  jq -n --arg h "$HEAD_SHA" '{command:"bats x", command_sha256:"8453bad3e8c6502dace501a594b36b8c583c82c2623d805450e1cb66559ac36b", head_sha:$h, exit_code:0, passed:1, failed:0, log_sha256:"e838b8e381bac6a532bb51e31736b50ef1231271167860547ca2545fa6964325"}' \
+  local cmd="bats x"
+  local csha; csha="$(printf '%s' "$cmd" | sha256sum | awk '{print $1}')"
+  printf 'ok 1\n1..1\n' > "$TEST_EVIDENCE_DIR/gates/single.log"
+  local lsha; lsha="$(sha256sum "$TEST_EVIDENCE_DIR/gates/single.log" | awk '{print $1}')"
+  jq -n --arg h "$HEAD_SHA" --arg c "$cmd" --arg cs "$csha" --arg ls "$lsha" \
+    '{command:$c, command_sha256:$cs, head_sha:$h, exit_code:0, passed:1, failed:0, log:"single.log", log_sha256:$ls}' \
     > "$TEST_EVIDENCE_DIR/gates/single.receipt.json"
   export AID_TEST_RECEIPT_FILE="$TEST_EVIDENCE_DIR/gates/single.receipt.json"
 
@@ -800,13 +813,74 @@ CODEXEOF
   local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
   _imp269_two_commit_repo
   printf '# Impl summary of itself\n' > "$TEST_EVIDENCE_DIR/final_report.md"
-  printf '# The REAL plan\n\n## Acceptance Criteria\n- [ ] does X\n' > "$TEST_PROJECT_ROOT/real-plan.md"
+  # Canonical plan location (PM review 2026-07-24): a distinct plan under
+  # .aid-o/plans still earns ac_source=plan.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  printf '# The REAL plan\n\n## Acceptance Criteria\n- [ ] does X\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/real-plan.md"
   _imp269_write_review_profile '["ac_to_test_identity"]'
-  export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/real-plan.md"
+  export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/.aid-o/plans/real-plan.md"
   run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
   [ "$status" -eq 0 ]
   run jq -r '.audit_input_manifest.ac_source' "$TEST_EVIDENCE_DIR/audit-input-manifest.json"
   [ "$output" = "plan" ]
+  unset AID_PLAN_AC_FILE
+}
+
+# ── IMP-269 canonical/revision hardening (PM review 2026-07-24) ─────────────
+# Gap: ANY readable in-repo file earned ac_source=plan. Only a canonical
+# .aid-o/plans or .aid-o/tasks file may; anything else downgrades so the
+# AC-lens gate fails closed instead of trusting an arbitrary file.
+
+@test "IMP-269 (canonical): a non-canonical readable in-repo file is NOT laundered into ac_source=plan" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  _imp269_two_commit_repo
+  printf '# impl summary\n' > "$TEST_EVIDENCE_DIR/final_report.md"
+  _imp269_write_review_profile '["behavior_trace"]'   # no AC lens → run proceeds
+  # A perfectly readable, committed, in-repo file that is NOT a plan (a source
+  # file), and distinct from final_report.md. It must not be trusted as the AC.
+  export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/src/app.ts"
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.ac_source' "$TEST_EVIDENCE_DIR/audit-input-manifest.json"
+  [ "$output" = "final_report_fallback" ]
+  unset AID_PLAN_AC_FILE
+}
+
+@test "IMP-269 (canonical): a non-canonical AC file + required AC lens → build FAILS CLOSED" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  _imp269_two_commit_repo
+  printf '# impl summary\n' > "$TEST_EVIDENCE_DIR/final_report.md"
+  _imp269_write_review_profile '["ac_to_test_identity"]'   # AC lens required
+  export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/src/app.ts"
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"AC lens required"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json" ]
+  unset AID_PLAN_AC_FILE
+}
+
+@test "IMP-269 (revision): a canonical plan tracked at HEAD is bundled from the revision, not a dirtied worktree" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  _imp269_two_commit_repo
+  printf '# impl summary\n' > "$TEST_EVIDENCE_DIR/final_report.md"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  printf '# The committed plan\n\n## Acceptance Criteria\n- [ ] does X\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
+  git -C "$TEST_PROJECT_ROOT" add .aid-o/plans/plan.md
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "add plan"
+  HEAD_SHA="$(git -C "$TEST_PROJECT_ROOT" rev-parse HEAD)"; export HEAD_SHA
+  # Dirty the worktree copy AFTER committing — the bundle must use the committed
+  # content at HEAD, never this tampered worktree copy.
+  printf 'TAMPERED worktree content that never earns trust\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
+  _imp269_write_review_profile '["ac_to_test_identity"]'
+  export AID_PLAN_AC_FILE="$TEST_PROJECT_ROOT/.aid-o/plans/plan.md"
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.ac_source' "$TEST_EVIDENCE_DIR/audit-input-manifest.json"
+  [ "$output" = "plan" ]
+  run grep -q 'committed plan' "$TEST_EVIDENCE_DIR/c3/bundle-plan-ac.md"
+  [ "$status" -eq 0 ]
+  run grep -q 'TAMPERED' "$TEST_EVIDENCE_DIR/c3/bundle-plan-ac.md"
+  [ "$status" -ne 0 ]
   unset AID_PLAN_AC_FILE
 }
 
@@ -848,6 +922,45 @@ CODEXEOF
   # degrades to a manifest missing its promised test evidence.
   [ "$status" -ne 0 ]
   [[ "$output" == *"command_sha256 does not match"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json" ]
+  unset AID_TEST_RECEIPT_FILE
+}
+
+@test "IMP-269 (log): a receipt whose log_sha256 is not the hash of a real log is rejected, not sealed" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  _imp269_two_commit_repo
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  local cmd="bats real-suite"
+  local csha; csha="$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)"
+  # A real log exists, but log_sha256 is a decoy that does NOT hash it — the
+  # "test ran" claim is unbacked.
+  printf 'ok 1 something\n1..1\n' > "$TEST_EVIDENCE_DIR/gates/real-suite.log"
+  jq -n --arg h "$HEAD_SHA" --arg c "$cmd" --arg cs "$csha" \
+    '{command:$c, command_sha256:$cs, head_sha:$h, exit_code:0, passed:1, failed:0,
+      log:"real-suite.log", log_sha256:"e838b8e381bac6a532bb51e31736b50ef1231271167860547ca2545fa6964325"}' \
+    > "$TEST_EVIDENCE_DIR/gates/decoy.receipt.json"
+  export AID_TEST_RECEIPT_FILE="$TEST_EVIDENCE_DIR/gates/decoy.receipt.json"
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"log_sha256 does not match"* ]]
+  [ ! -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json" ]
+  unset AID_TEST_RECEIPT_FILE
+}
+
+@test "IMP-269 (log): a receipt with no .log field is rejected (log_sha256 is unbacked)" {
+  local DISPATCH="$AID_PLUGIN_PATH/scripts/lib/aid-c3-dispatch.sh"
+  _imp269_two_commit_repo
+  mkdir -p "$TEST_EVIDENCE_DIR/gates"
+  local cmd="bats real-suite"
+  local csha; csha="$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)"
+  jq -n --arg h "$HEAD_SHA" --arg c "$cmd" --arg cs "$csha" \
+    '{command:$c, command_sha256:$cs, head_sha:$h, exit_code:0, passed:1, failed:0,
+      log_sha256:"e838b8e381bac6a532bb51e31736b50ef1231271167860547ca2545fa6964325"}' \
+    > "$TEST_EVIDENCE_DIR/gates/nolog.receipt.json"
+  export AID_TEST_RECEIPT_FILE="$TEST_EVIDENCE_DIR/gates/nolog.receipt.json"
+  run bash "$DISPATCH" build-manifest "$TEST_EVIDENCE_DIR" "$BASE_SHA" "$HEAD_SHA" high
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no .log"* || "$output" == *"log"* ]]
   [ ! -f "$TEST_EVIDENCE_DIR/audit-input-manifest.json" ]
   unset AID_TEST_RECEIPT_FILE
 }
