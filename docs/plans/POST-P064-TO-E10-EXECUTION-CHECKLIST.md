@@ -26,7 +26,8 @@ new commits.
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
-| Next work | **P068 not started** (deferred per brief); IMP-266 awaits PM ratification (A or B) |
+| IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
+| Next work | **P068 not started** (deferred per brief) — Phase 1 now clear of open PM decisions |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -145,7 +146,7 @@ plan.
 - [x] **IMP-258:** repair propagates per-write failures instead of swallowing
   them through `|| true`. (`45ae9aa`.)
 - [x] Decide **IMP-266:** audited reopen from an incorrect
-  `merged_to_plan`, or a documented deliberately terminal recovery ceremony. (`e40f9ca` — decision brief prepared, recommends Option B, deferred to PM ratification; NOT implemented.)
+  `merged_to_plan`, or a documented deliberately terminal recovery ceremony. (`e40f9ca` decision brief → **PM ratified Option B on 2026-07-24**: keep `merged_to_plan` terminal + documented recovery ceremony in `IMP-266-merged-to-plan-recovery-CEREMONY.md`; doc-only, no code edge; Option A deferred to P068+.)
 
 ### 1D — P064 dormant-path blockers owed before P068
 
@@ -389,6 +390,7 @@ independently reviewable commit; do not rewrite earlier rows.
 | 2026-07-24 | Hardening IMP-262 | `8e94dd4` | 3 pre-PID fault tests; handshake; set-e/pipefail abort also fixed; test-aid-job 21/21 | marker + wrapper self-cancel; job never starts after cancel | — |
 | 2026-07-24 | Hardening IMP-270 | `6751157` | 2 tests repro'd RED on pre-fix (empty + malformed head); fix; test-aid-gate-waiver 24/24 | missing/malformed report HEAD fails closed, no current-HEAD fallback | — |
 | 2026-07-24 | Hardening review + close | `cee4685` | one independent adversarial review of all 4 boundaries → no residual bypass; registry 4 rows updated; v2.62.1 bump; two stale intro lines fixed; IMP-269 wording corrected (consistency-check, not provenance) folded into the local release; cache reset to `cee4685` (scripts-tree `6aea929`) | version sync verified; tree clean; not pushed, not tagged | PM: push + git-identity remedy; P068 start |
+| 2026-07-24 | IMP-266 ratified (B) | committed with this row | PM chose Option B; wrote recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`); updated decision brief + adjudication + checklist | doc-only, `merged_to_plan` stays terminal, no code edge; Option A deferred to P068+ | — |
 
 When Phase 1 finishes, update the top-level checkpoint, mark only genuinely
 completed checkboxes, and record the released version plus cache SHA.

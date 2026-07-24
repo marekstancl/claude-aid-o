@@ -1,12 +1,16 @@
 # IMP-266 — recovery from an incorrect terminal `merged_to_plan`: decision brief
 
-**Status:** DECISION PREPARED — not implemented. IMP-266 is an "architecture
-decision required" item; per the Phase-1 brief the recovery model must be chosen
-deliberately, never picked silently, and the implementation follows a ratified
-decision, not this brief.
-**Prepared:** 2026-07-23 (Phase-1 maintenance).
-**Adjudication:** independent Codex (recorded below); PM ratification requested
-before any implementation.
+**Status:** RATIFIED — the PM chose **Option B** on 2026-07-24: keep
+`merged_to_plan` deliberately terminal and correct a wrong entry via a
+documented, audited recovery ceremony, never an in-tool reverse transition. The
+ceremony (the Option B deliverable) is written in
+[`IMP-266-merged-to-plan-recovery-CEREMONY.md`](IMP-266-merged-to-plan-recovery-CEREMONY.md).
+No code change — `merged_to_plan` is already terminal. Option A (a narrow audited
+reopen edge) is deferred to P068+ if a real incident shows the ceremony is too
+slow or error-prone.
+**Prepared:** 2026-07-23 (Phase-1 maintenance). **Ratified:** 2026-07-24 (PM).
+**Adjudication:** independent Codex was unavailable (hung); the controller
+recommended B and the PM ratified B.
 
 ## The problem (verbatim from backlog)
 
@@ -107,11 +111,14 @@ rollback** — Option A is one audited edge, Option B is an audited human ceremo
 See `.aid-o/work/maintenance/imp-266-adjudication.md` for the independent
 bounded adjudication and its rationale.
 
-## What happens next
+## What happened next
 
-- This is a decision brief. No transition, subcommand, or ceremony is implemented
-  in this Phase-1 pass.
-- PM ratifies A or B. On B, the runbook section is written (docs, out of Phase-1
-  code scope). On A, it is a scoped follow-up commit with its own review.
+- The PM ratified **Option B** on 2026-07-24.
+- The Option B deliverable — a documented, PM-authorized recovery ceremony — is
+  written in [`IMP-266-merged-to-plan-recovery-CEREMONY.md`](IMP-266-merged-to-plan-recovery-CEREMONY.md).
+  It is doc-only: `merged_to_plan` stays terminal and no code edge is added.
+- Option A (a narrow audited reopen edge) is deferred to P068+; it is not
+  implemented and is only revisited if a real incident shows the ceremony is too
+  slow or error-prone.
 
-**Last Updated:** 2026-07-23
+**Last Updated:** 2026-07-24
