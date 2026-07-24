@@ -16,6 +16,13 @@ setup() {
   export FSM
   # Force post-deploy mode for the gate-enforcement assertions.
   export AID_DEPLOY_DATE="2026-04-01T00:00:00Z"
+  # IMP-263 is strict-by-default in production (a new run with no binding is
+  # rejected). Most increment-step tests here exercise OTHER preconditions
+  # (SKIP/visual-anchoring/orphan/memory) and do not carry a binding, so this
+  # file runs in observe to isolate the variable under test. The binding-specific
+  # tests opt back into strict explicitly (AID_STEP_BINDING=strict) or prove the
+  # default by unsetting it — see the "IMP-263 (fail-closed #1)" test.
+  export AID_STEP_BINDING=observe
 }
 
 teardown() {
@@ -2118,11 +2125,15 @@ _imp263_seed_step0() {
   [ "$(wc -l < "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl")" = "1" ]
 }
 
-@test "IMP-263: legacy evidence with NO binding advances by default (observe grandfather)" {
+@test "IMP-263: genuinely grandfathered evidence with NO binding still advances (legacy compat)" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   write_post_deploy_state_yaml "$state_file"  # current_step 3
+  # created_at BEFORE the deploy threshold → genuinely grandfathered, so it stays
+  # lenient even under strict-by-default (no env dependence).
+  sed -i 's/^created_at: .*/created_at: 2026-01-01T00:00:00Z/' "$state_file"
   write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
   _imp263_write_verifier_output 3
+  unset AID_STEP_BINDING
   run "$FSM" increment-step "$state_file"
   [ "$status" -eq 0 ]
   [[ "$output" == "status=advanced advanced_from=3 advanced_to=4" ]]
@@ -2143,21 +2154,81 @@ _imp263_seed_step0() {
 @test "IMP-263 (review MEDIUM): a forged ledger row cannot self-heal current_step by more than one" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _imp263_seed_step0 "$state_file" TOK-0
-  # A hand-forged ledger row claims token TOK-0 advanced from 1 to 99. The
-  # verify file for the CURRENT step (0) also carries TOK-0, so the idempotency
-  # lookup hits — but from=1 does not match current_step=0, and even a matching
-  # from must have to == from+1. Either way self-heal must NOT jump to 99.
-  printf '{"token":"TOK-0","from":1,"to":99}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
+  # A hand-forged ledger row claims token TOK-0 jumped 0→99. step-0 carries a
+  # valid binding, so the idempotency lookup hits — but self-heal requires
+  # to == from+1, so it can NEVER jump to 99. The run instead advances exactly
+  # one step through the normal verified path; current_step is 1, never 99.
+  # (The legitimate crash self-heal from=0,to=1 is covered by the dedicated
+  # "crash after ledger append" test above.)
+  printf '{"token":"TOK-0","from":0,"to":99}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
   run "$FSM" increment-step "$state_file"
   local cs; cs=$(grep '^current_step:' "$state_file" | awk '{print $2}')
   [ "$cs" != "99" ]
-  [ "$cs" -le 2 ]
+  [ "$cs" -le 1 ]
+}
 
-  # The legitimate self-heal (from=0, to=1) still works: a crash after the
-  # ledger append but before the bump repairs current_step to exactly 1.
-  printf '{"token":"TOK-0","from":0,"to":1}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
+# ── IMP-263 fail-closed hardening (PM review 2026-07-24) ─────────────────────
+# Three gaps the earlier IMP-263 pass left open:
+#   #3 a hand-inserted single-step ledger row let unverified evidence masquerade
+#      as crash recovery (self-heal advanced current_step with NO valid binding);
+#   #2 a PARTIAL binding (token only) evaded the id/hash/commit checks (they were
+#      guarded by `-n`), so token-only evidence advanced;
+#   #1 strict was opt-in — a new run with no binding advanced by default.
+
+@test "IMP-263 (fail-closed #3): forged ledger row cannot self-heal without a valid live binding" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  _imp263_write_plan
+  _imp263_write_verifier_output 0
+  # Evidence that would FAIL preconditions (Result: FAIL, no binding) but carries
+  # a token matching a hand-forged ledger row. Only the ledger self-heal bypass
+  # could advance here.
+  cat > "$TEST_EVIDENCE_DIR/step-0-verify.md" <<'VF'
+# Step 0 Verification
+## Result: FAIL
+idempotency_token: FORGE-0
+VF
+  printf '{"token":"FORGE-0","from":0,"to":1}\n' > "$TEST_EVIDENCE_DIR/step-transition-ledger.jsonl"
   run "$FSM" increment-step "$state_file"
-  [ "$status" -eq 0 ]
-  [[ "$output" =~ status=already_applied ]]
-  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "1" ]
+  [ "$status" -ne 0 ]
+  # Must NOT have self-healed: current_step stays 0.
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
+}
+
+@test "IMP-263 (fail-closed #2): a partial binding (token only) is rejected, not silently advanced" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"
+  sed -i 's/^current_step: .*/current_step: 0/; s/^total_steps: .*/total_steps: 2/' "$state_file"
+  _imp263_write_plan
+  _imp263_write_verifier_output 0
+  # Otherwise-valid evidence, but the binding carries ONLY a token — the id/hash/
+  # commit checks must not be skippable.
+  cat > "$TEST_EVIDENCE_DIR/step-0-verify.md" <<'VF'
+# Step 0 Verification
+## Result: PASS
+- [x] acceptance criterion met
+Commit: abc1234def5678
+idempotency_token: TOK-PARTIAL
+## Memory Used
+N/A — none
+## Memory Written
+N/A — none
+VF
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ binding ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "0" ]
+}
+
+@test "IMP-263 (fail-closed #1): strict is the DEFAULT for a new run — no binding is rejected without any env" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
+  write_post_deploy_state_yaml "$state_file"  # created_at > deploy → new run
+  write_valid_step_verify "$TEST_EVIDENCE_DIR/step-3-verify.md" 3
+  _imp263_write_verifier_output 3
+  unset AID_STEP_BINDING
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" =~ binding ]]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
 }

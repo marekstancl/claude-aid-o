@@ -3143,6 +3143,40 @@ _increment_ledger_lookup() {
     "$ledger" 2>/dev/null || return 0
 }
 
+# IMP-263 fail-closed: pure predicate (0 = verified, 1 = not) that returns TRUE
+# only when `vf` carries a COMPLETE binding — all five fields present — whose
+# idempotency_token == `token`, step_index == `step`, step_id + plan_step_hash
+# match the live plan.json step, and reviewed_commit == current HEAD. It logs
+# nothing and never exits, so callers stay set -e safe. The crash-recovery
+# self-heal is gated on this: a genuine crash leaves a valid step-verify.md
+# behind, whereas a hand-inserted ledger row does not — so a forged row can
+# never advance current_step without real, step-bound evidence.
+_increment_binding_verified() {
+  local vf="${1:-}" token="${2:-}" step="${3:-}" plan_json="${4:-}"
+  [[ -f "$vf" ]] || return 1
+  local bi bid bh bc bt
+  bi=$(yaml_field "$vf" step_index)
+  bid=$(yaml_field "$vf" step_id)
+  bh=$(yaml_field "$vf" plan_step_hash)
+  bc=$(yaml_field "$vf" reviewed_commit)
+  bt=$(yaml_field "$vf" idempotency_token)
+  [[ -n "$bi" && -n "$bid" && -n "$bh" && -n "$bc" && -n "$bt" ]] || return 1
+  [[ "$bt" == "$token" ]] || return 1
+  [[ "$bi" == "$step" ]] || return 1
+  # step_id + plan_step_hash MUST verify against the live plan — no plan, no trust.
+  [[ -f "$plan_json" ]] && command -v jq >/dev/null 2>&1 || return 1
+  local live_id live_hash
+  live_id=$(jq -r --argjson i "$step" '.steps[$i].id // ""' "$plan_json" 2>/dev/null || echo "")
+  live_hash=$(_increment_plan_step_hash "$plan_json" "$step")
+  [[ -n "$live_id" && "$bid" == "$live_id" ]] || return 1
+  [[ -n "$live_hash" && "$bh" == "$live_hash" ]] || return 1
+  # reviewed_commit MUST be the current HEAD — no HEAD, no trust.
+  local head_commit
+  head_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
+  [[ -n "$head_commit" && "$bc" == "$head_commit" ]] || return 1
+  return 0
+}
+
 cmd_increment_step() {
   local state_file="$1"
   local force="false"
@@ -3197,20 +3231,34 @@ cmd_increment_step() {
   _idem_hit=$(_increment_ledger_lookup "$_idem_ledger" "$_idem_token")
   if [[ -n "$_idem_hit" ]]; then
     local _idem_from="${_idem_hit%%$'\t'*}" _idem_to="${_idem_hit##*$'\t'}"
-    # IMP-263 review MEDIUM: the ledger is not hash-guarded (unlike plan.json),
-    # so a forged row {from,to} must not let self-heal jump current_step by more
-    # than one. A legitimate record path ALWAYS writes to = from+1; enforce that
-    # exactly here, so a `{from:1,to:99}` row can never skip steps 2..N.
+    if [[ "$_idem_to" =~ ^[0-9]+$ && "$step" == "$_idem_to" ]]; then
+      # PURE REPLAY: current_step is already at the recorded target. No mutation
+      # happens here, so even a forged ledger row cannot cause an advance — this
+      # is a safe idempotent no-op (the E-064-1_2 double-invoke case).
+      echo "status=already_applied step=${_idem_to} token=${_idem_token}"
+      return 0
+    fi
+    # CRASH-RECOVERY SELF-HEAL mutates current_step, so it must be EVIDENCE-backed,
+    # never ledger-alone (PM review 2026-07-24). A hand-inserted single-step row
+    # {token,from,to} must not masquerade as recovery. Require, together:
+    #   * step == from and to == from+1 (no step-skipping — review MEDIUM guard);
+    #   * a COMPLETE, live-verified binding in step-${step}-verify.md matching
+    #     this token/step/plan/HEAD. A genuine crash leaves that file behind; a
+    #     forged ledger row does not.
     if [[ "$_idem_from" =~ ^[0-9]+$ && "$_idem_to" =~ ^[0-9]+$ \
-          && "$step" == "$_idem_from" && "$_idem_to" -eq $(( _idem_from + 1 )) ]]; then
+          && "$step" == "$_idem_from" && "$_idem_to" -eq $(( _idem_from + 1 )) ]] \
+       && _increment_binding_verified "$_idem_verify" "$_idem_token" "$step" "${evidence_dir}/plan.json"; then
       local _heal_tmp="${state_file}.tmp"
       sed "s/^current_step: .*/current_step: ${_idem_to}/" "$state_file" > "$_heal_tmp" && mv "$_heal_tmp" "$state_file"
       local _idem_tl; _idem_tl=$(derive_timeline "$state_file") || true
       [[ -n "$_idem_tl" ]] && log_event "$_idem_tl" "step_transition_recovered" \
         token="$_idem_token" from="$_idem_from" to="$_idem_to"
+      echo "status=already_applied step=${_idem_to} token=${_idem_token}"
+      return 0
     fi
-    echo "status=already_applied step=${_idem_to} token=${_idem_token}"
-    return 0
+    # Ledger hit but no valid recovery basis (forged/partial row, or the live
+    # binding does not verify) → do NOT trust it. Fall through to the normal
+    # fail-closed preconditions below; a strict run rejects the unverifiable state.
   fi
 
   # Precondition: step verification evidence must exist + content checks.
@@ -3389,11 +3437,17 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
     # name step 0. (A copied file whose token was already applied never reaches
     # this point — the idempotency short-circuit returned already_applied first.)
     #
-    # LEGACY COMPAT: a verify file with NO binding fields (runs created before
-    # this change) is accepted by default and emits a `step_binding_absent`
-    # observe event. AID_STEP_BINDING=strict requires the binding on every
-    # non-grandfathered run — unbound evidence is then rejected, so new/strict
-    # runs never silently accept it.
+    # STRICT BY DEFAULT for new runs (PM review 2026-07-24). A non-grandfathered
+    # (post-deploy) run is strict automatically — the default is `strict`, not
+    # `observe`; only a genuinely grandfathered run (created before the deploy
+    # threshold) or an explicit AID_STEP_BINDING=observe downgrades it. Three
+    # cases, all fail-closed for new runs:
+    #   * ALL FIVE fields absent  → strict: reject (missing binding); else: legacy
+    #     observe path (log step_binding_absent, advance).
+    #   * PARTIAL binding (1..4 of 5) → ALWAYS reject, regardless of mode. A
+    #     token-only binding must never skip the id/hash/commit checks (those were
+    #     `-n`-guarded and so evadable); all-or-nothing closes that.
+    #   * ALL FIVE present → validated field-by-field below.
     local _bind_index _bind_id _bind_hash _bind_commit _bind_token
     _bind_index=$(yaml_field "$verify_file" step_index)
     _bind_id=$(yaml_field "$verify_file" step_id)
@@ -3401,9 +3455,14 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
     _bind_commit=$(yaml_field "$verify_file" reviewed_commit)
     _bind_token=$(yaml_field "$verify_file" idempotency_token)
 
-    if [[ -z "$_bind_token" && -z "$_bind_index" && -z "$_bind_hash" && -z "$_bind_commit" ]]; then
-      local _bind_mode="${AID_STEP_BINDING:-observe}"
-      if [[ "$_bind_mode" == "strict" ]] && ! fsm_check_grandfather; then
+    local _bind_mode="${AID_STEP_BINDING:-strict}"
+    fsm_check_grandfather && _bind_mode="observe"
+    local _bind_absent="false" _bind_present="false"
+    [[ -z "$_bind_index" && -z "$_bind_id" && -z "$_bind_hash" && -z "$_bind_commit" && -z "$_bind_token" ]] && _bind_absent="true"
+    [[ -n "$_bind_index" && -n "$_bind_id" && -n "$_bind_hash" && -n "$_bind_commit" && -n "$_bind_token" ]] && _bind_present="true"
+
+    if [[ "$_bind_absent" == "true" ]]; then
+      if [[ "$_bind_mode" == "strict" ]]; then
         _increment_fail missing_step_binding \
           "PRECONDITION FAIL: step verification carries no IMP-263 binding (strict mode)." \
           "File: ${verify_file}" \
@@ -3412,13 +3471,15 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
       fi
       local _bind_tl; _bind_tl=$(derive_timeline "$state_file") || true
       [[ -n "$_bind_tl" ]] && log_event "$_bind_tl" "step_binding_absent" step="$step" mode="$_bind_mode"
-    else
-      # A partial binding (any field present) MUST carry a non-empty token — the
-      # replay/ledger key — otherwise it can neither be deduped nor recorded.
-      [[ -n "$_bind_token" ]] || _increment_fail binding_missing_token \
-        "PRECONDITION FAIL: partial step binding present but idempotency_token is empty." \
+    elif [[ "$_bind_present" != "true" ]]; then
+      # PARTIAL binding — reject unconditionally; an incomplete binding can neither
+      # be trusted nor allowed to bypass the id/hash/commit verification below.
+      _increment_fail incomplete_step_binding \
+        "PRECONDITION FAIL: step binding is incomplete — all five fields are required." \
         "File: ${verify_file}" \
-        "Supply a non-empty idempotency_token alongside the binding fields."
+        "Required: step_index, step_id, plan_step_hash, reviewed_commit, idempotency_token." \
+        "Present: step_index=${_bind_index:+y} step_id=${_bind_id:+y} plan_step_hash=${_bind_hash:+y} reviewed_commit=${_bind_commit:+y} idempotency_token=${_bind_token:+y}"
+    else
 
       # step_index must name the CURRENT step (rejects a copied/renamed file for
       # another step, and any stale/future-step evidence).
@@ -3541,6 +3602,11 @@ Fix: revert plan.json to init state, OR re-init EPIC if changes are legitimate."
   fi
 
   # ── IMP-263: record the transition in the ledger, THEN bump current_step ────
+  # By the time control reaches here on the non-force path the binding is either
+  # legitimately absent (legacy/grandfathered — token empty, so NO row is written
+  # by the `-n "$_rec_token"` guard) or FULLY VALIDATED above. So every ledger row
+  # written is validated, and it is written before — and is a precondition of —
+  # the current_step bump, never after it.
   # Ledger append first (durable temp+mv → never a partially-written ledger),
   # current_step bump second. A crash BETWEEN the two is repaired on the next
   # invocation by the idempotency short-circuit above (ledger → state self-heal),
