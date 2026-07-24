@@ -771,6 +771,45 @@ flag (above) is what makes a real evaluation possible in both modes. Note
 that flag is supplied, and the default path it would otherwise compute assumes an
 EPIC evidence layout.
 
+**Data model — `quarantine_substitutes[]` in the plan-final gate report.** When a
+quarantined broad gate is satisfied by a marked targeted substitute, the stage
+records it in a top-level `quarantine_substitutes[]` array in `gates_report.json`
+(runtime artifact — no Files entry; produced by `plan-finalize --stage gates`).
+Each entry has at minimum:
+
+```json
+{
+  "gate_id": "plan_diff",
+  "targeted_substitute": "accepted",
+  "receipt_path": "gates/plan_diff-substitute.receipt.json",
+  "receipt_sha256": "sha256:<64-hex>",
+  "command_sha256": "sha256:<64-hex>",
+  "base_sha": "<40-hex plan_base_commit>",
+  "head_sha": "<40-hex, MUST equal candidate_sha>",
+  "substitute_scope": "plan_diff over plan_base_commit..candidate_sha",
+  "exit_code": 0,
+  "failed": 0
+}
+```
+
+Binding rules the stage enforces (fail the stage otherwise):
+- **Same-gate only.** A substitute is accepted only for the `gate_id` it names;
+  one receipt can never satisfy a different gate. The stage matches
+  `quarantine_substitutes[].gate_id` to the quarantined gate id exactly.
+- **`head_sha == candidate_sha`.** The receipt (and this entry) must be bound to
+  the frozen candidate; any other head fails. `base_sha` must equal
+  `plan_base_commit`. `receipt_sha256` must equal the sealed receipt file's hash
+  and `command_sha256` must equal sha256 of the recorded command (the IMP-269
+  receipt contract).
+- **Genuine green substitute.** `exit_code: 0` and `failed: 0` — a substitute may
+  only stand in for a broad gate when its own targeted run actually passed.
+- **Waiver is separate.** A gate-scoped waiver (`revision.head_sha`-bound,
+  fail-closed) remains a distinct PM risk-acceptance record; it never appears in,
+  and never replaces, a `quarantine_substitutes[]` entry.
+- **Broad gate stays quarantined.** The broad gate's own row in `gates` stays
+  `waived` / `profile_excluded` / `unverifiable` — the substitute never rewrites
+  it to `pass`.
+
 After the run the stage asserts, from the report itself: `profile` is the
 resolved release-derived profile (`release`, or its quarantine-substitute when
 gates are quarantined); `revision.head_sha == candidate_sha`; `excluded_gates`
@@ -834,7 +873,14 @@ does not retry it.
       *additionally* record PM risk-acceptance where the gate would otherwise
       block, but never substitutes for the targeted evidence: a waiver alone, with
       no substitute receipt, does **not** satisfy the gate. Never green.
-- [ ] `_command_log` is non-empty and every entry has a non-null duration.
+- [ ] Every quarantined gate satisfied by a substitute has a matching
+      `quarantine_substitutes[]` entry carrying `gate_id`, `targeted_substitute`,
+      `receipt_path` + `receipt_sha256`, `command_sha256`, `base_sha`,
+      `head_sha == candidate_sha`, `substitute_scope`, `exit_code: 0` and
+      `failed: 0`; the stage rejects a substitute whose `gate_id` does not match
+      the quarantined gate (one receipt cannot satisfy another gate) or whose
+      `head_sha != candidate_sha`, and never rewrites the broad gate's own row to
+      `pass`.
 - [ ] Exactly one `gate_runner_start` event exists for the plan-final run —
       no second broad run under a `full` label.
 - [ ] `plan_diff` evidence covers the candidate range for real: when
@@ -2377,6 +2423,23 @@ named in the acceptance criteria of the step that touches its subject.
 output, checks the exit code *and* asserts a non-zero `1..N` TAP plan line,
 so a not-yet-written test can never be misreported as present. This is the
 template P063 adopted after PM review and it is reused verbatim here.
+
+**Quarantine-aware green bar (v2.62.1).** While the P066 quarantine holds, the
+green bar for this plan is the **relevant targeted / non-quarantined suites**,
+never the broad `bats_all` or `plan_diff` gates. Concretely: `test-aid-plan-final-boundary.bats`,
+`test-aid-plan-release-boundary.bats`, and the touched-file suites named in each
+step's acceptance criteria (`test-aid-fsm.bats`, `test-release-policy.bats`,
+`test-aid-run-gates.bats`, `test-queue-revalidation.bats`, `test-plan-close.bats`,
+`test-aid-plan-close-check.bats`, `test-c0-plan-review.bats`, and the two new
+`test-instruction-sweep.sh` / `test-control-boundary.sh`) must pass at the
+reviewed HEAD. The quarantined broad gates are **never asserted `pass`**: their
+state is recorded honestly (`waived` / `profile_excluded` / `unverifiable`) and,
+where a plan-required dimension is theirs, satisfied by a marked
+targeted-substitute receipt (the `quarantine_substitutes[]` channel in Step 2's
+gate report). No step's acceptance may read a quarantined broad gate as green,
+and no substitute may be labelled a broad-suite pass. When P066 lifts the
+quarantine, the broad gates run normally and this carve-out is inert.
+
 ## Success Criteria
 
 - A four-EPIC plan run end to end invokes the broad gate profile once, the
@@ -2399,10 +2462,16 @@ template P063 adopted after PM review and it is reused verbatim here.
 - No agent-facing surface instructs a per-EPIC release or a
   task-branch-to-target-branch merge outside an explicit
   `legacy_epic_release_mode` fork, proven by `test-instruction-sweep.sh`.
-- All three carried findings (CF1 abandon path, CF2 tracked dogfood payload,
-  CF3 plan-graph availability) are closed by a named step.
+- The three carried findings are addressed by a named step: CF1 (abandon path)
+  and CF2 (tracked dogfood payload) are closed; CF3's blocking half (graph
+  absence) is already resolved in code, so its named step delivers only the
+  semantic `absent_pre_generation` refinement.
 - `test-aid-plan-final-boundary.bats` passes, `test-aid-plan-release-boundary.bats`
-  from P064 stays green, and every pre-existing bats suite stays green.
+  from P064 stays green, and every relevant targeted / non-quarantined bats suite
+  stays green. **While the P066 quarantine holds, the broad `bats_all` and
+  `plan_diff` gates are NOT required green** — they are recorded honestly
+  (`waived` / `profile_excluded` / `unverifiable`, never `pass`) with their marked
+  targeted substitutes, per *Test Execution Cadence and Quarantine*.
 
 ## Constraints
 
@@ -2690,17 +2759,25 @@ plan line, so a not-yet-written test cannot be misreported as present.
 
 ## Next Steps
 
-1. Do not start this plan until P064 is DONE and merged. Its acceptance
-   criteria reference functions P064 creates; grounding them against promised
-   code is the failure mode that split the original plan.
-2. Re-ground every `file:line` citation in this plan against the post-P064
-   tree before EPIC generation — P064 changes `aid-fsm.sh`,
-   `aid-run-gates.sh`, `lib/aid-lifecycle.sh` and `.aid-o/config/execution.yaml`,
-   so anchors taken from today's HEAD will have moved.
-3. Resolve CF3 (plan-graph availability at plan-review time) before running
-   CP1-deep / C0 on this plan, or the review returns `unverifiable` for that
-   reason alone, as it did six times on the combined plan.
-4. Generate EPICs with chained dependencies — EPIC 2 depends on EPIC 1.
-5. Choose the dogfood subject under CF2's constraint: a small tracked change
-   under `plugins/aid-orchestrator/`, recorded in the `## Authorization`
-   section of the tracked dogfood report before the run.
+Current status (2026-07-24, v2.62.1):
+
+1. **P064 and Phase 1 are DONE.** The plan-branch substrate P068 consumes exists
+   and is merged; the Phase-1 fail-closed hardening (IMP-263/269/270/262 and the
+   lineage/freshness batch) is released locally as v2.62.1.
+2. **P068 has been re-grounded against local main at v2.62.1** — every consumed
+   contract re-verified, the Step 2 quarantine collision, the Step 3 schema
+   target and the Step 9 counts/rows corrected, and the cadence/quarantine and
+   handoff sections added. `file:line` citations carry a re-grep note (they
+   predate Phase 1's edits).
+3. **CF3 is not a blocker.** A missing `plan-graph.json` no longer makes the C0
+   review `unverifiable` (the bridge seals it as a zero-byte manifest entry), so
+   P068 can run its own C0 today; Step 1 only *semantically refines* the absent
+   case to `plan_graph: absent_pre_generation` and resolves plugin-relative
+   contract paths.
+4. **Next action, after explicit PM approval: regenerate the P068 EPICs** from
+   this re-grounded plan, as a chain **EPIC 2 → EPIC 1** (EPIC 2, the cutover,
+   depends on EPIC 1, the plan-final release). Nothing is generated, run, or
+   pushed before that approval. On regeneration, still re-grep every `file:line`
+   by symbol first, and pick the dogfood subject under CF2 (a small *tracked*
+   change under `plugins/aid-orchestrator/`, recorded in the dogfood report's
+   `## Authorization` section before the run).
