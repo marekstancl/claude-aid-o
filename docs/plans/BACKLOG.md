@@ -2799,3 +2799,26 @@ crafted value change what the system treats as trusted config, not just
 what it can read" into CP3's security-review checklist for any future
 `--profile`/name-driven config lookups, so this class of impact is rated
 correctly on first pass rather than requiring PM escalation to surface.
+
+## P068 re-grounding follow-ups (2026-07-24, v2.62.1)
+
+Unrelated findings surfaced while re-grounding the P068 plan against current
+code. Recorded here, NOT folded into P068 (they do not block P068 execution and
+are out of its scope). Numbering deferred per the POST-P064 checklist's
+"dedup/renumber Curator IMP-271+ proposals" note.
+
+### Shipped `defaults/execution.yaml` has no `gate_profiles` block
+
+**Status:** idea — verify scope before acting.
+**Context:** P068 Step 2 resolves the plan-final profile via the `gate_profiles`
+table (`gate_profile_max`, `release` ⊃ `full`), which P064 Step 8 delivers. That
+table exists only in the self-host `.aid-o/config/execution.yaml`; the shipped
+`plugins/aid-orchestrator/defaults/execution.yaml` ships **no** `gate_profiles`
+block. A consumer project initialised from defaults would have no profile table
+for a plan-final release run to resolve against.
+**Proposed change:** confirm whether P064 Step 8 was meant to seed the profile
+table into `defaults/execution.yaml` (and `/aid-init`), or whether consumers are
+expected to author it. If the former, it is a P064-scope defect to fix in P064,
+not worked around in P068.
+**Open question:** is this already tracked under a P064/P066 item? Dedup before
+filing.
