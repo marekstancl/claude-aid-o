@@ -313,6 +313,31 @@ JSON
   [[ "$output" == *"carries no waiver_ref"* ]]
 }
 
+@test "fsm GATES:DONE (IMP-270): a waived report with NO revision.head_sha is rejected, not validated against current HEAD" {
+  _issue_ok
+  "$RG" run-all "$EXEC" E-1 R-1 --report-file "$REPORT" >/dev/null 2>&1
+  local sf; sf=$(_fsm_to_gates)
+  # Strip the report's revision binding. HEAD has NOT moved, so the tool's
+  # --head fallback would resolve the same (valid) HEAD and let the waiver pass.
+  # The FSM must instead fail closed: a report that cannot name its revision is
+  # untrusted regardless of what is currently checked out.
+  jq 'del(.revision.head_sha)' "$REPORT" > "$REPORT.x" && mv "$REPORT.x" "$REPORT"
+  run "$FSM" transition GATES DONE "$sf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"revision.head_sha"* ]]
+  run bash -c "grep '^state:' '$sf'"; [[ "$output" == *"GATES"* ]]
+}
+
+@test "fsm GATES:DONE (IMP-270): a waived report with a malformed revision.head_sha is rejected" {
+  _issue_ok
+  "$RG" run-all "$EXEC" E-1 R-1 --report-file "$REPORT" >/dev/null 2>&1
+  local sf; sf=$(_fsm_to_gates)
+  jq '.revision.head_sha = "not-a-sha"' "$REPORT" > "$REPORT.x" && mv "$REPORT.x" "$REPORT"
+  run "$FSM" transition GATES DONE "$sf"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"revision.head_sha"* ]]
+}
+
 @test "fsm GATES:DONE: a non-waived required failure still blocks (overall=fail)" {
   # No waiver → overall fail → DONE must be refused.
   "$RG" run-all "$EXEC" E-1 R-1 --report-file "$REPORT" >/dev/null 2>&1 || true

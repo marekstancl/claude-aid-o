@@ -1947,6 +1947,18 @@ EOF
         report_head=$(jq -r '.revision.head_sha // empty' "$report" 2>/dev/null)
         waived_rows=$(jq -r '(.gates // {}) | to_entries[] | select(.value.result == "waived") | .key' "$report" 2>/dev/null)
         if [[ -n "$waived_rows" ]]; then
+          # IMP-270 (PM review 2026-07-24): a waived row is re-validated against
+          # the report's OWN revision.head_sha. If that is absent or not a 40-hex
+          # sha, FAIL CLOSED here — do NOT pass an empty head to aid-gate-waiver.sh,
+          # whose --head fallback would then resolve the CURRENT HEAD and validate
+          # the waiver against whatever is checked out now, silently bypassing the
+          # report's revision binding. A report that cannot name its reviewed
+          # revision cannot have its waiver trusted.
+          if [[ ! "$report_head" =~ ^[0-9a-f]{40}$ ]]; then
+            _PRECONDITION_FAIL_REASON="waiver_report_head_missing"
+            echo "PRECONDITION FAIL: report declares waived gate(s) but its .revision.head_sha is missing or not a 40-hex sha (got '${report_head:-<empty>}') — refusing to re-validate a waiver against an unbound revision (a missing report HEAD must not fall back to the current HEAD)." >&2
+            return 1
+          fi
           local waived_gate wv_ref wv_verdict wv_rc
           while IFS= read -r waived_gate; do
             [[ -z "$waived_gate" ]] && continue
