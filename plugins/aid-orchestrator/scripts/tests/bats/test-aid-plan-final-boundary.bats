@@ -1235,6 +1235,11 @@ _seed_review_project() {
 
 # _review [extra args...] — the stage under test.
 _review() {
+  # CP2 F1: the review boundary requires the worktree to BE the candidate — the
+  # stage's drift detection is baselined on it and the plan-level specialists
+  # review it. That is the CONTROLLER's job (it dispatches between the exit-7 and
+  # the validating invocation), so this helper does what the controller must do.
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}" 2>/dev/null || true
   run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage review \
     --project-root "$TEST_PROJECT_ROOT" "$@"
 }
@@ -1250,13 +1255,17 @@ _p2() {
   local cand base
   cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
   base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  # CP2 F2: stamp the ACTUAL plan-final run id, never a hard-coded -final-1 —
+  # the stage now binds outputs to the attempt, so a re-frozen candidate in
+  # R-<plan>-final-2 must carry that run id.
+  local rid; rid="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
   local sh; sh="$(printf '%s' "$fname" | sha256sum | cut -d' ' -f1)"
   jq -n --arg t "$atype" --arg pk "$pkey" --arg h "$cand" --arg b "$base" \
-        --arg plan "$PLAN_ID" --arg sh "sha256:${sh}" \
+        --arg plan "$PLAN_ID" --arg sh "sha256:${sh}" --arg rid "$rid" \
     '{schema_version:"aid-2.0", artifact_type:$t, producer:"aid-test@2.0",
       created_at:"2026-07-25T00:00:00Z", control_protocol:"aid-2.0",
       identity:{project_id:"aid-orchestrator", epic_id:null, plan_id:$plan,
-                run_id:("R-" + $plan + "-final-1")},
+                run_id:$rid},
       subject:{subject_hash:$sh},
       revision:{head_sha:$h, base_sha:$b, head_is_current:true, freshness:"current"},
       status:"pass", verdict:{kind:"none"},
@@ -1287,8 +1296,9 @@ _write_review_outputs() {
     '.sources = ["E-068-1_2"]'
   _p2 acceptance-evidence.json acceptance_evidence acceptance_evidence \
     '.sources = ["E-068-1_2"]'
-  jq -n --arg c "$cand" \
-    '{candidate_sha:$c,
+  local drid; drid="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  jq -n --arg c "$cand" --arg r "$drid" \
+    '{candidate_sha:$c, run_id:$r,
       dispatches:[{agent:"auditor",count:1},{agent:"curator",count:1},
                   {agent:"simplifier",count:1},{agent:"reporter",count:1}],
       utilities:[{id:"scanner_memory_scan",count:1}]}' > "${dir}/dispatch-record.json"
@@ -1705,4 +1715,43 @@ _write_review_outputs() {
   [[ "$output" == *"already in AWAITING_PM"* ]]
   run plan_state_get "$PLAN_ID" "plan_state"
   [ "$output" = "AWAITING_PM" ]
+}
+
+# ── CP2 F2 regression: outputs are bound to the ATTEMPT, not only the candidate ──
+# The verifier's concrete attack: a review pass completes in R-<plan>-final-1, a
+# stray tracked write triggers invalidation, the operator REVERTS it instead of
+# committing a fix, so sync/freeze re-freeze the SAME commit into
+# R-<plan>-final-2 — and copying the old directory reproduces every file with
+# matching heads, a self-consistent curator ref and preserved mtimes.
+@test "CP2 F2: a previous attempt's outputs copied into a new run dir are refused (run_id binding)" {
+  _seed_review_project
+  _write_review_outputs
+  _review
+  [ "$status" -eq 0 ]
+  local first_dir; first_dir="$(_run_dir)"
+
+  # A stray tracked write, then a REVERT (not a fix): the candidate commit is
+  # unchanged, so the re-freeze mints the SAME sha under a new attempt.
+  echo "stray" >> "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
+  _review
+  [ "$status" -eq 6 ]
+  git -C "$TEST_PROJECT_ROOT" checkout -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
+
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -eq 0 ]
+  local receipt; receipt="$(_write_receipt bats_all)"
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+
+  local second_dir; second_dir="$(_run_dir)"
+  [ "$second_dir" != "$first_dir" ]
+
+  # Carry the whole previous attempt over, mtimes preserved.
+  cp -rp "$first_dir"/. "$second_dir"/
+
+  _review
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run_id"* ]]
 }

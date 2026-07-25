@@ -1230,9 +1230,21 @@ against the frozen candidate. **The FSM dispatches nothing.** It declares which 
 exist, validates them against `candidate_sha`, and blocks until they do — the same division
 already used for C3, where `aid-fsm.sh` validates a dispatch record the controller produced.
 
+**Before the first invocation, put the worktree ON the candidate and keep it there for
+the whole review boundary:**
+
 ```bash
+git -C {project_root} checkout plan/{plan_id}   # its head IS candidate_sha
 bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage review
 ```
+
+This is the controller's job, not the stage's, because the specialists are dispatched
+*between* the exit-7 invocation and the validating one. Two things depend on it: the
+plan-level specialists review this worktree (an agent that reads files rather than
+`git show base..candidate` would otherwise silently review the target branch), and the
+stage's drift detection is baselined on it. `--stage gates` restores HEAD to wherever it
+was when it finished, so after gates the worktree is **not** on the candidate — position
+it again. The stage refuses with exit 1 if `HEAD != candidate_sha`.
 
 | Exit | Meaning | Controller action |
 |------|---------|-------------------|

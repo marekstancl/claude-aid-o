@@ -2680,7 +2680,7 @@ delivery-report.json|delivery_report|identity.plan_id set and revision.head_sha 
 review-profile.json|review_profile|produced over plan_base_commit..candidate_sha; carries review_profile.required_lenses (arms the C3 gate)
 delivery-gate.json|delivery_gate|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
 acceptance-evidence.json|acceptance_evidence|identity.epic_id == null, identity.plan_id set, sources[] lists every contributing EPIC
-dispatch-record.json|-|one dispatch per plan-boundary agent and per registered utility, bound to candidate_sha
+dispatch-record.json|-|one dispatch per plan-boundary agent and per registered utility, bound to candidate_sha AND this attempt's run_id
 ROWS
 }
 
@@ -2770,6 +2770,26 @@ _pfsm_finalize_review() {
     return 1
   fi
 
+  # ── CP2 F1 (2026-07-25): the worktree must BE the candidate ─────────────
+  # `--stage gates` documents why ("the working tree must BE the candidate while
+  # they run"), checks out plan/<plan_id> and restores HEAD afterwards. This stage
+  # did neither, so in the normal gates -> review flow it ran with HEAD on whatever
+  # branch preceded gates — typically the target branch. Two costs: the
+  # `git status` half of the drift check was baselined against the WRONG tree (a
+  # "fix" rewriting a file to the version already on that branch reads as clean),
+  # and the four specialists were dispatched against a tree that is not the
+  # candidate, so any agent reading the worktree silently reviewed the wrong code.
+  # Refuse rather than silently check out: the controller dispatches BETWEEN the
+  # exit-7 and the validating invocation, so it — not this stage — must place the
+  # worktree on the candidate and keep it there for the whole review boundary.
+  local head_now=""
+  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+  if [[ "$head_now" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage review requires the worktree to BE the frozen candidate, but HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. The plan-level specialists review this worktree, and the drift check is baselined on it. Run 'git -C ${root} checkout plan/${plan_id}' (the candidate is its head) before dispatching the reviewers, and stay there until '--stage review' returns 0." >&2
+    return 1
+  fi
+
+
   local run_dir_abs="${root}/${run_dir_rel}"
   mkdir -p "$run_dir_abs" || {
     echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
@@ -2820,7 +2840,22 @@ _pfsm_finalize_review() {
   while IFS='|' read -r fname atype binding; do
     [[ -z "$fname" || "$atype" == "-" ]] && continue
     local vrc=0 vout=""
-    vout="$(bash "${SCRIPT_DIR}/aid-protocol-validate.sh" "${run_dir_abs}/${fname}" 2>&1)" || vrc=$?
+    # CP2 F3 (2026-07-25): aid-protocol-validate.sh returns 0 with `legacy_skipped`
+    # for any artifact declaring control_protocol: "legacy", BEFORE the envelope,
+    # provenance and type-specific checks — including the audit-report independence
+    # check. Accepting that here would let the one artifact whose independence is
+    # the entire point of the audit opt out of proving it. A plan-final review
+    # output must be a real protocol-v2 artifact.
+    local proto
+    proto="$(jq -r '.control_protocol // ""' "${run_dir_abs}/${fname}" 2>/dev/null || echo "")"
+    if [[ "$proto" == "legacy" ]]; then
+      _rassert "${fname} declares control_protocol: \"legacy\", which short-circuits aid-protocol-validate.sh before the envelope, provenance and type-specific checks (for an audit report, before the independence check). A plan-final review output must be a real protocol-v2 artifact."
+      continue
+    fi
+    # CP2 F5: pass the candidate as the current head so the validator's freshness
+    # cross-check (revision.head_is_current / revision.freshness) actually runs
+    # instead of being skipped for an empty CURRENT_HEAD.
+    vout="$(bash "${SCRIPT_DIR}/aid-protocol-validate.sh" "${run_dir_abs}/${fname}" --current-head "$candidate" 2>&1)" || vrc=$?
     if [[ "$vrc" -ne 0 ]]; then
       _rassert "${fname} fails aid-protocol-validate.sh (validator exit ${vrc}: ${vout})."
       continue
@@ -2843,6 +2878,17 @@ _pfsm_finalize_review() {
     h="$(jq -r '.revision.head_sha // ""' "${run_dir_abs}/${f}")"
     [[ "$h" == "$candidate" ]] \
       || _rassert "${f} records revision.head_sha '${h}', expected the frozen candidate '${candidate}' — a review of any other head is stale evidence."
+    # CP2 F2 (2026-07-25): bind to the ATTEMPT, not only the candidate. Without
+    # this, an invalidation that is REVERTED rather than fixed re-freezes the SAME
+    # commit into a new run directory, and `cp -p` of the previous attempt's
+    # outputs satisfies every other check — heads match, the curator ref is
+    # self-consistent because the audit report was copied alongside it, and cp -p
+    # preserves mtimes so the Reporter-last ordering still holds. The stage would
+    # return 0 having validated a review nobody performed on this attempt.
+    local rid_out
+    rid_out="$(jq -r '.identity.run_id // ""' "${run_dir_abs}/${f}")"
+    [[ "$rid_out" == "$run_id" ]] \
+      || _rassert "${f} records identity.run_id '${rid_out}', expected this attempt's '${run_id}' — an output carried over from a previous plan-final attempt is not a review of THIS attempt, even when the candidate sha happens to match."
     p="$(jq -r '.identity.plan_id // ""' "${run_dir_abs}/${f}")"
     [[ "$p" == "$plan_id" ]] \
       || _rassert "${f} records identity.plan_id '${p}', expected '${plan_id}' — this output does not belong to this plan (an EPIC evidence pack copied in fails here)."
@@ -2926,6 +2972,13 @@ _pfsm_finalize_review() {
   dr_cand="$(jq -r '.candidate_sha // ""' "$dr" 2>/dev/null || echo "")"
   [[ "$dr_cand" == "$candidate" ]] \
     || _rassert "dispatch-record.json records candidate_sha '${dr_cand}', expected '${candidate}' — a dispatch record for another candidate proves nothing about THIS attempt."
+  # CP2 F2: the candidate alone does not identify the attempt — a re-freeze of the
+  # same commit gets a NEW run id, and a copied dispatch record would otherwise
+  # still match.
+  local dr_run
+  dr_run="$(jq -r '.run_id // ""' "$dr" 2>/dev/null || echo "")"
+  [[ "$dr_run" == "$run_id" ]] \
+    || _rassert "dispatch-record.json records run_id '${dr_run}', expected this attempt's '${run_id}' — a dispatch record copied from a previous attempt proves nothing about THIS one."
   local ag n
   local counts_json="{}" utils_json="[]"
   for ag in "${_AID_PLAN_FINAL_AGENTS[@]}"; do
