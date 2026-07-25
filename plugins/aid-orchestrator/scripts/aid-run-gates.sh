@@ -225,8 +225,8 @@ run_all_gates() {
 
   # A flag that is PASSED must carry a real value — an empty --plan-path would
   # otherwise silently degrade to the same `null` this flag exists to prevent.
-  if (( base_commit_opt_set )) && [[ -z "$base_commit_opt" ]]; then
-    echo "ERROR: aid-run-gates.sh: --base-commit was passed with an empty value." >&2
+  if (( base_commit_opt_set )) && [[ -z "$base_commit_opt" || "$base_commit_opt" == "null" ]]; then
+    echo "ERROR: aid-run-gates.sh: --base-commit was passed with an empty/'null' value — pass a real commit or omit the flag." >&2
     exit 1
   fi
   if (( plan_path_opt_set )) && [[ -z "$plan_path_opt" || "$plan_path_opt" == "null" ]]; then

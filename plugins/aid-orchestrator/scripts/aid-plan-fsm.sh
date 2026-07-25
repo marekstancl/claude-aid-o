@@ -830,6 +830,9 @@ _pfsm_require_optval() {
 # ---------------------------------------------------------------------------
 _pfsm_restore_head() {
   local root="$1" orig_branch="$2"
+  # CP2 F1 (2026-07-25): callers pass a DETACHED-HEAD sha here as well as a branch
+  # name. `git checkout <sha>` restores a detached HEAD exactly, so nothing below
+  # needs to distinguish the two. An empty value still means "nothing to restore".
   [[ -n "$orig_branch" ]] || return 0
   local out="" rc=0
   out="$(git -C "$root" checkout -q "$orig_branch" 2>&1)" || rc=$?
@@ -1899,6 +1902,11 @@ _pfsm_finalize_sync() {
 
   local orig_branch=""
   orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+  # CP2 F1 (2026-07-25): on a DETACHED HEAD `symbolic-ref` fails, which left
+  # orig_branch empty — the checkout below still ran, but the guarded restore was
+  # skipped, silently stranding the caller on the plan branch. Fall back to the
+  # exact commit; `git checkout <sha>` restores a detached HEAD faithfully.
+  [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${root}" rev-parse HEAD 2>/dev/null || echo "")"
   if ! git -C "$root" checkout -q "$plan_branch" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-finalize --stage sync: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged." >&2
     return 1
@@ -2284,6 +2292,11 @@ _pfsm_finalize_gates() {
   head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || head_now=""
   if [[ "$head_now" != "$candidate" ]]; then
     orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+  # CP2 F1 (2026-07-25): on a DETACHED HEAD `symbolic-ref` fails, which left
+  # orig_branch empty — the checkout below still ran, but the guarded restore was
+  # skipped, silently stranding the caller on the plan branch. Fall back to the
+  # exact commit; `git checkout <sha>` restores a detached HEAD faithfully.
+    [[ -n "$orig_branch" ]] || orig_branch="$(git -C "${root}" rev-parse HEAD 2>/dev/null || echo "")"
     if ! git -C "$root" checkout -q "$plan_branch" 2>/dev/null; then
       echo "PRECONDITION FAIL: plan-finalize --stage gates: cannot check out ${plan_branch} (checked out in another worktree?) — no gates were run." >&2
       return 1
