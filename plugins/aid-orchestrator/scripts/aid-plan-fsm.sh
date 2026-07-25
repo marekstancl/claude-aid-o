@@ -64,6 +64,17 @@
 # exit 7 until they exist, refuses a stale/wrong-subject output with exit 1, and
 # invalidates the candidate with exit 6 when a tracked write proves a fix was
 # accepted. On success: PLAN_REVIEW -> AWAITING_PM.
+# P068 Step 4 adds the fifth and sixth stages — the plan-mode C4 decision and
+# the plan-level PM summary:
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage c4
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage summary
+# — see the section header above `_pfsm_finalize_c4`. Both run out of
+# AWAITING_PM and make NO state transition: `c4` produces ONE release decision
+# via `aid-release-policy.sh --plan` (the same aggregator, plan resolution) plus
+# dual-run evidence, and `summary` renders the PM plan-final summary via
+# `aid-pm-brief.sh`, keeping reviewed candidate / approved target / final merge
+# SHA / tag status as four distinct fields. The merge and the release/tag stay
+# with Step 5's PM-authorized `plan-merge-to-main`.
 # — see the dedicated section header above cmd_plan_finalize for the order it
 # enforces (sync → version preparation → freeze) and why an invalidation
 # clears the whole candidate binding at once.
@@ -3069,7 +3080,269 @@ _pfsm_finalize_review() {
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|review> [--frozen-at <rfc3339>]
+# P068 Step 4 — `plan-finalize --stage c4` and `--stage summary`
+# =============================================================================
+#
+# `--stage c4` produces EXACTLY ONE plan-mode release decision, bound to the
+# frozen candidate AND to the approved target head, into the plan-final run
+# directory. It is the plan-level analogue of the FSM's review->release C4 hook
+# for EPICs, and it reuses the SAME aggregator (`aid-release-policy.sh`) in its
+# new `--plan` mode — no second decision engine.
+#
+# `--stage summary` renders the PM plan-final summary from that decision (via
+# `aid-pm-brief.sh`, which reads release-decision.json and nothing else).
+#
+# STATE: both stages run out of AWAITING_PM and make NO state transition.
+# `--stage review` is what moves PLAN_REVIEW -> AWAITING_PM (Step 3), and the
+# plan state table in lib/aid-plan-state.sh has no state between them. Adding
+# one would be a state-machine change, which this step deliberately does not
+# make; instead both stages are idempotent and re-runnable inside AWAITING_PM,
+# and `--stage summary` ASSERTS the plan is in AWAITING_PM rather than moving it
+# there a second time. The PM authorization + merge remain Step 5's job.
+#
+# DUAL RUN: before E10, C4 keeps its configured mode from
+# defaults/policies/release-decision-policy.yaml (`enforcement: observe` today)
+# and emits dual-run evidence exactly as aid-fsm.sh does for EPICs — the
+# comparison is recorded, and only `enforcement: blocking` lets a
+# release_ready=false actually fail the stage.
+# ---------------------------------------------------------------------------
+
+# _pfsm_c4_enforcement — echoes observe|blocking. Fail-safe: anything unreadable
+# degrades to `observe` (never blocks), mirroring the aid-fsm.sh hook.
+_pfsm_c4_enforcement() {
+  local pf="${RELEASE_DECISION_POLICY:-${SCRIPT_DIR}/../defaults/policies/release-decision-policy.yaml}"
+  local v=""
+  if [[ -f "$pf" ]] && command -v yq >/dev/null 2>&1; then
+    v="$(yq -r '.enforcement // "observe"' "$pf" 2>/dev/null || echo observe)"
+  fi
+  case "$v" in blocking) echo blocking ;; *) echo observe ;; esac
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_c4 <root> <plan_id>
+# ---------------------------------------------------------------------------
+_pfsm_finalize_c4() {
+  local root="$1" plan_id="$2"
+
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires jq — refusing to produce a release decision without the tool that reads its inputs." >&2
+    return 1
+  }
+
+  local candidate base_commit run_id run_dir_rel target_branch target_head v
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  target_head="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head=""
+  for v in candidate base_commit run_id run_dir_rel target_branch target_head; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage c4: ${plan_id} has no frozen candidate (${v} is unset) — the plan-level release decision is bound to ONE immutable candidate and to the target head recorded at its freeze. Run '--stage sync', '--stage freeze', '--stage gates' and '--stage review' first." >&2
+      return 1
+    fi
+  done
+
+  # The same invalidation trigger the review stage runs, for the same reason: a
+  # tracked write between the review and the decision means the decision would
+  # describe a candidate that no longer exists.
+  local drift=""
+  if ! drift="$(_pfsm_review_candidate_drift "$root" "$plan_id" "$candidate")"; then
+    local irc=0
+    plan_final_invalidate "$plan_id" "candidate_changed_during_c4" "PLAN_FIX" || irc=$?
+    [[ "$irc" -ne 0 ]] && return "$irc"
+    echo "CANDIDATE INVALIDATED: ${drift}. No release decision was produced; ${plan_id} is now PLAN_FIX. Re-run the whole plan-final cycle against the NEW candidate." >&2
+    return 6
+  fi
+
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+  if [[ "$cur_state" != "AWAITING_PM" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage c4: ${plan_id} is in state '${cur_state:-<none>}' — the plan-level C4 decision runs only out of AWAITING_PM (the review stage puts it there)." >&2
+    return 1
+  fi
+
+  # Same worktree rule as `--stage review`: the decision's inputs are read at the
+  # candidate, and aid-evidence-verify.sh --at-head compares against the worktree.
+  local head_now=""
+  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo "")"
+  if [[ "$head_now" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage c4 requires the worktree to BE the frozen candidate, but HEAD is ${head_now:-<unknown>} and the candidate is ${candidate}. Run 'git -C ${root} checkout plan/${plan_id}' before the C4 stage." >&2
+    return 1
+  fi
+
+  local run_dir_abs="${root}/${run_dir_rel}"
+  local decision="${run_dir_abs}/release-decision.json"
+  mkdir -p "$run_dir_abs" || { echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2; return 1; }
+
+  # ── The one plan-mode C4 run ────────────────────────────────────────────
+  local arc=0 aout=""
+  aout="$(AID_PROJECT_ROOT="$root" bash "${SCRIPT_DIR}/aid-release-policy.sh" \
+    --plan "$plan_id" --run-id "$run_id" --evidence-dir "$run_dir_rel" \
+    --candidate-sha "$candidate" --target-ref "$target_branch" --target-head-sha "$target_head" \
+    --out "$decision" 2>&1)" || arc=$?
+  if [[ "$arc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage c4: the plan-mode release aggregator exited ${arc} for ${plan_id} — no release decision was recorded. Aggregator output: ${aout}" >&2
+    return 1
+  fi
+  if ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-finalize --stage c4: ${run_dir_rel}/release-decision.json is not a release_decision artifact." >&2
+    return 1
+  fi
+
+  local release_ready blockers_n
+  release_ready="$(jq -r '.release_decision.release_ready' "$decision")"
+  blockers_n="$(jq -r '.release_decision.blockers | length' "$decision")"
+
+  # ── The relocated legacy release checks, run ONCE in this same stage ─────
+  # At the plan boundary the legacy stack is the plan-final gate report plus the
+  # recorded plan-final review — the two things that, before C4 existed, were the
+  # whole basis for "this is releasable". Both are already durable, so this is a
+  # read, not a re-run.
+  local legacy_gates="fail" legacy_review="fail" legacy_verdict="false"
+  local gr="${run_dir_abs}/gates_report.json"
+  if [[ -f "$gr" ]] && jq -e '(.overall // .gates_report.result // .status // "") == "pass"' "$gr" >/dev/null 2>&1; then
+    legacy_gates="pass"
+  fi
+  if [[ "$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_review.run_id')" == "$run_id" ]]; then
+    legacy_review="pass"
+  fi
+  [[ "$legacy_gates" == "pass" && "$legacy_review" == "pass" ]] && legacy_verdict="true"
+
+  local match="false" divergence="none"
+  [[ "$release_ready" == "$legacy_verdict" ]] && match="true"
+  if [[ "$match" != "true" ]]; then
+    if [[ "$release_ready" == "false" ]]; then divergence="c4_stricter"; else divergence="c4_permissive"; fi
+  fi
+
+  local enforcement; enforcement="$(_pfsm_c4_enforcement)"
+  local dual="${run_dir_abs}/release-decision-dual-run.json"
+  jq -n --arg plan "$plan_id" --arg run "$run_id" --arg cand "$candidate" \
+        --arg tref "$target_branch" --arg thead "$target_head" \
+        --arg enf "$enforcement" --arg div "$divergence" \
+        --arg lg "$legacy_gates" --arg lr "$legacy_review" \
+        --argjson rr "$release_ready" --argjson lv "$legacy_verdict" --argjson m "$match" \
+    '{event:"release_policy_dual_run", plan_id:$plan, run_id:$run, candidate_sha:$cand,
+      target_ref:$tref, target_head_sha:$thead, head_sha:$cand,
+      enforcement:$enf, c4_release_ready:$rr,
+      legacy_verdict:$lv, legacy_checks:{gates_report:$lg, plan_final_review:$lr},
+      match:$m, divergence_class:$div}' > "${dual}.tmp" \
+    && mv "${dual}.tmp" "$dual" || {
+      rm -f "${dual}.tmp"
+      echo "PRECONDITION FAIL: plan-finalize --stage c4: could not write ${run_dir_rel}/release-decision-dual-run.json — a C4 run whose dual-run evidence is not durable is not recorded." >&2
+      return 1
+    }
+
+  local c4_json
+  c4_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg thead "$target_head" \
+    --arg enf "$enforcement" --argjson rr "$release_ready" --argjson bn "$blockers_n" \
+    --argjson m "$match" --arg div "$divergence" \
+    '{run_id:$run, candidate_sha:$cand, target_head_sha:$thead, enforcement:$enf,
+      release_ready:$rr, blockers:$bn, dual_run:{match:$m, divergence_class:$div}}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_c4 = ${c4_json}" >/dev/null || {
+    echo "PRECONDITION FAIL: the plan-final C4 decision for ${plan_id} was written to ${run_dir_rel}/release-decision.json, but the result could not be recorded in the manifest. Re-run '--stage c4' — the aggregator is deterministic at a fixed candidate." >&2
+    return 1
+  }
+
+  if [[ "$enforcement" == "blocking" && "$release_ready" != "true" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage c4: release_ready=false with ${blockers_n} blocker(s) and release-decision-policy enforcement=blocking. The decision is durable at ${run_dir_rel}/release-decision.json; resolve the blockers listed there." >&2
+    return 1
+  fi
+
+  echo "$candidate"
+  echo "plan-final C4 decision recorded for ${plan_id} at ${candidate} (release_ready=${release_ready}, blockers=${blockers_n}, enforcement=${enforcement}, dual_run match=${match}/${divergence}). ${plan_id} stays AWAITING_PM; run '--stage summary' next." >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_summary <root> <plan_id>
+# ---------------------------------------------------------------------------
+_pfsm_finalize_summary() {
+  local root="$1" plan_id="$2"
+
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: plan-finalize --stage summary requires jq." >&2
+    return 1
+  }
+
+  local candidate run_id run_dir_rel v
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  for v in candidate run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage summary: ${plan_id} has no frozen candidate (${v} is unset)." >&2
+      return 1
+    fi
+  done
+
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+  if [[ "$cur_state" != "AWAITING_PM" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${plan_id} is in state '${cur_state:-<none>}' — the PM summary is rendered for a plan that is AWAITING_PM (the review stage puts it there, the C4 stage keeps it there)." >&2
+    return 1
+  fi
+
+  local run_dir_abs="${root}/${run_dir_rel}"
+  local decision="${run_dir_abs}/release-decision.json"
+  if [[ ! -s "$decision" ]] || ! jq -e '.release_decision | type == "object"' "$decision" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: no plan-mode release decision at ${run_dir_rel}/release-decision.json — run '--stage c4' first. The PM summary REPORTS the decision; it never substitutes for it." >&2
+    return 1
+  fi
+  # A decision produced in EPIC mode (or carried over) cannot be summarised as this
+  # plan's: the plan-level sections are rendered from `release_decision.plan_summary`,
+  # which only plan mode emits, and the identity must name this plan and this attempt.
+  local d_plan d_run d_epic
+  d_plan="$(jq -r '.identity.plan_id // ""' "$decision")"
+  d_run="$(jq -r '.identity.run_id // ""' "$decision")"
+  d_epic="$(jq -r '.identity.epic_id // "null"' "$decision")"
+  if [[ "$d_plan" != "$plan_id" || "$d_run" != "$run_id" || "$d_epic" != "null" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${run_dir_rel}/release-decision.json is bound to plan '${d_plan:-<absent>}' / run '${d_run:-<absent>}' / epic '${d_epic}', expected plan '${plan_id}' / run '${run_id}' / epic null. A PM summary must never be able to imply an intermediate EPIC was released." >&2
+    return 1
+  fi
+  if ! jq -e '.release_decision.plan_summary | type == "object"' "$decision" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: the decision carries no release_decision.plan_summary — it was not produced in plan mode, so the plan-level sections (EPICs, skips, gates, specialist review, backlog, merge decision) cannot be rendered." >&2
+    return 1
+  fi
+
+  local brc=0 bout=""
+  bout="$(bash "${SCRIPT_DIR}/aid-pm-brief.sh" "$run_dir_abs" 2>&1)" || brc=$?
+  if [[ "$brc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: aid-pm-brief.sh exited ${brc} for ${plan_id} — the PM summary is NOT complete. Output: ${bout}" >&2
+    return 1
+  fi
+  local md="${run_dir_abs}/pm-summary.md"
+  [[ -s "$md" ]] || {
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: ${run_dir_rel}/pm-summary.md was not written." >&2
+    return 1
+  }
+  # The four fields roadmap §8 requires to be DISTINCT and labelled. Asserted here so a
+  # renderer regression cannot silently collapse "reviewed" into "released".
+  local lbl missing_lbl=""
+  for lbl in "Reviewed candidate SHA:" "Approved target SHA:" "Final main merge SHA:" "Release / tag status:"; do
+    grep -Fq "$lbl" "$md" || missing_lbl="${missing_lbl:+${missing_lbl}, }${lbl}"
+  done
+  if [[ -n "$missing_lbl" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage summary: pm-summary.md is missing the required labelled field(s): ${missing_lbl}. The reviewed candidate, the approved target, the final merge SHA and the tag status are four distinct facts and must each be rendered." >&2
+    return 1
+  fi
+
+  local sum_json
+  sum_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" \
+    --arg md "${run_dir_rel}/pm-summary.md" --arg brief "${run_dir_rel}/pm-decision-brief.json" \
+    '{run_id:$run, candidate_sha:$cand, pm_summary:$md, pm_decision_brief:$brief}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_summary = ${sum_json}" >/dev/null || {
+    echo "PRECONDITION FAIL: the PM plan-final summary for ${plan_id} was rendered at ${run_dir_rel}/pm-summary.md but could not be recorded in the manifest. Re-run '--stage summary' — it re-renders from the same durable decision." >&2
+    return 1
+  }
+
+  echo "$candidate"
+  echo "plan-final PM summary rendered for ${plan_id} at ${run_dir_rel}/pm-summary.md (+ pm-decision-brief.json); ${plan_id} is AWAITING_PM — the merge and the release/tag are Step 5's PM-authorized actions, not this stage's." >&2
+  return 0
+}
+
+# =============================================================================
+# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>]
 #                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
@@ -3106,7 +3379,7 @@ cmd_plan_finalize() {
   done
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|review> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -3114,8 +3387,8 @@ cmd_plan_finalize() {
     exit 2
   fi
   case "$stage" in
-    sync|freeze|gates|review) ;;
-    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates' or 'review' (got '${stage}')" >&2; exit 2 ;;
+    sync|freeze|gates|review|c4|summary) ;;
+    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
   esac
   if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
     echo "ERROR: plan-finalize: --substitute-receipt is only meaningful for --stage gates." >&2
@@ -3142,7 +3415,11 @@ cmd_plan_finalize() {
   # "commit or stash first"; instead `_pfsm_finalize_review` detects it and
   # calls `plan_final_invalidate`, so the plan returns to PLAN_FIX and every
   # review output is invalidated together with the candidate.
-  if [[ "$stage" != "review" ]]; then
+  # `c4` and `summary` join `review` in the dirty-tree exemption for the same reason:
+  # inside the review->decision->summary boundary a tracked write MEANS the candidate
+  # changed, and `_pfsm_finalize_c4` turns that into an invalidation rather than a
+  # "commit or stash first" that would hide it.
+  if [[ "$stage" != "review" && "$stage" != "c4" && "$stage" != "summary" ]]; then
     _pfsm_check_clean_worktree "$project_root" || exit 1
   fi
 
@@ -3164,6 +3441,8 @@ cmd_plan_finalize() {
       local execution_yaml_r="${execution_yaml_opt:-${project_root}/.aid-o/config/execution.yaml}"
       _pfsm_finalize_review "$project_root" "$plan_id" "$execution_yaml_r" || rc=$?
       ;;
+    c4)      _pfsm_finalize_c4 "$project_root" "$plan_id" || rc=$? ;;
+    summary) _pfsm_finalize_summary "$project_root" "$plan_id" || rc=$? ;;
   esac
   exit "$rc"
 }
@@ -3644,7 +3923,7 @@ Subcommands:
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
-  plan-finalize <plan_id> --stage <sync|freeze|gates|review> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }

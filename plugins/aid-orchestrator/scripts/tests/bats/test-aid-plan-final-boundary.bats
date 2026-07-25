@@ -1755,3 +1755,310 @@ _write_review_outputs() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"run_id"* ]]
 }
+
+# =============================================================================
+# ─── aid-plan-fsm.sh plan-finalize --stage c4 / --stage summary ───────────
+#     (P068 Step 4 — the plan-mode C4 decision + the plan-level PM summary)
+# =============================================================================
+
+# _write_plan_c0 [head_override] — the plan's OWN C0 review at the canonical path
+# aid-c0-plan-review.sh writes (.aid-o/work/evidence/<plan_id>/c0-plan-review.json).
+# Stamped at plan_base_commit by default: a plan-time artifact is stale by
+# construction, so the aggregator's basis for it is ANCESTRY, not equality.
+_write_plan_c0() {
+  local dir="$TEST_PROJECT_ROOT/.aid-o/work/evidence/${PLAN_ID}"
+  mkdir -p "$dir"
+  local h="${1:-$(_manifest_field "$PLAN_ID" plan_base_commit)}"
+  jq -n --arg h "$h" --arg p "$PLAN_ID" \
+    '{schema_version:"aid-2.0", artifact_type:"plan_review", producer:"aid-c0-plan-review.sh@1.0",
+      created_at:"2026-07-25T00:00:00Z", control_protocol:"aid-2.0",
+      identity:{project_id:"aid-orchestrator", plan_id:$p, epic_id:null, run_id:"C0-1", step_id:null},
+      subject:{subject_hash:"sha256:c0"},
+      revision:{head_sha:$h, head_is_current:true, freshness:"current"},
+      status:"pass", verdict:{kind:"none", ready:true},
+      provenance:{dispatch_mode:"subagent", generated_by_tool:"aid-c0-plan-review.sh"},
+      plan_review:{review_status:"reviewed", blocking_findings:false}}' \
+    > "$dir/c0-plan-review.json"
+}
+
+# _seed_c4_project — a plan that has passed the FULL review boundary, plus the two
+# things C4 reads that the review stage does not produce: the plan's own C0 review
+# and the per-EPIC evidence directories the roll-up checks for on disk.
+_seed_c4_project() {
+  _seed_review_project
+  _write_review_outputs
+  _review
+  [ "$status" -eq 0 ]
+  _write_plan_c0
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/evidence/E-068-1_2/R-E-068-1_2-1"
+  # The at-HEAD verifier subprocess is stubbed (double-gated seam) — this suite
+  # exercises the plan-mode RESOLUTION layer, not aid-evidence-verify.sh itself,
+  # which has its own suite and costs ~9s per invocation.
+  export AID_TEST_MODE=1
+  export AID_RELEASE_POLICY_EVIDENCE_VERIFY_STUB=pass
+}
+
+# _c4 / _summary — the stages under test. The controller keeps the worktree on the
+# candidate across the whole review->c4->summary boundary; _review already did the
+# checkout, so these do not move HEAD.
+_c4()      { run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage c4      --project-root "$TEST_PROJECT_ROOT" "$@"; }
+_summary() { run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage summary --project-root "$TEST_PROJECT_ROOT" "$@"; }
+_decision() { printf '%s/release-decision.json' "$(_run_dir)"; }
+
+# ─── AC4.1: every plan-mode input names the plan, the attempt, the candidate,
+#     the target ref and the target head ─────────────────────────────────────
+@test "AC4: the plan-mode C4 decision names plan id, run id, candidate SHA, target ref and target head SHA" {
+  _seed_c4_project
+  local cand thead run
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
+  run="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+
+  _c4
+  [ "$status" -eq 0 ]
+
+  local d; d="$(_decision)"
+  [ -f "$d" ]
+  # identity: the PLAN, this attempt, and epic_id explicitly null.
+  [ "$(jq -r '.identity.plan_id' "$d")" = "$PLAN_ID" ]
+  [ "$(jq -r '.identity.run_id' "$d")" = "$run" ]
+  [ "$(jq -r '.identity.epic_id' "$d")" = "null" ]
+  [ "$(jq -r '.revision.head_sha' "$d")" = "$cand" ]
+  # the five identity facts, as data the PM brief renders from
+  [ "$(jq -r '.release_decision.plan_summary.plan_id' "$d")" = "$PLAN_ID" ]
+  [ "$(jq -r '.release_decision.plan_summary.plan_final_run_id' "$d")" = "$run" ]
+  [ "$(jq -r '.release_decision.plan_summary.reviewed_candidate_sha' "$d")" = "$cand" ]
+  [ "$(jq -r '.release_decision.plan_summary.target_ref' "$d")" = "main" ]
+  [ "$(jq -r '.release_decision.plan_summary.approved_target_sha' "$d")" = "$thead" ]
+  # and in the PM-facing one-liner, so a summary can never be read plan-agnostically
+  [[ "$(jq -r '.release_decision.summary_for_pm' "$d")" == *"plan=${PLAN_ID}"* ]]
+  [[ "$(jq -r '.release_decision.summary_for_pm' "$d")" == *"reviewed_candidate=${cand}"* ]]
+
+  # a complete plan-final pack releases
+  [ "$(jq -r '.release_decision.release_ready' "$d")" = "true" ]
+  [ "$(jq -r '.release_decision.blockers | length' "$d")" = "0" ]
+
+  # dual-run evidence, exactly as the EPIC hook emits it
+  local dr; dr="$(_run_dir)/release-decision-dual-run.json"
+  [ -f "$dr" ]
+  [ "$(jq -r '.event' "$dr")" = "release_policy_dual_run" ]
+  [ "$(jq -r '.candidate_sha' "$dr")" = "$cand" ]
+  [ "$(jq -r '.target_head_sha' "$dr")" = "$thead" ]
+  [ "$(jq -r '.enforcement' "$dr")" = "observe" ]
+
+  # the stage does not move the plan on: PM authorization is Step 5's
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "AWAITING_PM" ]
+}
+
+# ─── AC4.2: the Reporter and Simplifier are MANDATORY here — the EPIC
+#     `ca-review-complete` marker must not be able to make them a silent skip ──
+@test "AC4: C4 reads the run-scoped delivery-report.json — a ca-review-complete marker cannot demote a missing Reporter to not_applicable" {
+  _seed_c4_project
+  # The EPIC-mode escape hatch, planted deliberately: marker present, report gone.
+  rm -f "$(_run_dir)/delivery-report.json"
+  : > "$(_run_dir)/ca-review-complete"
+
+  _c4
+  [ "$status" -eq 0 ]   # observe mode records the decision; it does not fail the stage
+  local d; d="$(_decision)"
+  [ "$(jq -r '.release_decision.reporter_status' "$d")" = "missing" ]
+  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
+  run jq -r '[.release_decision.blockers[].input_id] | join(",")' "$d"
+  [[ "$output" == *"reporter"* ]]
+  # and NOT the EPIC-mode inversion
+  [ "$(jq -r '.release_decision.reporter_reason' "$d")" != "not_plan_boundary" ]
+}
+
+@test "AC4: a Simplifier report whose Head: provenance is not the candidate blocks, never skips" {
+  _seed_c4_project
+  printf '# Simplifier report\n\nHead: %s\n' "$(_manifest_field "$PLAN_ID" plan_base_commit)" \
+    > "$(_run_dir)/simplifier-report.md"
+
+  _c4
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision)"
+  [ "$(jq -r '.release_decision.simplifier_status' "$d")" = "fail" ]
+  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
+}
+
+# ─── AC4.3: identity validation — an EPIC evidence directory, and a copy of a
+#     valid EPIC pack placed at the plan path ────────────────────────────────
+@test "AC4: passing an EPIC evidence directory fails plan-mode identity validation and writes NO decision" {
+  _seed_c4_project
+  local epic_dir=".aid-o/work/evidence/E-068-1_2/R-E-068-1_2-1"
+  local out="$TEST_PROJECT_ROOT/${epic_dir}/release-decision.json"
+
+  run env AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" \
+    bash "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh" \
+      --plan "$PLAN_ID" --run-id "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
+      --evidence-dir "$epic_dir" \
+      --candidate-sha "$(_manifest_field "$PLAN_ID" candidate_sha)" \
+      --target-ref main \
+      --target-head-sha "$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)" \
+      --out "$out"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"IDENTITY MISMATCH"* ]]
+  [[ "$output" == *"not the plan-final run directory recorded in the manifest"* ]]
+  [ ! -f "$out" ]
+}
+
+@test "AC4: a mismatched --target-head-sha exits 1 regardless of policy mode, and reads no evidence" {
+  _seed_c4_project
+  run env AID_PROJECT_ROOT="$TEST_PROJECT_ROOT" \
+    bash "$AID_PLUGIN_PATH/scripts/aid-release-policy.sh" \
+      --plan "$PLAN_ID" --run-id "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
+      --evidence-dir "$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)" \
+      --candidate-sha "$(_manifest_field "$PLAN_ID" candidate_sha)" \
+      --target-ref main \
+      --target-head-sha "0000000000000000000000000000000000000000"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"target_branch_head_at_candidate_freeze"* ]]
+  [ ! -f "$(_decision)" ]
+}
+
+@test "AC4: a copy of a valid EPIC artifact placed at the plan path is blocked on identity, not accepted" {
+  _seed_c4_project
+  # A complete, protocol-valid delivery-gate — but an EPIC's, carrying identity.epic_id
+  # and the EPIC's run id. The path is right; the binding is not.
+  local dir; dir="$(_run_dir)"
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  jq --arg e "E-068-1_2" --arg r "R-E-068-1_2-1" \
+     '.identity.epic_id = $e | .identity.run_id = $r | del(.identity.plan_id)' \
+     "$dir/delivery-gate.json" > "$dir/delivery-gate.json.tmp"
+  mv "$dir/delivery-gate.json.tmp" "$dir/delivery-gate.json"
+
+  _c4
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision)"
+  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
+  run jq -r '[.release_decision.blockers[] | select(.input_id == "delivery_gate") | .reason] | join(" ")' "$d"
+  [[ "$output" == *"not bound to this plan-final attempt"* ]]
+}
+
+# ─── AC4: the per-EPIC roll-up blocker NAMES the EPIC ──────────────────────
+@test "AC4: an EPIC whose roll-up contribution is missing is a blocker naming that EPIC" {
+  _seed_c4_project
+  local dir; dir="$(_run_dir)"
+  jq '.sources = []' "$dir/acceptance-evidence.json" > "$dir/ae.tmp" && mv "$dir/ae.tmp" "$dir/acceptance-evidence.json"
+
+  _c4
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision)"
+  run jq -r '[.release_decision.blockers[].input_id] | join(",")' "$d"
+  [[ "$output" == *"epic_rollup:E-068-1_2"* ]]
+  [ "$(jq -r '.release_decision.release_ready' "$d")" = "false" ]
+}
+
+# ─── AC4.4: a retry writes -final-2 and leaves run 1 byte-identical ─────────
+@test "AC4: a retry after a PLAN_FIX writes R-<plan>-final-2 and never overwrites run 1's decision" {
+  _seed_c4_project
+  _c4
+  [ "$status" -eq 0 ]
+  local first_dir; first_dir="$(_run_dir)"
+  local first_sha; first_sha="$(sha256sum "$first_dir/release-decision.json" | awk '{print $1}')"
+  [[ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" == *"-final-1" ]]
+
+  # A fix lands on the plan branch → the candidate is invalidated on the next stage.
+  _commit_on "plan/${PLAN_ID}" fix.txt "an accepted specialist fix"
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
+  _c4
+  [ "$status" -eq 6 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_FIX" ]
+
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -eq 0 ]
+  [ "$(_manifest_field "$PLAN_ID" plan_final_run_id)" = "R-${PLAN_ID}-final-2" ]
+  local second_dir; second_dir="$(_run_dir)"
+  [ "$second_dir" != "$first_dir" ]
+
+  # Run 1 is untouched by everything that followed it.
+  [ "$(sha256sum "$first_dir/release-decision.json" | awk '{print $1}')" = "$first_sha" ]
+  [ ! -f "$second_dir/release-decision.json" ]
+}
+
+# ─── AC4.5: the PM summary keeps the four facts SEPARATE ───────────────────
+@test "AC4: the PM plan-final summary renders reviewed candidate, approved target, final merge SHA and tag status as four distinct fields" {
+  _seed_c4_project
+  _c4
+  [ "$status" -eq 0 ]
+
+  _summary
+  [ "$status" -eq 0 ]
+
+  local md; md="$(_run_dir)/pm-summary.md"
+  [ -f "$md" ]
+  local cand thead
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
+
+  grep -Fq "Reviewed candidate SHA:" "$md"
+  grep -Fq "Approved target SHA:" "$md"
+  grep -Fq "Final main merge SHA:" "$md"
+  grep -Fq "Release / tag status:" "$md"
+  grep -Fq "$cand" "$md"
+  grep -Fq "$thead" "$md"
+  # the merge has NOT happened — the summary must say so, not imply a release
+  grep -Fq "Final main merge SHA:** _not yet recorded_" "$md"
+  grep -Fq "not_tagged" "$md"
+  # roadmap §8 sections
+  grep -Fq "## What the plan delivered" "$md"
+  grep -Fq "### Skipped at EPIC level" "$md"
+  grep -Fq "## Plan-final gate results" "$md"
+  grep -Fq "## Specialist review summary" "$md"
+  grep -Fq "## Remaining backlog" "$md"
+  grep -Fq "## Merge decision" "$md"
+  # and it is the PLAN's summary, never an EPIC's
+  grep -Fq "# PM Plan-Final Summary — ${PLAN_ID}" "$md"
+  grep -Fq "E-068-1_2" "$md"
+
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "AWAITING_PM" ]
+}
+
+@test "AC4: --stage summary refuses when no plan-mode decision exists (it reports the decision, never substitutes for it)" {
+  _seed_c4_project
+  _summary
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"run '--stage c4' first"* ]]
+}
+
+@test "AC4: --stage summary refuses a decision bound to another plan-final attempt" {
+  _seed_c4_project
+  _c4
+  [ "$status" -eq 0 ]
+  local d; d="$(_decision)"
+  jq '.identity.run_id = "R-P068-final-9"' "$d" > "${d}.tmp" && mv "${d}.tmp" "$d"
+
+  _summary
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never be able to imply an intermediate EPIC was released"* ]]
+}
+
+# ─── the release-decision schema's blockers[].input_id oneOf ───────────────
+@test "AC4: blockers[].input_id accepts canonical ids and well-formed epic_rollup ids, and rejects both malformed branches" {
+  local schema="$AID_PLUGIN_PATH/defaults/schemas/release-decision.schema.json"
+  run python3 - "$schema" <<'PY'
+import json, sys
+from jsonschema import Draft202012Validator
+schema = json.load(open(sys.argv[1]))
+sub = schema["properties"]["release_decision"]["properties"]["blockers"]["items"]["properties"]["input_id"]
+v = Draft202012Validator(sub)
+cases = {
+    "delivery_gate": True,          # canonical (branch 1)
+    "delivery_report": True,        # plan-mode Reporter input (branch 1)
+    "epic_rollup:E-068-1_2": True,  # well-formed EPIC id (branch 2)
+    "epic_rollup:E-999-12_34": True,
+    "delivery_gates": False,        # typo in a canonical id still fails
+    "epic_rollup:E-68-1_2": False,  # malformed EPIC id still fails
+    "epic_rollup:*": False,
+}
+bad = [k for k, want in cases.items() if v.is_valid(k) != want]
+print("MISMATCH:", bad) if bad else print("ALL_OK")
+PY
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ALL_OK"* ]]
+}
