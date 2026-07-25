@@ -23,7 +23,10 @@
         "required": ["id", "scope"],
         "properties": {
           "id": { "type": "string", "pattern": "^E-[0-9]+-[0-9]+_[0-9]+$" },
-          "scope": { "enum": ["required", "backlog"] }
+          "scope": {
+            "enum": ["required", "backlog", "abandoned", "superseded"],
+            "description": "P068 E-068-1_2 Step 5 (CF1) widens this from [required, backlog]. `abandoned` and `superseded` are written by plan-merge-to-main, in the SAME commit as the delivery bindings, for EPICs the PM terminated without delivery — so aid_plan_closure_state stops counting them in the required denominator and the plan can close. They are NOT written at epic-complete: _aid_lc_require_target_branch refuses a lifecycle write off the target branch, and epic-complete runs on a task branch. The PM's REASON deliberately does not live here — this file is additionalProperties:false and aid_lifecycle_publicsafe_check rejects a free-text `reason` key; the reason is recorded in the runtime plan-state and the operation log."
+          }
         }
       }
     },
@@ -47,6 +50,10 @@
           "bound_at": { "type": "string" }
         }
       }
+    },
+    "status": {
+      "enum": ["active", "closed", "aborted"],
+      "description": "P068 E-068-1_2 Step 5: the plan's terminal lifecycle status, durable on the target branch. Absent means `active` (every manifest written before P068). Step 6 (plan-close) owns the transition to `closed`; an aborted plan is recorded as `aborted`. Deliberately additive: the receipt remains the authoritative closure artifact, this is the manifest-side flag closure predicates can read without resolving a second file."
     },
     "created_at": { "type": "string" },
     "aid_version": { "type": "string" }

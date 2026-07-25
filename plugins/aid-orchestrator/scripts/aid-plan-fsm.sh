@@ -1876,6 +1876,26 @@ _pfsm_finalize_sync() {
     return 1
   fi
 
+  # ── CONFLICT resolution invalidates the frozen candidate (P068 Step 5) ───
+  # `CONFLICT` is not terminal. The operator resolves a plan-merge conflict by
+  # re-synchronising the target branch into the plan branch — i.e. by running
+  # THIS stage — and that necessarily produces a new plan branch head. So the
+  # frozen candidate is discarded here rather than silently re-pointed: there is
+  # deliberately NO path from CONFLICT back to a merge against the old
+  # candidate, and a PM decision bound to it must not survive the resolution.
+  local pre_state=""
+  pre_state="$(plan_state_get "$plan_id" "plan_state")" || pre_state=""
+  if [[ "$pre_state" == "CONFLICT" ]]; then
+    local held=""
+    held="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || held=""
+    if [[ -n "$held" && "$held" != "null" && "$held" != "not_found" ]]; then
+      local circ=0
+      plan_final_invalidate "$plan_id" "conflict_resync" "PLAN_SYNC" || circ=$?
+      [[ "$circ" -ne 0 ]] && return "$circ"
+      echo "CANDIDATE INVALIDATED: ${plan_id} was in CONFLICT and the resolution re-synchronises ${plan_branch}, which necessarily moves its head — the frozen candidate ${held} and every plan-final field are cleared, and any PM decision bound to it is void. Re-run '--stage freeze' onwards after this sync." >&2
+    fi
+  fi
+
   # ── Every EPIC must be terminal ─────────────────────────────────────────
   # `pending` or `running` means work is still outstanding: syncing and then
   # freezing a candidate would seal a plan that does not contain it. The
@@ -2070,6 +2090,17 @@ _pfsm_finalize_freeze() {
     echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
     return 1
   }
+
+  # P068 Step 5: `prepare-plan` runs BEFORE this stage, so it cannot write into
+  # a run directory that does not exist yet — it records the resolved version
+  # (or the literal `none`) in the plan's runtime state directory. Copy that
+  # record into the attempt's evidence now, so "tag or no tag" is auditable
+  # against THIS attempt. plan-merge-to-main reads this copy first and falls
+  # back to the canonical record; a missing record means `none` (no tag).
+  local prep_src="${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"
+  if [[ -s "$prep_src" ]]; then
+    cp -p "$prep_src" "${run_dir_abs}/release-prep.json" 2>/dev/null || true
+  fi
 
   # ── The atomic two-field freeze write ───────────────────────────────────
   # candidate_sha + candidate_frozen_at land in the SAME manifest write (with
@@ -3448,6 +3479,494 @@ cmd_plan_finalize() {
 }
 
 # =============================================================================
+# P068 Step 5 — `plan-merge-to-main`: the ONE place in AID where the target
+# branch moves
+# =============================================================================
+#
+# It replaces the prose merge in skills/pipeline.md AND the version/tag ceremony
+# aid-release.sh performs per EPIC today. Under `plan_branch` mode nothing else
+# advances the target branch: no EPIC merges into it, and no intermediate EPIC
+# creates a version commit or a tag.
+#
+# ── WHY THE PUBLISH AND THE LIFECYCLE COMMIT ARE TWO STAGES ─────────────────
+# They have CONFLICTING requirements, and one code path cannot satisfy both:
+#
+#   The merge must NOT check out the target branch. `git checkout <target>` +
+#   head check + `git merge` leaves a TOCTOU window in which another process
+#   moves the ref between the check and the merge — and in the normal case the
+#   checkout is not even possible, because the target branch is checked out in
+#   another linked worktree and Git refuses the same branch twice.
+#
+#   The lifecycle write must be ON the target branch:
+#   `_aid_lc_require_target_branch` tests `git branch --show-current`.
+#
+# The sequence resolves both:
+#
+#   Stage 1 — build the merge commit in ISOLATION (`git merge-tree --write-tree`
+#   for the tree, `git commit-tree` with first parent <target_head_sha> and
+#   second parent <candidate_sha>) without moving ANY ref, then publish with
+#   `git update-ref refs/heads/<target> <merge> <target_head_sha>`. That is a
+#   compare-and-swap: it fails atomically if the ref no longer points at the
+#   expected old value, leaving the target branch byte-identical. THE RELEASE IS
+#   NOW PUBLISHED and the CAS window is closed.
+#
+#   Stage 2 — only then the lifecycle commit: the delivery bindings and the CF1
+#   re-scope, NOT the receipt. Built with `git commit-tree` (parent = the
+#   published merge commit) and published with another compare-and-swap
+#   `update-ref` — no worktree, no HEAD. See lib/aid-lifecycle.sh's PLAN MODE
+#   header for the five binding-path functions this required.
+#
+# The receipt is Step 6's (`plan-close`): the split is deliberate so a single
+# owner writes each artifact. Step 5 makes the plan CLOSABLE (every required
+# EPIC delivered and reviewed, abandoned ones re-scoped); Step 6 verifies
+# closure and commits the receipt. If the process dies between the two stages
+# the merge STANDS, and the resumed run re-applies the missing binding
+# idempotently — never a second merge.
+#
+# ── TAGGING IS CONDITIONAL ON A VERSION BUMP ────────────────────────────────
+# `prepare-plan --bump auto` may resolve to NO bump (only chore:/docs: commits
+# since the last tag). The candidate's version then equals the already-released
+# one, and `tag-plan --version <that version>` would fail because the tag exists
+# on an older commit. So `prepare-plan` records the resolved version — or the
+# literal `none` — in release-prep.json, and this command calls `tag-plan` ONLY
+# when a new version was prepared. A no-bump plan merges and closes with NO new
+# tag: a legal, tested outcome, not a `tag-plan` failure.
+#
+# ── PUSH ────────────────────────────────────────────────────────────────────
+# Publishing to a remote is OPT-IN (`--push`), never a side effect of merging.
+# The push is guarded the same way the tag is: it checks whether the remote ref
+# already contains the merge commit and pushes at most once.
+# ---------------------------------------------------------------------------
+
+# _pfsm_rfc3339_epoch <ts> — echo the epoch seconds of a STRICT RFC 3339 UTC
+# instant, or return 1. Deliberately strict and fail-closed: this feeds the
+# freeze-time comparison, where "could not parse, assume it is old enough" is
+# exactly the degenerate acceptance AC3 forbids.
+_pfsm_rfc3339_epoch() {
+  local ts="${1:-}"
+  [[ "$ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]] || return 1
+  local e=""
+  e="$(date -u -d "$ts" +%s 2>/dev/null)" || return 1
+  [[ -n "$e" ]] || return 1
+  printf '%s' "$e"
+}
+
+# _pfsm_validate_json_schema <json_file> <schema_basename> — fail-closed schema
+# validation for a runtime (gitignored) JSON artifact. Mirrors
+# aid_lifecycle_schema_validate's contract: no python3/jsonschema means the
+# artifact is NOT validated, and an unvalidated PM authorization must never
+# authorize a merge, so that is exit 1 too.
+_pfsm_validate_json_schema() {
+  local f="$1" schema_base="$2"
+  local schema="${SCRIPT_DIR}/../defaults/schemas/${schema_base}"
+  [[ -f "$f" ]] || { echo "schema: artifact not found: $f" >&2; return 1; }
+  [[ -f "$schema" ]] || { echo "schema: schema not found: $schema" >&2; return 1; }
+  if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import jsonschema' >/dev/null 2>&1; then
+    echo "schema: validator unavailable (python3 + jsonschema are required to validate ${schema_base}) — refusing to act on an unvalidated artifact." >&2
+    return 1
+  fi
+  python3 -c '
+import sys, json, jsonschema
+schema = json.load(open(sys.argv[1]))
+try:
+    inst = json.load(open(sys.argv[2]))
+except Exception as e:
+    print("schema: artifact is not valid JSON: %s" % e, file=sys.stderr); sys.exit(1)
+try:
+    jsonschema.validate(inst, schema)
+except jsonschema.ValidationError as e:
+    print("schema: %s" % e.message, file=sys.stderr); sys.exit(1)
+' "$schema" "$f"
+}
+
+# _pfsm_release_prep_version <root> <plan_id> <run_dir_rel> — echo the version
+# `prepare-plan` resolved, or the literal `none`. Reads the run-directory copy
+# first (the attempt's own evidence) and falls back to the canonical record in
+# the plan's runtime state directory. A MISSING record is `none`: a plan that
+# never ran prepare-plan prepared no version, so it gets no tag.
+_pfsm_release_prep_version() {
+  local root="$1" plan_id="$2" run_dir_rel="$3"
+  local f v
+  for f in "${root}/${run_dir_rel}/release-prep.json" \
+           "${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"; do
+    [[ -s "$f" ]] || continue
+    v="$(jq -r '.version // "none"' "$f" 2>/dev/null || echo none)"
+    [[ -z "$v" || "$v" == "null" ]] && v="none"
+    printf '%s' "$v"
+    return 0
+  done
+  printf 'none'
+  return 0
+}
+
+# _pfsm_terminal_rescope <plan_id> — echo "<epic_id>=<abandoned|superseded>"
+# lines from the RUNTIME plan-boundary manifest's epic_runs[]. This is CF1's
+# input: P064 could only record the terminal status in the runtime manifest,
+# because `epic-complete` runs on a task branch and lifecycle writes are refused
+# there. Here we are past the merge, so the git-tracked re-scope is legal.
+_pfsm_terminal_rescope() {
+  local plan_id="$1"
+  plan_manifest_get "$plan_id" \
+    '[.plan_boundary_manifest.epic_runs[] | select(.status == "abandoned" or .status == "superseded") | .epic_id + "=" + .status] | join("\n")' \
+    2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# cmd_plan_merge_to_main <plan_id> --decision <path> [--project-root <path>]
+#                        [--op-id <id>] [--push]
+# ---------------------------------------------------------------------------
+cmd_plan_merge_to_main() {
+  local plan_id="" decision_file="" project_root_opt="" op_id_opt="" do_push=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --decision)
+        _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
+        decision_file="$2"; shift 2 ;;
+      --project-root)
+        _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
+        project_root_opt="$2"; shift 2 ;;
+      --op-id)
+        _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
+        op_id_opt="$2"; shift 2 ;;
+      --push) do_push=1; shift ;;
+      --*) echo "ERROR: plan-merge-to-main: unknown flag: $1" >&2; exit 2 ;;
+      *)
+        if [[ -z "$plan_id" ]]; then plan_id="$1"
+        else echo "ERROR: plan-merge-to-main: unexpected argument: $1" >&2; exit 2; fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" || -z "$decision_file" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]" >&2
+    exit 2
+  fi
+  if ! _pfsm_validate_plan_id "$plan_id"; then
+    echo "ERROR: plan-merge-to-main: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
+    exit 2
+  fi
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: plan-merge-to-main requires jq." >&2; exit 1; }
+
+  local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+
+  _pfsm_check_no_merge_in_progress "$root" || exit 1
+  _pfsm_check_clean_worktree "$root" || exit 1
+
+  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
+    echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
+    exit 1
+  fi
+
+  # ── The candidate binding this merge is authorized against ───────────────
+  local target_branch candidate frozen_at target_head_frozen run_id run_dir_rel v
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  frozen_at="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_frozen_at')" || frozen_at=""
+  target_head_frozen="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')" || target_head_frozen=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  for v in target_branch candidate target_head_frozen run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_id} has no frozen candidate (${v} is unset) — there is nothing a PM could have authorized. Run the plan-final stages first." >&2
+      exit 1
+    fi
+  done
+
+  # ── AC3 (fail-closed freeze time): a manifest with no candidate_frozen_at, or
+  #    one that is not a strict RFC 3339 UTC instant, is a DEGENERATE input and
+  #    exits 1 — never "assume the decision is old enough". ─────────────────
+  local frozen_epoch=""
+  if [[ -z "$frozen_at" || "$frozen_at" == "null" || "$frozen_at" == "not_found" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the RUNTIME plan-boundary manifest for ${plan_id} carries no candidate_frozen_at — the PM decision's freshness cannot be established, so no merge is authorized. Re-freeze the candidate." >&2
+    exit 1
+  fi
+  if ! frozen_epoch="$(_pfsm_rfc3339_epoch "$frozen_at")"; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: candidate_frozen_at '${frozen_at}' is not a valid RFC 3339 UTC instant — refusing to compare a PM decision against an unparseable freeze time." >&2
+    exit 1
+  fi
+
+  # ── The PM decision artifact ─────────────────────────────────────────────
+  if [[ ! -s "$decision_file" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: no PM decision at '${decision_file}' — ${target_branch} is unchanged. The merge is PM-authorized; it never proceeds on an absent authorization." >&2
+    exit 1
+  fi
+  if ! jq -e '.' "$decision_file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: '${decision_file}' is not parseable JSON — ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+  local vout="" vrc=0
+  vout="$(_pfsm_validate_json_schema "$decision_file" "pm-plan-decision.schema.json" 2>&1)" || vrc=$?
+  if [[ "$vrc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the PM decision at '${decision_file}' fails pm-plan-decision.schema.json — ${target_branch} is unchanged and NO Git action was taken. ${vout}" >&2
+    exit 1
+  fi
+
+  local d_plan d_run d_decision d_cand d_target d_thead d_at
+  d_plan="$(jq -r '.plan_id' "$decision_file")"
+  d_run="$(jq -r '.plan_final_run_id' "$decision_file")"
+  d_decision="$(jq -r '.decision' "$decision_file")"
+  d_cand="$(jq -r '.candidate_sha' "$decision_file")"
+  d_target="$(jq -r '.target_branch' "$decision_file")"
+  d_thead="$(jq -r '.target_head_sha' "$decision_file")"
+  d_at="$(jq -r '.decided_at' "$decision_file")"
+
+  if [[ "$d_plan" != "$plan_id" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the decision authorizes plan '${d_plan}', not '${plan_id}' — ${target_branch} is unchanged and no Git action was taken." >&2
+    exit 1
+  fi
+  if [[ "$d_run" != "$run_id" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the decision is bound to plan-final run '${d_run}', but ${plan_id}'s current attempt is '${run_id}' — a decision about an earlier attempt cannot authorize this one. ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+  local decided_epoch=""
+  if ! decided_epoch="$(_pfsm_rfc3339_epoch "$d_at")"; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: decided_at '${d_at}' is not a valid RFC 3339 UTC instant — refusing to accept an authorization whose timestamp cannot be compared with candidate_frozen_at. ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+  if [[ "$decided_epoch" -lt "$frozen_epoch" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the decision was made at ${d_at}, BEFORE the candidate was frozen at ${frozen_at} — it cannot be a decision about this candidate (a re-freeze rewrites candidate_frozen_at precisely so a decision bound to the pre-refreeze candidate fails here). ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+
+  # ── The plan state this command is legal from ────────────────────────────
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+  case "$cur_state" in
+    AWAITING_PM|PLAN_MERGING) ;;
+    *)
+      echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_id} is in state '${cur_state:-<none>}' — the merge runs out of AWAITING_PM (PLAN_MERGING is the crash-resume re-entry). ${target_branch} is unchanged." >&2
+      exit 1
+      ;;
+  esac
+
+  # ── FIX / ABORT: refuse the merge, record the outcome ────────────────────
+  if [[ "$d_decision" != "MERGE" ]]; then
+    local reason; reason="$(jq -r '.reason // ""' "$decision_file")"
+    local to=""
+    case "$d_decision" in
+      FIX)   to="PLAN_FIX" ;;
+      ABORT) to="ABORTED" ;;
+    esac
+    if [[ "$d_decision" == "ABORT" ]]; then
+      plan_manifest_update "$plan_id" ".plan_boundary_manifest.terminal_reason = $(jq -Rn --arg s "${reason:-pm_abort}" '$s')" >/dev/null 2>&1 || true
+    fi
+    if ! _pfsm_plan_state_set "$plan_id" "$to"; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the PM decided ${d_decision}, but ${plan_id} could not be moved to ${to}. ${target_branch} is unchanged; reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
+      exit 1
+    fi
+    echo "PM DECISION ${d_decision}: no merge was performed for ${plan_id}; ${target_branch} is unchanged and ${plan_id} is now ${to}${reason:+ (reason: ${reason})}." >&2
+    exit 3
+  fi
+
+  # ── The candidate must be exactly what the PM approved, and still be the
+  #    plan branch head ────────────────────────────────────────────────────
+  local plan_branch="plan/${plan_id}"
+  local plan_head=""
+  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  if [[ -z "$plan_head" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: ${plan_branch} not found — ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+  if [[ "$d_cand" != "$candidate" || "$plan_head" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: candidate mismatch — the decision names ${d_cand}, the manifest's frozen candidate is ${candidate}, and ${plan_branch} is at ${plan_head}. All three must be identical. ${target_branch} is unchanged and no Git action was taken." >&2
+    exit 1
+  fi
+  if [[ "$d_target" != "$target_branch" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the decision authorizes a merge into '${d_target}', but ${plan_id}'s target branch is '${target_branch}'. Nothing was merged." >&2
+    exit 1
+  fi
+
+  local target_head=""
+  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  if [[ -z "$target_head" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: target branch ${target_branch} not found." >&2
+    exit 1
+  fi
+  if [[ "$d_thead" != "$target_head_frozen" ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the decision approved target head ${d_thead}, but the candidate was frozen against ${target_head_frozen} — the authorization does not describe this candidate binding. ${target_branch} is unchanged." >&2
+    exit 1
+  fi
+
+  # ── Crash resume: has THIS op already published its merge? ────────────────
+  local op_id="${op_id_opt:-$(plan_op_key "plan-merge-to-main" "$plan_id" "-" "0" "$plan_id")}"
+  local phase="none" prc=0
+  phase="$(plan_op_reconcile "$plan_id" "$op_id")" || prc=$?
+  local resumed_merge=""
+  if [[ "$phase" == "git_applied" || "$phase" == "state_committed" ]]; then
+    resumed_merge="$(_pfsm_last_resulting_sha "$plan_id" "$op_id")"
+  fi
+
+  # ── The stale-authorization case: the target branch advanced while the PM
+  #    was deciding. This is NOT merely a mismatch — the plan must go back and
+  #    re-synchronise, so the candidate binding is invalidated and the plan
+  #    returns to PLAN_SYNC. (Skipped on a resumed run whose merge is already
+  #    published: the target head has legitimately moved to OUR merge.) ─────
+  if [[ -z "$resumed_merge" && "$target_head" != "$target_head_frozen" ]]; then
+    plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_final_merge = {"result":"stale_authorization"}' >/dev/null 2>&1 || true
+    local irc=0
+    plan_final_invalidate "$plan_id" "stale_authorization" "PLAN_SYNC" || irc=$?
+    echo "STALE AUTHORIZATION: ${target_branch} advanced from the approved ${target_head_frozen} to ${target_head} while the PM was deciding. NOTHING was merged, ${target_branch} is unchanged, the candidate binding is cleared and ${plan_id} is back in PLAN_SYNC. Re-run '--stage sync' onwards and obtain a fresh decision." >&2
+    [[ "$irc" -ne 0 ]] && exit "$irc"
+    exit 1
+  fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STAGE 1 — build the merge in isolation, publish with a compare-and-swap
+  # ─────────────────────────────────────────────────────────────────────────
+  local brc=0
+  plan_op_begin "$plan_id" "$op_id" "plan-merge-to-main" "$plan_id" "$target_head" || brc=$?
+  if [[ "$brc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: could not record the operation intent for ${plan_id} (rc=${brc}) — nothing was merged." >&2
+    exit 1
+  fi
+
+  local merge_commit="" merged_tree=""
+  if [[ -n "$resumed_merge" ]] && git -C "$root" rev-parse --verify --quiet "${resumed_merge}^{commit}" >/dev/null 2>&1 \
+     && git -C "$root" merge-base --is-ancestor "$resumed_merge" "$target_branch" 2>/dev/null; then
+    # Already published by an earlier attempt of THIS op — never a second merge.
+    merge_commit="$resumed_merge"
+    merged_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null)"
+    echo "RESUME: the plan merge ${merge_commit} is already published on ${target_branch} — skipping the merge and continuing with the lifecycle bindings, the tag and the push." >&2
+  else
+    # Merge TREE first — no ref moves, no worktree is touched, no MERGE_HEAD is
+    # created, so a conflict costs nothing and leaves nothing to abort.
+    local mt_out="" mt_rc=0
+    mt_out="$(git -C "$root" merge-tree --write-tree --no-messages "$target_head" "$candidate" 2>&1)" || mt_rc=$?
+    if [[ "$mt_rc" -ne 0 ]]; then
+      _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
+      echo "MERGE CONFLICT: ${plan_branch} (${candidate}) does not merge cleanly into ${target_branch} (${target_head}). NOTHING was merged — ${target_branch} is still at ${target_head} — and ${plan_id} is now CONFLICT. Resolve by re-synchronising the target branch into the plan branch ('plan-finalize --stage sync'), which necessarily produces a NEW plan branch head and therefore INVALIDATES the frozen candidate: there is no path from CONFLICT back to a merge against the old candidate." >&2
+      printf '%s\n' "$mt_out" >&2
+      exit 4
+    fi
+    merged_tree="$(printf '%s' "$mt_out" | head -1 | tr -d '[:space:]')"
+    if ! [[ "$merged_tree" =~ ^[0-9a-f]{40}$ ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: git merge-tree did not produce a tree object for ${plan_id} — ${target_branch} is unchanged. Output: ${mt_out}" >&2
+      exit 1
+    fi
+
+    local msg="merge(plan): ${plan_id} — ${plan_branch} into ${target_branch}"
+    merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$candidate" -m "$msg" 2>/dev/null)" || merge_commit=""
+    if [[ -z "$merge_commit" ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: could not build the merge commit for ${plan_id} — no ref was moved and ${target_branch} is unchanged." >&2
+      exit 1
+    fi
+    # Still nothing published: the commit exists as a dangling object only.
+    if ! git -C "$root" update-ref "refs/heads/${target_branch}" "$merge_commit" "$target_head" 2>/dev/null; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the compare-and-swap publish was REJECTED — ${target_branch} no longer points at the expected ${target_head}, so another process advanced it between the head check and the publish. NOTHING was published; ${target_branch} is byte-identical. Re-run: the revalidation will detect the advance as a stale authorization." >&2
+      exit 1
+    fi
+  fi
+
+  local grc=0
+  plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
+  [[ "$grc" -ne 0 ]] && echo "WARN: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the git_applied record could not be written (rc=${grc}) — a resumed run will re-verify from the ref itself." >&2
+
+  # ── Tree identity + reachability, between publish and lifecycle commit ────
+  local actual_tree=""
+  actual_tree="$(git -C "$root" rev-parse "${merge_commit}^{tree}" 2>/dev/null)" || actual_tree=""
+  if [[ "$actual_tree" != "$merged_tree" ]]; then
+    echo "TREE VERIFICATION FAILED: the published merge commit ${merge_commit} has tree ${actual_tree:-<unresolved>}, not the expected merged tree ${merged_tree}. ${target_branch} has ALREADY MOVED and this command will NOT attempt an automatic reset — published history is repaired by a new revert or hotfix, never destructively. Inspect manually before any further plan command." >&2
+    exit 5
+  fi
+  if ! git -C "$root" merge-base --is-ancestor "$candidate" "$target_branch" 2>/dev/null; then
+    echo "TREE VERIFICATION FAILED: the candidate ${candidate} is not reachable from ${target_branch} after the merge ${merge_commit}. ${target_branch} has ALREADY MOVED; inspect manually — no automatic reset is attempted." >&2
+    exit 5
+  fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STAGE 2 — the lifecycle commit, by plumbing, on top of the published merge
+  # ─────────────────────────────────────────────────────────────────────────
+  local -a rescope=()
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" && "$line" != "not_found" && "$line" != "null" ]] && rescope+=("$line")
+  done < <(_pfsm_terminal_rescope "$plan_id")
+
+  local run_dir_abs="${root}/${run_dir_rel}"
+  local lrc=0 lout=""
+  lout="$(aid_lifecycle_plan_merge_bind "$plan_id" "$root" "$merge_commit" "$run_dir_abs" \
+            ${rescope[@]+"${rescope[@]}"} 2>&1)" || lrc=$?
+  if [[ "$lrc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the lifecycle delivery bindings / CF1 re-scope were not committed (rc=${lrc}). The merge stands — do NOT re-merge; re-run this command (or plan-close-check) to re-apply the bindings idempotently. Detail: ${lout}" >&2
+    exit 1
+  fi
+
+  # ── The ONE conditional tag (bindings first, so a crash between them cannot
+  #    produce a tagged release with no closure path) ───────────────────────
+  local version tag_status="none"
+  version="$(_pfsm_release_prep_version "$root" "$plan_id" "$run_dir_rel")"
+  if [[ "$version" != "none" ]]; then
+    local trc=0 tout=""
+    tout="$(bash "${SCRIPT_DIR}/aid-release.sh" tag-plan "$plan_id" \
+              --merge-sha "$merge_commit" --version "$version" --project-root "$root" 2>&1)" || trc=$?
+    if [[ "$trc" -ne 0 ]]; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: the merge and the lifecycle bindings are published, but tag-plan failed for v${version} (rc=${trc}). The merge stands; resolve the tag and re-run. Detail: ${tout}" >&2
+      exit 1
+    fi
+    tag_status="v${version}"
+  else
+    echo "NO TAG: prepare-plan resolved no version bump for ${plan_id} (release-prep.json records 'none'), so no tag is created. A no-bump plan merges and closes without a new tag." >&2
+  fi
+
+  # ── Push (opt-in, guarded, at most once) ─────────────────────────────────
+  local push_status="skipped"
+  if [[ "$do_push" -eq 1 ]]; then
+    local remote=""
+    remote="$(git -C "$root" config --get "branch.${target_branch}.remote" 2>/dev/null || true)"
+    [[ -z "$remote" ]] && remote="$(git -C "$root" remote 2>/dev/null | head -1 || true)"
+    if [[ -z "$remote" ]]; then
+      push_status="no_remote"
+      echo "NO PUSH: --push was given but this repository has no remote configured." >&2
+    else
+      local remote_sha=""
+      remote_sha="$(git -C "$root" ls-remote "$remote" "refs/heads/${target_branch}" 2>/dev/null | awk '{print $1}' | head -1 || true)"
+      if [[ -n "$remote_sha" ]] && git -C "$root" merge-base --is-ancestor "$merge_commit" "$remote_sha" 2>/dev/null; then
+        push_status="already_pushed"
+        echo "PUSH SKIPPED: ${remote}/${target_branch} already contains ${merge_commit}." >&2
+      else
+        local push_rc=0
+        git -C "$root" push "$remote" "refs/heads/${target_branch}:refs/heads/${target_branch}" >/dev/null 2>&1 || push_rc=$?
+        if [[ "$push_rc" -ne 0 ]]; then
+          echo "PRECONDITION FAIL: plan-merge-to-main: the merge, bindings and tag are LOCAL and durable, but the push to ${remote} failed (rc=${push_rc}). Re-run with --push once the remote is reachable; the push guard makes it idempotent." >&2
+          exit 1
+        fi
+        push_status="pushed"
+        if [[ "$tag_status" != "none" ]]; then
+          git -C "$root" push "$remote" "refs/tags/${tag_status}" >/dev/null 2>&1 || true
+        fi
+      fi
+    fi
+  fi
+
+  # ── Record + transition ──────────────────────────────────────────────────
+  local merge_json
+  merge_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg tb "$target_branch" \
+    --arg thead "$target_head_frozen" --arg mc "$merge_commit" --arg tree "$merged_tree" \
+    --arg tag "$tag_status" --arg push "$push_status" \
+    '{result:"merged", run_id:$run, candidate_sha:$cand, target_branch:$tb,
+      target_head_before:$thead, merge_commit:$mc, merged_tree:$tree,
+      tag:$tag, push:$push}')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_merge = ${merge_json}" >/dev/null 2>&1 || \
+    echo "WARN: plan-merge-to-main: the merge ${merge_commit} is published but could not be recorded in the runtime manifest." >&2
+
+  if ! _pfsm_plan_state_set "$plan_id" "PLAN_MERGING"; then
+    echo "PRECONDITION FAIL: plan-merge-to-main: ${merge_commit} is published on ${target_branch} and the bindings are committed, but ${plan_id} could not be moved to PLAN_MERGING. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}' before plan-close." >&2
+    exit 1
+  fi
+
+  local crc=0
+  plan_op_commit "$plan_id" "$op_id" || crc=$?
+  [[ "$crc" -ne 0 ]] && echo "WARN: plan-merge-to-main: could not append the state_committed record for ${op_id} (rc=${crc})." >&2
+
+  echo "$merge_commit"
+  echo "MERGED: ${plan_id} candidate ${candidate} is published on ${target_branch} as ${merge_commit} (tag=${tag_status}, push=${push_status}); ${plan_id} is now PLAN_MERGING. The closure receipt is plan-close's." >&2
+  return 0
+}
+
+# =============================================================================
 # cmd_plan_state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>]
 #                [--project-root ...]
 # =============================================================================
@@ -3924,6 +4443,7 @@ Subcommands:
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }
@@ -3937,6 +4457,7 @@ main() {
     epic-complete) cmd_epic_complete "$@" ;;
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
+    plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
     -h|--help|"")
       _aid_plan_fsm_usage

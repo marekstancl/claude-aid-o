@@ -3,6 +3,55 @@
 # AID Orchestrator — version bump check before push
 # Blocks push if feat:/fix: commits exist since last tag without version bump.
 
+# ── P068 E-068-1_2 Step 5: plan/* and task/* are EXEMPT ─────────────────────
+# This guard blocks any push carrying feat:/fix: commits since the last tag with
+# no release: commit among them. In `plan_branch` mode a plan branch accumulates
+# exactly that from its first EPIC until the plan-final freeze, so without this
+# exemption EVERY push of a task/* or plan/* branch would be blocked — and the
+# remedy the hook prints (`aid-release.sh auto`) is the per-EPIC release ceremony
+# P068 exists to remove. The guard stays FULLY ACTIVE for the target branch,
+# which under the new model is the only branch where a premature release is
+# possible: it is moved once, by plan-merge-to-main, after the PM authorizes it.
+#
+# The refs being pushed are read from stdin (git's pre-push protocol:
+# "<local ref> <local sha> <remote ref> <remote sha>" per line). A `(delete)`
+# local ref carries no commits and is skipped. Only if EVERY pushed ref is a
+# plan/* or task/* branch is the push exempt — a push that also carries the
+# target branch is still checked. When stdin is empty (the hook invoked by hand,
+# or a git that supplies no refs) we fall back to the current branch name, so the
+# exemption is never silently unreachable.
+_AID_PUSH_REFS=""
+if [ ! -t 0 ]; then
+  while read -r _lref _lsha _rref _rsha; do
+    [ -n "${_lref:-}" ] || continue
+    _AID_PUSH_REFS="${_AID_PUSH_REFS}${_lref}
+"
+  done
+fi
+if [ -z "$_AID_PUSH_REFS" ]; then
+  _AID_PUSH_REFS="$(git symbolic-ref -q HEAD 2>/dev/null || true)"
+fi
+
+if [ -n "$_AID_PUSH_REFS" ]; then
+  _AID_ALL_EXEMPT=true
+  _AID_SAW_REF=false
+  while IFS= read -r _ref; do
+    [ -n "$_ref" ] || continue
+    [ "$_ref" = "(delete)" ] && continue
+    _AID_SAW_REF=true
+    case "$_ref" in
+      refs/heads/plan/*|refs/heads/task/*|plan/*|task/*) ;;
+      *) _AID_ALL_EXEMPT=false ;;
+    esac
+  done <<EOF
+$_AID_PUSH_REFS
+EOF
+  if [ "$_AID_SAW_REF" = "true" ] && [ "$_AID_ALL_EXEMPT" = "true" ]; then
+    # plan/* and task/* only — the version-bump guard does not apply.
+    exit 0
+  fi
+fi
+
 _AID_LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 
 if [[ -z "$_AID_LAST_TAG" ]]; then

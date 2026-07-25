@@ -38,6 +38,10 @@ setup() {
   source "$PLAN_STATE_LIB"
   # shellcheck disable=SC1090
   source "$PLAN_MANIFEST_LIB"
+  LIFECYCLE_LIB="$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  export LIFECYCLE_LIB
+  # shellcheck disable=SC1090
+  source "$LIFECYCLE_LIB"
 }
 
 teardown() {
@@ -65,6 +69,19 @@ _bootstrap() {
   printf '.aid-o/work/\n' > "$TEST_PROJECT_ROOT/.gitignore"
   git -C "$TEST_PROJECT_ROOT" add -- .gitignore
   git -C "$TEST_PROJECT_ROOT" commit -q -m "gitignore the runtime area"
+  # P068 Step 5 (opt-in): the GIT-TRACKED lifecycle manifest the plan merge binds
+  # deliveries into. It has to exist on the TARGET branch BEFORE the plan branch
+  # is cut — a later commit on main would advance the target head past the one
+  # the candidate is frozen against, which plan-merge-to-main correctly rejects
+  # as a stale authorization. Built through the REAL entry point
+  # (aid_lifecycle_ensure_manifest + its strict legacy EPIC parse), never a
+  # hand-written fixture manifest.
+  if [[ "${AID_TEST_SEED_LIFECYCLE:-0}" == "1" ]]; then
+    mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+    printf '# %s\n\n**EPIC 1: the delivered one**\n\n**EPIC 2: the abandoned one**\n' "$plan_id" \
+      > "$TEST_PROJECT_ROOT/.aid-o/plans/${plan_id}-lifecycle.md"
+    aid_lifecycle_ensure_manifest "$plan_id" "$TEST_PROJECT_ROOT" >/dev/null
+  fi
   local base; base="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
   git -C "$TEST_PROJECT_ROOT" branch "plan/${plan_id}" "$base"
   plan_state_init "$plan_id" "plan_branch" "plan/${plan_id}" "main"
@@ -2061,4 +2078,617 @@ print("MISMATCH:", bad) if bad else print("ALL_OK")
 PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"ALL_OK"* ]]
+}
+
+# =============================================================================
+# ─── aid-plan-fsm.sh plan-merge-to-main (Step 5) ─────────────────────────
+#     + aid-release.sh tag-plan + defaults/hooks/pre-push
+# =============================================================================
+#
+# AC5/AC6 — the ONE place in AID where the target branch moves. Every test here
+# asserts what happened to `main`, because "the merge was refused" is only a
+# real guarantee if the target branch is provably byte-identical afterwards.
+
+# _seed_merge_project — a plan at AWAITING_PM, at a frozen candidate, with the
+# git-tracked lifecycle manifest already on main (see _bootstrap's opt-in) and a
+# SECOND declared EPIC recorded as abandoned in the RUNTIME manifest — the CF1
+# input plan-merge-to-main re-scopes.
+#
+# It reaches AWAITING_PM through the REAL sync + freeze stages and then walks the
+# REAL plan-state transition table (PLAN_GATES -> PLAN_REVIEW -> AWAITING_PM)
+# rather than re-running the gate and review stages: those two stages are Step 2
+# and Step 3's own, exhaustively covered above, and each costs a full release
+# gate profile run. What plan-merge-to-main actually consumes from them is the
+# frozen candidate and the PLAN-LEVEL audit/curator reports, and both are set up
+# here explicitly — so nothing this seed skips is a precondition this command
+# reads.
+_seed_merge_project() {
+  export AID_TEST_SEED_LIFECYCLE=1
+  _bootstrap
+  # REAL work on the plan branch. Without it the candidate IS the target head,
+  # and `git commit-tree -p <target> -p <candidate>` collapses two identical
+  # parents into one — the two-parent assertion would then be testing a
+  # degenerate plan (one with no commits), not a plan.
+  _commit_on "plan/${PLAN_ID}" epic-work.txt "feat: the EPIC's work"
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$mc"
+  # The SECOND declared EPIC, terminated without delivery — CF1's input.
+  _add_epic "$PLAN_ID" "E-068-2_2"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-2_2" "abandoned"
+  plan_manifest_update "$PLAN_ID" \
+    '(.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-2_2") | .terminal_reason) = "PM dropped it"' >/dev/null
+
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -eq 0 ]
+  plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_REVIEW" >/dev/null
+  plan_state_transition "$PLAN_ID" "PLAN_REVIEW" "AWAITING_PM" >/dev/null
+
+  # The ONE plan-level review the binder derives every EPIC's verdict from.
+  local dir; dir="$(_run_dir)"
+  mkdir -p "$dir"
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  jq -n --arg h "$cand" \
+    '{schema_version:"aid-2.0", artifact_type:"audit_report",
+      revision:{head_sha:$h}, status:"pass",
+      audit_report:{reviewed_head:$h, blocking_findings:false}}' \
+    > "${dir}/audit-report.json"
+  jq -n '{schema_version:"aid-2.0", artifact_type:"curator",
+          status:"pass", curator:{blocking_findings:false}}' \
+    > "${dir}/curator-report.json"
+
+  # The controller keeps the worktree on the candidate across the PM boundary.
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
+}
+
+# _merge_commit — the published plan merge SHA, read from the RUNTIME manifest.
+# NOT from $output: bats `run` folds stderr into stdout, and this command writes
+# a deliberately loud operator narrative to stderr.
+_merge_commit() {
+  jq -r '.plan_boundary_manifest.plan_final_merge.merge_commit' \
+    "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+}
+
+# _poke_manifest <jq_expr> — edit the RUNTIME manifest JSON DIRECTLY, bypassing
+# plan_manifest_update's invariant enforcement. That bypass is the point: the
+# fail-closed freeze-time tests need a DEGENERATE on-disk manifest (a missing or
+# malformed candidate_frozen_at), and the writer correctly refuses to produce
+# one — the paired-nullable invariant is exactly what keeps it from happening
+# through the sanctioned path. Hand corruption is therefore the only honest way
+# to prove plan-merge-to-main does not trust the file it reads.
+_poke_manifest() {
+  local f="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+  local t="${f}.poke"
+  jq "$1" "$f" > "$t" && mv "$t" "$f"
+}
+
+# _main_sha / _plan_sha — the two refs every assertion here is about.
+_main_sha() { git -C "$TEST_PROJECT_ROOT" rev-parse main; }
+_plan_sha() { git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID"; }
+
+# _decision_file [jq_override] — a VALID PM MERGE decision bound to this plan,
+# this attempt, this candidate and this target head. The override corrupts
+# exactly one field so each refusal test isolates one cause.
+_decision_file() {
+  local override="${1:-.}"
+  local f="$TEST_TMPDIR/pm-decision.json"
+  jq -n --arg p "$PLAN_ID" \
+        --arg r "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
+        --arg c "$(_manifest_field "$PLAN_ID" candidate_sha)" \
+        --arg t "$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)" \
+    '{schema_version:"aid-pm-plan-decision-1.0", artifact_type:"pm_plan_decision",
+      producer:"aid-test@1.0", created_at:"2026-07-26T00:00:00Z",
+      plan_id:$p, plan_final_run_id:$r, decision:"MERGE",
+      candidate_sha:$c, target_branch:"main", target_head_sha:$t,
+      decided_at:"2026-07-26T00:00:00Z", decided_by:"pm"}' \
+    | jq "$override" > "$f"
+  printf '%s' "$f"
+}
+
+# _merge [decision_file] [extra args...] — the command under test.
+_merge() {
+  local d="${1:-$(_decision_file)}"; shift || true
+  run bash "$PLAN_FSM_CLI" plan-merge-to-main "$PLAN_ID" --decision "$d" \
+    --project-root "$TEST_PROJECT_ROOT" "$@"
+}
+
+# ─── AC5.1: every refusal leaves the target branch unchanged ───────────────
+
+@test "AC5: a MISSING decision file exits 1 with main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  _merge "$TEST_TMPDIR/nope.json"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no PM decision"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a MALFORMED decision file exits 1 with main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  printf 'not json at all' > "$TEST_TMPDIR/bad.json"
+  _merge "$TEST_TMPDIR/bad.json"
+  [ "$status" -eq 1 ]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision that fails pm-plan-decision.schema.json is rejected BEFORE any Git action" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  # A verdict outside the enum — structurally parseable, contractually invalid.
+  local d; d="$(_decision_file '.decision = "MAYBE"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pm-plan-decision.schema.json"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision missing a REQUIRED contract field is rejected by the schema" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file 'del(.target_head_sha)')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pm-plan-decision.schema.json"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision for a DIFFERENT plan exits 1 before any Git action" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.plan_id = "P999"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"authorizes plan 'P999'"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision bound to a DIFFERENT plan-final run id exits 1 before any Git action" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.plan_final_run_id = "R-P068-final-99"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"earlier attempt"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision naming the WRONG candidate exits 1 with main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.candidate_sha = "0000000000000000000000000000000000000000"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"candidate mismatch"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision naming the WRONG approved target head exits 1 with main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.target_head_sha = "0000000000000000000000000000000000000000"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"approved target head"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: decision FIX refuses the merge, moves the plan to PLAN_FIX and leaves main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.decision = "FIX" | .reason = "one more pass"')"
+  _merge "$d"
+  [ "$status" -eq 3 ]
+  [ "$(_main_sha)" = "$before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_FIX" ]
+}
+
+@test "AC5: decision ABORT refuses the merge, moves the plan to ABORTED with the reason recorded, main unchanged" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.decision = "ABORT" | .reason = "superseded by P069"')"
+  _merge "$d"
+  [ "$status" -eq 3 ]
+  [ "$(_main_sha)" = "$before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ABORTED" ]
+  [ "$(_manifest_field "$PLAN_ID" terminal_reason)" = "superseded by P069" ]
+}
+
+@test "AC5: a STALE authorization (main advanced while the PM decided) merges nothing and returns the plan to PLAN_SYNC" {
+  _seed_merge_project
+  local d; d="$(_decision_file)"
+  # main advances after the freeze and after the decision was written.
+  _commit_on main hotfix.txt "hotfix on main"
+  local before; before="$(_main_sha)"
+
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"STALE AUTHORIZATION"* ]]
+  # main is byte-identical to its advanced state — no merge was published.
+  [ "$(_main_sha)" = "$before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_SYNC" ]
+  # the candidate binding is gone, so no decision can be replayed against it
+  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "null" ]
+}
+
+# ─── AC5.2 + AC5.3: freeze-time validation, fail-closed on every degenerate
+#     input ────────────────────────────────────────────────────────────────
+
+@test "AC5: a decision whose decided_at PRECEDES candidate_frozen_at is rejected before any Git action" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file '.decided_at = "2000-01-01T00:00:00Z"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BEFORE the candidate was frozen"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a manifest MISSING candidate_frozen_at exits 1 — never 'assume old enough'" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file)"
+  _poke_manifest '.plan_boundary_manifest.candidate_frozen_at = null'
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no candidate_frozen_at"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a candidate_frozen_at that is not valid RFC 3339 UTC exits 1" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  local d; d="$(_decision_file)"
+  _poke_manifest '.plan_boundary_manifest.candidate_frozen_at = "yesterday-ish"'
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a valid RFC 3339 UTC instant"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decided_at that matches the pattern but is not a real instant exits 1" {
+  _seed_merge_project
+  local before; before="$(_main_sha)"
+  # Pattern-valid (schema passes), calendar-invalid (date -d refuses) — the
+  # exact input a regex-only check would wave through.
+  local d; d="$(_decision_file '.decided_at = "2026-13-45T99:99:99Z"')"
+  _merge "$d"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"decided_at"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+@test "AC5: a decision bound to a PRE-REFREEZE candidate fails against the rewritten candidate_frozen_at" {
+  _seed_merge_project
+  local old_decision; old_decision="$(_decision_file)"
+  # A refreeze rewrites BOTH candidate_sha and candidate_frozen_at. Simulate the
+  # rewritten freeze time being LATER than the old decision.
+  _poke_manifest '.plan_boundary_manifest.candidate_frozen_at = "2099-01-01T00:00:00Z"'
+  local before; before="$(_main_sha)"
+  _merge "$old_decision"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"BEFORE the candidate was frozen"* ]]
+  [ "$(_main_sha)" = "$before" ]
+}
+
+# ─── AC5.4 + AC5.5: the compare-and-swap publish ───────────────────────────
+
+@test "AC5: the merge commit is built without moving any ref, and a rejected update-ref leaves the target byte-identical" {
+  _seed_merge_project
+  local cand target; cand="$(_plan_sha)"; target="$(_main_sha)"
+
+  # Stage 1 exactly as the command performs it: tree, then commit, then publish.
+  local tree; tree="$(git -C "$TEST_PROJECT_ROOT" merge-tree --write-tree --no-messages "$target" "$cand")"
+  local mc; mc="$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree" -p "$target" -p "$cand" -m "merge(plan): probe")"
+  # NOTHING has moved: main is still exactly where it was.
+  [ "$(_main_sha)" = "$target" ]
+
+  # A concurrent advance between the head check and the publish.
+  _commit_on main racer.txt "another process moved main"
+  local raced; raced="$(_main_sha)"
+  [ "$raced" != "$target" ]
+
+  # The compare-and-swap must REJECT, and main must be byte-identical to the
+  # racer's state — the losing merge publishes nothing.
+  run git -C "$TEST_PROJECT_ROOT" update-ref refs/heads/main "$mc" "$target"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$raced" ]
+}
+
+# ─── AC5.6 + AC5.10 + AC5.11: the happy path, the lifecycle commit and CF1 ──
+
+@test "AC5: a MERGE decision publishes exactly one merge commit whose parents are the approved target head and the candidate" {
+  _seed_merge_project
+  local cand target; cand="$(_plan_sha)"; target="$(_main_sha)"
+
+  _merge
+  [ "$status" -eq 0 ]
+
+  local mc; mc="$(_merge_commit)"
+  [[ "$mc" =~ ^[0-9a-f]{40}$ ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "${mc}^1")" = "$target" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "${mc}^2")" = "$cand" ]
+  # The candidate is reachable from main, and main is at (or above) the merge.
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$cand" main
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$mc" main
+  [ "$status" -eq 0 ]
+  # Exactly ONE merge commit naming this plan.
+  [ "$(git -C "$TEST_PROJECT_ROOT" log main --merges --grep "merge(plan): ${PLAN_ID}" --pretty=%H | wc -l)" -eq 1 ]
+
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_MERGING" ]
+}
+
+@test "AC5: the lifecycle commit lands on main by plumbing — every non-abandoned EPIC is bound to the plan merge commit" {
+  _seed_merge_project
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+
+  # The manifest is read from the TARGET branch, not the worktree: the whole
+  # point is that the commit landed on main while HEAD stayed on the plan branch.
+  local m; m="$TEST_TMPDIR/manifest-on-main.yaml"
+  git -C "$TEST_PROJECT_ROOT" show "main:.aid-lifecycle/manifests/${PLAN_ID}.yaml" > "$m"
+  [ "$(yq -r '.deliveries."E-068-1_2".delivery_sha' "$m")" = "$mc" ]
+  [ "$(yq -r '.deliveries."E-068-1_2".delivery' "$m")" = "delivered" ]
+  [ "$(yq -r '.deliveries."E-068-1_2".review' "$m")" = "accepted" ]
+
+  # HEAD never left the plan branch, and the plan branch is not left dirty.
+  [ "$(git -C "$TEST_PROJECT_ROOT" symbolic-ref --short HEAD)" = "plan/${PLAN_ID}" ]
+  run git -C "$TEST_PROJECT_ROOT" diff --quiet -- .aid-lifecycle
+  [ "$status" -eq 0 ]
+}
+
+@test "AC5 (CF1): the abandoned EPIC is re-scoped in the SAME commit as the bindings, and stops counting as required" {
+  _seed_merge_project
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+
+  local m; m="$TEST_TMPDIR/manifest-on-main.yaml"
+  git -C "$TEST_PROJECT_ROOT" show "main:.aid-lifecycle/manifests/${PLAN_ID}.yaml" > "$m"
+  [ "$(yq -r '.declared_epics[] | select(.id == "E-068-2_2") | .scope' "$m")" = "abandoned" ]
+  # ONE commit for both facts: the re-scope and the bindings are in the same tree.
+  [ "$(yq -r '.deliveries."E-068-1_2".delivery_sha' "$m")" = "$mc" ]
+  # An abandoned EPIC is never bound as delivered.
+  [ "$(yq -r '.deliveries."E-068-2_2".delivery_sha // "absent"' "$m")" = "absent" ]
+
+  # And it is excluded from the closure denominator. The closure state MUST be
+  # evaluated on the TARGET branch, not from the plan worktree: the lifecycle
+  # commit landed on main by plumbing and the plan branch's own copy of the
+  # manifest is deliberately restored, so reading it there would answer a
+  # question about the wrong branch. Step 6 (plan-close) runs on the target
+  # branch for exactly this reason.
+  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_TMPDIR/closure-wt" main
+  run aid_plan_closure_state "$PLAN_ID" "$TEST_TMPDIR/closure-wt"
+  [ "$output" != "active" ]
+  [ "$output" != "legacy-unverifiable" ]
+}
+
+@test "AC5: the lifecycle commit succeeds with the TARGET BRANCH CHECKED OUT IN ANOTHER WORKTREE" {
+  _seed_merge_project
+  # The normal production shape: main is checked out in a linked worktree, so
+  # `git checkout main` from the plan worktree is impossible — Git refuses the
+  # same branch twice. The plumbing path must not care.
+  git -C "$TEST_PROJECT_ROOT" worktree add -q "$TEST_TMPDIR/main-wt" main
+  run git -C "$TEST_PROJECT_ROOT" checkout main
+  [ "$status" -ne 0 ]        # proof the legacy checkout path is genuinely blocked
+
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+  local m; m="$TEST_TMPDIR/manifest-on-main.yaml"
+  git -C "$TEST_PROJECT_ROOT" show "main:.aid-lifecycle/manifests/${PLAN_ID}.yaml" > "$m"
+  [ "$(yq -r '.deliveries."E-068-1_2".delivery_sha' "$m")" = "$mc" ]
+}
+
+@test "AC5: a crash between the publish and the lifecycle commit is resolved by re-applying the bindings, never a second merge" {
+  _seed_merge_project
+  local cand; cand="$(_plan_sha)"
+  local target; target="$(_main_sha)"
+
+  # Publish the merge exactly as stage 1 does, then stop — the crash point.
+  local tree mc
+  tree="$(git -C "$TEST_PROJECT_ROOT" merge-tree --write-tree --no-messages "$target" "$cand")"
+  mc="$(git -C "$TEST_PROJECT_ROOT" commit-tree "$tree" -p "$target" -p "$cand" -m "merge(plan): ${PLAN_ID} — crashed run")"
+  git -C "$TEST_PROJECT_ROOT" update-ref refs/heads/main "$mc" "$target"
+
+  # Resume: the binding pass alone, idempotently, on top of the published merge.
+  run aid_lifecycle_plan_merge_bind "$PLAN_ID" "$TEST_PROJECT_ROOT" "$mc" \
+    "$(_run_dir)" "E-068-2_2=abandoned"
+  [ "$status" -eq 0 ]
+  local m; m="$TEST_TMPDIR/m1.yaml"
+  git -C "$TEST_PROJECT_ROOT" show "main:.aid-lifecycle/manifests/${PLAN_ID}.yaml" > "$m"
+  [ "$(yq -r '.deliveries."E-068-1_2".delivery_sha' "$m")" = "$mc" ]
+  local after_first; after_first="$(_main_sha)"
+
+  # A SECOND resume is a no-op: no duplicate commit, no second merge.
+  run aid_lifecycle_plan_merge_bind "$PLAN_ID" "$TEST_PROJECT_ROOT" "$mc" \
+    "$(_run_dir)" "E-068-2_2=abandoned"
+  [ "$status" -eq 0 ]
+  [ "$(_main_sha)" = "$after_first" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" log main --merges --grep "merge(plan): ${PLAN_ID}" --pretty=%H | wc -l)" -eq 1 ]
+}
+
+# ─── AC5.7 + AC5.8: the ONE tag, and resume without duplicates ─────────────
+
+@test "AC5: a no-bump plan merges and closes with NO tag, and tag-plan is never called" {
+  _seed_merge_project
+  # release-prep.json records `none` — prepare-plan resolved no version bump.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"none"}' \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+
+  _merge
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NO TAG"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 0 ]
+}
+
+@test "AC5: a plan WITH a prepared version creates exactly ONE tag, on the final merge commit" {
+  _seed_merge_project
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' \
+    > "$(_run_dir)/release-prep.json"
+
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 1 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse 'v9.9.9^{commit}')" = "$mc" ]
+  # No intermediate EPIC produced a version commit or a tag: the ONLY tag in the
+  # repository is this one, on the plan merge.
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "v9.9.9" ]
+}
+
+@test "AC5: a resumed run after full success creates no duplicate merge, no duplicate lifecycle commit and no duplicate tag" {
+  _seed_merge_project
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' \
+    > "$(_run_dir)/release-prep.json"
+
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+  local after; after="$(_main_sha)"
+
+  _merge
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"RESUME"* ]]
+  [ "$(_main_sha)" = "$after" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" log main --merges --grep "merge(plan): ${PLAN_ID}" --pretty=%H | wc -l)" -eq 1 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 1 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse 'v9.9.9^{commit}')" = "$mc" ]
+}
+
+# ─── Error handling: a conflicting candidate ───────────────────────────────
+
+@test "AC5: a merge conflict against the target branch exits 4, moves the plan to CONFLICT and leaves main unchanged" {
+  _seed_merge_project
+  # Both sides change the SAME file differently. main's advance is then recorded
+  # as the approved target head so the stale-authorization guard does not fire
+  # first — this test is about the conflict path itself.
+  _commit_on "plan/${PLAN_ID}" clash.txt "plan side"
+  # keep the candidate == plan head
+  _poke_manifest ".plan_boundary_manifest.candidate_sha = \"$(_plan_sha)\""
+  _commit_on main clash.txt "main side"
+  _poke_manifest ".plan_boundary_manifest.target_branch_head_at_candidate_freeze = \"$(_main_sha)\""
+  local before; before="$(_main_sha)"
+
+  _merge
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"MERGE CONFLICT"* ]]
+  [ "$(_main_sha)" = "$before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "CONFLICT" ]
+  # No MERGE_HEAD was ever created — the merge happened entirely in object space.
+  [ ! -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD" ]
+}
+
+@test "AC5: resolving a CONFLICT by re-syncing INVALIDATES the frozen candidate and returns the plan to PLAN_SYNC" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  # Drive the plan into CONFLICT the way plan-merge-to-main does.
+  plan_state_transition "$PLAN_ID" "AWAITING_PM" "CONFLICT" >/dev/null
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "CONFLICT" ]
+
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
+  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "null" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_SYNC" ]
+}
+
+# ─── aid-release.sh tag-plan ───────────────────────────────────────────────
+
+@test "AC5: tag-plan is idempotent — an existing tag on the SAME merge SHA exits 0 without acting" {
+  _seed_merge_project
+  local sha; sha="$(_main_sha)"
+  run bash "$RELEASE_CLI" tag-plan "$PLAN_ID" --merge-sha "$sha" --version 3.2.1 \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  run bash "$RELEASE_CLI" tag-plan "$PLAN_ID" --merge-sha "$sha" --version 3.2.1 \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already exists"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 1 ]
+}
+
+@test "AC5: tag-plan exits 1 when the tag exists on a DIFFERENT commit, and never moves it" {
+  _seed_merge_project
+  local other; other="$(_main_sha)"
+  run bash "$RELEASE_CLI" tag-plan "$PLAN_ID" --merge-sha "$other" --version 3.2.1 \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  local elsewhere; elsewhere="$(_plan_sha)"
+  [ "$elsewhere" != "$other" ]
+  run bash "$RELEASE_CLI" tag-plan "$PLAN_ID" --merge-sha "$elsewhere" --version 3.2.1 \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"immutable"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse 'v3.2.1^{commit}')" = "$other" ]
+}
+
+@test "AC5: tag-plan refuses the literal 'none' as a version (a no-bump plan must not call it)" {
+  _seed_merge_project
+  run bash "$RELEASE_CLI" tag-plan "$PLAN_ID" --merge-sha "$(_main_sha)" --version none \
+    --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 2 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 0 ]
+}
+
+@test "AC5: prepare-plan records the resolved version in release-prep.json, and 'none' when no bump was needed" {
+  _bootstrap
+  _seed_version_project
+  _prepare "$PLAN_ID" --bump minor
+  [ "$status" -eq 0 ]
+  local rec="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  [ -s "$rec" ]
+  [ "$(jq -r '.version' "$rec")" = "1.3.0" ]
+
+  # A chore-only follow-up resolves to no bump and records the literal `none`.
+  git -C "$TEST_PROJECT_ROOT" tag -a "v1.3.0" -m "released" >/dev/null 2>&1
+  _commit_on "plan/${PLAN_ID}" chore.txt "chore: tidy"
+  _prepare "$PLAN_ID" --bump auto
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.version' "$rec")" = "none" ]
+}
+
+# ─── defaults/hooks/pre-push: plan/* and task/* are exempt, main is not ─────
+
+@test "AC5: pushing plan/* or task/* with feat:/fix: commits and no release: commit is allowed, while main in the same state is blocked" {
+  _bootstrap
+  local hook="$AID_PLUGIN_PATH/defaults/hooks/pre-push"
+  # A tag, then a feat: commit and no release: commit — the exact state the
+  # guard blocks. Made on main so LAST_TAG..HEAD sees it from any branch.
+  git -C "$TEST_PROJECT_ROOT" tag -a v1.0.0 -m base
+  _commit_on main feature.txt "feat: a plan-branch feature"
+
+  # main: still blocked.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && printf 'refs/heads/main %s refs/heads/main %s\n' \
+    \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000 | bash '$hook' origin git@example:x.git"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Push blocked"* ]]
+
+  # plan/*: exempt.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && printf 'refs/heads/plan/${PLAN_ID} %s refs/heads/plan/${PLAN_ID} %s\n' \
+    \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000 | bash '$hook' origin git@example:x.git"
+  [ "$status" -eq 0 ]
+
+  # task/*: exempt.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && printf 'refs/heads/task/E-068-1_2/main %s refs/heads/task/E-068-1_2/main %s\n' \
+    \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000 | bash '$hook' origin git@example:x.git"
+  [ "$status" -eq 0 ]
+
+  # A push carrying BOTH a plan branch and main is still checked.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && { printf 'refs/heads/plan/${PLAN_ID} %s refs/heads/plan/${PLAN_ID} %s\n' \
+    \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000; \
+    printf 'refs/heads/main %s refs/heads/main %s\n' \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000; } | bash '$hook' origin git@example:x.git"
+  [ "$status" -eq 1 ]
 }

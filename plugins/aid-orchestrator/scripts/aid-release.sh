@@ -5,6 +5,8 @@
 #   aid-release.sh <patch|minor|major> [--dry-run] [--force]  # explicit bump
 #   aid-release.sh prepare-plan <plan_id> --bump <auto|patch|minor|major>
 #                  --plan-branch <branch> [--project-root <path>] [--dry-run]
+#   aid-release.sh tag-plan <plan_id> --merge-sha <sha> --version <X.Y.Z>
+#                  [--project-root <path>]      # P068 Step 5 — the ONE plan tag
 #
 # ── SUBCOMMAND DISPATCH (P068 Step 1) ──────────────────────────────────────
 # This script had NO main() and NO dispatch: `BUMP_TYPE="${1:?...}"` was read
@@ -83,6 +85,12 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
 
     if [[ -z "$COMMITS" ]]; then
       echo "No commits since $LAST_TAG — nothing to release." >&2
+      # P068 Step 5: a plan-mode caller must be able to distinguish "no bump was
+      # needed" from "the bump failed" AFTER this function has exited the whole
+      # script. The hook records `version: none` in release-prep.json first, so
+      # plan-merge-to-main knows not to call tag-plan. Legacy callers set no hook
+      # and see byte-identical behaviour.
+      if [[ -n "${_RELEASE_NOBUMP_HOOK:-}" ]]; then "$_RELEASE_NOBUMP_HOOK"; fi
       exit 0
     fi
 
@@ -109,6 +117,7 @@ if [[ "$BUMP_TYPE" == "auto" ]]; then
       BUMP_TYPE="patch"
     else
       echo "Only chore/docs/refactor/test commits since $LAST_TAG — no version bump needed." >&2
+      if [[ -n "${_RELEASE_NOBUMP_HOOK:-}" ]]; then "$_RELEASE_NOBUMP_HOOK"; fi
       exit 0
     fi
 
@@ -471,6 +480,50 @@ _release_legacy_bump() {
 # Exit codes: 0 success or documented no-op (no bump needed / already
 # prepared / dry run), 1 precondition failure, 2 usage error.
 # =============================================================================
+
+# ── release-prep.json — the record `plan-merge-to-main` reads to decide whether
+#    to tag at all (P068 Step 5) ────────────────────────────────────────────
+#
+# `prepare-plan --bump auto` may legitimately resolve to NO bump (only chore:/
+# docs: commits since the last tag). It then makes no version commit, the
+# candidate's version equals the already-released one, and calling
+# `tag-plan --version <that version>` would FAIL, because a tag for it already
+# exists on an older commit. A no-bump plan merging and closing with no new tag
+# is a legal outcome, not a tag-plan failure — so the resolved version, or the
+# literal string `none`, is recorded here and plan-merge-to-main calls tag-plan
+# only when a new version was actually prepared.
+#
+# LOCATION: the plan's runtime state directory, because prepare-plan runs BEFORE
+# `--stage freeze` and the plan-final run directory does not exist yet.
+# `--stage freeze` copies this file into the run directory it allocates, so the
+# record also lives with the attempt's evidence; plan-merge-to-main reads the
+# run-directory copy first and falls back to this canonical one.
+_release_plan_state_dir() {
+  local plan_id="$1"
+  local common_dir root
+  common_dir="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
+  if [[ -n "$common_dir" ]]; then root="$(dirname "$common_dir")"; else root="$REPO_ROOT"; fi
+  printf '%s/.aid-o/work/plan-state/%s' "$root" "$plan_id"
+}
+
+# _release_write_prep_record <plan_id> <plan_branch> <bump> <version|none>
+_release_write_prep_record() {
+  local plan_id="$1" plan_branch="$2" bump="$3" version="$4"
+  local dir; dir="$(_release_plan_state_dir "$plan_id")"
+  mkdir -p "$dir" || { echo "PRECONDITION FAIL: cannot create ${dir} for release-prep.json" >&2; return 1; }
+  local head=""
+  head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || head=""
+  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n --arg p "$plan_id" --arg b "$plan_branch" --arg bump "$bump" \
+        --arg v "$version" --arg h "$head" --arg ts "$ts" \
+    '{schema_version:"aid-release-prep-1.0", plan_id:$p, plan_branch:$b,
+      bump_requested:$bump, version:$v, prepare_commit:$h, prepared_at:$ts}' \
+    > "${dir}/release-prep.json.tmp" \
+    && mv "${dir}/release-prep.json.tmp" "${dir}/release-prep.json" \
+    || { rm -f "${dir}/release-prep.json.tmp"; echo "PRECONDITION FAIL: could not write ${dir}/release-prep.json" >&2; return 1; }
+  return 0
+}
+
 cmd_prepare_plan() {
   local plan_id="" bump="" plan_branch="" project_root="" dry=false
   while [[ $# -gt 0 ]]; do
@@ -529,6 +582,10 @@ cmd_prepare_plan() {
   head_subject="$(git -C "$REPO_ROOT" log -1 --format=%s 2>/dev/null)" || head_subject=""
   if [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
     echo "Already prepared: ${head_subject} (HEAD $(git -C "$REPO_ROOT" rev-parse --short HEAD)) — reusing the existing commit, no second bump." >&2
+    # Re-assert the record on the resume path too: a crash between the commit and
+    # the record would otherwise leave plan-merge-to-main with no way to know a
+    # version WAS prepared, and it would silently skip the one tag.
+    $dry || _release_write_prep_record "$plan_id" "$plan_branch" "$bump" "${BASH_REMATCH[1]}" || return 1
     echo "${BASH_REMATCH[1]}"
     return 0
   fi
@@ -549,6 +606,17 @@ cmd_prepare_plan() {
   #    `auto` resolving to "no bump" exits 0 from inside here, before any file
   #    is touched — a chore/docs-only plan legitimately makes no commit and the
   #    candidate is simply the current plan head.
+  # The no-bump hook: `_release_parse_args_and_resolve_bump` exits the whole
+  # script when `auto` resolves to no bump, so the `version: none` record has to
+  # be written from inside it. A dry run records nothing (it changes nothing).
+  if ! $dry; then
+    _AID_PREP_PLAN_ID="$plan_id"; _AID_PREP_PLAN_BRANCH="$plan_branch"; _AID_PREP_BUMP="$bump"
+    _release_prepare_plan_record_none() {
+      _release_write_prep_record "$_AID_PREP_PLAN_ID" "$_AID_PREP_PLAN_BRANCH" "$_AID_PREP_BUMP" "none" || true
+    }
+    _RELEASE_NOBUMP_HOOK=_release_prepare_plan_record_none
+  fi
+
   _release_parse_args_and_resolve_bump "$bump"
   _release_detect_version
 
@@ -601,18 +669,108 @@ cmd_prepare_plan() {
   git -C "$REPO_ROOT" commit -q -m "release: prepare v${NEW_VERSION} for ${plan_id}" \
     || { echo "PRECONDITION FAIL: prepare commit failed — the version edits remain staged." >&2; exit 1; }
 
+  _release_write_prep_record "$plan_id" "$plan_branch" "$bump" "$NEW_VERSION" || return 1
+
   echo "Prepared v${NEW_VERSION} for ${plan_id} on ${plan_branch} at $(git -C "$REPO_ROOT" rev-parse --short HEAD) — no tag, no push." >&2
   echo "$NEW_VERSION"
   return 0
 }
 
 # =============================================================================
-# Dispatch. Anything that is not the literal `prepare-plan` goes to the legacy
-# entry point with its arguments untouched — including the empty argument list.
+# cmd_tag_plan <plan_id> --merge-sha <sha> --version <X.Y.Z> [--project-root <p>]
+#
+# The ONE tag of a plan_branch plan, created on the plan's merge commit on the
+# target branch — never per EPIC. Called by `aid-plan-fsm.sh plan-merge-to-main`
+# AFTER the merge is published and the lifecycle delivery bindings are written,
+# and ONLY when `prepare-plan` actually resolved a version bump (a no-bump plan
+# merges and closes with no new tag; see release-prep.json above).
+#
+# IDEMPOTENT BY CONSTRUCTION — this is the crash-resume contract:
+#   - tag absent            -> create it on <merge-sha>, exit 0
+#   - tag exists on <merge-sha> -> exit 0, doing nothing (the resumed run of a
+#     process that died between the tag and the push finds its own tag)
+#   - tag exists ELSEWHERE  -> exit 1, touching nothing. Re-pointing a published
+#     tag is never automatic; a released version is immutable.
+#
+# It NEVER pushes and NEVER moves a branch.
+# Exit codes: 0 tagged or already correctly tagged, 1 precondition failure /
+# tag collision on another commit, 2 usage error.
+# =============================================================================
+cmd_tag_plan() {
+  local plan_id="" merge_sha="" version="" project_root=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --merge-sha)
+        [[ $# -ge 2 ]] || { echo "ERROR: tag-plan: --merge-sha requires a value." >&2; exit 2; }
+        merge_sha="$2"; shift 2 ;;
+      --version)
+        [[ $# -ge 2 ]] || { echo "ERROR: tag-plan: --version requires a value." >&2; exit 2; }
+        version="$2"; shift 2 ;;
+      --project-root)
+        [[ $# -ge 2 ]] || { echo "ERROR: tag-plan: --project-root requires a value." >&2; exit 2; }
+        project_root="$2"; shift 2 ;;
+      --*) echo "ERROR: tag-plan: unknown flag: $1" >&2; exit 2 ;;
+      *)
+        if [[ -z "$plan_id" ]]; then plan_id="$1"
+        else echo "ERROR: tag-plan: unexpected argument: $1" >&2; exit 2; fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" || -z "$merge_sha" || -z "$version" ]]; then
+    echo "Usage: aid-release.sh tag-plan <plan_id> --merge-sha <sha> --version <X.Y.Z> [--project-root <path>]" >&2
+    exit 2
+  fi
+  if ! [[ "$plan_id" =~ ^P[0-9]{3}$ ]]; then
+    echo "ERROR: tag-plan: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
+    exit 2
+  fi
+  if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: tag-plan: --version must be X.Y.Z (got '${version}'). The literal 'none' is not a version — a no-bump plan must not call tag-plan at all." >&2
+    exit 2
+  fi
+
+  if [[ -n "$project_root" ]]; then
+    REPO_ROOT="$(cd "$project_root" && git rev-parse --show-toplevel 2>/dev/null)" \
+      || { echo "PRECONDITION FAIL: tag-plan: --project-root '${project_root}' is not inside a git repository." >&2; exit 1; }
+  fi
+
+  local target=""
+  target="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${merge_sha}^{commit}" 2>/dev/null)" || target=""
+  if [[ -z "$target" ]]; then
+    echo "PRECONDITION FAIL: tag-plan: --merge-sha '${merge_sha}' does not resolve to a commit — refusing to tag a SHA that is not in this repository." >&2
+    exit 1
+  fi
+
+  local tag="v${version}"
+  local existing=""
+  existing="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "refs/tags/${tag}^{commit}" 2>/dev/null)" || existing=""
+  if [[ -n "$existing" ]]; then
+    if [[ "$existing" == "$target" ]]; then
+      echo "Tag ${tag} already exists on ${target} — nothing to do (idempotent)." >&2
+      echo "$tag"
+      return 0
+    fi
+    echo "PRECONDITION FAIL: tag-plan: ${tag} already exists and points at ${existing}, not at the plan merge commit ${target}. A released version is immutable — refusing to move the tag. Resolve by preparing a NEW version for ${plan_id}." >&2
+    exit 1
+  fi
+
+  git -C "$REPO_ROOT" tag -a "$tag" -m "Release ${tag} (${plan_id})" "$target" \
+    || { echo "PRECONDITION FAIL: tag-plan: could not create ${tag} on ${target}." >&2; exit 1; }
+  echo "Tagged ${tag} on ${target} for ${plan_id} — no push." >&2
+  echo "$tag"
+  return 0
+}
+
+# =============================================================================
+# Dispatch. Anything that is not one of the literal plan-mode subcommands
+# (`prepare-plan`, `tag-plan`) goes to the legacy entry point with its arguments
+# untouched — including the empty argument list.
 # =============================================================================
 main() {
   case "${1:-}" in
     prepare-plan) shift; cmd_prepare_plan "$@" ;;
+    tag-plan)     shift; cmd_tag_plan "$@" ;;
     *) _release_legacy_bump "$@" ;;
   esac
 }
