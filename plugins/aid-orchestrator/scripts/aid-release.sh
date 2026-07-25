@@ -3,6 +3,35 @@
 # Usage:
 #   aid-release.sh auto [--dry-run] [--force]   # auto-detect bump from conventional commits
 #   aid-release.sh <patch|minor|major> [--dry-run] [--force]  # explicit bump
+#   aid-release.sh prepare-plan <plan_id> --bump <auto|patch|minor|major>
+#                  --plan-branch <branch> [--project-root <path>] [--dry-run]
+#
+# ── SUBCOMMAND DISPATCH (P068 Step 1) ──────────────────────────────────────
+# This script had NO main() and NO dispatch: `BUMP_TYPE="${1:?...}"` was read
+# at the top and the whole body ran unconditionally at source time. Adding a
+# second entry point therefore meant a RESTRUCTURE, not an insertion: the
+# original body is now split into functions and the LEGACY entry point
+# (`auto|patch|minor|major`) is preserved EXACTLY — same argument parsing,
+# same order of operations, same messages, same `git add -u` + commit + tag.
+# Anything that is not the literal token `prepare-plan` in $1 goes down the
+# legacy path, including no arguments at all (which still hits the same
+# `${1:?Usage: ...}` error).
+#
+# ── WHY prepare-plan EXISTS ────────────────────────────────────────────────
+# The plan-final boundary freezes ONE immutable candidate commit and reviews
+# it. The version metadata must therefore already be IN that candidate —
+# nothing may be committed after the reviews start. `prepare-plan` applies the
+# version-file edits and the CHANGELOG entry, commits them on the plan branch,
+# and stops: NO tag, NO push. Tagging happens once, later, at merge time.
+#
+# It also fixes a staging defect that only matters for a frozen candidate. The
+# legacy path stages `git add "${UPDATED[@]}"` and then an UNQUALIFIED
+# `git add -u`, which sweeps in every modified tracked file in the worktree.
+# For a per-EPIC release that is merely untidy; for a candidate that is about
+# to be sealed, hashed and reviewed it is a correctness defect — unrelated
+# dirt would silently become part of the reviewed and tagged commit.
+# `prepare-plan` refuses to run on a dirty tree and stages ONLY the explicit
+# version-file list, so the prepare commit contains exactly the version edits.
 #
 # Version source (single source of truth, auto-detected):
 #   1. CHANGELOG.md  (## [X.Y.Z])
@@ -25,6 +54,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Find repo root (walk up from CWD, not from script location)
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
+# ─── Shared stage 1: argument parsing + bump-type resolution ─────────────
+# Byte-for-byte the original top-of-script block, wrapped in a function. The
+# `${1:?...}` still fires identically when the script is called with no
+# arguments, because the legacy dispatch arm forwards "$@" unchanged.
+_release_parse_args_and_resolve_bump() {
 BUMP_TYPE="${1:?Usage: aid-release.sh <auto|patch|minor|major> [--dry-run] [--force]}"
 DRY_RUN=false
 FORCE=false
@@ -87,9 +121,14 @@ case "$BUMP_TYPE" in
   patch|minor|major) ;;
   *) echo "ERROR: bump type must be auto|patch|minor|major" >&2; exit 1 ;;
 esac
+}
 
-# ─── Layer 2: FSM state check ───────────────────────────────────────────
-
+# ─── Shared stage 2: Layer 2 FSM state check ─────────────────────────────
+# Legacy-only. `prepare-plan` deliberately does NOT run this: it guards the
+# per-EPIC FSM (aid-fsm.sh's run states), which is exactly the machinery a
+# plan-branch plan structurally skips. The plan-final runner enforces its own,
+# stricter precondition instead (plan_state == PLAN_SYNC, clean tree).
+_release_fsm_guard() {
 STATE_FILE=""
 if [[ -d "$REPO_ROOT/.aid-o/work/runs/" ]]; then
   STATE_FILE=$(find "$REPO_ROOT/.aid-o/work/runs/" \( -name "fsm-state.yaml" -o -name "state.yaml" \) 2>/dev/null | head -1)
@@ -113,6 +152,7 @@ if [[ -n "$STATE_FILE" && "$FORCE" != "true" ]]; then
     exit 1
   fi
 fi
+}
 
 # ─── Detect version source (single source of truth) ─────────────────────
 #
@@ -128,6 +168,7 @@ fi
 # current released version and then renamed to the bumped version, silently
 # collapsing prior version's history.
 
+_release_detect_version() {
 VERSION_SOURCE=""
 CHANGELOG_HEADER=""
 RELEASED_VERSION=""
@@ -185,14 +226,11 @@ case "$BUMP_TYPE" in
 esac
 
 echo "Bumping: $CURRENT → $NEW_VERSION ($BUMP_TYPE)"
-
-if $DRY_RUN; then
-  echo "[DRY RUN] Would update version to $NEW_VERSION"
-  exit 0
-fi
+}
 
 # ─── Update version files ───────────────────────────────────────────────
 
+_release_update_files() {
 TODAY=$(date +%Y-%m-%d)
 UPDATED=()
 
@@ -364,9 +402,11 @@ fi
 
 echo ""
 echo "Updated ${#UPDATED[@]} files total."
+}
 
-# ─── Git commit + tag ────────────────────────────────────────────────────
+# ─── Git commit + tag (LEGACY path only) ─────────────────────────────────
 
+_release_commit_and_tag() {
 cd "$REPO_ROOT"
 git add "${UPDATED[@]}" 2>/dev/null || true
 # Also add any files updated in the config loop (may have been missed)
@@ -378,3 +418,203 @@ git tag -a "v${NEW_VERSION}" -m "Release v${NEW_VERSION}"
 
 echo ""
 echo "Released v${NEW_VERSION}. Push with: git push --no-verify && git push --tags"
+}
+
+# =============================================================================
+# LEGACY ENTRY POINT — aid-release.sh <auto|patch|minor|major> [--dry-run] [--force]
+#
+# The original script, unchanged in behaviour: resolve bump → FSM guard →
+# detect version → dry-run exit → update files → commit + tag.
+# =============================================================================
+_release_legacy_bump() {
+  _release_parse_args_and_resolve_bump "$@"
+  _release_fsm_guard
+  _release_detect_version
+
+  if $DRY_RUN; then
+    echo "[DRY RUN] Would update version to $NEW_VERSION"
+    exit 0
+  fi
+
+  _release_update_files
+  _release_commit_and_tag
+}
+
+# =============================================================================
+# cmd_prepare_plan <plan_id> --bump <auto|patch|minor|major>
+#                  --plan-branch <branch> [--project-root <path>] [--dry-run]
+#
+# The plan-final version-preparation step. Applies the version-file edits and
+# the CHANGELOG entry driven by .aid-o/config/project.yaml `versioning.files[]`
+# (the same registry the legacy path uses — one implementation, not a fork),
+# commits them on the plan branch as
+#     release: prepare v<version> for <plan_id>
+# and exits WITHOUT tagging or pushing.
+#
+# ORDER: this runs while the plan is still in PLAN_SYNC — BEFORE the candidate
+# is frozen — so it never requires a `candidate_sha` that does not exist yet,
+# and the candidate that IS frozen afterwards already contains the release
+# metadata.
+#
+# THREE guarantees the legacy path does not give:
+#   1. Clean tree required UP FRONT. Refuses rather than sweeping unrelated
+#      modifications into a commit that is about to be frozen and reviewed.
+#   2. Explicit staging only. `git add` receives exactly the files this run
+#      reports as updated — never `git add -u`. After staging, the staged set
+#      is re-read from Git and any file outside the updated list aborts the
+#      commit, so the guarantee is checked, not merely intended.
+#   3. Idempotent under crash-resume. If HEAD is already a prepare commit for
+#      this plan, the existing commit is REUSED (no-op, exit 0) rather than
+#      bumping a second time — the version files already carry the new version,
+#      so a naive re-run would bump 2.62.2 → 2.62.3.
+#
+# Exit codes: 0 success or documented no-op (no bump needed / already
+# prepared / dry run), 1 precondition failure, 2 usage error.
+# =============================================================================
+cmd_prepare_plan() {
+  local plan_id="" bump="" plan_branch="" project_root="" dry=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --bump)
+        [[ $# -ge 2 ]] || { echo "ERROR: prepare-plan: --bump requires a value." >&2; exit 2; }
+        bump="$2"; shift 2 ;;
+      --plan-branch)
+        [[ $# -ge 2 ]] || { echo "ERROR: prepare-plan: --plan-branch requires a value." >&2; exit 2; }
+        plan_branch="$2"; shift 2 ;;
+      --project-root)
+        [[ $# -ge 2 ]] || { echo "ERROR: prepare-plan: --project-root requires a value." >&2; exit 2; }
+        project_root="$2"; shift 2 ;;
+      --dry-run) dry=true; shift ;;
+      --*) echo "ERROR: prepare-plan: unknown flag: $1" >&2; exit 2 ;;
+      *)
+        if [[ -z "$plan_id" ]]; then plan_id="$1"
+        else echo "ERROR: prepare-plan: unexpected argument: $1" >&2; exit 2; fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" || -z "$bump" || -z "$plan_branch" ]]; then
+    echo "Usage: aid-release.sh prepare-plan <plan_id> --bump <auto|patch|minor|major> --plan-branch <branch> [--project-root <path>] [--dry-run]" >&2
+    exit 2
+  fi
+  if ! [[ "$plan_id" =~ ^P[0-9]{3}$ ]]; then
+    echo "ERROR: prepare-plan: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
+    exit 2
+  fi
+  case "$bump" in
+    auto|patch|minor|major) ;;
+    *) echo "ERROR: prepare-plan: --bump must be auto|patch|minor|major (got '${bump}')" >&2; exit 2 ;;
+  esac
+
+  # Re-resolve REPO_ROOT against --project-root when given (the top-level
+  # resolution walked up from the invoking CWD, which a runner may not share).
+  if [[ -n "$project_root" ]]; then
+    REPO_ROOT="$(cd "$project_root" && git rev-parse --show-toplevel 2>/dev/null)" \
+      || { echo "PRECONDITION FAIL: prepare-plan: --project-root '${project_root}' is not inside a git repository." >&2; exit 1; }
+  fi
+  cd "$REPO_ROOT"
+
+  # ── Must be ON the plan branch. Deliberately a refusal, not a checkout:
+  #    silently moving HEAD under a runner that is mid-sequence is exactly the
+  #    kind of hidden side effect a frozen candidate must not depend on.
+  local head_branch=""
+  head_branch="$(git -C "$REPO_ROOT" symbolic-ref --short -q HEAD 2>/dev/null)" || head_branch=""
+  if [[ "$head_branch" != "$plan_branch" ]]; then
+    echo "PRECONDITION FAIL: prepare-plan must run on ${plan_branch}, but HEAD is on '${head_branch:-<detached>}' — check out the plan branch first; this command will not move HEAD for you." >&2
+    exit 1
+  fi
+
+  # ── Crash-resume convergence: HEAD is already this plan's prepare commit ──
+  local head_subject=""
+  head_subject="$(git -C "$REPO_ROOT" log -1 --format=%s 2>/dev/null)" || head_subject=""
+  if [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
+    echo "Already prepared: ${head_subject} (HEAD $(git -C "$REPO_ROOT" rev-parse --short HEAD)) — reusing the existing commit, no second bump." >&2
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  # ── Clean tree required BEFORE any edit (guarantee 1). Same exclusion list
+  #    as aid-plan-fsm.sh's own preflight: gitignored/runtime paths that are
+  #    "dirty" by design are not real blockers.
+  local dirty
+  dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no \
+    | grep -vE '^.. \.aid-o/config/queue\.yaml$|^.. \.aid-o/work/audit-log\.jsonl$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml$|^.. \.aid-o/metrics/gate-runtime-baselines\.yaml\.lock$|^.. \.aid-o/work/plan-state/' || true)"
+  if [[ -n "$dirty" ]]; then
+    echo "PRECONDITION FAIL: prepare-plan refuses to run with modified tracked files — they would be swept into the commit that is about to become the frozen, reviewed candidate. Commit or stash first:" >&2
+    printf '%s\n' "$dirty" >&2
+    exit 1
+  fi
+
+  # ── The shared version machinery (one implementation with the legacy path).
+  #    `auto` resolving to "no bump" exits 0 from inside here, before any file
+  #    is touched — a chore/docs-only plan legitimately makes no commit and the
+  #    candidate is simply the current plan head.
+  _release_parse_args_and_resolve_bump "$bump"
+  _release_detect_version
+
+  if $dry; then
+    echo "[DRY RUN] Would prepare v${NEW_VERSION} for ${plan_id} on ${plan_branch} (no commit, no tag)"
+    return 0
+  fi
+
+  _release_update_files
+
+  # ── Explicit staging only (guarantee 2) ─────────────────────────────────
+  if [[ ${#UPDATED[@]} -eq 0 ]]; then
+    echo "PRECONDITION FAIL: prepare-plan resolved a ${BUMP_TYPE} bump to v${NEW_VERSION} but updated no files — refusing to make an empty prepare commit." >&2
+    exit 1
+  fi
+
+  local f
+  for f in "${UPDATED[@]}"; do
+    [[ -n "$f" ]] || continue
+    git -C "$REPO_ROOT" add -- "$f" \
+      || { echo "PRECONDITION FAIL: cannot stage ${f}" >&2; exit 1; }
+  done
+
+  # Re-read what is ACTUALLY staged and prove it is a subset of the intended
+  # list. A version-file edit that failed partway (guarantee: Error Handling)
+  # leaves the tree dirty and this command exits non-zero — no candidate is
+  # frozen afterwards because --stage freeze refuses a dirty tree.
+  local staged unexpected=""
+  staged="$(git -C "$REPO_ROOT" diff --cached --name-only)"
+  local want="" rel
+  for f in "${UPDATED[@]}"; do
+    [[ -n "$f" ]] || continue
+    rel="$(realpath -m --relative-to="$REPO_ROOT" -- "$f" 2>/dev/null)" || rel="$f"
+    want+="${rel}"$'\n'
+  done
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    grep -qxF "$rel" <<<"$want" || unexpected+="${rel}"$'\n'
+  done <<<"$staged"
+  if [[ -n "$unexpected" ]]; then
+    echo "PRECONDITION FAIL: files outside the version-file registry are staged — refusing to fold them into the prepare commit:" >&2
+    printf '%s' "$unexpected" >&2
+    exit 1
+  fi
+  if [[ -z "$staged" ]]; then
+    echo "PRECONDITION FAIL: nothing staged after the version-file edits — refusing to make an empty prepare commit." >&2
+    exit 1
+  fi
+
+  git -C "$REPO_ROOT" commit -q -m "release: prepare v${NEW_VERSION} for ${plan_id}" \
+    || { echo "PRECONDITION FAIL: prepare commit failed — the version edits remain staged." >&2; exit 1; }
+
+  echo "Prepared v${NEW_VERSION} for ${plan_id} on ${plan_branch} at $(git -C "$REPO_ROOT" rev-parse --short HEAD) — no tag, no push." >&2
+  echo "$NEW_VERSION"
+  return 0
+}
+
+# =============================================================================
+# Dispatch. Anything that is not the literal `prepare-plan` goes to the legacy
+# entry point with its arguments untouched — including the empty argument list.
+# =============================================================================
+main() {
+  case "${1:-}" in
+    prepare-plan) shift; cmd_prepare_plan "$@" ;;
+    *) _release_legacy_bump "$@" ;;
+  esac
+}
+
+main "$@"

@@ -48,7 +48,30 @@
 #                                                            owns that; this
 #                                                            file only carries
 #                                                            it forward via
-#                                                            plan_manifest_update)
+#                                                            plan_manifest_update.
+#                                                            The ONE exception,
+#                                                            added by P068
+#                                                            Step 1: the
+#                                                            candidate
+#                                                            freeze/clear pair
+#                                                            below MUST move
+#                                                            plan_state in the
+#                                                            same atomic write
+#                                                            as candidate_sha,
+#                                                            because the
+#                                                            candidate_sha
+#                                                            invariant depends
+#                                                            on it — split
+#                                                            across two writes,
+#                                                            either order fails
+#                                                            validation or
+#                                                            leaves a lie on
+#                                                            disk. The
+#                                                            plan-state.yaml
+#                                                            file itself is
+#                                                            still transitioned
+#                                                            only by
+#                                                            aid-plan-fsm.sh.)
 #   epics, active_epics, total_epics                      — the EPIC set +
 #                                                            currently-running
 #                                                            subset
@@ -61,6 +84,31 @@
 #                                                            lifecycle
 #   plan_final_run_id, plan_final_evidence_dir             — set together or
 #                                                            not at all
+#   candidate_frozen_at                                    — P068 Step 1. The
+#                                                            RFC 3339 UTC
+#                                                            instant of the
+#                                                            freeze, written
+#                                                            and cleared ONLY
+#                                                            together with
+#                                                            candidate_sha (see
+#                                                            plan_manifest_freeze_candidate
+#                                                            / _clear_candidate).
+#                                                            This runtime field
+#                                                            — NOT the
+#                                                            .aid-lifecycle
+#                                                            manifest — is the
+#                                                            authoritative
+#                                                            freeze time a PM
+#                                                            decision's
+#                                                            decided_at is
+#                                                            checked against;
+#                                                            only this write
+#                                                            path can be atomic
+#                                                            with candidate_sha.
+#   candidate_invalidation_reason                          — P068 Step 1. Why
+#                                                            the last candidate
+#                                                            was discarded;
+#                                                            informational.
 #
 # ── INVARIANT ENFORCEMENT (this file, NOT aid-protocol-validate.sh, NOT the
 #    descriptive schema) ─────────────────────────────────────────────────────
@@ -168,7 +216,7 @@
 #   "not_found" case (manifest doesn't exist yet) — see each function's own
 #   doc comment for the exact stdout contract.
 #
-# **Last Updated:** 2026-07-23
+# **Last Updated:** 2026-07-25
 # =============================================================================
 
 _AID_PLAN_MANIFEST_LIBDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -296,6 +344,8 @@ _pm_build_init_json() {
         target_branch_head_at_candidate_freeze: null,
         plan_branch_head: $base_sha,
         candidate_sha: null,
+        candidate_frozen_at: null,
+        candidate_invalidation_reason: null,
         plan_state: "OPEN",
         mode: $mode,
         epics: [],
@@ -401,6 +451,27 @@ _pm_check_invariants() {
   # ── candidate_sha non-null requires a late plan_state ────────────────────
   if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED"] | index($s) != null)' "$file" >/dev/null 2>&1; then
     echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED)" >&2
+    return 1
+  fi
+
+  # ── candidate_frozen_at: null, or an RFC 3339 UTC instant ────────────────
+  # P068 Step 1. Deliberately strict: only the `Z` (UTC) form is accepted, so
+  # a freeze time can never be recorded in a local offset a later comparison
+  # (Step 5's decided_at check) would have to normalise. The regex also pins
+  # the field length, which rejects the "2026-07-25" date-only shape.
+  if ! jq -e '(.plan_boundary_manifest.candidate_frozen_at == null) or ((.plan_boundary_manifest.candidate_frozen_at | type == "string") and (.plan_boundary_manifest.candidate_frozen_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — offending field: candidate_frozen_at (non-null must be an RFC 3339 UTC instant, e.g. 2026-07-25T09:31:04Z)" >&2
+    return 1
+  fi
+
+  # ── candidate_sha / candidate_frozen_at are null or non-null TOGETHER ─────
+  # The freeze binding is the PAIR, never either half: a candidate with no
+  # freeze time cannot be validated against a PM decision's decided_at, and a
+  # freeze time with no candidate names an instant at which nothing was
+  # frozen. Enforced in BOTH directions so neither a partial freeze nor a
+  # partial invalidation can ever reach disk (P068 Step 1).
+  if ! jq -e '.plan_boundary_manifest as $m | (($m.candidate_sha == null) and ($m.candidate_frozen_at == null)) or (($m.candidate_sha != null) and ($m.candidate_frozen_at != null))' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha and candidate_frozen_at must be null/non-null together (the freeze binding is the pair; a half-written freeze or half-cleared invalidation is rejected before it reaches disk)" >&2
     return 1
   fi
 
@@ -1061,6 +1132,145 @@ plan_manifest_raise_final_profile() {
 }
 
 # ===========================================================================
+# plan_manifest_freeze_candidate <plan_id> <candidate_sha> <target_head_sha>
+#                                 <plan_final_run_id> <plan_final_evidence_dir>
+#                                 [frozen_at]
+#
+# P068 Step 1 — THE candidate freeze write, and the only sanctioned way to set
+# `candidate_sha`. It is ONE `_plan_manifest_atomic_mutate` call, so every
+# field that makes a candidate meaningful lands in the same temp-file →
+# validate → rename, or none of them does:
+#
+#   candidate_sha, candidate_frozen_at,
+#   target_branch_head_at_candidate_freeze,
+#   plan_final_run_id, plan_final_evidence_dir,
+#   plan_state = PLAN_GATES, candidate_invalidation_reason = null
+#
+# WHY the timestamp is written HERE and nowhere else: this library already
+# owns `candidate_sha`, so this is the only write path that can make the pair
+# atomic. Putting the freeze time in the `.aid-lifecycle` manifest instead
+# would put it behind a DIFFERENT artifact's write path, where a crash between
+# the two writes leaves a candidate with no freeze time (or a freeze time with
+# no candidate) — exactly the state Step 5's decided_at check cannot
+# adjudicate. The pair invariant in _pm_check_invariants makes that
+# unreachable: a half-written freeze fails validation on the temp file and is
+# never renamed into place.
+#
+# `plan_state` MUST move in the same write because the manifest's own
+# candidate_sha invariant requires a late plan_state — writing the SHA first
+# and the state second would fail validation, and the reverse order would
+# leave PLAN_GATES recorded with no candidate.
+#
+# `frozen_at` defaults to now (UTC, RFC 3339 `Z`); it is a parameter only so
+# tests and a crash-resume can reproduce an exact instant. A malformed value
+# is rejected here AND again by the invariant.
+#
+# Returns: 0 success, 1 bad args / not_found / invariant violation, 2 missing
+# jq, 3 lock timeout, 5 corrupt / validator missing.
+# ===========================================================================
+plan_manifest_freeze_candidate() {
+  local plan_id="$1" candidate_sha="$2" target_head="$3" run_id="$4" \
+        evidence_dir="$5" frozen_at="${6:-}"
+
+  _plan_manifest_require_jq || return 2
+  _pm_validate_plan_id_charset "$plan_id" || return 1
+
+  if ! [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: candidate_sha must be a 40-hex sha (got '${candidate_sha:-<empty>}')"
+    return 1
+  fi
+  if ! [[ "$target_head" =~ ^[0-9a-f]{40}$ ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: target_branch_head_at_candidate_freeze must be a 40-hex sha (got '${target_head:-<empty>}')"
+    return 1
+  fi
+  if [[ -z "$run_id" || -z "$evidence_dir" ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: plan_final_run_id and plan_final_evidence_dir are both required"
+    return 1
+  fi
+
+  [[ -n "$frozen_at" ]] || frozen_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if ! [[ "$frozen_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+    _pm_warn "plan_manifest_freeze_candidate: frozen_at must be an RFC 3339 UTC instant (got '${frozen_at}')"
+    return 1
+  fi
+
+  local filter='
+    .plan_boundary_manifest.candidate_sha = $candidate_sha
+    | .plan_boundary_manifest.candidate_frozen_at = $frozen_at
+    | .plan_boundary_manifest.target_branch_head_at_candidate_freeze = $target_head
+    | .plan_boundary_manifest.plan_final_run_id = $run_id
+    | .plan_boundary_manifest.plan_final_evidence_dir = $evidence_dir
+    | .plan_boundary_manifest.candidate_invalidation_reason = null
+    | .plan_boundary_manifest.plan_state = "PLAN_GATES"
+  '
+
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --arg candidate_sha "$candidate_sha" \
+    --arg frozen_at "$frozen_at" \
+    --arg target_head "$target_head" \
+    --arg run_id "$run_id" \
+    --arg evidence_dir "$evidence_dir"
+}
+
+# ===========================================================================
+# plan_manifest_clear_candidate <plan_id> <reason> <target_plan_state>
+#
+# P068 Step 1 — the exact inverse of plan_manifest_freeze_candidate, and the
+# only sanctioned way to clear `candidate_sha`. One atomic write clears ALL
+# FIVE plan-final fields together (candidate_sha, candidate_frozen_at,
+# target_branch_head_at_candidate_freeze, plan_final_run_id,
+# plan_final_evidence_dir), records `candidate_invalidation_reason` and moves
+# `plan_state` to the CALLER-SUPPLIED target.
+#
+# The target state is a parameter, not a constant: the same field-clearing
+# serves two recovery paths that land in different states — PLAN_FIX (a review
+# fix) and PLAN_SYNC (a stale-authorization or conflict resynchronisation).
+# Hard-coding PLAN_FIX would make the resync path inexpressible.
+#
+# Clearing `candidate_frozen_at` in the SAME write is what makes a PM decision
+# bound to the previous candidate unable to satisfy the next one: after an
+# invalidation there is no freeze time at all, and the next freeze mints a new
+# one, so a `decided_at` from before the invalidation can never fall after it.
+#
+# NOTE: this function does NOT delete the run directory the cleared
+# `plan_final_evidence_dir` pointed at. Prior run directories are immutable by
+# construction — each freeze allocates a fresh `R-<plan_id>-final-<N>`.
+#
+# Returns: 0 success, 1 bad args / not_found / illegal target state /
+# invariant violation, 2 missing jq, 3 lock timeout, 5 corrupt.
+# ===========================================================================
+plan_manifest_clear_candidate() {
+  local plan_id="$1" reason="$2" target_state="$3"
+
+  _plan_manifest_require_jq || return 2
+  _pm_validate_plan_id_charset "$plan_id" || return 1
+  if [[ -z "$reason" ]]; then
+    _pm_warn "plan_manifest_clear_candidate: a reason is required — an unexplained invalidation is not recordable"
+    return 1
+  fi
+  case "$target_state" in
+    PLAN_FIX|PLAN_SYNC) ;;
+    *)
+      _pm_warn "plan_manifest_clear_candidate: target_plan_state must be PLAN_FIX or PLAN_SYNC (got '${target_state:-<empty>}')"
+      return 1
+      ;;
+  esac
+
+  local filter='
+    .plan_boundary_manifest.candidate_sha = null
+    | .plan_boundary_manifest.candidate_frozen_at = null
+    | .plan_boundary_manifest.target_branch_head_at_candidate_freeze = null
+    | .plan_boundary_manifest.plan_final_run_id = null
+    | .plan_boundary_manifest.plan_final_evidence_dir = null
+    | .plan_boundary_manifest.candidate_invalidation_reason = $reason
+    | .plan_boundary_manifest.plan_state = $target_state
+  '
+
+  _plan_manifest_atomic_mutate "$plan_id" "$filter" \
+    --arg reason "$reason" --arg target_state "$target_state"
+}
+
+# ===========================================================================
 # plan_manifest_validate <plan_id> [--current-head <sha>]
 #
 # The public three-layer validator (see file header "INVARIANT ENFORCEMENT")
@@ -1111,6 +1321,8 @@ Subcommands:
   add-epic <plan_id> <epic_id> <run_id> <task_branch> <epic_base_commit> <epic_source_ref> <evidence_dir>
   set-epic-status <plan_id> <epic_id> <status> [merge_commit]
   raise-final-profile <plan_id> <profile>
+  freeze-candidate <plan_id> <candidate_sha> <target_head_sha> <run_id> <evidence_dir> [frozen_at]
+  clear-candidate <plan_id> <reason> <PLAN_FIX|PLAN_SYNC>
   validate <plan_id> [--current-head <sha>]
 EOF
 }
@@ -1126,6 +1338,8 @@ main() {
     add-epic)              plan_manifest_add_epic "$@"; exit $? ;;
     set-epic-status)       plan_manifest_set_epic_status "$@"; exit $? ;;
     raise-final-profile)   plan_manifest_raise_final_profile "$@"; exit $? ;;
+    freeze-candidate)      plan_manifest_freeze_candidate "$@"; exit $? ;;
+    clear-candidate)       plan_manifest_clear_candidate "$@"; exit $? ;;
     validate)              plan_manifest_validate "$@"; exit $? ;;
     -h|--help|"")
       _aid_plan_manifest_usage

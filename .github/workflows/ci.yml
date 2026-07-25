@@ -43,6 +43,26 @@ jobs:
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-release-boundary.bats
         timeout-minutes: 15
 
+  plan-final-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install jq + bats + yq
+        # Same shape and same reason as plan-boundary-tests above: this suite
+        # (test-aid-plan-final-boundary.bats, P068 E-068-1_2) builds a real Git
+        # repository per test and drives real merges, version-file bumps and
+        # candidate freeze/invalidation cycles through the CLIs, so it gets its
+        # own job and its own budget rather than eating the bash-tests job's
+        # remaining headroom. yq is needed because the plan-final path reads
+        # .aid-o/config/project.yaml and the lifecycle manifests.
+        run: |
+          sudo apt-get install -y jq bats
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      - name: Run plan-final boundary suite
+        run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
+        timeout-minutes: 15
+
   vitest:
     runs-on: ubuntu-latest
     steps:

@@ -55,7 +55,21 @@
             { "type": "string", "pattern": "^[0-9a-f]{40}$" },
             { "type": "null" }
           ],
-          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh). Non-null ALSO requires candidate_frozen_at non-null, and vice versa (P068 Step 1) — the pair is written and cleared atomically by lib/aid-plan-manifest.sh, which is the sole owner of both fields."
+        },
+        "candidate_frozen_at": {
+          "oneOf": [
+            { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+            { "type": "null" }
+          ],
+          "description": "P068 Step 1. RFC 3339 UTC ('Z') instant at which candidate_sha was frozen — the AUTHORITATIVE freeze-time source a PM decision artifact's decided_at is validated against (Step 5). Deliberately lives HERE, in the RUNTIME plan-boundary manifest, and NOT in the .aid-lifecycle manifest: only this artifact's write path can establish atomicity with candidate_sha. Nullable under exactly the same rule as candidate_sha — the two are legal only together, so a refreeze rewrites both and an invalidation clears both. NOT enforced here — see lib/aid-plan-manifest.sh (_pm_check_invariants)."
+        },
+        "candidate_invalidation_reason": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ],
+          "description": "P068 Step 1. Free-text reason recorded by plan_final_invalidate when a frozen candidate is discarded (e.g. candidate_changed_after_freeze, stale_pm_authorization). Cleared on the next successful freeze. Purely informational — no invariant depends on it."
         },
         "plan_state": {
           "enum": [

@@ -45,8 +45,19 @@
 # branch, and adding it would multiply the branch-identity paths this file
 # has to reason about for no tested benefit.
 #
-# `plan-finalize`, `plan-merge-to-main`, `plan-close-check` and `inventory`
-# remain P068/later-step subcommands; this file does not implement them.
+# P068 EPIC E-068-1_2 Step 1 adds the FIRST plan-final subcommand:
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze>
+#                    [--frozen-at <rfc3339>] [--project-root <path>]
+# — see the dedicated section header above cmd_plan_finalize for the order it
+# enforces (sync → version preparation → freeze) and why an invalidation
+# clears the whole candidate binding at once.
+#
+# `plan-merge-to-main`, `plan-close-check` and `inventory` remain later-step
+# subcommands; this file does not implement them yet. That matters beyond
+# bookkeeping: `_pfsm_plan_final_installed` requires BOTH `plan-finalize` AND
+# `plan-merge-to-main` in the dispatcher before `--mode plan_branch` is
+# allowed, so adding only the first one deliberately does NOT lift the
+# plan-start refusal — a plan_branch plan still could not be CLOSED.
 # Neither `epic-start` NOR `epic-merge-to-plan` performs a queue write — Step 7
 # owns every queue write and wires itself into both (the manifest is the
 # authority for EPIC status, the queue a derived view; that one-way edge is
@@ -116,7 +127,7 @@
 # pipefail` (no `-e`) still guards against unset variables and swallowed
 # pipeline failures wherever a pipeline's exit code IS checked below.
 #
-# **Last Updated:** 2026-07-23
+# **Last Updated:** 2026-07-25
 # =============================================================================
 
 set -uo pipefail
@@ -1690,6 +1701,415 @@ cmd_epic_merge_to_plan() {
 }
 
 # =============================================================================
+# ─── P068 Step 1: the plan-final boundary — `plan-finalize` ──────────────────
+#
+# `plan-finalize` opens the plan-final cycle in a FIXED order that the rest of
+# the boundary depends on:
+#
+#     --stage sync   : every EPIC is terminal → merge target_branch into the
+#                      plan branch → PLAN_SYNC
+#     (the release script's prepare-plan subcommand runs HERE, still in PLAN_SYNC —
+#      it makes the version commit on the plan branch)
+#     --stage freeze : freeze ONE immutable candidate at the resulting plan
+#                      head, allocate its run directory → PLAN_GATES
+#
+# The order is load-bearing. Version preparation happens BEFORE the freeze so
+# the frozen candidate already contains the release metadata and nothing has
+# to be committed once the reviews start. And because `prepare-plan` runs
+# while the state is still PLAN_SYNC, it never needs a `candidate_sha` that
+# does not yet exist.
+#
+# A MERGE, NOT A REBASE (roadmap resolved decision 4): `--stage sync` uses
+# `git merge --no-ff`. A rebase would rewrite the plan branch's commits, so
+# every recorded SHA in the manifest (`plan_base_commit`, every
+# `epic_base_commit`, every `epic_merge_commit`) would name a commit that no
+# longer exists — resume and audit both stop being deterministic.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# _pfsm_plan_final_run_dir_rel <plan_id> <n> — the repo-relative run directory
+# for attempt n. Kept in one place because BOTH the allocator and the manifest
+# write must agree with the manifest's own containment invariant
+# (.aid-o/work/evidence/<plan_id>/...).
+# ---------------------------------------------------------------------------
+_pfsm_plan_final_run_dir_rel() {
+  printf '.aid-o/work/evidence/%s/R-%s-final-%s' "$1" "$1" "$2"
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_next_plan_final_attempt <root> <plan_id>
+#
+# The attempt allocator. Derived from what is ON DISK — the highest existing
+# `R-<plan_id>-final-<N>` directory plus one — rather than from a counter in
+# the manifest, and that is deliberate: an invalidation CLEARS the manifest's
+# plan-final fields, so a counter stored there would be cleared with them and
+# the next freeze would re-allocate `-1` on top of a directory that already
+# exists. Deriving from disk makes "prior run directories are never deleted or
+# overwritten" (roadmap resolved decision 8) structural rather than a promise.
+# Echoes 1 when none exist.
+# ---------------------------------------------------------------------------
+_pfsm_next_plan_final_attempt() {
+  local root="$1" plan_id="$2"
+  local base="${root}/.aid-o/work/evidence/${plan_id}"
+  local max=0 d n
+  if [[ -d "$base" ]]; then
+    for d in "$base"/R-"${plan_id}"-final-*; do
+      [[ -d "$d" ]] || continue
+      n="${d##*-final-}"
+      [[ "$n" =~ ^[0-9]+$ ]] || continue
+      [[ "$n" -gt "$max" ]] && max="$n"
+    done
+  fi
+  printf '%s' "$((max + 1))"
+}
+
+# ---------------------------------------------------------------------------
+# plan_final_invalidate <plan_id> <reason> <target_state>
+#
+# ONE function for every candidate invalidation. It clears `candidate_sha`,
+# `candidate_frozen_at`, `target_branch_head_at_candidate_freeze`,
+# `plan_final_run_id` and `plan_final_evidence_dir` in a SINGLE atomic manifest
+# write (lib/aid-plan-manifest.sh's plan_manifest_clear_candidate), records the
+# reason, and transitions the plan to the CALLER-SUPPLIED target state.
+#
+# The target state is a parameter, not a constant, because the same field
+# clearing serves two recovery paths that land in different states: `PLAN_FIX`
+# for a review fix, `PLAN_SYNC` for a stale-authorization or conflict
+# resynchronisation. Both are legal from `AWAITING_PM` in P064's transition
+# table. An earlier draft hard-coded PLAN_FIX and simply could not express the
+# resync path.
+#
+# It never deletes a run directory: each freeze allocates a fresh one, so the
+# prior attempt's evidence stays byte-identical and auditable.
+# ---------------------------------------------------------------------------
+plan_final_invalidate() {
+  local plan_id="$1" reason="$2" target_state="$3"
+
+  # ── The transition must be legal BEFORE anything is cleared ──────────────
+  # The manifest write and the plan-state file are two artifacts, and the
+  # manifest is written first. If the caller-supplied target were illegal from
+  # the current state, the manifest would record it while the state file kept
+  # the old value — an invisible divergence between the two records of the
+  # same fact. So legality is checked against the SAME table plan_state_transition
+  # uses, up front, and an illegal target is a refusal that writes nothing.
+  # (PLAN_FIX is legal from PLAN_GATES/PLAN_REVIEW/AWAITING_PM; PLAN_SYNC is
+  # the resync target and is legal from AWAITING_PM/PLAN_FIX/CONFLICT — which
+  # is exactly why the target is a parameter.)
+  local cur="" crc=0
+  cur="$(plan_state_get "$plan_id" "plan_state")" || crc=$?
+  if [[ "$crc" -ne 0 || -z "$cur" || "$cur" == "not_found" ]]; then
+    echo "PRECONDITION FAIL: cannot read the plan state for ${plan_id} — refusing to invalidate a candidate without knowing the state it would move from." >&2
+    return 1
+  fi
+  if [[ "$cur" != "$target_state" ]]; then
+    local t legal=0
+    for t in "${_AID_PLAN_TRANSITIONS[@]}"; do
+      [[ "$t" == "${cur}:${target_state}" ]] && { legal=1; break; }
+    done
+    if [[ "$legal" -ne 1 ]]; then
+      echo "PRECONDITION FAIL: ${cur} -> ${target_state} is not a legal plan-state transition — refusing to invalidate the candidate for ${plan_id}; nothing was cleared. (PLAN_FIX is the review-fix target, PLAN_SYNC the resync target; they are reachable from different states.)" >&2
+      return 1
+    fi
+  fi
+
+  local rc=0
+  plan_manifest_clear_candidate "$plan_id" "$reason" "$target_state" >/dev/null || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    echo "PRECONDITION FAIL: could not clear the plan-final fields for ${plan_id} (rc=${rc}) — the candidate binding is UNCHANGED; nothing was half-cleared." >&2
+    return "$rc"
+  fi
+  # F1 (controller review, 2026-07-25): do NOT swallow this write. The manifest
+  # is already cleared and moved to <target_state> by the time we get here, so a
+  # silently-failed state-file write leaves exactly the manifest/state-file
+  # divergence the legality pre-check above exists to prevent — and the caller
+  # would see exit 0 and believe the invalidation completed. Same class as
+  # IMP-258 (per-write failures must propagate, never `|| true`). Report loudly
+  # and name the reconciliation, rather than pretending success.
+  if ! _pfsm_plan_state_set "$plan_id" "$target_state"; then
+    echo "PRECONDITION FAIL: the plan-final fields for ${plan_id} were cleared and the manifest moved to ${target_state}, but the plan STATE FILE could not be moved — the two records now disagree. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}' before finalizing again; the candidate binding is already gone, so re-run '--stage sync' rather than assuming a candidate exists." >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_sync <root> <plan_id>  — the `--stage sync` body.
+# ---------------------------------------------------------------------------
+_pfsm_finalize_sync() {
+  local root="$1" plan_id="$2"
+  local plan_branch="plan/${plan_id}"
+
+  local target_branch=""
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  if [[ -z "$target_branch" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: no target_branch recorded for ${plan_id} — run plan-start first." >&2
+    return 1
+  fi
+
+  # ── Every EPIC must be terminal ─────────────────────────────────────────
+  # `pending` or `running` means work is still outstanding: syncing and then
+  # freezing a candidate would seal a plan that does not contain it. The
+  # offending EPIC is NAMED, because "some EPIC is not done" is not actionable.
+  local unfinished=""
+  unfinished="$(plan_manifest_get "$plan_id" \
+    '[.plan_boundary_manifest.epic_runs[] | select(.status == "pending" or .status == "running" or .status == "blocked") | .epic_id + " (" + .status + ")"] | join(", ")')" || unfinished=""
+  if [[ -n "$unfinished" && "$unfinished" != "not_found" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_id} still has non-terminal EPICs — ${unfinished}. Every EPIC must be merged_to_plan, abandoned or superseded before the plan branch is synced." >&2
+    return 1
+  fi
+
+  # ── An abandoned/superseded EPIC must carry a recorded PM reason ─────────
+  # Abandonment is a decision, and an undocumented decision is indistinguish-
+  # able from an EPIC that was simply dropped (roadmap §12).
+  local unreasoned=""
+  unreasoned="$(plan_manifest_get "$plan_id" \
+    '[.plan_boundary_manifest.epic_runs[] | select((.status == "abandoned" or .status == "superseded") and ((.terminal_reason // "") == "")) | .epic_id + " (" + .status + ")"] | join(", ")')" || unreasoned=""
+  if [[ -n "$unreasoned" && "$unreasoned" != "not_found" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_id} has terminal EPICs with no recorded reason — ${unreasoned}. Abandonment requires a reason; record it with 'aid-plan-fsm.sh epic-complete ${plan_id} <epic_id> --abandon --reason <text>'." >&2
+    return 1
+  fi
+
+  local plan_head=""
+  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  if [[ -z "$plan_head" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: ${plan_branch} not found — run plan-start first." >&2
+    return 1
+  fi
+  local target_head=""
+  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  if [[ -z "$target_head" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: target branch ${target_branch} not found." >&2
+    return 1
+  fi
+
+  # ── Already contained: nothing to merge, the sync is a no-op ─────────────
+  if _pfsm_is_ancestor "$root" "$target_head" "$plan_branch"; then
+    _pfsm_plan_state_set "$plan_id" "PLAN_SYNC" || true
+    echo "$plan_head"
+    return 0
+  fi
+
+  local orig_branch=""
+  orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+  if ! git -C "$root" checkout -q "$plan_branch" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-finalize --stage sync: cannot check out ${plan_branch} (checked out in another worktree?) — nothing merged." >&2
+    return 1
+  fi
+
+  local merge_out="" mrc=0
+  merge_out="$(git -C "$root" merge --no-ff --no-edit \
+    -m "merge(plan-final): ${target_branch} into ${plan_branch}" "$target_branch" 2>&1)" || mrc=$?
+
+  if [[ "$mrc" -ne 0 ]]; then
+    # Same discrimination as epic-merge-to-plan: only a REAL conflict (a
+    # MERGE_HEAD or unmerged index entries) drives the plan to CONFLICT and
+    # exits 4. Everything else — a refusing hook, an untracked file in the
+    # way — leaves nothing to resolve and must not send an automated
+    # controller down the conflict-resolution path.
+    local git_dir="" is_conflict=0
+    git_dir="$(git -C "$root" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || git_dir=""
+    if [[ -n "$git_dir" && -f "${git_dir}/MERGE_HEAD" ]]; then
+      is_conflict=1
+    elif [[ -n "$(git -C "$root" ls-files --unmerged 2>/dev/null)" ]]; then
+      is_conflict=1
+    fi
+    if [[ "$is_conflict" -eq 1 ]]; then
+      git -C "$root" merge --abort >/dev/null 2>&1 || true
+    fi
+    _pfsm_restore_head "$root" "$orig_branch" || true
+    if [[ "$is_conflict" -eq 1 ]]; then
+      _pfsm_plan_state_set "$plan_id" "CONFLICT" || true
+      echo "MERGE CONFLICT: ${target_branch} does not merge cleanly into ${plan_branch} — plan state is CONFLICT, ${plan_branch} unchanged." >&2
+      printf '%s\n' "$merge_out" >&2
+      return 4
+    fi
+    echo "MERGE FAILED (not a conflict): git refused to merge ${target_branch} into ${plan_branch} — no MERGE_HEAD and no unmerged index entries, so there is nothing to resolve or abort. The plan state is left where it was." >&2
+    printf '%s\n' "$merge_out" >&2
+    return 1
+  fi
+
+  local new_head=""
+  new_head="$(git -C "$root" rev-parse "$plan_branch" 2>/dev/null)" || new_head=""
+  _pfsm_restore_head "$root" "$orig_branch" || true
+  if [[ -z "$new_head" ]]; then
+    echo "PRECONDITION FAIL: cannot resolve ${plan_branch} after the merge." >&2
+    return 5
+  fi
+
+  local esc; esc="$(jq -Rn --arg s "$new_head" '$s')"
+  plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_branch_head = ${esc}" >/dev/null 2>&1 || true
+  _pfsm_plan_state_set "$plan_id" "PLAN_SYNC" || true
+  echo "$new_head"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_freeze <root> <plan_id> [frozen_at]  — the `--stage freeze` body.
+# ---------------------------------------------------------------------------
+_pfsm_finalize_freeze() {
+  local root="$1" plan_id="$2" frozen_at="${3:-}"
+  local plan_branch="plan/${plan_id}"
+
+  local target_branch=""
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  if [[ -z "$target_branch" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze: no target_branch recorded for ${plan_id} — run plan-start first." >&2
+    return 1
+  fi
+
+  local plan_head="" target_head=""
+  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  if [[ -z "$plan_head" || -z "$target_head" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze: cannot resolve ${plan_branch} and/or ${target_branch}." >&2
+    return 1
+  fi
+
+  local cur_candidate=""
+  cur_candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || cur_candidate=""
+
+  # ── A candidate already exists: it is either still exact, or it changed ──
+  # The candidate is IMMUTABLE. If the plan branch has moved off it, the thing
+  # that was reviewed no longer exists at the branch tip, so the binding is
+  # discarded wholesale rather than silently re-pointed at the new head: every
+  # plan-final field is cleared together and the plan goes to PLAN_FIX for the
+  # fix cycle to re-sync and re-freeze.
+  if [[ -n "$cur_candidate" && "$cur_candidate" != "not_found" ]]; then
+    if [[ "$cur_candidate" == "$plan_head" ]]; then
+      local run_dir=""
+      run_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir=""
+      echo "$cur_candidate"
+      [[ -n "$run_dir" && "$run_dir" != "not_found" ]] && echo "already frozen at ${cur_candidate} (${run_dir}) — no second candidate minted." >&2
+      return 0
+    fi
+    local irc=0
+    plan_final_invalidate "$plan_id" "candidate_changed_after_freeze" "PLAN_FIX" || irc=$?
+    [[ "$irc" -ne 0 ]] && return "$irc"
+    echo "CANDIDATE INVALIDATED: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head} — all plan-final fields cleared and the plan is now PLAN_FIX. Re-run --stage sync then --stage freeze to mint a new candidate; the previous run directory is left byte-identical." >&2
+    return 6
+  fi
+
+  # ── State precondition: freeze only out of PLAN_SYNC ─────────────────────
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+  if [[ "$cur_state" != "PLAN_SYNC" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage freeze: ${plan_id} is in state '${cur_state:-<none>}' — freeze runs only out of PLAN_SYNC (run '--stage sync' first, then the release script's prepare-plan subcommand)." >&2
+    return 1
+  fi
+
+  # ── Target drift between sync and freeze — REFUSE, never freeze anyway ───
+  # If the target branch has advanced since the sync merge (a hotfix,
+  # typically), its head is no longer contained in the plan branch. Recording
+  # the NEWER head and freezing anyway would bind a candidate that does NOT
+  # contain the hotfix to a target head that DOES: Step 5's compare-and-swap
+  # would still be exact, and would still merge a candidate missing the
+  # hotfix. So the plan returns to PLAN_SYNC and the drift is merged in first.
+  # PLAN_SYNC → PLAN_SYNC is a legal self-edge precisely for this loop.
+  if ! _pfsm_is_ancestor "$root" "$target_head" "$plan_branch"; then
+    _pfsm_plan_state_set "$plan_id" "PLAN_SYNC" || true
+    echo "PRECONDITION FAIL: target_drift_during_freeze — ${target_branch} advanced to ${target_head}, which ${plan_branch} does not contain. Nothing was frozen; the plan stays in PLAN_SYNC. Re-run '--stage sync' to merge the drift in, then freeze." >&2
+    return 1
+  fi
+
+  # ── Allocate the next attempt and create its immutable run directory ─────
+  local attempt run_dir_rel run_dir_abs run_id
+  attempt="$(_pfsm_next_plan_final_attempt "$root" "$plan_id")"
+  run_dir_rel="$(_pfsm_plan_final_run_dir_rel "$plan_id" "$attempt")"
+  run_id="R-${plan_id}-final-${attempt}"
+  run_dir_abs="${root}/${run_dir_rel}"
+  if [[ -e "$run_dir_abs" ]]; then
+    echo "PRECONDITION FAIL: ${run_dir_rel} already exists — refusing to reuse or overwrite a prior plan-final run directory." >&2
+    return 1
+  fi
+  mkdir -p "$run_dir_abs" || {
+    echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
+    return 1
+  }
+
+  # ── The atomic two-field freeze write ───────────────────────────────────
+  # candidate_sha + candidate_frozen_at land in the SAME manifest write (with
+  # the target head, the run id/dir and plan_state), so the manifest is never
+  # observable with one of the pair set and the other absent.
+  local wrc=0
+  plan_manifest_freeze_candidate "$plan_id" "$plan_head" "$target_head" \
+    "$run_id" "$run_dir_rel" "$frozen_at" >/dev/null || wrc=$?
+  if [[ "$wrc" -ne 0 ]]; then
+    rmdir "$run_dir_abs" 2>/dev/null || true
+    echo "PRECONDITION FAIL: could not record the candidate freeze for ${plan_id} (rc=${wrc}) — NO candidate is recorded; nothing was half-written." >&2
+    return "$wrc"
+  fi
+
+  _pfsm_plan_state_set "$plan_id" "PLAN_GATES" || true
+  echo "$plan_head"
+  return 0
+}
+
+# =============================================================================
+# cmd_plan_finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>]
+#                    [--project-root <path>]
+# =============================================================================
+cmd_plan_finalize() {
+  local plan_id="" stage="" project_root_opt="" frozen_at=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stage)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        stage="$2"; shift 2 ;;
+      --frozen-at)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        frozen_at="$2"; shift 2 ;;
+      --project-root)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        project_root_opt="$2"; shift 2 ;;
+      --*) echo "ERROR: plan-finalize: unknown flag: $1" >&2; exit 2 ;;
+      *)
+        if [[ -z "$plan_id" ]]; then plan_id="$1"
+        else echo "ERROR: plan-finalize: unexpected argument: $1" >&2; exit 2; fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" || -z "$stage" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>] [--project-root <path>]" >&2
+    exit 2
+  fi
+  if ! _pfsm_validate_plan_id "$plan_id"; then
+    echo "ERROR: plan-finalize: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
+    exit 2
+  fi
+  case "$stage" in
+    sync|freeze) ;;
+    *) echo "ERROR: plan-finalize: --stage must be 'sync' or 'freeze' (got '${stage}')" >&2; exit 2 ;;
+  esac
+
+  local project_root
+  project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$project_root"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$project_root"
+
+  # The checks are about the worktree this command actually merges in and
+  # freezes FROM — the main worktree, not wherever the operator stands.
+  # A dirty tree blocks BOTH stages: a half-applied `prepare-plan` (a version
+  # file written, the CHANGELOG edit failed) leaves the tree dirty, and
+  # refusing here is what guarantees no candidate is frozen over it.
+  _pfsm_check_detached_head "$project_root" || exit 1
+  _pfsm_check_no_merge_in_progress "$project_root" || exit 1
+  _pfsm_check_clean_worktree "$project_root" || exit 1
+
+  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
+    echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2
+    exit 1
+  fi
+
+  local rc=0
+  case "$stage" in
+    sync)   _pfsm_finalize_sync "$project_root" "$plan_id" || rc=$? ;;
+    freeze) _pfsm_finalize_freeze "$project_root" "$plan_id" "$frozen_at" || rc=$? ;;
+  esac
+  exit "$rc"
+}
+
+# =============================================================================
 # cmd_plan_state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>]
 #                [--project-root ...]
 # =============================================================================
@@ -2165,6 +2585,7 @@ Subcommands:
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
+  plan-finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }
@@ -2177,6 +2598,7 @@ main() {
     epic-start) cmd_epic_start "$@" ;;
     epic-complete) cmd_epic_complete "$@" ;;
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
+    plan-finalize) cmd_plan_finalize "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
     -h|--help|"")
       _aid_plan_fsm_usage
