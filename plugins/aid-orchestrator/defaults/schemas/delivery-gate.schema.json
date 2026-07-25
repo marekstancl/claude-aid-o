@@ -54,7 +54,14 @@
       "required": ["project_id", "epic_id", "run_id"],
       "properties": {
         "project_id": { "type": "string" },
-        "epic_id": { "type": "string" },
+        "epic_id": {
+          "type": ["string", "null"],
+          "description": "The EPIC this gate belongs to, or null for a PLAN-LEVEL aggregate (P068 Step 3): the plan-final delivery gate is aggregated from every contributing EPIC's evidence pack and is bound to identity.plan_id instead. The key stays REQUIRED — an absent epic_id is still a malformed artifact; an explicit null is the plan-level shape."
+        },
+        "plan_id": {
+          "type": "string",
+          "description": "Set (with epic_id null) on the plan-level aggregate produced at the plan-final review boundary."
+        },
         "run_id": { "type": "string" }
       }
     },
