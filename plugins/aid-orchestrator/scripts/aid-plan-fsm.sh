@@ -48,6 +48,14 @@
 # P068 EPIC E-068-1_2 Step 1 adds the FIRST plan-final subcommand:
 #   aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze>
 #                    [--frozen-at <rfc3339>] [--project-root <path>]
+# P068 Step 2 adds the third stage — the ONE plan-final gate run:
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage gates
+#                    [--execution-yaml <path>]
+#                    [--substitute-receipt <gate_id>=<receipt path>]...
+# — see the section header above `_pfsm_finalize_gates` for the profile
+# selection (release, or its pre-declared release-derived substitute when a
+# gate carries a `quarantine:` block), the post-run assertions, and why
+# `plan_diff` is plan-required with `pass` (never its Fast Mode exit-2 skip).
 # — see the dedicated section header above cmd_plan_finalize for the order it
 # enforces (sync → version preparation → freeze) and why an invalidation
 # clears the whole candidate binding at once.
@@ -2064,13 +2072,546 @@ _pfsm_finalize_freeze() {
 }
 
 # =============================================================================
-# cmd_plan_finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>]
+# P068 Step 2 — `plan-finalize --stage gates`: EXACTLY ONE plan-final gate run
+# =============================================================================
+#
+# One resolved release-derived gate profile, run ONCE against the frozen
+# candidate, producing a plan-scoped gates_report.json that PROVES no required
+# gate was excluded and no broad suite ran twice.
+#
+# WHAT THIS STAGE IS NOT: it is not a change to the gate runner's semantics.
+# `aid-run-gates.sh` has no quarantine awareness and this stage adds none — the
+# quarantine handling here is a PROFILE SELECTION (run `release_quarantine`
+# instead of `release`) plus post-run assertions over the report the runner
+# wrote. The runner still just runs the gates in a profile's include[].
+#
+# THE VACUOUS-RUN TRAP (found by the C0 cross-provider review; four
+# same-provider rounds missed it): `aid-run-gates.sh` substitutes {base_commit}
+# and {plan_path} into gate commands and, before Step 2, sourced BOTH only from
+# `--state-file` — an EPIC-scoped fsm-state.yaml a plan-final run does not
+# have. With neither supplied, `plan_diff` receives `--plan null`, takes its
+# documented Fast Mode graceful skip (exit 2), and execution.yaml's
+# pass_criteria for that gate ACCEPTS exit 2 — so the single release gate run
+# for an entire plan would report success while verifying nothing about the
+# plan's acceptance criteria. Hence `--base-commit` / `--plan-path` (added to
+# the runner by this same step) are passed here, and hence `plan_diff` is
+# treated as PLAN-REQUIRED regardless of its `required: false` default, with
+# `result` asserted to be `pass` — an exit-2 skip fails the stage.
+#
+# A REQUIRED GATE IS NEVER SATISFIED BY A SKIP, and a QUARANTINED GATE IS NEVER
+# GREEN: a gate carrying `quarantine.enabled: true` is EXPECTED to be excluded
+# (its own row stays profile_excluded/waived/unverifiable, never rewritten to
+# `pass`) and must instead carry a marked targeted-substitute receipt, recorded
+# in the report's top-level `quarantine_substitutes[]`. A waiver is a separate,
+# additional PM risk-acceptance record — a waiver ALONE, with no substitute
+# receipt, does not satisfy the gate.
+# ---------------------------------------------------------------------------
+
+# _pfsm_gates_yq / _pfsm_gates_jq — hard tool preconditions for this stage.
+_pfsm_gates_require_tools() {
+  local missing=""
+  command -v yq >/dev/null 2>&1 || missing="yq"
+  command -v jq >/dev/null 2>&1 || missing="${missing:+${missing}, }jq"
+  command -v sha256sum >/dev/null 2>&1 || missing="${missing:+${missing}, }sha256sum"
+  if [[ -n "$missing" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates requires ${missing} — refusing to run the plan-final gates without the tools that read and verify their own report." >&2
+    return 1
+  fi
+  return 0
+}
+
+# _pfsm_profile_include <execution_yaml> <profile> — the profile's include[]
+# gate ids, one per line. Empty output for an unknown profile.
+_pfsm_profile_include() {
+  PROFILE="$2" yq -r '.gate_profiles[strenv(PROFILE)].include // [] | .[]' "$1" 2>/dev/null || true
+}
+
+# _pfsm_quarantined_gates <execution_yaml> — gate ids carrying a DECLARED
+# `quarantine.enabled: true` block. This is the ONLY definition of "quarantined"
+# this stage accepts: a profile named "*_quarantine" proves nothing, and a gate
+# without the block is an ordinary gate (notably `plan_diff`, which is NOT
+# quarantined and has no substitute path).
+_pfsm_quarantined_gates() {
+  yq -r '.gates | to_entries | map(select(.value.quarantine.enabled == true)) | .[].key' "$1" 2>/dev/null || true
+}
+
+# _pfsm_required_gates <execution_yaml> — gate ids with `required: true`.
+_pfsm_required_gates() {
+  yq -r '.gates | to_entries | map(select(.value.required == true)) | .[].key' "$1" 2>/dev/null || true
+}
+
+# _pfsm_in_list <needle> <newline-separated haystack>
+_pfsm_in_list() {
+  local needle="$1" hay="$2" line
+  while IFS= read -r line; do
+    [[ "$line" == "$needle" ]] && return 0
+  done <<< "$hay"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_validate_substitute_receipt <receipt_file> <candidate_sha> <root>
+#
+# The IMP-269 targeted-run receipt contract, applied to a plan-final quarantine
+# substitute. Fail-closed on every violation; prints the precise reason.
+#
+#   command / command_sha256 — command_sha256 MUST equal sha256(.command), or
+#     the fingerprint is decorative and a receipt could name one command while
+#     claiming another ran.
+#   log / log_sha256 — .log must name a real, in-repo file next to the receipt
+#     whose sha256 equals log_sha256; that is what proves the run ACTUALLY ran
+#     rather than that someone typed 64 hex characters.
+#   head binding — every present head field must equal <candidate_sha>. A
+#     substitute bound to any other head is stale or forged evidence.
+#   exit_code == 0 and failed == 0 — a substitute may only stand in for a broad
+#     gate when its own targeted run genuinely passed.
+# ---------------------------------------------------------------------------
+_pfsm_validate_substitute_receipt() {
+  local f="$1" head="$2" root="$3"
+  [[ -f "$f" && -r "$f" ]] || { echo "substitute receipt unreadable: $f" >&2; return 1; }
+  jq -e 'type == "object"' "$f" >/dev/null 2>&1 \
+    || { echo "substitute receipt is not a single JSON object: $f" >&2; return 1; }
+  jq -e --arg head "$head" '
+      (.command        | type == "string" and (length > 0))
+      and (.command_sha256 | type == "string" and test("^(sha256:)?[0-9a-f]{64}$"))
+      and (.log_sha256     | type == "string" and test("^(sha256:)?[0-9a-f]{64}$"))
+      and (.exit_code | type == "number")
+      and (.passed    | type == "number")
+      and (.failed    | type == "number")
+      and (([.head_sha, .head_sha_before, .head_sha_after] | map(select(. != null))) as $heads
+           | ($heads | length > 0) and ($heads | all(. == $head)))
+  ' "$f" >/dev/null 2>&1 \
+    || { echo "substitute receipt malformed, or not bound to the frozen candidate (${head}): $f" >&2; return 1; }
+
+  local claimed actual cmd
+  cmd="$(jq -r '.command' "$f")"
+  claimed="$(jq -r '.command_sha256' "$f" | sed 's/^sha256://')"
+  actual="$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)"
+  if [[ "$claimed" != "$actual" ]]; then
+    echo "substitute receipt command_sha256 is not sha256(.command) — the fingerprint is not of the recorded command: $f" >&2
+    return 1
+  fi
+
+  local logrel logabs logdir
+  logrel="$(jq -r '.log // ""' "$f")"
+  [[ -n "$logrel" ]] || { echo "substitute receipt has no .log — log_sha256 is unbacked, so the run is unproven: $f" >&2; return 1; }
+  logdir="$(cd "$(dirname "$f")" && pwd)" || { echo "cannot resolve receipt directory: $f" >&2; return 1; }
+  case "$logrel" in
+    /*) logabs="$logrel" ;;
+    *)  logabs="${logdir}/${logrel}" ;;
+  esac
+  logabs="$(realpath -m -- "$logabs" 2>/dev/null || echo "")"
+  [[ -n "$logabs" ]] || { echo "cannot resolve receipt .log path ('${logrel}'): $f" >&2; return 1; }
+  local root_abs; root_abs="$(realpath -m -- "$root" 2>/dev/null || echo "$root")"
+  case "$logabs" in
+    "$root_abs"/*) ;;
+    *) echo "substitute receipt .log escapes the repository (path traversal / absolute path rejected): ${logrel}" >&2; return 1 ;;
+  esac
+  [[ -f "$logabs" && -r "$logabs" ]] \
+    || { echo "substitute receipt .log not found or unreadable ('${logrel}') — cannot verify log_sha256: $f" >&2; return 1; }
+  local lclaimed lactual
+  lclaimed="$(jq -r '.log_sha256' "$f" | sed 's/^sha256://')"
+  lactual="$(sha256sum "$logabs" | awk '{print $1}')"
+  if [[ "$lclaimed" != "$lactual" ]]; then
+    echo "substitute receipt log_sha256 is not sha256(.log) — the recorded hash is not of the named log ('${logrel}'): $f" >&2
+    return 1
+  fi
+
+  # Genuine green: a red targeted run can never stand in for a broad gate.
+  if ! jq -e '.exit_code == 0 and .failed == 0' "$f" >/dev/null 2>&1; then
+    echo "substitute receipt is not a passing run (exit_code must be 0 and failed must be 0): $f" >&2
+    return 1
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# _pfsm_finalize_gates <root> <plan_id> <execution_yaml> [<gate_id>=<receipt>...]
+# ---------------------------------------------------------------------------
+_pfsm_finalize_gates() {
+  local root="$1" plan_id="$2" execution_yaml="$3"; shift 3
+  local -a subs=("$@")
+
+  _pfsm_gates_require_tools || return 1
+  [[ -f "$execution_yaml" ]] || {
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: execution config not found: ${execution_yaml}" >&2
+    return 1
+  }
+
+  local plan_branch="plan/${plan_id}"
+  local candidate base_commit run_id run_dir_rel required_profile
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  base_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || base_commit=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+  required_profile="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_required_profile')" || required_profile=""
+  for v in candidate base_commit run_id run_dir_rel; do
+    if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+      echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_id} has no frozen candidate (${v} is unset) — run '--stage sync' then '--stage freeze' first. The plan-final gates run against ONE immutable candidate, never against a moving branch head." >&2
+      return 1
+    fi
+  done
+  [[ "$required_profile" == "null" || "$required_profile" == "not_found" ]] && required_profile="standard"
+
+  # ── State precondition, and the RESUME path ──────────────────────────────
+  # PLAN_REVIEW means this stage already completed for this candidate; say so
+  # and do nothing rather than mint a second broad run.
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+  if [[ "$cur_state" == "PLAN_REVIEW" ]]; then
+    echo "already in PLAN_REVIEW for candidate ${candidate} — the plan-final gate run is complete; gates were NOT re-run." >&2
+    echo "$candidate"
+    return 0
+  fi
+  if [[ "$cur_state" != "PLAN_GATES" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_id} is in state '${cur_state:-<none>}' — the gate stage runs only out of PLAN_GATES (freeze puts it there)." >&2
+    return 1
+  fi
+
+  # ── The candidate must still be the plan branch head ─────────────────────
+  local plan_head=""
+  plan_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  if [[ "$plan_head" != "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: ${plan_branch} is at ${plan_head:-<unresolvable>} but the frozen candidate is ${candidate} — refusing to gate a head that is not the candidate. Re-run '--stage freeze' (it invalidates the stale binding) before gating." >&2
+    return 1
+  fi
+
+  # The gate commands are relative to the repository root and the runner stamps
+  # revision.head_sha from `git rev-parse HEAD` — so the working tree must BE
+  # the candidate while they run. Check out the plan branch when it is not
+  # already checked out, and put HEAD back afterwards either way.
+  local orig_branch="" head_now=""
+  head_now="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || head_now=""
+  if [[ "$head_now" != "$candidate" ]]; then
+    orig_branch="$(git -C "$root" symbolic-ref --short HEAD 2>/dev/null)" || orig_branch=""
+    if ! git -C "$root" checkout -q "$plan_branch" 2>/dev/null; then
+      echo "PRECONDITION FAIL: plan-finalize --stage gates: cannot check out ${plan_branch} (checked out in another worktree?) — no gates were run." >&2
+      return 1
+    fi
+  fi
+
+  local rc=0
+  _pfsm_finalize_gates_body "$root" "$plan_id" "$execution_yaml" "$candidate" \
+    "$base_commit" "$run_id" "$run_dir_rel" "$required_profile" "${subs[@]+"${subs[@]}"}" || rc=$?
+
+  if [[ -n "$orig_branch" ]]; then
+    _pfsm_restore_head "$root" "$orig_branch" || rc="${rc:-1}"
+  fi
+  return "$rc"
+}
+
+# _pfsm_finalize_gates_body — everything that runs WITH the candidate checked
+# out. Split out so the HEAD restore above happens on every exit path.
+_pfsm_finalize_gates_body() {
+  local root="$1" plan_id="$2" execution_yaml="$3" candidate="$4" \
+        base_commit="$5" run_id="$6" run_dir_rel="$7" required_profile="$8"
+  shift 8
+  local -a subs=("$@")
+
+  # ── Profile resolution: max(plan_final_required_profile, release) ────────
+  # gate_profile_max comes from lib/aid-gate-profile.sh (P064 Step 8); this
+  # stage CONSUMES the table, it does not define one.
+  local resolved=""
+  resolved="$(gate_profile_max "$required_profile" release)" || {
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: cannot resolve the plan-final profile from '${required_profile}'." >&2
+    return 1
+  }
+
+  local release_include quarantined
+  release_include="$(_pfsm_profile_include "$execution_yaml" "$resolved")"
+  if [[ -z "$release_include" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: profile '${resolved}' has an empty or missing include[] in ${execution_yaml}." >&2
+    return 1
+  fi
+  quarantined="$(_pfsm_quarantined_gates "$execution_yaml")"
+
+  # Only a quarantined gate that is actually IN the resolved profile matters.
+  local -a quarantined_in_profile=()
+  local g
+  while IFS= read -r g; do
+    [[ -z "$g" ]] && continue
+    if _pfsm_in_list "$g" "$release_include"; then quarantined_in_profile+=("$g"); fi
+  done <<< "$quarantined"
+
+  # ── Substitute profile selection (NOT a runner transformation) ───────────
+  local effective_profile="$resolved"
+  if (( ${#quarantined_in_profile[@]} > 0 )); then
+    effective_profile="${resolved}_quarantine"
+    local sub_include
+    sub_include="$(_pfsm_profile_include "$execution_yaml" "$effective_profile")"
+    if [[ -z "$sub_include" ]]; then
+      echo "PRECONDITION FAIL: gate(s) ${quarantined_in_profile[*]} in profile '${resolved}' carry a declared quarantine block, but no pre-declared substitute profile '${effective_profile}' exists in ${execution_yaml}. The substitute must be DECLARED, never improvised at run time." >&2
+      return 1
+    fi
+    # SET EQUALITY, not "is a subset": the substitute must be the release
+    # profile minus exactly the quarantined gates. This is what stops
+    # `bats_all_quarantine` (which also omits shell_pipeline_smoke) from being
+    # used here and silently dropping a non-quarantined release gate.
+    local expected_json actual_json
+    expected_json="$(printf '%s\n' "$release_include" | jq -R . | jq -s --argjson q "$(printf '%s\n' "${quarantined_in_profile[@]}" | jq -R . | jq -s .)" 'map(select(. as $x | ($q | index($x)) | not)) | sort')"
+    actual_json="$(printf '%s\n' "$sub_include" | jq -R . | jq -s 'sort')"
+    if [[ "$expected_json" != "$actual_json" ]]; then
+      echo "PRECONDITION FAIL: substitute profile '${effective_profile}' is not '${resolved}' minus the quarantined gate(s) ${quarantined_in_profile[*]}. Expected ${expected_json}, found ${actual_json} — a substitute that drops a NON-quarantined release gate would silently shrink the plan-final evidence." >&2
+      return 1
+    fi
+  fi
+
+  # ── The plan-required gate floor ────────────────────────────────────────
+  # required:true in execution.yaml, UNION the manifest's accumulated
+  # plan_final_required_gates[] (written by epic-complete, P064 Step 8), UNION
+  # `plan_diff` — which this stage treats as plan-required for the plan-final
+  # run regardless of its `required: false` default, because the whole point of
+  # the run is to evaluate the plan's acceptance criteria against the candidate.
+  local plan_required
+  plan_required="$(_pfsm_required_gates "$execution_yaml")"
+  local manifest_gates=""
+  manifest_gates="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_required_gates[]?' 2>/dev/null)" || manifest_gates=""
+  [[ "$manifest_gates" == "not_found" ]] && manifest_gates=""
+  plan_required="$(printf '%s\n%s\nplan_diff\n' "$plan_required" "$manifest_gates" | grep -v '^$' | sort -u)"
+
+  # ── The plan file the gates evaluate against ────────────────────────────
+  local plan_path="" cand
+  for cand in "${root}/.aid-o/plans/${plan_id}"*.md; do
+    [[ -f "$cand" ]] || continue
+    plan_path="$cand"; break
+  done
+  if [[ -z "$plan_path" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage gates: no plan file matching .aid-o/plans/${plan_id}*.md — without it plan_diff would run against '--plan null', take its Fast Mode exit-2 skip and report a green gate that verified nothing. Refusing the vacuous run." >&2
+    return 1
+  fi
+
+  local run_dir_abs="${root}/${run_dir_rel}"
+  local report_file="${run_dir_abs}/gates_report.json"
+  local timeline_file="${run_dir_abs}/timeline.jsonl"
+  mkdir -p "$run_dir_abs" || {
+    echo "PRECONDITION FAIL: cannot create ${run_dir_rel}." >&2
+    return 1
+  }
+
+  # ── Resume: the report is already written, only the transition is missing ─
+  # Re-read the existing report and complete the transition; NEVER re-run the
+  # gates (that would be the second broad run this stage exists to forbid).
+  local ran_now=0
+  if [[ -f "$report_file" ]]; then
+    echo "gates_report.json already exists for ${run_id} — re-reading it and completing only the transition; gates were NOT re-run." >&2
+  else
+    ran_now=1
+    local grc=0
+    ( cd "$root" && "${SCRIPT_DIR}/aid-run-gates.sh" run-all "$execution_yaml" \
+        "$plan_id" "$run_id" "$timeline_file" \
+        --report-file "$report_file" \
+        --profile "$effective_profile" \
+        --base-commit "$base_commit" \
+        --plan-path "$plan_path" ) >/dev/null || grc=$?
+    if [[ ! -f "$report_file" ]]; then
+      echo "PRECONDITION FAIL: the plan-final gate run produced no report at ${run_dir_rel}/gates_report.json (runner rc=${grc}) — the plan stays in PLAN_GATES." >&2
+      return 1
+    fi
+    if [[ "$grc" -ne 0 ]]; then
+      echo "GATES FAILED: the plan-final gate run for ${plan_id} did not pass (runner rc=${grc}); see ${run_dir_rel}/gates_report.json. The plan stays in PLAN_GATES — a failing candidate is shown to the PM, never silently retried." >&2
+      return 1
+    fi
+  fi
+
+  # ── quarantine_substitutes[]: the ONLY accepted evidence for a quarantined
+  #    gate. Built from PM-supplied receipts, validated, then written into the
+  #    report as a top-level array. ────────────────────────────────────────
+  local subs_json="[]"
+  if (( ${#quarantined_in_profile[@]} > 0 )); then
+    local qg entry receipt_path receipt_abs found
+    for qg in "${quarantined_in_profile[@]}"; do
+      found=""
+      local s
+      for s in ${subs[@]+"${subs[@]}"}; do
+        [[ "${s%%=*}" == "$qg" ]] && { found="${s#*=}"; break; }
+      done
+      if [[ -z "$found" ]]; then
+        echo "PRECONDITION FAIL: quarantined gate '${qg}' was excluded from the plan-final run but no targeted-substitute receipt was supplied (--substitute-receipt ${qg}=<path>). A quarantined gate is never green and never simply absent: it must carry marked targeted-substitute evidence. A waiver alone does NOT satisfy it." >&2
+        return 1
+      fi
+      receipt_abs="$(realpath -m -- "$found" 2>/dev/null || echo "$found")"
+      if ! _pfsm_validate_substitute_receipt "$receipt_abs" "$candidate" "$root"; then
+        echo "PRECONDITION FAIL: the targeted-substitute receipt for '${qg}' is not acceptable (reason above) — the plan stays in PLAN_GATES." >&2
+        return 1
+      fi
+      # Same-gate only: one receipt can never satisfy a different gate. When the
+      # receipt names a gate_id, it must be THIS gate.
+      local rgate
+      rgate="$(jq -r '.gate_id // ""' "$receipt_abs")"
+      if [[ -n "$rgate" && "$rgate" != "$qg" ]]; then
+        echo "PRECONDITION FAIL: the receipt supplied for '${qg}' declares gate_id '${rgate}' — one receipt can never satisfy a different gate." >&2
+        return 1
+      fi
+      receipt_path="$(realpath -m --relative-to="$run_dir_abs" -- "$receipt_abs" 2>/dev/null || echo "$receipt_abs")"
+      local receipt_sha cmd_sha
+      receipt_sha="$(sha256sum "$receipt_abs" | awk '{print $1}')"
+      cmd_sha="$(jq -r '.command_sha256' "$receipt_abs" | sed 's/^sha256://')"
+      entry="$(jq -nc \
+        --arg gate "$qg" \
+        --arg rp "$receipt_path" \
+        --arg rs "sha256:${receipt_sha}" \
+        --arg cs "sha256:${cmd_sha}" \
+        --arg base "$base_commit" \
+        --arg head "$candidate" \
+        --arg scope "targeted bats suites covering the candidate range, in place of the quarantined ${qg} aggregate" \
+        --argjson ec "$(jq '.exit_code' "$receipt_abs")" \
+        --argjson failed "$(jq '.failed' "$receipt_abs")" \
+        '{gate_id:$gate, targeted_substitute:"accepted", receipt_path:$rp,
+          receipt_sha256:$rs, command_sha256:$cs, base_sha:$base, head_sha:$head,
+          substitute_scope:$scope, exit_code:$ec, failed:$failed}')"
+      subs_json="$(jq -c --argjson e "$entry" '. + [$e]' <<< "$subs_json")"
+    done
+    local tmp_report="${report_file}.subs.tmp"
+    jq --argjson s "$subs_json" '. + {quarantine_substitutes: $s}' "$report_file" > "$tmp_report" \
+      && mv "$tmp_report" "$report_file" || {
+        rm -f "$tmp_report"
+        echo "PRECONDITION FAIL: could not record quarantine_substitutes[] into ${run_dir_rel}/gates_report.json." >&2
+        return 1
+      }
+  fi
+
+  # ── POST-RUN ASSERTIONS, read back from the report itself ───────────────
+  # Every one of these exits 1 and leaves the plan in PLAN_GATES.
+  local fails=0
+  _gassert() { echo "PLAN-FINAL GATE ASSERTION FAILED: $1" >&2; fails=$((fails+1)); }
+
+  jq -e 'type == "object"' "$report_file" >/dev/null 2>&1 || {
+    echo "PLAN-FINAL GATE ASSERTION FAILED: ${run_dir_rel}/gates_report.json is not a JSON object." >&2
+    return 1
+  }
+
+  local r_profile r_head r_overall
+  r_profile="$(jq -r '.profile // ""' "$report_file")"
+  r_head="$(jq -r '.revision.head_sha // ""' "$report_file")"
+  r_overall="$(jq -r '.overall // ""' "$report_file")"
+  [[ "$r_profile" == "$effective_profile" ]] \
+    || _gassert "report profile is '${r_profile}', expected the resolved release-derived profile '${effective_profile}'."
+  [[ "$r_head" == "$candidate" ]] \
+    || _gassert "report revision.head_sha is '${r_head}', expected the frozen candidate '${candidate}'."
+  [[ "$r_overall" == "pass" ]] \
+    || _gassert "report overall is '${r_overall}', not 'pass'."
+
+  # _command_log non-empty, every entry with a non-null duration_ms.
+  jq -e '(._command_log | type == "array") and (._command_log | length > 0)' "$report_file" >/dev/null 2>&1 \
+    || _gassert "_command_log is empty — the run recorded no executed gate."
+  jq -e '(._command_log // []) | all(.duration_ms != null)' "$report_file" >/dev/null 2>&1 \
+    || _gassert "a _command_log entry has a null duration_ms."
+
+  # No plan-required / required:true gate may be excluded — EXCEPT a gate whose
+  # quarantine block is enabled, which is expected to be excluded and must
+  # instead carry its substitute evidence (checked below).
+  local ex
+  while IFS= read -r ex; do
+    [[ -z "$ex" ]] && continue
+    if _pfsm_in_list "$ex" "$plan_required"; then
+      if ! _pfsm_in_list "$ex" "$quarantined"; then
+        _gassert "excluded_gates contains '${ex}', which is required:true or plan-declared and carries no quarantine block."
+      fi
+    fi
+  done < <(jq -r '.excluded_gates // [] | .[]' "$report_file")
+
+  # Every NON-quarantined gate of the include list must have a real result.
+  local inc
+  while IFS= read -r inc; do
+    [[ -z "$inc" ]] && continue
+    if _pfsm_in_list "$inc" "$quarantined"; then continue; fi
+    local res
+    res="$(jq -r --arg g "$inc" '.gates[$g].result // "<absent>"' "$report_file")"
+    if [[ "$res" == "<absent>" || "$res" == "profile_excluded" ]]; then
+      _gassert "release gate '${inc}' has result '${res}' — a non-quarantined gate of the resolved profile must appear with a real result (notably shell_pipeline_smoke, which the EPIC-scoped bats_all_quarantine profile omits)."
+    elif [[ "$res" == "skip" ]] && _pfsm_in_list "$inc" "$plan_required"; then
+      _gassert "required gate '${inc}' reported result 'skip' — a required gate is never satisfied by a skip."
+    fi
+  done <<< "$release_include"
+
+  # plan_diff specifically: a REAL evaluation, not the Fast-Mode exit-2 skip.
+  local pd
+  pd="$(jq -r '.gates.plan_diff.result // "<absent>"' "$report_file")"
+  [[ "$pd" == "pass" ]] \
+    || _gassert "plan_diff result is '${pd}', expected 'pass' — an exit-2 Fast Mode skip against '--plan null' does not evaluate the plan's acceptance criteria. plan_diff is plan-required for the plan-final run and has no substitute path (it carries no quarantine block)."
+
+  # Quarantined gates: never `pass`, and each must carry a matching substitute.
+  local qg2
+  for qg2 in ${quarantined_in_profile[@]+"${quarantined_in_profile[@]}"}; do
+    local qres
+    qres="$(jq -r --arg g "$qg2" '.gates[$g].result // "profile_excluded"' "$report_file")"
+    case "$qres" in
+      pass) _gassert "quarantined gate '${qg2}' is reported 'pass' — a quarantined gate is never green." ;;
+      waived|profile_excluded|unverifiable|fail) ;;
+      *) _gassert "quarantined gate '${qg2}' has unexpected result '${qres}'." ;;
+    esac
+    jq -e --arg g "$qg2" --arg h "$candidate" --arg b "$base_commit" '
+      (.quarantine_substitutes // []) | any(
+        .gate_id == $g and .targeted_substitute == "accepted"
+        and (.receipt_path | type == "string" and length > 0)
+        and (.receipt_sha256 | test("^sha256:[0-9a-f]{64}$"))
+        and (.command_sha256 | test("^sha256:[0-9a-f]{64}$"))
+        and .head_sha == $h and .base_sha == $b
+        and (.substitute_scope | type == "string" and length > 0)
+        and .exit_code == 0 and .failed == 0)
+    ' "$report_file" >/dev/null 2>&1 \
+      || _gassert "quarantined gate '${qg2}' has no valid quarantine_substitutes[] entry bound to the candidate (${candidate}) and base (${base_commit})."
+  done
+
+  # Exactly ONE gate_runner_start for this plan-final run — the structural
+  # no-duplicate-broad-run proof. `release` is a superset of `full`, so one
+  # invocation covers everything and a second would mean a `full` run smuggled
+  # in under another label.
+  if [[ -f "$timeline_file" ]]; then
+    local starts
+    starts="$(grep -c '"event":"gate_runner_start"' "$timeline_file" 2>/dev/null || true)"
+    [[ -z "$starts" ]] && starts=0
+    if [[ "$starts" -ne 1 ]]; then
+      _gassert "timeline has ${starts} gate_runner_start events for ${run_id}, expected exactly 1 (no second broad run under a 'full' label)."
+    fi
+  elif [[ "$ran_now" -eq 1 ]]; then
+    _gassert "no timeline at ${run_dir_rel}/timeline.jsonl — the single-run assertion cannot be made."
+  fi
+
+  if [[ "$fails" -gt 0 ]]; then
+    echo "PRECONDITION FAIL: ${fails} plan-final gate assertion(s) failed for ${plan_id}; the plan stays in PLAN_GATES and no transition was made. Fix the candidate or the evidence and re-run." >&2
+    return 1
+  fi
+
+  # ── The transition (a P064-legal edge: PLAN_GATES → PLAN_REVIEW) ─────────
+  local op_id crc=0
+  op_id="$(plan_op_key "plan-finalize-gates" "$plan_id" "-" "0" "$plan_id")"
+  plan_op_begin "$plan_id" "$op_id" "plan-finalize-gates" "$plan_id" "$candidate" >/dev/null 2>&1 || true
+  if ! _pfsm_plan_state_set "$plan_id" "PLAN_REVIEW"; then
+    echo "PRECONDITION FAIL: the plan-final gate report for ${plan_id} passed every assertion, but the plan STATE FILE could not be moved PLAN_GATES -> PLAN_REVIEW. The report is durable at ${run_dir_rel}/gates_report.json; re-run '--stage gates' — it re-reads the passing report and completes only the transition (gates are NOT re-run)." >&2
+    return 1
+  fi
+  plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "PLAN_REVIEW"' >/dev/null 2>&1 || true
+  plan_op_commit "$plan_id" "$op_id" >/dev/null 2>&1 || crc=$?
+  if [[ "$crc" -ne 0 ]]; then
+    echo "WARN: could not record the plan-finalize-gates state_committed op for ${plan_id} (rc=${crc}); the state transition itself landed." >&2
+  fi
+
+  echo "$candidate"
+  echo "plan-final gates PASSED for ${plan_id} at ${candidate} (profile ${effective_profile}) — ${run_dir_rel}/gates_report.json; ${plan_id} is now PLAN_REVIEW." >&2
+  return 0
+}
+
+# =============================================================================
+# cmd_plan_finalize <plan_id> --stage <sync|freeze|gates> [--frozen-at <rfc3339>]
+#                    [--execution-yaml <path>] [--substitute-receipt <gate>=<path>]
 #                    [--project-root <path>]
 # =============================================================================
 cmd_plan_finalize() {
-  local plan_id="" stage="" project_root_opt="" frozen_at=""
+  local plan_id="" stage="" project_root_opt="" frozen_at="" execution_yaml_opt=""
+  local -a substitute_receipts=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --execution-yaml)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        execution_yaml_opt="$2"; shift 2 ;;
+      --substitute-receipt)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        if [[ "$2" != *=* ]]; then
+          echo "ERROR: plan-finalize: --substitute-receipt expects <gate_id>=<receipt_path> (got '$2')" >&2
+          exit 2
+        fi
+        substitute_receipts+=("$2"); shift 2 ;;
       --stage)
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         stage="$2"; shift 2 ;;
@@ -2089,7 +2630,7 @@ cmd_plan_finalize() {
   done
 
   if [[ -z "$plan_id" || -z "$stage" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-finalize <plan_id> --stage <sync|freeze|gates> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -2097,9 +2638,13 @@ cmd_plan_finalize() {
     exit 2
   fi
   case "$stage" in
-    sync|freeze) ;;
-    *) echo "ERROR: plan-finalize: --stage must be 'sync' or 'freeze' (got '${stage}')" >&2; exit 2 ;;
+    sync|freeze|gates) ;;
+    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze' or 'gates' (got '${stage}')" >&2; exit 2 ;;
   esac
+  if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
+    echo "ERROR: plan-finalize: --substitute-receipt is only meaningful for --stage gates." >&2
+    exit 2
+  fi
 
   local project_root
   project_root="$(_pfsm_resolve_project_root "$project_root_opt")"
@@ -2124,6 +2669,11 @@ cmd_plan_finalize() {
   case "$stage" in
     sync)   _pfsm_finalize_sync "$project_root" "$plan_id" || rc=$? ;;
     freeze) _pfsm_finalize_freeze "$project_root" "$plan_id" "$frozen_at" || rc=$? ;;
+    gates)
+      local execution_yaml="${execution_yaml_opt:-${project_root}/.aid-o/config/execution.yaml}"
+      _pfsm_finalize_gates "$project_root" "$plan_id" "$execution_yaml" \
+        "${substitute_receipts[@]+"${substitute_receipts[@]}"}" || rc=$?
+      ;;
   esac
   exit "$rc"
 }
@@ -2604,7 +3154,7 @@ Subcommands:
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
-  plan-finalize <plan_id> --stage <sync|freeze> [--frozen-at <rfc3339>] [--project-root <path>]
+  plan-finalize <plan_id> --stage <sync|freeze|gates> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }

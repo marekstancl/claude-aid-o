@@ -777,3 +777,424 @@ _prepare() {
   run git -C "$TEST_PROJECT_ROOT" show "${cand}:pkg/plugin.json"
   [[ "$output" == *"1.2.4"* ]]
 }
+
+# =============================================================================
+# ─── aid-plan-fsm.sh plan-finalize --stage gates (Step 2) ────────────────
+# =============================================================================
+#
+# AC2 — exactly ONE plan-final gate profile run against the frozen candidate,
+# with a gates_report.json that PROVES no required gate was excluded, no broad
+# suite ran twice, plan_diff really evaluated the plan, and no quarantined gate
+# came back green.
+#
+# The fixture execution.yaml below is deliberately a MINIATURE of the real one
+# (a required gate, a quarantined required gate, a non-quarantined
+# `shell_pipeline_smoke`, `plan_diff` with the exit-2 Fast Mode convention, and
+# `docs_updated`) — same shapes, sub-second commands. The gate ids that the
+# stage treats specially (`plan_diff`, `shell_pipeline_smoke`) keep their real
+# names; everything else is generic on purpose, so the test proves the
+# MECHANISM rather than one hard-coded gate list.
+
+# _write_exec_yaml [substitute_include_override]
+#   Writes .aid-o/config/execution.yaml into the test project. When the first
+#   argument is given it REPLACES the release_quarantine include[] block, so a
+#   test can prove that a substitute which drops a non-quarantined release gate
+#   is refused.
+_write_exec_yaml() {
+  local sub_include="${1:-}"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml" <<'YAML'
+version: '1.0'
+gates:
+  bats_fsm:
+    command: "true"
+    required: true
+    timeout_seconds: 30
+    max_retries: 0
+  bats_all:
+    quarantine:
+      enabled: true
+      authorized_by: "PM test"
+      tracked_by: "P066"
+      original_command: "bats tests/"
+    command: "echo QUARANTINED >&2; exit 86"
+    required: true
+    timeout_seconds: 10
+    max_retries: 0
+  shell_pipeline_smoke:
+    command: "true"
+    required: false
+    timeout_seconds: 30
+    max_retries: 0
+  plan_diff:
+    command: "echo '{plan_path}' '{base_commit}' > .aid-o/work/plan_diff_args.txt; test '{plan_path}' != 'null' && test -f '{plan_path}' && git rev-parse --verify --quiet {base_commit} >/dev/null || exit 2"
+    required: false
+    pass_criteria: "exit 0 (all present) or exit 2 (Fast Mode graceful skip)"
+    timeout_seconds: 30
+    max_retries: 0
+  docs_updated:
+    command: "true"
+    required: false
+    timeout_seconds: 30
+    max_retries: 0
+gate_profiles:
+  release:
+    include:
+      - bats_fsm
+      - bats_all
+      - shell_pipeline_smoke
+      - plan_diff
+      - docs_updated
+  release_quarantine:
+    include:
+      - bats_fsm
+      - shell_pipeline_smoke
+      - plan_diff
+      - docs_updated
+YAML
+  if [[ -n "$sub_include" ]]; then
+    # Replace everything from the release_quarantine include marker onward.
+    local f="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+    local keep; keep="$(awk '/^  release_quarantine:/{exit} {print}' "$f")"
+    { printf '%s\n' "$keep"; printf '  release_quarantine:\n    include:\n'; printf '%s' "$sub_include"; } > "$f"
+  fi
+}
+
+# _seed_gates_project — a plan branch whose candidate carries the plan file the
+# gates evaluate, plus a gitignored runtime area.
+_seed_gates_project() {
+  _bootstrap
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  printf '# %s\n\n## Acceptance Criteria\n- [ ] something\n' "$PLAN_ID" \
+    > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
+  git -C "$TEST_PROJECT_ROOT" add -- ".aid-o/plans/${PLAN_ID}-test-plan.md"
+  git -C "$TEST_PROJECT_ROOT" commit -q -m "the plan file"
+  git -C "$TEST_PROJECT_ROOT" branch -f "plan/${PLAN_ID}" main
+  _finalize "$PLAN_ID" sync
+  _finalize "$PLAN_ID" freeze
+}
+
+# _run_dir — the frozen candidate's plan-final evidence directory (absolute).
+_run_dir() {
+  printf '%s/%s' "$TEST_PROJECT_ROOT" "$(_manifest_field "$PLAN_ID" plan_final_evidence_dir)"
+}
+
+# _write_receipt <gate_id> [head_override] [exit_code] [failed]
+#   A valid IMP-269-shaped targeted-run receipt (command_sha256 == sha256(cmd),
+#   log_sha256 == sha256 of a real in-repo log) bound to the frozen candidate.
+#   Echoes the receipt path.
+_write_receipt() {
+  local gate="$1" head="${2:-}" ec="${3:-0}" failed="${4:-0}"
+  local dir; dir="$(_run_dir)/gates"
+  mkdir -p "$dir"
+  [[ -z "$head" ]] && head="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local cmd="bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats"
+  printf 'ok 1 targeted substitute\n' > "$dir/${gate}-substitute.log"
+  local csha lsha
+  csha="$(printf '%s' "$cmd" | sha256sum | cut -d' ' -f1)"
+  lsha="$(sha256sum "$dir/${gate}-substitute.log" | awk '{print $1}')"
+  jq -nc --arg g "$gate" --arg c "$cmd" --arg cs "$csha" --arg h "$head" \
+         --arg l "${gate}-substitute.log" --arg ls "$lsha" \
+         --argjson ec "$ec" --argjson failed "$failed" \
+    '{gate_id:$g, command:$c, command_sha256:$cs, head_sha:$h, log:$l,
+      log_sha256:$ls, exit_code:$ec, passed:1, failed:$failed}' \
+    > "$dir/${gate}-substitute.receipt.json"
+  printf '%s' "$dir/${gate}-substitute.receipt.json"
+}
+
+# _gates [extra args...] — the stage under test.
+_gates() {
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage gates \
+    --project-root "$TEST_PROJECT_ROOT" "$@"
+}
+
+# _report — the plan-final gates_report.json path.
+_report() { printf '%s/gates_report.json' "$(_run_dir)"; }
+
+# ─── AC2.1 + AC2.5: the resolved release-derived profile, head_sha ==
+#     candidate, and NO non-quarantined release gate dropped ────────────────
+@test "AC2: the plan-final report carries the release-derived profile, the candidate head, and every non-quarantined release gate" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  run jq -r '.profile' "$(_report)"
+  [ "$output" = "release_quarantine" ]
+  run jq -r '.revision.head_sha' "$(_report)"
+  [ "$output" = "$cand" ]
+  run jq -r '.overall' "$(_report)"
+  [ "$output" = "pass" ]
+
+  # Every non-quarantined release gate has a REAL result — notably
+  # shell_pipeline_smoke, which the EPIC-scoped bats_all_quarantine profile omits.
+  local g
+  for g in bats_fsm shell_pipeline_smoke plan_diff docs_updated; do
+    run jq -r --arg g "$g" '.gates[$g].result' "$(_report)"
+    [ "$output" = "pass" ]
+  done
+
+  # ...and the stage transitioned PLAN_GATES -> PLAN_REVIEW.
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_REVIEW" ]
+}
+
+# ─── AC2.7: plan_diff runs FOR REAL — not `--plan null`, not the exit-2 skip ─
+@test "AC2: plan_diff evaluates the real plan file and the candidate range (never the Fast Mode exit-2 skip)" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+
+  # `pass`, not `skip`: a skip is what an exit-2 `--plan null` would produce.
+  run jq -r '.gates.plan_diff.result' "$(_report)"
+  [ "$output" = "pass" ]
+  run jq -r '.gates.plan_diff.exit_code' "$(_report)"
+  [ "$output" = "0" ]
+  # The gate SAW the real plan file and the real base commit — recorded by the
+  # gate command itself, i.e. AFTER token substitution (the report's
+  # _command_log keeps the raw, pre-substitution command by design).
+  local base; base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  run cat "$TEST_PROJECT_ROOT/.aid-o/work/plan_diff_args.txt"
+  [[ "$output" == *"${PLAN_ID}-test-plan.md"* ]]
+  [[ "$output" == *"$base"* ]]
+  [[ "$output" != *"null"* ]]
+}
+
+# ─── AC2.7 (negative): without the new flags the SAME gate is vacuous ───────
+# This is the finding the C0 cross-provider review made, pinned as a test: with
+# no --base-commit/--plan-path and no --state-file, plan_diff resolves to
+# `--plan null`, exits 2, and execution.yaml's pass_criteria ACCEPTS it. The
+# stage must never be able to reach that state.
+@test "AC2: a plan-final gate run WITHOUT --plan-path degrades plan_diff to the accepted exit-2 skip (the vacuity the flags close)" {
+  _seed_gates_project
+  _write_exec_yaml
+  local rd; rd="$(_run_dir)"
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
+  run bash -c "cd '$TEST_PROJECT_ROOT' && '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' run-all \
+      '$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml' '$PLAN_ID' 'R-vacuous' \
+      '$rd/vacuous-timeline.jsonl' --report-file '$rd/vacuous.json' \
+      --profile release_quarantine"
+  run jq -r '.gates.plan_diff.result' "$rd/vacuous.json"
+  [ "$output" = "skip" ]
+  run jq -r '.gates.plan_diff.exit_code' "$rd/vacuous.json"
+  [ "$output" = "2" ]
+  # The gate literally received the string "null" as its plan.
+  run cat "$TEST_PROJECT_ROOT/.aid-o/work/plan_diff_args.txt"
+  [[ "$output" == "null "* ]]
+}
+
+# ─── AC2.9: existing EPIC-scoped callers are unaffected when the flags are
+#     absent — the state file still supplies both tokens ────────────────────
+@test "AC2: --base-commit/--plan-path are additive — omitted, the runner still reads the state file" {
+  _seed_gates_project
+  _write_exec_yaml
+  local rd; rd="$(_run_dir)"
+  local base; base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  local plan="$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-test-plan.md"
+  cat > "$rd/fsm-state.yaml" <<EOF
+state: GATES
+base_commit: $base
+plan_path: $plan
+EOF
+  git -C "$TEST_PROJECT_ROOT" checkout -q "plan/${PLAN_ID}"
+  run bash -c "cd '$TEST_PROJECT_ROOT' && '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' run-all \
+      '$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml' '$PLAN_ID' 'R-legacy' \
+      '$rd/legacy-timeline.jsonl' --state-file '$rd/fsm-state.yaml' \
+      --report-file '$rd/legacy.json' --profile release_quarantine"
+  run jq -r '.gates.plan_diff.result' "$rd/legacy.json"
+  [ "$output" = "pass" ]
+  run cat "$TEST_PROJECT_ROOT/.aid-o/work/plan_diff_args.txt"
+  [[ "$output" == *"${PLAN_ID}-test-plan.md"* ]]
+  [[ "$output" == *"$base"* ]]
+}
+
+# ─── AC2.3 + AC2.4: the quarantined gate is never green, and is satisfied
+#     ONLY by a matching, candidate-bound, genuinely-green substitute ───────
+@test "AC2: the quarantined gate is excluded, never 'pass', and carries a bound quarantine_substitutes[] entry" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+
+  local cand base
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+
+  run jq -r '.gates.bats_all.result // "profile_excluded"' "$(_report)"
+  [ "$output" != "pass" ]
+  run jq -r '.excluded_gates | index("bats_all") != null' "$(_report)"
+  [ "$output" = "true" ]
+
+  run jq -r '.quarantine_substitutes | length' "$(_report)"
+  [ "$output" = "1" ]
+  run jq -r '.quarantine_substitutes[0].gate_id' "$(_report)"
+  [ "$output" = "bats_all" ]
+  run jq -r '.quarantine_substitutes[0].targeted_substitute' "$(_report)"
+  [ "$output" = "accepted" ]
+  run jq -r '.quarantine_substitutes[0].head_sha' "$(_report)"
+  [ "$output" = "$cand" ]
+  run jq -r '.quarantine_substitutes[0].base_sha' "$(_report)"
+  [ "$output" = "$base" ]
+  run jq -e '.quarantine_substitutes[0]
+             | (.receipt_sha256 | test("^sha256:[0-9a-f]{64}$"))
+               and (.command_sha256 | test("^sha256:[0-9a-f]{64}$"))
+               and (.receipt_path | length > 0)
+               and (.substitute_scope | length > 0)
+               and .exit_code == 0 and .failed == 0' "$(_report)"
+  [ "$status" -eq 0 ]
+
+  # receipt_sha256 is the SEALED hash of the receipt file itself.
+  local actual; actual="$(sha256sum "$receipt" | awk '{print $1}')"
+  run jq -r '.quarantine_substitutes[0].receipt_sha256' "$(_report)"
+  [ "$output" = "sha256:${actual}" ]
+}
+
+# ─── AC2.4 (negative): no receipt at all — a quarantined gate is NOT satisfied
+#     by simply being excluded, and a waiver alone would not help either ────
+@test "AC2: a quarantined gate with NO substitute receipt fails the stage and leaves the plan in PLAN_GATES" {
+  _seed_gates_project
+  _write_exec_yaml
+
+  _gates
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no targeted-substitute receipt was supplied"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+}
+
+# ─── AC2.4 (negative): a receipt for a DIFFERENT gate never satisfies this one ─
+@test "AC2: a substitute receipt whose gate_id does not match is rejected (one receipt cannot satisfy another gate)" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_fsm)"   # wrong gate_id inside
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"one receipt can never satisfy a different gate"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+}
+
+# ─── AC2.4 (negative): head_sha != candidate_sha is rejected ────────────────
+@test "AC2: a substitute receipt bound to any head other than the frozen candidate is rejected" {
+  _seed_gates_project
+  _write_exec_yaml
+  local other; other="$(git -C "$TEST_PROJECT_ROOT" rev-parse main~1)"
+  local receipt; receipt="$(_write_receipt bats_all "$other")"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not bound to the frozen candidate"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+}
+
+# ─── AC2.4 (negative): a RED substitute never stands in for a broad gate ────
+@test "AC2: a substitute receipt with a non-zero exit_code or failed>0 is rejected" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all "" 1 2)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a passing run"* ]]
+}
+
+# ─── AC2.4 (negative): a tampered receipt (command_sha256 no longer of
+#     .command) is rejected — the fingerprint is not decorative ─────────────
+@test "AC2: a substitute receipt whose command_sha256 is not sha256(.command) is rejected" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+  jq '.command = "echo something else entirely"' "$receipt" > "${receipt}.t" && mv "${receipt}.t" "$receipt"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"command_sha256 is not sha256(.command)"* ]]
+}
+
+# ─── AC2.5: the substitute profile MUST be release-derived — a profile that
+#     drops a non-quarantined release gate is refused BEFORE any gate runs ──
+@test "AC2: a substitute profile that drops a non-quarantined release gate (shell_pipeline_smoke) is refused" {
+  _seed_gates_project
+  # Exactly the bats_all_quarantine shape: release minus bats_all AND minus
+  # shell_pipeline_smoke. Correct-looking, silently one gate short.
+  _write_exec_yaml "$(printf '      - bats_fsm\n      - plan_diff\n      - docs_updated\n')"
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not 'release' minus the quarantined gate"* ]]
+  [[ "$output" == *"shell_pipeline_smoke"* ]]
+  # Nothing ran: no report was written.
+  [ ! -f "$(_report)" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+}
+
+# ─── AC2.6: EXACTLY ONE gate_runner_start — no second broad run ────────────
+@test "AC2: exactly one gate_runner_start event exists for the plan-final run" {
+  _seed_gates_project
+  _write_exec_yaml
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 0 ]
+
+  run grep -c '"event":"gate_runner_start"' "$(_run_dir)/timeline.jsonl"
+  [ "$output" = "1" ]
+
+  # A resume re-reads the passing report and completes ONLY the transition —
+  # it never mints a second broad run.
+  plan_state_transition "$PLAN_ID" "PLAN_REVIEW" "PLAN_GATES" >/dev/null 2>&1 || \
+    plan_state_transition "$PLAN_ID" "PLAN_REVIEW" "PLAN_FIX" >/dev/null 2>&1
+  _gates --substitute-receipt "bats_all=${receipt}"
+  run grep -c '"event":"gate_runner_start"' "$(_run_dir)/timeline.jsonl"
+  [ "$output" = "1" ]
+}
+
+# ─── AC2.8: a required gate reporting `skip` fails the stage ───────────────
+@test "AC2: a result:skip on a required gate fails the stage rather than counting as satisfied" {
+  _seed_gates_project
+  _write_exec_yaml
+  # bats_fsm is required:true; give it a null command so the runner records an
+  # explicit skip row (no_command) rather than a pass.
+  yq -i '.gates.bats_fsm.command = null' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  local receipt; receipt="$(_write_receipt bats_all)"
+
+  _gates --substitute-receipt "bats_all=${receipt}"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"never satisfied by a skip"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+}
+
+# ─── the candidate binding: the stage refuses a head that is not the
+#     frozen candidate, and refuses to run at all before the freeze ─────────
+@test "AC2: --stage gates refuses when the plan branch has moved off the frozen candidate" {
+  _seed_gates_project
+  _write_exec_yaml
+  _commit_on "plan/${PLAN_ID}" drift.txt "drift"
+
+  _gates
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not the candidate"* ]]
+  [ ! -f "$(_report)" ]
+}
+
+@test "AC2: --stage gates refuses out of any state other than PLAN_GATES" {
+  _bootstrap
+  _write_exec_yaml
+
+  _gates
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no frozen candidate"* ]]
+}
