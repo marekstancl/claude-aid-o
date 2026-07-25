@@ -908,6 +908,34 @@ main() {
         add_input "epic_rollup:${_eid}" "${_edir}" "pass" "contribution present on disk and named in both plan-level aggregates" true
       fi
     done < <(jq -r '.[] | select(.status == "merged_to_plan") | [.epic_id, .evidence_dir] | @tsv' <<<"$PLAN_EPICS_JSON" 2>/dev/null)
+
+    # CP2 M2 (2026-07-25): the loop above only sees `merged_to_plan`. Every OTHER
+    # entry used to fall through as "skipped" with no reason and no blocker, so an
+    # EPIC recorded with a typo'd or unknown status — or still non-terminal at the
+    # release boundary — vanished from the completeness check silently. Walk the
+    # remaining entries explicitly and classify against the manifest's OWN status
+    # vocabulary (lib/aid-plan-manifest.sh _AID_EPIC_STATUS_TRANSITIONS):
+    #   abandoned | superseded → legitimately out of the roll-up, reason recorded;
+    #   pending | running | blocked → non-terminal at a release boundary → blocker;
+    #   anything else → unknown vocabulary → blocker (never a silent skip).
+    local _eid2 _est
+    while IFS=$'\t' read -r _eid2 _est; do
+      [[ -n "$_eid2" ]] || continue
+      case "$_est" in
+        merged_to_plan) ;;  # handled above
+        abandoned|superseded)
+          add_input "epic_rollup:${_eid2}" "-" "not_applicable" "EPIC is ${_est}: deliberately outside the plan-level roll-up" true
+          ;;
+        pending|running|blocked)
+          add_input "epic_rollup:${_eid2}" "-" "blocked" "EPIC is still ${_est} at the plan-final boundary — a release candidate cannot be built while an EPIC is non-terminal" false
+          add_blocker "epic_rollup:${_eid2}" "blocking" "EPIC ${_eid2} is ${_est}, not terminal — the plan-final roll-up cannot be complete"
+          ;;
+        *)
+          add_input "epic_rollup:${_eid2}" "-" "blocked" "EPIC carries an unrecognised status '${_est}' — outside the manifest status vocabulary" false
+          add_blocker "epic_rollup:${_eid2}" "blocking" "EPIC ${_eid2} carries an unrecognised status '${_est}'; a status outside the manifest vocabulary must never silently drop an EPIC from the roll-up"
+          ;;
+      esac
+    done < <(jq -r '.[] | select(.status != "merged_to_plan") | [.epic_id, (.status // "")] | @tsv' <<<"$PLAN_EPICS_JSON" 2>/dev/null)
   fi
 
   # --- waivers (OPTIONAL) → waivers_applied[] + waiver→input mapping (contract 6) ---
