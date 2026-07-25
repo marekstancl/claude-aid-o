@@ -1978,8 +1978,18 @@ _pfsm_finalize_freeze() {
     if [[ "$cur_candidate" == "$plan_head" ]]; then
       local run_dir=""
       run_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir=""
+      # CP2 M1 (2026-07-25): this idempotent branch is also the RECOVERY path for a
+      # freeze whose manifest write landed but whose state-file write did not. It
+      # must therefore reconcile the state file rather than return 0 on the
+      # manifest's word alone — otherwise the divergence is permanent, because
+      # every re-run lands right here. _pfsm_plan_state_set is a no-op when the
+      # state file already reads PLAN_GATES.
+      if ! _pfsm_plan_state_set "$plan_id" "PLAN_GATES"; then
+        echo "PRECONDITION FAIL: ${plan_id} is frozen at ${cur_candidate} in the manifest, but the plan STATE FILE could not be reconciled to PLAN_GATES — the two records disagree and this re-run could not repair it. Inspect with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
+        return 1
+      fi
       echo "$cur_candidate"
-      [[ -n "$run_dir" && "$run_dir" != "not_found" ]] && echo "already frozen at ${cur_candidate} (${run_dir}) — no second candidate minted." >&2
+      [[ -n "$run_dir" && "$run_dir" != "not_found" ]] && echo "already frozen at ${cur_candidate} (${run_dir}) — no second candidate minted; state file reconciled to PLAN_GATES." >&2
       return 0
     fi
     local irc=0
@@ -2039,7 +2049,16 @@ _pfsm_finalize_freeze() {
     return "$wrc"
   fi
 
-  _pfsm_plan_state_set "$plan_id" "PLAN_GATES" || true
+  # CP2 M1 (2026-07-25): do NOT swallow this write. The manifest already records
+  # PLAN_GATES + the candidate pair, so a silently-failed state-file write leaves
+  # the same manifest/state-file divergence `plan_final_invalidate` refuses to
+  # leave one function above — and here it would ALSO never self-heal on its own,
+  # because a re-run short-circuits on the "already frozen at the same head"
+  # branch. Fail closed and name the repair; the candidate itself is durable.
+  if ! _pfsm_plan_state_set "$plan_id" "PLAN_GATES"; then
+    echo "PRECONDITION FAIL: the candidate for ${plan_id} was recorded (manifest is at PLAN_GATES with the candidate pair), but the plan STATE FILE could not be moved to PLAN_GATES — the two records now disagree. Re-run '--stage freeze': it reconciles the state file from the recorded candidate. Do not proceed to the gate run until both read PLAN_GATES." >&2
+    return 1
+  fi
   echo "$plan_head"
   return 0
 }
