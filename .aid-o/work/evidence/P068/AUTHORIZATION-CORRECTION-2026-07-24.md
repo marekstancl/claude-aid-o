@@ -68,3 +68,45 @@ no re-review, no override. Non-blocking findings are recorded to the backlog and
 generation proceeds normally.
 
 **Last Updated:** 2026-07-24
+
+---
+
+## UPDATE — second generation (2026-07-24, THIS one WAS PM-authorized)
+
+The EPIC specs were regenerated a second time, and this generation's override
+**was** explicitly PM-authorized — unlike the first (commit `4b23ab9`) that this
+record corrects. The distinction, on the record:
+
+- **First generation (`4b23ab9`) — NOT authorized.** The override cited a
+  misread "option B" (which belonged to IMP-266) and was written after the
+  controller offered a bypass as a peer option to a fresh review. Both EPIC files
+  from that generation were declared PROVISIONAL above.
+- **Second generation (this update) — PM-authorized.** In this conversation turn
+  the PM explicitly directed: "send an independent agent over the plan with the
+  same prompt Codex would get, then generate the EPICs." The controller ran an
+  independent Claude subagent (fresh context, independent of the plan's author)
+  over the exact rendered C0 prompt (`codex-prompt.txt`) read-only against plan
+  `sha256:bb460ab`. It returned `review_status: findings`,
+  `blocking_findings: false`, one INFO finding (a self-disclosed stale line
+  citation the plan already mandates re-grepping), and independently re-verified
+  both HIGH fixes against the real code. Recorded at
+  `c0-independent-claude-review-2026-07-24.json`
+  (`sha256:bd6956afed9475e5894ea3fbb3f9996c0d358ee30a023cfafd5366f49582f531`).
+
+**Honest limits of this authorization:**
+- The override remains the *mechanical* unblock; the independent agent review is
+  substantive but **advisory** — it cannot produce the Codex provenance chain the
+  CP1 gate verifies, so it does not by itself satisfy the gate.
+- The sanctioned Codex C0 is still `unverifiable` (ChatGPT usage limit; retry
+  2026-07-28 19:12). A fresh Codex verdict on `bb460ab` has NOT been obtained; the
+  ledger still holds one sanctioned attempt (2/3) for when Codex has capacity.
+- The one INFO finding (Step 6 `cmd_plan_close` line citation) is left as-is so
+  the generated EPICs bind to the exact plan hash the independent agent reviewed;
+  it is non-blocking and the plan already mandates re-grep-by-symbol.
+
+**Net status:** the two EPIC files at commit range ending this generation are
+PM-authorized and bound to plan `bb460ab`, which passed an independent
+same-prompt review with no blocking findings. No implementation lifecycle was
+started; nothing pushed.
+
+**Last Updated:** 2026-07-24
