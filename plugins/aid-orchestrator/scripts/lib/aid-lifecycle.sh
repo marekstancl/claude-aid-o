@@ -30,7 +30,49 @@ _AID_LC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Paths ────────────────────────────────────────────────────────────────────
 aid_lifecycle_dir()   { echo "${1:-.}/.aid-lifecycle"; }
 aid_identity_path()   { echo "$(aid_lifecycle_dir "${1:-.}")/repo-identity.yaml"; }
-aid_manifest_path()   { echo "$(aid_lifecycle_dir "${2:-.}")/manifests/${1}.yaml"; }
+# aid_manifest_path <plan_id> [root] — the git-tracked lifecycle manifest.
+#
+# P068 E-068-1_2 Step 6 — THE TARGET-REF OVERRIDE. Every manifest READER in this
+# file (aid_lifecycle_declared_epics, _aid_lc_delivered, _aid_lc_reviewed_accepted,
+# aid_lifecycle_build_receipt, aid_plan_closure_state) resolves the file through
+# this one function, so redirecting it here redirects all of them consistently.
+#
+# WHY IT IS NEEDED: after a plan merge the delivery bindings live on the TARGET
+# branch — Step 5 commits them there by plumbing and then restores the worktree
+# copy, because the worktree is sitting on `plan/<plan_id>`, whose copy of the
+# manifest predates the bindings. Reading the worktree file at close time
+# therefore reports a plan with NO deliveries, i.e. `active`, and would either
+# refuse a legitimately closable plan or (worse, had the state check been laxer)
+# build a receipt out of the pre-merge manifest. The override materialises the
+# TARGET-BRANCH content read-only into a temp file for the duration of a scoped
+# read; nothing in the worktree is touched. Deliberately NOT exported — a child
+# process must resolve its own.
+aid_manifest_path() {
+  if [[ -n "${_AID_LC_MANIFEST_OVERRIDE:-}" ]]; then echo "$_AID_LC_MANIFEST_OVERRIDE"; return 0; fi
+  echo "$(aid_lifecycle_dir "${2:-.}")/manifests/${1}.yaml"
+}
+
+# aid_lc_manifest_ref_begin <plan_id> <root> <ref> — materialise <ref>'s copy of
+# the lifecycle manifest and route every reader at it until _end. Returns 1 (and
+# sets nothing) when that ref carries no manifest, so a caller can fall back to
+# the ordinary worktree path rather than silently reading an empty file.
+aid_lc_manifest_ref_begin() {
+  local plan_id="$1" root="${2:-.}" ref="$3"
+  local rel=".aid-lifecycle/manifests/${plan_id}.yaml"
+  local tmp; tmp="$(mktemp 2>/dev/null)" || return 1
+  if ! git -C "$root" show "${ref}:${rel}" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp" 2>/dev/null
+    return 1
+  fi
+  _AID_LC_MANIFEST_OVERRIDE="$tmp"
+  return 0
+}
+
+aid_lc_manifest_ref_end() {
+  [[ -n "${_AID_LC_MANIFEST_OVERRIDE:-}" ]] && rm -f -- "$_AID_LC_MANIFEST_OVERRIDE" 2>/dev/null
+  unset _AID_LC_MANIFEST_OVERRIDE
+  return 0
+}
 aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"; }
 
 # _aid_lc_require_target_branch <root> — 0 iff HEAD is on the configured
@@ -599,22 +641,95 @@ aid_lifecycle_commit_receipt() {
   aid_lifecycle_receipt_durable "$plan_id" "$root"
 }
 
-# aid_lifecycle_plan_close <plan_id> <root> — forward-path close. Requires the
-# manifest to show EVERY required EPIC delivered + reviewed-accepted; then writes
-# + commits the receipt (=> closed). Fail-closed: any missing predicate => no
-# receipt, non-zero.
+# aid_lifecycle_plan_close <plan_id> <root> [<plan_mode_parent>] — forward-path
+# close. Requires the manifest to show EVERY required EPIC delivered +
+# reviewed-accepted; then writes + commits the receipt (=> closed). Fail-closed:
+# any missing predicate => no receipt, non-zero.
+#
+# P068 E-068-1_2 Step 6 — PLAN-MODE PLUMBING (the third optional argument).
+# Without it the receipt commit reaches _aid_lc_isolated_commit's ordinary path,
+# which goes through _aid_lc_require_target_branch and refuses whenever the
+# target branch is not the branch currently checked out — the NORMAL case for a
+# plan-branch close, where the controller sits on plan/<plan_id> and the target
+# branch may additionally be checked out in another worktree. Passing the LIVE
+# target head as <plan_mode_parent> switches the receipt commit to the same
+# `commit-tree` + CAS `update-ref` path Step 5 established for the delivery
+# bindings: no checkout, no HEAD move, no index reset.
+#
+# RESTORE-ON-FAILURE (mirrors aid_lifecycle_plan_merge_bind's _lc_rollback
+# discipline, added for the same reason): in plan mode a failed close must leave
+# the worktree byte-identical to never having run, because the caller's
+# clean-worktree precondition would otherwise refuse the prescribed re-run. A
+# receipt that did not exist on entry is removed; one that did is restored. The
+# LEGACY (two-argument) path deliberately keeps its existing behaviour — an
+# uncommitted receipt left on disk is what makes aid_plan_closure_state report
+# `closing_pending_commit`, which several callers and suites depend on.
 aid_lifecycle_plan_close() {
-  local plan_id="$1" root="${2:-.}"
+  local plan_id="$1" root="${2:-.}" plan_parent="${3:-}"
+
+  # Plan mode reads (and builds the receipt from) the TARGET BRANCH's manifest —
+  # the one Step 5's bindings landed on — not the plan branch's stale worktree
+  # copy. See aid_manifest_path's header for why this is a correctness fix and
+  # not a convenience.
+  local _mref=0
+  if [[ -n "$plan_parent" ]]; then
+    aid_lc_manifest_ref_begin "$plan_id" "$root" "$(aid_target_branch)" && _mref=1
+  fi
+
+  # _pc_done <rc> — the single exit point that drops the target-ref override.
+  _pc_done() { [[ "$_mref" -eq 1 ]] && aid_lc_manifest_ref_end; return "$1"; }
+
   local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
   case "$st" in
-    closed) echo "already closed" >&2; return 0 ;;
-    not_found) echo "plan-close: ${plan_id} not found" >&2; return 3 ;;
-    legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; return 1 ;;
-    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; return 1 ;;
+    closed) echo "already closed" >&2; _pc_done 0; return 0 ;;
+    not_found) echo "plan-close: ${plan_id} not found" >&2; _pc_done 3; return 3 ;;
+    legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; _pc_done 1; return 1 ;;
+    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; _pc_done 1; return 1 ;;
   esac
+
   # delivered-but-unreconciled or closing_pending_commit -> write/commit receipt.
-  aid_lifecycle_commit_receipt "$plan_id" "$root" || { echo "plan-close: receipt not committed/reachable for ${plan_id}" >&2; return 1; }
+  if [[ -z "$plan_parent" ]]; then
+    aid_lifecycle_commit_receipt "$plan_id" "$root" || { echo "plan-close: receipt not committed/reachable for ${plan_id}" >&2; return 1; }
+    echo "closed ${plan_id}"
+    return 0
+  fi
+
+  # ── Plan mode ────────────────────────────────────────────────────────────
+  local tb; tb="$(aid_target_branch)"
+  local live; live="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${tb}" 2>/dev/null || true)"
+  if [[ "$live" != "$plan_parent" ]]; then
+    echo "plan-close: refusing the plan-mode receipt commit — ${tb} is at ${live:-<absent>}, not at the expected ${plan_parent} (something else advanced the target branch)" >&2
+    _pc_done 1; return 1
+  fi
+
+  local receipt; receipt="$(aid_receipt_path "$plan_id" "$root")"
+  local _rc_snap="" _rc_existed=0
+  if [[ -f "$receipt" ]]; then
+    _rc_existed=1
+    _rc_snap="$(mktemp 2>/dev/null)" || _rc_snap=""
+    [[ -n "$_rc_snap" ]] && cp -p -- "$receipt" "$_rc_snap" 2>/dev/null
+  fi
+
+  aid_lc_plan_mode_begin "" "" "$plan_parent"
+  local crc=0
+  aid_lifecycle_commit_receipt "$plan_id" "$root" || crc=$?
+  local newparent="${_AID_LC_PLAN_PARENT:-$plan_parent}"
+  aid_lc_plan_mode_end
+
+  if [[ "$crc" -ne 0 ]]; then
+    if [[ "$_rc_existed" -eq 1 ]]; then
+      [[ -n "$_rc_snap" && -f "$_rc_snap" ]] && cp -p -- "$_rc_snap" "$receipt" 2>/dev/null
+    else
+      rm -f -- "$receipt" 2>/dev/null || true
+    fi
+    [[ -n "$_rc_snap" ]] && rm -f -- "$_rc_snap" 2>/dev/null
+    echo "plan-close: receipt not committed/reachable for ${plan_id} — the worktree is restored to its pre-run bytes; re-run to converge." >&2
+    _pc_done 1; return 1
+  fi
+  [[ -n "$_rc_snap" ]] && rm -f -- "$_rc_snap" 2>/dev/null
+  printf '%s\n' "$newparent"
   echo "closed ${plan_id}"
+  _pc_done 0; return 0
 }
 
 # ── Legacy reconciliation (metadata-only; never fabricates) ──────────────────

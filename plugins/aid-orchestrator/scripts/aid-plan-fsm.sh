@@ -3105,6 +3105,19 @@ _pfsm_finalize_review() {
     echo "WARN: could not record the plan-finalize-review state_committed op for ${plan_id} (rc=${crc}); the state transition itself landed." >&2
   fi
 
+  # ── The SPLIT marker (P068 Step 6) ───────────────────────────────────────
+  # `plan-review-complete` says exactly what it means: every plan-final review
+  # is complete and the PM decision is still PENDING. It is deliberately NOT
+  # `plan-close-complete` — that second marker is written only after the PM
+  # decision exists AND the merge (or a recorded abort) has happened AND the
+  # lifecycle receipt is committed, so a closed plan can never be reported
+  # before the release actually occurred.
+  local _pr_marker="${root}/.aid-o/work/plan-state/${plan_id}/plan-review-complete"
+  mkdir -p "$(dirname "$_pr_marker")" 2>/dev/null || true
+  printf 'run_id=%s\ncandidate_sha=%s\nreviews_complete_at=%s\npm_decision=pending\n' \
+    "$run_id" "$candidate" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${_pr_marker}.tmp" 2>/dev/null \
+    && mv -f "${_pr_marker}.tmp" "$_pr_marker" 2>/dev/null || rm -f "${_pr_marker}.tmp" 2>/dev/null
+
   echo "$candidate"
   echo "plan-final review PASSED for ${plan_id} at ${candidate} over ${base_commit}..${candidate} — every required output in ${run_dir_rel}/ is present, protocol-valid and bound to the candidate; ${plan_id} is now AWAITING_PM." >&2
   return 0
@@ -3963,6 +3976,17 @@ cmd_plan_merge_to_main() {
     fi
   fi
 
+  # ── The PM authorization, durable in the attempt's own evidence ──────────
+  # P068 Step 6: plan-close has to prove a PM authorized THIS merge, and the
+  # decision artifact lives wherever the PM happened to write it (a --decision
+  # path this command does not own and cannot re-find later). Copying the
+  # already-VALIDATED artifact into the attempt's run directory makes the
+  # authorization part of the evidence the close attests to, so removing it
+  # blocks close (AC7) instead of silently degrading to "the merge record
+  # implies someone must have approved it".
+  cp -f -- "$decision_file" "${run_dir_rel:+${root}/${run_dir_rel}}/pm-plan-decision.json" 2>/dev/null || \
+    echo "WARN: plan-merge-to-main: could not copy the PM decision into ${run_dir_rel}/ — plan-close will refuse until it is present." >&2
+
   # ── Record + transition ──────────────────────────────────────────────────
   local merge_json
   merge_json="$(jq -nc --arg run "$run_id" --arg cand "$candidate" --arg tb "$target_branch" \
@@ -3985,6 +4009,339 @@ cmd_plan_merge_to_main() {
 
   echo "$merge_commit"
   echo "MERGED: ${plan_id} candidate ${candidate} is published on ${target_branch} as ${merge_commit} (tag=${tag_status}, push=${push_status}); ${plan_id} is now PLAN_MERGING. The closure receipt is plan-close's." >&2
+  return 0
+}
+
+# =============================================================================
+# P068 E-068-1_2 Step 6 — `plan-close`, the mechanical close transaction.
+#
+# WHY THIS EXISTS: two plan-state systems have coexisted and neither read the
+# other — the legacy `ca-review-complete` marker plus the gitignored
+# `.aid-o/reports/*` (aid-fsm.sh's own `cmd_plan_close`), and the git-tracked
+# `.aid-lifecycle/manifests|receipts` layer. A plan could therefore be
+# "closed" in one world while the other had no durable proof of anything. This
+# command is the ONE place they are reconciled, and it is a real gate: it can
+# only pass after the merge or a recorded abort.
+#
+# TRANSACTION SHAPE — identical to every other durable operation in this file:
+#   1. acquire the close lock (see the OWNED-LOCK EXCEPTION below);
+#   2. run every precondition through aid-plan-close-check.sh --plan-branch —
+#      the checks live there, next to the legacy checks they must agree with;
+#   3. `intent`      — plan_op_begin, key plan-close:<plan_id>:-:<attempt>:<plan_id>;
+#   4. `git_applied` — the lifecycle receipt commits (merge close), or the abort
+#      record + `status: aborted` commit (abort close);
+#   5. `state_committed` — the `plan-close-complete` marker is written, and the
+#      plan transitions to CLOSED (merge close only; ABORTED is already
+#      terminal and the transition table has no ABORTED -> CLOSED edge).
+# A crash between 4 and 5 is reconciled by finding the committed receipt and
+# writing only the marker — never a second receipt, never a second merge.
+#
+# OWNED-LOCK EXCEPTION: the close transaction holds its own lock for the whole
+# transaction, so a naive "no relevant lock is held" probe would contend with
+# its OWN descriptor and always fail — and releasing it before the receipt and
+# the marker are durable would destroy the very transaction boundary this
+# command exists to provide. The probe therefore excludes exactly ONE path: the
+# close lock, passed explicitly as `--exclude-lock`. The exclusion is by exact
+# canonical path, not "any lock this process holds", so a DIFFERENT lock held by
+# the same process still blocks. The close lock is a DEDICATED sidecar
+# (`plan-close.lock`) rather than the plan-state lock, because `flock` is
+# per-open-file-description: re-acquiring the plan-state lock from this same
+# process inside plan_op_begin / plan_state_transition would deadlock against
+# our own hold. The lock is released only after the receipt and the marker are
+# durably written.
+#
+# THE MARKER IS HEAD-BOUND AND ATOMIC: written via mktemp + `mv` (one rename,
+# never a partially-visible file) and carrying the merge commit (or the
+# unchanged target head, for an abort), the candidate and the attempt — so a
+# marker left over from an earlier, no-longer-valid state is detectable rather
+# than merely present. On resume the command REVALIDATES everything rather than
+# trusting an existing marker: an existing `plan-close-complete` whose
+# preconditions no longer hold is reported as `close_marker_invalid`, exit 1.
+#
+# Usage:
+#   aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>]
+# =============================================================================
+
+# _pfsm_close_lock_path <plan_id> — the close transaction's OWN sidecar.
+_pfsm_close_lock_path() {
+  printf '%s/plan-close.lock' "$(dirname "$(plan_state_path "$1")")"
+}
+
+# _pfsm_close_marker_path <plan_id>
+_pfsm_close_marker_path() {
+  printf '%s/plan-close-complete' "$(dirname "$(plan_state_path "$1")")"
+}
+
+# _pfsm_lock_held <path> — 0 iff a non-blocking flock acquire FAILS, i.e. the
+# advisory lock is still held by a live open file description. Existence of the
+# sidecar is deliberately NOT the signal (flock releases on descriptor close,
+# not on unlink, so the sidecars persist by design).
+_pfsm_lock_held() {
+  local p="$1" fd
+  command -v flock >/dev/null 2>&1 || return 1
+  [[ -e "$p" ]] || return 1
+  exec {fd}<>"$p" 2>/dev/null || return 1
+  if flock -n "$fd" 2>/dev/null; then
+    flock -u "$fd" 2>/dev/null || true
+    eval "exec ${fd}>&-" 2>/dev/null || true
+    return 1
+  fi
+  eval "exec ${fd}>&-" 2>/dev/null || true
+  return 0
+}
+
+# _pfsm_close_lock_contended <plan_id> <excluded_path>... — echoes the first
+# RELEVANT sidecar that is still HELD, skipping the excluded canonical paths.
+# Returns 1 when one is contended, 0 when none are. Extracted as its own
+# function so the owned-lock exception is directly testable: the path-scoped
+# nature of the exclusion (case c: a different lock held by the SAME process
+# still blocks) cannot be exercised through a subprocess.
+_pfsm_close_lock_contended() {
+  local plan_id="$1"; shift
+  local -a excl=("$@")
+  local dir; dir="$(dirname "$(plan_state_path "$plan_id")")"
+  [[ -d "$dir" ]] || return 0
+  local lp e skip canon
+  while IFS= read -r lp; do
+    [[ -n "$lp" ]] || continue
+    canon="$(readlink -f -- "$lp" 2>/dev/null || printf '%s' "$lp")"
+    skip=0
+    for e in ${excl[@]+"${excl[@]}"}; do
+      [[ "$canon" == "$(readlink -f -- "$e" 2>/dev/null || printf '%s' "$e")" ]] && skip=1
+    done
+    [[ "$skip" -eq 1 ]] && continue
+    if _pfsm_lock_held "$lp"; then
+      printf '%s (pid recorded in the sidecar: %s)' "$lp" "$(tr -d '\n' < "$lp" 2>/dev/null || echo unknown)"
+      return 1
+    fi
+  done < <(find "$dir" -maxdepth 1 -name '*.lock' 2>/dev/null | sort)
+  return 0
+}
+
+cmd_plan_close() {
+  local plan_id="" project_root_opt="" op_id_opt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --project-root)
+        _pfsm_require_optval "plan-close" "$1" "$#" || exit 2
+        project_root_opt="$2"; shift 2 ;;
+      --op-id)
+        _pfsm_require_optval "plan-close" "$1" "$#" || exit 2
+        op_id_opt="$2"; shift 2 ;;
+      --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
+      *)
+        if [[ -z "$plan_id" ]]; then plan_id="$1"
+        else echo "ERROR: plan-close: unexpected argument: $1" >&2; exit 2; fi
+        shift ;;
+    esac
+  done
+
+  if [[ -z "$plan_id" ]]; then
+    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>]" >&2
+    exit 2
+  fi
+  if ! _pfsm_validate_plan_id "$plan_id"; then
+    echo "ERROR: plan-close: plan_id must match ^P[0-9]{3}\$ (got '${plan_id}')" >&2
+    exit 2
+  fi
+  command -v jq >/dev/null 2>&1 || {
+    echo "PRECONDITION FAIL: plan-close requires jq." >&2; exit 1; }
+
+  local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+
+  if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
+    echo "PRECONDITION FAIL: plan-close: no plan-boundary-manifest for ${plan_id} — there is nothing to close." >&2
+    exit 1
+  fi
+
+  local marker; marker="$(_pfsm_close_marker_path "$plan_id")"
+  local cur_state=""
+  cur_state="$(plan_state_get "$plan_id" "plan_state")" || cur_state=""
+
+  local close_mode="merge"
+  case "$cur_state" in
+    PLAN_MERGING) close_mode="merge" ;;
+    ABORTED)      close_mode="abort" ;;
+    CLOSED)
+      if [[ -f "$marker" ]]; then
+        echo "ALREADY CLOSED: ${plan_id} is CLOSED and ${marker} is present — plan-close is a no-op." >&2
+        exit 0
+      fi
+      close_mode="merge" ;;
+    *)
+      echo "PRECONDITION FAIL: plan-close: ${plan_id} is in state '${cur_state:-<none>}' — close runs out of PLAN_MERGING (after the merge) or ABORTED (a recorded abort). No marker was written." >&2
+      exit 1
+      ;;
+  esac
+
+  local target_branch candidate run_id run_dir_rel
+  target_branch="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch')" || target_branch=""
+  candidate="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || candidate=""
+  run_id="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || run_id=""
+  run_dir_rel="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || run_dir_rel=""
+
+  # ── 1. the close lock ─────────────────────────────────────────────────────
+  local close_lock; close_lock="$(_pfsm_close_lock_path "$plan_id")"
+  if ! aid_lock_acquire "$close_lock" 10; then
+    echo "PRECONDITION FAIL: plan-close: another close transaction holds ${close_lock} — nothing was written." >&2
+    exit 1
+  fi
+  local close_fd="$AID_LOCK_FD"
+  _pfsm_close_release() { [[ -n "${close_fd:-}" ]] && aid_lock_release "$close_fd" >/dev/null 2>&1; close_fd=""; return 0; }
+
+  # ── 2. every precondition, in one place, with the owned lock excluded ─────
+  local ccrc=0 ccout=""
+  ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" \
+            --project-root "$root" --plan-branch --close-mode "$close_mode" \
+            --exclude-lock "$close_lock" 2>&1)" || ccrc=$?
+  if [[ "$ccrc" -ne 0 ]]; then
+    _pfsm_close_release
+    if [[ -f "$marker" ]]; then
+      echo "close_marker_invalid: ${plan_id} carries a plan-close-complete marker whose preconditions NO LONGER HOLD — the marker is not trusted and close is refused. Resolve the failures below, then re-run plan-close." >&2
+    else
+      echo "PRECONDITION FAIL: plan-close: aid-plan-close-check.sh reported a blocking failure for ${plan_id} — NO marker was written and nothing was committed." >&2
+    fi
+    printf '%s\n' "$ccout" >&2
+    exit 1
+  fi
+
+  # ── 3. intent ─────────────────────────────────────────────────────────────
+  local attempt="${run_id##*-final-}"
+  [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+  local op_id="${op_id_opt:-$(plan_op_key "plan-close" "$plan_id" "-" "$attempt" "$plan_id")}"
+  local phase="none" prc=0
+  phase="$(plan_op_reconcile "$plan_id" "$op_id")" || prc=$?
+  if [[ "$phase" != "git_applied" && "$phase" != "state_committed" ]]; then
+    local brc=0
+    plan_op_begin "$plan_id" "$op_id" "plan-close" "$plan_id" "$candidate" || brc=$?
+    if [[ "$brc" -ne 0 ]]; then
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close: could not record the operation intent for ${plan_id} (rc=${brc}) — nothing was committed." >&2
+      exit 1
+    fi
+  fi
+
+  # ── 4. git_applied: the durable closure proof ─────────────────────────────
+  local target_head="" applied_sha="" lifecycle_note=""
+  target_head="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || target_head=""
+  if [[ -z "$target_head" ]]; then
+    _pfsm_close_release
+    echo "PRECONDITION FAIL: plan-close: the target branch ${target_branch} does not resolve — no receipt was written." >&2
+    exit 1
+  fi
+  local lc_manifest="${root}/.aid-lifecycle/manifests/${plan_id}.yaml"
+
+  if [[ "$close_mode" == "merge" ]]; then
+    if [[ ! -f "$lc_manifest" ]]; then
+      # Legacy-mode plan that pre-dates the lifecycle layer. NOT an escape
+      # hatch for plans created under the new model: aid-auto-pipeline.sh
+      # writes a lifecycle manifest for every one of those.
+      lifecycle_note="lifecycle_manifest_absent"
+      applied_sha="$target_head"
+      echo "NOTE: ${plan_id} has no .aid-lifecycle manifest — closing in legacy mode with reason 'lifecycle_manifest_absent' and NO receipt." >&2
+    else
+      local lrc=0 lout=""
+      lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" 2>&1)" || lrc=$?
+      if [[ "$lrc" -ne 0 ]]; then
+        _pfsm_close_release
+        echo "PRECONDITION FAIL: plan-close: the lifecycle receipt for ${plan_id} was NOT committed (rc=${lrc}) — for a plan_branch plan the receipt is MANDATORY, not best-effort, so NO close marker was written and ${plan_id} stays ${cur_state}. Detail: ${lout}" >&2
+        exit 1
+      fi
+      applied_sha="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null)" || applied_sha="$target_head"
+      lifecycle_note="receipt_committed"
+    fi
+  else
+    # ── The abort close ────────────────────────────────────────────────────
+    # An aborted plan writes NO lifecycle receipt: aid_lifecycle_plan_close
+    # refuses while any required EPIC is undelivered, which is ALWAYS true
+    # before a merge, so demanding one here would make an abort unclosable.
+    # The durable proof is an abort record in the attempt's run directory plus
+    # `status: aborted` on the tracked lifecycle manifest.
+    local reason; reason="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.terminal_reason')" || reason=""
+    local abort_rec="${root}/${run_dir_rel}/plan-close-abort.json"
+    mkdir -p "$(dirname "$abort_rec")" 2>/dev/null || true
+    if ! jq -n --arg p "$plan_id" --arg r "${reason:-unrecorded}" --arg c "$candidate" \
+              --arg run "$run_id" --arg tb "$target_branch" --arg th "$target_head" \
+              --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+         '{plan_id:$p, result:"aborted", terminal_reason:$r, abandoned_candidate_sha:$c,
+           plan_final_run_id:$run, target_branch:$tb, target_head_unchanged:$th, recorded_at:$at}' \
+         > "${abort_rec}.tmp" 2>/dev/null; then
+      rm -f "${abort_rec}.tmp" 2>/dev/null || true
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close: could not write the abort record at ${abort_rec} — no marker was written." >&2
+      exit 1
+    fi
+    mv -f "${abort_rec}.tmp" "$abort_rec"
+
+    if [[ -f "$lc_manifest" ]]; then
+      local mrc=0
+      # Plan-mode plumbing, exactly like the receipt: the target branch may be
+      # checked out in another worktree, and an abort never moves it.
+      aid_lc_plan_mode_begin "" "" "$target_head"
+      ( cd "$root" && yq -i '.status = "aborted"' ".aid-lifecycle/manifests/${plan_id}.yaml" ) || mrc=$?
+      if [[ "$mrc" -eq 0 ]]; then
+        aid_lifecycle_validate_artifact "$lc_manifest" "plan-lifecycle-manifest.schema.json" >/dev/null 2>&1 || mrc=1
+      fi
+      if [[ "$mrc" -eq 0 ]]; then
+        _aid_lc_isolated_commit "$root" "lifecycle: ${plan_id} aborted" ".aid-lifecycle/manifests/${plan_id}.yaml" || mrc=$?
+      fi
+      aid_lc_plan_mode_end
+      if [[ "$mrc" -ne 0 ]]; then
+        git -C "$root" checkout -q HEAD -- ".aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null || true
+        _pfsm_close_release
+        echo "PRECONDITION FAIL: plan-close: could not mark the lifecycle manifest for ${plan_id} as aborted (rc=${mrc}) — the tracked manifest is restored and NO close marker was written." >&2
+        exit 1
+      fi
+      lifecycle_note="manifest_aborted"
+    else
+      lifecycle_note="lifecycle_manifest_absent"
+    fi
+    applied_sha="$target_head"
+  fi
+
+  local grc=0
+  plan_op_mark_git_applied "$plan_id" "$op_id" "$applied_sha" || grc=$?
+  [[ "$grc" -ne 0 ]] && echo "WARN: plan-close: the durable closure proof for ${plan_id} IS committed, but the git_applied record could not be written (rc=${grc}) — a resumed run re-verifies from the artifacts themselves." >&2
+
+  # ── 5. state_committed: the ONE atomic, head-bound marker ────────────────
+  local merge_commit=""
+  merge_commit="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_merge.merge_commit')" || merge_commit=""
+  [[ "$merge_commit" == "null" || "$merge_commit" == "not_found" ]] && merge_commit=""
+  mkdir -p "$(dirname "$marker")" 2>/dev/null || true
+  if ! printf 'plan_id=%s\nresult=%s\nplan_final_run_id=%s\ncandidate_sha=%s\ntarget_branch=%s\ntarget_head=%s\nmerge_commit=%s\nlifecycle=%s\nclosed_at=%s\n' \
+        "$plan_id" "$close_mode" "$run_id" "$candidate" "$target_branch" "$applied_sha" \
+        "${merge_commit:-none}" "$lifecycle_note" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        > "${marker}.tmp" 2>/dev/null; then
+    rm -f "${marker}.tmp" 2>/dev/null || true
+    _pfsm_close_release
+    echo "PRECONDITION FAIL: plan-close: the closure proof for ${plan_id} is committed, but the close marker could not be written. Re-run plan-close — it revalidates and converges." >&2
+    exit 1
+  fi
+  mv -f "${marker}.tmp" "$marker"
+
+  if [[ "$close_mode" == "merge" ]]; then
+    if ! _pfsm_plan_state_set "$plan_id" "CLOSED"; then
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close: the receipt is committed and ${marker} is written, but ${plan_id} could not be moved to CLOSED. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
+      exit 1
+    fi
+    plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "CLOSED"' >/dev/null 2>&1 || true
+  fi
+
+  local crc=0
+  plan_op_commit "$plan_id" "$op_id" || crc=$?
+  [[ "$crc" -ne 0 ]] && echo "WARN: plan-close: could not append the state_committed record for ${op_id} (rc=${crc})." >&2
+
+  _pfsm_close_release
+
+  echo "$marker"
+  if [[ "$close_mode" == "merge" ]]; then
+    echo "CLOSED: ${plan_id} is closed (${lifecycle_note}); the merge ${merge_commit:-<none>} is published on ${target_branch} and the close marker is bound to ${applied_sha}." >&2
+  else
+    echo "CLOSED (ABORTED): ${plan_id} closed by abort (${lifecycle_note}); ${target_branch} is unchanged at ${applied_sha}, the abandoned candidate was ${candidate}, and the abort record is in ${run_dir_rel}/." >&2
+  fi
   return 0
 }
 
@@ -4466,6 +4823,7 @@ Subcommands:
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
+  plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }
@@ -4480,6 +4838,7 @@ main() {
     epic-merge-to-plan) cmd_epic_merge_to_plan "$@" ;;
     plan-finalize) cmd_plan_finalize "$@" ;;
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
+    plan-close) cmd_plan_close "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
     -h|--help|"")
       _aid_plan_fsm_usage

@@ -66,7 +66,11 @@ _bootstrap() {
   local plan_id="${1:-$PLAN_ID}"
   # Mirror production: `.aid-o/work/` is gitignored, so branch switching never
   # deletes the plan state or the manifest out from under the CLI.
-  printf '.aid-o/work/\n' > "$TEST_PROJECT_ROOT/.gitignore"
+  # `.aid-o/reports/` is gitignored here for the same reason production
+  # projects gitignore it: the human report projection is private. Step 6's
+  # close-check reads that mode (report_storage: private/gitignored) and never
+  # lets the Markdown projection alone make close pass.
+  printf '.aid-o/work/\n.aid-o/reports/\n' > "$TEST_PROJECT_ROOT/.gitignore"
   git -C "$TEST_PROJECT_ROOT" add -- .gitignore
   git -C "$TEST_PROJECT_ROOT" commit -q -m "gitignore the runtime area"
   # P068 Step 5 (opt-in): the GIT-TRACKED lifecycle manifest the plan merge binds
@@ -2832,4 +2836,463 @@ _ops_jsonl() { printf '%s/.aid-o/work/plan-state/%s/operations.jsonl' "$TEST_PRO
   # And the tracked tree is clean, so the printed remedy is actually runnable.
   run bash -c "git -C '$TEST_PROJECT_ROOT' status --porcelain -- '$relpath'"
   [ -z "$output" ]
+}
+
+# =============================================================================
+# ─── aid-plan-fsm.sh plan-close (Step 6) ──────────────────────────────────
+# =============================================================================
+#
+# AC7 — "plan close is truly final and recoverable". Every test here asserts one
+# of two things: that ONE individually removed or corrupted precondition BLOCKS
+# the close (and leaves no marker), or that a close which does pass leaves
+# exactly one atomic, head-bound marker AND a committed `.aid-lifecycle`
+# receipt. The negative half is the point: a close that cannot be blocked is not
+# a gate, it is a rubber stamp.
+
+_marker() { printf '%s/.aid-o/work/plan-state/%s/plan-close-complete' "$TEST_PROJECT_ROOT" "$PLAN_ID"; }
+_state_lock() { printf '%s/.aid-o/work/plan-state/%s/plan-state.yaml.lock' "$TEST_PROJECT_ROOT" "$PLAN_ID"; }
+_manifest_lock() { printf '%s/.aid-o/work/plan-state/%s/plan-boundary-manifest.json.lock' "$TEST_PROJECT_ROOT" "$PLAN_ID"; }
+_close_lock() { printf '%s/.aid-o/work/plan-state/%s/plan-close.lock' "$TEST_PROJECT_ROOT" "$PLAN_ID"; }
+_receipt_rel() { printf '.aid-lifecycle/receipts/%s.yaml' "$PLAN_ID"; }
+
+# _close — the command under test.
+_close() {
+  run bash "$PLAN_FSM_CLI" plan-close "$PLAN_ID" \
+    --project-root "$TEST_PROJECT_ROOT" "$@"
+}
+
+# _seed_plan_final_evidence — the plan-final review + C4 records the close
+# transaction attests to. Built by writing REAL files into the attempt's run
+# directory and recording their REAL sha256 in the manifest, exactly as
+# `--stage review` does — so a later corruption of any one of them is detected
+# by the same hash comparison production uses, not by a test-only shortcut.
+# (The review and C4 STAGES themselves are Step 2/3/4's own exhaustive
+# coverage above; re-running them here would cost a full release gate profile
+# per test and prove nothing about close.)
+_seed_plan_final_evidence() {
+  local dir; dir="$(_run_dir)"
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  local run_id; run_id="$(_manifest_field "$PLAN_ID" plan_final_run_id)"
+  local base; base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+  local thead; thead="$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)"
+  mkdir -p "$dir"
+
+  jq -n '{overall:"pass", gates:[]}' > "${dir}/gates_report.json"
+
+  local f outputs='{}'
+  for f in semantic-review-final.json audit-report.json curator-report.json \
+           simplifier-report.md delivery-report.json review-profile.json \
+           delivery-gate.json acceptance-evidence.json dispatch-record.json; do
+    if [[ ! -f "${dir}/${f}" ]]; then
+      if [[ "$f" == *.md ]]; then
+        printf 'Head: %s\n' "$cand" > "${dir}/${f}"
+      else
+        jq -n --arg h "$cand" '{schema_version:"aid-2.0", revision:{head_sha:$h}}' > "${dir}/${f}"
+      fi
+    fi
+    outputs="$(jq -c --arg k "$f" --arg v "sha256:$(sha256sum "${dir}/${f}" | awk '{print $1}')" \
+      '. + {($k): $v}' <<<"$outputs")"
+  done
+
+  plan_manifest_update "$PLAN_ID" \
+    ".plan_boundary_manifest.plan_final_review = $(jq -nc --arg c "$cand" --arg b "$base" \
+      --arg r "$run_id" --argjson o "$outputs" \
+      '{candidate_sha:$c, review_range:($b + ".." + $c), run_id:$r, outputs:$o,
+        dispatch_counts:{}, utilities_run:[]}')" >/dev/null
+
+  jq -n --arg c "$cand" '{schema_version:"aid-2.0", artifact_type:"release_decision",
+    release_decision:{release_ready:true, blockers:[], candidate_sha:$c}}' \
+    > "${dir}/release-decision.json"
+  jq -n --arg p "$PLAN_ID" --arg r "$run_id" --arg c "$cand" --arg t "$thead" \
+    '{event:"release_policy_dual_run", plan_id:$p, run_id:$r, candidate_sha:$c,
+      target_head_sha:$t, enforcement:"observe", c4_release_ready:true,
+      legacy_verdict:true, legacy_checks:{gates_report:"pass", plan_final_review:"pass"},
+      match:true, divergence_class:"none"}' > "${dir}/release-decision-dual-run.json"
+  plan_manifest_update "$PLAN_ID" \
+    ".plan_boundary_manifest.plan_final_c4 = $(jq -nc --arg r "$run_id" --arg c "$cand" --arg t "$thead" \
+      '{run_id:$r, candidate_sha:$c, target_head_sha:$t, enforcement:"observe",
+        release_ready:true, blockers:0, dual_run:{match:true, divergence_class:"none"}}')" >/dev/null
+
+  # The private, gitignored human projection. Its Head is the candidate, which
+  # IS the worktree HEAD across the close (the close moves the TARGET ref by
+  # plumbing and never touches HEAD), so Check 2 sees a fresh report.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/reports"
+  printf -- '---\nHead: %s\n---\n\n# %s delivery\n' "$cand" "$PLAN_ID" \
+    > "$TEST_PROJECT_ROOT/.aid-o/reports/${PLAN_ID}-delivery.md"
+}
+
+# _seed_closable — a plan that has really merged and is therefore closable.
+_seed_closable() {
+  _seed_merge_project
+  _seed_plan_final_evidence
+  _merge
+  [ "$status" -eq 0 ]
+}
+
+# ─── AC7: the happy path ───────────────────────────────────────────────────
+
+@test "AC7: a merged plan closes — exactly one head-bound marker, a committed .aid-lifecycle receipt, and state CLOSED" {
+  _seed_closable
+  [ ! -f "$(_marker)" ]
+  local main_before; main_before="$(_main_sha)"
+
+  _close
+  [ "$status" -eq 0 ]
+
+  # Exactly ONE marker, and it is bound to the published merge.
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID' -maxdepth 1 -name 'plan-close-complete*' | wc -l"
+  [ "$output" = "1" ]
+  run grep -c '^merge_commit=' "$(_marker)"
+  [ "$output" = "1" ]
+  run grep "^merge_commit=$(_merge_commit)$" "$(_marker)"
+  [ "$status" -eq 0 ]
+
+  # The receipt is COMMITTED on the target branch (not merely on disk).
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -eq 0 ]
+  # ...and the target ref advanced by exactly that plumbing commit.
+  [ "$(_main_sha)" != "$main_before" ]
+
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "CLOSED" ]
+}
+
+@test "AC7: a plan whose .lock sidecars EXIST but are not held closes normally (and the close takes its own lock)" {
+  _seed_closable
+  # The sidecars are on disk by design — flock releases on descriptor close,
+  # not on unlink — so requiring their ABSENCE would make close unsatisfiable.
+  [ -f "$(_state_lock)" ]
+  [ -f "$(_manifest_lock)" ]
+  _close
+  [ "$status" -eq 0 ]
+  # The close transaction's OWN sidecar exists afterwards, proving it held a
+  # lock across the transaction while the probe still passed (owned-lock case a).
+  [ -f "$(_close_lock)" ]
+}
+
+# ─── AC7: plan-close-complete is absent until the merge or a recorded abort ──
+
+@test "AC7: plan-close-complete is absent before the merge — a close out of AWAITING_PM is refused" {
+  _seed_merge_project
+  _seed_plan_final_evidence
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AWAITING_PM"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+# ─── AC7: the corruption matrix — each item INDIVIDUALLY blocks ─────────────
+
+@test "AC7: removing the runtime manifest blocks close and writes no marker" {
+  _seed_closable
+  rm -f "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID/plan-boundary-manifest.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nothing to close"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: removing the final gate report blocks close" {
+  _seed_closable
+  rm -f "$(_run_dir)/gates_report.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gate report"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: removing a required review output blocks close" {
+  _seed_closable
+  rm -f "$(_run_dir)/semantic-review-final.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"semantic-review-final.json"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: CORRUPTING a required review output blocks close (the recorded hash no longer matches)" {
+  _seed_closable
+  printf '{"tampered":true}\n' > "$(_run_dir)/curator-report.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"curator-report.json"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: corrupting the final SHA binding (plan_final_review.candidate_sha) blocks close" {
+  _seed_closable
+  _poke_manifest '.plan_boundary_manifest.plan_final_review.candidate_sha = "0000000000000000000000000000000000000000"'
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not to this attempt"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: removing the C4 decision blocks close" {
+  _seed_closable
+  rm -f "$(_run_dir)/release-decision.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"C4 decision"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: a legacy release path that did NOT pass blocks close" {
+  _seed_closable
+  local d; d="$(_run_dir)/release-decision-dual-run.json"
+  jq '.legacy_verdict = false' "$d" > "${d}.t" && mv "${d}.t" "$d"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"legacy_verdict"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: removing the PM decision blocks close" {
+  _seed_closable
+  [ -f "$(_run_dir)/pm-plan-decision.json" ]
+  rm -f "$(_run_dir)/pm-plan-decision.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no PM decision recorded"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: removing the merge record blocks close" {
+  _seed_closable
+  _poke_manifest 'del(.plan_boundary_manifest.plan_final_merge)'
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no published plan merge"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: corrupting EPIC ancestry blocks close" {
+  _seed_closable
+  # A commit that RESOLVES but is NOT an ancestor of the plan branch — built as
+  # a parentless dangling commit with `commit-tree`, so no ref moves and the
+  # worktree is untouched (an orphan-branch checkout would fight the untracked
+  # gitignored fixture files for no benefit).
+  local foreign
+  foreign="$(git -C "$TEST_PROJECT_ROOT" commit-tree \
+    "$(git -C "$TEST_PROJECT_ROOT" rev-parse 'main^{tree}')" -m "foreign, unreachable")"
+  _poke_manifest "(.plan_boundary_manifest.epic_runs[] | select(.epic_id == \"E-068-1_2\") | .epic_merge_commit) = \"${foreign}\""
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not an ancestor"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: UNKNOWN ancestry blocks rather than passing" {
+  _seed_closable
+  _poke_manifest '(.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-1_2") | .epic_merge_commit) = "dead0000dead0000dead0000dead0000dead0000"'
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ancestry UNKNOWN"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: a stale queue state blocks close" {
+  _seed_closable
+  # The EPIC's task branch really IS merged (it points at the candidate, which
+  # the plan merge published on main), while the queue still claims blocked.
+  git -C "$TEST_PROJECT_ROOT" branch "task/E-068-1_2/main" "$(_manifest_field "$PLAN_ID" candidate_sha)"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" <<'YAML'
+- epic_id: E-068-1_2
+  path: p
+  status: blocked
+  depends_on: []
+YAML
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"check4"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: a stale active.md state blocks close" {
+  _seed_closable
+  git -C "$TEST_PROJECT_ROOT" branch "task/E-068-1_2/main" "$(_manifest_field "$PLAN_ID" candidate_sha)"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config" "$TEST_PROJECT_ROOT/.aid-o/work"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" <<'YAML'
+- epic_id: E-068-1_2
+  path: p
+  status: queued
+  depends_on: []
+YAML
+  printf 'E-068-1_2 is waiting for merge\n' > "$TEST_PROJECT_ROOT/.aid-o/work/active.md"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"check4"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: a missing release/tag record blocks close" {
+  _seed_closable
+  # prepare-plan resolved a version, but no tag exists on the merge.
+  jq -n '{version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"v9.9.9"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: an unfinished operation record blocks close" {
+  _seed_closable
+  printf '{"op_id":"epic-merge-to-plan:%s:-:0:E-068-1_2","command":"epic-merge-to-plan","subject":"E-068-1_2","phase":"git_applied","expected_before_sha":null,"resulting_sha":null,"at":"2026-07-26T00:00:00Z"}\n' \
+    "$PLAN_ID" >> "$(_ops_jsonl "$PLAN_ID")"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unfinished operation record"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: an in-progress merge (MERGE_HEAD) blocks close" {
+  _seed_closable
+  printf '%s\n' "$(_main_sha)" > "$TEST_PROJECT_ROOT/.git/MERGE_HEAD"
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MERGE_HEAD"* ]]
+  [ ! -f "$(_marker)" ]
+  rm -f "$TEST_PROJECT_ROOT/.git/MERGE_HEAD"
+}
+
+# ─── AC7: the owned-lock exception ─────────────────────────────────────────
+
+@test "AC7: a SEPARATE live process holding another relevant sidecar blocks close, and is NAMED" {
+  _seed_closable
+  local lock; lock="$(_manifest_lock)"
+  setsid flock -x "$lock" -c 'sleep 60' >/dev/null 2>&1 &
+  local holder=$!
+  # Wait until the lock is genuinely held before probing.
+  local i=0
+  while [ "$i" -lt 50 ] && flock -n "$lock" true 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+
+  _close
+  local st="$status" out="$output"
+  pkill -P "$holder" 2>/dev/null || true
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+
+  [ "$st" -eq 1 ]
+  [[ "$out" == *"still HELD"* ]]
+  [[ "$out" == *"plan-boundary-manifest.json.lock"* ]]
+  [ ! -f "$(_marker)" ]
+}
+
+@test "AC7: the owned-lock exception is PATH-scoped — a different lock held by the SAME process still blocks" {
+  _seed_closable
+  # Source the CLI so the probe runs IN THIS process: the "same process holds a
+  # different lock" case cannot be produced through a subprocess.
+  # shellcheck disable=SC1090
+  source "$PLAN_FSM_CLI"
+  export AID_PLAN_STATE_PROJECT_ROOT="$TEST_PROJECT_ROOT"
+
+  # (a) Holding ONLY our own close lock: the probe passes.
+  aid_lock_acquire "$(_close_lock)" 5
+  local own_fd="$AID_LOCK_FD"
+  run _pfsm_close_lock_contended "$PLAN_ID" "$(_close_lock)"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+
+  # (c) The SAME process additionally holds a DIFFERENT lock: still blocked.
+  aid_lock_acquire "$(_manifest_lock)" 5
+  local other_fd="$AID_LOCK_FD"
+  run _pfsm_close_lock_contended "$PLAN_ID" "$(_close_lock)"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"plan-boundary-manifest.json.lock"* ]]
+
+  aid_lock_release "$other_fd" || true
+  aid_lock_release "$own_fd" || true
+}
+
+# ─── AC7: crash resume ─────────────────────────────────────────────────────
+
+@test "AC7: re-running after a simulated crash between the receipt and the marker writes exactly ONE marker and no second receipt" {
+  _seed_closable
+  _close
+  [ "$status" -eq 0 ]
+  local main_after_close; main_after_close="$(_main_sha)"
+  local receipt_blob; receipt_blob="$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:$(_receipt_rel)")"
+
+  # Simulate the crash: the receipt IS committed (git_applied happened), but the
+  # marker was never written and the plan never reached CLOSED.
+  rm -f "$(_marker)"
+  yq -i '.plan_state = "PLAN_MERGING"' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID/plan-state.yaml"
+
+  _close
+  [ "$status" -eq 0 ]
+
+  # Exactly ONE marker...
+  run bash -c "find '$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID' -maxdepth 1 -name 'plan-close-complete*' | wc -l"
+  [ "$output" = "1" ]
+  # ...no second receipt commit (the target ref did not move again)...
+  [ "$(_main_sha)" = "$main_after_close" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:$(_receipt_rel)")" = "$receipt_blob" ]
+  # ...and the plan is CLOSED again.
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "CLOSED" ]
+}
+
+@test "AC7: an existing close marker whose preconditions no longer hold is reported as close_marker_invalid" {
+  _seed_closable
+  _close
+  [ "$status" -eq 0 ]
+  [ -f "$(_marker)" ]
+
+  # The marker stays, but the evidence it attests to is destroyed and the plan
+  # is put back at the boundary. A resumed close must REVALIDATE, not trust it.
+  rm -f "$(_run_dir)/gates_report.json"
+  yq -i '.plan_state = "PLAN_MERGING"' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$PLAN_ID/plan-state.yaml"
+
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"close_marker_invalid"* ]]
+}
+
+# ─── AC7: the abort close ──────────────────────────────────────────────────
+
+@test "AC7: a plan closed by ABORT writes the marker with the terminal reason, an abort record, NO receipt, and leaves the target unchanged" {
+  _seed_merge_project
+  _seed_plan_final_evidence
+  local main_before; main_before="$(_main_sha)"
+  local d; d="$(_decision_file '.decision = "ABORT" | .reason = "PM stopped the plan"')"
+  _merge "$d"
+  [ "$status" -eq 3 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ABORTED" ]
+
+  _close
+  [ "$status" -eq 0 ]
+  [ -f "$(_marker)" ]
+  run grep '^result=abort$' "$(_marker)"
+  [ "$status" -eq 0 ]
+
+  # An abort record naming the abandoned candidate and the unchanged target.
+  run jq -r '.result + " " + .terminal_reason + " " + .abandoned_candidate_sha' "$(_run_dir)/plan-close-abort.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "aborted PM stopped the plan "* ]]
+
+  # NO lifecycle receipt, and main is byte-identical apart from the manifest's
+  # own `status: aborted` commit (which is the abort's durable record).
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -ne 0 ]
+  run git -C "$TEST_PROJECT_ROOT" show "main:.aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  [[ "$output" == *"aborted"* ]]
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$main_before" main
+  [ "$status" -eq 0 ]
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$(_manifest_field "$PLAN_ID" candidate_sha)" main
+  [ "$status" -ne 0 ]
+}
+
+@test "AC7: an abort close with NO recorded terminal reason is refused" {
+  _seed_merge_project
+  _seed_plan_final_evidence
+  local d; d="$(_decision_file '.decision = "ABORT" | .reason = "PM stopped the plan"')"
+  _merge "$d"
+  [ "$status" -eq 3 ]
+  _poke_manifest 'del(.plan_boundary_manifest.terminal_reason)'
+  _close
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"terminal_reason"* ]]
+  [ ! -f "$(_marker)" ]
 }

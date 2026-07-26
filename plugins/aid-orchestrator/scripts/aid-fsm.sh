@@ -5420,6 +5420,42 @@ cmd_plan_close() {
   [[ -n "$nnn" ]] || { echo "ERROR: plan-close: cannot derive a plan id from epic_id '${epic_id}' (expected E-<NNN>-...)." >&2; exit 1; }
   local plan_id="P${nnn}"
 
+  # ── P068 E-068-1_2 Step 6: delegate the PLAN BOUNDARY to the plan layer ───
+  # For a `plan_branch` plan the real close is a transaction, not a marker: it
+  # reconciles the legacy marker world this function owns with the git-tracked
+  # `.aid-lifecycle` receipt world, and it may only pass after the merge or a
+  # recorded abort. `aid-plan-fsm.sh plan-close` is that transaction.
+  #
+  # The delegation is DELIBERATELY scoped to a plan that has actually reached
+  # its boundary (PLAN_MERGING / ABORTED / CLOSED). An INTERMEDIATE EPIC of a
+  # plan_branch plan merges into `plan/<plan_id>` long before the plan boundary
+  # exists, and it still needs this function's ordinary per-EPIC report checks;
+  # delegating for it would fail the EPIC on a plan-level precondition that is
+  # not yet meant to hold. On success the EPIC's own `ca-review-complete` marker
+  # is still written, so nothing downstream of this function changes shape.
+  # The MODE comes from the ONE declared source (`_fsm_declared_plan_mode`, the
+  # git-tracked lifecycle manifest on target_branch) — never from the runtime
+  # plan-boundary manifest. CP3-F2 made that a structural invariant precisely so
+  # two mode sources can never disagree, and plan-close is not an exception.
+  local _pb_mode_row _pb_mode=""
+  _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
+  _pb_mode="${_pb_mode_row%%$'\t'*}"
+  if [[ "$_pb_mode" == "plan_branch" ]]; then
+    local _pb_state_file="${project_root}/.aid-o/work/plan-state/${plan_id}/plan-state.yaml"
+    local _pb_state=""
+    [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
+    case "$_pb_state" in
+      PLAN_MERGING|ABORTED|CLOSED)
+        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "$plan_id" --project-root "$project_root"; then
+          echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
+          exit 1
+        fi
+        touch "${evidence_dir}/ca-review-complete"
+        return 0
+        ;;
+    esac
+  fi
+
   # Read execution.yaml toggles — grep-only, no yq dependency.
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local simplifier_enabled=true

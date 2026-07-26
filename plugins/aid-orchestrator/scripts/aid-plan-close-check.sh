@@ -66,6 +66,20 @@ Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotat
   --project-root         project root containing .aid-o/ (default: cwd)
   --auto-annotate        Check 2 only: rewrite a stale-but-docs-only report's
                          frontmatter (Head_at_generation + Head + Head_note)
+  --plan-branch          P068 Step 6: additionally run Check 5, the plan-branch
+                         close boundary (EPIC terminality + ancestry, the
+                         plan-final evidence bound to candidate_sha, the C4 and
+                         PM decisions, the merge-or-abort record, the tag state,
+                         MERGE_HEAD, unfinished operation records, held locks
+                         and the .aid-lifecycle receipt reconciliation).
+  --close-mode <m>       merge|abort — which terminal shape Check 5 verifies
+                         (default: merge). Only meaningful with --plan-branch.
+  --exclude-lock <path>  Check 5's lock-contention probe SKIPS this exact
+                         canonical path. The close transaction holds its OWN
+                         lock for the whole transaction, so probing that one
+                         would contend with the caller and never pass; the
+                         exclusion is by exact path, so a DIFFERENT lock held
+                         by the same process still blocks. Repeatable.
   --skip-delivery-report Caller has reporter.enabled:false — a missing
                          delivery/boundary report is expected and must NOT
                          fail Check 1. Only the report-existence requirement
@@ -82,11 +96,17 @@ PLAN_ID=""
 PROJECT_ROOT="$(pwd)"
 AUTO_ANNOTATE=0
 SKIP_DELIVERY_REPORT=0
+PLAN_BRANCH_MODE=0
+CLOSE_MODE="merge"
+EXCLUDE_LOCKS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-root) [[ $# -ge 2 ]] || usage; PROJECT_ROOT="$2"; shift 2 ;;
     --auto-annotate) AUTO_ANNOTATE=1; shift ;;
+    --plan-branch) PLAN_BRANCH_MODE=1; shift ;;
+    --close-mode) [[ $# -ge 2 ]] || usage; CLOSE_MODE="$2"; shift 2 ;;
+    --exclude-lock) [[ $# -ge 2 ]] || usage; EXCLUDE_LOCKS+=("$2"); shift 2 ;;
     --skip-delivery-report) SKIP_DELIVERY_REPORT=1; shift ;;
     -h|--help) usage ;;
     -*) echo "Unknown flag: $1" >&2; usage ;;
@@ -112,6 +132,21 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not a git 
 # suite relies on), so sourcing here is safe and side-effect-free.
 # shellcheck source=/dev/null
 source "$AID_FSM"
+
+# P068 Step 6: Check 5 reads the git-tracked `.aid-lifecycle` layer through its
+# OWN canonical resolver (aid_plan_closure_state) rather than re-deriving
+# closability here — the whole point of the check is that the two state systems
+# agree. Sourced only in --plan-branch mode so the legacy invocation keeps its
+# exact dependency surface. Both project-root knobs are set because the plan
+# libraries read one and the manifest library the other.
+if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
+  export AID_PLAN_STATE_PROJECT_ROOT="$PROJECT_ROOT"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$PROJECT_ROOT"
+  if ! declare -F aid_plan_closure_state >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+  fi
+fi
 
 PLAN_NUM="${PLAN_ID#P}"
 REPORTS_DIR=".aid-o/reports"
@@ -487,6 +522,341 @@ check4_queue_revalidate() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════
+# Check 5 — the plan-branch close boundary (P068 E-068-1_2 Step 6)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Checks 1-4 are the LEGACY marker world: reports, their freshness, DONE-but-
+# pending EPIC state files, and queue/active consistency. Check 5 is the
+# plan-branch world: the runtime plan-boundary manifest, the plan-final
+# evidence, the C4 and PM decisions, the published merge (or the recorded
+# abort), the tag, and the git-tracked `.aid-lifecycle` layer. Neither used to
+# read the other; plan-close is the one place they must agree, so BOTH run and
+# a failure in either blocks.
+#
+# Every sub-check is INDEPENDENTLY blocking and names itself, because AC7 is
+# precisely "individually removing or corrupting <one thing> blocks close" —
+# a single aggregated verdict could not distinguish which thing.
+
+PLAN_STATE_DIR=".aid-o/work/plan-state/${PLAN_ID}"
+PLAN_MANIFEST_JSON="${PLAN_STATE_DIR}/plan-boundary-manifest.json"
+
+# _pbm <jq_path> — a field of the runtime plan-boundary manifest payload, or
+# the empty string. Never aborts under `set -e`.
+_pbm() {
+  [[ -f "$PLAN_MANIFEST_JSON" ]] || { echo ""; return 0; }
+  local v; v="$(jq -r "${1} // \"\"" "$PLAN_MANIFEST_JSON" 2>/dev/null || true)"
+  [[ "$v" == "null" ]] && v=""
+  printf '%s' "$v"
+}
+
+# _lock_is_held <path> — 0 iff a NON-BLOCKING flock acquire fails, i.e. the
+# advisory lock is still held by a live open file description.
+#
+# This is deliberately NOT "does a .lock file exist". flock releases when the
+# descriptor closes, not when the file is unlinked, so the `.lock` sidecars the
+# plan transactions create persist on disk for the life of the workspace BY
+# DESIGN (this very repository carries such files under .aid-o/metrics/).
+# Requiring their absence would make plan-close unsatisfiable for every plan
+# that ever ran a transaction.
+_lock_is_held() {
+  local p="$1" fd
+  command -v flock >/dev/null 2>&1 || return 1
+  exec {fd}<>"$p" 2>/dev/null || return 1
+  if flock -n "$fd" 2>/dev/null; then
+    flock -u "$fd" 2>/dev/null || true
+    eval "exec ${fd}>&-" 2>/dev/null || true
+    return 1
+  fi
+  eval "exec ${fd}>&-" 2>/dev/null || true
+  return 0
+}
+
+check5_plan_branch_boundary() {
+  # ── 5.0 the runtime manifest itself ────────────────────────────────────
+  if [[ ! -f "$PLAN_MANIFEST_JSON" ]]; then
+    _fail "check5" "no runtime plan-boundary manifest at ${PLAN_MANIFEST_JSON} — there is nothing to close against"
+    return 0
+  fi
+  if ! jq -e '.plan_boundary_manifest | type == "object"' "$PLAN_MANIFEST_JSON" >/dev/null 2>&1; then
+    _fail "check5" "${PLAN_MANIFEST_JSON} is not a parseable plan-boundary manifest — close is blocked"
+    return 0
+  fi
+  _pass "check5" "runtime plan-boundary manifest present and parseable"
+
+  local candidate run_id run_dir target_branch plan_branch
+  candidate="$(_pbm '.plan_boundary_manifest.candidate_sha')"
+  run_id="$(_pbm '.plan_boundary_manifest.plan_final_run_id')"
+  run_dir="$(_pbm '.plan_boundary_manifest.plan_final_evidence_dir')"
+  target_branch="$(_pbm '.plan_boundary_manifest.target_branch')"
+  plan_branch="$(_pbm '.plan_boundary_manifest.plan_branch')"
+  [[ -n "$plan_branch" ]] || plan_branch="plan/${PLAN_ID}"
+
+  local f
+  for f in candidate run_id run_dir target_branch; do
+    if [[ -z "${!f}" ]]; then
+      _fail "check5" "the manifest has no ${f} — the plan-final candidate binding is gone, close is blocked"
+      return 0
+    fi
+  done
+
+  # ── 5.1 every EPIC has a terminal status ───────────────────────────────
+  local nonterminal
+  nonterminal="$(jq -r '[.plan_boundary_manifest.epic_runs[]? | select(.status != "merged_to_plan" and .status != "abandoned" and .status != "superseded") | .epic_id + "(" + (.status // "unknown") + ")"] | join(", ")' "$PLAN_MANIFEST_JSON" 2>/dev/null || true)"
+  if [[ -n "$nonterminal" ]]; then
+    _fail "check5" "non-terminal EPIC(s): ${nonterminal} — every EPIC must be terminal before the plan closes"
+  else
+    _pass "check5" "every epic_runs[] entry carries a terminal status"
+  fi
+
+  # ── 5.2 every non-abandoned EPIC's merge commit is an ancestor of the
+  #        plan branch. UNKNOWN ancestry (a rewritten or missing ref) BLOCKS —
+  #        unknown is never treated as merged. ─────────────────────────────
+  local eid mc bad=""
+  while read -r eid mc; do
+    [[ -n "$eid" ]] || continue
+    if [[ -z "$mc" || "$mc" == "null" ]]; then
+      bad="${bad:+${bad}, }${eid}(no merge commit recorded)"; continue
+    fi
+    if ! git cat-file -e "${mc}^{commit}" 2>/dev/null; then
+      bad="${bad:+${bad}, }${eid}(merge commit ${mc:0:8} does not resolve — ancestry UNKNOWN)"; continue
+    fi
+    if ! git merge-base --is-ancestor "$mc" "$plan_branch" 2>/dev/null; then
+      bad="${bad:+${bad}, }${eid}(${mc:0:8} is not an ancestor of ${plan_branch})"
+    fi
+  done < <(jq -r '.plan_boundary_manifest.epic_runs[]? | select(.status == "merged_to_plan") | .epic_id + " " + (.epic_merge_commit // "")' "$PLAN_MANIFEST_JSON" 2>/dev/null || true)
+  if [[ -n "$bad" ]]; then
+    _fail "check5" "EPIC ancestry is not provable against ${plan_branch}: ${bad}"
+  else
+    _pass "check5" "every merged EPIC's merge commit is an ancestor of ${plan_branch}"
+  fi
+
+  # ── 5.3 the plan-final run directory: the gate report + every required
+  #        review artifact, still byte-identical to what the review recorded
+  #        against candidate_sha ─────────────────────────────────────────
+  if [[ ! -d "$run_dir" ]]; then
+    _fail "check5" "the plan-final run directory ${run_dir} does not exist — the evidence this close would attest to is gone"
+  else
+    local gr="${run_dir}/gates_report.json"
+    if [[ ! -f "$gr" ]]; then
+      _fail "check5" "no plan-final gate report at ${gr}"
+    elif ! jq -e '(.overall // .gates_report.result // .status // "") == "pass"' "$gr" >/dev/null 2>&1; then
+      _fail "check5" "${gr} does not record an overall pass"
+    else
+      _pass "check5" "the plan-final gate report is present and records a pass"
+    fi
+
+    local rev_run rev_cand
+    rev_run="$(_pbm '.plan_boundary_manifest.plan_final_review.run_id')"
+    rev_cand="$(_pbm '.plan_boundary_manifest.plan_final_review.candidate_sha')"
+    if [[ -z "$rev_run" ]]; then
+      _fail "check5" "the manifest records no plan_final_review — the plan-level review boundary was never completed for this attempt"
+    elif [[ "$rev_run" != "$run_id" || "$rev_cand" != "$candidate" ]]; then
+      _fail "check5" "the recorded plan_final_review is bound to run '${rev_run}' / candidate ${rev_cand:0:8}, not to this attempt '${run_id}' / candidate ${candidate:0:8}"
+    else
+      local rf rsha actual missing="" corrupt=""
+      while read -r rf rsha; do
+        [[ -n "$rf" ]] || continue
+        if [[ ! -f "${run_dir}/${rf}" ]]; then
+          missing="${missing:+${missing}, }${rf}"; continue
+        fi
+        actual="sha256:$(sha256sum "${run_dir}/${rf}" 2>/dev/null | awk '{print $1}')"
+        [[ "$actual" == "$rsha" ]] || corrupt="${corrupt:+${corrupt}, }${rf}"
+      done < <(jq -r '.plan_boundary_manifest.plan_final_review.outputs // {} | to_entries[] | .key + " " + .value' "$PLAN_MANIFEST_JSON" 2>/dev/null || true)
+      if [[ -n "$missing" ]]; then
+        _fail "check5" "required plan-final review output(s) missing from ${run_dir}: ${missing}"
+      fi
+      if [[ -n "$corrupt" ]]; then
+        _fail "check5" "required plan-final review output(s) no longer match the hash recorded at review time (corrupted or regenerated after the candidate was reviewed): ${corrupt}"
+      fi
+      [[ -z "$missing" && -z "$corrupt" ]] && \
+        _pass "check5" "every required plan-final review output is present and bound to candidate ${candidate:0:8}"
+    fi
+
+    # ── 5.4 the plan-mode C4 decision, and the legacy release path ────────
+    local c4_run c4_cand
+    c4_run="$(_pbm '.plan_boundary_manifest.plan_final_c4.run_id')"
+    c4_cand="$(_pbm '.plan_boundary_manifest.plan_final_c4.candidate_sha')"
+    if [[ ! -f "${run_dir}/release-decision.json" ]]; then
+      _fail "check5" "no plan-mode C4 decision at ${run_dir}/release-decision.json"
+    elif [[ "$c4_run" != "$run_id" || "$c4_cand" != "$candidate" ]]; then
+      _fail "check5" "the recorded plan_final_c4 is bound to run '${c4_run}' / candidate ${c4_cand:0:8}, not to this attempt"
+    else
+      _pass "check5" "a plan-mode C4 decision exists for this attempt's candidate"
+    fi
+    local dual="${run_dir}/release-decision-dual-run.json"
+    if [[ ! -f "$dual" ]]; then
+      _fail "check5" "no ${dual} — the currently authoritative legacy release path has no recorded verdict"
+    elif ! jq -e '.legacy_verdict == true' "$dual" >/dev/null 2>&1; then
+      _fail "check5" "${dual} records legacy_verdict != true — the currently authoritative legacy release path did NOT pass"
+    else
+      _pass "check5" "the legacy release path recorded a pass for this attempt"
+    fi
+  fi
+
+  # ── 5.5 the PM decision ────────────────────────────────────────────────
+  local pmd="${run_dir}/pm-plan-decision.json"
+  local terminal_reason; terminal_reason="$(_pbm '.plan_boundary_manifest.terminal_reason')"
+  if [[ "$CLOSE_MODE" == "abort" ]]; then
+    if [[ -z "$terminal_reason" ]]; then
+      _fail "check5" "abort close: the manifest records no terminal_reason — an aborted plan closes only with a recorded reason"
+    else
+      _pass "check5" "abort close: the terminal reason is recorded (${terminal_reason})"
+    fi
+  else
+    if [[ ! -f "$pmd" ]]; then
+      _fail "check5" "no PM decision recorded at ${pmd} — plan-merge-to-main copies the authorization it validated into the attempt's run directory; without it this close has no proof a PM authorized anything"
+    elif ! jq -e --arg p "$PLAN_ID" --arg r "$run_id" --arg c "$candidate" \
+              '.plan_id == $p and .plan_final_run_id == $r and .candidate_sha == $c and .decision == "MERGE"' \
+              "$pmd" >/dev/null 2>&1; then
+      _fail "check5" "the PM decision at ${pmd} is not a MERGE authorization bound to ${PLAN_ID} / ${run_id} / ${candidate:0:8}"
+    else
+      _pass "check5" "a PM MERGE decision bound to this plan, attempt and candidate is recorded"
+    fi
+  fi
+
+  # ── 5.6 the merge (or abort) record, and the ancestry it claims ────────
+  local merge_result merge_commit target_head_now
+  merge_result="$(_pbm '.plan_boundary_manifest.plan_final_merge.result')"
+  merge_commit="$(_pbm '.plan_boundary_manifest.plan_final_merge.merge_commit')"
+  target_head_now="$(git rev-parse --verify --quiet "refs/heads/${target_branch}" 2>/dev/null || true)"
+  if [[ "$CLOSE_MODE" == "abort" ]]; then
+    local frozen_target; frozen_target="$(_pbm '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')"
+    if [[ -n "$merge_result" && "$merge_result" == "merged" ]]; then
+      _fail "check5" "abort close requested, but the manifest records a PUBLISHED merge (${merge_commit:0:8}) — an aborted plan never merged"
+    elif [[ -n "$frozen_target" && -n "$target_head_now" && "$frozen_target" != "$target_head_now" ]]; then
+      _fail "check5" "abort close: ${target_branch} moved from ${frozen_target:0:8} to ${target_head_now:0:8} — an aborted plan must leave the target branch unchanged"
+    else
+      _pass "check5" "abort close: no merge was published and ${target_branch} is unchanged"
+    fi
+  else
+    if [[ "$merge_result" != "merged" || -z "$merge_commit" ]]; then
+      _fail "check5" "the manifest records no published plan merge (plan_final_merge.result='${merge_result:-<none>}') — close is blocked until the merge or a recorded abort exists"
+    elif ! git cat-file -e "${merge_commit}^{commit}" 2>/dev/null; then
+      _fail "check5" "the recorded merge commit ${merge_commit} does not resolve in this repository — ancestry UNKNOWN, never treated as merged"
+    elif [[ -z "$target_head_now" ]]; then
+      _fail "check5" "the target branch ${target_branch} does not resolve — ancestry UNKNOWN"
+    elif ! git merge-base --is-ancestor "$candidate" "$target_head_now" 2>/dev/null; then
+      _fail "check5" "the candidate ${candidate:0:8} is NOT an ancestor of ${target_branch} (${target_head_now:0:8}) — the plan branch is not merged"
+    else
+      _pass "check5" "the plan merge ${merge_commit:0:8} is published and ${candidate:0:8} is an ancestor of ${target_branch}"
+    fi
+  fi
+
+  # ── 5.7 the tag state matches project policy ───────────────────────────
+  local version=""
+  for f in "${run_dir}/release-prep.json" "${PLAN_STATE_DIR}/release-prep.json"; do
+    [[ -s "$f" ]] || continue
+    version="$(jq -r '.version // "none"' "$f" 2>/dev/null || echo none)"
+    [[ -z "$version" || "$version" == "null" ]] && version="none"
+    break
+  done
+  [[ -n "$version" ]] || version="none"
+  if [[ "$CLOSE_MODE" == "abort" ]]; then
+    _info "check5" "abort close: no tag assertion is made (nothing was released)"
+  elif [[ "$version" == "none" ]]; then
+    _pass "check5" "no version was prepared for this plan — no tag is required (recorded tag status: $(_pbm '.plan_boundary_manifest.plan_final_merge.tag'))"
+  else
+    local tagged; tagged="$(git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" 2>/dev/null || true)"
+    if [[ -z "$tagged" ]]; then
+      _fail "check5" "prepare-plan resolved version ${version} but tag v${version} does not exist — the release record is incomplete"
+    elif [[ -n "$merge_commit" && "$tagged" != "$merge_commit" ]]; then
+      _fail "check5" "tag v${version} points at ${tagged:0:8}, not at the plan merge ${merge_commit:0:8}"
+    else
+      _pass "check5" "tag v${version} exists on the plan merge commit"
+    fi
+  fi
+
+  # ── 5.8 no merge is in progress ────────────────────────────────────────
+  local gitdir; gitdir="$(git rev-parse --git-dir 2>/dev/null || echo .git)"
+  if [[ -f "${gitdir}/MERGE_HEAD" ]]; then
+    _fail "check5" "a merge is in progress (${gitdir}/MERGE_HEAD exists) — resolve or abort it before closing"
+  else
+    _pass "check5" "no MERGE_HEAD — no merge is in progress"
+  fi
+
+  # ── 5.9 no operation record is left at intent or git_applied ───────────
+  local ops="${PLAN_STATE_DIR}/operations.jsonl"
+  if [[ -f "$ops" ]]; then
+    local stuck
+    stuck="$(jq -rs '
+      [ .[] | select(type == "object") ]
+      | group_by(.op_id)
+      | map({op_id: .[0].op_id, phase: (.[-1].phase // "")})
+      | map(select(.phase == "intent" or .phase == "git_applied"))
+      | map(.op_id + "@" + .phase) | join(", ")' "$ops" 2>/dev/null || true)"
+    # An op_id belonging to THIS close transaction is excluded: the close
+    # transaction is itself mid-flight while this check runs on a resume.
+    stuck="$(printf '%s' "$stuck" | tr ',' '\n' | grep -v '^ *plan-close:' | paste -sd', ' - 2>/dev/null || true)"
+    stuck="$(printf '%s' "$stuck" | sed 's/^ *//; s/ *$//')"
+    if [[ -n "$stuck" ]]; then
+      _fail "check5" "unfinished operation record(s) — a prior transaction never reached state_committed: ${stuck}"
+    else
+      _pass "check5" "no operation record is left at intent or git_applied"
+    fi
+  else
+    _info "check5" "no operations.jsonl for ${PLAN_ID} — nothing to reconcile"
+  fi
+
+  # ── 5.10 no RELEVANT lock is currently HELD (owned-lock exception) ─────
+  local lp held="" excl skip
+  if [[ -d "$PLAN_STATE_DIR" ]]; then
+    while IFS= read -r lp; do
+      [[ -n "$lp" ]] || continue
+      skip=0
+      for excl in ${EXCLUDE_LOCKS[@]+"${EXCLUDE_LOCKS[@]}"}; do
+        # Exact canonical path, NOT "any lock this process holds": a DIFFERENT
+        # lock held by the same process must still block.
+        [[ "$(readlink -f -- "$lp" 2>/dev/null || printf '%s' "$lp")" == \
+           "$(readlink -f -- "$excl" 2>/dev/null || printf '%s' "$excl")" ]] && skip=1
+      done
+      [[ "$skip" -eq 1 ]] && continue
+      if _lock_is_held "$lp"; then
+        held="${held:+${held}, }${lp} (pid recorded in the sidecar: $(tr -d '\n' < "$lp" 2>/dev/null || echo unknown))"
+      fi
+    done < <(find "$PLAN_STATE_DIR" -maxdepth 1 -name '*.lock' 2>/dev/null | sort)
+  fi
+  if [[ -n "$held" ]]; then
+    _fail "check5" "a relevant lock is still HELD by a live process: ${held} — close is blocked until it is released"
+  else
+    _pass "check5" "no relevant lock is held (existing .lock sidecars are expected; only a HELD lock blocks)"
+  fi
+
+  # ── 5.11 the .aid-lifecycle reconciliation ────────────────────────────
+  local lc_manifest=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  if [[ ! -f "$lc_manifest" ]]; then
+    _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (aid-auto-pipeline.sh creates one for every plan made under the new model)"
+  elif [[ "$CLOSE_MODE" == "abort" ]]; then
+    _info "check5" "abort close: an aborted plan writes NO lifecycle receipt (aid_lifecycle_plan_close refuses while any required EPIC is undelivered, which is always true before a merge) — the manifest is marked aborted instead"
+  else
+    # Resolved against the TARGET BRANCH's copy of the lifecycle manifest, not
+    # the worktree's: after the plan merge the delivery bindings live on the
+    # target branch, while the worktree sits on plan/<plan_id> whose copy
+    # predates them. Reading the worktree file here would report `active` for
+    # every legitimately closable plan. Read-only — nothing is written.
+    local lcs=""
+    if declare -F aid_plan_closure_state >/dev/null 2>&1; then
+      local _tb; _tb="$(aid_target_branch 2>/dev/null || echo main)"
+      if aid_lc_manifest_ref_begin "$PLAN_ID" "$PROJECT_ROOT" "$_tb" 2>/dev/null; then
+        lcs="$(aid_plan_closure_state "$PLAN_ID" "$PROJECT_ROOT" 2>/dev/null || true)"
+        aid_lc_manifest_ref_end
+      else
+        lcs="$(aid_plan_closure_state "$PLAN_ID" "$PROJECT_ROOT" 2>/dev/null || true)"
+      fi
+    fi
+    case "$lcs" in
+      delivered-but-unreconciled|closing_pending_commit|closed)
+        _pass "check5" "the lifecycle layer resolves to '${lcs}' — a receipt is writable (or already durable) for this plan" ;;
+      active)
+        _fail "check5" "the lifecycle layer resolves to 'active' — a required EPIC is not delivered + reviewed-accepted, so no durable closure proof can be written. Refusing to declare a plan closed with no receipt." ;;
+      "")
+        _fail "check5" "could not resolve the lifecycle closure state for ${PLAN_ID} (aid_plan_closure_state unavailable) — refusing to close on an unverified lifecycle layer" ;;
+      *)
+        _fail "check5" "the lifecycle layer resolves to '${lcs}' — not a closable state" ;;
+    esac
+  fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════
 # Aggregate
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -495,6 +865,9 @@ main() {
   check2_head_freshness
   check3_fsm_done_pending
   check4_queue_revalidate
+  if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
+    check5_plan_branch_boundary
+  fi
 
   echo "=== aid-plan-close-check: ${PLAN_ID} ==="
   local line

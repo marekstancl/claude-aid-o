@@ -65,7 +65,15 @@
 #   op_id                 string       see plan_op_key below
 #   command                string       plan-start | epic-start | epic-complete
 #                                       | epic-merge-to-plan | plan-finalize
-#                                       | plan-merge-to-main
+#                                       | plan-merge-to-main | plan-close
+#     `plan-close` is P068 E-068-1_2 Step 6's ADDITIVE extension of P064's own
+#     six-command enum, declared here rather than silently assumed: the close
+#     transaction is a durable operation like every other one, keyed
+#     `plan-close:<plan_id>:-:<attempt>:<plan_id>`, following the same
+#     intent -> git_applied -> state_committed sequence (git_applied is stamped
+#     when the lifecycle receipt — or, for an aborted plan, the abort record —
+#     commits; state_committed when the plan-close-complete marker is written),
+#     so a crash between the two is reconcilable exactly like any other.
 #   subject                string       EPIC id for EPIC-scoped commands, else
 #                                       plan id
 #   phase                  enum         intent | git_applied | state_committed
