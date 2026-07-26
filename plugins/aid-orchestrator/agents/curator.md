@@ -285,3 +285,11 @@ Update `.aid-o/work/backlog.md`:
   and any shared-memory store — is written by the **Controller** from your report. You never write
   source code, status `implementing`, or dispatch a fixer.
 - backlog.md is the single source of truth for improvement tracking.
+
+## Dispatch boundary
+
+Under `plan_branch` you are dispatched **once per plan**, at the plan-final
+boundary, against the frozen candidate — not once per EPIC. Your report is bound
+to that candidate SHA and is re-hashed at plan close, so a report produced
+against a different HEAD will be rejected rather than quietly accepted. Under
+`legacy_epic_release_mode` the per-EPIC dispatch is unchanged.

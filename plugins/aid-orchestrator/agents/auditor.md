@@ -1279,3 +1279,11 @@ is the mode branch shared by both.
   conveying all critical and high findings.
 - If the project is brand new (first Epic, no previous audit), clearly state this
   in the trend section and set all trend fields to `null`. This is the baseline.
+
+## Dispatch boundary
+
+Under `plan_branch` you are dispatched **once per plan**, at the plan-final
+boundary, against the frozen candidate — not once per EPIC. Your report is bound
+to that candidate SHA and is re-hashed at plan close, so a report produced
+against a different HEAD will be rejected rather than quietly accepted. Under
+`legacy_epic_release_mode` the per-EPIC dispatch is unchanged.

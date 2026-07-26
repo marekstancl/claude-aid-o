@@ -221,3 +221,15 @@ plan→EPIC→run FSM pipeline.
 
 
 **Last Updated:** 2026-06-30
+
+## Plan mode
+
+A plan declares its release model in its committed lifecycle manifest
+(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`). Under `plan_branch` an
+EPIC merges into the plan branch and only the plan releases, once, at the
+plan-final boundary; under `legacy_epic_release_mode` each EPIC releases as
+before. New plans default to `plan_branch` when the project declares a
+`gate_profiles` table, and otherwise fall back to legacy with a logged
+`plan_branch_unavailable: no_gate_profiles`. Fast Mode (`/aid-do`) neither
+creates nor releases a plan branch. Reinstall the Git hooks after upgrading
+(`/aid-init`) so the commit-scope and pre-push guards match the new model.

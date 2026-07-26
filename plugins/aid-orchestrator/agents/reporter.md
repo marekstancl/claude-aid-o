@@ -149,3 +149,11 @@ Write this file to `.aid-o/reports/{plan_id}-boundary.md`. It must be committed 
 | **ALWAYS** prefer the real runtime over the no-runtime fallback | The fallback is for genuinely unrunnable deliveries only |
 | **ALWAYS** keep the template's section structure and order | Reports must be identical in shape every time |
 | **NEVER** communicate with PM directly | Route through the Orchestrator |
+
+## Dispatch boundary
+
+Under `plan_branch` you are dispatched **once per plan**, at the plan-final
+boundary, against the frozen candidate — not once per EPIC. Your report is bound
+to that candidate SHA and is re-hashed at plan close, so a report produced
+against a different HEAD will be rejected rather than quietly accepted. Under
+`legacy_epic_release_mode` the per-EPIC dispatch is unchanged.

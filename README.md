@@ -132,3 +132,22 @@ See [CHANGELOG.md](CHANGELOG.md) for full history.
 ## License
 
 AGPL-3.0-only — see [LICENSE](LICENSE)
+
+## Plan-level release model
+
+A plan declares its release model in its committed lifecycle manifest
+(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`).
+
+Under **`plan_branch`** an EPIC merges into the plan branch and releases nothing.
+The plan releases once, at the plan-final boundary: one gate profile run against
+a frozen candidate, one specialist review (Auditor, Curator, Simplifier,
+Reporter), one PM authorization bound to that candidate, one compare-and-swap
+merge to the target branch, at most one tag, and a committed lifecycle receipt
+without which the plan cannot be declared closed.
+
+Under **`legacy_epic_release_mode`** each EPIC releases as before.
+
+New plans default to `plan_branch` when the project declares a `gate_profiles`
+table in its `execution.yaml`, and otherwise fall back to legacy with a logged
+`plan_branch_unavailable: no_gate_profiles`. Existing plans are never migrated:
+`aid-plan-fsm.sh inventory --apply` stamps them explicitly instead.

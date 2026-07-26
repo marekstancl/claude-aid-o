@@ -1,0 +1,32 @@
+# instruction-sweep allowlist (P068 Step 10 / E-068-2_2 Step 4)
+#
+# Format: <path-suffix>:<pattern-substring>   — one per line, `#` comments.
+# A denylist hit is suppressed only when BOTH the file path ends with the given
+# suffix AND the matched pattern contains the given substring.
+#
+# Every entry needs a reason. An allowlist without reasons decays into a way of
+# making the check quiet, which is worse than not having the check: it looks
+# like coverage and is not.
+
+# ── The document that DEFINES the legacy ritual ─────────────────────────────
+# pipeline.md is where `legacy_epic_release_mode` is specified. It must be able
+# to describe the per-EPIC release in detail; what it must not do is present it
+# as the default, which is enforced by the mode-fork requirement rather than by
+# the denylist.
+skills/pipeline.md:per-EPIC release
+
+# ── The command that documents both modes side by side ──────────────────────
+# aid-run.md carries the PM options for BOTH modes, so the legacy phrasing
+# appears there by design, immediately beside its plan_branch counterpart.
+commands/aid-run.md:per-EPIC release
+
+# ── History, not instruction ────────────────────────────────────────────────
+# A changelog records what the system used to do. Rewriting history to match
+# current behaviour is exactly the kind of tidying that destroys an audit trail.
+CHANGELOG.md:per-EPIC release
+CHANGELOG.md:release + merge to main
+
+# ── The registry describes enforcements, including superseded ones ──────────
+# enforcement-registry.yaml records what each row enforces, which necessarily
+# includes rows about the legacy path.
+defaults/enforcement-registry.yaml:per-EPIC release
