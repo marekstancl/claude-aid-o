@@ -1,6 +1,6 @@
 epic_id: E-068-1_2
 run_id: R-E068-1
-state: EXECUTE
+state: GATES
 current_step: 6
 total_steps: 6
 mode: full
