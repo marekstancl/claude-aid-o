@@ -1906,6 +1906,16 @@ run (P068). The FSM enforces the skip structurally; these instructions must matc
 
 #### `legacy_epic_release_mode` — the per-EPIC release ritual
 
+> **This ritual is NOT the default any more.** Since P068 Step 7 the default mode
+> for a new plan is `plan_branch` whenever the project declares a `gate_profiles`
+> table (`defaults/policies/plan-boundary-policy.yaml`, resolved by
+> `aid-plan-fsm.sh __default-mode`); without that table it falls back here and
+> says so with `plan_branch_unavailable: no_gate_profiles`. Everything in this
+> subsection applies only when the plan's committed lifecycle manifest declares
+> `mode: legacy_epic_release_mode`. In `plan_branch` the EPIC merges into the
+> plan branch and nothing is released, tagged or pushed until the plan-final
+> boundary.
+
 14. **Release:** Call `aid-release.sh` — version bump
     - Standalone/last EPIC: mandatory bump
     - Intermediate EPIC: defer (auto-mode) or ask PM (manual mode)

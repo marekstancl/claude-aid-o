@@ -354,11 +354,22 @@ Sub-phase transitions are managed by `done-advance` (not `transition`).
     Key outputs: {artifact list}
     Evidence: .aid-o/work/evidence/{id}/{run_id}/
 
-    Options:
+    Options (`legacy_epic_release_mode`):
       MERGE — release + merge to main + queue pickup
       FIX   — provide guidance, re-run review cycle
       ABORT — stop EPIC, no merge
+
+    Options (`plan_branch`):
+      MERGE — merge this EPIC into the PLAN branch; no release, no tag, no push.
+              The release happens once, later, at the plan-final boundary.
+      FIX   — provide guidance, re-run review cycle
+      ABORT — stop EPIC, no merge
     ```
+    The summary above is the `legacy_epic_release_mode` shape. In `plan_branch`
+    mode the Auditor/Curator/Simplifier/Reporter lines describe the PLAN-FINAL
+    review, not a per-EPIC one — those roles run once per plan, at the boundary,
+    against the frozen candidate. An EPIC completing in `plan_branch` mode owes
+    its CP3 pair and its own evidence, not a specialist stack.
 12. **PM decides:** MERGE → step 13 | FIX → re-run steps 5-11 | ABORT → ERROR (E8)
 13. **Advance sub-phase:** PM chose MERGE →
     ```
@@ -430,7 +441,7 @@ repair the lifecycle manifest — never fall back to the legacy branch.
 ## Important
 
 - **Review Checkpoints** — CP2-CP5 dispatched automatically per `config/policies/review-checkpoints.yaml`; individually toggleable
-- **Pre-merge review** — Curator + Auditor run in parallel BEFORE merge; PM approves via MERGE/FIX/ABORT
+- **Pre-merge review** — mode-dependent. In `legacy_epic_release_mode` Curator + Auditor run in parallel before the EPIC merge. In `plan_branch` they do not run per EPIC at all: they are plan-final roles, dispatched once per plan against the frozen candidate, and the EPIC owes its CP3 code-review + security pair instead. PM approves via MERGE/FIX/ABORT in both modes
 - **Escalation E7** — verifier review failed after 2 fix-loop iterations
 - **Escalation E8** — PM chose ABORT in DONE summary due to critical auditor findings
 - **6 states only** — READY, EXECUTE, GATES, ESCALATION, DONE, ERROR
