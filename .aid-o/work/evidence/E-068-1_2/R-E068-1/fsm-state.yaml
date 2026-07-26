@@ -1,6 +1,6 @@
 epic_id: E-068-1_2
 run_id: R-E068-1
-state: GATES
+state: DONE
 current_step: 6
 total_steps: 6
 mode: full
@@ -44,3 +44,4 @@ steps:
     status: completed
     started_at: "2026-07-26T14:44:42Z"
     completed_at: "2026-07-26T14:44:42Z"
+done_phase: review
