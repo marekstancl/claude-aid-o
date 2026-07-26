@@ -1690,8 +1690,14 @@ Auto-fixes: {count} applied from auditor recommendations
 
 Key outputs: {artifact list}
 
-Options:
+Options (`legacy_epic_release_mode`):
   MERGE — release + merge to main + queue pickup
+  FIX   — provide guidance, re-run review cycle
+  ABORT — stop EPIC, no merge (/aid-stop)
+
+Options (`plan_branch`):
+  MERGE — merge this EPIC into the PLAN branch. No release, no tag, no push:
+          the release happens once, later, at the plan-final boundary.
   FIX   — provide guidance, re-run review cycle
   ABORT — stop EPIC, no merge (/aid-stop)
 ```
