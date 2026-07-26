@@ -6056,11 +6056,15 @@ EOF
 # with spies that could never fire: the FSM does not invoke them at all, in
 # either mode, so a plan_branch run cannot reach them by construction.
 _rs_static_release_stack_absence() {
-  # `aid-release.sh` has ZERO callers under scripts/ — the only hits are inside
-  # the script's own header/usage lines. The controller invokes it by absolute
-  # path from pipeline.md, never through the FSM.
-  run bash -c "grep -rn 'aid-release\\.sh' '$AID_PLUGIN_PATH/scripts' --include='*.sh' \
-                 | grep -v '/aid-release\\.sh:' | grep -v '/tests/' || true"
+  # This test is about the INTERMEDIATE done-advance path, so the static guard
+  # is scoped to the FSM that path runs through. It used to grep all of
+  # scripts/ and assert `aid-release.sh` has zero callers anywhere — a premise
+  # P068 Step 5 legitimately retired by adding the plan-final `tag-plan` call in
+  # aid-plan-fsm.sh. That call is reachable ONLY from plan-merge-to-main, i.e.
+  # at the plan boundary, never from an intermediate EPIC completion, so a
+  # whole-tree assertion made the test fail for the very change it should
+  # permit. (PM-authorized scope extension, 2026-07-26.)
+  run bash -c "grep -n 'aid-release\\.sh' '$FSM' || true"
   [ -z "$output" ]
   # The four specialist dispatches are AGENT dispatches, not executables: no
   # such name exists anywhere in the plugin, least of all in the FSM.

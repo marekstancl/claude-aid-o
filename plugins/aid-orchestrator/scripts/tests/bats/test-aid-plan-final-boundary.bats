@@ -85,6 +85,12 @@ _bootstrap() {
     printf '# %s\n\n**EPIC 1: the delivered one**\n\n**EPIC 2: the abandoned one**\n' "$plan_id" \
       > "$TEST_PROJECT_ROOT/.aid-o/plans/${plan_id}-lifecycle.md"
     aid_lifecycle_ensure_manifest "$plan_id" "$TEST_PROJECT_ROOT" >/dev/null
+    # The DECLARED mode, written durably while main is still the checked-out
+    # branch and before any candidate freeze — a later write would advance the
+    # target head past the frozen one and be rejected as a stale authorization.
+    if [[ -n "${AID_TEST_DECLARED_PLAN_MODE:-}" ]]; then
+      aid_lifecycle_set_plan_mode "$plan_id" "$AID_TEST_DECLARED_PLAN_MODE" "$TEST_PROJECT_ROOT" >/dev/null
+    fi
   fi
   local base; base="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
   git -C "$TEST_PROJECT_ROOT" branch "plan/${plan_id}" "$base"
@@ -3295,4 +3301,114 @@ YAML
   [ "$status" -eq 1 ]
   [[ "$output" == *"terminal_reason"* ]]
   [ ! -f "$(_marker)" ]
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC7 — the aid-fsm.sh delegation (CP3 pre-review finding, 2026-07-26).
+# cmd_plan_close ran the IRREVERSIBLE plan-layer close (receipt + CLOSED +
+# marker) BEFORE checking the EPIC's required Curator/Auditor reports, so a
+# missing report failed the command only after the plan was already closed in
+# the books. These tests hold the ordering.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_EPIC_ID="E-068-1_2"
+_epic_dir() { printf '%s/.aid-o/work/evidence/%s/R-%s-1' "$TEST_PROJECT_ROOT" "$_EPIC_ID" "$_EPIC_ID"; }
+
+# _seed_delegated_close [--no-curator|--no-audit] — a plan closable through the
+# FSM entry point: the declared mode says plan_branch, the plan is merged, and
+# the EPIC carries its required reports unless one is deliberately withheld.
+_seed_delegated_close() {
+  local omit="${1:-}"
+  export AID_TEST_DECLARED_PLAN_MODE=plan_branch
+  _seed_closable
+  local d; d="$(_epic_dir)"
+  mkdir -p "$d"
+  [[ "$omit" == "--no-curator" ]] || echo "curator report" > "${d}/curator-report.md"
+  [[ "$omit" == "--no-audit" ]]   || printf 'blocking_findings: false\n' > "${d}/audit-report.md"
+  # Both optional specialists are switched OFF so the test isolates the two
+  # ALWAYS-required reports rather than re-testing the toggles.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  printf 'simplifier:\n  enabled: false\nreporter:\n  enabled: false\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+}
+
+_fsm_close() {
+  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" plan-close \
+    "$_EPIC_ID" "$(_epic_dir)" "$TEST_PROJECT_ROOT"
+}
+
+@test "AC7: the delegation REFUSES a missing curator report and closes NOTHING — no receipt, no marker, not CLOSED" {
+  _seed_delegated_close --no-curator
+  local main_before; main_before="$(_main_sha)"
+
+  _fsm_close
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"curator-report.md"* ]]
+
+  # NOTHING durable happened: this is the whole point of the ordering.
+  [ ! -f "$(_marker)" ]
+  [ ! -f "$(_epic_dir)/ca-review-complete" ]
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$main_before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "CLOSED" ]
+}
+
+@test "AC7: the delegation REFUSES a missing audit report and closes NOTHING" {
+  _seed_delegated_close --no-audit
+  local main_before; main_before="$(_main_sha)"
+
+  _fsm_close
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"audit-report.md"* ]]
+
+  [ ! -f "$(_marker)" ]
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$main_before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "CLOSED" ]
+}
+
+@test "AC7: with complete evidence the delegation closes once — one receipt, both markers, CLOSED" {
+  _seed_delegated_close
+
+  _fsm_close
+  [ "$status" -eq 0 ]
+
+  # Exactly one receipt commit on the target branch.
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list main -- '$(_receipt_rel)' | wc -l"
+  [ "$output" = "1" ]
+
+  # Both markers: the plan-level close record and the EPIC's CA signal.
+  [ -f "$(_marker)" ]
+  [ -f "$(_epic_dir)/ca-review-complete" ]
+
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "CLOSED" ]
+}
+
+@test "AC7: a crash after the plan-layer close but before the CA marker converges on re-run — no second receipt" {
+  _seed_delegated_close
+
+  _fsm_close
+  [ "$status" -eq 0 ]
+  local receipt_blob; receipt_blob="$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:$(_receipt_rel)")"
+
+  # Simulate the crash window: the plan is closed and its receipt committed, but
+  # the EPIC's CA marker never landed.
+  rm -f "$(_epic_dir)/ca-review-complete"
+
+  _fsm_close
+  [ "$status" -eq 0 ]
+  [ -f "$(_epic_dir)/ca-review-complete" ]
+
+  # The receipt is untouched — the re-run completed the marker, it did not
+  # close the plan a second time.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:$(_receipt_rel)")" = "$receipt_blob" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list main -- '$(_receipt_rel)' | wc -l"
+  [ "$output" = "1" ]
 }

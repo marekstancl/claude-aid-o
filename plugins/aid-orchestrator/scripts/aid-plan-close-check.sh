@@ -79,7 +79,9 @@ Usage: aid-plan-close-check.sh <plan_id> [--project-root <path>] [--auto-annotat
                          lock for the whole transaction, so probing that one
                          would contend with the caller and never pass; the
                          exclusion is by exact path, so a DIFFERENT lock held
-                         by the same process still blocks. Repeatable.
+                         by the same process still blocks. May be given at
+                         most once, and only for this plan's own
+                         plan-close.lock — the exclusion cannot be widened.
   --skip-delivery-report Caller has reporter.enabled:false — a missing
                          delivery/boundary report is expected and must NOT
                          fail Check 1. Only the report-existence requirement

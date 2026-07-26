@@ -5447,31 +5447,7 @@ cmd_plan_close() {
   _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
   _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
 
-  local _pb_mode_row _pb_mode="" _pb_plan_layer_closed=0
-  _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
-  _pb_mode="${_pb_mode_row%%$'\t'*}"
-  if [[ "$_pb_mode" == "plan_branch" ]]; then
-    local _pb_state_file="${project_root}/.aid-o/work/plan-state/${plan_id}/plan-state.yaml"
-    local _pb_state=""
-    [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
-    case "$_pb_state" in
-      PLAN_MERGING|ABORTED|CLOSED)
-        local -a _pb_close_args=("$plan_id" --project-root "$project_root")
-        [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)
-        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "${_pb_close_args[@]}"; then
-          echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
-          exit 1
-        fi
-        # CP2 M4: this used to `touch ca-review-complete; return 0`, skipping every
-        # required-CA-report check below. ca-review-complete is the plan-boundary
-        # signal the next plan's start gate reads, so an EPIC of an already-CLOSED
-        # plan obtained it with zero evidence. The plan-layer close is now a
-        # PRECONDITION, not a substitute: the EPIC's own evidence is still
-        # checked, and only the redundant legacy close-check re-run is skipped.
-        _pb_plan_layer_closed=1
-        ;;
-    esac
-  fi
+  local _pb_plan_layer_closed=0
 
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 
@@ -5516,6 +5492,39 @@ cmd_plan_close() {
 
   if [[ "$missing" -ne 0 ]]; then
     exit 1
+  fi
+
+  # ── The plan-layer close transaction — AFTER the evidence gate above ──────
+  # Ordering is the whole point. The plan-layer close is IRREVERSIBLE: it commits
+  # a lifecycle receipt, writes plan-close-complete and moves the plan to CLOSED.
+  # Running it before the required-report checks meant a plan could be
+  # permanently closed in the books and only then fail on a missing Curator or
+  # Auditor report — the exact split between recorded state and reality that this
+  # whole plan boundary exists to prevent. Nothing durable is written until every
+  # required report for this EPIC is present.
+  local _pb_mode_row _pb_mode=""
+  _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
+  _pb_mode="${_pb_mode_row%%$'\t'*}"
+  if [[ "$_pb_mode" == "plan_branch" ]]; then
+    local _pb_state_file="${project_root}/.aid-o/work/plan-state/${plan_id}/plan-state.yaml"
+    local _pb_state=""
+    [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
+    case "$_pb_state" in
+      PLAN_MERGING|ABORTED|CLOSED)
+        local -a _pb_close_args=("$plan_id" --project-root "$project_root")
+        [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)
+        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "${_pb_close_args[@]}"; then
+          echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
+          exit 1
+        fi
+        # The plan-layer close is a PRECONDITION for the EPIC marker, never a
+        # substitute for the EPIC's own evidence (CP2 M4). It is idempotent, so a
+        # crash between it and the marker below converges on re-run: the second
+        # pass finds the plan already CLOSED, writes no second receipt, and
+        # completes the marker.
+        _pb_plan_layer_closed=1
+        ;;
+    esac
   fi
 
   # Mechanical plan-close self-check (aid-plan-close-check.sh) — replaces the
