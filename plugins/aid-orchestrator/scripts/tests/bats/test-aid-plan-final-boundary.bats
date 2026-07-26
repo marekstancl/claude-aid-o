@@ -3820,3 +3820,28 @@ _review_counts() {
   run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | wc -l"
   [ "$output" = "1" ]
 }
+
+@test "AC8: --apply COMMITS the stamp, and reports it as not durable when it cannot" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  _seed_lifecycle_manifest >/dev/null
+  yq -i 'del(.mode)' "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-state.yaml"
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+
+  _inv --apply
+  # Whatever the outcome, it must be HONEST: either the stamp is readable from
+  # the target branch's committed tree, or the run said it is not durable and
+  # returned non-zero. A worktree-only stamp reported as success is the exact
+  # defect this asserts against — the authority every later reader consults is
+  # the committed copy, not the file on disk.
+  local committed
+  committed="$(git -C "$TEST_PROJECT_ROOT" show "main:${rel}" 2>/dev/null | yq -r '.mode // ""' 2>/dev/null || true)"
+  if [ "$status" -eq 0 ]; then
+    [ "$committed" = "legacy_epic_release_mode" ]
+    [[ "$output" == *"committed"* ]]
+  else
+    [[ "$output" == *"NOT readable"* ]]
+    [[ "$output" == *"declares nothing"* ]]
+  fi
+}

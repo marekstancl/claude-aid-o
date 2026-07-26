@@ -5074,8 +5074,29 @@ cmd_inventory() {
       # that this step inventories and stamps, it does not convert.
       local lm="${root}/.aid-lifecycle/manifests/${id}.yaml"
       if [[ -f "$lm" ]]; then
+        # CP3: the stamp has to be COMMITTED. The lifecycle manifest is the
+        # git-tracked authority precisely because a worktree file proves nothing
+        # — _fsm_declared_plan_mode answers from the target branch's tree, so a
+        # `yq -i` alone would leave every "stamped" plan still declaring nothing
+        # where it counts. Same defect this EPIC already fixed once in the
+        # auto-pipeline; it is not allowed to survive here.
         if ( cd "$root" && yq -i '.mode = "legacy_epic_release_mode"' ".aid-lifecycle/manifests/${id}.yaml" ) 2>/dev/null; then
-          disposition="stamped_legacy(manifest)"; stamped=$((stamped + 1)); mode="legacy_epic_release_mode"
+          local _inv_crc=0
+          if declare -F _aid_lc_isolated_commit >/dev/null 2>&1; then
+            ( cd "$root" && _aid_lc_isolated_commit "." "lifecycle: stamp mode legacy_epic_release_mode for ${id}" \
+                ".aid-lifecycle/manifests/${id}.yaml" >/dev/null 2>&1 ) || _inv_crc=$?
+          else
+            _inv_crc=127
+          fi
+          local _inv_read=""
+          _inv_read="$(git -C "$root" show "$(aid_target_branch):.aid-lifecycle/manifests/${id}.yaml" 2>/dev/null | yq -r '.mode // ""' 2>/dev/null || true)"
+          if [[ "$_inv_read" == "legacy_epic_release_mode" ]]; then
+            disposition="stamped_legacy(manifest,committed)"; stamped=$((stamped + 1)); mode="legacy_epic_release_mode"
+          else
+            disposition="stamp_not_durable(rc=${_inv_crc})"
+            echo "ERROR: inventory: ${id} was stamped in the worktree but the stamp is NOT readable from $(aid_target_branch)'s committed manifest (rc=${_inv_crc}) — an uncommitted mode declares nothing to any later reader. Commit .aid-lifecycle/manifests/${id}.yaml, or re-run on the target branch." >&2
+            rc=1
+          fi
         else
           echo "ERROR: inventory: could not stamp the lifecycle manifest for ${id} — nothing was written for this plan." >&2
           rc=1
