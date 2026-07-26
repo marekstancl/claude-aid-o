@@ -1583,6 +1583,7 @@ cmd_epic_merge_to_plan() {
     fi
     local brc=0
     plan_op_begin "$plan_id" "$op_id" "epic-merge-to-plan" "$epic_id" "$plan_head" || brc=$?
+  _pfsm_crash_seam intent
     if [[ "$brc" -ne 0 ]]; then
       echo "PRECONDITION FAIL: could not record epic-merge-to-plan intent for ${epic_id} (rc=${brc})." >&2
       exit "$brc"
@@ -1701,6 +1702,7 @@ cmd_epic_merge_to_plan() {
 
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
+  _pfsm_crash_seam git_applied
   if [[ "$grc" -ne 0 ]]; then
     echo "PRECONDITION FAIL: merge ${merge_commit} created but could not record git_applied (rc=${grc}) — retry converges." >&2
     exit "$grc"
@@ -3853,6 +3855,7 @@ cmd_plan_merge_to_main() {
   # ─────────────────────────────────────────────────────────────────────────
   local brc=0
   plan_op_begin "$plan_id" "$op_id" "plan-merge-to-main" "$plan_id" "$target_head" || brc=$?
+  _pfsm_crash_seam intent
   if [[ "$brc" -ne 0 ]]; then
     echo "PRECONDITION FAIL: plan-merge-to-main: could not record the operation intent for ${plan_id} (rc=${brc}) — nothing was merged." >&2
     exit 1
@@ -3897,6 +3900,7 @@ cmd_plan_merge_to_main() {
 
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
+  _pfsm_crash_seam git_applied
   [[ "$grc" -ne 0 ]] && echo "WARN: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the git_applied record could not be written (rc=${grc}) — a resumed run will re-verify from the ref itself." >&2
 
   # ── Tree identity + reachability, between publish and lifecycle commit ────
@@ -4226,6 +4230,7 @@ cmd_plan_close() {
   if [[ "$phase" != "git_applied" && "$phase" != "state_committed" ]]; then
     local brc=0
     plan_op_begin "$plan_id" "$op_id" "plan-close" "$plan_id" "$candidate" || brc=$?
+    _pfsm_crash_seam intent
     if [[ "$brc" -ne 0 ]]; then
       _pfsm_close_release
       echo "PRECONDITION FAIL: plan-close: could not record the operation intent for ${plan_id} (rc=${brc}) — nothing was committed." >&2
@@ -4315,6 +4320,7 @@ cmd_plan_close() {
 
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$applied_sha" || grc=$?
+  _pfsm_crash_seam git_applied
   [[ "$grc" -ne 0 ]] && echo "WARN: plan-close: the durable closure proof for ${plan_id} IS committed, but the git_applied record could not be written (rc=${grc}) — a resumed run re-verifies from the artifacts themselves." >&2
 
   # ── 5. state_committed: the ONE atomic, head-bound marker ────────────────
@@ -4824,6 +4830,31 @@ _pfsm_plan_state_repair() {
 # Dispatch — mirrors aid-fsm.sh's own top-level `case "$sub" in ...` shape,
 # kept much smaller (three subcommands).
 # =============================================================================
+
+
+# ---------------------------------------------------------------------------
+# _pfsm_crash_seam <phase>
+# P068 Step 8 — the ONE test seam for the resilience matrix.
+#
+# Every transactional command in this plan is specified as
+# `intent -> git_applied -> state_committed`. That specification is only worth
+# something if a crash at each boundary is actually exercised, and a crash
+# cannot be exercised honestly by mocking: the process has to die after the
+# record lands and before the next one does. When AID_PLAN_FSM_CRASH_AFTER
+# names a phase, the command exits 99 the instant that phase is recorded.
+#
+# It is a SEAM, not a feature: it is inert unless the variable is set, it can
+# only ever cause an exit (never a state change of its own), and 99 is outside
+# every meaningful exit code this script uses, so a test cannot mistake an
+# induced crash for a real failure.
+# ---------------------------------------------------------------------------
+_pfsm_crash_seam() {
+  local phase="$1"
+  [[ -n "${AID_PLAN_FSM_CRASH_AFTER:-}" ]] || return 0
+  [[ "${AID_PLAN_FSM_CRASH_AFTER}" == "$phase" ]] || return 0
+  echo "CRASH SEAM: AID_PLAN_FSM_CRASH_AFTER=${phase} — exiting 99 immediately after the '${phase}' record. This is a test seam; nothing further was written." >&2
+  exit 99
+}
 
 # ═══════════════════════════════════════════════════════════════════════════
 # P068 Step 7 — in-flight inventory and the default mode flip

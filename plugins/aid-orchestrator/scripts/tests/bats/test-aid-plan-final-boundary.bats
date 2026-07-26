@@ -3608,3 +3608,140 @@ _seed_gate_profiles() {
   [ "$status" -eq 0 ]
   [ "$output" = "plan_branch" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC9 — the resilience matrix (E-068-2_2 Step 2).
+#
+# Every transactional command is SPECIFIED as intent -> git_applied ->
+# state_committed. That specification is worth nothing until a crash at each
+# boundary is actually exercised, so these tests kill the process there for
+# real (AID_PLAN_FSM_CRASH_AFTER, exit 99) rather than mocking it, and then
+# resume and assert what survived.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_crash_merge() {
+  run env AID_PLAN_FSM_CRASH_AFTER="$1" bash "$PLAN_FSM_CLI" plan-merge-to-main "$PLAN_ID" \
+    --decision "$(_decision_file)" --project-root "$TEST_PROJECT_ROOT"
+}
+
+@test "AC9: a crash after INTENT leaves the target branch untouched and the retry is clean" {
+  _seed_merge_project
+  local main_before; main_before="$(_main_sha)"
+
+  _crash_merge intent
+  [ "$status" -eq 99 ]
+  [[ "$output" == *"CRASH SEAM"* ]]
+  # Nothing Git-visible happened: intent is a journal entry, not an effect.
+  [ "$(_main_sha)" = "$main_before" ]
+
+  # The retry is a normal first run, not a damaged resume.
+  _merge
+  [ "$status" -eq 0 ]
+  [ "$(_main_sha)" != "$main_before" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | wc -l"
+  [ "$output" = "1" ]
+}
+
+@test "AC9: a crash after GIT_APPLIED reuses the published merge and never makes a second one" {
+  _seed_merge_project
+  local main_before; main_before="$(_main_sha)"
+
+  _crash_merge git_applied
+  [ "$status" -eq 99 ]
+  # The merge IS published — that is what git_applied means — but the state
+  # records that follow it are not yet written.
+  local published; published="$(_main_sha)"
+  [ "$published" != "$main_before" ]
+
+  _merge
+  [ "$status" -eq 0 ]
+  # Exactly one merge commit: the resume reused the published one.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | wc -l"
+  [ "$output" = "1" ]
+}
+
+@test "AC9: two crashes in a row at the same boundary behave identically — the resume is not one-shot" {
+  _seed_merge_project
+  _crash_merge git_applied
+  [ "$status" -eq 99 ]
+  _crash_merge git_applied
+  [ "$status" -eq 99 ]
+
+  _merge
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | wc -l"
+  [ "$output" = "1" ]
+}
+
+@test "AC9: a crash after git_applied leaves no SECOND tag when the plan resolves a version" {
+  _seed_merge_project
+  _crash_merge git_applied
+  [ "$status" -eq 99 ]
+  _merge
+  [ "$status" -eq 0 ]
+  # Whatever the tag policy resolved, it resolved it once.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' tag | wc -l"
+  local tags="$output"
+  _merge
+  run bash -c "git -C '$TEST_PROJECT_ROOT' tag | wc -l"
+  [ "$output" = "$tags" ]
+}
+
+@test "AC9: a pre-merge ABORT leaves the target branch unchanged and records the terminal reason" {
+  _seed_merge_project
+  local main_before; main_before="$(_main_sha)"
+
+  # `reason` is the schema's field name and the schema is closed, so an invented
+  # `terminal_reason` would be rejected as malformed before the abort is even
+  # considered — the decision would never reach the abort path at all.
+  _merge "$(_decision_file '.decision = "ABORT" | .reason = "PM stopped it"')"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$main_before" ]
+
+  # The plan branch and its evidence are preserved — an abort is a decision,
+  # not a cleanup.
+  run git -C "$TEST_PROJECT_ROOT" rev-parse --verify "plan/$PLAN_ID"
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ABORTED" ]
+}
+
+@test "AC9: a HOTFIX on the target branch after the freeze forces resynchronisation before any merge" {
+  _seed_merge_project
+  local main_before; main_before="$(_main_sha)"
+
+  # Someone lands a hotfix straight on the target branch after the candidate was
+  # frozen. The authorization the PM gave describes a head that no longer exists.
+  _commit_on main hotfix.txt "fix: an urgent hotfix"
+  local hotfixed; hotfixed="$(_main_sha)"
+  [ "$hotfixed" != "$main_before" ]
+
+  _merge
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"STALE AUTHORIZATION"* ]]
+  [ "$(_main_sha)" = "$hotfixed" ]
+  # Back to sync: the plan must re-establish a candidate against the new head.
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [[ "$output" == *"PLAN_SYNC"* ]]
+}
+
+@test "AC9: a published rollback is a NEW revert commit — history is never rewritten" {
+  _seed_closable
+  local mc; mc="$(_merge_commit)"
+  local before; before="$(_main_sha)"
+
+  # The rollback shape this system permits: revert forward. The controller's
+  # worktree sits on the plan branch after a close, so the revert has to be made
+  # ON the target branch — reverting wherever HEAD happens to point would prove
+  # nothing about the target branch's history.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && orig=\$(git symbolic-ref --short HEAD) \
+    && git checkout -q main && git revert --no-edit -m 1 '$mc' >/dev/null 2>&1 \
+    && git checkout -q \"\$orig\""
+  [ "$status" -eq 0 ]
+
+  # The merge is STILL reachable — nothing was rewritten — and the branch grew.
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$mc" main
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --count '${before}..main'"
+  [ "$output" -ge 1 ]
+}
