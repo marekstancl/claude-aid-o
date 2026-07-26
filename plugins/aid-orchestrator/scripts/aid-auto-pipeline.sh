@@ -276,11 +276,30 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
 
   _lc_rc=0; aid_lifecycle_ensure_manifest "$plan_id" "." >/dev/null 2>&1 || _lc_rc=$?
   if [[ "$_lc_rc" -eq 0 ]]; then
-    # Stamp the resolved mode into the manifest that was just made durable. The
-    # manifest is the git-tracked authority every later reader consults, so a
-    # plan whose manifest carries no mode is a plan nobody can prove the mode of.
+    # Stamp the resolved mode into the manifest that was just made durable, then
+    # make the STAMP durable too. ensure_manifest commits what it wrote, so a
+    # bare `yq -i` here would leave the mode in the worktree only while the
+    # COMMITTED copy — the authority every later reader consults, including
+    # _fsm_declared_plan_mode, which reads target_branch's tree — carried none.
+    # A mode that exists only in an uncommitted file is not a declaration.
     if ! yq -i ".mode = \"${_pb_default_mode}\"" ".aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null; then
       error_exit "Lifecycle manifest for $plan_id was created but its mode could not be stamped — a manifest with no declared mode cannot prove which release model the plan follows." 6
+    fi
+    # ensure_manifest returns early once the manifest is durable, and rebuilds
+    # it from the plan when it is not — either way it neither knows nor preserves
+    # `mode`. The stamp therefore has to be committed here, on its own, through
+    # the same isolated-index path the lifecycle layer uses (the caller's index
+    # is never touched). Verified by reading the committed copy back: a stamp
+    # that cannot be read from target_branch's tree is not a declaration.
+    _lc_rc2=0
+    _aid_lc_isolated_commit "." "lifecycle: declare mode ${_pb_default_mode} for ${plan_id}" \
+      ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || _lc_rc2=$?
+    _pb_committed_mode="$(git show "$(aid_target_branch):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null | yq -r '.mode // ""' 2>/dev/null || true)"
+    if [[ "$_pb_committed_mode" != "$_pb_default_mode" ]]; then
+      if [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
+        error_exit "The mode stamp for $plan_id is not readable from $(aid_target_branch)'s committed manifest (rc=$_lc_rc2, read='${_pb_committed_mode:-<none>}') — under plan_branch an undeclared mode in the committed manifest is exactly the silent downgrade this boundary exists to prevent." 6
+      fi
+      echo "[WARN] lifecycle: the mode stamp for $plan_id is not committed (rc=$_lc_rc2) — the plan runs legacy, which is what the uncommitted state already implies." >&2
     fi
     echo "[INFO] lifecycle manifest ensured for $plan_id (.aid-lifecycle/manifests/${plan_id}.yaml), mode=${_pb_default_mode} (${_pb_mode_reason})" >&2
   elif [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then

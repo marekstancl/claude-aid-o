@@ -3590,3 +3590,21 @@ _seed_gate_profiles() {
   [[ "$output" == *"policy_default"* ]]
   [[ "$output" != *"unknown_policy_default"* ]]
 }
+
+@test "AC8: the stamped mode must be COMMITTED, not merely present in the worktree" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  # ensure_manifest commits what it writes, so a mode stamped after that call
+  # and never re-committed would live only in the worktree while the authority
+  # every later reader consults — target_branch's committed tree — carried none.
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  ( cd "$TEST_PROJECT_ROOT" && aid_lifecycle_ensure_manifest "$PLAN_ID" "." >/dev/null 2>&1 ) || skip "ensure_manifest unavailable in this fixture"
+  ( cd "$TEST_PROJECT_ROOT" && yq -i '.mode = "plan_branch"' "$rel" \
+      && _aid_lc_isolated_commit "." "lifecycle: declare mode plan_branch for $PLAN_ID" "$rel" >/dev/null 2>&1 )
+
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' 2>/dev/null | yq -r '.mode'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan_branch" ]
+}
