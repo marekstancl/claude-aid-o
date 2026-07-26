@@ -24,7 +24,14 @@ _AID_PUSH_REFS=""
 if [ ! -t 0 ]; then
   while read -r _lref _lsha _rref _rsha; do
     [ -n "${_lref:-}" ] || continue
+    # CP2 M4 (2026-07-26): record BOTH sides of the refspec. Matching only the
+    # LOCAL ref let `git push origin plan/P068:main` slip the target branch
+    # through — the local ref is plan/* and therefore "exempt", while what
+    # actually lands on the remote is main, unguarded. What the guard protects is
+    # decided by the REMOTE ref, so both must be exempt for the push to be exempt.
     _AID_PUSH_REFS="${_AID_PUSH_REFS}${_lref}
+"
+    [ -n "${_rref:-}" ] && _AID_PUSH_REFS="${_AID_PUSH_REFS}${_rref}
 "
   done
 fi

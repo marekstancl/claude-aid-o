@@ -2174,15 +2174,21 @@ _plan_sha() { git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID"; }
 _decision_file() {
   local override="${1:-.}"
   local f="$TEST_TMPDIR/pm-decision.json"
+  # The decision time is derived from the manifest's ACTUAL candidate_frozen_at,
+  # never a wall-clock literal: a hardcoded date silently becomes "before the
+  # freeze" once real time passes it, and every refusal test then fails on the
+  # freshness guard instead of the cause it isolates (observed 2026-07-26).
+  local _frozen; _frozen="$(_manifest_field "$PLAN_ID" candidate_frozen_at)"
   jq -n --arg p "$PLAN_ID" \
         --arg r "$(_manifest_field "$PLAN_ID" plan_final_run_id)" \
         --arg c "$(_manifest_field "$PLAN_ID" candidate_sha)" \
         --arg t "$(_manifest_field "$PLAN_ID" target_branch_head_at_candidate_freeze)" \
+        --arg at "$_frozen" \
     '{schema_version:"aid-pm-plan-decision-1.0", artifact_type:"pm_plan_decision",
-      producer:"aid-test@1.0", created_at:"2026-07-26T00:00:00Z",
+      producer:"aid-test@1.0", created_at:$at,
       plan_id:$p, plan_final_run_id:$r, decision:"MERGE",
       candidate_sha:$c, target_branch:"main", target_head_sha:$t,
-      decided_at:"2026-07-26T00:00:00Z", decided_by:"pm"}' \
+      decided_at:$at, decided_by:"pm"}' \
     | jq "$override" > "$f"
   printf '%s' "$f"
 }
