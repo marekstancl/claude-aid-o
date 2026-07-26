@@ -75,3 +75,24 @@ candidate so a new candidate is a new operation (M2).
 
 **pass** — one finding, found and fixed with a regression; the boundary
 invariants hold on the reviewed HEAD.
+
+## Correction (2026-07-26, PM)
+
+An earlier phrasing in this run described `plan_diff` as quarantined. It is not.
+`execution.yaml` carries a `quarantine:` block on `bats_all` alone; in the
+quick-profile gate run `plan_diff` was simply `profile_excluded`, like
+`targeted_tests`, `shell_pipeline_smoke` and the two `ui_calibration_*` gates.
+The distinction matters: a quarantined gate can never be reported as `pass` and
+its exclusion is a standing risk acceptance, whereas a profile exclusion is an
+ordinary scoping decision recorded in the report.
+
+## Blocking item for plan-final (not for this EPIC)
+
+P068 has no committed `.aid-lifecycle/manifests/P068.yaml`, so `mode:
+plan_branch` is not mechanically declared for this plan. `_fsm_declared_plan_mode`
+answers from the target branch's committed copy, so today it would resolve P068
+to `legacy_epic_release_mode` and a later `done-advance review→release` could not
+prove its entitlement to skip the planning stack. This must be resolved before
+plan-final. It is explicitly NOT a reason to run per-EPIC Curator/Auditor: under
+the target `plan_branch` model those roles belong at the plan-final boundary,
+and the per-EPIC CP3 pair is what this EPIC owes — which is recorded above.
