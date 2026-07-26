@@ -4119,7 +4119,7 @@ _pfsm_close_lock_contended() {
 }
 
 cmd_plan_close() {
-  local plan_id="" project_root_opt="" op_id_opt=""
+  local plan_id="" project_root_opt="" op_id_opt="" skip_delivery_report=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root)
@@ -4128,6 +4128,10 @@ cmd_plan_close() {
       --op-id)
         _pfsm_require_optval "plan-close" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
+      # CP2 M5: forwarded by aid-fsm.sh when execution.yaml sets reporter.enabled:false.
+      # It relaxes the delivery-report EXISTENCE requirement only; every other
+      # check still runs, exactly as the legacy path already treats this toggle.
+      --skip-delivery-report) skip_delivery_report=1; shift ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -4137,7 +4141,7 @@ cmd_plan_close() {
   done
 
   if [[ -z "$plan_id" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]" >&2
     exit 2
   fi
   if ! _pfsm_validate_plan_id "$plan_id"; then
@@ -4192,10 +4196,19 @@ cmd_plan_close() {
   _pfsm_close_release() { [[ -n "${close_fd:-}" ]] && aid_lock_release "$close_fd" >/dev/null 2>&1; close_fd=""; return 0; }
 
   # ── 2. every precondition, in one place, with the owned lock excluded ─────
+  # The operation key is derived HERE rather than at step 3 because the check's
+  # "no unfinished operation record" guard must exclude exactly THIS transaction
+  # and nothing else (CP2 M2) — it cannot do that without being told which one.
+  local attempt="${run_id##*-final-}"
+  [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+  local op_id="${op_id_opt:-$(plan_op_key "plan-close" "$plan_id" "-" "$attempt" "$plan_id")}"
+
   local ccrc=0 ccout=""
-  ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" \
-            --project-root "$root" --plan-branch --close-mode "$close_mode" \
-            --exclude-lock "$close_lock" 2>&1)" || ccrc=$?
+  local -a _cc_args=("$plan_id" --project-root "$root" --plan-branch
+                     --close-mode "$close_mode" --exclude-lock "$close_lock"
+                     --close-op-id "$op_id")
+  [[ "$skip_delivery_report" -eq 1 ]] && _cc_args+=(--skip-delivery-report)
+  ccout="$(bash "${SCRIPT_DIR}/aid-plan-close-check.sh" "${_cc_args[@]}" 2>&1)" || ccrc=$?
   if [[ "$ccrc" -ne 0 ]]; then
     _pfsm_close_release
     if [[ -f "$marker" ]]; then
@@ -4207,10 +4220,7 @@ cmd_plan_close() {
     exit 1
   fi
 
-  # ── 3. intent ─────────────────────────────────────────────────────────────
-  local attempt="${run_id##*-final-}"
-  [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
-  local op_id="${op_id_opt:-$(plan_op_key "plan-close" "$plan_id" "-" "$attempt" "$plan_id")}"
+  # ── 3. intent (op_id was derived above, for the check's exclusion) ────────
   local phase="none" prc=0
   phase="$(plan_op_reconcile "$plan_id" "$op_id")" || prc=$?
   if [[ "$phase" != "git_applied" && "$phase" != "state_committed" ]]; then

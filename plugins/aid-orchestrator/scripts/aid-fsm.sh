@@ -5437,7 +5437,17 @@ cmd_plan_close() {
   # git-tracked lifecycle manifest on target_branch) — never from the runtime
   # plan-boundary manifest. CP3-F2 made that a structural invariant precisely so
   # two mode sources can never disagree, and plan-close is not an exception.
-  local _pb_mode_row _pb_mode=""
+  # Read execution.yaml toggles — grep-only, no yq dependency. Read BEFORE the
+  # plan-layer delegation (CP2 M5): the delegated path used to return before
+  # this, so a project with reporter.enabled:false hard-failed the plan layer's
+  # Check 1 ("report never generated") with no reachable remedy.
+  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
+  local simplifier_enabled=true
+  local reporter_enabled=true
+  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
+  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
+
+  local _pb_mode_row _pb_mode="" _pb_plan_layer_closed=0
   _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
   _pb_mode="${_pb_mode_row%%$'\t'*}"
   if [[ "$_pb_mode" == "plan_branch" ]]; then
@@ -5446,22 +5456,22 @@ cmd_plan_close() {
     [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
     case "$_pb_state" in
       PLAN_MERGING|ABORTED|CLOSED)
-        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "$plan_id" --project-root "$project_root"; then
+        local -a _pb_close_args=("$plan_id" --project-root "$project_root")
+        [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)
+        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "${_pb_close_args[@]}"; then
           echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
           exit 1
         fi
-        touch "${evidence_dir}/ca-review-complete"
-        return 0
+        # CP2 M4: this used to `touch ca-review-complete; return 0`, skipping every
+        # required-CA-report check below. ca-review-complete is the plan-boundary
+        # signal the next plan's start gate reads, so an EPIC of an already-CLOSED
+        # plan obtained it with zero evidence. The plan-layer close is now a
+        # PRECONDITION, not a substitute: the EPIC's own evidence is still
+        # checked, and only the redundant legacy close-check re-run is skipped.
+        _pb_plan_layer_closed=1
         ;;
     esac
   fi
-
-  # Read execution.yaml toggles — grep-only, no yq dependency.
-  local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
-  local simplifier_enabled=true
-  local reporter_enabled=true
-  _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
-  _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
 
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 
@@ -5526,7 +5536,9 @@ cmd_plan_close() {
     _plan_close_check_flags+=(--skip-delivery-report)
     log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-delivery-report" rationale="reporter.enabled:false in execution.yaml (delivery-report existence only; Checks 2-4 still run)"
   fi
-  if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
+  if [[ "$_pb_plan_layer_closed" -eq 1 ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-rerun" rationale="the plan-layer close transaction already ran aid-plan-close-check.sh --plan-branch, which is a strict superset of this invocation"
+  elif ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
     echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
     echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
     exit 1

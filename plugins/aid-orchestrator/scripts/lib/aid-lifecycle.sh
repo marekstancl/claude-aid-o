@@ -685,6 +685,11 @@ aid_lifecycle_plan_close() {
     not_found) echo "plan-close: ${plan_id} not found" >&2; _pc_done 3; return 3 ;;
     legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; _pc_done 1; return 1 ;;
     active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; _pc_done 1; return 1 ;;
+    delivered-but-unreconciled|closing_pending_commit) ;;
+    # CP2 L3: the case had no default arm, so an empty or unrecognised closure
+    # state fell straight through and committed a receipt — declaring a plan
+    # closed on the strength of a state nobody could name. Fail closed.
+    *) echo "plan-close: ${plan_id} has an unrecognised closure state '${st:-<empty>}' — refusing to write a receipt for a state this code cannot interpret" >&2; _pc_done 1; return 1 ;;
   esac
 
   # delivered-but-unreconciled or closing_pending_commit -> write/commit receipt.

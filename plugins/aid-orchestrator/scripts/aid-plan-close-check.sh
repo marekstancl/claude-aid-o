@@ -98,6 +98,7 @@ AUTO_ANNOTATE=0
 SKIP_DELIVERY_REPORT=0
 PLAN_BRANCH_MODE=0
 CLOSE_MODE="merge"
+CLOSE_OP_ID=""
 EXCLUDE_LOCKS=()
 
 while [[ $# -gt 0 ]]; do
@@ -107,6 +108,7 @@ while [[ $# -gt 0 ]]; do
     --plan-branch) PLAN_BRANCH_MODE=1; shift ;;
     --close-mode) [[ $# -ge 2 ]] || usage; CLOSE_MODE="$2"; shift 2 ;;
     --exclude-lock) [[ $# -ge 2 ]] || usage; EXCLUDE_LOCKS+=("$2"); shift 2 ;;
+    --close-op-id) [[ $# -ge 2 ]] || usage; CLOSE_OP_ID="$2"; shift 2 ;;
     --skip-delivery-report) SKIP_DELIVERY_REPORT=1; shift ;;
     -h|--help) usage ;;
     -*) echo "Unknown flag: $1" >&2; usage ;;
@@ -540,6 +542,27 @@ check4_queue_revalidate() {
 PLAN_STATE_DIR=".aid-o/work/plan-state/${PLAN_ID}"
 PLAN_MANIFEST_JSON="${PLAN_STATE_DIR}/plan-boundary-manifest.json"
 
+# CP2 M1: --exclude-lock exists for exactly one purpose — letting the close
+# transaction skip the lock it is itself holding. Unvalidated and repeatable, it
+# was a command-line switch that disarmed 5.10 entirely while the script still
+# printed "no relevant lock is held". This script is a PM-runnable tool and its
+# output is evidence, so the exclusion is constrained to that one sidecar.
+# (Top-level scope — `local` is a function builtin and is a hard error here.)
+if [[ ${#EXCLUDE_LOCKS[@]} -gt 1 ]]; then
+  echo "ERROR: --exclude-lock may be given at most once — it exists only to skip the close transaction's own lock (got ${#EXCLUDE_LOCKS[@]})" >&2
+  exit 2
+fi
+if [[ ${#EXCLUDE_LOCKS[@]} -eq 1 ]]; then
+  _excl_raw="${EXCLUDE_LOCKS[0]}"
+  _excl_expected="${PLAN_STATE_DIR}/plan-close.lock"
+  _excl_c="$(readlink -f -- "$_excl_raw" 2>/dev/null || printf '%s' "$_excl_raw")"
+  _excl_e="$(readlink -f -- "$_excl_expected" 2>/dev/null || printf '%s' "$_excl_expected")"
+  if [[ "$_excl_c" != "$_excl_e" ]]; then
+    echo "ERROR: --exclude-lock '${_excl_raw}' is not this plan's close sidecar (${_excl_expected}) — the exclusion cannot be widened" >&2
+    exit 2
+  fi
+fi
+
 # _pbm <jq_path> — a field of the runtime plan-boundary manifest payload, or
 # the empty string. Never aborts under `set -e`.
 _pbm() {
@@ -561,6 +584,10 @@ _pbm() {
 _lock_is_held() {
   local p="$1" fd
   command -v flock >/dev/null 2>&1 || return 1
+  # CP2 L1: without this, `exec {fd}<>"$p"` CREATES the sidecar when the path
+  # vanished between the find(1) that listed it and this probe — a read-only
+  # check must not write to the workspace it is judging.
+  [[ -e "$p" ]] || return 1
   exec {fd}<>"$p" 2>/dev/null || return 1
   if flock -n "$fd" 2>/dev/null; then
     flock -u "$fd" 2>/dev/null || true
@@ -723,10 +750,41 @@ check5_plan_branch_boundary() {
     local frozen_target; frozen_target="$(_pbm '.plan_boundary_manifest.target_branch_head_at_candidate_freeze')"
     if [[ -n "$merge_result" && "$merge_result" == "merged" ]]; then
       _fail "check5" "abort close requested, but the manifest records a PUBLISHED merge (${merge_commit:0:8}) — an aborted plan never merged"
-    elif [[ -n "$frozen_target" && -n "$target_head_now" && "$frozen_target" != "$target_head_now" ]]; then
-      _fail "check5" "abort close: ${target_branch} moved from ${frozen_target:0:8} to ${target_head_now:0:8} — an aborted plan must leave the target branch unchanged"
-    else
+    elif [[ -z "$frozen_target" || -z "$target_head_now" ]]; then
+      # CP2 H2: this used to fall through to the PASS below, printing "the target
+      # branch is unchanged" while having skipped the only check that could say
+      # so. `target_branch_head_at_candidate_freeze` is genuinely nullable (every
+      # candidate invalidation resets it), so the degenerate case is reachable —
+      # and "cannot verify" must never read as "verified".
+      _fail "check5" "abort close: the target-branch head at candidate freeze is not recorded (frozen='${frozen_target:-<none>}', live='${target_head_now:-<unresolvable>}') — whether ${target_branch} is unchanged cannot be established, so close is blocked rather than assumed"
+    elif [[ "$frozen_target" == "$target_head_now" ]]; then
       _pass "check5" "abort close: no merge was published and ${target_branch} is unchanged"
+    else
+      # CP2 H1: the abort transaction itself commits `status: aborted` onto the
+      # target branch, so a successful abort close ALWAYS advances the target by
+      # its own lifecycle commit. A bare "moved => fail" made abort single-shot
+      # (any re-run, including the crash-resume the error message prescribes,
+      # was permanently refused). What 5.6 actually means for an abort is that no
+      # PLAN CONTENT was published — so accept exactly the abort's own lifecycle
+      # commits: a fast-forward from the frozen head whose every commit touches
+      # nothing but this plan's lifecycle manifest.
+      local _ab_ok=1 _ab_c _ab_files
+      if ! git merge-base --is-ancestor "$frozen_target" "$target_head_now" 2>/dev/null; then
+        _ab_ok=0
+      else
+        while IFS= read -r _ab_c; do
+          [[ -n "$_ab_c" ]] || continue
+          _ab_files="$(git show --pretty=format: --name-only "$_ab_c" 2>/dev/null | grep -v '^$' | sort -u)"
+          if [[ "$_ab_files" != ".aid-lifecycle/manifests/${PLAN_ID}.yaml" ]]; then
+            _ab_ok=0; break
+          fi
+        done < <(git rev-list "${frozen_target}..${target_head_now}" 2>/dev/null)
+      fi
+      if [[ "$_ab_ok" -eq 1 ]]; then
+        _pass "check5" "abort close: no plan content was published — ${target_branch} advanced from ${frozen_target:0:8} to ${target_head_now:0:8} only by this plan's own abort record in .aid-lifecycle/manifests/${PLAN_ID}.yaml"
+      else
+        _fail "check5" "abort close: ${target_branch} moved from ${frozen_target:0:8} to ${target_head_now:0:8} by commits that are NOT this plan's abort record — an aborted plan must publish no content"
+      fi
     fi
   else
     if [[ "$merge_result" != "merged" || -z "$merge_commit" ]]; then
@@ -743,18 +801,45 @@ check5_plan_branch_boundary() {
   fi
 
   # ── 5.7 the tag state matches project policy ───────────────────────────
-  local version=""
+  local version="" _relprep=""
   for f in "${run_dir}/release-prep.json" "${PLAN_STATE_DIR}/release-prep.json"; do
     [[ -s "$f" ]] || continue
+    _relprep="$f"
     version="$(jq -r '.version // "none"' "$f" 2>/dev/null || echo none)"
     [[ -z "$version" || "$version" == "null" ]] && version="none"
     break
   done
   [[ -n "$version" ]] || version="none"
+  # CP2 M3: the release record this check must not fail open on is the one the
+  # merge transaction WRITES — plan_final_merge.tag ("none" or "vX.Y.Z"). An
+  # absent release-prep.json is NOT that record: the merge path itself resolves a
+  # missing file to "no bump" (_pfsm_release_prep_version), so demanding it here
+  # would make every legitimate no-bump plan unclosable — which is exactly what
+  # a first attempt at this fix did. Absence of the RECORDED tag status, and any
+  # disagreement between it and a present release-prep.json, both block.
+  local _rec_tag; _rec_tag="$(_pbm '.plan_boundary_manifest.plan_final_merge.tag')"
   if [[ "$CLOSE_MODE" == "abort" ]]; then
     _info "check5" "abort close: no tag assertion is made (nothing was released)"
+  elif [[ -z "$_rec_tag" ]]; then
+    _fail "check5" "the manifest records no tag status for the plan merge (plan_final_merge.tag is absent) — whether a tag was required cannot be established, so close is blocked rather than assumed"
+  elif [[ -n "$_relprep" && "$version" != "none" && "$_rec_tag" != "v${version}" ]]; then
+    _fail "check5" "the release record ${_relprep} prepared version ${version}, so tag v${version} was required, but the merge recorded tag status '${_rec_tag}' — the two disagree about what was released"
+  elif [[ -n "$_relprep" && "$version" == "none" && "$_rec_tag" != "none" ]]; then
+    _fail "check5" "the release record ${_relprep} prepared no version, but the merge recorded tag status '${_rec_tag}' — the two disagree about what was released"
+  elif [[ "$_rec_tag" == "none" ]]; then
+    _pass "check5" "the merge recorded no tag (no version bump for this plan) and no tag is required"
   elif [[ "$version" == "none" ]]; then
-    _pass "check5" "no version was prepared for this plan — no tag is required (recorded tag status: $(_pbm '.plan_boundary_manifest.plan_final_merge.tag'))"
+    # A tag was recorded with no release-prep.json to corroborate it: verify the
+    # tag itself against the merge commit rather than trusting the record.
+    version="${_rec_tag#v}"
+    local tagged; tagged="$(git rev-parse --verify --quiet "refs/tags/${_rec_tag}^{commit}" 2>/dev/null || true)"
+    if [[ -z "$tagged" ]]; then
+      _fail "check5" "the merge recorded tag ${_rec_tag}, but that tag does not exist — the release record is incomplete"
+    elif [[ -n "$merge_commit" && "$tagged" != "$merge_commit" ]]; then
+      _fail "check5" "tag ${_rec_tag} points at ${tagged:0:8}, not at the plan merge ${merge_commit:0:8}"
+    else
+      _pass "check5" "tag ${_rec_tag} exists on the plan merge commit"
+    fi
   else
     local tagged; tagged="$(git rev-parse --verify --quiet "refs/tags/v${version}^{commit}" 2>/dev/null || true)"
     if [[ -z "$tagged" ]]; then
@@ -784,9 +869,17 @@ check5_plan_branch_boundary() {
       | map({op_id: .[0].op_id, phase: (.[-1].phase // "")})
       | map(select(.phase == "intent" or .phase == "git_applied"))
       | map(.op_id + "@" + .phase) | join(", ")' "$ops" 2>/dev/null || true)"
-    # An op_id belonging to THIS close transaction is excluded: the close
-    # transaction is itself mid-flight while this check runs on a resume.
-    stuck="$(printf '%s' "$stuck" | tr ',' '\n' | grep -v '^ *plan-close:' | paste -sd', ' - 2>/dev/null || true)"
+    # CP2 M2: the exclusion used to drop EVERY `plan-close:*` record, so a prior
+    # close attempt (a different attempt number, or a crashed abort close) stuck
+    # at intent/git_applied was silently ignored by the guard whose whole job is
+    # to notice exactly that. Only the operation in hand is excluded, by exact
+    # op_id, and only when the caller names it.
+    if [[ -n "$CLOSE_OP_ID" ]]; then
+      stuck="$(printf '%s' "$stuck" | tr ',' '\n' \
+        | grep -v -x -F -e " ${CLOSE_OP_ID}@intent" -e "${CLOSE_OP_ID}@intent" \
+                        -e " ${CLOSE_OP_ID}@git_applied" -e "${CLOSE_OP_ID}@git_applied" \
+        | paste -sd', ' - 2>/dev/null || true)"
+    fi
     stuck="$(printf '%s' "$stuck" | sed 's/^ *//; s/ *$//')"
     if [[ -n "$stuck" ]]; then
       _fail "check5" "unfinished operation record(s) — a prior transaction never reached state_committed: ${stuck}"
