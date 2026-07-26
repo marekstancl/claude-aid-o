@@ -2698,3 +2698,138 @@ _merge() {
     printf 'refs/heads/main %s refs/heads/main %s\n' \"\$(git rev-parse main)\" 0000000000000000000000000000000000000000; } | bash '$hook' origin git@example:x.git"
   [ "$status" -eq 1 ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CP2 regressions (2026-07-26) — the publish/recovery invariant.
+# Each of these reproduces a defect the step-5 review found and the fix closes.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_ops_jsonl() { printf '%s/.aid-o/work/plan-state/%s/operations.jsonl' "$TEST_PROJECT_ROOT" "$1"; }
+
+# ─── M4: the pre-push exemption is about the REMOTE target, not the local ref ─
+
+@test "CP2 M4: a plan/* or task/* ref pushed AT main is blocked; same-name pushes stay exempt" {
+  _bootstrap
+  local hook="$AID_PLUGIN_PATH/defaults/hooks/pre-push"
+  git -C "$TEST_PROJECT_ROOT" tag -a v1.0.0 -m base
+  _commit_on main feature.txt "feat: an unreleased feature"
+  local sha; sha="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  local zero=0000000000000000000000000000000000000000
+
+  _push() {
+    run bash -c "cd '$TEST_PROJECT_ROOT' && printf '%s %s %s %s\n' '$1' '$sha' '$2' '$zero' \
+      | bash '$hook' origin git@example:x.git"
+  }
+
+  # The attack: an exempt-looking LOCAL ref aimed at the guarded remote branch.
+  _push "refs/heads/plan/${PLAN_ID}" "refs/heads/main"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Push blocked"* ]]
+
+  _push "refs/heads/task/E-068-1_2/main" "refs/heads/main"
+  [ "$status" -eq 1 ]
+
+  # The legitimate pushes are untouched.
+  _push "refs/heads/plan/${PLAN_ID}" "refs/heads/plan/${PLAN_ID}"
+  [ "$status" -eq 0 ]
+
+  _push "refs/heads/task/E-068-1_2/main" "refs/heads/task/E-068-1_2/main"
+  [ "$status" -eq 0 ]
+}
+
+# ─── M1: a recorded resulting_sha must not disarm the stale-auth guard ───────
+
+@test "CP2 M1: after the target is REWOUND past our merge, a re-run publishes nothing and returns to PLAN_SYNC" {
+  _seed_merge_project
+  local before_main; before_main="$(_main_sha)"
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+  [ -n "$mc" ]
+
+  # The target branch is rewound PAST our merge to a commit that is neither the
+  # approved head nor a descendant of the merge: the op log still holds our
+  # resulting_sha, but it no longer explains where main is. This is the exact
+  # shape that used to fall through and CAS-publish against the live head.
+  # (Rewinding to exactly the approved head is a different, benign case: the
+  # decision still describes that head, so re-converging there is correct.)
+  local earlier; earlier="$(git -C "$TEST_PROJECT_ROOT" rev-parse "${before_main}~1")"
+  [ -n "$earlier" ]
+  git -C "$TEST_PROJECT_ROOT" branch -f main "$earlier"
+  local rewound; rewound="$(_main_sha)"
+  [ "$rewound" != "$before_main" ]
+
+  _merge
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"STALE AUTHORIZATION"* ]]
+  [ "$(_main_sha)" = "$rewound" ]
+  # The plan is no longer in a state that authorizes a publish, and a further
+  # attempt refuses again rather than converging onto the rewound head.
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [[ "$output" != *"AWAITING_PM"* ]]
+  _merge
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$rewound" ]
+}
+
+@test "CP2 M1: a target advance that still CONTAINS our merge resumes without a second merge" {
+  _seed_merge_project
+  _merge
+  [ "$status" -eq 0 ]
+  local mc; mc="$(_merge_commit)"
+
+  # main moves forward, but our merge remains an ancestor — a legitimate resume.
+  _commit_on main later.txt "chore: unrelated later work"
+  local advanced; advanced="$(_main_sha)"
+  run git -C "$TEST_PROJECT_ROOT" merge-base --is-ancestor "$mc" "$advanced"
+  [ "$status" -eq 0 ]
+
+  _merge
+  [[ "$output" != *"STALE AUTHORIZATION"* ]]
+  # Exactly one merge of this candidate exists on main.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | grep -c '^${mc}$'"
+  [ "${output}" = "1" ]
+}
+
+# ─── M2: the operation key identifies the candidate, not just the plan ───────
+
+@test "CP2 M2: the merge operation key is bound to the candidate, so a new candidate is a new operation" {
+  _seed_merge_project
+  local cand; cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  _merge
+  [ "$status" -eq 0 ]
+
+  # The recorded op_id names THIS candidate. Before the fix it was plan-id-only,
+  # so a later attempt with a different candidate reconciled against this very
+  # entry and was misreported as a crash resume.
+  local ops; ops="$(jq -r 'select(.command == "plan-merge-to-main") | .op_id' "$(_ops_jsonl "$PLAN_ID")" | sort -u)"
+  [ -n "$ops" ]
+  [[ "$ops" == *"$cand"* ]]
+  # And it is not the plan-id-only shape any more.
+  [[ "$ops" != *"plan-merge-to-main:${PLAN_ID}:-:0:${PLAN_ID}"* ]]
+}
+
+# ─── M3: a failed lifecycle bind leaves NO dirty tracked file ────────────────
+
+@test "CP2 M3: a lifecycle bind that fails mid-way restores the tracked manifest byte-identically" {
+  _seed_merge_project
+  local relpath=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  local manifest="${TEST_PROJECT_ROOT}/${relpath}"
+  [ -f "$manifest" ]
+  local before; before="$(sha256sum "$manifest" | awk '{print $1}')"
+
+  # One VALID re-scope (which really rewrites the file) followed by an INVALID
+  # one (which fails). Before the fix the valid write stayed on disk and the
+  # tracked file was left dirty, deadlocking the prescribed re-run.
+  run bash -c "cd '$TEST_PROJECT_ROOT' && source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh' && \
+    aid_lifecycle_plan_merge_bind '$PLAN_ID' '$TEST_PROJECT_ROOT' \
+      \"\$(git rev-parse main)\" '$(_run_dir)' 'E-068-2_2=abandoned' 'E-068-1_2=not-a-scope'"
+  [ "$status" -ne 0 ]
+
+  local after; after="$(sha256sum "$manifest" | awk '{print $1}')"
+  [ "$before" = "$after" ]
+
+  # And the tracked tree is clean, so the printed remedy is actually runnable.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' status --porcelain -- '$relpath'"
+  [ -z "$output" ]
+}

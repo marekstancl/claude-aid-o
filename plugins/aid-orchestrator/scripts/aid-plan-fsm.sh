@@ -298,48 +298,6 @@ _pfsm_last_resulting_sha() {
 }
 
 # ---------------------------------------------------------------------------
-# _pfsm_merge_already_published <plan_id>
-# CP2 M3 (2026-07-26): true when the op log records ANY plan-merge-to-main entry
-# that reached a resulting_sha — i.e. the merge is published on the target branch
-# and this invocation is a resume, not a first attempt. Used to relax the
-# clean-worktree precondition: stage-2 failure paths print "re-run this command
-# to re-apply the bindings idempotently", but stage 2 leaves its own `.aid-o/`
-# runtime edits uncommitted, so the strict check refused the very remedy it
-# prescribed — a deadlock after an already-published merge, with no way forward
-# that does not hand-edit runtime state.
-# ---------------------------------------------------------------------------
-_pfsm_merge_already_published() {
-  local ops_path
-  ops_path="$(_pfsm_ops_path "$1")"
-  [[ -f "$ops_path" ]] || return 1
-  jq -e -s 'any(.[]; .command == "plan-merge-to-main" and (.resulting_sha // "") != "")' \
-    "$ops_path" >/dev/null 2>&1
-}
-
-# ---------------------------------------------------------------------------
-# _pfsm_check_clean_worktree_resume <project_root> <plan_id>
-# The clean-worktree precondition, with the command's own `.aid-o/` runtime
-# workspace exempted ONLY once the merge is published. Source files are still
-# held to the strict rule in both cases — stage 2 never edits them.
-# ---------------------------------------------------------------------------
-_pfsm_check_clean_worktree_resume() {
-  local root="$1" plan_id="$2"
-  if ! _pfsm_merge_already_published "$plan_id"; then
-    _pfsm_check_clean_worktree "$root"
-    return $?
-  fi
-  local dirty
-  dirty="$(git -C "$root" status --porcelain --untracked-files=no \
-    | grep -vE '^.. \.aid-o/' || true)"
-  if [[ -n "$dirty" ]]; then
-    echo "PRECONDITION FAIL: plan-merge-to-main: the merge for ${plan_id} is already published, so this is a resume and the command's own .aid-o/ runtime edits are tolerated — but these SOURCE changes are not. Commit or stash them, then re-run:" >&2
-    printf '%s\n' "$dirty" >&2
-    return 1
-  fi
-  return 0
-}
-
-# ---------------------------------------------------------------------------
 # _pfsm_verify_epic_lineage <project_root> <plan_id> <epic_id> <task_branch>
 #                            <entry_json>
 # The lineage check for an ALREADY-EXISTING task branch. `entry_json` is the
@@ -3695,7 +3653,7 @@ cmd_plan_merge_to_main() {
   export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
 
   _pfsm_check_no_merge_in_progress "$root" || exit 1
-  _pfsm_check_clean_worktree_resume "$root" "$plan_id" || exit 1
+  _pfsm_check_clean_worktree "$root" || exit 1
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: no plan-boundary-manifest for ${plan_id} — run plan-start first." >&2

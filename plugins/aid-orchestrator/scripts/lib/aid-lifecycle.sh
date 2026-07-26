@@ -1021,18 +1021,38 @@ aid_lifecycle_plan_merge_bind() {
   # the commit is a documented no-op. Either way the merge must be published:
   # a target head that does not CONTAIN the merge means this is not stage 2 of
   # anything, and binding deliveries to an unpublished merge would be a lie.
+  # CP2 M3 (2026-07-26, corrected): every mutation below rewrites the TRACKED
+  # file .aid-lifecycle/manifests/<plan>.yaml. A failure part-way used to leave
+  # it dirty, and the printed remedy ("re-run to converge") was then refused by
+  # the caller's clean-worktree precondition — a deadlock after an ALREADY
+  # published merge. The fix belongs here, not in a blanket exemption from that
+  # guard: snapshot the file's exact bytes on entry and restore them on every
+  # failure path, so a failed stage 2 is byte-identical to never having run and
+  # the re-run converges. Success keeps its edits (they are the deliverable).
+  local _lc_snap=""
+  _lc_snap="$(mktemp 2>/dev/null)" || _lc_snap=""
+  [[ -n "$_lc_snap" ]] && cp -p -- "$manifest" "$_lc_snap" 2>/dev/null
+
   local tb_live; tb_live="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$(aid_target_branch)" 2>/dev/null || true)"
   if [[ -z "$tb_live" ]] || ! git -C "$root" merge-base --is-ancestor "$merge_sha" "$tb_live" 2>/dev/null; then
     echo "lifecycle: plan-merge-bind: ${merge_sha} is not contained in $(aid_target_branch) (${tb_live:-<absent>}) — the merge is not published; refusing to bind deliveries to it" >&2
     return 1
   fi
 
+  # _lc_rollback — put the manifest back exactly as found, then drop the snapshot.
+  _lc_rollback() {
+    [[ -n "$_lc_snap" && -f "$_lc_snap" ]] && cp -p -- "$_lc_snap" "$manifest" 2>/dev/null
+    [[ -n "$_lc_snap" ]] && rm -f -- "$_lc_snap" 2>/dev/null
+    _lc_snap=""
+    return 0
+  }
+
   aid_lc_plan_mode_begin "$merge_sha" "$run_dir_abs" "$tb_live"
 
   # Entry precheck (the staged/unstaged user-collision half is fully active in
   # plan mode; only the branch assertion is satisfied by construction).
   local prc=0; _aid_lc_precheck_write "$root" "$relpath" || prc=$?
-  if [[ "$prc" -ne 0 ]]; then aid_lc_plan_mode_end; return "$prc"; fi
+  if [[ "$prc" -ne 0 ]]; then aid_lc_plan_mode_end; _lc_rollback; return "$prc"; fi
 
   # ── (a) CF1 re-scope ─────────────────────────────────────────────────────
   local spec eid newscope
@@ -1042,10 +1062,10 @@ aid_lifecycle_plan_merge_bind() {
     case "$newscope" in
       abandoned|superseded) ;;
       *) echo "lifecycle: plan-merge-bind: refusing an unknown re-scope '${newscope}' for ${eid}" >&2
-         aid_lc_plan_mode_end; return 1 ;;
+         aid_lc_plan_mode_end; _lc_rollback; return 1 ;;
     esac
     ( cd "$root" && yq -i "(.declared_epics[] | select(.id == \"${eid}\") | .scope) = \"${newscope}\"" "$relpath" ) \
-      || { echo "lifecycle: plan-merge-bind: could not re-scope ${eid} to ${newscope}" >&2; aid_lc_plan_mode_end; return 1; }
+      || { echo "lifecycle: plan-merge-bind: could not re-scope ${eid} to ${newscope}" >&2; aid_lc_plan_mode_end; _lc_rollback; return 1; }
   done
 
   # ── (b) delivery bindings for every EPIC still in the required/backlog set ─
@@ -1053,7 +1073,7 @@ aid_lifecycle_plan_merge_bind() {
   declared="$(aid_lifecycle_declared_epics "$plan_id" "$root")" || drc=$?
   if [[ "$drc" -ne 0 ]]; then
     echo "lifecycle: plan-merge-bind: cannot read the declared EPIC set for ${plan_id} (rc=${drc})" >&2
-    aid_lc_plan_mode_end; return 1
+    aid_lc_plan_mode_end; _lc_rollback; return 1
   fi
   local unbound=""
   while read -r eid scope; do
@@ -1065,13 +1085,13 @@ aid_lifecycle_plan_merge_bind() {
   done <<< "$declared"
   if [[ -n "$unbound" ]]; then
     echo "lifecycle: plan-merge-bind: could not bind ${unbound} — the plan-final review evidence in ${run_dir_abs} does not support a binding for them" >&2
-    aid_lc_plan_mode_end; return 1
+    aid_lc_plan_mode_end; _lc_rollback; return 1
   fi
 
   # Validate BEFORE the commit — fail-closed, exactly like every other lifecycle
   # write. A widened `scope` that the schema rejects must never reach the tree.
   if ! aid_lifecycle_validate_artifact "$manifest" "plan-lifecycle-manifest.schema.json"; then
-    aid_lc_plan_mode_end; return 1
+    aid_lc_plan_mode_end; _lc_rollback; return 1
   fi
 
   local crc=0
@@ -1079,10 +1099,13 @@ aid_lifecycle_plan_merge_bind() {
   local newparent="${_AID_LC_PLAN_PARENT}"
   aid_lc_plan_mode_end
   if [[ "$crc" -ne 0 ]]; then
-    echo "lifecycle: plan-merge-bind: the delivery bindings for ${plan_id} were NOT committed (rc=${crc}) — the merge stands; re-run to converge." >&2
-    return 5
+    echo "lifecycle: plan-merge-bind: the delivery bindings for ${plan_id} were NOT committed (rc=${crc}) — the merge stands, the manifest is restored to its pre-run bytes; re-run to converge." >&2
+    _lc_rollback; return 5
   fi
-  git -C "$root" cat-file -e "$(aid_target_branch):${relpath}" 2>/dev/null || return 5
+  if ! git -C "$root" cat-file -e "$(aid_target_branch):${relpath}" 2>/dev/null; then
+    _lc_rollback; return 5
+  fi
+  [[ -n "$_lc_snap" ]] && rm -f -- "$_lc_snap" 2>/dev/null
   printf '%s\n' "$newparent"
   return 0
 }
