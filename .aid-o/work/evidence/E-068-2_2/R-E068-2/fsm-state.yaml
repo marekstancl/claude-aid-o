@@ -1,6 +1,6 @@
 epic_id: E-068-2_2
 run_id: R-E068-2
-state: EXECUTE
+state: DONE
 current_step: 5
 total_steps: 5
 mode: full
@@ -39,3 +39,4 @@ steps:
     status: completed
     started_at: "2026-07-26T18:59:10Z"
     completed_at: "2026-07-26T18:59:10Z"
+done_phase: review
