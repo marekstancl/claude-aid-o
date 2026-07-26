@@ -4245,12 +4245,14 @@ cmd_plan_close() {
 
   if [[ "$close_mode" == "merge" ]]; then
     if [[ ! -f "$lc_manifest" ]]; then
-      # Legacy-mode plan that pre-dates the lifecycle layer. NOT an escape
-      # hatch for plans created under the new model: aid-auto-pipeline.sh
-      # writes a lifecycle manifest for every one of those.
-      lifecycle_note="lifecycle_manifest_absent"
-      applied_sha="$target_head"
-      echo "NOTE: ${plan_id} has no .aid-lifecycle manifest — closing in legacy mode with reason 'lifecycle_manifest_absent' and NO receipt." >&2
+      # CP3 (2026-07-26): keyed on the FILE rather than the MODE, this was an
+      # escape hatch after all — deleting the tracked manifest turned a
+      # plan-branch plan's MANDATORY receipt into an optional one and closed the
+      # plan with no durable proof. This command only ever closes plan-branch
+      # plans, so the absence is a blocking defect, not a legacy shape.
+      _pfsm_close_release
+      echo "PRECONDITION FAIL: plan-close: ${plan_id} has no .aid-lifecycle manifest at ${lc_manifest}, but the receipt is MANDATORY for a plan-branch close — refusing to declare the plan closed with no durable proof. NO marker was written and ${plan_id} stays ${cur_state}." >&2
+      exit 1
     else
       local lrc=0 lout=""
       lout="$(aid_lifecycle_plan_close "$plan_id" "$root" "$target_head" 2>&1)" || lrc=$?

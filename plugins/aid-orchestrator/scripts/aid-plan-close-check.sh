@@ -919,7 +919,17 @@ check5_plan_branch_boundary() {
   # ── 5.11 the .aid-lifecycle reconciliation ────────────────────────────
   local lc_manifest=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
   if [[ ! -f "$lc_manifest" ]]; then
-    _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (aid-auto-pipeline.sh creates one for every plan made under the new model)"
+    # CP3 (2026-07-26): this branch used to key on the FILE, not the MODE, so
+    # deleting the tracked manifest silently downgraded a plan_branch plan's
+    # MANDATORY receipt to "legacy plan, close without one" — a plan declared
+    # closed with no durable proof, and the exact inverse of AC7's "removing the
+    # manifest blocks close". The escape hatch belongs to legacy plans only, and
+    # `--plan-branch` is precisely the caller's assertion that this is not one.
+    if [[ "$PLAN_BRANCH_MODE" -eq 1 ]]; then
+      _fail "check5" "no lifecycle manifest at ${lc_manifest} for a plan-branch close — the receipt is MANDATORY for this mode, so its absence blocks rather than downgrading the close to the legacy no-receipt path"
+    else
+      _info "check5" "lifecycle_manifest_absent — ${lc_manifest} does not exist; this is a legacy-mode plan predating the lifecycle layer, so close completes with that reason recorded (aid-auto-pipeline.sh creates one for every plan made under the new model)"
+    fi
   elif [[ "$CLOSE_MODE" == "abort" ]]; then
     _info "check5" "abort close: an aborted plan writes NO lifecycle receipt (aid_lifecycle_plan_close refuses while any required EPIC is undelivered, which is always true before a merge) — the manifest is marked aborted instead"
   else

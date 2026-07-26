@@ -3412,3 +3412,25 @@ _fsm_close() {
   run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list main -- '$(_receipt_rel)' | wc -l"
   [ "$output" = "1" ]
 }
+
+@test "AC7: removing the tracked lifecycle manifest BLOCKS a plan-branch close — the receipt is mandatory, not conditional on the file" {
+  _seed_closable
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  local main_before; main_before="$(_main_sha)"
+
+  # The manifest is removed from the WORKTREE — the shape an accidental clean or
+  # a checkout of a pre-lifecycle revision produces. Before the fix this dropped
+  # the close into the legacy "no receipt required" path and it SUCCEEDED.
+  rm -f "${TEST_PROJECT_ROOT}/${rel}"
+
+  _close
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MANDATORY"* ]]
+
+  [ ! -f "$(_marker)" ]
+  run git -C "$TEST_PROJECT_ROOT" cat-file -e "main:$(_receipt_rel)"
+  [ "$status" -ne 0 ]
+  [ "$(_main_sha)" = "$main_before" ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "CLOSED" ]
+}
