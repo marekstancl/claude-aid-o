@@ -4824,6 +4824,257 @@ _pfsm_plan_state_repair() {
 # Dispatch — mirrors aid-fsm.sh's own top-level `case "$sub" in ...` shape,
 # kept much smaller (three subcommands).
 # =============================================================================
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P068 Step 7 — in-flight inventory and the default mode flip
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _pfsm_policy_path — the plan-boundary policy shipped with the plugin, or the
+# project's own copy if it has one (a target project may opt out without
+# patching the plugin, which is the entire reason this is a file and not a
+# constant).
+_pfsm_policy_path() {
+  local root="${1:-.}"
+  local local_copy="${root}/.aid-o/config/policies/plan-boundary-policy.yaml"
+  [[ -f "$local_copy" ]] && { printf '%s' "$local_copy"; return 0; }
+  printf '%s/../defaults/policies/plan-boundary-policy.yaml' "$SCRIPT_DIR"
+}
+
+# _pfsm_policy_get <key> [root] — one scalar from the policy, or empty. Never
+# aborts under `set -e`; an unreadable policy yields empty and every caller
+# treats that as "no opinion", falling back to the conservative legacy default.
+_pfsm_policy_get() {
+  local key="$1" root="${2:-.}" f v
+  f="$(_pfsm_policy_path "$root")"
+  [[ -f "$f" ]] || { printf ''; return 0; }
+  v="$(yq -r ".${key} // \"\"" "$f" 2>/dev/null || true)"
+  [[ "$v" == "null" ]] && v=""
+  printf '%s' "$v"
+}
+
+# _pfsm_has_gate_profiles [root] — 0 iff the project's execution.yaml declares a
+# gate_profiles table.
+#
+# THE GUARD ON THE FLIP. plan_branch mode's gates stage resolves against this
+# table. P064 adds it to THIS repository's self-host execution.yaml, not to the
+# defaults/execution.yaml that /aid-init distributes, so a consumer project that
+# merely upgrades the plugin would flip to plan_branch and resolve its gates
+# against nothing at all. Absence of the table is therefore not a detail — it is
+# the difference between a mode that works and one that silently has no gates.
+_pfsm_has_gate_profiles() {
+  local root="${1:-.}"
+  local ey="${root}/.aid-o/config/execution.yaml"
+  [[ -f "$ey" ]] || return 1
+  if command -v yq >/dev/null 2>&1; then
+    local n; n="$(yq -r '.gate_profiles | length' "$ey" 2>/dev/null || echo 0)"
+    [[ "$n" =~ ^[0-9]+$ && "$n" -gt 0 ]] && return 0
+    return 1
+  fi
+  grep -qE '^gate_profiles:' "$ey" 2>/dev/null
+}
+
+# _pfsm_default_mode [root] — the mode a NEW plan is created with.
+# Prints "<mode>\t<reason>". The policy value is a CEILING, never a promise:
+# plan_branch is granted only when the gate table exists, otherwise the caller
+# gets legacy_epic_release_mode and the reason `plan_branch_unavailable:
+# no_gate_profiles`, which is a logged fact rather than a silent downgrade.
+_pfsm_default_mode() {
+  local root="${1:-.}" want
+  want="$(_pfsm_policy_get default_mode "$root")"
+  [[ -z "$want" ]] && want="legacy_epic_release_mode"
+  case "$want" in
+    plan_branch)
+      if _pfsm_has_gate_profiles "$root"; then
+        printf 'plan_branch\tpolicy_default\n'
+      else
+        printf 'legacy_epic_release_mode\tplan_branch_unavailable: no_gate_profiles\n'
+      fi
+      ;;
+    legacy_epic_release_mode)
+      printf 'legacy_epic_release_mode\tpolicy_default\n'
+      ;;
+    *)
+      # An unknown value in the policy is a configuration error, not a licence
+      # to guess. Fail closed to the conservative mode and say why.
+      printf 'legacy_epic_release_mode\tunknown_policy_default: %s\n' "$want"
+      ;;
+  esac
+}
+
+# _pfsm_inv_plan_ids [root] — every plan id with a plan file or a queue entry.
+_pfsm_inv_plan_ids() {
+  local root="${1:-.}" f id
+  {
+    for f in "${root}"/.aid-o/plans/P*.md; do
+      [[ -e "$f" ]] || continue
+      id="$(basename "$f")"; id="${id%%-*}"
+      [[ "$id" =~ ^P[0-9]+$ ]] && printf '%s\n' "$id"
+    done
+    if [[ -f "${root}/.aid-o/config/queue.yaml" ]]; then
+      grep -oE '"?P[0-9]{3}[^"/]*"?' "${root}/.aid-o/config/queue.yaml" 2>/dev/null \
+        | grep -oE '^"?P[0-9]{3}' | tr -d '"' || true
+    fi
+  } | sort -u
+}
+
+# _pfsm_inv_epic_states <plan_id> [root] — "<total> <terminal> <nonterminal>"
+# read from the queue, the ONE place EPIC status is script-written.
+_pfsm_inv_epic_states() {
+  local plan_id="$1" root="${2:-.}"
+  local q="${root}/.aid-o/config/queue.yaml"
+  local total=0 terminal=0 nonterminal=0
+  if [[ -f "$q" ]] && command -v yq >/dev/null 2>&1; then
+    local nnn="${plan_id#P}" line st
+    while IFS= read -r line; do
+      [[ -n "$line" ]] || continue
+      st="$line"
+      total=$((total + 1))
+      case "$st" in
+        done|completed|merged|released_to_main|abandoned|superseded|cancelled) terminal=$((terminal + 1)) ;;
+        *) nonterminal=$((nonterminal + 1)) ;;
+      esac
+    done < <(yq -r ".queue[]? | select(.epic_id | test(\"^E-${nnn}\")) | .status // \"\"" "$q" 2>/dev/null || true)
+  fi
+  printf '%s %s %s' "$total" "$terminal" "$nonterminal"
+}
+
+# _pfsm_inv_mode <plan_id> [root] — the plan's currently declared mode, read
+# from the git-tracked lifecycle manifest (the authority), else the runtime
+# plan-state file, else "none".
+_pfsm_inv_mode() {
+  local plan_id="$1" root="${2:-.}" m=""
+  local lm="${root}/.aid-lifecycle/manifests/${plan_id}.yaml"
+  if [[ -f "$lm" ]] && command -v yq >/dev/null 2>&1; then
+    m="$(yq -r '.mode // ""' "$lm" 2>/dev/null || true)"
+    [[ "$m" == "null" ]] && m=""
+  fi
+  if [[ -z "$m" ]]; then
+    local ps="${root}/.aid-o/work/plan-state/${plan_id}/plan-state.yaml"
+    if [[ -f "$ps" ]] && command -v yq >/dev/null 2>&1; then
+      m="$(yq -r '.mode // ""' "$ps" 2>/dev/null || true)"
+      [[ "$m" == "null" ]] && m=""
+    fi
+  fi
+  printf '%s' "${m:-none}"
+}
+
+# ---------------------------------------------------------------------------
+# aid-plan-fsm.sh inventory [--apply] [--plan <id>] [--project-root <path>]
+#
+# Roadmap D11 bounds this migration deliberately: no algorithm, no inference —
+# an inventory and an explicit stamp. Listing is read-only. `--apply` writes
+# `mode: legacy_epic_release_mode` into each plan's LIFECYCLE MANIFEST, the
+# git-tracked authority; a legacy plan that has no schema-valid manifest is
+# stamped in its runtime plan-state file instead and recorded
+# `legacy-unverifiable`, because plan-lifecycle-manifest.schema.json is
+# additionalProperties:false and requires four fields a legacy plan cannot
+# supply. No invalid manifest is ever fabricated, no plan branch is created and
+# no plan is migrated mid-run.
+# ---------------------------------------------------------------------------
+cmd_inventory() {
+  local apply=0 only_plan="" project_root_opt=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --apply) apply=1; shift ;;
+      --plan)
+        _pfsm_require_optval "inventory" "$1" "$#" || exit 2
+        only_plan="$2"; shift 2 ;;
+      --project-root)
+        _pfsm_require_optval "inventory" "$1" "$#" || exit 2
+        project_root_opt="$2"; shift 2 ;;
+      --*) echo "ERROR: inventory: unknown flag: $1" >&2; exit 2 ;;
+      *) echo "ERROR: inventory: unexpected argument: $1" >&2; exit 2 ;;
+    esac
+  done
+
+  local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
+  export AID_PLAN_STATE_PROJECT_ROOT="$root"
+  export AID_PLAN_MANIFEST_PROJECT_ROOT="$root"
+
+  if [[ -n "$only_plan" ]] && ! _pfsm_validate_plan_id "$only_plan"; then
+    exit 2
+  fi
+
+  local -a ids=()
+  local id
+  while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done < <(_pfsm_inv_plan_ids "$root")
+
+  if [[ -n "$only_plan" ]]; then
+    local found=0
+    for id in ${ids[@]+"${ids[@]}"}; do [[ "$id" == "$only_plan" ]] && found=1; done
+    if [[ "$found" -eq 0 ]]; then
+      echo "ERROR: inventory: no plan file or queue entry matches ${only_plan} — refusing to invent one." >&2
+      exit 1
+    fi
+    ids=("$only_plan")
+  fi
+
+  local dm_row dm dm_reason
+  dm_row="$(_pfsm_default_mode "$root")"
+  dm="${dm_row%%$'\t'*}"; dm_reason="${dm_row#*$'\t'}"; dm_reason="${dm_reason%$'\n'}"
+  echo "default_mode for NEW plans: ${dm} (${dm_reason})"
+  printf '%-8s %-28s %-7s %-9s %s\n' "PLAN" "MODE" "EPICS" "ACTIVE" "DISPOSITION"
+
+  local rc=0 stamped=0
+  for id in ${ids[@]+"${ids[@]}"}; do
+    local counts total terminal nonterminal mode disposition
+    counts="$(_pfsm_inv_epic_states "$id" "$root")"
+    total="${counts%% *}"; terminal="$(echo "$counts" | awk '{print $2}')"
+    nonterminal="$(echo "$counts" | awk '{print $3}')"
+    mode="$(_pfsm_inv_mode "$id" "$root")"
+
+    if [[ "$mode" != "none" && "$mode" != "plan_branch" && "$mode" != "legacy_epic_release_mode" ]]; then
+      echo "ERROR: inventory: ${id} declares an unknown mode '${mode}' — refusing to operate on it. Nothing was mutated." >&2
+      rc=1; continue
+    fi
+
+    if [[ "$mode" != "none" ]]; then
+      disposition="already_stamped"
+    elif [[ "$nonterminal" -gt 0 ]]; then
+      disposition="active_unstamped"
+    elif [[ "$total" -gt 0 ]]; then
+      disposition="unclosed_legacy"
+    else
+      disposition="no_epics"
+    fi
+
+    if [[ "$apply" -eq 1 && "$mode" == "none" ]]; then
+      # Existing plans are stamped LEGACY and never migrated: D11 is explicit
+      # that this step inventories and stamps, it does not convert.
+      local lm="${root}/.aid-lifecycle/manifests/${id}.yaml"
+      if [[ -f "$lm" ]]; then
+        if ( cd "$root" && yq -i '.mode = "legacy_epic_release_mode"' ".aid-lifecycle/manifests/${id}.yaml" ) 2>/dev/null; then
+          disposition="stamped_legacy(manifest)"; stamped=$((stamped + 1)); mode="legacy_epic_release_mode"
+        else
+          echo "ERROR: inventory: could not stamp the lifecycle manifest for ${id} — nothing was written for this plan." >&2
+          rc=1
+        fi
+      else
+        local ps="${root}/.aid-o/work/plan-state/${id}/plan-state.yaml"
+        if [[ -f "$ps" ]]; then
+          if ( cd "$root" && yq -i '.mode = "legacy_epic_release_mode"' ".aid-o/work/plan-state/${id}/plan-state.yaml" ) 2>/dev/null; then
+            disposition="stamped_legacy(legacy-unverifiable)"; stamped=$((stamped + 1)); mode="legacy_epic_release_mode"
+          else
+            echo "ERROR: inventory: could not stamp the runtime plan state for ${id}." >&2
+            rc=1
+          fi
+        else
+          disposition="unstampable(no manifest, no plan state)"
+        fi
+      fi
+    fi
+
+    printf '%-8s %-28s %-7s %-9s %s\n' "$id" "$mode" "$total" "$nonterminal" "$disposition"
+  done
+
+  if [[ "$apply" -eq 1 ]]; then
+    echo "stamped ${stamped} plan(s) legacy_epic_release_mode (no plan was migrated, no branch was created)"
+  else
+    echo "(read-only: re-run with --apply to stamp unstamped plans legacy_epic_release_mode)"
+  fi
+  return "$rc"
+}
+
 _aid_plan_fsm_usage() {
   cat <<'EOF'
 Usage: aid-plan-fsm.sh <subcommand> [args...]
@@ -4836,6 +5087,7 @@ Subcommands:
   plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>]
+  inventory [--apply] [--plan <id>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]
 EOF
 }
@@ -4852,6 +5104,20 @@ main() {
     plan-merge-to-main) cmd_plan_merge_to_main "$@" ;;
     plan-close) cmd_plan_close "$@" ;;
     plan-state) cmd_plan_state "$@" ;;
+    inventory) cmd_inventory "$@" ;;
+    # Internal: the resolved default mode for NEW plans, as "<mode>\t<reason>".
+    # Deliberately undocumented in the usage text — it is a resolver other
+    # scripts consult, not an operator command.
+    __default-mode)
+      local __dm_root=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --project-root) __dm_root="${2:-}"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      _pfsm_default_mode "$(_pfsm_resolve_project_root "$__dm_root")"
+      ;;
     -h|--help|"")
       _aid_plan_fsm_usage
       [[ -z "$sub" ]] && exit 2

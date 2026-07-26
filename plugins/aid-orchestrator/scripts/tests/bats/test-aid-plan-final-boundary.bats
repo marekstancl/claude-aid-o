@@ -3434,3 +3434,159 @@ _fsm_close() {
   run plan_state_get "$PLAN_ID" "plan_state"
   [ "$output" != "CLOSED" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC8 — in-flight inventory and the default mode flip (E-068-2_2 Step 1).
+# The migration is deliberately unclever: an inventory and an explicit stamp,
+# never inference and never a mid-run conversion.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_inv() { run bash "$PLAN_FSM_CLI" inventory --project-root "$TEST_PROJECT_ROOT" "$@"; }
+
+# _seed_plan_file — inventory enumerates plans from .aid-o/plans/P*.md and the
+# queue. A fixture with neither has no plans to inventory, which is correct
+# behaviour and useless as a test subject.
+_seed_plan_file() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"
+  printf '# %s\n\n**EPIC 1: the one**\n' "$PLAN_ID" \
+    > "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-inventory-subject.md"
+}
+
+# _seed_lifecycle_manifest [mode] — a schema-shaped manifest, optionally stamped.
+_seed_lifecycle_manifest() {
+  local mode="${1:-}"
+  local lm="${TEST_PROJECT_ROOT}/.aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  mkdir -p "$(dirname "$lm")"
+  printf 'schema_version: "aid-2.0"\nrepo_id: t\nplan_id: %s\ndeclared_epics: []\n' "$PLAN_ID" > "$lm"
+  [[ -n "$mode" ]] && printf 'mode: %s\n' "$mode" >> "$lm"
+  printf '%s' "$lm"
+}
+_default_mode() { run bash "$PLAN_FSM_CLI" __default-mode --project-root "$TEST_PROJECT_ROOT"; }
+
+# _seed_gate_profiles [yes|no] — the project execution.yaml the mode resolver
+# reads. `plan_branch` is granted only when a gate_profiles table is present.
+_seed_gate_profiles() {
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  if [[ "${1:-yes}" == "yes" ]]; then
+    printf 'gates:\n  bats_fsm:\n    required: true\ngate_profiles:\n  quick:\n    include:\n      - bats_fsm\n' \
+      > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  else
+    printf 'gates:\n  bats_fsm:\n    required: true\n' \
+      > "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  fi
+}
+
+@test "AC8: new plans default to plan_branch when the project declares a gate_profiles table" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _default_mode
+  [ "$status" -eq 0 ]
+  [[ "$output" == plan_branch* ]]
+  [[ "$output" == *"policy_default"* ]]
+}
+
+@test "AC8: with NO gate_profiles table the default falls back to legacy and says why" {
+  _bootstrap
+  _seed_gate_profiles no
+  _default_mode
+  [ "$status" -eq 0 ]
+  [[ "$output" == legacy_epic_release_mode* ]]
+  # The fallback is a LOGGED fact, never a silent downgrade — plan_branch mode's
+  # gates stage resolves against that table, so without it the mode would have
+  # no gates at all.
+  [[ "$output" == *"plan_branch_unavailable"* ]]
+  [[ "$output" == *"no_gate_profiles"* ]]
+}
+
+@test "AC8: inventory LISTS without mutating — a read-only run stamps nothing" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  local lm; lm="$(_seed_lifecycle_manifest)"
+  local before; before="$(sha256sum "$lm" | awk '{print $1}')"
+
+  _inv
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"$PLAN_ID"* ]]
+  [[ "$output" == *"read-only"* ]]
+  [ "$(sha256sum "$lm" | awk '{print $1}')" = "$before" ]
+}
+
+@test "AC8: --apply stamps an existing plan legacy_epic_release_mode, never migrates it" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  local lm; lm="$(_seed_lifecycle_manifest)"
+  # _bootstrap's plan_state_init already stamps the RUNTIME state plan_branch,
+  # and the mode reader legitimately falls back to it when the manifest carries
+  # none — so an "unstamped plan" fixture has to clear it, or the subject is
+  # already stamped and the test proves nothing.
+  yq -i 'del(.mode)' "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-state.yaml"
+
+  _inv --apply
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.mode' "$lm")" = "legacy_epic_release_mode" ]
+  # Stamping is NOT migration: no plan branch was created for it.
+  [[ "$output" == *"no plan was migrated"* ]]
+}
+
+@test "AC8: --apply on an ALREADY stamped plan is a no-op, not an error" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  local lm; lm="$(_seed_lifecycle_manifest plan_branch)"
+
+  _inv --apply
+  [ "$status" -eq 0 ]
+  [ "$(yq -r '.mode' "$lm")" = "plan_branch" ]
+  [[ "$output" == *"already_stamped"* ]]
+}
+
+@test "AC8: an UNKNOWN declared mode exits non-zero and mutates nothing" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _seed_plan_file
+  local lm; lm="$(_seed_lifecycle_manifest banana)"
+  local before; before="$(sha256sum "$lm" | awk '{print $1}')"
+
+  _inv --apply
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown mode"* ]]
+  [ "$(sha256sum "$lm" | awk '{print $1}')" = "$before" ]
+}
+
+@test "AC8: a plan id matching no plan file and no queue entry exits non-zero" {
+  _bootstrap
+  _seed_gate_profiles yes
+  _inv --plan P999
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no plan file or queue entry"* ]]
+}
+
+@test "AC8: an unknown value in the policy fails CLOSED to legacy and names the value" {
+  _bootstrap
+  _seed_gate_profiles yes
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'schema_version: "aid-2.0"\ndefault_mode: sideways\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/plan-boundary-policy.yaml"
+
+  _default_mode
+  [ "$status" -eq 0 ]
+  [[ "$output" == legacy_epic_release_mode* ]]
+  [[ "$output" == *"unknown_policy_default"* ]]
+  [[ "$output" == *"sideways"* ]]
+}
+
+@test "AC8: a project may opt OUT of the new model through its own policy copy" {
+  _bootstrap
+  _seed_gate_profiles yes
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config/policies"
+  printf 'schema_version: "aid-2.0"\ndefault_mode: legacy_epic_release_mode\n' \
+    > "$TEST_PROJECT_ROOT/.aid-o/config/policies/plan-boundary-policy.yaml"
+
+  _default_mode
+  [ "$status" -eq 0 ]
+  [[ "$output" == legacy_epic_release_mode* ]]
+  [[ "$output" == *"policy_default"* ]]
+  [[ "$output" != *"unknown_policy_default"* ]]
+}
