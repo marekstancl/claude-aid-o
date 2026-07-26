@@ -3745,3 +3745,78 @@ _crash_merge() {
   run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --count '${before}..main'"
   [ "$output" -ge 1 ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC10 — the cadence, asserted over the STRUCTURED record (E-068-2_2 Step 5).
+#
+# "Each specialist ran exactly once, at plan final" is the claim the whole
+# plan-boundary model rests on, and it is the easiest claim in the system to
+# assert falsely: nothing about a finished run looks different when a role ran
+# twice, or ran per EPIC. So it is asserted over dispatch_counts in the RUNTIME
+# manifest, which the review stage writes from the dispatch record it validated.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_review_counts() {
+  jq -r ".plan_boundary_manifest.plan_final_review.dispatch_counts.\"$1\" // \"absent\"" \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+}
+
+@test "AC10: a REAL review pass records the cadence — exactly one dispatch per specialist" {
+  _seed_review_project
+  _write_review_outputs
+  _review
+  [ "$status" -eq 0 ]
+
+  # The counts come from the production stage, not from the fixture: the refusal
+  # side is covered by AC3, and this is its positive twin — proof that a passing
+  # run actually WRITES the cadence rather than merely not objecting to it. A
+  # cadence nobody records is a cadence nobody can audit afterwards.
+  local a
+  for a in auditor curator simplifier reporter; do
+    local n; n="$(_review_counts "$a")"
+    [ "$n" != "absent" ]
+    [ "$n" = "1" ]
+  done
+}
+
+@test "AC10: the recorded review is bound to the SAME candidate the merge published" {
+  _seed_closable
+  local recorded_cand
+  recorded_cand="$(jq -r '.plan_boundary_manifest.plan_final_review.candidate_sha' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  local merged_cand
+  merged_cand="$(jq -r '.plan_boundary_manifest.plan_final_merge.candidate_sha' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  # A review of one candidate and a merge of another is the precise shape of a
+  # review that proves nothing.
+  [ -n "$recorded_cand" ]
+  [ "$recorded_cand" = "$merged_cand" ]
+}
+
+@test "AC10: a REAL review pass records every output bound by content hash" {
+  _seed_review_project
+  _write_review_outputs
+  _review
+  [ "$status" -eq 0 ]
+
+  local m="${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+  # Every recorded output carries a sha256, which is what lets plan-close
+  # re-verify the review instead of trusting that it happened.
+  run jq -r '[.plan_boundary_manifest.plan_final_review.outputs | to_entries[]
+              | select((.value | startswith("sha256:")) | not)] | length' "$m"
+  [ "$output" = "0" ]
+  run jq -r '.plan_boundary_manifest.plan_final_review.outputs | length' "$m"
+  [ "$output" -ge 1 ]
+}
+
+@test "AC10: EPIC work reaches the target branch ONLY through the plan branch" {
+  _seed_closable
+  local mc; mc="$(_merge_commit)"
+  # The plan merge has exactly two parents: the previous target head and the
+  # candidate. An EPIC that had merged straight to the target branch would show
+  # up as its own commit on main outside this merge.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --parents -n 1 '$mc' | wc -w"
+  [ "$output" = "3" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' rev-list --merges main | wc -l"
+  [ "$output" = "1" ]
+}
