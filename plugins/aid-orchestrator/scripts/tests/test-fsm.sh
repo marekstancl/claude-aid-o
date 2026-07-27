@@ -209,7 +209,13 @@ teardown() { rm -rf "$TEST_DIR"; }
 @test "increment-step advances counter and outputs new value" {
   init_state
   run fsm_inc
-  [ "$output" = "1" ]
+  # IMP-263 (2026-07-23) replaced the bare number with a machine-readable line —
+  # `status=advanced advanced_from=N advanced_to=N+1` — precisely so a caller
+  # cannot misread a bare "0" as an error, which is what caused a double advance.
+  # This assertion had expected the old form ever since, and only the CI step
+  # timeout kept it from being seen.
+  [[ "$output" == *"status=advanced"* ]]
+  [[ "$output" == *"advanced_to=1"* ]]
   run "$FSM" get-field current_step "$STATE_FILE"
   [ "$output" = "1" ]
 }
@@ -219,6 +225,8 @@ teardown() { rm -rf "$TEST_DIR"; }
   fsm_inc >/dev/null
   fsm_inc >/dev/null
   run fsm_inc
+  [[ "$output" == *"advanced_to=3"* ]]
+  run "$FSM" get-field current_step "$STATE_FILE"
   [ "$output" = "3" ]
 }
 
