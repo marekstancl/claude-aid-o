@@ -3901,6 +3901,15 @@ cmd_plan_merge_to_main() {
       echo "PRECONDITION FAIL: plan-merge-to-main: the PM decided ${d_decision}, but ${plan_id} could not be moved to ${to}. ${target_branch} is unchanged; reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
       exit 1
     fi
+    # F3 (2026-07-27, found while closing the P067 dogfood): `plan-state` reports
+    # from the RUNTIME manifest's plan_state mirror, not from the authoritative
+    # plan-state.yaml. The merge path mirrors its CLOSED transition; this path
+    # did not, so an aborted plan kept reporting AWAITING_PM — the command said
+    # "P067 is now ABORTED" and the very next query disagreed with it. A mirror
+    # that only some writers maintain is worse than no mirror: every reader
+    # trusts it.
+    plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_state = $(jq -Rn --arg s "$to" '$s')" >/dev/null 2>&1 \
+      || echo "WARN: plan-merge-to-main: ${plan_id} is ${to} in plan-state.yaml, but the runtime manifest's plan_state mirror could not be updated — 'plan-state' will under-report until it is reconciled." >&2
     echo "PM DECISION ${d_decision}: no merge was performed for ${plan_id}; ${target_branch} is unchanged and ${plan_id} is now ${to}${reason:+ (reason: ${reason})}." >&2
     exit 3
   fi
@@ -4542,7 +4551,25 @@ cmd_plan_state() {
     echo "not_found"
     exit 1
   fi
-  jq -c '{plan_state: .plan_boundary_manifest.plan_state, mode: .plan_boundary_manifest.mode, candidate_sha: .plan_boundary_manifest.candidate_sha, plan_final_run_id: .plan_boundary_manifest.plan_final_run_id}' "$path"
+  # F3 (2026-07-27, found while closing the P067 dogfood): report the
+  # AUTHORITATIVE state, not the runtime manifest's mirror of it.
+  #
+  # The mirror is maintained by some writers and not others — plan_state_transition
+  # does not touch it — so it drifts, and it drifted silently: after P067's abort
+  # the command printed "P067 is now ABORTED" and the very next `plan-state`
+  # answered AWAITING_PM, while the state file said ABORTED and a fixture that
+  # had transitioned through plan_state_transition reported PLAN_GATES. Patching
+  # one writer would have left the others; the guarantee belongs at the reader.
+  # The mirror is still reported when the state file cannot be read, so a
+  # workspace with only a manifest degrades rather than going blank.
+  local _ps_auth=""
+  _ps_auth="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || true)"
+  [[ "$_ps_auth" == "null" || "$_ps_auth" == "not_found" ]] && _ps_auth=""
+  if [[ -n "$_ps_auth" ]]; then
+    jq -c --arg s "$_ps_auth" '{plan_state: $s, mode: .plan_boundary_manifest.mode, candidate_sha: .plan_boundary_manifest.candidate_sha, plan_final_run_id: .plan_boundary_manifest.plan_final_run_id}' "$path"
+  else
+    jq -c '{plan_state: .plan_boundary_manifest.plan_state, mode: .plan_boundary_manifest.mode, candidate_sha: .plan_boundary_manifest.candidate_sha, plan_final_run_id: .plan_boundary_manifest.plan_final_run_id}' "$path"
+  fi
   exit 0
 }
 
