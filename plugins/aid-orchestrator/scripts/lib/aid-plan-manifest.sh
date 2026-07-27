@@ -449,8 +449,17 @@ _pm_check_invariants() {
   fi
 
   # ── candidate_sha non-null requires a late plan_state ────────────────────
-  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED"] | index($s) != null)' "$file" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED)" >&2
+  # F3 (2026-07-27, PM-authorized scope extension): ABORTED belongs in this set.
+  # An aborted plan RETAINS its abandoned candidate on purpose — it is the proof
+  # of what was refused, the abort message names it, and the close record asserts
+  # the target branch is unchanged against it. Excluding ABORTED here meant the
+  # abort path could not mirror its own transition into the manifest, so
+  # `plan-state` kept reporting AWAITING_PM for a plan the authoritative
+  # plan-state.yaml had already marked ABORTED. The alternatives were both worse:
+  # clearing the candidate destroys the evidence, and tolerating the stale mirror
+  # leaves every reader with a false answer.
+  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED","ABORTED"] | index($s) != null)' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED/ABORTED)" >&2
     return 1
   fi
 
@@ -953,7 +962,11 @@ _AID_EPIC_STATUS_TRANSITIONS=(
   "pending:blocked"
   "pending:abandoned"
   "pending:superseded"
-  "pending:merged_to_plan"
+  # F2 (2026-07-27): "pending:merged_to_plan" REMOVED. A pending EPIC never
+  # completed anything, so allowing it to become merged_to_plan let unfinished
+  # work into the plan candidate — the P067 dogfood did exactly that. The only
+  # route into merged_to_plan is now from `running`, and epic-merge-to-plan
+  # additionally requires a successful, task-SHA-bound epic-complete.
   "running:merged_to_plan"
   "running:blocked"
   "running:abandoned"
@@ -1045,7 +1058,7 @@ plan_manifest_set_epic_status() {
   # 02c4d75): comparison logic inlined into the jq filter, running under the lock.
   local filter='
     # Define the legal transitions as an array of "from:to" strings
-    ["pending:running", "pending:blocked", "pending:abandoned", "pending:superseded", "pending:merged_to_plan", "running:merged_to_plan", "running:blocked", "running:abandoned", "running:superseded", "blocked:running", "blocked:abandoned", "blocked:superseded"] as $legal_transitions |
+    ["pending:running", "pending:blocked", "pending:abandoned", "pending:superseded", "running:merged_to_plan", "running:blocked", "running:abandoned", "running:superseded", "blocked:running", "blocked:abandoned", "blocked:superseded"] as $legal_transitions |
     if (.plan_boundary_manifest.epic_runs | any(.epic_id == $epic_id))
     then
       # Found the epic entry — now extract its current status and validate the transition
