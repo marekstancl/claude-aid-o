@@ -5768,6 +5768,22 @@ cmd_plan_rollback() {
     # git-tracked artifact, and it was only ever accepted because this path
     # skipped validation. The human reason lives in the runtime marker and the
     # operation log; what the ledger carries is a technical pointer to it.
+    # BASE THE EDIT ON THE LEDGER, not on the worktree copy. The controller sits
+    # on the plan branch, whose manifest can be OLDER than the target's — it
+    # predates the delivery bindings the merge itself just committed. Editing
+    # that stale copy and publishing the whole file would silently delete the
+    # fresh `deliveries` and anything else the target has and the plan branch
+    # does not. Materialising the target's content first means every existing
+    # field survives, because it is what we started from.
+    local rb_base_rc=0
+    ( cd "$root" && git show "${target_branch}:${lc_rel}" > "$lc_rel" ) 2>/dev/null || rb_base_rc=$?
+    if [[ "$rb_base_rc" -ne 0 ]]; then
+      ( cd "$root" && git checkout -q HEAD -- "$lc_rel" 2>/dev/null ) || true
+      _pfsm_rb_release
+      echo "PRECONDITION FAIL: plan-rollback: could not read ${target_branch}:${lc_rel} to base the rollback record on (rc=${rb_base_rc}) — editing the plan branch's possibly-stale copy could drop deliveries the ledger already records. Nothing was written." >&2
+      exit 1
+    fi
+
     local rb_yrc=0
     ( cd "$root" && yq -i ".status = \"rolled_back\"
         | .rollback = {\"candidate_sha\": \"${candidate}\",
@@ -5818,6 +5834,9 @@ cmd_plan_rollback() {
     fi
     fi
   fi
+  # The worktree path was borrowed to carry the ledger's content into the
+  # commit; put the plan branch's own copy back so the borrow leaves no trace.
+  ( cd "$root" && git checkout -q HEAD -- "$lc_rel" 2>/dev/null ) || true
   plan_op_mark_git_applied "$plan_id" "$rb_op" "$rev_norm" >/dev/null 2>&1 || true
   _pfsm_crash_seam git_applied
 

@@ -4510,3 +4510,48 @@ _revert_the_merge() {
   [ "$status" -eq 0 ]
   [ "$output" = "rolled_back" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC16 — the git target is the ledger; the worktree is a working copy.
+# Two last applications of the same rule (2026-07-27).
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "AC16: an uncommitted local status: rolled_back does NOT make the resolver say rolled_back" {
+  _seed_closable
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  # Anyone can write this into a working copy without committing anything. If the
+  # resolver believed it, AID would report a rollback the ledger knows nothing
+  # about — the same two truths, pointing the other way.
+  ( cd "$TEST_PROJECT_ROOT" && yq -i '.status = "rolled_back"' "$rel" )
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status // \"\"'"
+  [ "$output" != "rolled_back" ]
+
+  run bash -c "cd '$TEST_PROJECT_ROOT' \
+    && source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh' \
+    && aid_plan_closure_state '$PLAN_ID' '$TEST_PROJECT_ROOT'"
+  [ "$status" -eq 0 ]
+  [ "$output" != "rolled_back" ]
+}
+
+@test "AC16: the rollback preserves deliveries the target has and the plan branch does not" {
+  _seed_closable
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  # The merge committed delivery bindings to the target. Make the plan branch's
+  # working copy deliberately STALE — no deliveries — the way a plan branch cut
+  # before the merge legitimately is. Editing that copy and publishing the whole
+  # file would silently delete what the ledger already records.
+  local target_deliveries
+  target_deliveries="$(git -C "$TEST_PROJECT_ROOT" show "main:${rel}" | yq -r '.deliveries // {} | length')"
+  [ "$target_deliveries" -ge 1 ]
+  ( cd "$TEST_PROJECT_ROOT" && yq -i 'del(.deliveries)' "$rel" )
+
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+
+  # The ledger still carries every delivery, alongside the rollback record.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.deliveries // {} | length'"
+  [ "$output" = "$target_deliveries" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status'"
+  [ "$output" = "rolled_back" ]
+}
