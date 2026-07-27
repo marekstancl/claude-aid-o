@@ -8,6 +8,55 @@ plan via `/aid-plan`.
 
 ---
 
+## P068 — DONE, released 2026-07-27
+
+**P068 (plan-final release boundary + cutover) is complete and released as
+v2.63.0, repaired by v2.63.1.** Both EPICs merged to `main` in a one-time
+bootstrap legacy close: P068 built the plan-final path but was itself built on
+the old one, so declaring it `plan_branch` would have been a false record.
+
+- Delivered: `plan_branch` as the guarded default, the plan-final gate/review/C4
+  sequence against a frozen candidate, the compare-and-swap merge, `plan-close`
+  as a real gate, `ROLLED_BACK` for a merged-then-reverted plan, and the
+  completion gate on `epic-merge-to-plan`.
+- Live-verified by the **P077** dogfood: `release_ready=true` with zero blockers,
+  merged, and `CLOSED` with a durable receipt — first attempt, no manual edit to
+  any evidence artifact.
+- Full dogfood history (P067 halted at C4, P075 merged then rolled back, P076
+  invalidated by controller error, P077 clean) is in
+  `plugins/aid-orchestrator/reference/P068-plan-branch-dogfood-report.md` and
+  archived on branch `archive/P068-dogfood-P067-P077-20260727`.
+
+**The three items below marked "required before P068 enables `plan_branch`" are
+satisfied** — IMP-271 (the mechanical `_pfsm_plan_final_installed` probe, whose
+refusal lifted only when both commands landed), IMP-272 (`merge_target`
+constrained by `_dep_merge_target_authorized`) and IMP-273 (`cmd_init` now asks
+the one fail-closed `_fsm_declared_plan_mode` authority). Their entries are kept
+below as the record of what was required and why.
+
+### NEW — IMP-280: a dogfood must not share refs with the repository it tests
+
+**Status:** ready — found by the P068 dogfood itself
+**Priority:** high
+**Class:** test isolation / false-evidence prevention
+**Area:** dogfood preflight
+
+**Summary:** The P067/P075/P076/P077 dogfoods ran in a linked `git worktree`,
+which shares `.git` and every ref with the source repository — so the "dogfood
+checkout's" `main` WAS the real `main`, and every run advanced the repository's
+real mainline. The two-checkout topology isolated the *commits* exactly as
+designed (no P068 implementation commit ever entered a candidate) but not the
+*refs*, which the report had implicitly assumed. Recovery needed an archive
+branch and a compare-and-swap restore of `refs/heads/main`.
+
+**Proposed change:** a dogfood preflight that compares
+`git rev-parse --git-common-dir` against the source repository's and, on a match,
+either refuses the run or requires a namespaced target ref or a genuinely
+separate clone. A dogfood that can move the real target branch is not isolated,
+however carefully its commits are kept apart.
+
+---
+
 ## Improvement items
 
 ### IMP-261 - Project-scoped configuration and INIT/SETUP redesign (analysis first)
