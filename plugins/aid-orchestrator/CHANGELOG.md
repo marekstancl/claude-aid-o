@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.63.2] — 2026-07-27
+
+### Fixed
+- **test-fsm's increment-step assertions** — they expected the pre-IMP-263 bare number, which the CI step timeout had hidden since 2026-07-23.
+
+### Changed
+- **Backlog records P068 as done** — released as 2.63.0, live-verified by the P077 dogfood, with the three `before P068` prerequisites marked satisfied against the code that satisfies them, and IMP-280 added: a dogfood must not run in a linked worktree sharing refs with the repository it tests.
+
 ## [2.63.1] — 2026-07-27
 
 ### Fixed
