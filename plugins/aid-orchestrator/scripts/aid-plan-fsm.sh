@@ -4858,7 +4858,7 @@ _pfsm_plan_state_repair() {
   cur_state="$(plan_state_get "$plan_id" "plan_state")" || src=$?
   if [[ "$src" -eq 0 ]]; then
     case "$cur_state" in
-      PLAN_GATES|PLAN_REVIEW|PLAN_FIX|AWAITING_PM|PLAN_MERGING|CLOSED|ABORTED)
+      PLAN_GATES|PLAN_REVIEW|PLAN_FIX|AWAITING_PM|PLAN_MERGING|CLOSED|ABORTED|ROLLED_BACK)
         echo "PRECONDITION FAIL: plan ${plan_id} is past PLAN_SYNC (state=${cur_state}) — repair refuses to run (would risk fabricating a candidate binding)." >&2
         return 1
         ;;
@@ -5528,7 +5528,7 @@ cmd_inventory() {
 # record that cannot find its own merge is describing a history someone edited.
 # ═══════════════════════════════════════════════════════════════════════════
 cmd_plan_rollback() {
-  local plan_id="" project_root_opt="" revert_commit="" reason=""
+  local plan_id="" project_root_opt="" revert_commit="" reason="" op_id_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --project-root) _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
@@ -5537,6 +5537,8 @@ cmd_plan_rollback() {
                       revert_commit="$2"; shift 2 ;;
       --reason)       _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
                       reason="$2"; shift 2 ;;
+      --op-id)        _pfsm_require_optval "plan-rollback" "$1" "$#" || exit 2
+                      op_id_opt="$2"; shift 2 ;;
       --*) echo "ERROR: plan-rollback: unknown flag: $1" >&2; exit 2 ;;
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"
          else echo "ERROR: plan-rollback: unexpected argument: $1" >&2; exit 2; fi
@@ -5544,7 +5546,7 @@ cmd_plan_rollback() {
     esac
   done
   if [[ -z "$plan_id" || -z "$revert_commit" ]]; then
-    echo "Usage: aid-plan-fsm.sh plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>]" >&2
+    echo "Usage: aid-plan-fsm.sh plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]" >&2
     exit 2
   fi
   _pfsm_validate_plan_id "$plan_id" || exit 2
@@ -5618,15 +5620,105 @@ cmd_plan_rollback() {
   # record that the merge happened is the audit trail a rollback is supposed to
   # preserve, not something it is supposed to clean up. What a rollback claims is
   # that the DELIVERY is gone, so that is what is checked.
-  local still=""
-  still="$(git -C "$root" diff --name-only "${target_before}" "${target_now}" 2>/dev/null \
+  # THE REVERT ITSELF must be the commit that restored the content — not merely
+  # any later descendant that happens to sit on a branch whose tip looks right.
+  # Comparing only the tip would accept a decoy: revert properly, commit
+  # something else, then name THAT as the revert. So the named commit's OWN tree
+  # is compared against the pre-merge tree.
+  local rev_diff=""
+  rev_diff="$(git -C "$root" diff --name-only "${target_before}" "${rev_norm}" 2>/dev/null \
     | grep -v '^\.aid-lifecycle/' | head -20 || true)"
+  # A commit made BEFORE the revert cannot restore anything; a commit made after
+  # it may legitimately add unrelated files, so the comparison that matters is
+  # the plan's own paths. Anything else here is not this plan's business.
+  if [[ -n "$rev_diff" ]]; then
+    local _rd kept=""
+    while IFS= read -r _rd; do
+      [[ -n "$_rd" ]] || continue
+      git -C "$root" diff --quiet "${target_before}" "${merge_commit}" -- "$_rd" 2>/dev/null \
+        || kept="${kept}${_rd}
+"
+    done <<< "$rev_diff"
+    rev_diff="$kept"
+  fi
+  # Matching content is necessary but NOT sufficient: every commit after the real
+  # revert also matches, because the revert already restored things. What makes a
+  # commit THE revert is that IT is the one that changed those paths. Otherwise
+  # the drill could be performed properly and then a later, innocent commit named
+  # as the revert — a true-looking record pointing at the wrong commit.
+  local rev_own=""
+  rev_own="$(git -C "$root" diff --name-only "${rev_norm}^" "${rev_norm}" 2>/dev/null \
+    | grep -v '^\.aid-lifecycle/' || true)"
+  local touched_plan_paths=0 _ro
+  if [[ -n "$rev_own" ]]; then
+    while IFS= read -r _ro; do
+      [[ -n "$_ro" ]] || continue
+      git -C "$root" diff --quiet "${target_before}" "${merge_commit}" -- "$_ro" 2>/dev/null \
+        || touched_plan_paths=1
+    done <<< "$rev_own"
+  fi
+  if [[ "$touched_plan_paths" -eq 0 ]]; then
+    echo "PRECONDITION FAIL: plan-rollback: ${rev_norm:0:8} does not itself restore the plan's paths — its own diff touches none of them, so it is a commit that happens to sit after the revert rather than the revert itself. Name the commit that removed the delivery. Nothing was written." >&2
+    exit 1
+  fi
+  if [[ -n "$rev_diff" ]]; then
+    echo "PRECONDITION FAIL: plan-rollback: the commit named as the revert (${rev_norm:0:8}) does not itself restore the pre-merge content of ${target_before:0:8} — these paths still differ AT THAT COMMIT, so it is not the revert (lifecycle bookkeeping under .aid-lifecycle/ is exempt and expected to remain):" >&2
+    printf '  %s\n' $rev_diff >&2
+    echo "Nothing was written." >&2
+    exit 1
+  fi
+  # And the branch must not have re-introduced THE PLAN'S OWN paths afterwards.
+  # Scoping matters: comparing the whole branch would reject every later
+  # unrelated commit, which has nothing to do with whether the delivery came
+  # back. The plan's paths are the ones its merge introduced.
+  local delivered still=""
+  delivered="$(git -C "$root" diff --name-only "${target_before}" "${merge_commit}" 2>/dev/null \
+    | grep -v '^\.aid-lifecycle/' || true)"
+  if [[ -n "$delivered" ]]; then
+    local dp
+    while IFS= read -r dp; do
+      [[ -n "$dp" ]] || continue
+      if ! git -C "$root" diff --quiet "${target_before}" "${target_now}" -- "$dp" 2>/dev/null; then
+        still="${still}${dp}
+"
+      fi
+    done <<< "$delivered"
+  fi
   if [[ -n "$still" ]]; then
-    echo "PRECONDITION FAIL: plan-rollback: ${target_branch} still carries the plan's delivery relative to its pre-merge state ${target_before:0:8} — these paths remain, so the delivery was not fully reverted (lifecycle bookkeeping under .aid-lifecycle/ is exempt and expected to remain):" >&2
+    echo "PRECONDITION FAIL: plan-rollback: ${target_branch} carries the plan's delivery again relative to its pre-merge state ${target_before:0:8} — the revert happened, but something after it re-introduced these paths:" >&2
     printf '  %s\n' $still >&2
     echo "Nothing was written." >&2
     exit 1
   fi
+
+  # ── The transaction: lock, then intent -> git_applied -> state_committed ──
+  # Without this a crash between the manifest write and the state change left a
+  # plan recording a rollback it was not in, with nothing to reconcile from.
+  local rb_lock; rb_lock="$(_pfsm_close_lock_path "$plan_id")"
+  rb_lock="${rb_lock%plan-close.lock}plan-rollback.lock"
+  if ! aid_lock_acquire "$rb_lock" 10; then
+    echo "PRECONDITION FAIL: plan-rollback: another rollback holds ${rb_lock} — nothing was written." >&2
+    exit 1
+  fi
+  local rb_fd="$AID_LOCK_FD"
+  _pfsm_rb_release() { [[ -n "${rb_fd:-}" ]] && aid_lock_release "$rb_fd" >/dev/null 2>&1; rb_fd=""; return 0; }
+
+  local rb_run
+  rb_run="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || rb_run=""
+  [[ "$rb_run" == "null" || "$rb_run" == "not_found" ]] && rb_run=""
+  local rb_attempt="${rb_run##*-final-}"
+  [[ "$rb_attempt" =~ ^[0-9]+$ ]] || rb_attempt=0
+  local rb_op="${op_id_opt:-$(plan_op_key "plan-rollback" "$plan_id" "-" "$rb_attempt" "$rev_norm")}"
+  local rb_phase="none"
+  rb_phase="$(plan_op_reconcile "$plan_id" "$rb_op" 2>/dev/null || echo none)"
+  if [[ "$rb_phase" != "git_applied" && "$rb_phase" != "state_committed" ]]; then
+    if ! plan_op_begin "$plan_id" "$rb_op" "plan-rollback" "$plan_id" "$rev_norm"; then
+      _pfsm_rb_release
+      echo "PRECONDITION FAIL: plan-rollback: could not record the rollback intent for ${plan_id} — nothing was written." >&2
+      exit 1
+    fi
+  fi
+  _pfsm_crash_seam intent
 
   local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local rb_json
@@ -5638,9 +5730,66 @@ cmd_plan_rollback() {
       verified:{merge_still_reachable:true, revert_on_target:true,
                 revert_after_merge:true, target_restored_to_pre_merge:true}}')"
   plan_manifest_update "$plan_id" ".plan_boundary_manifest.plan_final_rollback = ${rb_json}" >/dev/null 2>&1 \
-    || { echo "PRECONDITION FAIL: plan-rollback: could not record the rollback for ${plan_id}. Nothing was written." >&2; exit 1; }
+    || { _pfsm_rb_release; echo "PRECONDITION FAIL: plan-rollback: could not record the rollback for ${plan_id}. Nothing was written." >&2; exit 1; }
+
+  # ── git_applied: the DURABLE record, on the target branch ────────────────
+  # The runtime marker lives under gitignored .aid-o/, so without this a fresh
+  # clone would read `deliveries` and conclude the plan was delivered while the
+  # local workspace said it had been rolled back. Two truths — exactly what this
+  # boundary exists to remove. The write goes through the same plumbing path the
+  # merge bindings use (commit-tree + CAS update-ref, no checkout) and is READ
+  # BACK from the target ref: a record that cannot be read from git is not
+  # durable, whatever the worktree says.
+  local lc_rel=".aid-lifecycle/manifests/${plan_id}.yaml"
+  if [[ -f "${root}/${lc_rel}" ]]; then
+    # Idempotent by read-back: a resumed run finds the record already durable and
+    # writes nothing further. Committing it twice would put a second, identical
+    # lifecycle commit on the target branch for one rollback.
+    local rb_already=""
+    rb_already="$(git -C "$root" show "${target_branch}:${lc_rel}" 2>/dev/null \
+      | yq -r 'select(.status == "rolled_back") | .rollback.revert_commit // ""' 2>/dev/null || true)"
+    if [[ "$rb_already" == "$rev_norm" ]]; then
+      echo "NOTE: plan-rollback: the durable rollback record for ${plan_id} is already on ${target_branch} naming ${rev_norm:0:8} — this is a resume, so nothing was re-committed." >&2
+    else
+    local rb_yrc=0
+    ( cd "$root" && yq -i ".status = \"rolled_back\"
+        | .rollback = {\"candidate_sha\": \"${candidate}\",
+                       \"target_head_before_merge\": \"${target_before}\",
+                       \"merge_commit\": \"${merge_commit}\",
+                       \"revert_commit\": \"${rev_norm}\",
+                       \"rolled_back_at\": \"${now}\",
+                       \"reason\": \"${reason:-pm_rollback}\"}" "$lc_rel" ) || rb_yrc=$?
+    if [[ "$rb_yrc" -ne 0 ]]; then
+      _pfsm_rb_release
+      echo "PRECONDITION FAIL: plan-rollback: could not write the durable rollback record into ${lc_rel} — without it a fresh clone would still read this plan as delivered. Nothing further was written." >&2
+      exit 1
+    fi
+    # PLAN MODE, for the same reason the merge bindings and the close receipt use
+    # it: the controller's worktree sits on the plan branch, not on the target,
+    # and an ordinary commit would be refused by the target-branch guard. Plan
+    # mode publishes with commit-tree + a CAS update-ref onto the target ref —
+    # no checkout, no HEAD move.
+    local rb_crc=0
+    aid_lc_plan_mode_begin "" "" "$target_now"
+    ( cd "$root" && _aid_lc_isolated_commit "." "lifecycle: ${plan_id} rolled back (merge ${merge_commit:0:8}, revert ${rev_norm:0:8})" "$lc_rel" >/dev/null 2>&1 ) || rb_crc=$?
+    aid_lc_plan_mode_end
+    local rb_read=""
+    rb_read="$(git -C "$root" show "${target_branch}:${lc_rel}" 2>/dev/null | yq -r '.status // ""' 2>/dev/null || true)"
+    if [[ "$rb_read" != "rolled_back" ]]; then
+      ( cd "$root" && git checkout -q HEAD -- "$lc_rel" 2>/dev/null ) || true
+      _pfsm_rb_release
+      echo "PRECONDITION FAIL: plan-rollback: the durable rollback record is not readable from ${target_branch}:${lc_rel} (rc=${rb_crc}, read='${rb_read:-<none>}') — the worktree edit is reverted and nothing else was written. A rollback nobody can see from a clean clone is not a rollback." >&2
+      exit 1
+    fi
+    fi
+  else
+    echo "NOTE: plan-rollback: ${plan_id} has no ${lc_rel} — this is a legacy plan predating the lifecycle layer, so the rollback is recorded in the runtime manifest only and is NOT durable across a clean clone." >&2
+  fi
+  plan_op_mark_git_applied "$plan_id" "$rb_op" "$rev_norm" >/dev/null 2>&1 || true
+  _pfsm_crash_seam git_applied
 
   if ! _pfsm_plan_state_set "$plan_id" "ROLLED_BACK"; then
+    _pfsm_rb_release
     echo "PRECONDITION FAIL: plan-rollback: the rollback is recorded for ${plan_id}, but the plan could not be moved to ROLLED_BACK. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}'." >&2
     exit 1
   fi
@@ -5654,7 +5803,9 @@ cmd_plan_rollback() {
     "$plan_id" "$candidate" "$target_branch" "$target_before" "$merge_commit" "$rev_norm" "${reason:-pm_rollback}" "$now" \
     > "${marker}.tmp" && mv -f "${marker}.tmp" "$marker"
 
-  echo "ROLLED BACK: ${plan_id} merged as ${merge_commit:0:8} and was reverted by ${rev_norm:0:8}; ${target_branch} is back at its pre-merge tree (${target_before:0:8}) with both commits still reachable. The plan is ROLLED_BACK — not aborted, which would deny the merge, and not closed, which would claim a delivery that is no longer there." >&2
+  plan_op_commit "$plan_id" "$rb_op" >/dev/null 2>&1 || true
+  _pfsm_rb_release
+  echo "ROLLED BACK: ${plan_id} merged as ${merge_commit:0:8} and was reverted by ${rev_norm:0:8}; ${target_branch} is back at its pre-merge tree (${target_before:0:8}) with both commits still reachable, and the rollback is durable in ${lc_rel} on ${target_branch}. The plan is ROLLED_BACK — not aborted, which would deny the merge, and not closed, which would claim a delivery that is no longer there." >&2
   return 0
 }
 
@@ -5669,7 +5820,7 @@ Subcommands:
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
   plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
-  plan-close <plan_id> [--project-root <path>]
+  plan-close <plan_id> [--project-root <path>] [--op-id <id>] [--skip-delivery-report]
   plan-rollback <plan_id> --revert-commit <sha> [--reason <text>] [--project-root <path>] [--op-id <id>]
   inventory [--apply] [--plan <id>] [--project-root <path>]
   plan-state <plan_id> [--repair] [--attest-source-ref <ref> --reason <text> --epic <epic_id>] [--project-root <path>]

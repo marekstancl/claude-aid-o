@@ -457,9 +457,11 @@ _pm_check_invariants() {
   # `plan-state` kept reporting AWAITING_PM for a plan the authoritative
   # plan-state.yaml had already marked ABORTED. The alternatives were both worse:
   # clearing the candidate destroys the evidence, and tolerating the stale mirror
-  # leaves every reader with a false answer.
-  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED","ABORTED"] | index($s) != null)' "$file" >/dev/null 2>&1; then
-    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED/ABORTED)" >&2
+  # leaves every reader with a false answer. ROLLED_BACK (2026-07-27) is here for
+  # the same reason: a rolled-back plan keeps the candidate that WAS merged and
+  # then reverted — that SHA is half the rollback record.
+  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED","ABORTED","ROLLED_BACK"] | index($s) != null)' "$file" >/dev/null 2>&1; then
+    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED/ABORTED/ROLLED_BACK)" >&2
     return 1
   fi
 

@@ -1,23 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://aid-orchestrator.aidlab.dev/schemas/plan-boundary-manifest.schema.json",
-  "title": "AID Protocol v2 — PlanBoundaryManifest (P064 E-064-1_2)",
-  "$comment": "producer: FSM (plan-branch lifecycle), consumers: [lib/aid-plan-manifest.sh, C4, PM brief]. Descriptive/documentation contract only — NOT loaded or enforced by aid-protocol-validate.sh (that script only proves payload-key presence, step 12, exit 12). The conditional invariants noted below are enforced by a LATER step (lib/aid-plan-manifest.sh, hand-written jq -e checks), not by this schema.",
-  "description": "Type-specific schema for plan-boundary-manifest.json — the record tracking a plan branch's EPICs, task branches, and integration heads through the plan-branch lifecycle (plan/Pxxx as the integration branch for a plan's EPICs). Path: .aid-o/work/plan-state/<plan_id>/plan-boundary-manifest.json.",
+  "title": "AID Protocol v2 \u2014 PlanBoundaryManifest (P064 E-064-1_2)",
+  "$comment": "producer: FSM (plan-branch lifecycle), consumers: [lib/aid-plan-manifest.sh, C4, PM brief]. Descriptive/documentation contract only \u2014 NOT loaded or enforced by aid-protocol-validate.sh (that script only proves payload-key presence, step 12, exit 12). The conditional invariants noted below are enforced by a LATER step (lib/aid-plan-manifest.sh, hand-written jq -e checks), not by this schema.",
+  "description": "Type-specific schema for plan-boundary-manifest.json \u2014 the record tracking a plan branch's EPICs, task branches, and integration heads through the plan-branch lifecycle (plan/Pxxx as the integration branch for a plan's EPICs). Path: .aid-o/work/plan-state/<plan_id>/plan-boundary-manifest.json.",
   "type": "object",
   "allOf": [
     {
-      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only — not a resolved $ref)"
+      "$comment": "extends aid-protocol-v2.schema.json envelope (reference only \u2014 not a resolved $ref)"
     }
   ],
   "properties": {
     "artifact_type": {
       "const": "plan_boundary_manifest",
-      "$comment": "enforced — must equal this type"
+      "$comment": "enforced \u2014 must equal this type"
     },
     "plan_boundary_manifest": {
       "type": "object",
-      "$comment": "enforced — payload-key presence only (step 12, exit 12). Field-level shape below is descriptive/documentation, not runtime-enforced by aid-protocol-validate.sh.",
+      "$comment": "enforced \u2014 payload-key presence only (step 12, exit 12). Field-level shape below is descriptive/documentation, not runtime-enforced by aid-protocol-validate.sh.",
       "properties": {
         "plan_id": {
           "type": "string",
@@ -42,8 +42,13 @@
         },
         "target_branch_head_at_candidate_freeze": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "plan_branch_head": {
@@ -52,24 +57,39 @@
         },
         "candidate_sha": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh). Non-null ALSO requires candidate_frozen_at non-null, and vice versa (P068 Step 1) — the pair is written and cleared atomically by lib/aid-plan-manifest.sh, which is the sole owner of both fields."
+          "description": "Non-null requires plan_state in PLAN_GATES, PLAN_REVIEW, AWAITING_PM, PLAN_MERGING, CLOSED. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh). Non-null ALSO requires candidate_frozen_at non-null, and vice versa (P068 Step 1) \u2014 the pair is written and cleared atomically by lib/aid-plan-manifest.sh, which is the sole owner of both fields."
         },
         "candidate_frozen_at": {
           "oneOf": [
-            { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "P068 Step 1. RFC 3339 UTC ('Z') instant at which candidate_sha was frozen — the AUTHORITATIVE freeze-time source a PM decision artifact's decided_at is validated against (Step 5). Deliberately lives HERE, in the RUNTIME plan-boundary manifest, and NOT in the .aid-lifecycle manifest: only this artifact's write path can establish atomicity with candidate_sha. Nullable under exactly the same rule as candidate_sha — the two are legal only together, so a refreeze rewrites both and an invalidation clears both. NOT enforced here — see lib/aid-plan-manifest.sh (_pm_check_invariants)."
+          "description": "P068 Step 1. RFC 3339 UTC ('Z') instant at which candidate_sha was frozen \u2014 the AUTHORITATIVE freeze-time source a PM decision artifact's decided_at is validated against (Step 5). Deliberately lives HERE, in the RUNTIME plan-boundary manifest, and NOT in the .aid-lifecycle manifest: only this artifact's write path can establish atomicity with candidate_sha. Nullable under exactly the same rule as candidate_sha \u2014 the two are legal only together, so a refreeze rewrites both and an invalidation clears both. NOT enforced here \u2014 see lib/aid-plan-manifest.sh (_pm_check_invariants)."
         },
         "candidate_invalidation_reason": {
           "oneOf": [
-            { "type": "string", "minLength": 1 },
-            { "type": "null" }
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "P068 Step 1. Free-text reason recorded by plan_final_invalidate when a frozen candidate is discarded (e.g. candidate_changed_after_freeze, stale_pm_authorization). Cleared on the next successful freeze. Purely informational — no invariant depends on it."
+          "description": "P068 Step 1. Free-text reason recorded by plan_final_invalidate when a frozen candidate is discarded (e.g. candidate_changed_after_freeze, stale_pm_authorization). Cleared on the next successful freeze. Purely informational \u2014 no invariant depends on it."
         },
         "plan_state": {
           "enum": [
@@ -83,11 +103,15 @@
             "PLAN_MERGING",
             "CLOSED",
             "ABORTED",
-            "CONFLICT"
+            "CONFLICT",
+            "ROLLED_BACK"
           ]
         },
         "mode": {
-          "enum": ["plan_branch", "legacy_epic_release_mode"]
+          "enum": [
+            "plan_branch",
+            "legacy_epic_release_mode"
+          ]
         },
         "epics": {
           "type": "array",
@@ -99,7 +123,7 @@
         },
         "active_epics": {
           "type": "array",
-          "description": "Must be a subset of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh).",
+          "description": "Must be a subset of epics. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh).",
           "items": {
             "type": "string",
             "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$"
@@ -108,18 +132,30 @@
         "total_epics": {
           "type": "integer",
           "minimum": 0,
-          "description": "Must equal epics length. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Must equal epics length. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "is_plan_final": {
           "type": "boolean",
-          "description": "True only in PLAN_SYNC or later. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "True only in PLAN_SYNC or later. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "epic_required_profile": {
-          "enum": ["quick", "targeted", "standard", "full", "release"]
+          "enum": [
+            "quick",
+            "targeted",
+            "standard",
+            "full",
+            "release"
+          ]
         },
         "plan_final_required_profile": {
-          "enum": ["quick", "targeted", "standard", "full", "release"],
-          "description": "Monotonically non-decreasing relative to epic_required_profile. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+          "enum": [
+            "quick",
+            "targeted",
+            "standard",
+            "full",
+            "release"
+          ],
+          "description": "Monotonically non-decreasing relative to epic_required_profile. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "epic_runs": {
           "type": "array",
@@ -129,7 +165,7 @@
               "epic_id": {
                 "type": "string",
                 "pattern": "^E-[0-9]{3}-[0-9]+_[0-9]+$",
-                "description": "Must be a member of epics. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+                "description": "Must be a member of epics. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
               },
               "run_id": {
                 "type": "string",
@@ -145,18 +181,29 @@
                 "description": "The plan head observed at epic-start."
               },
               "epic_source_ref": {
-                "type": ["string", "null"],
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "description": "The ref the branch was created from; null only for a repaired entry that could not prove its origin."
               },
               "lineage": {
-                "enum": ["proven", "unproven"]
+                "enum": [
+                  "proven",
+                  "unproven"
+                ]
               },
               "epic_merge_commit": {
                 "oneOf": [
-                  { "type": "string", "pattern": "^[0-9a-f]{40}$" },
-                  { "type": "null" }
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  {
+                    "type": "null"
+                  }
                 ],
-                "description": "Non-null requires status: merged_to_plan. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+                "description": "Non-null requires status: merged_to_plan. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
               },
               "evidence_dir": {
                 "type": "string",
@@ -164,23 +211,48 @@
                 "description": "Must start with .aid-o/work/evidence/<epic_id>/. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
               },
               "status": {
-                "enum": ["pending", "running", "merged_to_plan", "abandoned", "superseded", "blocked"]
+                "enum": [
+                  "pending",
+                  "running",
+                  "merged_to_plan",
+                  "abandoned",
+                  "superseded",
+                  "blocked"
+                ]
               }
             },
-            "required": ["epic_id", "run_id", "task_branch", "epic_base_commit", "lineage", "evidence_dir", "status"]
+            "required": [
+              "epic_id",
+              "run_id",
+              "task_branch",
+              "epic_base_commit",
+              "lineage",
+              "evidence_dir",
+              "status"
+            ]
           }
         },
         "plan_final_run_id": {
           "oneOf": [
-            { "type": "string", "pattern": "^R-P[0-9]{3}-final-[0-9]+$" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^R-P[0-9]{3}-final-[0-9]+$"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "Non-null requires plan_final_evidence_dir non-null and vice versa. NOT enforced here — see Step 3 (lib/aid-plan-manifest.sh)."
+          "description": "Non-null requires plan_final_evidence_dir non-null and vice versa. NOT enforced here \u2014 see Step 3 (lib/aid-plan-manifest.sh)."
         },
         "plan_final_evidence_dir": {
           "oneOf": [
-            { "type": "string", "pattern": "^\\.aid-o/work/evidence/P[0-9]{3}/" },
-            { "type": "null" }
+            {
+              "type": "string",
+              "pattern": "^\\.aid-o/work/evidence/P[0-9]{3}/"
+            },
+            {
+              "type": "null"
+            }
           ],
           "description": "Non-null requires plan_final_run_id non-null and vice versa. Path containment (no ..) is checked by Step 3 (lib/aid-plan-manifest.sh), not here."
         }
@@ -204,5 +276,7 @@
       ]
     }
   },
-  "required": ["plan_boundary_manifest"]
+  "required": [
+    "plan_boundary_manifest"
+  ]
 }

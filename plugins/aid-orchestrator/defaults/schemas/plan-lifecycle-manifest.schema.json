@@ -1,38 +1,72 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "AID plan-lifecycle manifest (IMP-232 v2.58.0)",
-  "description": "Git-tracked, PUBLIC-SAFE durable denominator + structured deps + delivery provenance for a plan. Technical receipt fields only — no report bodies, findings, prompts, absolute paths, secrets, PII, or waiver reasons.",
+  "description": "Git-tracked, PUBLIC-SAFE durable denominator + structured deps + delivery provenance for a plan. Technical receipt fields only \u2014 no report bodies, findings, prompts, absolute paths, secrets, PII, or waiver reasons.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "repo_id", "plan_id", "declared_epics"],
+  "required": [
+    "schema_version",
+    "repo_id",
+    "plan_id",
+    "declared_epics"
+  ],
   "properties": {
-    "schema_version": { "type": "string" },
-    "repo_id": { "type": "string", "minLength": 1 },
-    "plan_id": { "type": "string", "pattern": "^P[0-9]+$" },
-    "source_plan_sha": { "type": "string" },
-    "target_branch": { "type": "string" },
+    "schema_version": {
+      "type": "string"
+    },
+    "repo_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "pattern": "^P[0-9]+$"
+    },
+    "source_plan_sha": {
+      "type": "string"
+    },
+    "target_branch": {
+      "type": "string"
+    },
     "mode": {
-      "enum": ["plan_branch", "legacy_epic_release_mode"],
-      "description": "P064 E-064-1_2 Step 3: the authoritative release model for this plan. Absent on a manifest created before P064 (or by ensure_manifest without an explicit mode write) — absence means legacy_epic_release_mode (aid_lifecycle_plan_mode's documented default), never a hard failure. Written durably by aid_lifecycle_set_plan_mode (lib/aid-lifecycle.sh) so a hand-edited/deleted runtime plan-state.yaml can never silently change which model a plan follows."
+      "enum": [
+        "plan_branch",
+        "legacy_epic_release_mode"
+      ],
+      "description": "P064 E-064-1_2 Step 3: the authoritative release model for this plan. Absent on a manifest created before P064 (or by ensure_manifest without an explicit mode write) \u2014 absence means legacy_epic_release_mode (aid_lifecycle_plan_mode's documented default), never a hard failure. Written durably by aid_lifecycle_set_plan_mode (lib/aid-lifecycle.sh) so a hand-edited/deleted runtime plan-state.yaml can never silently change which model a plan follows."
     },
     "declared_epics": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "scope"],
+        "required": [
+          "id",
+          "scope"
+        ],
         "properties": {
-          "id": { "type": "string", "pattern": "^E-[0-9]+-[0-9]+_[0-9]+$" },
+          "id": {
+            "type": "string",
+            "pattern": "^E-[0-9]+-[0-9]+_[0-9]+$"
+          },
           "scope": {
-            "enum": ["required", "backlog", "abandoned", "superseded"],
-            "description": "P068 E-068-1_2 Step 5 (CF1) widens this from [required, backlog]. `abandoned` and `superseded` are written by plan-merge-to-main, in the SAME commit as the delivery bindings, for EPICs the PM terminated without delivery — so aid_plan_closure_state stops counting them in the required denominator and the plan can close. They are NOT written at epic-complete: _aid_lc_require_target_branch refuses a lifecycle write off the target branch, and epic-complete runs on a task branch. The PM's REASON deliberately does not live here — this file is additionalProperties:false and aid_lifecycle_publicsafe_check rejects a free-text `reason` key; the reason is recorded in the runtime plan-state and the operation log."
+            "enum": [
+              "required",
+              "backlog",
+              "abandoned",
+              "superseded"
+            ],
+            "description": "P068 E-068-1_2 Step 5 (CF1) widens this from [required, backlog]. `abandoned` and `superseded` are written by plan-merge-to-main, in the SAME commit as the delivery bindings, for EPICs the PM terminated without delivery \u2014 so aid_plan_closure_state stops counting them in the required denominator and the plan can close. They are NOT written at epic-complete: _aid_lc_require_target_branch refuses a lifecycle write off the target branch, and epic-complete runs on a task branch. The PM's REASON deliberately does not live here \u2014 this file is additionalProperties:false and aid_lifecycle_publicsafe_check rejects a free-text `reason` key; the reason is recorded in the runtime plan-state and the operation log."
           }
         }
       }
     },
     "depends_on_plans": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^P[0-9]+$" }
+      "items": {
+        "type": "string",
+        "pattern": "^P[0-9]+$"
+      }
     },
     "deliveries": {
       "type": "object",
@@ -40,22 +74,90 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "delivery": { "enum": ["delivered"] },
-          "review": { "enum": ["accepted", "unverifiable", "rejected", "none"] },
-          "reviewed_sha": { "type": "string" },
-          "reviewed_verdict": { "type": "string" },
-          "unresolved_blockers": { "type": "integer", "minimum": 0 },
-          "delivery_sha": { "type": "string" },
-          "merged_tree": { "type": "string" },
-          "bound_at": { "type": "string" }
+          "delivery": {
+            "enum": [
+              "delivered"
+            ]
+          },
+          "review": {
+            "enum": [
+              "accepted",
+              "unverifiable",
+              "rejected",
+              "none"
+            ]
+          },
+          "reviewed_sha": {
+            "type": "string"
+          },
+          "reviewed_verdict": {
+            "type": "string"
+          },
+          "unresolved_blockers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "delivery_sha": {
+            "type": "string"
+          },
+          "merged_tree": {
+            "type": "string"
+          },
+          "bound_at": {
+            "type": "string"
+          }
         }
       }
     },
     "status": {
-      "enum": ["active", "closed", "aborted"],
-      "description": "P068 E-068-1_2 Step 5: the plan's terminal lifecycle status, durable on the target branch. Absent means `active` (every manifest written before P068). Step 6 (plan-close) owns the transition to `closed`; an aborted plan is recorded as `aborted`. Deliberately additive: the receipt remains the authoritative closure artifact, this is the manifest-side flag closure predicates can read without resolving a second file."
+      "enum": [
+        "active",
+        "closed",
+        "aborted",
+        "rolled_back"
+      ],
+      "description": "P068 E-068-1_2 Step 5: the plan's terminal lifecycle status, durable on the target branch. Absent means `active` (every manifest written before P068). Step 6 (plan-close) owns the transition to `closed`; an aborted plan is recorded as `aborted`; a plan that merged and was then reverted is `rolled_back` (P075 dogfood, 2026-07-27) \u2014 neither `aborted`, which would deny the merge, nor `closed`, which would claim a delivery no longer on the target branch. Deliberately additive: the receipt remains the authoritative closure artifact, this is the manifest-side flag closure predicates can read without resolving a second file."
     },
-    "created_at": { "type": "string" },
-    "aid_version": { "type": "string" }
+    "created_at": {
+      "type": "string"
+    },
+    "aid_version": {
+      "type": "string"
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_sha",
+        "target_head_before_merge",
+        "merge_commit",
+        "revert_commit"
+      ],
+      "description": "The durable, git-tracked rollback record. It exists because the runtime marker under .aid-o/ is gitignored: without this block a fresh clone would read `deliveries` and conclude the plan was delivered, while the local workspace said it had been rolled back. Two truths, which is exactly what the plan boundary removes.",
+      "properties": {
+        "candidate_sha": {
+          "type": "string",
+          "description": "The candidate the PM approved and that was merged."
+        },
+        "target_head_before_merge": {
+          "type": "string",
+          "description": "The target-branch head the candidate was approved against \u2014 what the revert restored the branch to."
+        },
+        "merge_commit": {
+          "type": "string",
+          "description": "The published plan merge. Must remain reachable: a rollback is a revert forward, never a rewrite."
+        },
+        "revert_commit": {
+          "type": "string",
+          "description": "The commit that restored the pre-merge content. Verified by comparing ITS tree against the pre-merge tree outside .aid-lifecycle/, not merely by ancestry."
+        },
+        "rolled_back_at": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
   }
 }

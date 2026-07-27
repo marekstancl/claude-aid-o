@@ -5510,6 +5510,16 @@ cmd_plan_close() {
     local _pb_state=""
     [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
     case "$_pb_state" in
+      ROLLED_BACK)
+        # A rolled-back plan is already terminal and was closed by plan-rollback,
+        # which has its own marker and its own durable record. Sending it to
+        # plan-close would refuse (close runs out of PLAN_MERGING or a recorded
+        # abort) and, worse, would imply the plan still owed a closure it has
+        # already had. The EPIC's own evidence is still checked below — the plan
+        # being rolled back says nothing about whether this EPIC did its work.
+        echo "NOTE: plan-close: ${plan_id} is ROLLED_BACK — its plan-layer closure is the rollback record, so no plan-close is attempted. The EPIC's own required reports are still checked." >&2
+        _pb_plan_layer_closed=1
+        ;;
       PLAN_MERGING|ABORTED|CLOSED)
         local -a _pb_close_args=("$plan_id" --project-root "$project_root")
         [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)

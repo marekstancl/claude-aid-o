@@ -226,6 +226,11 @@ _AID_PLAN_TRANSITIONS=(
   "AWAITING_PM:CONFLICT"
   "AWAITING_PM:ABORTED"
   "PLAN_MERGING:CLOSED"
+  # P075 dogfood (2026-07-27): a plan that merged and was then correctly reverted
+  # has no honest terminal state today. ABORTED is a lie — it merged; CLOSED is a
+  # lie — its delivery is not on the target branch. ROLLED_BACK is the third
+  # outcome the boundary always had in practice and never had a name for.
+  "PLAN_MERGING:ROLLED_BACK"
   "PLAN_MERGING:CONFLICT"
   "PLAN_MERGING:ABORTED"
 )
@@ -237,7 +242,7 @@ _AID_PLAN_TRANSITIONS=(
 
 _AID_PLAN_VALID_STATES=(
   OPEN EPIC_INTEGRATION PLAN_SYNC PLAN_GATES PLAN_REVIEW PLAN_FIX
-  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT
+  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT ROLLED_BACK
 )
 
 _plan_warn() {

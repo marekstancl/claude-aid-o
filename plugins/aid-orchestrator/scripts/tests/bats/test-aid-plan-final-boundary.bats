@@ -4290,3 +4290,129 @@ _revert_the_merge() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"PUBLISHED merge"* ]]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC14 — ROLLED_BACK is durable, transactional and known system-wide.
+#
+# The first cut of plan-rollback recorded the state locally only: the runtime
+# marker lives under gitignored .aid-o/, so a fresh clone still read `deliveries`
+# and concluded the plan was delivered. Two truths — exactly what the boundary
+# removes.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "AC14: the plan-boundary schema accepts ROLLED_BACK" {
+  run jq -r '[.properties.plan_boundary_manifest.properties.plan_state.enum[]] | index("ROLLED_BACK")' \
+    "$AID_PLUGIN_PATH/defaults/schemas/plan-boundary-manifest.schema.json"
+  [ "$output" != "null" ]
+  run jq -r '[.properties.status.enum[]] | index("rolled_back")' \
+    "$AID_PLUGIN_PATH/defaults/schemas/plan-lifecycle-manifest.schema.json"
+  [ "$output" != "null" ]
+  # The rollback block requires all four SHAs — a record naming fewer proves less.
+  run jq -r '.properties.rollback.required | sort | join(",")' \
+    "$AID_PLUGIN_PATH/defaults/schemas/plan-lifecycle-manifest.schema.json"
+  [ "$output" = "candidate_sha,merge_commit,revert_commit,target_head_before_merge" ]
+}
+
+@test "AC14: a CLEAN CLONE can tell the plan was rolled back, with all four SHAs" {
+  _seed_closable
+  local cand mc tbefore
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  mc="$(_merge_commit)"
+  tbefore="$(jq -r '.plan_boundary_manifest.plan_final_merge.target_head_before' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+
+  # Read it the way a fresh clone would: from git, never from .aid-o/.
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status'"
+  [ "$output" = "rolled_back" ]
+  local k
+  for k in candidate_sha:$cand merge_commit:$mc revert_commit:$rev target_head_before_merge:$tbefore; do
+    run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.rollback.${k%%:*}'"
+    [ "$output" = "${k#*:}" ]
+  done
+}
+
+@test "AC14: a DECOY commit after the real revert cannot be passed off as the revert" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  # An unrelated commit AFTER the revert. The branch tip now looks correct, so a
+  # check that only inspected the tip would accept this commit as the revert.
+  _commit_on main decoy.txt "chore: an unrelated commit after the revert"
+  local decoy; decoy="$(_main_sha)"
+
+  _rollback "$decoy"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"does not itself restore"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "ROLLED_BACK" ]
+
+  # ...while the REAL revert is still accepted, decoy and all.
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC14: a later unrelated commit does not block the rollback" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _commit_on main unrelated.txt "chore: work that has nothing to do with the plan"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+}
+
+@test "AC14: a crash after INTENT leaves nothing recorded and the retry converges" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  run env AID_PLAN_FSM_CRASH_AFTER=intent bash "$PLAN_FSM_CLI" plan-rollback "$PLAN_ID" \
+    --revert-commit "$rev" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 99 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "ROLLED_BACK" ]
+
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+}
+
+@test "AC14: a crash after GIT_APPLIED converges without a second durable record" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  run env AID_PLAN_FSM_CRASH_AFTER=git_applied bash "$PLAN_FSM_CLI" plan-rollback "$PLAN_ID" \
+    --revert-commit "$rev" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 99 ]
+  # The durable record IS written at git_applied — that is what the phase means.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.status'"
+  [ "$output" = "rolled_back" ]
+  local commits_before
+  commits_before="$(git -C "$TEST_PROJECT_ROOT" rev-list --count main -- "$rel")"
+
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+  # The resume did not write the record a second time.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-list --count main -- "$rel")" = "$commits_before" ]
+}
+
+@test "AC14: repair refuses a rolled-back plan, and the ABORT path still refuses a published merge" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh" "$PLAN_ID" \
+    --project-root "$TEST_PROJECT_ROOT" --plan-branch --close-mode abort
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PUBLISHED merge"* ]]
+}
