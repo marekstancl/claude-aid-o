@@ -4084,3 +4084,66 @@ _seed_startable_epic() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"epic_completion"* ]]
 }
+
+@test "AC5: after an ABORT, plan-state agrees with the authoritative state file" {
+  _seed_merge_project
+  _merge "$(_decision_file '.decision = "ABORT" | .reason = "diagnostic run"')"
+  [ "$status" -ne 0 ]
+
+  # The authority and the reporter must not disagree. `plan-state` answers from
+  # the runtime manifest's mirror, so a transition that does not mirror leaves
+  # every reader believing an aborted plan is still awaiting the PM — which is
+  # exactly what the P067 close produced before the invariant admitted ABORTED.
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ABORTED" ]
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ABORTED"* ]]
+  [[ "$output" != *"AWAITING_PM"* ]]
+  # And the abandoned candidate is RETAINED — it is the proof of what was
+  # refused, which is why ABORTED had to join the candidate-bearing states
+  # rather than the candidate being cleared.
+  [ -n "$(_manifest_field "$PLAN_ID" candidate_sha)" ]
+}
+
+@test "AC12: a DELETED FSM state file after completion blocks the merge" {
+  _seed_startable_epic "E-068-1_2"
+  _seed_epic_done_state "E-068-1_2"
+  run bash "$PLAN_FSM_CLI" epic-complete "$PLAN_ID" "E-068-1_2" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Deleting the evidence is the cheapest way to make an unverified EPIC look
+  # mergeable, so an absent state file must be a refusal, never a skipped check.
+  local edir
+  edir="$(jq -r '[.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-1_2") | .epic_completion_evidence_dir][0]' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  [ -n "$edir" ]
+  rm -f "${TEST_PROJECT_ROOT}/${edir}/fsm-state.yaml"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion_stale"* ]]
+  [[ "$output" == *"never a passed check"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$plan_before" ]
+}
+
+@test "AC12: the FSM is read from the RECORDED evidence dir, not a derived path" {
+  _seed_startable_epic "E-068-1_2"
+  _seed_epic_done_state "E-068-1_2"
+  run bash "$PLAN_FSM_CLI" epic-complete "$PLAN_ID" "E-068-1_2" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # Rewind the state the RECORDED directory holds. A merge that derived its own
+  # path could miss this and pass on a completion that no longer holds.
+  local edir
+  edir="$(jq -r '[.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-1_2") | .epic_completion_evidence_dir][0]' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  printf 'epic_id: E-068-1_2\nstate: EXECUTE\ncurrent_step: 1\ntotal_steps: 2\n' \
+    > "${TEST_PROJECT_ROOT}/${edir}/fsm-state.yaml"
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion_stale"* ]]
+  [[ "$output" == *"not DONE"* ]]
+}

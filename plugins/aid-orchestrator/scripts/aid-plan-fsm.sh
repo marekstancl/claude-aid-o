@@ -1538,17 +1538,42 @@ cmd_epic_merge_to_plan() {
       echo "PRECONDITION FAIL: epic_completion_missing: the epic-complete operation for ${epic_id} is recorded at phase '${_mg_phase:-<none>}', not 'state_committed' — an interrupted completion is not a completion. Re-run epic-complete. Nothing was merged." >&2
       exit 1
     fi
-    # The EPIC's own FSM must still say DONE — a state file rewound after
-    # completion invalidates the authorization just as a moved tip does.
-    if [[ -n "$_mg_run" ]]; then
-      local _mg_state_file="${project_root}/.aid-o/work/evidence/${epic_id}/${_mg_run}/fsm-state.yaml"
-      if [[ -f "$_mg_state_file" ]]; then
-        local _mg_st; _mg_st="$(grep -E '^state:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1)"
-        if [[ "$_mg_st" != "DONE" ]]; then
-          echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}', not DONE — the completion this merge relies on no longer holds. Nothing was merged." >&2
-          exit 1
-        fi
-      fi
+    # The EPIC's own FSM must still say DONE. Two fail-open holes were closed
+    # here on 2026-07-27, both found by review rather than by a test:
+    #
+    #   (a) the check only ran when the state file EXISTED, so deleting it after
+    #       completion skipped the check entirely — the one thing an attacker or
+    #       a careless cleanup would do to make an unfinished EPIC mergeable;
+    #   (b) the path was DERIVED from the run id instead of read from the
+    #       `epic_completion_evidence_dir` completion recorded, which was written
+    #       and then never used. A derived path can point somewhere completion
+    #       never looked.
+    #
+    # Both the run id and the evidence dir are now required, must still match the
+    # manifest entry, and the FSM is read ONLY from the recorded directory. A
+    # missing state file is `epic_completion_stale`, not a skipped check.
+    local _mg_evd _mg_entry_run _mg_entry_evd
+    _mg_evd="$(jq -r '.epic_completion_evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || _mg_evd=""
+    _mg_entry_run="$(jq -r '.run_id // empty' <<<"$entry_json" 2>/dev/null)" || _mg_entry_run=""
+    _mg_entry_evd="$(jq -r '.evidence_dir // empty' <<<"$entry_json" 2>/dev/null)" || _mg_entry_evd=""
+    if [[ -z "$_mg_run" || -z "$_mg_evd" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} records no epic_completion_run_id/epic_completion_evidence_dir (run='${_mg_run:-<unset>}', dir='${_mg_evd:-<unset>}') — completion that names no evidence cannot be re-checked, so it authorizes nothing. Re-run epic-complete. Nothing was merged." >&2
+      exit 1
+    fi
+    if [[ -n "$_mg_entry_run" && "$_mg_run" != "$_mg_entry_run" ]] \
+       || [[ -n "$_mg_entry_evd" && "$_mg_evd" != "$_mg_entry_evd" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s completion names run '${_mg_run}' / dir '${_mg_evd}', but the manifest entry now records run '${_mg_entry_run}' / dir '${_mg_entry_evd}' — the EPIC was re-run since completion, so that completion describes a different run. Re-run epic-complete. Nothing was merged." >&2
+      exit 1
+    fi
+    local _mg_state_file="${project_root}/${_mg_evd}/fsm-state.yaml"
+    if [[ ! -f "$_mg_state_file" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM state file is missing at ${_mg_evd}/fsm-state.yaml — the completion this merge relies on can no longer be verified. An absent file is never a passed check. Nothing was merged." >&2
+      exit 1
+    fi
+    local _mg_st; _mg_st="$(grep -E '^state:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1)"
+    if [[ "$_mg_st" != "DONE" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}', not DONE — the completion this merge relies on no longer holds. Nothing was merged." >&2
+      exit 1
     fi
     # The tip TODAY must be the tip completion verified.
     local _mg_tip=""

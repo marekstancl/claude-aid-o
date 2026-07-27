@@ -1,6 +1,20 @@
 # Scope-exception request — two changes in `lib/aid-plan-manifest.sh`
 
-**Status: NOT APPLIED. Awaiting a PM scope decision.**
+**Status: APPLIED 2026-07-27, under explicit PM authorization.**
+
+> PM autorizuje scope extension E-068-2_2 na
+> `plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh` výhradně pro:
+> odstranění přechodu `pending:merged_to_plan` z obou transition tables a
+> povolení `ABORTED` v candidate-bearing state invariantu. Důvod: oba defekty
+> byly přímo reprodukovány autorizovaným P067 dogfoodem a jsou nutnou součástí
+> F2/F3 closure. Autorizace nezahrnuje jiné refaktory ani změny manifestového
+> kontraktu.
+
+Both changes are applied and nothing else in the file was touched: no refactor,
+no other contract change. The regression that could not pass before — `AC5:
+after an ABORT, plan-state agrees with the authoritative state file` — is back
+in the suite and green, and it additionally asserts the abandoned candidate is
+RETAINED, which is the whole reason ABORTED had to join that state set.
 
 `plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh` is in EPIC 1's
 `allowed_paths`, not EPIC 2's, so the commit-scope hook refuses it in the state
