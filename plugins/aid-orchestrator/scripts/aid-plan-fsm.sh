@@ -4898,6 +4898,25 @@ _pfsm_finalize_inputs() {
   mkdir -p "$run_dir_abs" 2>/dev/null || {
     echo "PRECONDITION FAIL: plan-finalize --stage inputs: cannot create ${run_dir_abs}." >&2; return 1; }
 
+  # CP2 (2026-07-27): this stage OVERWRITES the three artifacts. Once
+  # `--stage review` has recorded their sha256 in the manifest, re-running it
+  # would change files whose hashes are already bound, and plan-close would then
+  # report "a required review output was altered" — a true statement with a
+  # misleading diagnosis, since nobody tampered with anything: a producer was
+  # simply run twice. A producer that can silently invalidate a completed review
+  # is worse than one that refuses, so it refuses.
+  #
+  # The exception is a RE-FROZEN candidate: the recorded review then describes a
+  # candidate that no longer exists and is already void, so producing fresh
+  # inputs for the new one is exactly right.
+  local _rec_cand=""
+  _rec_cand="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_review.candidate_sha')" 2>/dev/null || _rec_cand=""
+  [[ "$_rec_cand" == "null" || "$_rec_cand" == "not_found" ]] && _rec_cand=""
+  if [[ -n "$_rec_cand" && "$_rec_cand" == "$candidate" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} already has a RECORDED plan-final review bound to candidate ${candidate:0:8}, whose outputs are hash-bound in the manifest. Re-producing them now would alter files the review already attested to, and close would report them as altered. Nothing was written. If the candidate genuinely changed, re-freeze first — the recorded review is void from that moment and this stage will run." >&2
+    return 1
+  fi
+
   local project_id; project_id="$(basename "$root")"
   local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
 

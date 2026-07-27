@@ -3949,3 +3949,25 @@ _inputs() {
   _review
   [ "$status" -eq 0 ]
 }
+
+@test "AC11: --stage inputs REFUSES once the review has recorded hash-bound outputs" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
+  _inputs
+  [ "$status" -eq 0 ]
+  command sleep 1
+  touch "${dir}/delivery-report.json"
+  _review
+  [ "$status" -eq 0 ]
+
+  # The review is recorded and its outputs are hash-bound. Re-running the
+  # producer would rewrite them, and close would then report them as ALTERED —
+  # true, but a diagnosis of tampering for what was really a repeated stage.
+  local before; before="$(sha256sum "${dir}/delivery-gate.json" | awk '{print $1}')"
+  _inputs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already has a RECORDED plan-final review"* ]]
+  [ "$(sha256sum "${dir}/delivery-gate.json" | awk '{print $1}')" = "$before" ]
+}
