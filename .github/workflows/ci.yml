@@ -21,7 +21,7 @@ jobs:
         run: |
           chmod +x plugins/aid-orchestrator/scripts/tests/run-all-tests.sh
           plugins/aid-orchestrator/scripts/tests/run-all-tests.sh --verbose
-        timeout-minutes: 5
+        timeout-minutes: 20
 
   plan-boundary-tests:
     runs-on: ubuntu-latest

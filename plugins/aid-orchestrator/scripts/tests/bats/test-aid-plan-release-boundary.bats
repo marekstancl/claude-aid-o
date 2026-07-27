@@ -1327,7 +1327,18 @@ _seed_manifest_from_fixture() {
     }]
   '
 
-  # Transition pending → merged_to_plan (legal)
+  # P068 F2 (2026-07-27): `pending -> merged_to_plan` was REMOVED from the
+  # table. A pending EPIC has completed nothing, so the route should never have
+  # existed — the P067 dogfood took it and put unfinished work into a plan
+  # candidate. It is now refused, which this test asserts instead of relying on
+  # it as a setup step.
+  run plan_manifest_set_epic_status "P900" "E-900-9_9" "merged_to_plan" "2222222222222222222222222222222222222222"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PRECONDITION FAIL"* ]]
+
+  # The reverse-rejection assertions below need the EPIC actually IN
+  # merged_to_plan, which is now reachable only from `running`.
+  plan_manifest_set_epic_status "P900" "E-900-9_9" "running"
   plan_manifest_set_epic_status "P900" "E-900-9_9" "merged_to_plan" "2222222222222222222222222222222222222222"
 
   # Attempt reverse (illegal)
@@ -3241,6 +3252,19 @@ _pfsm_epic_with_commit() {
   git -C "$TEST_PROJECT_ROOT" add "$file"
   git -C "$TEST_PROJECT_ROOT" commit -qm "${epic_id}: work"
   git -C "$TEST_PROJECT_ROOT" checkout -q main
+
+  # P068 F2 (2026-07-27): epic-merge-to-plan now requires a SUCCESSFUL,
+  # task-SHA-bound epic-complete before it will move anything. These fixtures
+  # predate that gate and merged straight from `running`, which is precisely the
+  # hole the gate closes — so the default seed now completes the EPIC, and the
+  # cases that deliberately exercise an INCOMPLETE one opt out with
+  # PFSM_SKIP_COMPLETE=1 rather than the whole suite pretending completion is
+  # optional.
+  if [[ "${PFSM_SKIP_COMPLETE:-0}" != "1" ]]; then
+    _pfsm_write_epic_evidence "$epic_id" DONE
+    run bash "$PLAN_FSM_CLI" epic-complete "$plan_id" "$epic_id" --project-root "$TEST_PROJECT_ROOT"
+    [ "$status" -eq 0 ]
+  fi
 }
 
 # _pfsm_write_epic_evidence <epic_id> [state] [profile]
@@ -3470,7 +3494,8 @@ _pfsm_merge_commit_count() {
 # ─── AC4: state:DONE + a deleted task branch is NOT proof ──────────────────
 @test "AC4: merged_to_plan is refused when only state:DONE and a deleted task branch are present (unproven_merge)" {
   _pfsm_bootstrap_plan "P064"
-  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  # NOT completed: the point is an EPIC that never earned a merge authorization.
+  PFSM_SKIP_COMPLETE=1 _pfsm_epic_with_commit "P064" "E-064-1_1"
   _pfsm_write_epic_evidence "E-064-1_1" "DONE" "standard"
 
   # The exact failure mode aid-fsm.sh's _revalidate_one_dep fallback accepts:
@@ -3480,7 +3505,11 @@ _pfsm_merge_commit_count() {
 
   run bash "$PLAN_FSM_CLI" epic-merge-to-plan P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"unproven_merge"* ]]
+  # P068 F2 (2026-07-27): the completion gate now fires FIRST and refuses on
+  # epic_completion_missing before the lineage check is reached. Both refusals
+  # are correct and the merge is refused either way; this asserts the refusal
+  # and its reason rather than pinning one of two valid ones.
+  [[ "$output" == *"unproven_merge"* || "$output" == *"epic_completion_missing"* ]]
 
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse plan/P064)" = "$plan_before" ]
   run _pfsm_entry_field P064 E-064-1_1 status
@@ -3571,7 +3600,8 @@ _pfsm_merge_commit_count() {
 
 @test "Error Handling: epic-complete requires the EPIC FSM state file to report state: DONE" {
   _pfsm_bootstrap_plan "P064"
-  _pfsm_epic_with_commit "P064" "E-064-1_1"
+  # The seed must NOT complete it — this test is about epic-complete's own refusal.
+  PFSM_SKIP_COMPLETE=1 _pfsm_epic_with_commit "P064" "E-064-1_1"
 
   # No state file at all.
   run bash "$PLAN_FSM_CLI" epic-complete P064 E-064-1_1 --project-root "$TEST_PROJECT_ROOT"

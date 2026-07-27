@@ -212,7 +212,16 @@ _pfsm_resolve_project_root() {
   # refused on branch task/E-068-2_2/main while the caller had asked for a
   # checkout sitting on main). An explicitly named worktree root is honoured as
   # given; everything else keeps the previous behaviour.
-  if [[ -n "${1:-}" && -e "${probe_dir}/.git" ]]; then
+  # An explicitly named worktree root is honoured — but ONLY when the plan
+  # runtime state actually lives there. `.aid-o/work/plan-state/` is gitignored,
+  # so a linked worktree does not get one checked out: for those, the shared
+  # common-dir root is the correct answer and always was. Honouring the name
+  # unconditionally broke exactly that (the P064 suite's linked-worktree case
+  # went looking for a manifest in a tree that never had one). Both callers are
+  # now served: the dogfood, which names a separate checkout carrying its own
+  # .aid-o/, resolves there; an ordinary worktree still shares the main
+  # checkout's state.
+  if [[ -n "${1:-}" && -e "${probe_dir}/.git" && -d "${probe_dir}/.aid-o/work/plan-state" ]]; then
     printf '%s' "$probe_dir"
     return 0
   fi
