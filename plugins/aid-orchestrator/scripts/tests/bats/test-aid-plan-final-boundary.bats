@@ -3971,3 +3971,116 @@ _inputs() {
   [[ "$output" == *"already has a RECORDED plan-final review"* ]]
   [ "$(sha256sum "${dir}/delivery-gate.json" | awk '{print $1}')" = "$before" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC12 — the completion gate on epic-merge-to-plan (F2, found by the P067
+# live dogfood 2026-07-27).
+#
+# The dogfood merged an EPIC into the plan branch after `epic-complete` had
+# REFUSED it. Nothing at the door asked whether completion had succeeded, so
+# unfinished work reached the candidate and only C4 noticed, four stages later.
+# A check at the exit is not a substitute for a check at the entrance.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_merge_epic() {
+  run bash "$PLAN_FSM_CLI" epic-merge-to-plan "$PLAN_ID" "$1" \
+    --project-root "$TEST_PROJECT_ROOT"
+}
+
+# _seed_epic_done_state <epic_id> — the EPIC's own FSM evidence, reporting DONE.
+# epic-complete reads it from the evidence_dir the manifest entry records, which
+# is the whole point: completion is proven by the EPIC's own run, never asserted
+# by the plan layer on its behalf.
+_seed_epic_done_state() {
+  local eid="$1" edir
+  edir="$(jq -r --arg e "$eid" \
+    '[.plan_boundary_manifest.epic_runs[] | select(.epic_id == $e) | .evidence_dir][0] // ""' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  [ -n "$edir" ]
+  mkdir -p "${TEST_PROJECT_ROOT}/${edir}/gates"
+  printf 'epic_id: %s\nstate: DONE\ndone_phase: release\ncurrent_step: 1\ntotal_steps: 1\n' "$eid" \
+    > "${TEST_PROJECT_ROOT}/${edir}/fsm-state.yaml"
+  printf '{"overall":"pass","profile":"quick","gates":[]}\n' \
+    > "${TEST_PROJECT_ROOT}/${edir}/gates/gates_report.json"
+}
+
+# _seed_startable_epic <epic_id> — a plan with a plan branch and ONE EPIC that
+# has started (status running) and has real work on its task branch.
+_seed_startable_epic() {
+  local eid="$1"
+  _bootstrap
+  run bash "$PLAN_FSM_CLI" epic-start "$PLAN_ID" "$eid" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  _commit_on "task/${eid}/main" "work-${eid}.txt" "feat: the EPIC's work"
+}
+
+@test "AC12: a PENDING epic cannot merge into the plan branch" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion_missing"* ]]
+  # The plan branch is byte-identical: refusal happens before any Git mutation.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$plan_before" ]
+}
+
+@test "AC12: a RUNNING epic with no completion is refused — status alone is not proof" {
+  _seed_startable_epic "E-068-1_2"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+
+  # This is exactly the P067 shape: the EPIC started, work exists, the task
+  # branch exists — and epic-complete never succeeded.
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion_missing"* ]]
+  [[ "$output" == *"merge_status"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$plan_before" ]
+}
+
+@test "AC12: a COMPLETED epic merges — the gate blocks the unproven, not the proven" {
+  _seed_startable_epic "E-068-1_2"
+  _seed_epic_done_state "E-068-1_2"
+  run bash "$PLAN_FSM_CLI" epic-complete "$PLAN_ID" "E-068-1_2" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -eq 0 ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' merge-base --is-ancestor 'task/E-068-1_2/main' 'plan/$PLAN_ID'"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC12: work landing AFTER completion invalidates the authorization" {
+  _seed_startable_epic "E-068-1_2"
+  _seed_epic_done_state "E-068-1_2"
+  run bash "$PLAN_FSM_CLI" epic-complete "$PLAN_ID" "E-068-1_2" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+
+  # A commit pushed onto the task branch after the check was never verified by
+  # anything. Merging it would launder it into the candidate.
+  _commit_on "task/E-068-1_2/main" "sneaked.txt" "feat: landed after the completion check"
+  local plan_before; plan_before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion_stale"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" = "$plan_before" ]
+}
+
+@test "AC12: a FAILED epic-complete leaves no usable authorization behind" {
+  _seed_startable_epic "E-068-1_2"
+  # No DONE state file: epic-complete must refuse.
+  run bash "$PLAN_FSM_CLI" epic-complete "$PLAN_ID" "E-068-1_2" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]
+
+  # And it must not have written a merge_status a later merge could rely on.
+  local ms
+  ms="$(jq -r '[.plan_boundary_manifest.epic_runs[] | select(.epic_id == "E-068-1_2") | .merge_status // "unset"][0]' \
+        "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  [ "$ms" != "pending" ]
+
+  _merge_epic "E-068-1_2"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"epic_completion"* ]]
+}

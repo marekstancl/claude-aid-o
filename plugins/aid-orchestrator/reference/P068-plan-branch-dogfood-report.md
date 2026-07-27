@@ -7,32 +7,23 @@ plan ran the whole path and stopped at `AWAITING_PM` with C4 reporting
 *Updated 2026-07-27 with the PM decision on the bootstrap question and the
 authorized execution order.*
 
-## Authorization
+## Authorization and outcome
 
-The live dogfood run **has not been performed**, and this section says so first
-because a report that buried it would be worse than no report at all.
+The P067 dogfood **was authorized by the PM and was run on 2026-07-27**. It did
+NOT merge: it halted at `AWAITING_PM` with C4 reporting `release_ready=false` and
+four blockers. The full record is under "Run record" at the end of this file, and
+it is the authority — where this section and that one ever disagree, that one is
+what happened.
 
-The dogfood, as specified, advances the real `main` branch of this repository: it
-runs a small follow-up plan (P067) end to end through `plan_branch` mode and
-merges it to the target branch. That is an irreversible, outward-facing act on
-the repository's mainline, and it is exactly the class of action this controller
-does not take on its own initiative. The standing instruction for this run has
-been that `main` stays untouched and nothing is pushed; every commit of P068 to
-date has honoured that, and `main` has not moved from `0158a68`.
+P067 is subsequently closed as an **aborted diagnostic dogfood**. Its content is
+not merged, tagged or pushed, and its history is preserved as the audit trail of
+what the run found. It is not repaired by creating EPIC evidence after the fact:
+evidence produced after a merge cannot show the merge was justified at the moment
+it happened.
 
-**What the PM is being asked to authorize**, explicitly, before execution:
-
-1. Creating the P067 dogfood subject plan (the number is already reserved in
-   `.aid-o/config/counter.yaml`).
-2. Running it end to end in `plan_branch` mode.
-3. **Merging it to `main`** — the first time the plan-final boundary moves the
-   real target branch.
-4. Re-synchronising `plan/P068` onto the advanced `main` afterwards.
-
-Nothing in this report should be read as a claim that the end-to-end path has
-been exercised on real branches. What HAS been proven is stated under
-"Evidence that exists today", and what has not is stated under "What only the
-live run can prove".
+What the run cost and bought: it found two real defects, one of them (F2, the
+missing completion gate on `epic-merge-to-plan`) a release blocker for P068
+itself. A dogfood that finds a release blocker has done its job.
 
 ## PM decision of 2026-07-27, and what it changes
 
@@ -59,12 +50,20 @@ The PM ruled on the bootstrap question this report raised:
    recorded in `.aid-o/work/evidence/E-068-2_2/R-E068-2/plan-final/c4-producer-review.md`.
    One defect found and fixed (the producer could silently invalidate a
    completed review); targeted plan-final set 44/44.
-2. **P067 live dogfood** — prepared below. **Requires explicit PM authorization
-   to merge to `main`; not started.**
-3. P068 bootstrap legacy close: legacy merge to `main`, then the durable
+2. ~~P067 live dogfood~~ — **run 2026-07-27, halted at the boundary.** It found
+   F2, a release blocker for P068, and is closed as an aborted diagnostic run.
+3. **Fix F2** — `epic-merge-to-plan` must require a successful, task-SHA-bound
+   `epic-complete` before any Git mutation. In progress.
+4. **A second, clean dogfood under a new plan id**, driven through a real C0
+   review, the real EPIC FSM and `epic-complete` before `epic-merge-to-plan`,
+   reaching `release_ready=true`, the merge and the rollback drill.
+5. P068 bootstrap legacy close: legacy merge to `main`, then the durable
    lifecycle manifest with `mode: legacy_epic_release_mode`, then the close
    record.
-4. Tag and release 2.63.0.
+6. Tag and release 2.63.0.
+
+**P068 merge, tag and push stay forbidden until the second dogfood reaches
+`release_ready=true`.**
 
 ## Preparation completed
 

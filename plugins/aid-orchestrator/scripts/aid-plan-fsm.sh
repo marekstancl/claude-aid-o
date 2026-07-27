@@ -1364,7 +1364,25 @@ cmd_epic_complete() {
   [[ -n "$profile" ]] && esc_profile="$(jq -Rn --arg s "$profile" '$s')"
   local esc_floor="null"
   [[ -n "$final_floor" ]] && esc_floor="$(jq -Rn --arg s "$final_floor" '$s')"
-  local assign=".merge_status = \"pending\" | .epic_completed_at = ${esc_now} | .epic_completion_profile = ${esc_profile} | .epic_final_profile_floor = ${esc_floor} | .unknown_production_path = ${unknown_production_path} | .plan_final_required_gates = ${excluded_plan_gates}"
+  # F2 (2026-07-27, found by the P067 dogfood): completion must be bound to the
+  # exact task-branch tip it verified. `merge_status: pending` alone says "this
+  # EPIC completed at some point"; it does not say WHAT completed, so work
+  # pushed onto the task branch after the check would ride into the plan branch
+  # on the strength of a verification that never saw it. The tip is recorded
+  # here and re-checked at merge time; a moved tip is `epic_completion_stale`.
+  local _ec_tip="" esc_tip="null"
+  if [[ -n "$_ec_task_branch" ]]; then
+    _ec_tip="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/${_ec_task_branch}" 2>/dev/null || true)"
+  fi
+  if [[ -z "$_ec_tip" ]]; then
+    echo "PRECONDITION FAIL: epic-complete: cannot resolve the task branch tip for ${epic_id} (branch '${_ec_task_branch:-<unset>}') — completion cannot be bound to a commit, so no merge authorization is issued." >&2
+    exit 1
+  fi
+  esc_tip="$(jq -Rn --arg s "$_ec_tip" '$s')"
+  local esc_evd="null"
+  [[ -n "$evidence_dir" ]] && esc_evd="$(jq -Rn --arg s "$evidence_dir" '$s')"
+
+  local assign=".merge_status = \"pending\" | .epic_completed_at = ${esc_now} | .epic_completion_sha = ${esc_tip} | .epic_completion_evidence_dir = ${esc_evd} | .epic_completion_run_id = $(jq -Rn --arg s "$run_id" '$s') | .epic_completion_profile = ${esc_profile} | .epic_final_profile_floor = ${esc_floor} | .unknown_production_path = ${unknown_production_path} | .plan_final_required_gates = ${excluded_plan_gates}"
   if [[ "$full_tests" -eq 1 ]]; then
     # The PM-approved mid-plan broad run, audited: reason + the boundary that
     # requested it. Named `epic_full_test_exception` (plan Step 8) — the
@@ -1467,6 +1485,83 @@ cmd_epic_merge_to_plan() {
       exit 1
       ;;
   esac
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # F2 (2026-07-27) — THE COMPLETION GATE, before any Git mutation.
+  #
+  # Found by the P067 live dogfood: `epic-complete` refused an EPIC ("cannot
+  # confirm the EPIC reached DONE") and this command merged it into the plan
+  # branch anyway, because `pending -> merged_to_plan` was a permitted
+  # transition and nothing here asked whether completion had ever succeeded.
+  # An unfinished EPIC therefore reached the candidate, and the only thing that
+  # noticed was C4, four stages downstream. The check at the door was missing:
+  # a status, a lineage record and an existing task branch are not completion
+  # proof.
+  #
+  # Completion proof is all four of these, together:
+  #   1. the EPIC is `running` — `pending` never completed anything;
+  #   2. `merge_status` is `pending`, which only a successful epic-complete writes;
+  #   3. that epic-complete's operation record reached `state_committed`;
+  #   4. the task tip TODAY equals the tip epic-complete verified.
+  # (4) is what makes the authorization about a commit rather than about a
+  # branch name: work pushed after the check was never verified, and merging it
+  # would launder it into the candidate.
+  # ─────────────────────────────────────────────────────────────────────────
+  if [[ "$cur_status" != "merged_to_plan" ]]; then
+    if [[ "$cur_status" != "running" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} is '${cur_status}', not 'running' — only an EPIC that started and then completed may merge into plan/${plan_id}. Run epic-start, finish the EPIC, then epic-complete." >&2
+      exit 1
+    fi
+    local _mg_ms _mg_csha _mg_run
+    _mg_ms="$(jq -r '.merge_status // empty' <<<"$entry_json" 2>/dev/null)" || _mg_ms=""
+    _mg_csha="$(jq -r '.epic_completion_sha // empty' <<<"$entry_json" 2>/dev/null)" || _mg_csha=""
+    _mg_run="$(jq -r '.epic_completion_run_id // .run_id // empty' <<<"$entry_json" 2>/dev/null)" || _mg_run=""
+    if [[ "$_mg_ms" != "pending" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} carries merge_status '${_mg_ms:-<unset>}', not 'pending' — only a SUCCESSFUL epic-complete writes that, so this EPIC has no merge authorization. Nothing was merged." >&2
+      exit 1
+    fi
+    if [[ -z "$_mg_csha" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_missing: ${epic_id} records no epic_completion_sha — its completion is not bound to any commit, so there is nothing to verify the task branch against. Re-run epic-complete. Nothing was merged." >&2
+      exit 1
+    fi
+    # The epic-complete operation must have REACHED state_committed. A record
+    # stuck at intent/git_applied means completion was interrupted, and an
+    # interrupted verification is not a verification.
+    local _mg_ops _mg_phase=""
+    _mg_ops="$(_pfsm_ops_path "$plan_id")"
+    if [[ -f "$_mg_ops" ]]; then
+      _mg_phase="$(jq -rs --arg e "$epic_id" \
+        '[ .[] | select(type == "object" and .command == "epic-complete" and .subject == $e) ]
+         | if length == 0 then "" else (.[-1].phase // "") end' "$_mg_ops" 2>/dev/null || true)"
+    fi
+    if [[ "$_mg_phase" != "state_committed" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_missing: the epic-complete operation for ${epic_id} is recorded at phase '${_mg_phase:-<none>}', not 'state_committed' — an interrupted completion is not a completion. Re-run epic-complete. Nothing was merged." >&2
+      exit 1
+    fi
+    # The EPIC's own FSM must still say DONE — a state file rewound after
+    # completion invalidates the authorization just as a moved tip does.
+    if [[ -n "$_mg_run" ]]; then
+      local _mg_state_file="${project_root}/.aid-o/work/evidence/${epic_id}/${_mg_run}/fsm-state.yaml"
+      if [[ -f "$_mg_state_file" ]]; then
+        local _mg_st; _mg_st="$(grep -E '^state:' "$_mg_state_file" 2>/dev/null | awk '{print $2}' | head -1)"
+        if [[ "$_mg_st" != "DONE" ]]; then
+          echo "PRECONDITION FAIL: epic_completion_stale: ${epic_id}'s FSM now reports state '${_mg_st:-<empty>}', not DONE — the completion this merge relies on no longer holds. Nothing was merged." >&2
+          exit 1
+        fi
+      fi
+    fi
+    # The tip TODAY must be the tip completion verified.
+    local _mg_tip=""
+    _mg_tip="$(git -C "$project_root" rev-parse --verify --quiet "refs/heads/task/${epic_id}/main" 2>/dev/null || true)"
+    if [[ -z "$_mg_tip" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: task/${epic_id}/main does not resolve, so the completed commit ${_mg_csha:0:8} cannot be confirmed as its tip. Nothing was merged." >&2
+      exit 1
+    fi
+    if [[ "$_mg_tip" != "$_mg_csha" ]]; then
+      echo "PRECONDITION FAIL: epic_completion_stale: task/${epic_id}/main is at ${_mg_tip:0:8} but epic-complete verified ${_mg_csha:0:8} — work landed after the completion check and has never been verified. Re-run epic-complete against the current tip. Nothing was merged." >&2
+      exit 1
+    fi
+  fi
 
   local plan_branch="plan/${plan_id}" task_branch="task/${epic_id}/main"
   local plan_head=""
