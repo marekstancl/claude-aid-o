@@ -1,6 +1,9 @@
 # P068 plan-branch dogfood report
 
-**Status: PREPARED, NOT EXECUTED — awaiting PM authorization.**
+**Status: PREPARED, NOT EXECUTED — awaiting explicit PM authorization to merge P067 to `main`.**
+
+*Updated 2026-07-27 with the PM decision on the bootstrap question and the
+authorized execution order.*
 
 ## Authorization
 
@@ -28,6 +31,38 @@ Nothing in this report should be read as a claim that the end-to-end path has
 been exercised on real branches. What HAS been proven is stated under
 "Evidence that exists today", and what has not is stated under "What only the
 live run can prove".
+
+## PM decision of 2026-07-27, and what it changes
+
+The PM ruled on the bootstrap question this report raised:
+
+- **P068 is declared `legacy_epic_release_mode`, never `plan_branch`.** It did
+  not run through the new path — `plan/P068` never received either EPIC, and no
+  plan-state for P068 exists — so stamping it plan_branch would be a false record
+  of how it ran. P068 built the new line; it was itself built on the old one.
+  That is a bootstrap situation, not a failure. Claiming otherwise would be.
+- **No standalone manifest commit to `main` now.** `aid_lifecycle_ensure_manifest`
+  makes an isolated commit onto the target branch, so it would move `main`
+  without verifying or unblocking anything: P068 would still not be a plan-branch
+  run, and the dogfood would still not have happened.
+- **P067 is the first real `plan_branch` run**, and the proof the new path works.
+- **P068 closes afterwards as a one-time bootstrap legacy release**, with its
+  close evidence stating explicitly that P068 DELIVERED the mechanism and P067
+  LIVE-VERIFIED it.
+- **2.63.0 tags and releases only after that.**
+
+## Execution order, as authorized
+
+1. ~~Targeted CP2/CP3 over the C4 producer wiring~~ — **done** 2026-07-27,
+   recorded in `.aid-o/work/evidence/E-068-2_2/R-E068-2/plan-final/c4-producer-review.md`.
+   One defect found and fixed (the producer could silently invalidate a
+   completed review); targeted plan-final set 44/44.
+2. **P067 live dogfood** — prepared below. **Requires explicit PM authorization
+   to merge to `main`; not started.**
+3. P068 bootstrap legacy close: legacy merge to `main`, then the durable
+   lifecycle manifest with `mode: legacy_epic_release_mode`, then the close
+   record.
+4. Tag and release 2.63.0.
 
 ## Preparation completed
 
