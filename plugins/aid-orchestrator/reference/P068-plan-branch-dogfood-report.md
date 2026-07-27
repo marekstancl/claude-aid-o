@@ -162,75 +162,87 @@ did not merge is the most useful thing it produced.
 
 | Step | Result |
 |------|--------|
-|  | OK — first plan ever created in plan_branch mode |
-| EPIC 1 work +  | merged into  |
-| EPIC 2 work +  | merged into  |
-|  /  | candidate , run  |
-|  (attempt 1) | **FAILED** — and correctly |
-| candidate re-freeze | , run  |
-|  (attempt 2) | **PASSED**, profile , one run |
-|  | produced all three C4 inputs from the real candidate |
-|  | **PASSED** — every output protocol-valid and candidate-bound |
-|  | **release_ready=false, 4 blockers** |
-|  | PM summary rendered; plan held at  |
-| merge to  | **NOT PERFORMED** |
+| `plan-start P067 --mode plan_branch` | OK — the first plan ever created in plan_branch mode |
+| EPIC 1 work, then `epic-merge-to-plan` | merged into `plan/P067` |
+| EPIC 2 work, then `epic-merge-to-plan` | merged into `plan/P067` |
+| `--stage sync` / `--stage freeze` | candidate `f3c68d5`, run `R-P067-final-1` |
+| `--stage gates` (attempt 1) | **FAILED** — and correctly |
+| candidate re-freeze | `307b654`, run `R-P067-final-2` |
+| `--stage gates` (attempt 2) | **PASSED**, profile `release`, exactly one run |
+| `--stage inputs` | produced all three C4 inputs from the real candidate |
+| `--stage review` | **PASSED** — every output protocol-valid and candidate-bound |
+| `--stage c4` | **release_ready=false, 4 blockers** |
+| `--stage summary` | PM summary rendered; plan held at `AWAITING_PM` |
+| merge to `main` | **NOT PERFORMED** |
 
-## The four C4 blockers, verbatim in effect
+## The four C4 blockers
 
-1.  — P067 has no C0 plan review, which is a required input at the
-   plan-final boundary.
-2.  — the at-HEAD verification failed.
-3.  — the per-EPIC evidence directory is absent.
-4.  — likewise.
+1. `plan_review` — P067 has no C0 plan review, a required input at the boundary.
+2. `verification_report` — the at-HEAD verification failed.
+3. `epic_rollup:E-067-1_2` — the per-EPIC evidence directory is absent.
+4. `epic_rollup:E-067-2_2` — likewise.
 
-Blockers 3 and 4 are honest consequences of how the dogfood was driven: the two
-EPICs were merged into the plan branch without ever running through the EPIC
-FSM, so they produced no per-EPIC evidence. C4 noticed. That is the boundary
-doing precisely what it exists to do — refusing to call a plan releasable when
-the evidence behind it does not exist.
+Blockers 3 and 4 are honest consequences of how the run was driven: both EPICs
+were merged into the plan branch without ever going through the EPIC FSM, so
+they produced no per-EPIC evidence. C4 noticed. That is the boundary doing
+precisely what it exists to do — refusing to call a plan releasable when the
+evidence behind it does not exist.
 
-**No merge was attempted.** Merging past a not-ready C4 would need an explicit
-PM override, which is a PM-authority act and not one the controller takes.
+**No merge was attempted.** Merging past a not-ready C4 requires an explicit PM
+override, which is a PM-authority act and not one the controller takes.
 
 ## Two real findings, surfaced by running it
 
-**F1 —  was ignored for a linked worktree (FIXED).**
- collapsed any worktree to the git common dir, so the
-explicitly-named dogfood checkout resolved back to the main repository and every
-lifecycle write aimed at the wrong tree — it refused "on branch
-task/E-068-2_2/main" while the caller had named a checkout sitting on .
-The two-checkout topology could not work at all. An explicitly named worktree
-root is now honoured as given; an inferred root keeps the old behaviour, which is
+**F1 — an explicitly named `--project-root` was ignored for a linked worktree
+(FIXED).** `_pfsm_resolve_project_root` collapsed any worktree to the git common
+dir, so the named dogfood checkout resolved back to the main repository and every
+lifecycle write aimed at the wrong tree: it refused "on branch
+task/E-068-2_2/main" while the caller had named a checkout sitting on `main`. The
+two-checkout topology could not work at all. A named worktree root is now
+honoured as given; an inferred root keeps the previous behaviour, which stays
 correct because plan runtime state is shared across worktrees.
 
-**F2 —  does not require  to have succeeded.**
-For EPIC 1  refused ("cannot confirm the EPIC reached DONE"), and
- then merged it into the plan branch anyway; the manifest went
-, which the transition table permits. So an EPIC can
-reach the plan branch, and thus the candidate, without proof it ever completed.
-C4's roll-up blockers catch the consequence downstream, but the EPIC-level gate
-itself does not hold. NOT fixed — recorded for a decision, since it is a
-substantive change to the transition contract rather than a slip.
+**F2 — `epic-merge-to-plan` does not require `epic-complete` to have succeeded
+(RECORDED, NOT FIXED).** For EPIC 1 the completion check refused — "cannot
+confirm the EPIC reached DONE" — and the merge into the plan branch proceeded
+anyway; the manifest went `pending` to `merged_to_plan`, a permitted transition.
+So an EPIC can reach the plan branch, and therefore the candidate, with no proof
+it ever completed. C4's roll-up blockers catch the consequence downstream, but
+the EPIC-level gate itself does not hold. Changing it amends the transition
+contract, so it is written down for a decision rather than patched mid-run.
 
 ## Isolation proof — measured, not assumed
 
+Commits on the plan branch and nowhere else:
 
+    307b654 docs(P067): record the gate-authoring correction
+    f3c68d5 merge(plan-final): main into plan/P067
+    5fc8093 merge(epic): E-067-2_2 into plan/P067
+    34d18c6 feat(P067): dogfood payload 2
+    c069ba9 merge(epic): E-067-1_2 into plan/P067
+    76014ef feat(P067): dogfood payload 1
 
-Every P068 implementation commit was tested against  with
-: **none is an ancestor**. The tool under test did
+Files the plan would deliver:
+
+    plugins/aid-orchestrator/reference/P067-dogfood-note-1.md
+    plugins/aid-orchestrator/reference/P067-dogfood-note-2.md
+    plugins/aid-orchestrator/reference/P067-dogfood-note-3.md
+
+Every P068 implementation commit was tested against the plan branch with
+`git merge-base --is-ancestor`: **none is an ancestor**. The tool under test did
 not smuggle itself into the candidate.
 
 ## What the run proved
 
-- A plan can be created, worked, merged and finalized in  mode.
-- The gate profile runs **once** per attempt: a second run was refused even after
-  the configuration was corrected, and the corrected config did not get to
-  overwrite the history of the attempt it was corrected in.
+- A plan can be created, worked, merged and finalized in `plan_branch` mode.
+- The gate profile runs **once** per attempt. A second run was refused even after
+  the configuration was corrected — a corrected config does not get to overwrite
+  the history of the attempt it was corrected in.
 - A failing candidate is shown, never silently retried.
 - Changing the candidate invalidates every plan-final field and returns the plan
-  to , leaving the previous run directory byte-identical.
--  produces the three C4 inputs from the real candidate and the
-  real EPIC set, and  accepts exactly what it produced.
+  to `PLAN_FIX`, leaving the previous run directory byte-identical.
+- `--stage inputs` produces the three C4 inputs from the real candidate and the
+  real EPIC set, and `--stage review` accepts exactly what it produced.
 - C4 refuses to declare a plan releasable on absent evidence.
 
 ## What it did not prove
@@ -238,8 +250,8 @@ not smuggle itself into the candidate.
 The merge itself, the tag, the push, and the rollback drill on a really-advanced
 target branch. All of them sit behind the four blockers above.
 
-##  during the run
+## `main` during the run
 
- moved twice, both times by the lifecycle layer and both times by design:
- (the P067 manifest) and  (its  stamp). No
-plan content reached .
+`main` moved twice, both by the lifecycle layer and both by design: `a61154f`
+(the P067 manifest) and `7e51603` (its `mode: plan_branch` stamp). No plan
+content reached `main`.
