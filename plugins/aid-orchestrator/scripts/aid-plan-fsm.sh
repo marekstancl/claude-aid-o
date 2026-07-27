@@ -5140,8 +5140,26 @@ _pfsm_finalize_inputs() {
 
     local body
     if [[ "$agg" == "delivery-gate" ]]; then
-      body="$(jq -nc --argjson s "$sources_json" \
+      # DOGFOOD FINDING (P075, 2026-07-27): the aggregate must carry the
+      # enforcement interpretation. `aid-evidence-verify.sh --at-head` fails
+      # `observe_blocking_interpretation` when `delivery_gate.summary.enforcement`
+      # is absent, and that failure blocks C4 — so a delivery gate that does not
+      # say HOW it is enforced is not a usable input, however complete it looks.
+      # The value is read from the policy in force rather than hardcoded: writing
+      # "observe" into an artifact while the project enforces "blocking" would be
+      # the aggregate lying about its own weight.
+      local _dg_enf=""
+      local _dg_pol="${SCRIPT_DIR}/../defaults/policies/delivery-gate.yaml"
+      [[ -f "${root}/.aid-o/config/policies/delivery-gate.yaml" ]] \
+        && _dg_pol="${root}/.aid-o/config/policies/delivery-gate.yaml"
+      [[ -f "$_dg_pol" ]] && _dg_enf="$(yq -r '.enforcement // ""' "$_dg_pol" 2>/dev/null || true)"
+      case "$_dg_enf" in
+        observe|dual_run|blocking) ;;
+        *) _dg_enf="observe" ;;   # the conservative reading when the policy is silent
+      esac
+      body="$(jq -nc --argjson s "$sources_json" --arg enf "$_dg_enf" \
         '{phase: "plan-final", profile: "plan_aggregate",
+          summary: {enforcement: $enf},
           checks: [], aggregated_from: ($s | length),
           aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
     else

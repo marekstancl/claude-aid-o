@@ -4147,3 +4147,18 @@ _seed_startable_epic() {
   [[ "$output" == *"epic_completion_stale"* ]]
   [[ "$output" == *"not DONE"* ]]
 }
+
+@test "AC11: the delivery-gate aggregate carries the enforcement interpretation" {
+  _seed_merge_project
+  _inputs
+  [ "$status" -eq 0 ]
+  local dir; dir="$(_run_dir)"
+
+  # `aid-evidence-verify.sh --at-head` fails observe_blocking_interpretation when
+  # this key is absent, and that failure blocks C4 — found by the P075 dogfood,
+  # where it was the last standing blocker. A delivery gate that does not say HOW
+  # it is enforced is not a usable input, however complete it otherwise looks.
+  run jq -r '.delivery_gate.summary.enforcement // "absent"' "${dir}/delivery-gate.json"
+  [ "$output" != "absent" ]
+  [[ "$output" == "observe" || "$output" == "dual_run" || "$output" == "blocking" ]]
+}
