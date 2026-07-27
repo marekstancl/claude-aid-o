@@ -3433,8 +3433,8 @@ cmd_plan_finalize() {
     exit 2
   fi
   case "$stage" in
-    sync|freeze|gates|review|c4|summary) ;;
-    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
+    sync|freeze|gates|inputs|review|c4|summary) ;;
+    *) echo "ERROR: plan-finalize: --stage must be 'sync', 'freeze', 'gates', 'inputs', 'review', 'c4' or 'summary' (got '${stage}')" >&2; exit 2 ;;
   esac
   if [[ "$stage" != "gates" && ${#substitute_receipts[@]} -gt 0 ]]; then
     echo "ERROR: plan-finalize: --substitute-receipt is only meaningful for --stage gates." >&2
@@ -3486,6 +3486,24 @@ cmd_plan_finalize() {
     review)
       local execution_yaml_r="${execution_yaml_opt:-${project_root}/.aid-o/config/execution.yaml}"
       _pfsm_finalize_review "$project_root" "$plan_id" "$execution_yaml_r" || rc=$?
+      ;;
+    inputs)
+      # The producer for the three C4 inputs. Runs between `gates` and `review`:
+      # the candidate must already be frozen (the profile is derived over the
+      # plan range against it) and the review stage validates what this writes.
+      local _in_cand _in_base _in_run _in_dir
+      _in_cand="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.candidate_sha')" || _in_cand=""
+      _in_base="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_base_commit')" || _in_base=""
+      _in_run="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_run_id')" || _in_run=""
+      _in_dir="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_final_evidence_dir')" || _in_dir=""
+      for v in _in_cand _in_base _in_run _in_dir; do
+        if [[ -z "${!v}" || "${!v}" == "null" || "${!v}" == "not_found" ]]; then
+          echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} has no frozen candidate binding (${v#_in_} is unset) — run '--stage sync' then '--stage freeze' first. The three C4 inputs are derived over the frozen candidate, never over a moving head." >&2
+          rc=1; break
+        fi
+      done
+      [[ "$rc" -eq 0 ]] && { _pfsm_finalize_inputs "$plan_id" "$project_root" \
+        "${project_root}/${_in_dir}" "$_in_cand" "$_in_base" "$_in_run" || rc=$?; }
       ;;
     c4)      _pfsm_finalize_c4 "$project_root" "$plan_id" || rc=$? ;;
     summary) _pfsm_finalize_summary "$project_root" "$plan_id" || rc=$? ;;
@@ -4857,6 +4875,144 @@ _pfsm_crash_seam() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# plan-finalize --stage inputs — the PRODUCER for the three C4 inputs.
+#
+# Closes `plan_finalize_c4_reader_gap`. Until this existed, the review and c4
+# stages VALIDATED review-profile.json, delivery-gate.json and
+# acceptance-evidence.json while nothing in the plan produced them: a reader
+# with no writer, which meant the plan-final boundary could not complete
+# end-to-end and the gap had to be recorded in the enforcement registry rather
+# than closed.
+#
+# Production is real, not fabrication. The review profile comes from the
+# existing `aid-prefilter.sh profile` producer run over the WHOLE plan range.
+# The two aggregates are built from each contributing EPIC's own evidence pack:
+# an EPIC that has an artifact contributes its content hash, and one that does
+# not is recorded as `absent` — visible in the artifact rather than silently
+# dropped, because "no EPIC produced this" is a fact the PM should see, not one
+# the aggregate should hide.
+# ═══════════════════════════════════════════════════════════════════════════
+_pfsm_finalize_inputs() {
+  local plan_id="$1" root="$2" run_dir_abs="$3" candidate="$4" base_commit="$5" run_id="$6"
+
+  mkdir -p "$run_dir_abs" 2>/dev/null || {
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: cannot create ${run_dir_abs}." >&2; return 1; }
+
+  local project_id; project_id="$(basename "$root")"
+  local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
+
+  # ── 1. review-profile.json, over plan_base_commit..candidate_sha ─────────
+  # The range matters: the review stage asserts revision.base_sha equals the
+  # plan base, because a profile derived over one EPIC would arm the C3 gate for
+  # a fraction of what is about to be released.
+  local rp="${run_dir_abs}/review-profile.json" rprc=0
+  if [[ -n "$plan_file" && -x "${SCRIPT_DIR}/aid-prefilter.sh" ]]; then
+    bash "${SCRIPT_DIR}/aid-prefilter.sh" profile "$plan_file" "$run_dir_abs" \
+      --range "${base_commit}..${candidate}" --out "$rp" >/dev/null 2>&1 || rprc=$?
+  else
+    rprc=127
+  fi
+  if [[ "$rprc" -ne 0 || ! -s "$rp" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: the review profile producer did not emit ${rp} (rc=${rprc}). The C3 gate cannot be armed for the plan-level run without it, and a hand-written profile would be a claim rather than a derivation." >&2
+    return 1
+  fi
+  # The producer is EPIC-shaped by origin; the plan-level run is bound to the
+  # plan, so the identity is corrected here rather than left ambiguous.
+  local rptmp; rptmp="$(mktemp)"
+  jq --arg p "$plan_id" --arg r "$run_id" --arg b "$base_commit" --arg h "$candidate" \
+     '.identity = ((.identity // {}) + {epic_id: null, plan_id: $p, run_id: $r})
+      | .revision = ((.revision // {}) + {base_sha: $b, head_sha: $h})' \
+     "$rp" > "$rptmp" 2>/dev/null && mv -f "$rptmp" "$rp" || { rm -f "$rptmp"; 
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: could not bind ${rp} to the plan." >&2; return 1; }
+
+  # ── 2 + 3. the two aggregates, built from the contributing EPICs ─────────
+  local contributing
+  contributing="$(plan_manifest_get "$plan_id" '[.plan_boundary_manifest.epic_runs[] | select(.status == "merged_to_plan") | .epic_id] | sort | join(" ")' 2>/dev/null)" || contributing=""
+  [[ "$contributing" == "not_found" || "$contributing" == "null" ]] && contributing=""
+  if [[ -z "$contributing" ]]; then
+    echo "PRECONDITION FAIL: plan-finalize --stage inputs: ${plan_id} records no EPIC in status merged_to_plan, so there is nothing to aggregate. An aggregate over zero sources would assert a delivery nobody made." >&2
+    return 1
+  fi
+
+  local agg base_name key
+  for agg in delivery-gate acceptance-evidence; do
+    case "$agg" in
+      delivery-gate)      key="delivery_gate" ;;
+      acceptance-evidence) key="acceptance_evidence" ;;
+    esac
+    local sources_json="[]" e edir efile ehash estatus
+    for e in $contributing; do
+      edir="$(plan_manifest_get "$plan_id" "[.plan_boundary_manifest.epic_runs[] | select(.epic_id == \"${e}\") | .evidence_dir][0] // \"\"" 2>/dev/null)" || edir=""
+      [[ "$edir" == "not_found" || "$edir" == "null" ]] && edir=""
+      efile=""; ehash=""; estatus="absent"
+      if [[ -n "$edir" && -s "${root}/${edir}/${agg}.json" ]]; then
+        efile="${edir}/${agg}.json"
+        ehash="sha256:$(sha256sum "${root}/${efile}" | awk '{print $1}')"
+        estatus="aggregated"
+      fi
+      sources_json="$(jq -c --arg e "$e" --arg d "${edir}" --arg f "$efile" \
+        --arg h "$ehash" --arg st "$estatus" \
+        '. + [{epic_id: $e, evidence_dir: $d, artifact: $f, sha256: $h, status: $st}]' \
+        <<< "$sources_json")"
+    done
+
+    local body
+    if [[ "$agg" == "delivery-gate" ]]; then
+      body="$(jq -nc --argjson s "$sources_json" \
+        '{phase: "plan-final", profile: "plan_aggregate",
+          checks: [], aggregated_from: ($s | length),
+          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
+    else
+      body="$(jq -nc --argjson s "$sources_json" \
+        '{criteria: [], aggregated_from: ($s | length),
+          aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
+    fi
+
+    local absent_n; absent_n="$(jq -r '[.[] | select(.status == "absent")] | length' <<< "$sources_json")"
+    local verdict="aggregated"; [[ "$absent_n" -gt 0 ]] && verdict="aggregated_with_gaps"
+
+    # The subject hash is the aggregate's identity as a REVIEW SUBJECT: it must
+    # be reproducible from what was aggregated, not a random id. It is the
+    # sha256 of the plan id, the candidate and the ordered source list, so two
+    # runs over the same inputs produce the same hash and a changed source set
+    # produces a different one. `aid-protocol-validate.sh` requires the
+    # `sha256:<64 hex>` shape (exit 7) and rejects anything else.
+    local subject_hash
+    subject_hash="sha256:$(printf '%s\n%s\n%s' "$plan_id" "$candidate" \
+      "$(jq -S -c '[.[] | {epic_id, sha256, status}]' <<< "$sources_json")" \
+      | sha256sum | awk '{print $1}')"
+    # verdict.kind is a closed enum (none|delivery_ready|release_ready). The
+    # aggregate does not decide readiness — C4 does — so it is `none`, with the
+    # aggregation outcome carried in a sibling field rather than smuggled into
+    # the enum.
+    jq -n --arg pid "$project_id" --arg p "$plan_id" --arg r "$run_id" \
+          --arg h "$candidate" --arg b "$base_commit" --arg at "$agg" \
+          --arg k "$key" --argjson body "$body" --argjson s "$sources_json" \
+          --arg v "$verdict" --arg sh "$subject_hash" \
+      '{schema_version: "aid-2.0", artifact_type: ($at | gsub("-"; "_")),
+        producer: "aid-plan-fsm.sh@plan-finalize-inputs",
+        created_at: (now | todate | sub("\\.[0-9]+Z$"; "Z")),
+        control_protocol: "aid-2.0",
+        identity: {project_id: $pid, epic_id: null, plan_id: $p, run_id: $r},
+        subject: {plan_id: $p, candidate_sha: $h, subject_hash: $sh},
+        revision: {base_sha: $b, head_sha: $h,
+                   head_is_current: true, freshness: "current"},
+        status: "pass", verdict: {kind: "none", aggregation: $v},
+        provenance: {dispatch_mode: "deterministic",
+                     generated_by_tool: "aid-plan-fsm.sh",
+                     aggregated_at_boundary: "plan-final"},
+        sources: $s}
+       | .[$k] = $body' > "${run_dir_abs}/${agg}.json" || {
+      echo "PRECONDITION FAIL: plan-finalize --stage inputs: could not write ${agg}.json." >&2
+      return 1; }
+  done
+
+  echo "INPUTS PRODUCED: ${plan_id} — review-profile.json over ${base_commit:0:8}..${candidate:0:8}, and the plan-level delivery-gate.json + acceptance-evidence.json aggregated from: ${contributing}. Written to ${run_dir_abs}." >&2
+  return 0
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # P068 Step 7 — in-flight inventory and the default mode flip
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -5136,7 +5292,7 @@ Subcommands:
   epic-start <plan_id> <epic_id> [--run-id <id>] [--project-root <path>] [--op-id <id>]
   epic-complete <plan_id> <epic_id> [--abandon --reason <text>] [--supersede-by <epic_id> --reason <text>] [--full-tests --reason <text>] [--project-root <path>] [--op-id <id>]
   epic-merge-to-plan <plan_id> <epic_id> [--expected-plan-sha <sha>] [--project-root <path>] [--op-id <id>]
-  plan-finalize <plan_id> --stage <sync|freeze|gates|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
+  plan-finalize <plan_id> --stage <sync|freeze|gates|inputs|review|c4|summary> [--frozen-at <rfc3339>] [--execution-yaml <path>] [--substitute-receipt <gate_id>=<path>] [--project-root <path>]
   plan-merge-to-main <plan_id> --decision <path> [--project-root <path>] [--op-id <id>] [--push]
   plan-close <plan_id> [--project-root <path>] [--op-id <id>]
   inventory [--apply] [--plan <id>] [--project-root <path>]

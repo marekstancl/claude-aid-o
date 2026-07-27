@@ -43,9 +43,9 @@ required_enforcement_rows:
   plan_merge_cas: ALIGNED
   plan_boundary_manifest: ALIGNED
   plan_branch_merge_target: ALIGNED
+  plan_finalize_c4_inputs_producer: ALIGNED
 
 # Rows that are deliberately NOT active. Recording them is the point: a planned
 # row silently becoming "active" would be a claim of enforcement that no code
 # backs.
-required_planned_rows:
-  plan_finalize_c4_reader_gap: planned
+required_planned_rows: {}

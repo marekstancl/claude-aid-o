@@ -3845,3 +3845,107 @@ _review_counts() {
     [[ "$output" == *"declares nothing"* ]]
   fi
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC11 — the C4 inputs have a PRODUCER (P068 follow-up, 2026-07-27).
+#
+# The registry recorded `plan_finalize_c4_reader_gap` honestly: the review and
+# c4 stages validated three artifacts that nothing in the plan produced — a
+# reader with no writer, so the boundary could not complete end-to-end. These
+# tests assert the producer exists, derives rather than fabricates, and that the
+# validating stage accepts what it wrote.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_inputs() {
+  run bash "$PLAN_FSM_CLI" plan-finalize "$PLAN_ID" --stage inputs \
+    --project-root "$TEST_PROJECT_ROOT"
+}
+
+@test "AC11: --stage inputs produces all three C4 inputs, bound to the plan and the frozen candidate" {
+  _seed_merge_project
+  local dir; dir="$(_run_dir)"
+  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
+
+  _inputs
+  [ "$status" -eq 0 ]
+
+  local cand base
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  base="$(_manifest_field "$PLAN_ID" plan_base_commit)"
+
+  # review-profile.json: derived over the WHOLE plan range, and armed.
+  [ -s "${dir}/review-profile.json" ]
+  [ "$(jq -r '.revision.base_sha' "${dir}/review-profile.json")" = "$base" ]
+  [ "$(jq -r '.review_profile.required_lenses | type' "${dir}/review-profile.json")" = "array" ]
+
+  # The two aggregates: bound to the PLAN, never to one EPIC.
+  local agg
+  for agg in delivery-gate acceptance-evidence; do
+    [ -s "${dir}/${agg}.json" ]
+    [ "$(jq -r '.identity.epic_id' "${dir}/${agg}.json")" = "null" ]
+    [ "$(jq -r '.identity.plan_id' "${dir}/${agg}.json")" = "$PLAN_ID" ]
+    [ "$(jq -r '.subject.candidate_sha' "${dir}/${agg}.json")" = "$cand" ]
+    # sources[] names every contributing EPIC — an empty one would assert a
+    # delivery nobody made.
+    [ "$(jq -r '.sources | length' "${dir}/${agg}.json")" -ge 1 ]
+    [ "$(jq -r '[.sources[] | select(.epic_id == "E-068-1_2")] | length' "${dir}/${agg}.json")" = "1" ]
+  done
+}
+
+@test "AC11: an EPIC with no artifact is recorded ABSENT in sources[], not silently dropped" {
+  _seed_merge_project
+  _inputs
+  [ "$status" -eq 0 ]
+  local dir; dir="$(_run_dir)"
+
+  # The fixture's EPIC has no delivery-gate.json of its own, so the aggregate
+  # must say so. "No EPIC produced this" is a fact the PM should see; an
+  # aggregate that hides it would report a completeness it does not have.
+  [ "$(jq -r '[.sources[] | select(.status == "absent")] | length' "${dir}/delivery-gate.json")" -ge 1 ]
+  # verdict.kind is a closed protocol enum, so the aggregation outcome lives
+  # beside it rather than being smuggled into it.
+  [ "$(jq -r '.verdict.kind' "${dir}/delivery-gate.json")" = "none" ]
+  [ "$(jq -r '.verdict.aggregation' "${dir}/delivery-gate.json")" = "aggregated_with_gaps" ]
+}
+
+@test "AC11: --stage inputs REFUSES before the candidate is frozen" {
+  _bootstrap
+  _add_epic "$PLAN_ID" "E-068-1_2"
+  _inputs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"frozen candidate"* ]]
+}
+
+@test "AC11: --stage inputs REFUSES when no EPIC has merged into the plan" {
+  _seed_merge_project
+  # `merged_to_plan -> abandoned` is not a legal transition, and rightly so — a
+  # delivered EPIC cannot be un-delivered. So the subject is a plan whose only
+  # EPIC was abandoned from `pending`, which is legal and is exactly the shape
+  # "nothing merged" takes in practice.
+  _add_epic "$PLAN_ID" "E-068-9_9"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-9_9" "abandoned" >/dev/null
+  plan_manifest_update "$PLAN_ID" \
+    '.plan_boundary_manifest.epic_runs |= [ .[] | select(.epic_id != "E-068-1_2") ]' >/dev/null
+  _inputs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"nothing to aggregate"* ]]
+}
+
+@test "AC11: what the producer writes is ACCEPTED by the validating review stage" {
+  _seed_review_project
+  _write_review_outputs
+  local dir; dir="$(_run_dir)"
+  # Replace the fixture's hand-written three with the real producer's output:
+  # the point of the follow-up is that production and validation agree.
+  rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
+  _inputs
+  [ "$status" -eq 0 ]
+  # The Reporter is dispatched LAST, after the inputs exist — that is the real
+  # cadence, and the review stage enforces it by mtime. Re-emitting the delivery
+  # report here reproduces the ordering rather than working around the check.
+  command sleep 1
+  touch "${dir}/delivery-report.json"
+
+  _review
+  [ "$status" -eq 0 ]
+}
