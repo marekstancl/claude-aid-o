@@ -254,3 +254,95 @@ target branch. All of them sit behind the four blockers above.
 `main` moved twice, both by the lifecycle layer and both by design: `a61154f`
 (the P067 manifest) and `7e51603` (its `mode: plan_branch` stamp). No plan
 content reached `main`.
+
+---
+
+# Second run record — P075, 2026-07-27
+
+The clean dogfood the PM ordered after P067. Both EPICs through their own FSM and
+through `epic-complete` before anything merged them; a real C0 review; the full
+plan-final sequence. **It reached `release_ready=true` with zero blockers and
+merged to `main`.** It did not close, for a reason that is itself a result.
+
+## What happened
+
+| Step | Result |
+|------|--------|
+| `plan-start P075 --mode plan_branch` | OK |
+| EPIC 1: own FSM (READY→EXECUTE→GATES→DONE), `epic-complete`, `epic-merge-to-plan` | OK — completion bound to `f2ae3334` |
+| EPIC 2: same | OK — completion bound to `a057f401` |
+| C0 plan review | written and accepted as a C4 input |
+| gates (attempt 1) | refused: the release profile omitted a required gate |
+| gates (attempt 2, new candidate) | **PASSED**, profile `release` |
+| `--stage inputs` | produced all three C4 inputs |
+| `--stage review` | **PASSED** |
+| `--stage c4` (attempt 1) | 1 blocker — the delivery-gate aggregate carried no `summary.enforcement` |
+| `--stage c4` (attempt 2, after the fix) | **release_ready=true, 0 blockers, dual-run match** |
+| `plan-merge-to-main` | **MERGED** — `main` advanced to the plan merge |
+| `plan-close` | **REFUSED** — see below |
+| rollback drill | **PASSED** |
+
+## Three defects found by running it
+
+**F4 — a plan in `PLAN_SYNC` whose candidate drifted could not re-freeze
+(FIXED).** The freeze-time invalidation targeted `PLAN_FIX` unconditionally, but
+that transition is not legal from `PLAN_SYNC` — the very state freeze runs out
+of. The drift was detected, the invalidation was refused, and the plan wedged
+with no way forward that did not hand-edit state. The target is now chosen from
+where the plan actually is.
+
+**F5 — the C4 inputs producer omitted the delivery gate's enforcement level
+(FIXED).** `aid-evidence-verify.sh --at-head` fails
+`observe_blocking_interpretation` without `delivery_gate.summary.enforcement`,
+and under `observe` it also requires the `would_block` boolean. A gate that does
+not say how it is enforced, or what it would have blocked, is not a usable input.
+Both are now derived — the enforcement from the policy in force, `would_block`
+from whether every contributing EPIC's gate could actually be shown.
+
+**F6 — the operator (this controller) tampered with attested evidence, and was
+caught.** To get past F5 mid-run, `delivery-gate.json` was hand-edited AFTER
+`--stage review` had recorded its sha256. `plan-close` refused:
+
+> required plan-final review output(s) no longer match the hash recorded at
+> review time (corrupted or regenerated after the candidate was reviewed):
+> delivery-gate.json
+
+Re-attesting was also refused, correctly — the review stage runs only out of
+`PLAN_REVIEW`, so evidence cannot be rewritten to fit a merge that already
+happened. This is the guard added earlier in P068 doing its job against the
+person who wrote it, which is the only test of such a guard that means anything.
+
+## Why the plan did not close, stated plainly
+
+Not because the mechanism failed. Because the operator edited a review-attested
+artifact mid-run, and the boundary is built to notice exactly that. The correct
+recovery is a fresh attempt with the fixed producer, which now writes both keys
+itself and needs no hand edit.
+
+## Rollback drill — performed
+
+```
+merge commit         a79918da
+main before revert   27bae7a
+main after revert    dd80b91
+```
+
+The merge is still an ancestor of `main` (history was never rewritten), the
+payload notes are gone from the working tree, and `main` grew by one commit
+rather than shrinking. Revert forward, exactly as specified.
+
+## Isolation — measured again
+
+No P068 implementation commit is an ancestor of `plan/P075`. The plan would have
+delivered four reference notes and nothing else.
+
+## What this run proves that P067 could not
+
+- The completion gate added after P067 works end to end: both EPICs passed
+  through it with real, task-SHA-bound completions.
+- A plan CAN reach `release_ready=true` with zero blockers.
+- The plan-final merge publishes to `main` under a PM decision bound to the
+  candidate and the approved target head.
+- Post-review tampering is caught at close, even when the tamperer is the
+  controller.
+- Rollback is a revert forward, never a rewrite.

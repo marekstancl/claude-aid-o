@@ -2185,10 +2185,21 @@ _pfsm_finalize_freeze() {
       [[ -n "$run_dir" && "$run_dir" != "not_found" ]] && echo "already frozen at ${cur_candidate} (${run_dir}) — no second candidate minted; state file reconciled to PLAN_GATES." >&2
       return 0
     fi
+    # DOGFOOD FINDING (P075, 2026-07-27): the invalidation target depends on
+    # where the plan currently IS. PLAN_FIX is reachable from the review-side
+    # states, but NOT from PLAN_SYNC — and freeze is exactly the stage a plan
+    # reaches from PLAN_SYNC. Targeting PLAN_FIX unconditionally wedged the plan:
+    # the drift was detected, the invalidation was refused as an illegal
+    # transition, and re-freezing became impossible with no way forward that did
+    # not hand-edit state. A plan whose candidate drifted while it sits in
+    # PLAN_SYNC simply stays there — that is already the re-sync state.
+    local _fz_state _fz_target="PLAN_FIX"
+    _fz_state="$(plan_state_get "$plan_id" "plan_state" 2>/dev/null || true)"
+    [[ "$_fz_state" == "PLAN_SYNC" ]] && _fz_target="PLAN_SYNC"
     local irc=0
-    plan_final_invalidate "$plan_id" "candidate_changed_after_freeze" "PLAN_FIX" || irc=$?
+    plan_final_invalidate "$plan_id" "candidate_changed_after_freeze" "$_fz_target" || irc=$?
     [[ "$irc" -ne 0 ]] && return "$irc"
-    echo "CANDIDATE INVALIDATED: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head} — all plan-final fields cleared and the plan is now PLAN_FIX. Re-run --stage sync then --stage freeze to mint a new candidate; the previous run directory is left byte-identical." >&2
+    echo "CANDIDATE INVALIDATED: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head} — all plan-final fields cleared and the plan is now ${_fz_target}. Re-run --stage sync then --stage freeze to mint a new candidate; the previous run directory is left byte-identical." >&2
     return 6
   fi
 
@@ -5157,9 +5168,16 @@ _pfsm_finalize_inputs() {
         observe|dual_run|blocking) ;;
         *) _dg_enf="observe" ;;   # the conservative reading when the policy is silent
       esac
+      # Under `observe` the gate must also record what it WOULD have blocked —
+      # that is the entire content of an observing gate, and the evidence
+      # verifier requires the boolean. The honest derivation for an aggregate:
+      # it would block when it cannot show every contributing EPIC's gate,
+      # because "I have no evidence for this EPIC" is not the same as "this EPIC
+      # passed". Under `blocking` the same condition is what actually blocks.
       body="$(jq -nc --argjson s "$sources_json" --arg enf "$_dg_enf" \
         '{phase: "plan-final", profile: "plan_aggregate",
-          summary: {enforcement: $enf},
+          summary: {enforcement: $enf,
+                    would_block: ([$s[] | select(.status == "absent")] | length > 0)},
           checks: [], aggregated_from: ($s | length),
           aggregated_absent: ([$s[] | select(.status == "absent")] | length)}')"
     else
