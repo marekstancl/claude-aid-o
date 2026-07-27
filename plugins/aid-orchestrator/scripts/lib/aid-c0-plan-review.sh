@@ -84,7 +84,7 @@
 #   AID_C0_CODEX_MODEL          — override for the `-m` model arg passed to codex
 #                                 (default: same as C3's CODEX_MODEL default).
 #
-# **Last Updated:** 2026-07-18
+# **Last Updated:** 2026-07-25
 # =============================================================================
 set -euo pipefail
 
@@ -234,11 +234,52 @@ _c0_project_id() {
   echo "$pid"
 }
 
+# _c0_resolve_contract_token <repo_root> <token>
+#   P068 Step 1 (CF3, second half). A plan cites contracts by the token
+#   `defaults/schemas/...` or `defaults/policies/...`, but in a plugin
+#   repository those files do NOT live at `<repo_root>/defaults/` — they live
+#   under `<repo_root>/plugins/<name>/defaults/`. Testing the token against the
+#   repo root ALONE therefore failed the existence check for every real
+#   contract in this repository, and the manifest silently sealed an empty
+#   `contracts` array even for a plan citing a dozen schemas: the reviewer saw
+#   none of them.
+#
+#   The token is now resolved against the repository root FIRST (unchanged
+#   behaviour for a non-plugin layout, and it wins on a collision so an
+#   existing consumer's paths never move), then against each `plugins/*/`
+#   directory in LC_ALL=C order. Echoes the repo-relative path of the FIRST
+#   candidate that exists, or nothing. Every candidate is still containment-
+#   checked, so a `..` token cannot escape the repo via the plugin prefix.
+_c0_resolve_contract_token() {
+  local root="$1" tok="$2" cand d rel
+  if [[ -f "$root/$tok" ]] && _path_is_within "$root" "$root/$tok"; then
+    printf '%s' "$tok"
+    return 0
+  fi
+  while IFS= read -r d; do
+    [[ -n "$d" && -d "$d" ]] || continue
+    cand="$d/$tok"
+    [[ -f "$cand" ]] || continue
+    _path_is_within "$root" "$cand" || continue
+    rel="$(realpath -m --relative-to="$root" "$cand" 2>/dev/null)" || continue
+    printf '%s' "$rel"
+    return 0
+  done < <(find "$root/plugins" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)
+  return 1
+}
+
 # _c0_manifest_entry <repo_root> <repo_rel_path>
 #   Echoes {path,sha256,size} for a repo-root-relative path. Missing files
 #   hash to the empty-string sha256 with size 0 (same "absent input" pattern
-#   as aid-c3-dispatch.sh's _sha256_file — a not-yet-produced plan-graph.json
-#   at build-manifest time is a legitimate edge case, not an error).
+#   as aid-c3-dispatch.sh's _sha256_file).
+#
+#   P068 Step 1 note: the ONE caller that used to rely on that absent-input
+#   fallback for a semantic purpose — the plan-graph — no longer does. An
+#   absent graph is now recorded as the explicit status string
+#   `absent_pre_generation` instead (see cmd_build_manifest), because a
+#   zero-byte seal cannot be told apart from a truncated file. The fallback
+#   remains here for any other input that vanishes between listing and
+#   hashing, where "absent" genuinely is the honest hash.
 _c0_manifest_entry() {
   local root="$1" rel="$2" full h sz
   full="$root/$rel"
@@ -295,20 +336,44 @@ cmd_build_manifest() {
   evidence_dir_rel="$(realpath -m --relative-to="$repo_root" "$evidence_abs" 2>/dev/null)" \
     || _fail "cannot compute repo-relative evidence_dir path"
 
-  # --- contracts the plan cites: repo-relative defaults/{schemas,policies}/*
-  #     paths mentioned in the plan text that ACTUALLY exist on disk. A plan
+  # --- contracts the plan cites: defaults/{schemas,policies}/* paths mentioned
+  #     in the plan text that ACTUALLY exist on disk — resolved against the
+  #     repo root AND each plugins/*/ directory (P068 Step 1, CF3). A plan
   #     citing no external contracts yields an empty (still valid) array. ----
   local contracts=()
-  local tok
+  local tok resolved
   while IFS= read -r tok; do
     [[ -z "$tok" ]] && continue
-    if [[ -f "$repo_root/$tok" ]] && _path_is_within "$repo_root" "$repo_root/$tok"; then
-      contracts+=("$tok")
-    fi
+    resolved="$(_c0_resolve_contract_token "$repo_root" "$tok")" || continue
+    [[ -n "$resolved" ]] && contracts+=("$resolved")
   done < <(grep -oE 'defaults/(schemas|policies)/[A-Za-z0-9_./-]+\.(json|ya?ml)' "$plan_file" 2>/dev/null | LC_ALL=C sort -u)
+  if [[ ${#contracts[@]} -gt 0 ]]; then
+    mapfile -t contracts < <(printf '%s\n' "${contracts[@]}" | LC_ALL=C sort -u)
+  fi
 
   # --- plan-graph (sibling c0/ dir; may not exist yet at plan-review time) --
+  #
+  # P068 Step 1 (CF3 refinement). `plan-graph.json` is produced by
+  # `aid-c0-contract.sh contract <plan.json>`, and `plan.json` exists only
+  # AFTER EPIC generation — so a pre-generation plan review can never supply
+  # it. That is a legitimate, expected state, not a defect.
+  #
+  # It used to be sealed as an ordinary absent input: the empty-string sha256
+  # with `size: 0`. That is indistinguishable from a graph that WAS produced
+  # and then truncated to zero bytes — the reviewer could not tell "not
+  # generated yet" from "generated and destroyed". The manifest now records
+  # the explicit status string `absent_pre_generation` in `plan_graph`
+  # instead, and drops the phantom entry from `files[]`/`allowlist` entirely
+  # (there is no file to allow reading, and a zero-byte entry in the hashed
+  # set is exactly the opaque seal being removed). When the graph DOES exist —
+  # any post-generation review — it is sealed and hashed exactly as before, as
+  # a {path,sha256,size} object.
+  #
+  # This changes the sealed `input_hash` for every pre-generation review, which
+  # is intended: the hash now commits to a different, honest input set.
   local plan_graph_rel="$evidence_dir_rel/c0/plan-graph.json"
+  local plan_graph_present=0
+  [[ -f "$repo_root/$plan_graph_rel" ]] && plan_graph_present=1
 
   # --- existing C0 evidence: cp1-deep lenses/adjudicator + c0 contract/plan-
   #     review artifacts, whichever are ACTUALLY present (nullglob). ---------
@@ -335,7 +400,8 @@ cmd_build_manifest() {
 
   # --- assemble the full hashed file set (plan + contracts + plan-graph +
   #     c0 evidence), sorted (LC_ALL=C) for determinism. --------------------
-  local all_paths=("$plan_file_rel" "${contracts[@]}" "$plan_graph_rel" "${c0_evidence[@]}")
+  local all_paths=("$plan_file_rel" "${contracts[@]}" "${c0_evidence[@]}")
+  [[ "$plan_graph_present" -eq 1 ]] && all_paths+=("$plan_graph_rel")
   mapfile -t all_paths < <(printf '%s\n' "${all_paths[@]}" | LC_ALL=C sort -u)
 
   local files_json="[]" p entry
@@ -354,9 +420,15 @@ cmd_build_manifest() {
   if [[ ${#c0_evidence[@]} -gt 0 && -n "${c0_evidence[0]}" ]]; then
     c0_evidence_json="$(printf '%s\n' "${c0_evidence[@]}" | jq -R . | jq -s .)"
   fi
+  # Present → the {path,sha256,size} seal, exactly as before.
+  # Absent  → the explicit status string, never a zero-byte seal.
   local plan_graph_entry
-  plan_graph_entry="$(_c0_manifest_entry "$repo_root" "$plan_graph_rel")" \
-    || _fail "cannot hash plan-graph entry"
+  if [[ "$plan_graph_present" -eq 1 ]]; then
+    plan_graph_entry="$(_c0_manifest_entry "$repo_root" "$plan_graph_rel")" \
+      || _fail "cannot hash plan-graph entry"
+  else
+    plan_graph_entry='"absent_pre_generation"'
+  fi
 
   local canonical input_hash
   canonical="$(jq -S -c -n \
@@ -1342,7 +1414,13 @@ cmd_dispatch() {
   local plan_file_rel reviewed_plan_hash plan_graph_rel contracts_str c0_evidence_str
   plan_file_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_file // ""' "$manifest_for_call")"
   reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call")"
-  plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.path // ""' "$manifest_for_call")"
+  # `plan_graph` is EITHER a {path,sha256,size} seal (graph present) OR the
+  # status string `absent_pre_generation` (P068 Step 1). Indexing a string with
+  # `.path` is a jq ERROR, not a null — so the shape is branched on explicitly
+  # and the status string is passed through to the prompt verbatim, telling the
+  # reviewer why there is no graph rather than handing it an empty path.
+  plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph
+                             | if type == "object" then (.path // "") else (. // "") end' "$manifest_for_call")"
   contracts_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.contracts // [] | join(", ")' "$manifest_for_call")"
   c0_evidence_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.c0_evidence // [] | join(", ")' "$manifest_for_call")"
 

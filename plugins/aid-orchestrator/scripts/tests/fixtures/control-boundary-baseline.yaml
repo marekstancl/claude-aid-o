@@ -1,0 +1,51 @@
+# Control-boundary baseline — the pre-P064 snapshot (P068 Step 9 / E-068-2_2 Step 3)
+#
+# WHY THIS FILE EXISTS. P064 and P068 move where reviews and releases happen.
+# The claim they make is narrow and easy to state: the plan boundary changes
+# WHEN the specialist stack runs, not WHETHER any existing enforcement still
+# enforces. That claim is worthless as prose — anyone can write it — so it is
+# pinned here as data and asserted mechanically by test-control-boundary.sh.
+#
+# Each entry is a value that existed BEFORE the plan-boundary work. If a later
+# change flips one of them, the check fails and the author has to say so out
+# loud rather than have it ride along inside an unrelated diff. Raising an
+# enforcement (observe -> blocking) is a deliberate act with its own review; it
+# is not something a documentation step gets to do quietly.
+
+schema_version: "aid-2.0"
+artifact_type: control_boundary_baseline
+captured_at_version: "2.62.1"
+
+# path -> key -> expected value
+policies:
+  defaults/policies/c0-contract.yaml:
+    enforcement: observe
+  defaults/policies/c3-audit-policy.yaml:
+    enforcement: observe
+  defaults/policies/delivery-gate.yaml:
+    enforcement: observe
+  defaults/policies/review-profiles.yaml:
+    enforcement: observe
+  defaults/policies/semantic-review.yaml:
+    enforcement: observe
+  defaults/policies/release-decision-policy.yaml:
+    enforcement: observe
+    head_match_policy: observe
+
+# Registry rows the plan-boundary work is required to have added, each with the
+# verdict it was added with. A row that vanishes, or whose verdict is quietly
+# upgraded, is exactly the drift this check exists to catch.
+required_enforcement_rows:
+  plan_final_gate_required: ALIGNED
+  plan_final_specialist_review: ALIGNED
+  epic_specialist_review_exception: ALIGNED
+  plan_candidate_identity_binding: ALIGNED
+  plan_merge_cas: ALIGNED
+  plan_boundary_manifest: ALIGNED
+  plan_branch_merge_target: ALIGNED
+  plan_finalize_c4_inputs_producer: ALIGNED
+
+# Rows that are deliberately NOT active. Recording them is the point: a planned
+# row silently becoming "active" would be a claim of enforcement that no code
+# backs.
+required_planned_rows: {}

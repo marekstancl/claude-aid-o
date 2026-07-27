@@ -384,3 +384,11 @@ finding_class: "<category string>"
 status: open|resolved|deferred
 detail: "<human-readable explanation>"
 ```
+
+## Plan-boundary note
+
+Under `plan_branch` the Auditor, Curator, Simplifier and Reporter are
+**plan-final** roles: dispatched once per plan, at the boundary, against the
+frozen candidate. CP2 and CP3 remain per EPIC. Under
+`legacy_epic_release_mode` the previous per-EPIC cadence is unchanged. Mode is
+read from the plan's committed lifecycle manifest, never inferred.

@@ -1190,4 +1190,67 @@ clone and the eco-dev↔eco-prod mirror.
 
 ---
 
-**Last Updated:** 2026-07-15
+**Last Updated:** 2026-07-27
+
+## The plan-boundary layer (P064 + P068)
+
+*Added 2026-07-27. This file is git-tracked — it is the negation-free exception
+to `.gitignore`'s `docs/` rule, so unlike the roadmap and design notes beside it
+this text IS distributed. An earlier draft of this section claimed the opposite;
+it was wrong, and the claim is removed rather than softened.*
+
+If you are adding anything to AID that decides **when** work is released, read
+this first.
+
+### What changed
+
+Releases used to happen per EPIC: each EPIC bumped a version, tagged, and merged
+to the target branch on its own. The consequence was structural, not cosmetic —
+what reached the target branch was never reviewed as a whole, and "the plan is
+done" was an assertion rather than something the system could verify.
+
+The plan-boundary layer moves the release to the plan. In `plan_branch` mode an
+EPIC merges into a plan branch and releases nothing; the plan freezes a candidate
+commit, runs its gates once against it, has the specialists review it once, takes
+one PM authorization naming that candidate and the approved target head, and
+merges with a compare-and-swap. Only then can it be declared closed, and only on
+the strength of a receipt committed in git.
+
+### The three rules a contributor has to respect
+
+**1. The declaration must be durable, not merely written.** A plan's mode lives
+in `.aid-lifecycle/manifests/<plan_id>.yaml`, and every reader resolves it from
+the TARGET BRANCH's committed tree — not from the worktree copy. Writing the
+field with `yq -i` and stopping there produces a plan that declares nothing where
+it counts. This exact bug was introduced twice during P068's own implementation,
+in two different files, and caught both times by read-back checks. If your code
+writes anything under `.aid-lifecycle/`, commit it and read it back from the ref
+before reporting success.
+
+**2. Nothing may move the target ref except a compare-and-swap.** There are two
+such paths (`aid-plan-fsm.sh`'s merge publish and `aid-lifecycle.sh`'s plumbing
+commit), and both pass the expected old value to `git update-ref`. If you add a
+third, it must do the same: a rejected swap has to leave the branch
+byte-identical, and the merge commit must exist only as a dangling object until
+the swap succeeds.
+
+**3. "Cannot verify" is never "verified".** Every guard on this path fails
+closed. A missing frozen head, an absent tag record, an unrecognised closure
+state, an unresolvable ancestry, a missing lifecycle manifest under
+`plan_branch` — each blocks. If you find yourself writing a branch that passes
+because a field was empty, you have found the bug this layer exists to prevent.
+
+### Where the enforcement is recorded
+
+`plugins/aid-orchestrator/defaults/enforcement-registry.yaml` is the tracked
+authority. Every detection capability you add needs a row there with its type,
+source, severity, surface and verdict, and `test-control-boundary.sh` asserts
+that the required rows exist, that planned rows stay planned, and that the header
+total is derived rather than hand-written.
+
+### Roadmap position
+
+E9.5 sits between E9 and E10: the plan-boundary layer is its own phase, not a
+sub-task of E9, because E10's calibration promotion depends on the plan-final
+cadence existing. The specialist stack is dispatched once per PLAN, not once per
+EPIC — if you are budgeting dispatches, budget them per plan.

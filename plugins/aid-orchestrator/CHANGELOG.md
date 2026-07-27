@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.63.0] — 2026-07-26
+
+### Added
+- **Plan-final release boundary** — a plan in `plan_branch` mode now releases exactly once, at its own boundary: one gate profile run against a frozen candidate, one specialist review, one PM authorization bound to that candidate, one compare-and-swap merge to the target branch, at most one tag, and a committed lifecycle receipt without which the plan cannot be declared closed.
+- **`plan-close` as a real gate** — the close transaction verifies EPIC terminality, EPIC merge ancestry, the gate report, every review output re-hashed against its record, the C4 and PM decisions, the merge record and its ancestry, the tag state, `MERGE_HEAD`, unfinished operation records and held locks before it writes anything, and only then commits the receipt and the head-bound marker.
+- **`aid-plan-fsm.sh inventory`** — enumerates every plan with its declared mode, EPIC counts and disposition, and with `--apply` stamps unstamped plans `legacy_epic_release_mode` without migrating them or creating a branch.
+- **`defaults/policies/plan-boundary-policy.yaml`** — the default mode, lock lease and plan-final profile floor, as a file a project can override rather than a constant it cannot.
+- **`AID_PLAN_FSM_CRASH_AFTER` test seam and the AC9 resilience matrix** — every transaction boundary is exercised by real process death and asserted to converge without a duplicate merge, tag or receipt.
+- **`test-control-boundary.sh` and `test-instruction-sweep.sh`** — mechanical guards that the plan boundary changed WHEN reviews run rather than whether existing enforcements enforce, and that no unqualified per-EPIC release instruction survives on an agent-facing surface.
+- **Agent handoff contract** — `skills/agent-protocol.md` states the five boundary messages an agent working inside a plan-branch plan may rely on.
+
+### Changed
+- **Default mode for new plans is `plan_branch`** — guarded on the project declaring a `gate_profiles` table, falling back to `legacy_epic_release_mode` with a logged `plan_branch_unavailable: no_gate_profiles` otherwise, so a consumer project cannot flip to a mode whose gates would resolve against nothing.
+- **Specialist cadence** — Auditor, Curator, Simplifier and Reporter are plan-final roles under `plan_branch`, dispatched once per plan against the frozen candidate; CP2 and CP3 remain per EPIC.
+- **Lifecycle manifest write is fail-closed under `plan_branch`** — a manifest that cannot be written no longer degrades to a warning, because no manifest means no declared mode, which means the plan runs legacy while everyone believes otherwise.
+
+### Fixed
+- **`pre-push` exemption checked only the local ref** — `git push origin plan/P068:main` slipped the guarded target branch through; both sides of the refspec are now checked.
+- **Stale-authorization guard could be disarmed by history** — any recorded `resulting_sha` disarmed it, so a rewound target branch let a publish land against a head the PM never approved.
+- **Abort close was single-shot** — the abort's own lifecycle commit advances the target branch, which the check read as a violation, making every re-run including crash recovery permanently refused.
+- **Fail-open paths closed** — a missing frozen target head, an absent tag record, an unrecognised closure state and a missing lifecycle manifest each block instead of passing.
+- **The plan was closed before its evidence was checked** — `cmd_plan_close` ran the irreversible plan-layer close ahead of the required Curator/Auditor report gate, so a missing report failed only after the plan was already closed in the books.
+- **The declared mode was written but never committed** — the stamp lived in the worktree while the git-tracked authority carried none.
+
 ## [2.62.1] — 2026-07-24
 
 ### Fixed

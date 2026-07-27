@@ -3,7 +3,16 @@
 #
 # Usage:
 #   aid-run-gates.sh run-gate <gate_name> <command> <timeout_s> <log_file>
-#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>] [--plan-json <path>] [--profile <name>]
+#   aid-run-gates.sh run-all <execution_yaml> <epic_id> <run_id> [timeline_file] [--state-file <path>] [--report-file <path>] [--plan-json <path>] [--profile <name>] [--base-commit <sha>] [--plan-path <path>]
+#
+# P068 Step 2 changes:
+#   • --base-commit <sha> / --plan-path <path> supply the {base_commit} and
+#     {plan_path} substitution tokens EXPLICITLY. Both are additive and
+#     optional; omitted, the runner reads them from --state-file exactly as
+#     before (unchanged EPIC-scoped behaviour). They exist for the plan-final
+#     run, which has no fsm-state.yaml at all — without them `plan_diff` gets
+#     `--plan null`, takes its Fast Mode exit-2 skip, and the one release gate
+#     run for a whole plan reports success while verifying nothing.
 #
 # P061 E1 Step 2 changes:
 #   • --profile <name> selects a named subset of gates to run, from
@@ -190,17 +199,40 @@ run_all_gates() {
     shift
   fi
 
-  # Parse optional flags: --state-file, --report-file, --plan-json, --profile
+  # Parse optional flags: --state-file, --report-file, --plan-json, --profile,
+  # --base-commit, --plan-path
   local state_file="" report_file="" plan_json="" profile=""
+  # P068 Step 2 — explicit substitution inputs. ADDITIVE and OPTIONAL: when
+  # absent, both fall back to --state-file exactly as before, so every existing
+  # EPIC-scoped caller is byte-for-byte unaffected. They exist because a
+  # PLAN-FINAL run has no fsm-state.yaml (an EPIC-scoped artifact) and without
+  # them `plan_diff` would receive `--plan null`, take its documented Fast Mode
+  # graceful skip (exit 2, which execution.yaml's pass_criteria ACCEPTS) and
+  # report a green gate that verified nothing.
+  local base_commit_opt="" plan_path_opt=""
+  local base_commit_opt_set=0 plan_path_opt_set=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --state-file) state_file="$2"; shift 2 ;;
       --report-file) report_file="$2"; shift 2 ;;
       --plan-json) plan_json="$2"; shift 2 ;;
       --profile) profile="$2"; shift 2 ;;
+      --base-commit) base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
+      --plan-path) plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
       *) shift ;;
     esac
   done
+
+  # A flag that is PASSED must carry a real value — an empty --plan-path would
+  # otherwise silently degrade to the same `null` this flag exists to prevent.
+  if (( base_commit_opt_set )) && [[ -z "$base_commit_opt" || "$base_commit_opt" == "null" ]]; then
+    echo "ERROR: aid-run-gates.sh: --base-commit was passed with an empty/'null' value — pass a real commit or omit the flag." >&2
+    exit 1
+  fi
+  if (( plan_path_opt_set )) && [[ -z "$plan_path_opt" || "$plan_path_opt" == "null" ]]; then
+    echo "ERROR: aid-run-gates.sh: --plan-path was passed with an empty/'null' value — pass a real plan file path or omit the flag." >&2
+    exit 1
+  fi
 
   [[ -f "$execution_yaml" ]] || { echo "ERROR: execution_yaml not found: $execution_yaml" >&2; exit 1; }
 
@@ -279,6 +311,14 @@ run_all_gates() {
     plan_path_resolved=$(grep '^plan_path:' "$state_file" 2>/dev/null | awk '{print $2}' || echo "null")
     [[ -z "$plan_path_resolved" ]] && plan_path_resolved="null"
   fi
+  # P068 Step 2 — the explicit flags WIN over the state file when supplied.
+  # Precedence, not merge: a plan-final caller that names its own base/plan is
+  # the authority for this run; a caller that names neither is on the legacy
+  # state-file path unchanged.
+  # (if/fi, not `(( x )) && ...` — under `set -e` a false arithmetic test as the
+  # last command of a && list exits the script.)
+  if (( base_commit_opt_set )); then base_commit_resolved="$base_commit_opt"; fi
+  if (( plan_path_opt_set )); then plan_path_resolved="$plan_path_opt"; fi
 
   # ─── gate_runner_start (P032 Step 3) ──────────────────────────────
   local gate_count gate_names_json

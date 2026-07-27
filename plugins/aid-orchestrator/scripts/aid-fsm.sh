@@ -5420,12 +5420,34 @@ cmd_plan_close() {
   [[ -n "$nnn" ]] || { echo "ERROR: plan-close: cannot derive a plan id from epic_id '${epic_id}' (expected E-<NNN>-...)." >&2; exit 1; }
   local plan_id="P${nnn}"
 
-  # Read execution.yaml toggles — grep-only, no yq dependency.
+  # ── P068 E-068-1_2 Step 6: delegate the PLAN BOUNDARY to the plan layer ───
+  # For a `plan_branch` plan the real close is a transaction, not a marker: it
+  # reconciles the legacy marker world this function owns with the git-tracked
+  # `.aid-lifecycle` receipt world, and it may only pass after the merge or a
+  # recorded abort. `aid-plan-fsm.sh plan-close` is that transaction.
+  #
+  # The delegation is DELIBERATELY scoped to a plan that has actually reached
+  # its boundary (PLAN_MERGING / ABORTED / CLOSED). An INTERMEDIATE EPIC of a
+  # plan_branch plan merges into `plan/<plan_id>` long before the plan boundary
+  # exists, and it still needs this function's ordinary per-EPIC report checks;
+  # delegating for it would fail the EPIC on a plan-level precondition that is
+  # not yet meant to hold. On success the EPIC's own `ca-review-complete` marker
+  # is still written, so nothing downstream of this function changes shape.
+  # The MODE comes from the ONE declared source (`_fsm_declared_plan_mode`, the
+  # git-tracked lifecycle manifest on target_branch) — never from the runtime
+  # plan-boundary manifest. CP3-F2 made that a structural invariant precisely so
+  # two mode sources can never disagree, and plan-close is not an exception.
+  # Read execution.yaml toggles — grep-only, no yq dependency. Read BEFORE the
+  # plan-layer delegation (CP2 M5): the delegated path used to return before
+  # this, so a project with reporter.enabled:false hard-failed the plan layer's
+  # Check 1 ("report never generated") with no reachable remedy.
   local exec_yaml="${project_root}/.aid-o/config/execution.yaml"
   local simplifier_enabled=true
   local reporter_enabled=true
   _aid_read_toggle "$exec_yaml" "simplifier" || simplifier_enabled=false
   _aid_read_toggle "$exec_yaml" "reporter" || reporter_enabled=false
+
+  local _pb_plan_layer_closed=0
 
   local audit_log="${project_root}/.aid-o/work/audit-log.jsonl"
 
@@ -5472,6 +5494,49 @@ cmd_plan_close() {
     exit 1
   fi
 
+  # ── The plan-layer close transaction — AFTER the evidence gate above ──────
+  # Ordering is the whole point. The plan-layer close is IRREVERSIBLE: it commits
+  # a lifecycle receipt, writes plan-close-complete and moves the plan to CLOSED.
+  # Running it before the required-report checks meant a plan could be
+  # permanently closed in the books and only then fail on a missing Curator or
+  # Auditor report — the exact split between recorded state and reality that this
+  # whole plan boundary exists to prevent. Nothing durable is written until every
+  # required report for this EPIC is present.
+  local _pb_mode_row _pb_mode=""
+  _pb_mode_row="$(_fsm_declared_plan_mode "$epic_id" 2>/dev/null || true)"
+  _pb_mode="${_pb_mode_row%%$'\t'*}"
+  if [[ "$_pb_mode" == "plan_branch" ]]; then
+    local _pb_state_file="${project_root}/.aid-o/work/plan-state/${plan_id}/plan-state.yaml"
+    local _pb_state=""
+    [[ -f "$_pb_state_file" ]] && _pb_state="$(yaml_field "$_pb_state_file" plan_state)"
+    case "$_pb_state" in
+      ROLLED_BACK)
+        # A rolled-back plan is already terminal and was closed by plan-rollback,
+        # which has its own marker and its own durable record. Sending it to
+        # plan-close would refuse (close runs out of PLAN_MERGING or a recorded
+        # abort) and, worse, would imply the plan still owed a closure it has
+        # already had. The EPIC's own evidence is still checked below — the plan
+        # being rolled back says nothing about whether this EPIC did its work.
+        echo "NOTE: plan-close: ${plan_id} is ROLLED_BACK — its plan-layer closure is the rollback record, so no plan-close is attempted. The EPIC's own required reports are still checked." >&2
+        _pb_plan_layer_closed=1
+        ;;
+      PLAN_MERGING|ABORTED|CLOSED)
+        local -a _pb_close_args=("$plan_id" --project-root "$project_root")
+        [[ "$reporter_enabled" == "false" ]] && _pb_close_args+=(--skip-delivery-report)
+        if ! "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-close "${_pb_close_args[@]}"; then
+          echo "PRECONDITION FAIL: plan-close: the plan-layer close transaction refused ${plan_id} — no EPIC marker was written." >&2
+          exit 1
+        fi
+        # The plan-layer close is a PRECONDITION for the EPIC marker, never a
+        # substitute for the EPIC's own evidence (CP2 M4). It is idempotent, so a
+        # crash between it and the marker below converges on re-run: the second
+        # pass finds the plan already CLOSED, writes no second receipt, and
+        # completes the marker.
+        _pb_plan_layer_closed=1
+        ;;
+    esac
+  fi
+
   # Mechanical plan-close self-check (aid-plan-close-check.sh) — replaces the
   # PM's repeated manual audits (stale/untracked reports, DONE-but-pending
   # fsm-state, stale queue/active.md) with a hard gate here. --auto-annotate
@@ -5490,7 +5555,9 @@ cmd_plan_close() {
     _plan_close_check_flags+=(--skip-delivery-report)
     log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-delivery-report" rationale="reporter.enabled:false in execution.yaml (delivery-report existence only; Checks 2-4 still run)"
   fi
-  if ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
+  if [[ "$_pb_plan_layer_closed" -eq 1 ]]; then
+    log_event "$audit_log" "plan_close_skip" specialist="plan-close-check-rerun" rationale="the plan-layer close transaction already ran aid-plan-close-check.sh --plan-branch, which is a strict superset of this invocation"
+  elif ! "${SCRIPT_DIR}/aid-plan-close-check.sh" "$plan_id" --project-root "$project_root" "${_plan_close_check_flags[@]}"; then
     echo "PRECONDITION FAIL: aid-plan-close-check.sh reported a blocking issue for ${plan_id}" >&2
     echo "Use 'aid-fsm.sh plan-close' — do NOT create this marker with touch." >&2
     exit 1

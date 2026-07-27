@@ -259,9 +259,57 @@ echo "[INFO] Starting pipeline for plan $plan_id ($total_phases phase(s), queue-
 if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
   # shellcheck source=lib/aid-lifecycle.sh
   source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+  # P068 Step 7 — the mode a NEW plan is created with, resolved from
+  # defaults/policies/plan-boundary-policy.yaml and GUARDED on the project's
+  # gate_profiles table existing. Resolved BEFORE the manifest write, from the
+  # policy rather than from the manifest, which avoids the chicken-and-egg of
+  # asking a file that has not been written yet what mode it declares.
+  _pb_mode_row="$(bash "${SCRIPT_DIR}/aid-plan-fsm.sh" __default-mode --project-root "." 2>/dev/null || true)"
+  _pb_default_mode="${_pb_mode_row%%$'\t'*}"
+  _pb_mode_reason="${_pb_mode_row#*$'\t'}"
+  [[ -z "$_pb_default_mode" ]] && { _pb_default_mode="legacy_epic_release_mode"; _pb_mode_reason="resolver_unavailable"; }
+  if [[ "$_pb_default_mode" == "legacy_epic_release_mode" && "$_pb_mode_reason" == *"no_gate_profiles"* ]]; then
+    echo "[INFO] plan_branch_unavailable: no_gate_profiles — $plan_id is created in legacy_epic_release_mode. Run the gate-profile bootstrap to enable the plan-final model." >&2
+    mkdir -p ".aid-o/work" 2>/dev/null \
+      && printf '{"plan_id":"%s","event":"plan_branch_unavailable","reason":"no_gate_profiles"}\n' "$plan_id" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
+  fi
+
   _lc_rc=0; aid_lifecycle_ensure_manifest "$plan_id" "." >/dev/null 2>&1 || _lc_rc=$?
   if [[ "$_lc_rc" -eq 0 ]]; then
-    echo "[INFO] lifecycle manifest ensured for $plan_id (.aid-lifecycle/manifests/${plan_id}.yaml)" >&2
+    # Stamp the resolved mode into the manifest that was just made durable, then
+    # make the STAMP durable too. ensure_manifest commits what it wrote, so a
+    # bare `yq -i` here would leave the mode in the worktree only while the
+    # COMMITTED copy — the authority every later reader consults, including
+    # _fsm_declared_plan_mode, which reads target_branch's tree — carried none.
+    # A mode that exists only in an uncommitted file is not a declaration.
+    if ! yq -i ".mode = \"${_pb_default_mode}\"" ".aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null; then
+      error_exit "Lifecycle manifest for $plan_id was created but its mode could not be stamped — a manifest with no declared mode cannot prove which release model the plan follows." 6
+    fi
+    # ensure_manifest returns early once the manifest is durable, and rebuilds
+    # it from the plan when it is not — either way it neither knows nor preserves
+    # `mode`. The stamp therefore has to be committed here, on its own, through
+    # the same isolated-index path the lifecycle layer uses (the caller's index
+    # is never touched). Verified by reading the committed copy back: a stamp
+    # that cannot be read from target_branch's tree is not a declaration.
+    _lc_rc2=0
+    _aid_lc_isolated_commit "." "lifecycle: declare mode ${_pb_default_mode} for ${plan_id}" \
+      ".aid-lifecycle/manifests/${plan_id}.yaml" >/dev/null 2>&1 || _lc_rc2=$?
+    _pb_committed_mode="$(git show "$(aid_target_branch):.aid-lifecycle/manifests/${plan_id}.yaml" 2>/dev/null | yq -r '.mode // ""' 2>/dev/null || true)"
+    if [[ "$_pb_committed_mode" != "$_pb_default_mode" ]]; then
+      if [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
+        error_exit "The mode stamp for $plan_id is not readable from $(aid_target_branch)'s committed manifest (rc=$_lc_rc2, read='${_pb_committed_mode:-<none>}') — under plan_branch an undeclared mode in the committed manifest is exactly the silent downgrade this boundary exists to prevent." 6
+      fi
+      echo "[WARN] lifecycle: the mode stamp for $plan_id is not committed (rc=$_lc_rc2) — the plan runs legacy, which is what the uncommitted state already implies." >&2
+    fi
+    echo "[INFO] lifecycle manifest ensured for $plan_id (.aid-lifecycle/manifests/${plan_id}.yaml), mode=${_pb_default_mode} (${_pb_mode_reason})" >&2
+  elif [[ "$_pb_default_mode" == "plan_branch" && "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
+    # P068 Step 7 — THE ESCAPE HATCH IS CLOSED UNDER plan_branch.
+    # This path used to WARN and proceed whenever the plan did not opt into
+    # lifecycle_strict. That is defensible for a legacy plan, but once the
+    # default mode is plan_branch it becomes the silent downgrade the whole
+    # boundary exists to prevent: no manifest means no mode declaration, which
+    # means the plan runs legacy while everyone believes it is plan-branch.
+    error_exit "Lifecycle manifest could not be created for $plan_id (rc=$_lc_rc) and the resolved default mode is plan_branch — proceeding would run the plan under the legacy model while its mode is undeclared. Fix the plan's EPIC declaration (strict '**EPIC N: …**' / '**EPIC N / Backlog: …**' grammar) and run on target_branch — or set AID_LIFECYCLE_MIGRATION=1 for an explicit, audited legacy run." 6
   elif grep -qE '^lifecycle_strict:[[:space:]]*true' "$plan" 2>/dev/null && [[ "${AID_LIFECYCLE_MIGRATION:-}" != "1" ]]; then
     # NEW-MODEL plan (opted into strict lifecycle via frontmatter) MUST have a
     # durable, committed manifest before EPIC scaffolding -> FAIL-CLOSED.
@@ -275,6 +323,20 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
     echo "[WARN] lifecycle: no durable manifest for plan $plan_id (mode=$_lc_mode, rc=$_lc_rc) — proceeding in AUDITED migration mode; run 'aid-fsm.sh plan-reconcile $plan_id --apply' after delivery. (New plans use the plan template's 'lifecycle_strict: true' + the strict '**EPIC N:**' grammar for fail-closed guarantees.)" >&2
     mkdir -p ".aid-o/work" 2>/dev/null \
       && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
+  fi
+
+  # P068 Step 7 — plan state for a NEW plan, stamped with the resolved mode.
+  # Only when the plan has none: an existing plan is never migrated mid-run, and
+  # plan-start is a no-op guard rather than a re-initialisation.
+  if [[ ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
+    _ps_rc=0
+    bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-start "$plan_id" \
+      --mode "$_pb_default_mode" --project-root "." >/dev/null 2>&1 || _ps_rc=$?
+    if [[ "$_ps_rc" -eq 0 ]]; then
+      echo "[INFO] plan state initialised for $plan_id (mode=${_pb_default_mode})" >&2
+    else
+      echo "[WARN] plan-start could not initialise plan state for $plan_id (rc=$_ps_rc) — the lifecycle manifest still carries the declared mode, which is the authority; run 'aid-plan-fsm.sh plan-start $plan_id --mode ${_pb_default_mode}' before the plan boundary." >&2
+    fi
   fi
 fi
 

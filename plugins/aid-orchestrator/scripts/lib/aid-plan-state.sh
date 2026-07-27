@@ -65,7 +65,15 @@
 #   op_id                 string       see plan_op_key below
 #   command                string       plan-start | epic-start | epic-complete
 #                                       | epic-merge-to-plan | plan-finalize
-#                                       | plan-merge-to-main
+#                                       | plan-merge-to-main | plan-close
+#     `plan-close` is P068 E-068-1_2 Step 6's ADDITIVE extension of P064's own
+#     six-command enum, declared here rather than silently assumed: the close
+#     transaction is a durable operation like every other one, keyed
+#     `plan-close:<plan_id>:-:<attempt>:<plan_id>`, following the same
+#     intent -> git_applied -> state_committed sequence (git_applied is stamped
+#     when the lifecycle receipt — or, for an aborted plan, the abort record —
+#     commits; state_committed when the plan-close-complete marker is written),
+#     so a crash between the two is reconcilable exactly like any other.
 #   subject                string       EPIC id for EPIC-scoped commands, else
 #                                       plan id
 #   phase                  enum         intent | git_applied | state_committed
@@ -218,6 +226,11 @@ _AID_PLAN_TRANSITIONS=(
   "AWAITING_PM:CONFLICT"
   "AWAITING_PM:ABORTED"
   "PLAN_MERGING:CLOSED"
+  # P075 dogfood (2026-07-27): a plan that merged and was then correctly reverted
+  # has no honest terminal state today. ABORTED is a lie — it merged; CLOSED is a
+  # lie — its delivery is not on the target branch. ROLLED_BACK is the third
+  # outcome the boundary always had in practice and never had a name for.
+  "PLAN_MERGING:ROLLED_BACK"
   "PLAN_MERGING:CONFLICT"
   "PLAN_MERGING:ABORTED"
 )
@@ -229,7 +242,7 @@ _AID_PLAN_TRANSITIONS=(
 
 _AID_PLAN_VALID_STATES=(
   OPEN EPIC_INTEGRATION PLAN_SYNC PLAN_GATES PLAN_REVIEW PLAN_FIX
-  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT
+  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT ROLLED_BACK
 )
 
 _plan_warn() {

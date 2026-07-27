@@ -1715,6 +1715,25 @@ _pfsm_install_plan_final_stub() {
   echo "$sdir/aid-plan-fsm.sh"
 }
 
+# _pfsm_install_pre_p068_stub — the INVERSE of the stub above, and the reason it
+# exists: P068 E-068-1_2 Step 5 landed `plan-merge-to-main`, so the REAL CLI now
+# declares both plan-final arms and `_pfsm_plan_final_installed` returns true.
+# The refusal it guards can therefore no longer be observed against the live CLI.
+# This installs a fixture copy with BOTH dispatcher arms stripped — a faithful
+# pre-P068 CLI — so the hard refusal and its "advertises no bypass" assertions
+# stay under test instead of being deleted along with the condition that fired
+# them. Same `ln -sfn` + `-e` guard discipline as the positive-control stub.
+_pfsm_install_pre_p068_stub() {
+  local sdir="$TEST_TMPDIR/pre-p068-stub-scripts"
+  if [[ ! -e "$sdir/aid-plan-fsm.sh" ]]; then
+    mkdir -p "$sdir"
+    ln -sfn "$AID_PLUGIN_PATH/scripts/lib" "$sdir/lib"
+    sed -E '/^[[:space:]]*plan-finalize\) /d; /^[[:space:]]*plan-merge-to-main\) /d' \
+      "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" > "$sdir/aid-plan-fsm.sh"
+  fi
+  echo "$sdir/aid-plan-fsm.sh"
+}
+
 # _pfsm_bootstrap_plan <plan_id> [mode] — writes a minimal legacy plan file
 # and runs a REAL plan-start through the CLI (never a parallel "test mode"
 # shortcut — matches build_default_init_args's own convention of always
@@ -2249,10 +2268,46 @@ _pfsm_bootstrap_plan() {
   [ ! -e "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml" ]
 }
 
-@test "IMP-271: --mode plan_branch is hard-refused (exit 1) naming both missing plan-final subcommands, advertises NO bypass, and creates nothing" {
+@test "IMP-271 (P068 Step 5): the LIVE CLI now accepts --mode plan_branch — the refusal lifted because plan-finalize and plan-merge-to-main landed" {
   _write_legacy_plan "P900"
 
+  # The guard was always conditional: "hard-refused WHILE those subcommands are
+  # missing". P068 E-068-1_2 Steps 1-5 landed them, so `_pfsm_plan_final_installed`
+  # now returns true against the real CLI and the refusal lifts MECHANICALLY —
+  # no flag, no override, no edit to the guard itself. This test records that
+  # transition; the refusal itself stays under test in the next one, against a
+  # fixture CLI with the arms stripped.
+  run grep -Eq '^[[:space:]]*plan-finalize\)' "$PLAN_FSM_CLI"
+  [ "$status" -eq 0 ]
+  run grep -Eq '^[[:space:]]*plan-merge-to-main\)' "$PLAN_FSM_CLI"
+  [ "$status" -eq 0 ]
+
   run bash "$PLAN_FSM_CLI" plan-start P900 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "plan/P900" ]
+  run yq -r '.mode' "$TEST_PROJECT_ROOT/.aid-lifecycle/manifests/P900.yaml"
+  [ "$output" = "plan_branch" ]
+
+  # The escape hatch stays gone: nothing recorded one, because nothing needed one.
+  local ops; ops="$(_ops_file P900)"
+  run grep -c 'allow_incomplete_plan_final' "$ops"
+  [ "$output" = "0" ]
+}
+
+@test "IMP-271: a CLI WITHOUT the plan-final subcommands still hard-refuses --mode plan_branch (exit 1), names both, advertises NO bypass, and creates nothing" {
+  _write_legacy_plan "P900"
+
+  # The guard's protection must not disappear just because THIS repo has since
+  # satisfied its condition. Run it against a faithful pre-P068 CLI (both
+  # dispatcher arms stripped) so the refusal, its message and the absence of any
+  # escape hatch are all still asserted.
+  local cli; cli="$(_pfsm_install_pre_p068_stub)"
+  run grep -Eq '^[[:space:]]*plan-finalize\)' "$cli"
+  [ "$status" -ne 0 ]
+  run grep -Eq '^[[:space:]]*plan-merge-to-main\)' "$cli"
+  [ "$status" -ne 0 ]
+
+  run bash "$cli" plan-start P900 --mode plan_branch --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"plan-finalize"* ]]
   [[ "$output" == *"plan-merge-to-main"* ]]
@@ -6001,11 +6056,15 @@ EOF
 # with spies that could never fire: the FSM does not invoke them at all, in
 # either mode, so a plan_branch run cannot reach them by construction.
 _rs_static_release_stack_absence() {
-  # `aid-release.sh` has ZERO callers under scripts/ — the only hits are inside
-  # the script's own header/usage lines. The controller invokes it by absolute
-  # path from pipeline.md, never through the FSM.
-  run bash -c "grep -rn 'aid-release\\.sh' '$AID_PLUGIN_PATH/scripts' --include='*.sh' \
-                 | grep -v '/aid-release\\.sh:' | grep -v '/tests/' || true"
+  # This test is about the INTERMEDIATE done-advance path, so the static guard
+  # is scoped to the FSM that path runs through. It used to grep all of
+  # scripts/ and assert `aid-release.sh` has zero callers anywhere — a premise
+  # P068 Step 5 legitimately retired by adding the plan-final `tag-plan` call in
+  # aid-plan-fsm.sh. That call is reachable ONLY from plan-merge-to-main, i.e.
+  # at the plan boundary, never from an intermediate EPIC completion, so a
+  # whole-tree assertion made the test fail for the very change it should
+  # permit. (PM-authorized scope extension, 2026-07-26.)
+  run bash -c "grep -n 'aid-release\\.sh' '$FSM' || true"
   [ -z "$output" ]
   # The four specialist dispatches are AGENT dispatches, not executables: no
   # such name exists anywhere in the plugin, least of all in the FSM.

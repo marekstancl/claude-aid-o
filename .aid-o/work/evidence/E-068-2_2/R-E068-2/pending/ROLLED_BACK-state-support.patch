@@ -1,0 +1,44 @@
+diff --git a/plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh b/plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh
+index a9d72bf..a24d4a7 100644
+--- a/plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh
++++ b/plugins/aid-orchestrator/scripts/lib/aid-plan-manifest.sh
+@@ -457,9 +457,11 @@ _pm_check_invariants() {
+   # `plan-state` kept reporting AWAITING_PM for a plan the authoritative
+   # plan-state.yaml had already marked ABORTED. The alternatives were both worse:
+   # clearing the candidate destroys the evidence, and tolerating the stale mirror
+-  # leaves every reader with a false answer.
+-  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED","ABORTED"] | index($s) != null)' "$file" >/dev/null 2>&1; then
+-    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED/ABORTED)" >&2
++  # leaves every reader with a false answer. ROLLED_BACK (2026-07-27) is here for
++  # the same reason: a rolled-back plan keeps the candidate that WAS merged and
++  # then reverted — that SHA is half the rollback record.
++  if ! jq -e '(.plan_boundary_manifest.candidate_sha == null) or (.plan_boundary_manifest.plan_state as $s | ["PLAN_GATES","PLAN_REVIEW","AWAITING_PM","PLAN_MERGING","CLOSED","ABORTED","ROLLED_BACK"] | index($s) != null)' "$file" >/dev/null 2>&1; then
++    echo "PRECONDITION FAIL: plan-boundary-manifest invariant violated for plan_id=$plan_id — candidate_sha is set while plan_state is too early (not in PLAN_GATES/PLAN_REVIEW/AWAITING_PM/PLAN_MERGING/CLOSED/ABORTED/ROLLED_BACK)" >&2
+     return 1
+   fi
+ 
+diff --git a/plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh b/plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh
+index d6ccd36..b1e167c 100644
+--- a/plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh
++++ b/plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh
+@@ -226,6 +226,11 @@ _AID_PLAN_TRANSITIONS=(
+   "AWAITING_PM:CONFLICT"
+   "AWAITING_PM:ABORTED"
+   "PLAN_MERGING:CLOSED"
++  # P075 dogfood (2026-07-27): a plan that merged and was then correctly reverted
++  # has no honest terminal state today. ABORTED is a lie — it merged; CLOSED is a
++  # lie — its delivery is not on the target branch. ROLLED_BACK is the third
++  # outcome the boundary always had in practice and never had a name for.
++  "PLAN_MERGING:ROLLED_BACK"
+   "PLAN_MERGING:CONFLICT"
+   "PLAN_MERGING:ABORTED"
+ )
+@@ -237,7 +242,7 @@ _AID_PLAN_TRANSITIONS=(
+ 
+ _AID_PLAN_VALID_STATES=(
+   OPEN EPIC_INTEGRATION PLAN_SYNC PLAN_GATES PLAN_REVIEW PLAN_FIX
+-  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT
++  AWAITING_PM PLAN_MERGING CLOSED ABORTED CONFLICT ROLLED_BACK
+ )
+ 
+ _plan_warn() {

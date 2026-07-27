@@ -55,6 +55,11 @@ done
 # ---------------------------------------------------------------------------
 declare -A DELEGATED_SUITES=(
   ["test-aid-plan-release-boundary.bats"]="plan-boundary-tests"
+  # P068 E-068-1_2 Step 1 — same reasoning as the line above: this suite
+  # creates a real Git repository per test and drives real merges, version
+  # bumps and freeze/invalidation cycles through the CLI, so it gets its own
+  # job with its own budget instead of eating this job's headroom.
+  ["test-aid-plan-final-boundary.bats"]="plan-final-tests"
 )
 
 # ---------------------------------------------------------------------------

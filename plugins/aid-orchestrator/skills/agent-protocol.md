@@ -303,3 +303,33 @@ All AID bash scripts live in the **plugin directory**, not the target project.
 ---
 
 **Last Updated:** 2026-06-30
+
+## Agent handoff contract at the plan boundary
+
+An agent dispatched inside a `plan_branch` plan is working on one EPIC of
+something larger. These five messages are the whole contract; anything an agent
+believes beyond them is an assumption, and the boundary exists because
+assumptions about release cadence were what previously leaked.
+
+1. **Your EPIC does not release.** Completing it merges your work into the plan
+   branch. No version bump, no tag, no push, no merge into the target branch. If
+   your instructions imply otherwise, the plan's mode overrides them.
+2. **Your review is CP2 and CP3.** The Auditor, Curator, Simplifier and Reporter
+   are plan-final roles under `plan_branch` — they run once per plan, at the
+   boundary, against the frozen candidate. Their absence from your EPIC is the
+   design, not an omission for you to compensate for.
+3. **The candidate is frozen without you.** After the last EPIC merges, the plan
+   freezes a candidate SHA and everything downstream binds to it. Work that
+   lands after the freeze is not in the release, however finished it looks.
+4. **Only the PM authorizes the merge to the target branch**, through a decision
+   artifact bound to the plan, the attempt, the candidate and the approved
+   target head. No agent, and no automation acting for one, may substitute for
+   it or infer it.
+5. **Report what is true, including what you did not do.** A step reported
+   complete on evidence that was not produced is worse than a step reported
+   blocked, because the plan boundary's guarantees are only as good as the
+   evidence they are computed from.
+
+Mode is read from the plan's committed lifecycle manifest
+(`.aid-lifecycle/manifests/<plan_id>.yaml`), never from a runtime file and never
+inferred from the branch name.

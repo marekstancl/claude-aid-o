@@ -1093,6 +1093,13 @@ on GATES→DONE transition.
 
 Ordered sequence — each step has a named gate. `done-advance` and `plan-close` enforce mechanically.
 
+**In `plan_branch` mode, steps 3–9 are NOT per-EPIC — they are the plan-final boundary**
+(P068). An intermediate EPIC in a `plan_branch` plan runs steps 1, 2, 2a, 10 and 11 only; the
+Auditor, Curator, Simplifier, Reporter, the plan utilities and the `ca-review-complete`
+marker all move to `aid-plan-fsm.sh plan-finalize <plan_id> --stage review`, which runs once
+against the frozen candidate. The table below is the `legacy_epic_release_mode` sequence; the
+plan-final equivalent is *Plan-final review boundary* further down this section.
+
 | Step | Action | Gate (enforced) |
 |------|--------|-----------------|
 | 1 | Archive run file + update `active.md` | run.md `status: completed` |
@@ -1174,6 +1181,11 @@ In `legacy_epic_release_mode` everything in this section runs exactly as before.
 - done_phase stays `review` until plan-level checkpoint
 
 **Per-Plan checkpoint (HARD STOP after last EPIC in plan):**
+
+In `plan_branch` mode this checkpoint is not a controller convention — it is the FSM stage
+*Plan-final review boundary* below, and the numbered list that follows describes the
+`legacy_epic_release_mode` shape.
+
 1. Wait for ALL pending C+A reports from all EPICs in this plan
 2. Read all reports, compile findings across all EPICs
 3. Apply ALL fixes — S, M, AND L effort (L findings are often trivial in practice)
@@ -1210,6 +1222,80 @@ In `legacy_epic_release_mode` everything in this section runs exactly as before.
 
 **Enforcement:** `aid-fsm.sh init` blocks cross-plan runs without `ca-review-complete` markers.
 The marker must be created via `plan-close`, not `touch` — `plan-close` enforces report presence.
+
+### Plan-final review boundary (`plan_branch` mode) — `plan-finalize --stage review`
+
+After `--stage gates` puts the plan in `PLAN_REVIEW`, every plan-level review runs **once**
+against the frozen candidate. **The FSM dispatches nothing.** It declares which outputs must
+exist, validates them against `candidate_sha`, and blocks until they do — the same division
+already used for C3, where `aid-fsm.sh` validates a dispatch record the controller produced.
+
+**Before the first invocation, put the worktree ON the candidate and keep it there for
+the whole review boundary:**
+
+```bash
+git -C {project_root} checkout plan/{plan_id}   # its head IS candidate_sha
+bash {plugin_path}/scripts/aid-plan-fsm.sh plan-finalize {plan_id} --stage review
+```
+
+This is the controller's job, not the stage's, because the specialists are dispatched
+*between* the exit-7 invocation and the validating one. Two things depend on it: the
+plan-level specialists review this worktree (an agent that reads files rather than
+`git show base..candidate` would otherwise silently review the target branch), and the
+stage's drift detection is baselined on it. `--stage gates` restores HEAD to wherever it
+was when it finished, so after gates the worktree is **not** on the candidate — position
+it again. The stage refuses with exit 1 if `HEAD != candidate_sha`.
+
+| Exit | Meaning | Controller action |
+|------|---------|-------------------|
+| 7 | `awaiting_review_outputs` — one or more required outputs absent | **Not an error.** Dispatch the named agents, then re-run the stage |
+| 1 | an output is present but stale / wrong-plan / wrong-candidate, or fails `aid-protocol-validate.sh` | Re-produce that output against the candidate; it is never accepted with a warning |
+| 6 | the candidate changed (a tracked write) | Plan is now `PLAN_FIX`: re-run `sync` → `freeze` → `gates` → `review` against the NEW candidate |
+| 0 | every output present, fresh and bound | Plan is now `AWAITING_PM` |
+
+The stage writes `review-requirements.json` into the plan-final run directory
+(`.aid-o/work/evidence/{plan_id}/R-{plan_id}-final-{n}/`) — the machine-readable contract of
+what to dispatch, including the review range `plan_base_commit..candidate_sha`. **The review
+range is the whole plan, not an EPIC diff**, so a defect introduced by the first EPIC is still
+in range when it is detected after the last one is integrated.
+
+Required outputs, all inside the run directory (never in the candidate tree):
+
+| Output | Type | Binding checked |
+|---|---|---|
+| `semantic-review-final.json` | `semantic_review` | `revision.head_sha == candidate_sha`; `revision.base_sha == plan_base_commit` |
+| `audit-report.json` | `audit_report` | `audit_report.reviewed_head == candidate_sha`; `input_manifest_hash` present |
+| `curator-report.json` | `curator` | `curator.audit_report_ref` is sha256 of that audit report |
+| `simplifier-report.md` | markdown | a `Head: <candidate_sha>` provenance line |
+| `review-profile.json` | `review_profile` | derived over the plan range; `review_profile.required_lenses[]` present (arms the C3 gate) |
+| `delivery-gate.json` | `delivery_gate` | `identity.epic_id: null`, `identity.plan_id` set, `sources[]` lists every contributing EPIC |
+| `acceptance-evidence.json` | `acceptance_evidence` | same; a missing per-EPIC contribution is a blocker naming that EPIC |
+| `delivery-report.json` | `delivery_report` | `identity.plan_id` set, `revision.head_sha == candidate_sha`, written **last** |
+| `dispatch-record.json` | — | `candidate_sha` bound; exactly **1** dispatch per plan-boundary agent and per registered utility |
+
+**Exactly once each.** `dispatch-record.json` carries `dispatches[] {agent, count}` for
+`auditor`, `curator`, `simplifier`, `reporter` and `utilities[] {id, count}` for every
+registered plan-boundary utility (default registry: `scanner_memory_scan`; override with
+`plan_final_utilities:` in `execution.yaml`). Any count other than 1 fails the stage. The
+accepted counts land in the manifest as `plan_final_review.dispatch_counts` and
+`plan_final_review.utilities_run[]`.
+
+**The Reporter is last.** It is dispatched only after the final non-mutating pass; the stage
+refuses a `delivery-report.json` older than any other required output. Its authoritative
+artifact is that protocol-v2 JSON — `.aid-o/reports/{plan_id}-delivery.md` remains a human
+projection and is **explicitly not release authority**.
+
+**Any tracked write is a fix, not a review result.** At the start (and again at the end) of
+every invocation the stage compares `git rev-parse plan/{plan_id}` against `candidate_sha` and
+checks `git status --porcelain` for uncommitted tracked changes. Either one calls
+`plan_final_invalidate` with the reason: the candidate binding, the gate report and **every**
+review output stop being authoritative and the plan returns to `PLAN_FIX`. This is why
+`--stage review` does not take the generic dirty-tree refusal the other stages take — a dirty
+tree here has a defined meaning, and hiding it behind "commit or stash first" would lose it.
+Untracked writes into the run directory are the normal case and never invalidate anything.
+
+C3 applicability is unchanged: the single plan-level Auditor dispatch is always recorded, but
+whether C3 **blocks** stays governed by `defaults/policies/c3-audit-policy.yaml`.
 
 ### Plan Boundary: Scanner Memory Scan
 
@@ -1604,8 +1690,14 @@ Auto-fixes: {count} applied from auditor recommendations
 
 Key outputs: {artifact list}
 
-Options:
+Options (`legacy_epic_release_mode`):
   MERGE — release + merge to main + queue pickup
+  FIX   — provide guidance, re-run review cycle
+  ABORT — stop EPIC, no merge (/aid-stop)
+
+Options (`plan_branch`):
+  MERGE — merge this EPIC into the PLAN branch. No release, no tag, no push:
+          the release happens once, later, at the plan-final boundary.
   FIX   — provide guidance, re-run review cycle
   ABORT — stop EPIC, no merge (/aid-stop)
 ```
@@ -1819,6 +1911,16 @@ run (P068). The FSM enforces the skip structurally; these instructions must matc
     not describe queue pickup as automatic in `plan_branch` mode.
 
 #### `legacy_epic_release_mode` — the per-EPIC release ritual
+
+> **This ritual is NOT the default any more.** Since P068 Step 7 the default mode
+> for a new plan is `plan_branch` whenever the project declares a `gate_profiles`
+> table (`defaults/policies/plan-boundary-policy.yaml`, resolved by
+> `aid-plan-fsm.sh __default-mode`); without that table it falls back here and
+> says so with `plan_branch_unavailable: no_gate_profiles`. Everything in this
+> subsection applies only when the plan's committed lifecycle manifest declares
+> `mode: legacy_epic_release_mode`. In `plan_branch` the EPIC merges into the
+> plan branch and nothing is released, tagged or pushed until the plan-final
+> boundary.
 
 14. **Release:** Call `aid-release.sh` — version bump
     - Standalone/last EPIC: mandatory bump
@@ -2329,7 +2431,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-23
+**Last Updated:** 2026-07-25
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

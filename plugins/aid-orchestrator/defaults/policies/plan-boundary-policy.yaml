@@ -1,0 +1,37 @@
+# Plan-boundary policy (P068 Step 7 / E-068-2_2 Step 1)
+#
+# The three knobs the plan-final release boundary reads. They live in a policy
+# file rather than in code so a target project can opt out of the new model
+# without patching the plugin — which is the difference between a default and a
+# hard-coded assumption.
+#
+# WHY A DEFAULT MODE AT ALL. Before this file existed the code's default was
+# `legacy_epic_release_mode` and every plan released per EPIC. The plan-final
+# model releases once, at the plan boundary, which is what makes a single
+# reviewed candidate the only thing that can reach the target branch. Flipping
+# the default is deliberately the LAST mechanical step of the plan: nothing
+# defaults to the new mode until the whole end-to-end path exists.
+
+schema_version: "aid-2.0"
+artifact_type: plan_boundary_policy
+
+# The mode a NEW plan is created with. Existing plans are never migrated by this
+# value — `aid-plan-fsm.sh inventory --apply` stamps them explicitly instead.
+#
+# GUARDED, NOT UNCONDITIONAL. `plan_branch` mode's gates stage resolves against
+# the project's `execution.yaml` `gate_profiles` table. A consumer project that
+# upgrades the plugin but has no such table would otherwise flip to plan_branch
+# and resolve its gates against nothing. The resolver therefore treats this
+# value as a CEILING: it yields `plan_branch` only when a `gate_profiles` block
+# is present, and otherwise falls back to `legacy_epic_release_mode` with a
+# logged `plan_branch_unavailable: no_gate_profiles`.
+default_mode: plan_branch
+
+# How long a plan transaction waits for a contended lock before giving up.
+# Seconds. Short on purpose: a lock held longer than this is a stuck process,
+# not a queue, and the caller is told which process holds it.
+lock_lease_seconds: 10
+
+# The gate profile a plan-final run must meet. Named here rather than in the FSM
+# so a project can raise it; lowering it is a risk acceptance the project owns.
+plan_final_profile_floor: release

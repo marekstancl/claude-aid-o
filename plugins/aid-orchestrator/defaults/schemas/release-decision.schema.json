@@ -56,19 +56,29 @@
             "required": ["input_id", "severity", "reason"],
             "properties": {
               "input_id": {
-                "enum": [
-                  "review_profile",
-                  "delivery_gate",
-                  "semantic_review_final",
-                  "acceptance_evidence",
-                  "gates_report",
-                  "curator_report",
-                  "plan_review",
-                  "verification_report",
-                  "audit_report",
-                  "invalidation_map",
-                  "reporter",
-                  "simplifier"
+                "$comment": "P068 E-068-1_2 Step 4 — CLOSED oneOf, not a widened enum. A finite enum cannot express `epic_rollup:<epic_id>` for arbitrary future EPIC IDs, so the second branch is a pattern rather than more members. It stays closed in both directions: a typo in a canonical id still fails (branch 1), and a malformed EPIC id in a roll-up blocker still fails (branch 2). `delivery_report` joins branch 1 because plan mode's Reporter input is the run-scoped delivery-report.json.",
+                "oneOf": [
+                  {
+                    "enum": [
+                      "review_profile",
+                      "delivery_gate",
+                      "semantic_review_final",
+                      "acceptance_evidence",
+                      "gates_report",
+                      "curator_report",
+                      "plan_review",
+                      "verification_report",
+                      "audit_report",
+                      "invalidation_map",
+                      "reporter",
+                      "simplifier",
+                      "delivery_report"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^epic_rollup:E-[0-9]{3}[A-Z]?(-[0-9]+_[0-9]+)?(-[a-z0-9]+(-[a-z0-9]+)*)?$"
+                  }
                 ]
               },
               "severity": { "type": "string" },
@@ -156,6 +166,24 @@
           "type": "string",
           "minLength": 1,
           "$comment": "enforced (exit 16) — D11 non-empty string"
+        },
+        "plan_summary": {
+          "type": "object",
+          "description": "PLAN mode only (P068 Step 4) — absent for every EPIC-mode decision. The substrate aid-pm-brief.sh renders the plan-level PM summary from, so the renderer still reads exactly ONE file (the D6/D9 cycle-break). reviewed_candidate_sha, approved_target_sha, final_merge_sha and release_tag_status are four DISTINCT fields so a PM summary can never imply an intermediate EPIC was released; final_merge_sha is null until the plan is merged to the target branch.",
+          "$comment": "reference — not validated by aid-protocol-validate.sh",
+          "properties": {
+            "plan_id": { "type": "string" },
+            "plan_final_run_id": { "type": "string" },
+            "reviewed_candidate_sha": { "type": "string" },
+            "approved_target_sha": { "type": "string" },
+            "target_ref": { "type": "string" },
+            "final_merge_sha": { "type": ["string", "null"] },
+            "release_tag_status": { "type": "string" },
+            "epics": { "type": "array" },
+            "plan_final_gates": { "type": "object" },
+            "specialist_review": { "type": ["object", "null"] },
+            "remaining_backlog": { "type": "array" }
+          }
         }
       },
       "required": [

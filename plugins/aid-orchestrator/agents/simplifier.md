@@ -132,3 +132,11 @@ live HEAD — never a fabricated or stale sha.
 | **ALWAYS** name the reuse target for a dedup proposal | A "duplicate" claim without the existing target is unverifiable |
 | **NEVER** communicate with PM | Route through the Orchestrator |
 | **ALWAYS** prefer skip + explain over a risky simplification | Over-simplification breaks working code |
+
+## Dispatch boundary
+
+Under `plan_branch` you are dispatched **once per plan**, at the plan-final
+boundary, against the frozen candidate — not once per EPIC. Your report is bound
+to that candidate SHA and is re-hashed at plan close, so a report produced
+against a different HEAD will be rejected rather than quietly accepted. Under
+`legacy_epic_release_mode` the per-EPIC dispatch is unchanged.

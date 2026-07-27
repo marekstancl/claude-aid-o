@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.62.1** (current) — fail-closed hardening of the Phase-1 boundaries (PM review): increment-step strict-by-default with partial-binding and forged-ledger rejection, C3 fail-closed checks that the AC source is in a canonical AID location and that a receipt is consistent with its named command, reviewed HEAD, and named log (consistency-checking within the local trust model, not cryptographic provenance against direct evidence tampering), waiver re-validation that never falls back to the current HEAD, and a cancel-before-PID handshake so a job can never start after cancellation.
+- **v2.63.0** (current) — the plan-final release boundary: a plan releases once, at its own boundary, and cannot be declared closed without durable proof
+- **v2.62.1** — fail-closed hardening of the Phase-1 boundaries (PM review): increment-step strict-by-default with partial-binding and forged-ledger rejection, C3 fail-closed checks that the AC source is in a canonical AID location and that a receipt is consistent with its named command, reviewed HEAD, and named log (consistency-checking within the local trust model, not cryptographic provenance against direct evidence tampering), waiver re-validation that never falls back to the current HEAD, and a cancel-before-PID handshake so a job can never start after cancellation.
 - **v2.62.0** — Phase-1 control-plane hardening: controller-owned job supervisor, gate-scoped single-use waivers, idempotent step advancement, one fail-closed mode authority, fail-closed lineage and re-derived attestation, explicit C3 AC/test-evidence binding, and read-time evidence freshness.
 - **v2.61.0** — plan-branch substrate: EPICs integrate into `plan/Pxxx` through an idempotent transaction proven by Git ancestry, the queue becomes a script-written derived view that can never substitute for that proof, gate profiles split by boundary, and the per-EPIC release stack goes structurally silent mid-plan.
 - **v2.58.4** — CI fix: a SIGPIPE flake in `test-regression.sh` (a 36 KB `echo … | grep -q` under `set -o pipefail`) that had failed the `bash-tests` CI job for several releases, resolved by switching those greps to here-strings
@@ -132,3 +133,22 @@ See [CHANGELOG.md](CHANGELOG.md) for full history.
 ## License
 
 AGPL-3.0-only — see [LICENSE](LICENSE)
+
+## Plan-level release model
+
+A plan declares its release model in its committed lifecycle manifest
+(`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`).
+
+Under **`plan_branch`** an EPIC merges into the plan branch and releases nothing.
+The plan releases once, at the plan-final boundary: one gate profile run against
+a frozen candidate, one specialist review (Auditor, Curator, Simplifier,
+Reporter), one PM authorization bound to that candidate, one compare-and-swap
+merge to the target branch, at most one tag, and a committed lifecycle receipt
+without which the plan cannot be declared closed.
+
+Under **`legacy_epic_release_mode`** each EPIC releases as before.
+
+New plans default to `plan_branch` when the project declares a `gate_profiles`
+table in its `execution.yaml`, and otherwise fall back to legacy with a logged
+`plan_branch_unavailable: no_gate_profiles`. Existing plans are never migrated:
+`aid-plan-fsm.sh inventory --apply` stamps them explicitly instead.

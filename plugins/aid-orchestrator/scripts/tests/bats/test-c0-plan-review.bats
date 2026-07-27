@@ -380,10 +380,121 @@ EOF
   [ "$status" -eq 0 ]
   run jq -r '.audit_input_manifest.c0_plan_review_input.contracts | length' "$MANIFEST"
   [ "$output" = "0" ]
-  run jq -e '.audit_input_manifest.c0_plan_review_input.plan_graph.path' "$MANIFEST"
-  [ "$status" -eq 0 ]
+  # P068 Step 1: with no plan-graph.json on disk (the pre-generation case this
+  # fixture is in), plan_graph is the STATUS STRING, not a zero-byte seal.
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph' "$MANIFEST"
+  [ "$output" = "absent_pre_generation" ]
   run jq -r '.audit_input_manifest.c0_plan_review_input.files | length'  "$MANIFEST"
-  [ "$output" -ge 2 ]
+  [ "$output" -ge 1 ]
+}
+
+# ─── P068 Step 1 (CF3 refinement): the plan_graph manifest entry ───────────
+#
+# The blocking half of CF3 was already resolved in code before this step (an
+# absent input was sealed rather than failing), so these tests assert the
+# SEMANTIC improvement on the bridge, never a review verdict: a review can be
+# `unverifiable` for unrelated reasons (provider availability), so its status
+# is not a deterministic signal.
+
+@test "build-manifest: absent plan-graph is recorded as absent_pre_generation, NOT a zero-byte seal" {
+  _build_low
+  [ "$status" -eq 0 ]
+
+  # The empty-file sha256 — the exact opaque value this step removes.
+  local empty_sha="sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph | type' "$MANIFEST"
+  [ "$output" = "string" ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph' "$MANIFEST"
+  [ "$output" = "absent_pre_generation" ]
+
+  # No phantom zero-byte plan-graph entry survives anywhere in the sealed set,
+  # and the allowlist does not offer a file that does not exist.
+  run jq -r --arg e "$empty_sha" \
+    '[.audit_input_manifest.c0_plan_review_input.files[] | select(.path | test("plan-graph\\.json$"))] | length' "$MANIFEST"
+  [ "$output" = "0" ]
+  run jq -r '[.audit_input_manifest.allowlist[] | select(test("plan-graph\\.json$"))] | length' "$MANIFEST"
+  [ "$output" = "0" ]
+}
+
+@test "build-manifest: a PRESENT plan-graph is sealed and hashed exactly as before (object with path/sha256/size)" {
+  mkdir -p "$C0_EVIDENCE_DIR/c0"
+  printf '{"artifact_type":"plan_graph"}\n' > "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  _build_low
+  [ "$status" -eq 0 ]
+
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph | type' "$MANIFEST"
+  [ "$output" = "object" ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.path' "$MANIFEST"
+  [[ "$output" == *"c0/plan-graph.json" ]]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.sha256' "$MANIFEST"
+  [[ "$output" =~ ^sha256:[0-9a-f]{64}$ ]]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.size' "$MANIFEST"
+  [ "$output" -gt 0 ]
+
+  # Present ⇒ it IS part of the hashed set and the allowlist again.
+  run jq -r '[.audit_input_manifest.c0_plan_review_input.files[] | select(.path | test("plan-graph\\.json$"))] | length' "$MANIFEST"
+  [ "$output" = "1" ]
+}
+
+@test "build-manifest: the sealed input_hash differs between the absent and present plan-graph shapes" {
+  _build_low
+  [ "$status" -eq 0 ]
+  local absent_hash; absent_hash="$(jq -r '.audit_input_manifest.input_hash' "$MANIFEST")"
+  [[ "$absent_hash" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+  mkdir -p "$C0_EVIDENCE_DIR/c0"
+  printf '{"artifact_type":"plan_graph"}\n' > "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  _build_low
+  [ "$status" -eq 0 ]
+  local present_hash; present_hash="$(jq -r '.audit_input_manifest.input_hash' "$MANIFEST")"
+
+  [ "$absent_hash" != "$present_hash" ]
+}
+
+@test "build-manifest: a contract that exists only under plugins/<name>/defaults/ is captured (plugin-relative resolution)" {
+  # The real layout of this repository: every schema and policy lives under
+  # plugins/aid-orchestrator/defaults/, NOT at the repo root. Before P068
+  # Step 1 the extractor tested the cited token against the repo root only,
+  # so EVERY such citation failed the existence check and was silently
+  # dropped — a plan citing a dozen schemas sealed an empty contracts[].
+  mkdir -p "$TEST_PROJECT_ROOT/plugins/demo-plugin/defaults/policies"
+  printf 'policy: demo\n' > "$TEST_PROJECT_ROOT/plugins/demo-plugin/defaults/policies/demo-policy.yaml"
+
+  PLAN_PLUGIN="$TEST_PROJECT_ROOT/plan-plugin-contracts.md"
+  cat > "$PLAN_PLUGIN" <<'EOF'
+---
+id: P900-c0-test
+risk: low
+---
+Cites defaults/policies/demo-policy.yaml, which exists only under
+plugins/demo-plugin/, and defaults/policies/nowhere.yaml, which exists nowhere.
+EOF
+  git add plan-plugin-contracts.md plugins
+  git commit -q -m "add plugin-relative contract plan"
+
+  run bash "$DISPATCH" build-manifest "$PLAN_PLUGIN" "$C0_EVIDENCE_DIR"
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.contracts | length' "$MANIFEST"
+  [ "$output" = "1" ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.contracts[0]' "$MANIFEST"
+  [ "$output" = "plugins/demo-plugin/defaults/policies/demo-policy.yaml" ]
+
+  # And it is genuinely sealed — a real sha256 over real bytes, not an
+  # absent-input placeholder.
+  run jq -r '[.audit_input_manifest.c0_plan_review_input.files[] | select(.path == "plugins/demo-plugin/defaults/policies/demo-policy.yaml") | .size] | first' "$MANIFEST"
+  [ "$output" -gt 0 ]
+}
+
+@test "build-manifest: a repo-root contract still wins over a same-token plugin copy (no path moves for existing consumers)" {
+  mkdir -p "$TEST_PROJECT_ROOT/plugins/demo-plugin/defaults/schemas"
+  printf '{"type":"string"}\n' > "$TEST_PROJECT_ROOT/plugins/demo-plugin/defaults/schemas/example-contract.schema.json"
+  git add plugins; git commit -q -m "add colliding plugin copy"
+
+  _build_low
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.contracts[0]' "$MANIFEST"
+  [ "$output" = "defaults/schemas/example-contract.schema.json" ]
 }
 
 @test "build-manifest: picks up existing cp1-deep lens files as C0 evidence" {

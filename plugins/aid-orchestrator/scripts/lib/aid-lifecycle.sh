@@ -30,15 +30,152 @@ _AID_LC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Paths ────────────────────────────────────────────────────────────────────
 aid_lifecycle_dir()   { echo "${1:-.}/.aid-lifecycle"; }
 aid_identity_path()   { echo "$(aid_lifecycle_dir "${1:-.}")/repo-identity.yaml"; }
-aid_manifest_path()   { echo "$(aid_lifecycle_dir "${2:-.}")/manifests/${1}.yaml"; }
+# aid_manifest_path <plan_id> [root] — the git-tracked lifecycle manifest.
+#
+# P068 E-068-1_2 Step 6 — THE TARGET-REF OVERRIDE. Every manifest READER in this
+# file (aid_lifecycle_declared_epics, _aid_lc_delivered, _aid_lc_reviewed_accepted,
+# aid_lifecycle_build_receipt, aid_plan_closure_state) resolves the file through
+# this one function, so redirecting it here redirects all of them consistently.
+#
+# WHY IT IS NEEDED: after a plan merge the delivery bindings live on the TARGET
+# branch — Step 5 commits them there by plumbing and then restores the worktree
+# copy, because the worktree is sitting on `plan/<plan_id>`, whose copy of the
+# manifest predates the bindings. Reading the worktree file at close time
+# therefore reports a plan with NO deliveries, i.e. `active`, and would either
+# refuse a legitimately closable plan or (worse, had the state check been laxer)
+# build a receipt out of the pre-merge manifest. The override materialises the
+# TARGET-BRANCH content read-only into a temp file for the duration of a scoped
+# read; nothing in the worktree is touched. Deliberately NOT exported — a child
+# process must resolve its own.
+aid_manifest_path() {
+  if [[ -n "${_AID_LC_MANIFEST_OVERRIDE:-}" ]]; then echo "$_AID_LC_MANIFEST_OVERRIDE"; return 0; fi
+  echo "$(aid_lifecycle_dir "${2:-.}")/manifests/${1}.yaml"
+}
+
+# aid_lc_manifest_ref_begin <plan_id> <root> <ref> — materialise <ref>'s copy of
+# the lifecycle manifest and route every reader at it until _end. Returns 1 (and
+# sets nothing) when that ref carries no manifest, so a caller can fall back to
+# the ordinary worktree path rather than silently reading an empty file.
+aid_lc_manifest_ref_begin() {
+  local plan_id="$1" root="${2:-.}" ref="$3"
+  local rel=".aid-lifecycle/manifests/${plan_id}.yaml"
+  local tmp; tmp="$(mktemp 2>/dev/null)" || return 1
+  if ! git -C "$root" show "${ref}:${rel}" > "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp" 2>/dev/null
+    return 1
+  fi
+  _AID_LC_MANIFEST_OVERRIDE="$tmp"
+  return 0
+}
+
+aid_lc_manifest_ref_end() {
+  [[ -n "${_AID_LC_MANIFEST_OVERRIDE:-}" ]] && rm -f -- "$_AID_LC_MANIFEST_OVERRIDE" 2>/dev/null
+  unset _AID_LC_MANIFEST_OVERRIDE
+  return 0
+}
 aid_receipt_path()    { echo "$(aid_lifecycle_dir "${2:-.}")/receipts/${1}.yaml"; }
 
 # _aid_lc_require_target_branch <root> — 0 iff HEAD is on the configured
 # target_branch. NO lifecycle tracked write may happen on any other branch
 # (constraint: before merge there are NO tracked lifecycle commits). Callers must
 # check this BEFORE writing any worktree lifecycle artifact.
+
+# =============================================================================
+# PLAN MODE (P068 E-068-1_2 Step 5) — advancing the target ref by PLUMBING
+# =============================================================================
+#
+# In `plan_branch` mode no EPIC ever merges into the target branch: the ONE
+# merge happens at the plan boundary, in `aid-plan-fsm.sh plan-merge-to-main`.
+# That command publishes the merge with a compare-and-swap `git update-ref` and
+# then has to layer the lifecycle commit (delivery bindings + the CF1 re-scope)
+# on top of it — while standing on the PLAN branch, because the target branch is
+# normally checked out in another linked worktree and Git refuses the same
+# branch in two worktrees. `git checkout <target_branch>` is therefore not
+# available, and every function below assumed it.
+#
+# So plan mode replaces two mechanisms and nothing else:
+#
+#   1. `_aid_lc_require_target_branch` — the legacy guard asserts
+#      `git branch --show-current == target_branch`. Its SAFETY INVARIANT is
+#      "the commit lands on the target branch", and in plan mode that is
+#      satisfied BY CONSTRUCTION: `_aid_lc_isolated_commit` writes exactly
+#      `refs/heads/<target_branch>` with `git update-ref <new> <expected-old>`,
+#      using no worktree and no HEAD. The guard is therefore satisfied, not
+#      bypassed.
+#   2. The three EVIDENCE readers on the binding path. `_aid_lc_find_delivery_merge`
+#      greps the target branch for a merge naming the EPIC — but the only merge
+#      reaching the target branch is `merge(plan): <plan_id>`, which names no
+#      EPIC id, so it returns empty. `_aid_lc_epic_reviewed_head` and
+#      `_aid_lc_epic_review_status` read a per-EPIC audit-report.json that the
+#      new model no longer produces: in `plan_branch` mode the review genuinely
+#      happens ONCE, for the whole plan. In plan mode the merge SHA is supplied
+#      explicitly by the caller and the reviewed head / review status come from
+#      the PLAN-FINAL run's audit-report.json and curator-report.json.
+#
+# Everything else — the staged/unstaged collision prechecks, schema + public-safe
+# validation, idempotence, `_aid_lc_can_bind`'s ancestry confirmation — is
+# UNCHANGED, and every legacy code path is byte-identical when plan mode is off.
+#
+# Plan mode is activated by `aid_lc_plan_mode_begin` and is a per-process
+# setting; `aid_lc_plan_mode_end` clears it. Never leave it on across an
+# unrelated lifecycle call.
+# -----------------------------------------------------------------------------
+
+# aid_lc_plan_mode_begin <merge_sha> <plan_final_run_dir_abs> <parent_commit>
+#   merge_sha   — the published plan merge commit, bound as every EPIC's delivery_sha
+#   run_dir_abs — the plan-final run directory holding audit-report.json + curator-report.json
+#   parent_commit — the commit the lifecycle commit is built on (the merge commit),
+#                   and the CAS "expected old value" for the target ref update
+aid_lc_plan_mode_begin() {
+  _AID_LC_PLAN_MODE=1
+  _AID_LC_PLAN_MERGE_SHA="$1"
+  _AID_LC_PLAN_RUN_DIR="$2"
+  _AID_LC_PLAN_PARENT="$3"
+  export _AID_LC_PLAN_MODE _AID_LC_PLAN_MERGE_SHA _AID_LC_PLAN_RUN_DIR _AID_LC_PLAN_PARENT
+}
+aid_lc_plan_mode_end() {
+  unset _AID_LC_PLAN_MODE _AID_LC_PLAN_MERGE_SHA _AID_LC_PLAN_RUN_DIR _AID_LC_PLAN_PARENT
+}
+_aid_lc_plan_mode() { [[ "${_AID_LC_PLAN_MODE:-0}" == "1" ]]; }
+
+# _aid_lc_plan_review_status — the ONE plan-level verdict, read from the
+# plan-final run's audit-report.json + curator-report.json. Same vocabulary and
+# the same fail-closed bias as the per-EPIC classifier it stands in for:
+# `unverifiable` whenever the evidence does not positively say "no blockers",
+# never a default to `accepted`.
+_aid_lc_plan_review_status() {
+  local dir="${_AID_LC_PLAN_RUN_DIR:-}"
+  [[ -n "$dir" ]] || { echo "none"; return 0; }
+  local audit="${dir}/audit-report.json" curator="${dir}/curator-report.json"
+  [[ -f "$audit" ]] || { echo "none"; return 0; }
+  local st bf
+  st="$(jq -r '.status // ""' "$audit" 2>/dev/null || true)"
+  # `//` is NOT usable here: jq treats `false` as falsy, so `.blocking_findings //
+  # .audit_report.blocking_findings` would fall through on the very value that
+  # means "accepted". Read the two shapes explicitly instead.
+  bf="$(jq -r 'if has("blocking_findings") then .blocking_findings
+               elif (.audit_report? | type) == "object" and (.audit_report | has("blocking_findings")) then .audit_report.blocking_findings
+               else null end' "$audit" 2>/dev/null || true)"
+  if [[ "$st" == "unverifiable" ]]; then echo "unverifiable"; return 0; fi
+  if [[ "$bf" == "true" || ( "$bf" =~ ^[0-9]+$ && "$bf" != "0" ) ]]; then echo "rejected"; return 0; fi
+  if [[ "$bf" != "false" && "$bf" != "0" ]]; then echo "unverifiable"; return 0; fi
+  # The Curator's verdict is part of the plan-level review, so a Curator that
+  # reports blockers rejects the plan just as the Auditor does.
+  if [[ -f "$curator" ]]; then
+    local cbf; cbf="$(jq -r 'if has("blocking_findings") then .blocking_findings
+                             elif (.curator? | type) == "object" and (.curator | has("blocking_findings")) then .curator.blocking_findings
+                             else false end' "$curator" 2>/dev/null || true)"
+    if [[ "$cbf" == "true" || ( "$cbf" =~ ^[0-9]+$ && "$cbf" != "0" ) ]]; then echo "rejected"; return 0; fi
+  fi
+  echo "accepted"
+}
+
 _aid_lc_require_target_branch() {
   local root="${1:-.}" cur tb
+  # Plan mode: the write is published straight to refs/heads/<target_branch> by
+  # `git update-ref`, so the invariant this guard protects holds by construction.
+  # There is no branch to be "on" — see the PLAN MODE header above.
+  if _aid_lc_plan_mode; then return 0; fi
   cur="$(git -C "$root" branch --show-current 2>/dev/null || true)"
   tb="$(aid_target_branch)"
   if [[ "$cur" != "$tb" ]]; then
@@ -101,6 +238,61 @@ _aid_lc_isolated_commit() {
   # AID's own legitimate write). The full unstaged/entry guard runs at the caller.
   _aid_lc_require_target_branch "$root" || return 3
   _aid_lc_no_staged_collision "$root" "${rels[@]}" || return $?
+
+  # ── PLAN MODE: advance the target ref by plumbing, never by checkout ──────
+  # Built on the caller-supplied parent (the published plan merge commit) and
+  # published with a compare-and-swap against that same commit, so a concurrent
+  # writer cannot be clobbered. No worktree, no HEAD, no index reset — which is
+  # what makes this work with the target branch checked out in another worktree.
+  # The worktree copies of the lifecycle paths are restored afterwards, so the
+  # plan branch is not left dirty by a write that is already durable elsewhere.
+  if _aid_lc_plan_mode; then
+    local tb; tb="$(aid_target_branch)"
+    local parent="${_AID_LC_PLAN_PARENT:-}"
+    if [[ -z "$parent" ]]; then
+      echo "lifecycle: plan mode requires a parent commit (aid_lc_plan_mode_begin) — refusing to guess one" >&2
+      return 1
+    fi
+    # The ref must still be where the caller said it was — otherwise something
+    # else moved the target branch and this commit's CAS base is a guess.
+    local live; live="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${tb}" 2>/dev/null || true)"
+    if [[ "$live" != "$parent" ]]; then
+      echo "lifecycle: refusing the plan-mode lifecycle commit — ${tb} is at ${live:-<absent>}, not at the expected ${parent} (something else advanced the target branch)" >&2
+      return 1
+    fi
+    local rc=0 newsha=""
+    newsha="$( cd "$root"
+      tmpidx="$(mktemp)"
+      if ! GIT_INDEX_FILE="$tmpidx" git read-tree "$parent" 2>/dev/null; then rm -f "$tmpidx"; exit 1; fi
+      GIT_INDEX_FILE="$tmpidx" git add -- "${rels[@]}" 2>/dev/null
+      tree="$(GIT_INDEX_FILE="$tmpidx" git write-tree 2>/dev/null)"
+      rm -f "$tmpidx"
+      [[ -n "$tree" ]] || exit 1
+      # Idempotent: identical content on the parent means the write already landed.
+      [[ "$tree" == "$(git rev-parse "${parent}^{tree}" 2>/dev/null)" ]] && exit 0
+      commit="$(git commit-tree "$tree" -p "$parent" -m "$msg" 2>/dev/null)"
+      [[ -n "$commit" ]] || exit 1
+      git update-ref "refs/heads/${tb}" "$commit" "$parent" 2>/dev/null || exit 1
+      printf '%s' "$commit"
+    )" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      # Advance the CAS base so a SECOND plan-mode commit in the same pass (the
+      # receipt, Step 6) chains onto this one instead of re-CASing against a
+      # commit the ref has already left.
+      [[ -n "$newsha" ]] && _AID_LC_PLAN_PARENT="$newsha"
+      # Restore the worktree copies: the content is durable on the target branch,
+      # and leaving the plan branch dirty would fail the next stage's clean-tree
+      # precondition for a change that is not the plan branch's.
+      local r
+      for r in "${rels[@]}"; do
+        if git -C "$root" ls-files --error-unmatch -- "$r" >/dev/null 2>&1; then
+          git -C "$root" checkout -q HEAD -- "$r" 2>/dev/null || true
+        fi
+      done
+    fi
+    return "$rc"
+  fi
+
   ( cd "$root"
     local tmpidx; tmpidx="$(mktemp)"
     if ! GIT_INDEX_FILE="$tmpidx" git read-tree HEAD 2>/dev/null; then rm -f "$tmpidx"; exit 1; fi
@@ -449,22 +641,100 @@ aid_lifecycle_commit_receipt() {
   aid_lifecycle_receipt_durable "$plan_id" "$root"
 }
 
-# aid_lifecycle_plan_close <plan_id> <root> — forward-path close. Requires the
-# manifest to show EVERY required EPIC delivered + reviewed-accepted; then writes
-# + commits the receipt (=> closed). Fail-closed: any missing predicate => no
-# receipt, non-zero.
+# aid_lifecycle_plan_close <plan_id> <root> [<plan_mode_parent>] — forward-path
+# close. Requires the manifest to show EVERY required EPIC delivered +
+# reviewed-accepted; then writes + commits the receipt (=> closed). Fail-closed:
+# any missing predicate => no receipt, non-zero.
+#
+# P068 E-068-1_2 Step 6 — PLAN-MODE PLUMBING (the third optional argument).
+# Without it the receipt commit reaches _aid_lc_isolated_commit's ordinary path,
+# which goes through _aid_lc_require_target_branch and refuses whenever the
+# target branch is not the branch currently checked out — the NORMAL case for a
+# plan-branch close, where the controller sits on plan/<plan_id> and the target
+# branch may additionally be checked out in another worktree. Passing the LIVE
+# target head as <plan_mode_parent> switches the receipt commit to the same
+# `commit-tree` + CAS `update-ref` path Step 5 established for the delivery
+# bindings: no checkout, no HEAD move, no index reset.
+#
+# RESTORE-ON-FAILURE (mirrors aid_lifecycle_plan_merge_bind's _lc_rollback
+# discipline, added for the same reason): in plan mode a failed close must leave
+# the worktree byte-identical to never having run, because the caller's
+# clean-worktree precondition would otherwise refuse the prescribed re-run. A
+# receipt that did not exist on entry is removed; one that did is restored. The
+# LEGACY (two-argument) path deliberately keeps its existing behaviour — an
+# uncommitted receipt left on disk is what makes aid_plan_closure_state report
+# `closing_pending_commit`, which several callers and suites depend on.
 aid_lifecycle_plan_close() {
-  local plan_id="$1" root="${2:-.}"
+  local plan_id="$1" root="${2:-.}" plan_parent="${3:-}"
+
+  # Plan mode reads (and builds the receipt from) the TARGET BRANCH's manifest —
+  # the one Step 5's bindings landed on — not the plan branch's stale worktree
+  # copy. See aid_manifest_path's header for why this is a correctness fix and
+  # not a convenience.
+  local _mref=0
+  if [[ -n "$plan_parent" ]]; then
+    aid_lc_manifest_ref_begin "$plan_id" "$root" "$(aid_target_branch)" && _mref=1
+  fi
+
+  # _pc_done <rc> — the single exit point that drops the target-ref override.
+  _pc_done() { [[ "$_mref" -eq 1 ]] && aid_lc_manifest_ref_end; return "$1"; }
+
   local st; st="$(aid_plan_closure_state "$plan_id" "$root")"
   case "$st" in
-    closed) echo "already closed" >&2; return 0 ;;
-    not_found) echo "plan-close: ${plan_id} not found" >&2; return 3 ;;
-    legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; return 1 ;;
-    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; return 1 ;;
+    closed) echo "already closed" >&2; _pc_done 0; return 0 ;;
+    not_found) echo "plan-close: ${plan_id} not found" >&2; _pc_done 3; return 3 ;;
+    legacy-unverifiable) echo "plan-close: ${plan_id} is legacy-unverifiable (run plan-reconcile)" >&2; _pc_done 1; return 1 ;;
+    active) echo "plan-close: ${plan_id} is active — not all required EPICs are delivered + reviewed-accepted" >&2; _pc_done 1; return 1 ;;
+    delivered-but-unreconciled|closing_pending_commit) ;;
+    # CP2 L3: the case had no default arm, so an empty or unrecognised closure
+    # state fell straight through and committed a receipt — declaring a plan
+    # closed on the strength of a state nobody could name. Fail closed.
+    *) echo "plan-close: ${plan_id} has an unrecognised closure state '${st:-<empty>}' — refusing to write a receipt for a state this code cannot interpret" >&2; _pc_done 1; return 1 ;;
   esac
+
   # delivered-but-unreconciled or closing_pending_commit -> write/commit receipt.
-  aid_lifecycle_commit_receipt "$plan_id" "$root" || { echo "plan-close: receipt not committed/reachable for ${plan_id}" >&2; return 1; }
+  if [[ -z "$plan_parent" ]]; then
+    aid_lifecycle_commit_receipt "$plan_id" "$root" || { echo "plan-close: receipt not committed/reachable for ${plan_id}" >&2; return 1; }
+    echo "closed ${plan_id}"
+    return 0
+  fi
+
+  # ── Plan mode ────────────────────────────────────────────────────────────
+  local tb; tb="$(aid_target_branch)"
+  local live; live="$(git -C "$root" rev-parse --verify --quiet "refs/heads/${tb}" 2>/dev/null || true)"
+  if [[ "$live" != "$plan_parent" ]]; then
+    echo "plan-close: refusing the plan-mode receipt commit — ${tb} is at ${live:-<absent>}, not at the expected ${plan_parent} (something else advanced the target branch)" >&2
+    _pc_done 1; return 1
+  fi
+
+  local receipt; receipt="$(aid_receipt_path "$plan_id" "$root")"
+  local _rc_snap="" _rc_existed=0
+  if [[ -f "$receipt" ]]; then
+    _rc_existed=1
+    _rc_snap="$(mktemp 2>/dev/null)" || _rc_snap=""
+    [[ -n "$_rc_snap" ]] && cp -p -- "$receipt" "$_rc_snap" 2>/dev/null
+  fi
+
+  aid_lc_plan_mode_begin "" "" "$plan_parent"
+  local crc=0
+  aid_lifecycle_commit_receipt "$plan_id" "$root" || crc=$?
+  local newparent="${_AID_LC_PLAN_PARENT:-$plan_parent}"
+  aid_lc_plan_mode_end
+
+  if [[ "$crc" -ne 0 ]]; then
+    if [[ "$_rc_existed" -eq 1 ]]; then
+      [[ -n "$_rc_snap" && -f "$_rc_snap" ]] && cp -p -- "$_rc_snap" "$receipt" 2>/dev/null
+    else
+      rm -f -- "$receipt" 2>/dev/null || true
+    fi
+    [[ -n "$_rc_snap" ]] && rm -f -- "$_rc_snap" 2>/dev/null
+    echo "plan-close: receipt not committed/reachable for ${plan_id} — the worktree is restored to its pre-run bytes; re-run to converge." >&2
+    _pc_done 1; return 1
+  fi
+  [[ -n "$_rc_snap" ]] && rm -f -- "$_rc_snap" 2>/dev/null
+  printf '%s\n' "$newparent"
   echo "closed ${plan_id}"
+  _pc_done 0; return 0
 }
 
 # ── Legacy reconciliation (metadata-only; never fabricates) ──────────────────
@@ -569,6 +839,14 @@ aid_lifecycle_ensure_manifest() {
 _aid_lc_epic_reviewed_head() {
   local epic_id="$1" root="${2:-.}"
   local rep
+  # Plan mode: there is no per-EPIC audit report to read — the review happened
+  # once for the whole plan. The reviewed head is the plan-final Auditor's.
+  if _aid_lc_plan_mode; then
+    local pa="${_AID_LC_PLAN_RUN_DIR:-}/audit-report.json"
+    [[ -f "$pa" ]] || return 0
+    jq -r '.revision.head_sha // .reviewed_head // ""' "$pa" 2>/dev/null || true
+    return 0
+  fi
   rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
   [[ -z "$rep" ]] && return 0
   jq -r '.revision.head_sha // .reviewed_head // ""' "$rep" 2>/dev/null || true
@@ -585,6 +863,9 @@ _aid_lc_epic_reviewed_head() {
 _aid_lc_epic_review_status() {
   local epic_id="$1" root="${2:-.}"
   local rep
+  # Plan mode: the ONE plan-level verdict stands for every EPIC in the plan —
+  # see _aid_lc_plan_review_status and the PLAN MODE header.
+  if _aid_lc_plan_mode; then _aid_lc_plan_review_status; return 0; fi
   rep="$(ls "${root}/.aid-o/work/evidence/${epic_id}"/*/audit-report.json 2>/dev/null | head -1 || true)"
   [[ -z "$rep" ]] && { echo "none"; return 0; }
   local st bf
@@ -603,6 +884,10 @@ _aid_lc_epic_review_status() {
 # against reviewed-head provenance (ancestor check), never by the message alone.
 _aid_lc_find_delivery_merge() {
   local epic_id="$1" root="${2:-.}" tb; tb="$(aid_target_branch)"
+  # Plan mode: the only merge reaching the target branch is `merge(plan): <plan_id>`,
+  # which names no EPIC id, so the grep below returns empty for EVERY EPIC. The
+  # merge SHA is therefore supplied explicitly by the caller.
+  if _aid_lc_plan_mode; then printf '%s' "${_AID_LC_PLAN_MERGE_SHA:-}"; return 0; fi
   local shas n
   shas="$(git -C "$root" log "$tb" --merges --grep "${epic_id}" --pretty=%H 2>/dev/null || true)"
   n="$(printf '%s' "$shas" | grep -c . || true)"
@@ -634,10 +919,16 @@ _aid_lc_can_bind() {
 # aid_lifecycle_bind_delivery <plan_id> <epic_id> <root> — WRITE a verified
 # historical delivery binding into the manifest (metadata-only). Returns 0 bound,
 # 1 not delivered, 2 unverifiable.
+# P068 Step 5: <merge_sha_override> is the 4th, OPTIONAL argument the plan-mode
+# caller uses to supply the plan merge commit explicitly (the legacy signature
+# accepted no merge SHA at all, which is precisely why the binding path could
+# not be reused at the plan boundary). Legacy callers pass three arguments and
+# behave identically.
 aid_lifecycle_bind_delivery() {
-  local plan_id="$1" epic_id="$2" root="${3:-.}"
+  local plan_id="$1" epic_id="$2" root="${3:-.}" merge_sha_override="${4:-}"
   local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
   [[ -f "$manifest" ]] || return 1
+  if [[ -n "$merge_sha_override" ]]; then _AID_LC_PLAN_MERGE_SHA="$merge_sha_override"; fi
   local out rc=0; out="$(_aid_lc_can_bind "$epic_id" "$root")" || rc=$?
   [[ "$rc" -ne 0 ]] && return "$rc"
   local merge rhead rs; read -r merge rhead rs <<< "$out"
@@ -687,7 +978,7 @@ aid_lifecycle_plan_reconcile() {
   local eid scope all_required_ok=true saw_unverifiable=false
   while read -r eid scope; do
     [[ -z "$eid" ]] && continue
-    if [[ "$scope" != "required" ]]; then echo "  ${eid}: ${scope} (excluded from denominator)"; continue; fi
+    if ! _aid_lc_scope_is_required "$scope"; then echo "  ${eid}: ${scope} (excluded from denominator)"; continue; fi
     # already recorded in the manifest?
     if _aid_lc_delivered "$plan_id" "$eid" "$root" && _aid_lc_reviewed_accepted "$plan_id" "$eid" "$root"; then
       echo "  ${eid}: required delivered+accepted"; continue
@@ -794,6 +1085,151 @@ aid_lifecycle_record_delivery() {
   return 0
 }
 
+# =============================================================================
+# aid_lifecycle_plan_merge_bind <plan_id> <root> <merge_sha> <run_dir_abs>
+#                               [<epic_id>=<abandoned|superseded> ...]
+#
+# P068 E-068-1_2 Step 5, stage 2 — the ONE post-merge lifecycle pass of a
+# `plan_branch` plan. Runs AFTER the plan merge commit is published on the
+# target branch, and writes, in a SINGLE commit:
+#
+#   (a) the CF1 re-scope — every abandoned/superseded EPIC's `scope` rewritten
+#       so aid_plan_closure_state stops counting it in the required set. This is
+#       the FIRST point where the write is legal: _aid_lc_require_target_branch
+#       refuses lifecycle writes off the target branch and `epic-complete` runs
+#       on a task branch, which is why P064 could only record the terminal
+#       status in its runtime manifest. The PM's REASON is deliberately NOT
+#       written here — the manifest schema is additionalProperties:false and
+#       aid_lifecycle_publicsafe_check rejects a free-text `reason` key; the
+#       reason lives in the runtime plan-state and the operation log.
+#   (b) the delivery bindings — every non-abandoned, non-superseded declared
+#       EPIC bound with delivery_sha = the plan merge commit, and the review
+#       verdict taken from the PLAN-level audit-report.json / curator-report.json
+#       in <run_dir_abs>. In the new model the review genuinely happens once for
+#       the whole plan, so a per-EPIC verdict derived from a per-EPIC audit
+#       report no longer exists to be read.
+#
+# ONE commit for both, so the closure denominator and the deliveries can never
+# disagree. It does NOT write the receipt: that is Step 6's (`plan-close`), so a
+# single owner writes each artifact. This function makes the plan CLOSABLE.
+#
+# Idempotent: re-running produces the identical manifest, and the plan-mode
+# isolated commit is a documented no-op when the tree is unchanged — so a crash
+# between the publish and this pass is resolved by simply re-running it.
+#
+# Returns: 0 written (or already correct), 1 manifest/validation failure,
+# 5 commit not durable (recoverable — re-run).
+# =============================================================================
+aid_lifecycle_plan_merge_bind() {
+  local plan_id="$1" root="${2:-.}" merge_sha="$3" run_dir_abs="$4"; shift 4
+  local -a rescope=("$@")
+  local relpath=".aid-lifecycle/manifests/${plan_id}.yaml"
+  local manifest; manifest="$(aid_manifest_path "$plan_id" "$root")"
+
+  if [[ -z "$merge_sha" ]]; then
+    echo "lifecycle: plan-merge-bind requires the published merge SHA" >&2; return 1
+  fi
+  if [[ ! -f "$manifest" ]]; then
+    echo "lifecycle: plan-merge-bind: no manifest at ${relpath} — plan-start ensures it; refusing to fabricate one after the merge" >&2
+    return 1
+  fi
+
+  # The CAS base is the LIVE target head, not the merge commit itself — that is
+  # what makes a resumed run converge instead of failing. On a first pass the
+  # live head IS the merge commit; on a re-run after a crash it is the lifecycle
+  # commit this function already made, and the rebuilt tree then matches it and
+  # the commit is a documented no-op. Either way the merge must be published:
+  # a target head that does not CONTAIN the merge means this is not stage 2 of
+  # anything, and binding deliveries to an unpublished merge would be a lie.
+  # CP2 M3 (2026-07-26, corrected): every mutation below rewrites the TRACKED
+  # file .aid-lifecycle/manifests/<plan>.yaml. A failure part-way used to leave
+  # it dirty, and the printed remedy ("re-run to converge") was then refused by
+  # the caller's clean-worktree precondition — a deadlock after an ALREADY
+  # published merge. The fix belongs here, not in a blanket exemption from that
+  # guard: snapshot the file's exact bytes on entry and restore them on every
+  # failure path, so a failed stage 2 is byte-identical to never having run and
+  # the re-run converges. Success keeps its edits (they are the deliverable).
+  local _lc_snap=""
+  _lc_snap="$(mktemp 2>/dev/null)" || _lc_snap=""
+  [[ -n "$_lc_snap" ]] && cp -p -- "$manifest" "$_lc_snap" 2>/dev/null
+
+  local tb_live; tb_live="$(git -C "$root" rev-parse --verify --quiet "refs/heads/$(aid_target_branch)" 2>/dev/null || true)"
+  if [[ -z "$tb_live" ]] || ! git -C "$root" merge-base --is-ancestor "$merge_sha" "$tb_live" 2>/dev/null; then
+    echo "lifecycle: plan-merge-bind: ${merge_sha} is not contained in $(aid_target_branch) (${tb_live:-<absent>}) — the merge is not published; refusing to bind deliveries to it" >&2
+    return 1
+  fi
+
+  # _lc_rollback — put the manifest back exactly as found, then drop the snapshot.
+  _lc_rollback() {
+    [[ -n "$_lc_snap" && -f "$_lc_snap" ]] && cp -p -- "$_lc_snap" "$manifest" 2>/dev/null
+    [[ -n "$_lc_snap" ]] && rm -f -- "$_lc_snap" 2>/dev/null
+    _lc_snap=""
+    return 0
+  }
+
+  aid_lc_plan_mode_begin "$merge_sha" "$run_dir_abs" "$tb_live"
+
+  # Entry precheck (the staged/unstaged user-collision half is fully active in
+  # plan mode; only the branch assertion is satisfied by construction).
+  local prc=0; _aid_lc_precheck_write "$root" "$relpath" || prc=$?
+  if [[ "$prc" -ne 0 ]]; then aid_lc_plan_mode_end; _lc_rollback; return "$prc"; fi
+
+  # ── (a) CF1 re-scope ─────────────────────────────────────────────────────
+  local spec eid newscope
+  for spec in ${rescope[@]+"${rescope[@]}"}; do
+    [[ "$spec" == *=* ]] || continue
+    eid="${spec%%=*}"; newscope="${spec#*=}"
+    case "$newscope" in
+      abandoned|superseded) ;;
+      *) echo "lifecycle: plan-merge-bind: refusing an unknown re-scope '${newscope}' for ${eid}" >&2
+         aid_lc_plan_mode_end; _lc_rollback; return 1 ;;
+    esac
+    ( cd "$root" && yq -i "(.declared_epics[] | select(.id == \"${eid}\") | .scope) = \"${newscope}\"" "$relpath" ) \
+      || { echo "lifecycle: plan-merge-bind: could not re-scope ${eid} to ${newscope}" >&2; aid_lc_plan_mode_end; _lc_rollback; return 1; }
+  done
+
+  # ── (b) delivery bindings for every EPIC still in the required/backlog set ─
+  local scope drc=0 declared=""
+  declared="$(aid_lifecycle_declared_epics "$plan_id" "$root")" || drc=$?
+  if [[ "$drc" -ne 0 ]]; then
+    echo "lifecycle: plan-merge-bind: cannot read the declared EPIC set for ${plan_id} (rc=${drc})" >&2
+    aid_lc_plan_mode_end; _lc_rollback; return 1
+  fi
+  local unbound=""
+  while read -r eid scope; do
+    [[ -z "$eid" ]] && continue
+    case "$scope" in abandoned|superseded) continue ;; esac
+    local brc=0
+    aid_lifecycle_bind_delivery "$plan_id" "$eid" "$root" "$merge_sha" >/dev/null 2>&1 || brc=$?
+    [[ "$brc" -ne 0 ]] && unbound="${unbound:+${unbound}, }${eid}(rc=${brc})"
+  done <<< "$declared"
+  if [[ -n "$unbound" ]]; then
+    echo "lifecycle: plan-merge-bind: could not bind ${unbound} — the plan-final review evidence in ${run_dir_abs} does not support a binding for them" >&2
+    aid_lc_plan_mode_end; _lc_rollback; return 1
+  fi
+
+  # Validate BEFORE the commit — fail-closed, exactly like every other lifecycle
+  # write. A widened `scope` that the schema rejects must never reach the tree.
+  if ! aid_lifecycle_validate_artifact "$manifest" "plan-lifecycle-manifest.schema.json"; then
+    aid_lc_plan_mode_end; _lc_rollback; return 1
+  fi
+
+  local crc=0
+  _aid_lc_isolated_commit "$root" "lifecycle: deliveries + scope for ${plan_id} (plan merge)" "$relpath" || crc=$?
+  local newparent="${_AID_LC_PLAN_PARENT}"
+  aid_lc_plan_mode_end
+  if [[ "$crc" -ne 0 ]]; then
+    echo "lifecycle: plan-merge-bind: the delivery bindings for ${plan_id} were NOT committed (rc=${crc}) — the merge stands, the manifest is restored to its pre-run bytes; re-run to converge." >&2
+    _lc_rollback; return 5
+  fi
+  if ! git -C "$root" cat-file -e "$(aid_target_branch):${relpath}" 2>/dev/null; then
+    _lc_rollback; return 5
+  fi
+  [[ -n "$_lc_snap" ]] && rm -f -- "$_lc_snap" 2>/dev/null
+  printf '%s\n' "$newparent"
+  return 0
+}
+
 # ── Convenience: does a plan even exist here? (for not_found result) ──────────
 # aid_lifecycle_plan_file <plan_id> [root] — echo the .aid-o plan file path if a
 # single match exists, else empty. (Active plans live in gitignored .aid-o/plans/.)
@@ -820,6 +1256,20 @@ aid_lifecycle_declared_epics() {
   local plan_file; plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root")"
   [[ -z "$plan_file" ]] && return 3
   aid_lifecycle_parse_legacy_epics "$plan_id" "$plan_file"   # 0 ok / 2 ambiguous
+}
+
+# ── The closure denominator (CF1) ────────────────────────────────────────────
+# _aid_lc_scope_is_required <scope> — 0 iff this scope counts towards closure.
+#
+# The required set is `required` and NOTHING else. Before P068 the only other
+# value was `backlog`; Step 5 adds `abandoned` and `superseded`, written by
+# plan-merge-to-main in the same commit as the delivery bindings for EPICs the
+# PM terminated without delivery. Making the predicate a NAMED function rather
+# than an inline `[[ "$scope" == "required" ]]` is the point: "which scopes are
+# excluded from the denominator" is now a real rule with more than one excluded
+# value, and it must read identically everywhere it is applied.
+_aid_lc_scope_is_required() {
+  [[ "${1:-}" == "required" ]]
 }
 
 # ── Per-EPIC predicates (manifest-recorded; forward path) ────────────────────
@@ -873,6 +1323,26 @@ aid_plan_closure_state() {
   manifest="$(aid_manifest_path "$plan_id" "$root")"
   plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
 
+  # A durable ROLLED-BACK record is authoritative and comes FIRST — before the
+  # receipt, before deliveries. A rolled-back plan still carries its delivery
+  # bindings (they record what WAS merged and then reverted), so evaluating
+  # deliveries first would answer `delivered-but-unreconciled` for a plan the
+  # git ledger plainly marks as rolled back: the clean clone would read the YAML
+  # correctly and the API would still contradict it.
+  if command -v yq >/dev/null 2>&1; then
+    # ONLY the committed copy on the target branch may establish `rolled_back`.
+    # The worktree file is a working copy: anyone can set `status: rolled_back`
+    # in it without committing anything, and a resolver that believed it would
+    # report a rollback the ledger knows nothing about — the same two-truths
+    # failure, just pointing the other way. The plan-mode plumbing also restores
+    # the worktree file after publishing, so a genuine rollback leaves no trace
+    # there anyway. The ledger is the authority; the worktree is not consulted.
+    local _cs_rel=".aid-lifecycle/manifests/${plan_id}.yaml"
+    local _cs_tb; _cs_tb="$(aid_target_branch)"
+    local _cs_status
+    _cs_status="$(git -C "$root" show "${_cs_tb}:${_cs_rel}" 2>/dev/null | yq -r '.status // ""' 2>/dev/null || true)"
+    if [[ "$_cs_status" == "rolled_back" ]]; then echo "rolled_back"; return 0; fi
+  fi
   # A COMMITTED + reachable receipt is authoritative -> closed.
   if [[ -f "$receipt" ]] && aid_lifecycle_receipt_durable "$plan_id" "$root"; then echo "closed"; return 0; fi
   # Nothing at all -> not_found (a plan-number gap has no lifecycle meaning).
@@ -886,7 +1356,7 @@ aid_plan_closure_state() {
   # Every REQUIRED epic must be delivered + reviewed-accepted for closability.
   local eid scope all_ok=true
   while read -r eid scope; do
-    [[ "$scope" == "required" ]] || continue
+    _aid_lc_scope_is_required "$scope" || continue
     if ! _aid_lc_delivered "$plan_id" "$eid" "$root" || ! _aid_lc_reviewed_accepted "$plan_id" "$eid" "$root"; then
       all_ok=false; break
     fi
