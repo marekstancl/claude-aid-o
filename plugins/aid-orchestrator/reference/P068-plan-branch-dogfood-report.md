@@ -346,3 +346,87 @@ delivered four reference notes and nothing else.
 - Post-review tampering is caught at close, even when the tamperer is the
   controller.
 - Rollback is a revert forward, never a rewrite.
+
+---
+
+# Third run record — P077, 2026-07-27, and the isolation failure that framed it
+
+## P077 — the clean positive run
+
+It went the whole way, first time, with no manual edit to any evidence artifact.
+
+| Step | Result |
+|------|--------|
+| both EPICs: own FSM -> `epic-complete` -> `epic-merge-to-plan` | OK, first attempt |
+| plan-final gates, profile `release` | passed, exactly one run |
+| `--stage inputs` | produced all three C4 inputs, unedited afterwards |
+| `--stage review` | passed |
+| `--stage c4` | **release_ready=true, 0 blockers, dual-run match** |
+| `plan-merge-to-main` | merged |
+| `plan-close` | **CLOSED**, receipt committed |
+
+    candidate   5cf5bd5
+    merge       eae6d69
+    lifecycle   626dd26
+    receipt     9cdaf26
+
+Verified from every side: `plan-state` and the canonical `aid_plan_closure_state`
+both answer `closed`; the receipt is durable on the target branch; both payload
+notes are delivered; and no P068 implementation commit is an ancestor of
+`plan/P077`.
+
+The P075 lesson held: a delivery report with `Head` in the FRONTMATTER passed
+close without incident.
+
+## P076 — invalidated by controller error, not by the mechanism
+
+The attempt before P077 was destroyed by a bug in the driver script, not in AID:
+a variable was read inside the same `local` statement that assigned it, so the
+EPIC id came out malformed, the task-branch checkout failed, and the payload
+commits landed on the target branch instead. `git diff main..plan/P076` was then
+empty and the isolation evidence worthless.
+
+It was NOT merged. The stray commits were reverted FORWARD — the rule this
+project enforces on itself — and the reverts propagated into the plan branch,
+which left P076 unsalvageable. It stands as an invalid diagnostic attempt in the
+archived history and is deliberately not rescued as a product plan.
+
+P077's driver added the checks that would have caught it: assert the task branch
+exists, assert HEAD is actually on it, and assert the target branch has not moved
+after each EPIC's commit.
+
+## The isolation failure — stated plainly
+
+**The "dogfood checkout" was a linked git worktree, so it shared `.git` and every
+ref with the source repository. Its `main` WAS the real `main`.** The two-checkout
+topology isolated the *commits* exactly as designed — no P068 implementation
+commit ever entered a candidate — but it did not isolate the *refs*, which the
+report had implicitly assumed. Every dogfood advanced the repository's real
+mainline.
+
+That is a process defect in how the dogfood was run, not a defect in P077 or in
+the boundary. It is recorded here rather than quietly corrected because the whole
+point of this plan is that the record matches reality.
+
+### Controlled recovery, 2026-07-27
+
+1. `archive/P068-dogfood-P067-P077-20260727` created at `9cdaf26`. It keeps the
+   entire dogfood history reachable: the P075 merge (`a79918d`) and its revert
+   (`dd80b91`), P076's mistaken commits (`b56b453`, `4b6b9fa`) and their reverts,
+   and the P077 merge (`eae6d69`), lifecycle commit (`626dd26`) and receipt
+   (`9cdaf26`).
+2. `refs/heads/main` restored from `9cdaf26` to the pre-dogfood baseline
+   `0158a68` with a compare-and-swap `git update-ref` — not `reset --hard`, and
+   nothing deleted. Nothing had been pushed, and the archive branch preserves
+   every commit.
+3. Verified: `main` is `0158a68`; both P068 task branches are untouched
+   (`4b50272`, `7dd5816`); the archive contains `9cdaf26`; `origin/main` and all
+   118 tags are unchanged.
+
+### Backlog — the guard this needs
+
+A dogfood must not run in a linked worktree that shares `refs/heads/<target>`
+with the source repository. The preflight should compare
+`git rev-parse --git-common-dir` against the source repo's and, on a match,
+either refuse the run or require a namespaced target ref or a genuinely separate
+clone. Recorded so the next dogfood cannot repeat this.
