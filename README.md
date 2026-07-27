@@ -116,7 +116,8 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.63.0** (current) — the plan-final release boundary: a plan releases once, at its own boundary, and cannot be declared closed without durable proof
+- **v2.63.1** (current) — post-release repair: P064 fixtures under the completion gate, worktree-aware project-root resolution, CI timeout
+- **v2.63.0** — the plan-final release boundary: a plan releases once, at its own boundary, and cannot be declared closed without durable proof
 - **v2.62.1** — fail-closed hardening of the Phase-1 boundaries (PM review): increment-step strict-by-default with partial-binding and forged-ledger rejection, C3 fail-closed checks that the AC source is in a canonical AID location and that a receipt is consistent with its named command, reviewed HEAD, and named log (consistency-checking within the local trust model, not cryptographic provenance against direct evidence tampering), waiver re-validation that never falls back to the current HEAD, and a cancel-before-PID handshake so a job can never start after cancellation.
 - **v2.62.0** — Phase-1 control-plane hardening: controller-owned job supervisor, gate-scoped single-use waivers, idempotent step advancement, one fail-closed mode authority, fail-closed lineage and re-derived attestation, explicit C3 AC/test-evidence binding, and read-time evidence freshness.
 - **v2.61.0** — plan-branch substrate: EPICs integrate into `plan/Pxxx` through an idempotent transaction proven by Git ancestry, the queue becomes a script-written derived view that can never substitute for that proof, gate profiles split by boundary, and the per-EPIC release stack goes structurally silent mid-plan.

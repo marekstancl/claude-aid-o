@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.63.1] — 2026-07-27
+
+### Fixed
+- **P064 fixtures under the completion gate** — the suite merged EPICs straight from `running`, which is the hole the gate closes; its seed now completes the EPIC it creates and the three cases that need an unfinished one say so explicitly.
+- **Project-root resolution for linked worktrees** — an explicitly named `--project-root` is honoured only when the plan runtime state actually lives there, so an ordinary worktree still shares the main checkout's state while a separate dogfood checkout resolves to its own.
+- **CI bash-test timeout** — the suite outgrew its five-minute step and timed out at 55 of 84; raised to twenty.
+
 ## [2.63.0] — 2026-07-26
 
 ### Added
