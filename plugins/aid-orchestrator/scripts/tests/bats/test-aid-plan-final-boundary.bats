@@ -4200,3 +4200,93 @@ _seed_startable_epic() {
   [ "$output" = "PLAN_GATES" ]
   [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$(_plan_sha)" ]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC13 — the sanctioned post-merge rollback (P075 dogfood, 2026-07-27).
+#
+# A plan that merged and was then correctly reverted had no honest terminal
+# state: abort refuses it (an aborted plan never merged) and CLOSED would claim
+# a delivery that is no longer on the target branch. P075 sat in PLAN_MERGING
+# forever having done everything right.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_rollback() {
+  run bash "$PLAN_FSM_CLI" plan-rollback "$PLAN_ID" --revert-commit "$1" \
+    --project-root "$TEST_PROJECT_ROOT" "${@:2}"
+}
+
+# _revert_the_merge — revert the plan merge ON the target branch, forward.
+_revert_the_merge() {
+  local mc; mc="$(_merge_commit)"
+  ( cd "$TEST_PROJECT_ROOT" \
+    && orig="$(git symbolic-ref --short HEAD)" \
+    && git checkout -q main \
+    && git revert --no-edit -m 1 "$mc" >/dev/null 2>&1 \
+    && git rev-parse HEAD > .revert_sha \
+    && git checkout -q "$orig" )
+  cat "${TEST_PROJECT_ROOT}/.revert_sha"
+}
+
+@test "AC13: a merged-then-reverted plan closes as ROLLED_BACK with all four SHAs recorded" {
+  _seed_closable
+  local cand mc tbefore
+  cand="$(_manifest_field "$PLAN_ID" candidate_sha)"
+  mc="$(_merge_commit)"
+  tbefore="$(jq -r '.plan_boundary_manifest.plan_final_merge.target_head_before' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  local rev; rev="$(_revert_the_merge)"
+
+  _rollback "$rev" --reason "dogfood rollback drill"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ROLLED BACK"* ]]
+
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "ROLLED_BACK" ]
+
+  # All four SHAs are recorded, not merely asserted in prose.
+  local m="${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json"
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_rollback.candidate_sha' "$m")" = "$cand" ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_rollback.merge_commit' "$m")" = "$mc" ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_rollback.revert_commit' "$m")" = "$rev" ]
+  [ "$(jq -r '.plan_boundary_manifest.plan_final_rollback.target_head_before_merge' "$m")" = "$tbefore" ]
+  [ -f "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-rollback-complete" ]
+}
+
+@test "AC13: rollback REFUSES while the delivery is still on the target branch" {
+  _seed_closable
+  # No revert performed: the plan's files are still there, so there is nothing
+  # rolled back — a record saying otherwise would be the lie the state exists to
+  # avoid. A commit that is on the branch but reverts nothing must not pass.
+  local head; head="$(_main_sha)"
+  _rollback "$head"
+  [ "$status" -ne 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "ROLLED_BACK" ]
+}
+
+@test "AC13: rollback REFUSES a revert that predates the merge" {
+  _seed_closable
+  local before; before="$(jq -r '.plan_boundary_manifest.plan_final_merge.target_head_before' \
+    "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-boundary-manifest.json")"
+  # `before` is on the branch but older than the merge — it cannot be undoing it.
+  _rollback "$before"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not an ancestor of the revert"* || "$output" == *"still differs"* ]]
+}
+
+@test "AC13: rollback REFUSES a plan that never merged — abort remains that plan's close" {
+  _seed_merge_project
+  _rollback "$(_main_sha)"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PLAN_MERGING"* ]]
+}
+
+@test "AC13: the ABORT path still refuses a published merge" {
+  _seed_closable
+  # The rollback state must not weaken the abort contract: an aborted plan never
+  # merged, and a plan that did must not be closeable as one.
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-close-check.sh" "$PLAN_ID" \
+    --project-root "$TEST_PROJECT_ROOT" --plan-branch --close-mode abort
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"PUBLISHED merge"* ]]
+}
