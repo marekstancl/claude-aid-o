@@ -6,3 +6,25 @@ declared_epics:
   - {id: E-068-1_2, scope: required}
   - {id: E-068-2_2, scope: required}
 depends_on_plans: []
+mode: legacy_epic_release_mode
+target_branch: main
+status: closed
+deliveries:
+  E-068-1_2:
+    delivery: delivered
+    review: accepted
+    reviewed_sha: 4b50272
+    reviewed_verdict: cp2+cp3 pass
+    unresolved_blockers: 0
+    delivery_sha: b9aa946dcfca9e1a9947729b62b48ffb451f4154
+    merged_tree: 1058b0a66ff16db48583b4716f277c059a357abf
+    bound_at: "2026-07-27T10:25:03Z"
+  E-068-2_2:
+    delivery: delivered
+    review: accepted
+    reviewed_sha: df5c8af
+    reviewed_verdict: cp2+cp3 pass
+    unresolved_blockers: 0
+    delivery_sha: b9aa946dcfca9e1a9947729b62b48ffb451f4154
+    merged_tree: 1058b0a66ff16db48583b4716f277c059a357abf
+    bound_at: "2026-07-27T10:25:03Z"
