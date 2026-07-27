@@ -1,6 +1,8 @@
 # P068 plan-branch dogfood report
 
-**Status: PREPARED, NOT EXECUTED — awaiting explicit PM authorization to merge P067 to `main`.**
+**Status: EXECUTED 2026-07-27 and HALTED at the boundary, by the boundary.** The
+plan ran the whole path and stopped at `AWAITING_PM` with C4 reporting
+`release_ready=false` and four blockers. Nothing was merged to `main`.
 
 *Updated 2026-07-27 with the PM decision on the bootstrap question and the
 authorized execution order.*
@@ -147,3 +149,97 @@ branch, run against real Git state rather than mocks:
 
 Not performed. It belongs to the live run and is recorded here as supporting
 evidence when it happens, never as a mechanical assertion.
+
+
+---
+
+# Run record — 2026-07-27
+
+PM authorization was given. The dogfood ran. It did not merge, and the reason it
+did not merge is the most useful thing it produced.
+
+## What happened, in order
+
+| Step | Result |
+|------|--------|
+|  | OK — first plan ever created in plan_branch mode |
+| EPIC 1 work +  | merged into  |
+| EPIC 2 work +  | merged into  |
+|  /  | candidate , run  |
+|  (attempt 1) | **FAILED** — and correctly |
+| candidate re-freeze | , run  |
+|  (attempt 2) | **PASSED**, profile , one run |
+|  | produced all three C4 inputs from the real candidate |
+|  | **PASSED** — every output protocol-valid and candidate-bound |
+|  | **release_ready=false, 4 blockers** |
+|  | PM summary rendered; plan held at  |
+| merge to  | **NOT PERFORMED** |
+
+## The four C4 blockers, verbatim in effect
+
+1.  — P067 has no C0 plan review, which is a required input at the
+   plan-final boundary.
+2.  — the at-HEAD verification failed.
+3.  — the per-EPIC evidence directory is absent.
+4.  — likewise.
+
+Blockers 3 and 4 are honest consequences of how the dogfood was driven: the two
+EPICs were merged into the plan branch without ever running through the EPIC
+FSM, so they produced no per-EPIC evidence. C4 noticed. That is the boundary
+doing precisely what it exists to do — refusing to call a plan releasable when
+the evidence behind it does not exist.
+
+**No merge was attempted.** Merging past a not-ready C4 would need an explicit
+PM override, which is a PM-authority act and not one the controller takes.
+
+## Two real findings, surfaced by running it
+
+**F1 —  was ignored for a linked worktree (FIXED).**
+ collapsed any worktree to the git common dir, so the
+explicitly-named dogfood checkout resolved back to the main repository and every
+lifecycle write aimed at the wrong tree — it refused "on branch
+task/E-068-2_2/main" while the caller had named a checkout sitting on .
+The two-checkout topology could not work at all. An explicitly named worktree
+root is now honoured as given; an inferred root keeps the old behaviour, which is
+correct because plan runtime state is shared across worktrees.
+
+**F2 —  does not require  to have succeeded.**
+For EPIC 1  refused ("cannot confirm the EPIC reached DONE"), and
+ then merged it into the plan branch anyway; the manifest went
+, which the transition table permits. So an EPIC can
+reach the plan branch, and thus the candidate, without proof it ever completed.
+C4's roll-up blockers catch the consequence downstream, but the EPIC-level gate
+itself does not hold. NOT fixed — recorded for a decision, since it is a
+substantive change to the transition contract rather than a slip.
+
+## Isolation proof — measured, not assumed
+
+
+
+Every P068 implementation commit was tested against  with
+: **none is an ancestor**. The tool under test did
+not smuggle itself into the candidate.
+
+## What the run proved
+
+- A plan can be created, worked, merged and finalized in  mode.
+- The gate profile runs **once** per attempt: a second run was refused even after
+  the configuration was corrected, and the corrected config did not get to
+  overwrite the history of the attempt it was corrected in.
+- A failing candidate is shown, never silently retried.
+- Changing the candidate invalidates every plan-final field and returns the plan
+  to , leaving the previous run directory byte-identical.
+-  produces the three C4 inputs from the real candidate and the
+  real EPIC set, and  accepts exactly what it produced.
+- C4 refuses to declare a plan releasable on absent evidence.
+
+## What it did not prove
+
+The merge itself, the tag, the push, and the rollback drill on a really-advanced
+target branch. All of them sit behind the four blockers above.
+
+##  during the run
+
+ moved twice, both times by the lifecycle layer and both times by design:
+ (the P067 manifest) and  (its  stamp). No
+plan content reached .

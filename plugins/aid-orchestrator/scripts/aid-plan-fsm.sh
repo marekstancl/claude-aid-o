@@ -201,6 +201,22 @@ _pfsm_resolve_invoke_root() {
 # ---------------------------------------------------------------------------
 _pfsm_resolve_project_root() {
   local probe_dir; probe_dir="$(_pfsm_resolve_invoke_root "${1:-}")"
+
+  # DOGFOOD FINDING (2026-07-27, P067 live run). Collapsing to the git common
+  # dir is right when the root is INFERRED — a linked worktree shares the plan's
+  # runtime state with the main checkout, so inferring per-worktree roots would
+  # scatter it. It is wrong when the caller NAMES a root: the two-checkout
+  # dogfood topology exists precisely so the tool under test runs against a
+  # different working tree than its own, and collapsing that back to the main
+  # checkout silently pointed every lifecycle write at the wrong tree (it
+  # refused on branch task/E-068-2_2/main while the caller had asked for a
+  # checkout sitting on main). An explicitly named worktree root is honoured as
+  # given; everything else keeps the previous behaviour.
+  if [[ -n "${1:-}" && -e "${probe_dir}/.git" ]]; then
+    printf '%s' "$probe_dir"
+    return 0
+  fi
+
   local common_dir=""
   common_dir="$(git -C "$probe_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
   if [[ -n "$common_dir" ]]; then
