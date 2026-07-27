@@ -108,6 +108,15 @@ _test_evidence:
   - "reporter/{artifact-file}"   # ≥1, each MUST exist on disk
 ```
 
+**Where the `Head:` goes — IN THE FRONTMATTER.** The block above is YAML
+frontmatter, delimited by `---`, and `plan-close-check` reads `Head` from there
+with a YAML parser. A bare `Head: <sha>` line in the body is NOT the same thing,
+and a report carrying only that is refused at close as having no recorded head.
+The distinction is easy to miss because the plan-final *simplifier* report
+deliberately uses a bare `Head:` line — two conventions in one system, which is
+how the P075 dogfood produced a delivery report the boundary would not accept.
+If you emit only one of the two, emit the frontmatter one.
+
 **At-HEAD provenance (`Head:` line) — REQUIRED.** Emit a `Head: <sha>` line carrying the exact
 `git rev-parse HEAD` at generation time. This is the C4 release aggregator's ONLY at-HEAD binding
 for the delivery report: the report lives under `.aid-o/reports/` which is gitignored, so a git-log

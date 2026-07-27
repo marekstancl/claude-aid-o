@@ -4180,6 +4180,14 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: ${merge_commit} is published on ${target_branch} and the bindings are committed, but ${plan_id} could not be moved to PLAN_MERGING. Reconcile with 'aid-plan-fsm.sh plan-state ${plan_id}' before plan-close." >&2
     exit 1
   fi
+  # DOGFOOD FINDING (P075, 2026-07-27): mirror the transition into the runtime
+  # manifest too. `plan-state` — and every other reader of the manifest — answers
+  # from that mirror, so a merge that moved only plan-state.yaml left the plan
+  # reporting AWAITING_PM while it was actually PLAN_MERGING. Same defect class
+  # as the abort path's (F3): a mirror only some writers maintain is worse than
+  # no mirror, because every reader trusts it.
+  plan_manifest_update "$plan_id" '.plan_boundary_manifest.plan_state = "PLAN_MERGING"' >/dev/null 2>&1 \
+    || echo "WARN: plan-merge-to-main: ${plan_id} is PLAN_MERGING in plan-state.yaml, but the runtime manifest's plan_state mirror could not be updated — 'plan-state' will under-report until it is reconciled." >&2
 
   local crc=0
   plan_op_commit "$plan_id" "$op_id" || crc=$?

@@ -4162,3 +4162,41 @@ _seed_startable_epic() {
   [ "$output" != "absent" ]
   [[ "$output" == "observe" || "$output" == "dual_run" || "$output" == "blocking" ]]
 }
+
+@test "AC5: after a MERGE, plan-state agrees with the authoritative state file" {
+  _seed_closable
+  # The merge moves the plan to PLAN_MERGING. `plan-state` answers from the
+  # runtime manifest's mirror, so a merge that updated only plan-state.yaml left
+  # every reader believing the plan was still awaiting the PM — the same defect
+  # the abort path had, found on the P075 dogfood.
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_MERGING" ]
+  run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PLAN_MERGING"* ]]
+  [[ "$output" != *"AWAITING_PM"* ]]
+}
+
+@test "AC4: a candidate that drifts in PLAN_SYNC re-freezes without any manual edit" {
+  _seed_merge_project
+  # Put the plan back to PLAN_SYNC with a frozen candidate, then move the plan
+  # branch. Freeze must invalidate and leave the plan somewhere it can re-freeze
+  # FROM — targeting PLAN_FIX here wedged the plan, because that transition is
+  # not legal out of PLAN_SYNC (F4, found on the P075 dogfood).
+  plan_state_transition "$PLAN_ID" "PLAN_GATES" "PLAN_SYNC" >/dev/null 2>&1 || true
+  _commit_on "plan/${PLAN_ID}" drift.txt "feat: work that lands after the freeze"
+
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"CANDIDATE INVALIDATED"* ]]
+  [[ "$output" != *"not a legal plan-state transition"* ]]
+
+  # And the plan can now genuinely re-freeze — no hand-edited state in between.
+  _finalize "$PLAN_ID" sync
+  [ "$status" -eq 0 ]
+  _finalize "$PLAN_ID" freeze
+  [ "$status" -eq 0 ]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" = "PLAN_GATES" ]
+  [ "$(_manifest_field "$PLAN_ID" candidate_sha)" = "$(_plan_sha)" ]
+}
