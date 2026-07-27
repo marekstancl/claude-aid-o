@@ -1323,6 +1323,29 @@ aid_plan_closure_state() {
   manifest="$(aid_manifest_path "$plan_id" "$root")"
   plan_file="$(aid_lifecycle_plan_file "$plan_id" "$root" || true)"
 
+  # A durable ROLLED-BACK record is authoritative and comes FIRST — before the
+  # receipt, before deliveries. A rolled-back plan still carries its delivery
+  # bindings (they record what WAS merged and then reverted), so evaluating
+  # deliveries first would answer `delivered-but-unreconciled` for a plan the
+  # git ledger plainly marks as rolled back: the clean clone would read the YAML
+  # correctly and the API would still contradict it.
+  if command -v yq >/dev/null 2>&1; then
+    local _cs_status=""
+    [[ -f "$manifest" ]] && _cs_status="$(yq -r '.status // ""' "$manifest" 2>/dev/null || true)"
+    # The COMMITTED copy on the target branch is the ledger. The plan-mode
+    # plumbing restores the worktree file after publishing, so a rollback that is
+    # durable in git leaves no trace in the working copy — and a resolver that
+    # only read the worktree would answer `active` for a plan the ledger marks
+    # rolled back, which is the very contradiction this record removes.
+    if [[ "$_cs_status" != "rolled_back" ]]; then
+      local _cs_rel=".aid-lifecycle/manifests/${plan_id}.yaml"
+      local _cs_tb; _cs_tb="$(aid_target_branch)"
+      local _cs_committed
+      _cs_committed="$(git -C "$root" show "${_cs_tb}:${_cs_rel}" 2>/dev/null | yq -r '.status // ""' 2>/dev/null || true)"
+      [[ -n "$_cs_committed" ]] && _cs_status="$_cs_committed"
+    fi
+    if [[ "$_cs_status" == "rolled_back" ]]; then echo "rolled_back"; return 0; fi
+  fi
   # A COMMITTED + reachable receipt is authoritative -> closed.
   if [[ -f "$receipt" ]] && aid_lifecycle_receipt_durable "$plan_id" "$root"; then echo "closed"; return 0; fi
   # Nothing at all -> not_found (a plan-number gap has no lifecycle meaning).

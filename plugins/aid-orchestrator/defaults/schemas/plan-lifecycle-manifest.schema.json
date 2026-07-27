@@ -133,7 +133,7 @@
         "merge_commit",
         "revert_commit"
       ],
-      "description": "The durable, git-tracked rollback record. It exists because the runtime marker under .aid-o/ is gitignored: without this block a fresh clone would read `deliveries` and conclude the plan was delivered, while the local workspace said it had been rolled back. Two truths, which is exactly what the plan boundary removes.",
+      "description": "The durable, git-tracked rollback record. It exists because the runtime marker under .aid-o/ is gitignored: without this block a fresh clone would read `deliveries` and conclude the plan was delivered, while the local workspace said it had been rolled back. Two truths, which is exactly what the plan boundary removes. Free-text is excluded on purpose \u2014 publicsafe_check forbids a `reason` key in a tracked artifact, and the human reason belongs in the runtime marker and the operation log.",
       "properties": {
         "candidate_sha": {
           "type": "string",
@@ -154,8 +154,9 @@
         "rolled_back_at": {
           "type": "string"
         },
-        "reason": {
-          "type": "string"
+        "decision_ref": {
+          "type": "string",
+          "description": "A technical reference to where the human reason lives (an op-log id or the runtime marker path). The reason itself is deliberately NOT here: this manifest is git-tracked and public-safe, and the contract forbids free-text keys."
         }
       }
     }

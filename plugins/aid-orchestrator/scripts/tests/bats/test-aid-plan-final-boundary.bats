@@ -4416,3 +4416,97 @@ _revert_the_merge() {
   [ "$status" -ne 0 ]
   [[ "$output" == *"PUBLISHED merge"* ]]
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC15 — the four fail-open gaps in the first ROLLED_BACK cut (2026-07-27).
+# Each existed because a check was skipped, not because one was missing.
+# ═══════════════════════════════════════════════════════════════════════════
+
+@test "AC15: no free-text reason reaches the git-tracked manifest" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev" --reason "a human sentence that must never enter the public ledger"
+  [ "$status" -eq 0 ]
+
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  # publicsafe_check forbids a `reason` key in a tracked artifact. The first cut
+  # wrote one and got away with it only because this path skipped validation.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | grep -cE '^[[:space:]]*reason[[:space:]]*:'"
+  [ "$output" = "0" ]
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | grep -c 'human sentence'"
+  [ "$output" = "0" ]
+  # The technical pointer IS there, so the reason remains findable.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' | yq -r '.rollback.decision_ref'"
+  [ -n "$output" ]
+  [ "$output" != "null" ]
+  # And the human reason survives where free text belongs: the runtime marker.
+  run grep -c 'human sentence' "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-rollback-complete"
+  [ "$output" = "1" ]
+}
+
+@test "AC15: the durable record validates against the public-safe contract before it is committed" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  # The committed artifact passes the same validator the rest of the lifecycle
+  # layer uses — which is the check the first cut never ran.
+  run bash -c "git -C '$TEST_PROJECT_ROOT' show 'main:${rel}' > '${TEST_TMPDIR}/lc.yaml' \
+    && cd '$TEST_PROJECT_ROOT' \
+    && source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh' \
+    && aid_lifecycle_validate_artifact '${TEST_TMPDIR}/lc.yaml' 'plan-lifecycle-manifest.schema.json'"
+  [ "$status" -eq 0 ]
+}
+
+@test "AC15: a tampered SHA in the durable record fails the read-back" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+
+  # Re-running against a DIFFERENT revert must not be satisfied by the record
+  # already present: the resume compares all five fields, not just one, so a
+  # partial match is a different record and must not be treated as done.
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")"
+  _commit_on main after.txt "chore: later work"
+  _rollback "$(_main_sha)"
+  [ "$status" -ne 0 ]
+  # The durable record is untouched by the refused run.
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "main:${rel}")" = "$before" ]
+}
+
+@test "AC15: a plan_branch plan with NO lifecycle manifest is refused — no state, no marker" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  local rel=".aid-lifecycle/manifests/${PLAN_ID}.yaml"
+  # Remove the manifest from the worktree: a rollback that cannot be made
+  # durable would leave the workspace saying "rolled back" while the ledger
+  # still reads the plan as delivered — the two truths this work removes.
+  rm -f "${TEST_PROJECT_ROOT}/${rel}"
+
+  _rollback "$rev"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"cannot be made durable"* ]]
+  run plan_state_get "$PLAN_ID" "plan_state"
+  [ "$output" != "ROLLED_BACK" ]
+  [ ! -f "${TEST_PROJECT_ROOT}/.aid-o/work/plan-state/${PLAN_ID}/plan-rollback-complete" ]
+}
+
+@test "AC15: the canonical closure resolver answers rolled_back, ahead of deliveries" {
+  _seed_closable
+  local rev; rev="$(_revert_the_merge)"
+  _rollback "$rev"
+  [ "$status" -eq 0 ]
+
+  # A rolled-back plan KEEPS its delivery bindings — they record what was merged
+  # and then reverted — so a resolver that evaluated deliveries first would
+  # answer delivered-but-unreconciled and contradict the ledger a clean clone
+  # reads. The status must be consulted before them.
+  run bash -c "cd '$TEST_PROJECT_ROOT' \
+    && source '$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh' \
+    && aid_plan_closure_state '$PLAN_ID' '$TEST_PROJECT_ROOT'"
+  [ "$status" -eq 0 ]
+  [ "$output" = "rolled_back" ]
+}

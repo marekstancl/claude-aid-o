@@ -5741,16 +5741,33 @@ cmd_plan_rollback() {
   # BACK from the target ref: a record that cannot be read from git is not
   # durable, whatever the worktree says.
   local lc_rel=".aid-lifecycle/manifests/${plan_id}.yaml"
-  if [[ -f "${root}/${lc_rel}" ]]; then
+  if [[ ! -f "${root}/${lc_rel}" ]]; then
+    # FAIL-CLOSED. A plan-branch plan with no lifecycle manifest cannot record a
+    # durable rollback, and a LOCAL-only ROLLED_BACK is the very two-truths state
+    # this work exists to remove: the workspace would say rolled back while the
+    # git ledger still read the plan as delivered. Refusing is the only honest
+    # outcome — better a plan stuck in PLAN_MERGING than a lie in the books.
+    _pfsm_rb_release
+    echo "PRECONDITION FAIL: plan-rollback: ${plan_id} has no ${lc_rel}, so the rollback cannot be made durable — and a rollback recorded only in gitignored .aid-o/ would leave a fresh clone reading this plan as delivered. NOTHING was written; ${plan_id} stays ${cur_state}." >&2
+    exit 1
+  fi
+  if true; then
     # Idempotent by read-back: a resumed run finds the record already durable and
     # writes nothing further. Committing it twice would put a second, identical
     # lifecycle commit on the target branch for one rollback.
     local rb_already=""
+    # The resume check compares the same five fields, not just the revert: a
+    # partial match is a different record, and skipping the write on it would
+    # leave the wrong one durable.
     rb_already="$(git -C "$root" show "${target_branch}:${lc_rel}" 2>/dev/null \
-      | yq -r 'select(.status == "rolled_back") | .rollback.revert_commit // ""' 2>/dev/null || true)"
-    if [[ "$rb_already" == "$rev_norm" ]]; then
+      | yq -r '[(.status // ""), (.rollback.candidate_sha // ""), (.rollback.target_head_before_merge // ""), (.rollback.merge_commit // ""), (.rollback.revert_commit // "")] | join("|")' 2>/dev/null || true)"
+    if [[ "$rb_already" == "rolled_back|${candidate}|${target_before}|${merge_commit}|${rev_norm}" ]]; then
       echo "NOTE: plan-rollback: the durable rollback record for ${plan_id} is already on ${target_branch} naming ${rev_norm:0:8} — this is a resume, so nothing was re-committed." >&2
     else
+    # NO free-text `reason` here. publicsafe_check forbids a `reason` key in a
+    # git-tracked artifact, and it was only ever accepted because this path
+    # skipped validation. The human reason lives in the runtime marker and the
+    # operation log; what the ledger carries is a technical pointer to it.
     local rb_yrc=0
     ( cd "$root" && yq -i ".status = \"rolled_back\"
         | .rollback = {\"candidate_sha\": \"${candidate}\",
@@ -5758,7 +5775,7 @@ cmd_plan_rollback() {
                        \"merge_commit\": \"${merge_commit}\",
                        \"revert_commit\": \"${rev_norm}\",
                        \"rolled_back_at\": \"${now}\",
-                       \"reason\": \"${reason:-pm_rollback}\"}" "$lc_rel" ) || rb_yrc=$?
+                       \"decision_ref\": \"${rb_op}\"}" "$lc_rel" ) || rb_yrc=$?
     if [[ "$rb_yrc" -ne 0 ]]; then
       _pfsm_rb_release
       echo "PRECONDITION FAIL: plan-rollback: could not write the durable rollback record into ${lc_rel} — without it a fresh clone would still read this plan as delivered. Nothing further was written." >&2
@@ -5769,21 +5786,37 @@ cmd_plan_rollback() {
     # and an ordinary commit would be refused by the target-branch guard. Plan
     # mode publishes with commit-tree + a CAS update-ref onto the target ref —
     # no checkout, no HEAD move.
+    # VALIDATE BEFORE COMMITTING — the mandatory step this path skipped, which is
+    # the only reason a forbidden key ever reached a tracked file. A failure here
+    # must stop the commit AND leave the local state untouched.
+    if ! aid_lifecycle_validate_artifact "${root}/${lc_rel}" "plan-lifecycle-manifest.schema.json"; then
+      ( cd "$root" && git checkout -q HEAD -- "$lc_rel" 2>/dev/null ) || true
+      _pfsm_rb_release
+      echo "PRECONDITION FAIL: plan-rollback: the rollback record for ${plan_id} does not validate against plan-lifecycle-manifest.schema.json / the public-safe contract — the worktree edit is reverted, nothing was committed and ${plan_id} stays ${cur_state}." >&2
+      exit 1
+    fi
     local rb_crc=0
     aid_lc_plan_mode_begin "" "" "$target_now"
     ( cd "$root" && _aid_lc_isolated_commit "." "lifecycle: ${plan_id} rolled back (merge ${merge_commit:0:8}, revert ${rev_norm:0:8})" "$lc_rel" >/dev/null 2>&1 ) || rb_crc=$?
     aid_lc_plan_mode_end
-    local rb_read=""
-    rb_read="$(git -C "$root" show "${target_branch}:${lc_rel}" 2>/dev/null | yq -r '.status // ""' 2>/dev/null || true)"
-    if [[ "$rb_read" != "rolled_back" ]]; then
+    # The read-back compares the STATUS AND ALL FOUR SHAs. Checking only the
+    # status would pass a record whose SHAs were wrong or missing — the report
+    # would claim four verified SHAs while one field had been verified.
+    local rb_read="" rb_mismatch=""
+    rb_read="$(git -C "$root" show "${target_branch}:${lc_rel}" 2>/dev/null \
+      | yq -r '[(.status // ""), (.rollback.candidate_sha // ""), (.rollback.target_head_before_merge // ""), (.rollback.merge_commit // ""), (.rollback.revert_commit // "")] | join("|")' 2>/dev/null || true)"
+    local rb_want="rolled_back|${candidate}|${target_before}|${merge_commit}|${rev_norm}"
+    [[ "$rb_read" != "$rb_want" ]] && rb_mismatch="1"
+    if [[ -n "$rb_mismatch" ]]; then
       ( cd "$root" && git checkout -q HEAD -- "$lc_rel" 2>/dev/null ) || true
       _pfsm_rb_release
-      echo "PRECONDITION FAIL: plan-rollback: the durable rollback record is not readable from ${target_branch}:${lc_rel} (rc=${rb_crc}, read='${rb_read:-<none>}') — the worktree edit is reverted and nothing else was written. A rollback nobody can see from a clean clone is not a rollback." >&2
+      echo "PRECONDITION FAIL: plan-rollback: the durable rollback record read back from ${target_branch}:${lc_rel} does not match what was written (rc=${rb_crc})." >&2
+      echo "  expected: ${rb_want}" >&2
+      echo "  read:     ${rb_read:-<none>}" >&2
+      echo "The worktree edit is reverted and nothing else was written. A rollback a clean clone cannot read, or reads differently, is not a rollback." >&2
       exit 1
     fi
     fi
-  else
-    echo "NOTE: plan-rollback: ${plan_id} has no ${lc_rel} — this is a legacy plan predating the lifecycle layer, so the rollback is recorded in the runtime manifest only and is NOT durable across a clean clone." >&2
   fi
   plan_op_mark_git_applied "$plan_id" "$rb_op" "$rev_norm" >/dev/null 2>&1 || true
   _pfsm_crash_seam git_applied
