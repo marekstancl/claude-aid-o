@@ -233,21 +233,25 @@ plan. It removes a false circular precondition which currently blocks ordinary
 plan generation: C0/CP1 request a dependency graph that is only produced after
 EPIC generation.
 
-- [ ] Build one shared, fail-closed parser for the source plan's dependency
-  syntax; accept only documented one-line and multi-line forms.
-- [ ] Before generation, produce a hash-bound, plan-global provisional graph
+- [x] Build one shared, fail-closed parser for the source plan's dependency
+  syntax; accept only documented one-line and multi-line forms. (`930fcd7`)
+- [x] Before generation, produce a hash-bound, plan-global provisional graph
   from the plan and reject missing steps, self dependencies, duplicates,
   forbidden forward dependencies, cycles and invalid phase/EPIC allocation.
-- [ ] Seal that graph into the C0 input, so C0 reviews real graph evidence
-  before EPIC files exist.
-- [ ] Make the generator consume the same parser; reject ambiguous dependency
-  syntax rather than silently producing an empty edge set.
-- [ ] Preserve every declared Files path; a comma is not a valid path separator.
+  (`930fcd7`)
+- [x] Seal that graph into the C0 input, so C0 reviews real graph evidence
+  before EPIC files exist. (`8302bae`)
+- [x] Make the generator consume the same parser; reject ambiguous dependency
+  syntax rather than silently producing an empty edge set. (`930fcd7`)
+- [x] Preserve every declared Files path; a comma is not a valid path separator.
+  (`930fcd7`; `+` is the only multi-path separator.)
 - [ ] After all EPICs are generated, create a plan-global final graph, compare
   it to the provisional graph, and write a hash-bound receipt.
 - [ ] Require that receipt before strict/high-risk first-EPIC init.
 - [ ] Add red-green reproductions for P074-style pre-generation review,
   multi-line dependencies, ambiguity, graph disagreement and multi-path Files.
+  (Source-plan cases and multi-path coverage in `930fcd7`; final-graph
+  disagreement remains coupled to the pending receipt.)
 
 **Explicitly out of this package:** CP2 orchestration and generic delivery-gate
 policy redesign. Those are separate auto/gate work, not prerequisites for
