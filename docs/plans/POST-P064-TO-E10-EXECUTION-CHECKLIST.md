@@ -240,14 +240,22 @@ EPIC generation.
   forbidden forward dependencies, cycles and invalid phase/EPIC allocation.
   (`930fcd7`)
 - [x] Seal that graph into the C0 input, so C0 reviews real graph evidence
-  before EPIC files exist. (`8302bae`)
+  before EPIC files exist. The whole-plan source graph lives at
+  `generation/provisional-graph.json`; it is deliberately separate from the
+  later per-EPIC C0 contract graph at `c0/plan-graph.json`. (`1bbf119`)
 - [x] Make the generator consume the same parser; reject ambiguous dependency
   syntax rather than silently producing an empty edge set. (`930fcd7`)
 - [x] Preserve every declared Files path; a comma is not a valid path separator.
   (`930fcd7`; `+` is the only multi-path separator.)
+- [ ] Split auto-pipeline into two truthful stages: generate and validate the
+  complete EPIC package first; only then initialise/queue any EPIC. Do not add
+  a receipt guard to the current per-phase init loop — that would recreate the
+  producer-before-consumer deadlock.
 - [ ] After all EPICs are generated, create a plan-global final graph, compare
-  it to the provisional graph, and write a hash-bound receipt.
-- [ ] Require that receipt before strict/high-risk first-EPIC init.
+  it to the provisional graph, and write a hash-bound receipt owned by the
+  generation stage.
+- [ ] Require that receipt before strict/high-risk first-EPIC init; preserve
+  an explicit legacy path rather than retroactively blocking in-flight plans.
 - [ ] Add red-green reproductions for P074-style pre-generation review,
   multi-line dependencies, ambiguity, graph disagreement and multi-path Files.
   (Source-plan cases and multi-path coverage in `930fcd7`; final-graph
