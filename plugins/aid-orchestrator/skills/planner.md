@@ -21,6 +21,16 @@ narrow and clear: (1) make sure the Plan is written in the format the scripts pa
 
 The LLM never hand-generates `plan.json`. It runs the scripts and reviews their output.
 
+## Before generation: mandatory readiness
+
+Run `aid-generation-readiness.sh <plan.md> --total <N>` before asking the
+generator to split a plan. It is the single mechanical briefing for direct
+script use and `/aid-plan`: it validates `Files:` grammar and builds a
+whole-plan provisional dependency graph directly from the source plan. It
+rejects missing, duplicate, self, forward or cyclic dependencies before any
+EPIC exists. Do not manufacture `plan-graph.json` or use a PM override for a
+normal valid plan; `aid-plan-to-epic.sh` runs the same readiness check itself.
+
 ---
 
 ## The pipeline (full chain)

@@ -85,23 +85,20 @@ done <<< "$frontmatter"
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
 
 # ---------------------------------------------------------------------------
-# Step 1a: Files-shape preflight (v2.58.3) — fail FAST on malformed **Files:**
-# entries, listing the WHOLE plan's violations at once, BEFORE any EPIC file is
-# written or the plan counter is bumped. Previously such entries only surfaced
-# phase-by-phase in the generation-time D5 allowed_paths_shape gate (a plan could
-# fail at phase 5 after phases 1-4 were already scaffolded). aid-plan-lint.sh
-# shares the SAME extractor + cleaner + shape predicate as that gate via
-# lib/aid-scoping.sh, so a plan that passes the lint provably passes the gate.
-# ERROR-tier (gate-breaking) always blocks; STRICT-tier blocks only lifecycle_strict
-# plans (legacy plans get one advisory printout on phase 1).
-# set -e-safe capture: a non-zero lint must NOT abort at the assignment itself (that
-# would skip the diagnostics + error_exit below and exit a bare 1 with no output).
-_lint_out="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)" && _lint_rc=0 || _lint_rc=$?
-if [[ "$_lint_rc" -ne 0 ]]; then
-  printf '%s\n' "$_lint_out" >&2
-  error_exit "Plan Files-shape lint failed for $plan (fix the entries above). Caught pre-generation so it never fails mid-split." 7
-elif [[ "$phase" -eq 1 && -n "$_lint_out" ]]; then
-  printf '%s\n' "$_lint_out" >&2
+# Step 1a: generation readiness — the canonical pre-generation contract.
+# It runs Files lint plus the shared SOURCE-plan dependency parser/whole-plan
+# graph before any EPIC exists.  This removes the former circular requirement
+# for plan-graph.json (which used to be produced only after generation), and
+# makes direct script use receive the same concise author guidance as /aid-plan.
+READINESS_SCRIPT="${SCRIPT_DIR}/aid-generation-readiness.sh"
+if [[ -x "$READINESS_SCRIPT" || -f "$READINESS_SCRIPT" ]]; then
+  _ready_out="$(bash "$READINESS_SCRIPT" "$plan" --total "$total" 2>&1)" && _ready_rc=0 || _ready_rc=$?
+  if [[ "$_ready_rc" -ne 0 ]]; then
+    printf '%s\n' "$_ready_out" >&2
+    error_exit "Generation readiness failed for $plan; repair the source-plan diagnostics before creating any EPIC." 7
+  elif [[ "$phase" -eq 1 && -n "$_ready_out" ]]; then
+    printf '%s\n' "$_ready_out" >&2
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -737,27 +734,14 @@ for sn in "${phase_steps[@]}"; do
   # exact algorithm directly inside aid-epic-to-json.sh when it derives
   # per-step allowed_paths from the block's RAW files[] values, using
   # _aid_split_path_entry below as the reference spec, not as callable code.
-  step_files="$(echo "$step_content" | awk '
-    BEGIN { in_files = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
-      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
-      if (in_files && ($0 ~ /Create:/ || $0 ~ /Modify:/)) {
-        sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
-        sub(/^Create:[[:space:]]*/, "", $0)
-        sub(/^Modify:[[:space:]]*/, "", $0)
-        # Extract just the path (before any description after " — ")
-        sub(/[[:space:]]*--[[:space:]].*/, "", $0)
-        sub(/[[:space:]]*\xe2\x80\x94[[:space:]].*/, "", $0)
-        # Handle backtick-wrapped paths
-        gsub(/`/, "", $0)
-        # Trim whitespace
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-        if ($0 != "") print
-      }
-    }
-  ')"
+  step_files=""
+  while IFS= read -r _raw_file; do
+    _raw_file="${_raw_file#- }"
+    [[ "$_raw_file" =~ ^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$ ]] || continue
+    while IFS= read -r _path; do
+      [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
+    done < <(_aid_split_path_entry "${BASH_REMATCH[2]}")
+  done <<< "$step_artifacts_top_level"
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
   fi
