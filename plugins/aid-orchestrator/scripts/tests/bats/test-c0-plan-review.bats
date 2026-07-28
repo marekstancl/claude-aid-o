@@ -437,6 +437,24 @@ EOF
   [ "$output" = "1" ]
 }
 
+@test "build-manifest: provisional source graph must bind to the reviewed plan bytes" {
+  mkdir -p "$C0_EVIDENCE_DIR/c0"
+  local plan_sha
+  plan_sha="sha256:$(sha256sum "$PLAN_FILE" | awk '{print $1}')"
+  jq -n --arg sha "$plan_sha" '{schema:"aid-source-plan-graph/v1",plan_sha256:$sha,edges:[],topological_order:["step-1"],cycles:[]}' \
+    > "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  _build_low
+  [ "$status" -eq 0 ]
+
+  # A graph forged for different plan bytes must fail before it becomes a
+  # sealed C0 input; valid JSON alone is not authority.
+  jq '.plan_sha256="sha256:deadbeef"' "$C0_EVIDENCE_DIR/c0/plan-graph.json" > "$C0_EVIDENCE_DIR/c0/tampered.json"
+  mv "$C0_EVIDENCE_DIR/c0/tampered.json" "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  run bash "$DISPATCH" build-manifest "$PLAN_FILE" "$C0_EVIDENCE_DIR"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"provisional plan graph hash does not match"* ]]
+}
+
 @test "build-manifest: the sealed input_hash differs between the absent and present plan-graph shapes" {
   _build_low
   [ "$status" -eq 0 ]

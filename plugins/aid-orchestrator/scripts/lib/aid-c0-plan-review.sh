@@ -374,6 +374,22 @@ cmd_build_manifest() {
   local plan_graph_rel="$evidence_dir_rel/c0/plan-graph.json"
   local plan_graph_present=0
   [[ -f "$repo_root/$plan_graph_rel" ]] && plan_graph_present=1
+  if [[ "$plan_graph_present" -eq 1 ]]; then
+    # A source-plan provisional graph is produced before EPIC/plan.json exists.
+    # It is useful only when cryptographically bound to THIS plan bytes; a
+    # hand-edited graph with a different plan_sha256 must not become a sealed
+    # C0 input merely because it happens to be valid JSON.
+    local graph_schema graph_plan_sha graph_cycles
+    graph_schema="$(jq -r '.schema // ""' "$repo_root/$plan_graph_rel" 2>/dev/null)" || _fail "plan graph is not valid JSON: $plan_graph_rel"
+    if [[ "$graph_schema" == "aid-source-plan-graph/v1" ]]; then
+      graph_plan_sha="$(jq -r '.plan_sha256 // ""' "$repo_root/$plan_graph_rel")"
+      [[ "$graph_plan_sha" == "$reviewed_plan_hash" ]] || _fail "provisional plan graph hash does not match reviewed plan: $plan_graph_rel"
+      jq -e '(.edges|type == "array") and (.topological_order|type == "array") and (.cycles|type == "array")' "$repo_root/$plan_graph_rel" >/dev/null \
+        || _fail "provisional plan graph has invalid graph shape: $plan_graph_rel"
+      graph_cycles="$(jq '.cycles | length' "$repo_root/$plan_graph_rel")"
+      [[ "$graph_cycles" == "0" ]] || _fail "provisional plan graph contains cycle(s): $plan_graph_rel"
+    fi
+  fi
 
   # --- existing C0 evidence: cp1-deep lenses/adjudicator + c0 contract/plan-
   #     review artifacts, whichever are ACTUALLY present (nullglob). ---------
