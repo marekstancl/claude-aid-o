@@ -20,7 +20,10 @@
 # build-manifest <plan_file> <evidence_dir>
 # ---------------------------------------------------------------------------
 # <evidence_dir> is the PLAN-ID evidence ROOT — `.aid-o/work/evidence/<plan_id>/`
-# — the SAME directory `aid-c0-contract.sh` writes `c0/plan-graph.json` +
+# — c0/plan-graph.json is the per-EPIC graph written by `aid-c0-contract.sh`;
+#   generation/provisional-graph.json is the whole-plan graph written before
+#   EPIC generation. They are deliberately distinct artifacts and must never
+#   overwrite each other.
 # `c0/contract-manifest.json` into, and `aid-cp1-gate.sh` reads
 # `cp1-deep/cp1-lens-L{1,2,3}-*.md` + `cp1-deep/cp1-adjudicator.md` from. This
 # step writes ONLY under `<evidence_dir>/c0/codex/` (its own subtree) and the
@@ -351,9 +354,9 @@ cmd_build_manifest() {
     mapfile -t contracts < <(printf '%s\n' "${contracts[@]}" | LC_ALL=C sort -u)
   fi
 
-  # --- plan-graph (sibling c0/ dir; may not exist yet at plan-review time) --
+  # --- per-EPIC plan-graph (sibling c0/ dir; may not exist yet at review) ---
   #
-  # P068 Step 1 (CF3 refinement). `plan-graph.json` is produced by
+  # P068 Step 1 (CF3 refinement). c0/plan-graph.json is produced by
   # `aid-c0-contract.sh contract <plan.json>`, and `plan.json` exists only
   # AFTER EPIC generation — so a pre-generation plan review can never supply
   # it. That is a legitimate, expected state, not a defect.
@@ -374,21 +377,24 @@ cmd_build_manifest() {
   local plan_graph_rel="$evidence_dir_rel/c0/plan-graph.json"
   local plan_graph_present=0
   [[ -f "$repo_root/$plan_graph_rel" ]] && plan_graph_present=1
-  if [[ "$plan_graph_present" -eq 1 ]]; then
-    # A source-plan provisional graph is produced before EPIC/plan.json exists.
-    # It is useful only when cryptographically bound to THIS plan bytes; a
-    # hand-edited graph with a different plan_sha256 must not become a sealed
-    # C0 input merely because it happens to be valid JSON.
+
+  # --- source-plan provisional graph (generation/; pre-generation input) ---
+  # This is a whole-plan artifact, not the C0 contract graph above.  Bind it
+  # to plan bytes before sealing it so neither a stale nor hand-authored graph
+  # can influence C0/CP1 review.
+  local source_graph_rel="$evidence_dir_rel/generation/provisional-graph.json"
+  local source_graph_present=0
+  [[ -f "$repo_root/$source_graph_rel" ]] && source_graph_present=1
+  if [[ "$source_graph_present" -eq 1 ]]; then
     local graph_schema graph_plan_sha graph_cycles
-    graph_schema="$(jq -r '.schema // ""' "$repo_root/$plan_graph_rel" 2>/dev/null)" || _fail "plan graph is not valid JSON: $plan_graph_rel"
-    if [[ "$graph_schema" == "aid-source-plan-graph/v1" ]]; then
-      graph_plan_sha="$(jq -r '.plan_sha256 // ""' "$repo_root/$plan_graph_rel")"
-      [[ "$graph_plan_sha" == "$reviewed_plan_hash" ]] || _fail "provisional plan graph hash does not match reviewed plan: $plan_graph_rel"
-      jq -e '(.edges|type == "array") and (.topological_order|type == "array") and (.cycles|type == "array")' "$repo_root/$plan_graph_rel" >/dev/null \
-        || _fail "provisional plan graph has invalid graph shape: $plan_graph_rel"
-      graph_cycles="$(jq '.cycles | length' "$repo_root/$plan_graph_rel")"
-      [[ "$graph_cycles" == "0" ]] || _fail "provisional plan graph contains cycle(s): $plan_graph_rel"
-    fi
+    graph_schema="$(jq -r '.schema // ""' "$repo_root/$source_graph_rel" 2>/dev/null)" || _fail "provisional source graph is not valid JSON: $source_graph_rel"
+    [[ "$graph_schema" == "aid-source-plan-graph/v1" ]] || _fail "unexpected provisional source graph schema: $source_graph_rel"
+    graph_plan_sha="$(jq -r '.plan_sha256 // ""' "$repo_root/$source_graph_rel")"
+    [[ "$graph_plan_sha" == "$reviewed_plan_hash" ]] || _fail "provisional plan graph hash does not match reviewed plan: $source_graph_rel"
+    jq -e '(.steps|type == "array") and (.edges|type == "array") and (.topological_order|type == "array") and (.cycles|type == "array")' "$repo_root/$source_graph_rel" >/dev/null \
+      || _fail "provisional plan graph has invalid graph shape: $source_graph_rel"
+    graph_cycles="$(jq '.cycles | length' "$repo_root/$source_graph_rel")"
+    [[ "$graph_cycles" == "0" ]] || _fail "provisional plan graph contains cycle(s): $source_graph_rel"
   fi
 
   # --- existing C0 evidence: cp1-deep lenses/adjudicator + c0 contract/plan-
@@ -414,10 +420,11 @@ cmd_build_manifest() {
   done
   mapfile -t c0_evidence < <(printf '%s\n' "${c0_evidence[@]}" | LC_ALL=C sort -u)
 
-  # --- assemble the full hashed file set (plan + contracts + plan-graph +
+  # --- assemble the full hashed file set (plan + contracts + both graphs +
   #     c0 evidence), sorted (LC_ALL=C) for determinism. --------------------
   local all_paths=("$plan_file_rel" "${contracts[@]}" "${c0_evidence[@]}")
   [[ "$plan_graph_present" -eq 1 ]] && all_paths+=("$plan_graph_rel")
+  [[ "$source_graph_present" -eq 1 ]] && all_paths+=("$source_graph_rel")
   mapfile -t all_paths < <(printf '%s\n' "${all_paths[@]}" | LC_ALL=C sort -u)
 
   local files_json="[]" p entry
@@ -444,6 +451,13 @@ cmd_build_manifest() {
       || _fail "cannot hash plan-graph entry"
   else
     plan_graph_entry='"absent_pre_generation"'
+  fi
+  local source_graph_entry
+  if [[ "$source_graph_present" -eq 1 ]]; then
+    source_graph_entry="$(_c0_manifest_entry "$repo_root" "$source_graph_rel")" \
+      || _fail "cannot hash provisional source graph entry"
+  else
+    source_graph_entry='"absent_pre_generation"'
   fi
 
   local canonical input_hash
@@ -486,6 +500,7 @@ cmd_build_manifest() {
     --arg risk_profile "$risk_profile" \
     --argjson contracts "$contracts_json" \
     --argjson plan_graph "$plan_graph_entry" \
+    --argjson source_plan_graph "$source_graph_entry" \
     --argjson c0_evidence "$c0_evidence_json" \
     --argjson files "$files_json" \
     '{
@@ -513,6 +528,7 @@ cmd_build_manifest() {
           risk_profile: $risk_profile,
           contracts: $contracts,
           plan_graph: $plan_graph,
+          source_plan_graph: $source_plan_graph,
           c0_evidence: $c0_evidence,
           files: $files
         }
@@ -1427,7 +1443,7 @@ cmd_dispatch() {
   fi
 
   # --- render the sealed C0 prompt DETERMINISTICALLY --------------------------
-  local plan_file_rel reviewed_plan_hash plan_graph_rel contracts_str c0_evidence_str
+  local plan_file_rel reviewed_plan_hash plan_graph_rel source_plan_graph_rel contracts_str c0_evidence_str
   plan_file_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_file // ""' "$manifest_for_call")"
   reviewed_plan_hash="$(jq -r '.audit_input_manifest.c0_plan_review_input.reviewed_plan_hash // ""' "$manifest_for_call")"
   # `plan_graph` is EITHER a {path,sha256,size} seal (graph present) OR the
@@ -1437,6 +1453,8 @@ cmd_dispatch() {
   # reviewer why there is no graph rather than handing it an empty path.
   plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph
                              | if type == "object" then (.path // "") else (. // "") end' "$manifest_for_call")"
+  source_plan_graph_rel="$(jq -r '.audit_input_manifest.c0_plan_review_input.source_plan_graph
+                                    | if type == "object" then (.path // "") else (. // "") end' "$manifest_for_call")"
   contracts_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.contracts // [] | join(", ")' "$manifest_for_call")"
   c0_evidence_str="$(jq -r '.audit_input_manifest.c0_plan_review_input.c0_evidence // [] | join(", ")' "$manifest_for_call")"
 
@@ -1452,12 +1470,13 @@ cmd_dispatch() {
     --arg input_manifest_path "$input_manifest_path_rel" \
     --arg input_manifest_hash "$manifest_input_hash" \
     --arg plan_graph_path "$plan_graph_rel" \
+    --arg source_plan_graph_path "$source_plan_graph_rel" \
     --arg contracts_paths "$contracts_str" \
     --arg c0_evidence_paths "$c0_evidence_str" \
     --arg output_schema_path "$output_schema_path" \
     '{plan_path:$plan_path, plan_sha256:$plan_sha256, reviewed_head:$reviewed_head,
       input_manifest_path:$input_manifest_path, input_manifest_hash:$input_manifest_hash,
-      plan_graph_path:$plan_graph_path, contracts_paths:$contracts_paths,
+      plan_graph_path:$plan_graph_path, source_plan_graph_path:$source_plan_graph_path, contracts_paths:$contracts_paths,
       c0_evidence_paths:$c0_evidence_paths, output_schema_path:$output_schema_path}' \
     > "$vars_json" || { echo "PRECONDITION FAIL: cannot assemble prompt vars" >&2; exit 1; }
 

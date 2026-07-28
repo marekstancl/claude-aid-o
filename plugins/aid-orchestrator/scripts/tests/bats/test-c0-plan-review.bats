@@ -438,21 +438,41 @@ EOF
 }
 
 @test "build-manifest: provisional source graph must bind to the reviewed plan bytes" {
-  mkdir -p "$C0_EVIDENCE_DIR/c0"
+  mkdir -p "$C0_EVIDENCE_DIR/generation"
   local plan_sha
   plan_sha="sha256:$(sha256sum "$PLAN_FILE" | awk '{print $1}')"
-  jq -n --arg sha "$plan_sha" '{schema:"aid-source-plan-graph/v1",plan_sha256:$sha,edges:[],topological_order:["step-1"],cycles:[]}' \
-    > "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  jq -n --arg sha "$plan_sha" '{schema:"aid-source-plan-graph/v1",plan_sha256:$sha,steps:[],edges:[],topological_order:["step-1"],cycles:[]}' \
+    > "$C0_EVIDENCE_DIR/generation/provisional-graph.json"
   _build_low
   [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.source_plan_graph.path' "$MANIFEST"
+  [[ "$output" == *"generation/provisional-graph.json" ]]
 
   # A graph forged for different plan bytes must fail before it becomes a
   # sealed C0 input; valid JSON alone is not authority.
-  jq '.plan_sha256="sha256:deadbeef"' "$C0_EVIDENCE_DIR/c0/plan-graph.json" > "$C0_EVIDENCE_DIR/c0/tampered.json"
-  mv "$C0_EVIDENCE_DIR/c0/tampered.json" "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  jq '.plan_sha256="sha256:deadbeef"' "$C0_EVIDENCE_DIR/generation/provisional-graph.json" > "$C0_EVIDENCE_DIR/generation/tampered.json"
+  mv "$C0_EVIDENCE_DIR/generation/tampered.json" "$C0_EVIDENCE_DIR/generation/provisional-graph.json"
   run bash "$DISPATCH" build-manifest "$PLAN_FILE" "$C0_EVIDENCE_DIR"
   [ "$status" -ne 0 ]
   [[ "$output" == *"provisional plan graph hash does not match"* ]]
+}
+
+@test "build-manifest: source graph and per-EPIC graph remain distinct sealed inputs" {
+  mkdir -p "$C0_EVIDENCE_DIR/c0" "$C0_EVIDENCE_DIR/generation"
+  local plan_sha
+  plan_sha="sha256:$(sha256sum "$PLAN_FILE" | awk '{print $1}')"
+  printf '{"artifact_type":"plan_graph"}\n' > "$C0_EVIDENCE_DIR/c0/plan-graph.json"
+  jq -n --arg sha "$plan_sha" '{schema:"aid-source-plan-graph/v1",plan_sha256:$sha,steps:[],edges:[],topological_order:[],cycles:[]}' \
+    > "$C0_EVIDENCE_DIR/generation/provisional-graph.json"
+
+  _build_low
+  [ "$status" -eq 0 ]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.plan_graph.path' "$MANIFEST"
+  [[ "$output" == *"c0/plan-graph.json" ]]
+  run jq -r '.audit_input_manifest.c0_plan_review_input.source_plan_graph.path' "$MANIFEST"
+  [[ "$output" == *"generation/provisional-graph.json" ]]
+  run jq -r '[.audit_input_manifest.c0_plan_review_input.files[] | .path] | map(select(test("(c0/plan-graph|generation/provisional-graph)\\.json$"))) | length' "$MANIFEST"
+  [ "$output" = "2" ]
 }
 
 @test "build-manifest: the sealed input_hash differs between the absent and present plan-graph shapes" {

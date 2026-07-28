@@ -3,7 +3,7 @@ template_id: c0-plan-review-prompt
 template_version: v1
 artifact: c0
 variables: [plan_path, plan_sha256, reviewed_head, input_manifest_path, input_manifest_hash,
-  plan_graph_path, contracts_paths, c0_evidence_paths, output_schema_path]
+  plan_graph_path, source_plan_graph_path, contracts_paths, c0_evidence_paths, output_schema_path]
 ---
 
 # C0 Independent Cross-Provider PLAN Review — Codex
@@ -28,7 +28,8 @@ and the output schema.
 - Plan under review: `{{plan_path}}` (`reviewed_plan_hash` = `{{plan_sha256}}`)
 - Repo state: `reviewed_head` = `{{reviewed_head}}`
 - Input manifest: `{{input_manifest_path}}` (hash `{{input_manifest_hash}}`)
-- Plan dependency graph: `{{plan_graph_path}}`
+- Per-EPIC contract graph (may be absent before generation): `{{plan_graph_path}}`
+- Whole-plan source dependency graph (the pre-generation authority): `{{source_plan_graph_path}}`
 - Contracts the plan cites (schemas/policies/interfaces): `{{contracts_paths}}`
 - Existing C0 evidence (deterministic contract check + lens outputs): `{{c0_evidence_paths}}`
 - Output schema you MUST conform to: `{{output_schema_path}}`

@@ -101,9 +101,11 @@ done
 [[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
 _ready_args=("$plan" --total "$total")
 # Source graph is a real, hashed C0 input when this is an AID project. It is
-# regenerated deterministically from the plan, never hand-authored.
+# regenerated deterministically from the plan, never hand-authored.  Keep it
+# under generation/: c0/plan-graph.json has a different owner and meaning
+# after an EPIC exists (aid-c0-contract.sh's per-EPIC contract graph).
 if [[ -d "${_project_root}/.aid-o" && "$(realpath "$plan")" == "${_project_root}/.aid-o/plans/"* ]]; then
-  _ready_args+=(--write-provisional "${_project_root}/.aid-o/work/evidence/${plan_id}/c0/plan-graph.json")
+  _ready_args+=(--write-provisional "${_project_root}/.aid-o/work/evidence/${plan_id}/generation/provisional-graph.json")
 fi
 if [[ -x "$READINESS_SCRIPT" || -f "$READINESS_SCRIPT" ]]; then
   _ready_out="$(bash "$READINESS_SCRIPT" "${_ready_args[@]}" 2>&1)" && _ready_rc=0 || _ready_rc=$?
