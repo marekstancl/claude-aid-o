@@ -177,16 +177,22 @@ ESCALATION → EXECUTE | GATES | ERROR
 
 ## §2 PRE-FLIGHT
 
-**No LLM involvement.** Scripts run sequentially, exit non-zero on failure.
+**No LLM involvement.** Scripts run deterministically, exit non-zero on
+failure, and use two stages: generation is completed and sealed before any
+FSM state or queue entry is created.
 
 ```bash
-aid-epic-to-json.sh  <epic_file> <run_dir>     # EPIC → plan.json
-aid-json-to-run.sh   <run_dir>                  # plan.json → run.md
-aid-fsm.sh init      <epic_id> <run_id> \       # Create fsm-state.yaml (state: READY)
-  <total_steps> <mode> <branch> <base_commit> <state_file>
+aid-generation-readiness.sh <plan.md>           # source grammar + provisional graph
+aid-plan-to-epic.sh … --phase N --total T       # repeat for every phase
+aid-epic-to-json.sh …                           # repeat for every generated EPIC
+aid-contract-validate.sh …                      # validate each generated package
+aid-generation-finalize.sh …                    # seal all phases in one receipt
+aid-json-to-run.sh … --generation-receipt …     # only now create run + FSM state
 ```
 
-**On success:** `fsm-state.yaml` exists with `state: READY`, `plan.json` and `run.md` present.
+**On generation success:** every phase has an EPIC, `plan.json`, contract
+validation evidence and one plan-global generation receipt. Only then may the
+execution stage create `fsm-state.yaml` with `state: READY` and queue entries.
 
 **On failure:** Script exits non-zero with JSON error on stderr. `/aid-run` reports to PM.
 
@@ -213,10 +219,11 @@ The uncommitted-changes guard runs in all modes — dirty workdir is rejected wi
 `fsm_check_grandfather()` for the EXECUTE→GATES precondition (§5). Threshold:
 `AID_DEPLOY_DATE` env var or `${AID_PLUGIN_PATH}/DEPLOY_DATE` file.
 
-### After aid-json-to-run.sh (PRE-FLIGHT)
+### After aid-json-to-run.sh (execution stage)
 
-After running `aid-json-to-run.sh`, the FSM is initialized and the EPIC is ready
-for `/aid-run`. No manual `aid-fsm.sh init` call is required. To re-initialize
+After the complete generation receipt has been checked, running
+`aid-json-to-run.sh` initializes the FSM and the EPIC is ready for `/aid-run`.
+No manual `aid-fsm.sh init` call is required. To re-initialize
 (rare — e.g. `/aid-run --streamlined` after a default-mode init), delete
 `fsm-state.yaml` and re-run `aid-json-to-run.sh --streamlined`. The
 `--streamlined` flag is what makes the re-init write `streamlined_mode: true`

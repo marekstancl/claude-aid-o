@@ -357,10 +357,16 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
       && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
   fi
 
-  # P068 Step 7 — plan state for a NEW plan, stamped with the resolved mode.
-  # Only when the plan has none: an existing plan is never migrated mid-run, and
-  # plan-start is a no-op guard rather than a re-initialisation.
-  if [[ ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
+  # The parent-plan state machine belongs exclusively to plan_branch mode.
+  # A legacy plan deliberately retains the pre-P064 EPIC-by-EPIC lifecycle;
+  # attempting plan-start without its durable plan-boundary manifest turns a
+  # compatible ordinary pipeline into a false blocker. Do not "migrate" it as
+  # a side effect of generation. plan_branch remains fail-closed above.
+  #
+  # Only when a plan-branch plan has no state: an existing plan is never
+  # migrated mid-run, and plan-start is a no-op guard rather than a
+  # re-initialisation.
+  if [[ "$_pb_default_mode" == "plan_branch" && ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
     _ps_rc=0
     bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-start "$plan_id" \
       --mode "$_pb_default_mode" --project-root "." >/dev/null 2>&1 || _ps_rc=$?
@@ -383,7 +389,8 @@ for phase in $(seq 1 "$total_phases"); do
     --total "$total_phases" \
     --epic-template "$epic_template" \
     --output-dir ".aid-o/tasks" \
-    --counter-yaml "$counter_yaml")"
+    --counter-yaml "$counter_yaml" \
+    --project-root "$(pwd)")"
 
   # Extract epic_id from the generated filename
   epic_basename="$(basename "$epic_path")"
@@ -633,14 +640,16 @@ for phase in $(seq 1 "$total_phases"); do
 
   # Append entry to epics manifest
   epics_json="$(echo "$epics_json" | jq \
+    --argjson phase "$phase" \
     --arg epic_id "$epic_id" \
     --arg epic_path "$epic_path" \
     --arg plan_json "$plan_json_path" \
     --arg run_path "$run_path" \
     --arg run_id "$run_id" \
-    --arg queue_status "queued" \
+    --arg queue_status "pending" \
     --argjson depends_on "$depends_on_json" \
     '. + [{
+      phase: $phase,
       epic_id: $epic_id,
       epic_path: $epic_path,
       plan_json: $plan_json,
@@ -686,7 +695,7 @@ if [[ "$two_stage" == true ]]; then
     _depends_csv="$(jq -r '.depends_on | join(",")' <<< "$_entry")"
     [[ -n "$_depends_csv" ]] && _queue_args+=(--depends-on "$_depends_csv")
     "${SCRIPT_DIR}/aid-queue-add.sh" "${_queue_args[@]}" >/dev/null
-    epics_json="$(jq --argjson p "$phase" --arg rp "$_run_path" 'map(if .phase == $p then . + {run_path:$rp, queue_status:"queued"} else . end)' <<< "$epics_json")"
+    epics_json="$(jq --argjson p "$phase" --arg rp "$_run_path" 'map(if .phase == $p then . + {run_path:$rp, queue_status:"pending"} else . end)' <<< "$epics_json")"
     echo "[INFO] Phase ${phase}/${total_phases}: ${_epic_id} initialised and queued after receipt" >&2
   done
 fi

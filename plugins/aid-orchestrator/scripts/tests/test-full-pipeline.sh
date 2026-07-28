@@ -365,17 +365,17 @@ else
 fi
 
 # ===========================================================================
-# TEST 11: Queue entries have status=queued
+# TEST 11: Queue entries have status=pending
 # ===========================================================================
-run_test "All queue entries in queue.yaml have status: queued"
+run_test "All queue entries in queue.yaml have status: pending"
 
 queue_yaml="$T01_WORKSPACE/.aid-o/config/queue.yaml"
 if [[ "$pipeline_exit" -eq 0 && -f "$queue_yaml" ]]; then
-  non_queued="$(grep "status:" "$queue_yaml" 2>/dev/null | grep -v "queued" | wc -l | tr -d ' ')"
-  if [[ "$non_queued" -eq 0 ]]; then
-    pass "all queue entries have status: queued"
+  non_pending="$(grep "status:" "$queue_yaml" 2>/dev/null | grep -v "pending" | wc -l | tr -d ' ')"
+  if [[ "$non_pending" -eq 0 ]]; then
+    pass "all queue entries have status: pending"
   else
-    fail "all queue entries have status: queued" "$non_queued entries have a different status"
+    fail "all queue entries have status: pending" "$non_pending entries have a different status"
   fi
 else
   fail "queue status check" "skipped — queue file not available"
@@ -452,19 +452,19 @@ else
 fi
 
 # ===========================================================================
-# TEST 15: manifest epic entries report queue_status = 'queued'
+# TEST 15: manifest epic entries report queue_status = 'pending'
 # ===========================================================================
-run_test "All manifest EPIC entries have queue_status = 'queued'"
+run_test "All manifest EPIC entries have queue_status = 'pending'"
 
 if [[ -n "$T01_STDOUT" ]] && echo "$T01_STDOUT" | jq . >/dev/null 2>&1; then
-  non_queued_statuses="$(echo "$T01_STDOUT" \
+  non_pending_statuses="$(echo "$T01_STDOUT" \
     | jq -r '.epics[].queue_status' 2>/dev/null \
-    | grep -v '^queued$' || true)"
-  if [[ -z "$non_queued_statuses" ]]; then
-    pass "all EPIC manifest entries have queue_status=queued"
+    | grep -v '^pending$' || true)"
+  if [[ -z "$non_pending_statuses" ]]; then
+    pass "all EPIC manifest entries have queue_status=pending"
   else
-    fail "all EPIC manifest entries have queue_status=queued" \
-      "unexpected statuses: $non_queued_statuses"
+    fail "all EPIC manifest entries have queue_status=pending" \
+      "unexpected statuses: $non_pending_statuses"
   fi
 else
   fail "queue_status manifest check" "skipped — manifest not parseable from TEST 1"
@@ -514,6 +514,7 @@ else
 fi
 
 # Also verify the regex still works for numeric-only plan IDs
+run_test "EPIC ID regex extracts numeric plan IDs"
 numeric_filename="E-019-1_2-some-feature.md"
 expected_numeric_id="E-019-1_2"
 

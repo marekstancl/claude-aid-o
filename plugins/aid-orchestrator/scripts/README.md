@@ -62,7 +62,7 @@ All non-zero exits print a JSON object to stderr:
    +------------+     +----------------+     +-------------+|    +---------------+
    | Plan.md    |---->| EPIC.md        |---->| plan.json   |--->| receipt       |
    | (.aid-o/   |  1  | (.aid-o/       |  2  |             ||  3 | (.aid-o/      |
-   |  plans/)   |     |  tasks/)       |     |             ||    |  work/runs/)  |
+   |  plans/)   |     |  tasks/)       |     |             ||    |  work/evidence/|
    +------------+     +----------------+     +-------------+|    +---------------+
                                                             |
                                                             |                 |
@@ -97,6 +97,7 @@ phase defined in the plan.
 | `--epic-template <path>` | Yes | Path to the EPIC template file (.aid-o/config/templates/epic.md) |
 | `--output-dir <path>` | Yes | Directory where the generated EPIC file is written |
 | `--counter-yaml <path>` | Yes | Path to the EPIC counter YAML file for auto-incrementing EPIC IDs |
+| `--project-root <path>` | No | Authoritative AID workspace for generation evidence when the plan itself lives outside `.aid-o/plans/` |
 
 #### stdin / stdout Contract
 
@@ -374,7 +375,7 @@ queue:
   - epic_id: E-018-1_3
     epic_path: .aid-o/tasks/E-018-1_3.md
     priority: medium
-    status: queued          # queued | running | completed | failed
+    status: pending         # pending | running | completed | failed (`queued` is read-only legacy input)
     depends_on: []
     added_at: 2026-02-28T14:30:00Z
 ```
@@ -447,7 +448,7 @@ complete package and writes a receipt, then creates runs and queue entries.
         "plan_json": ".aid-o/work/runs/R-E018-1/plan.json",
         "run_path": ".aid-o/work/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-1",
-        "queue_status": "queued"
+        "queue_status": "pending"
       },
       {
         "epic_id": "E-018-2_3",
@@ -455,7 +456,7 @@ complete package and writes a receipt, then creates runs and queue entries.
         "plan_json": ".aid-o/work/runs/R-E018-2/plan.json",
         "run_path": ".aid-o/work/runs/R-E018-2/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-2",
-        "queue_status": "queued"
+        "queue_status": "pending"
       }
     ],
     "queue_mode": "chain",

@@ -125,9 +125,14 @@ No FSM, no EPIC, no evidence dir — just implement and log.
 /aid-run — EPIC Pipeline
 ====================================
 PRE-FLIGHT (bash, before FSM):
-  1. aid-plan-to-epic.sh → EPIC file
-  2. aid-epic-to-json.sh → plan.json
-  3. aid-json-to-run.sh  → execution.yaml + fsm-state.yaml
+  1. generation-readiness validates the source plan + provisional graph
+  2. aid-plan-to-epic.sh → every EPIC file
+  3. aid-epic-to-json.sh → every plan.json + contract validation
+  4. aid-generation-finalize.sh → one generation receipt
+  5. aid-json-to-run.sh → execution.yaml + fsm-state.yaml, only after receipt
+
+  Generation is two-stage: no FSM state or queue entry exists until the
+  complete EPIC package has been verified and sealed by the receipt.
 
 6-State FSM:
   READY → EXECUTE → GATES → DONE

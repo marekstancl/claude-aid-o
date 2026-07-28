@@ -5,7 +5,8 @@
 # Usage:
 #   ./aid-plan-to-epic.sh \
 #     --plan <path> --phase <N> --total <T> \
-#     --epic-template <path> --output-dir <path> --counter-yaml <path>
+#     --epic-template <path> --output-dir <path> --counter-yaml <path> \
+#     [--project-root <workspace>]
 #
 # Reads the plan, extracts phase-specific steps, fills the EPIC template,
 # and writes the completed EPIC to the output directory.
@@ -35,6 +36,7 @@ total=""
 epic_template=""
 output_dir=""
 counter_yaml=""
+project_root=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --epic-template) epic_template="$2"; shift 2 ;;
     --output-dir)  output_dir="$2";    shift 2 ;;
     --counter-yaml) counter_yaml="$2"; shift 2 ;;
+    --project-root) project_root="$2"; shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -64,6 +67,7 @@ done
 [[ ! -f "$plan" ]]          && error_exit "Plan file not found: $plan" 3
 [[ ! -f "$epic_template" ]] && error_exit "EPIC template not found: $epic_template. Run /aid-init to deploy templates." 2
 [[ ! -d "$output_dir" ]]    && error_exit "Output directory not found: $output_dir" 3
+[[ -n "$project_root" && ! -d "$project_root/.aid-o" ]] && error_exit "--project-root must name an AID workspace containing .aid-o: $project_root" 3
 
 # Validate phase/total are positive integers
 [[ ! "$phase" =~ ^[0-9]+$ ]] && error_exit "Phase must be a positive integer, got: $phase" 1
@@ -93,12 +97,20 @@ done <<< "$frontmatter"
 READINESS_SCRIPT="${SCRIPT_DIR}/aid-generation-readiness.sh"
 # Resolve once: the same plan-scoped evidence root is consumed by CP1/C0.
 _project_root=""
-_search_dir="$(dirname "$(realpath "$plan")")"
-while [[ "$_search_dir" != "/" ]]; do
-  if [[ -d "${_search_dir}/.aid-o" ]]; then _project_root="$_search_dir"; break; fi
-  _search_dir="$(dirname "$_search_dir")"
-done
-[[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
+if [[ -n "$project_root" ]]; then
+  # The caller's workspace is authoritative when a plan is deliberately kept
+  # outside `.aid-o/plans/` (fixtures, imports, or a controller-owned plan).
+  # Searching from that external source path can otherwise bind evidence to an
+  # unrelated enclosing checkout.
+  _project_root="$(realpath "$project_root")"
+else
+  _search_dir="$(dirname "$(realpath "$plan")")"
+  while [[ "$_search_dir" != "/" ]]; do
+    if [[ -d "${_search_dir}/.aid-o" ]]; then _project_root="$_search_dir"; break; fi
+    _search_dir="$(dirname "$_search_dir")"
+  done
+  [[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
+fi
 _ready_args=("$plan" --total "$total")
 # Source graph is a real, hashed C0 input when this is an AID project. It is
 # regenerated deterministically from the plan, never hand-authored.  Keep it
