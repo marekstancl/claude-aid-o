@@ -49,6 +49,8 @@ output_dir=""
 run_id=""
 streamlined=false   # P040 Component D activation flag (CP3 gap fix); forwarded to aid-fsm.sh init in Step 18
 force_init_reason="" # PM-authorized, audited cross-plan force-init reason; forwarded to aid-fsm.sh init in Step 18 (invocation-scoped, no env export)
+generation_receipt="" # Complete-package receipt required by strict/high-risk source plans.
+defer_init=false       # Generation stage may render run.md before the package receipt exists.
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -59,6 +61,8 @@ while [[ $# -gt 0 ]]; do
     --run-id)           run_id="$2";          shift 2 ;;
     --streamlined)      streamlined=true;     shift 1 ;;
     --force-init-reason) force_init_reason="$2"; shift 2 ;;
+    --generation-receipt) generation_receipt="$2"; shift 2 ;;
+    --defer-init)       defer_init=true;      shift 1 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -647,7 +651,30 @@ fsm_base_commit="$(git rev-parse HEAD 2>/dev/null || true)"
 [[ -z "$fsm_base_commit" ]] && error_exit "aid-json-to-run.sh Step 18: cannot read git HEAD SHA for base_commit" 1
 
 fsm_plan_path="$(jq -r '.source_plan // empty' "$plan_json_path" 2>/dev/null || true)"  # PM fix 2026-07-08: fsm-state must carry plan_path (plan-diff skipped on null = false-green class)
-if [[ ! -f "$fsm_state_file" ]]; then
+# Generation integrity boundary: a strict plan (or an explicitly high-risk
+# plan) may not initialise its first EPIC from a partial package. The receipt
+# is produced only after every phase exists, so this check is deliberately here
+# at the init consumer — never in the pre-generation parser.
+_generation_receipt_required=false
+if [[ -n "$fsm_plan_path" && -f "$fsm_plan_path" ]]; then
+  if grep -qE '^lifecycle_strict:[[:space:]]*true' "$fsm_plan_path" 2>/dev/null || \
+     grep -qE '^risk:[[:space:]]*high' "$fsm_plan_path" 2>/dev/null; then
+    _generation_receipt_required=true
+  fi
+fi
+if [[ "$_generation_receipt_required" == true && "$defer_init" != true ]]; then
+  [[ -n "$generation_receipt" && -f "$generation_receipt" ]] || error_exit "Strict/high-risk plan requires a complete generation receipt before FSM init. Use aid-auto-pipeline.sh or aid-generation-finalize.sh; do not override this with --force." 1
+  _source_sha="sha256:$(sha256sum "$fsm_plan_path" | awk '{print $1}')"
+  _plan_json_sha="sha256:$(sha256sum "$plan_json_path" | awk '{print $1}')"
+  jq -e --arg eid "$epic_id" --arg source "$_source_sha" --arg psha "$_plan_json_sha" '
+    .schema == "aid-generation-receipt/v1" and .plan_sha256 == $source and
+    any(.epics[]; .epic_id == $eid and .plan_json_sha256 == $psha)
+  ' "$generation_receipt" >/dev/null 2>&1 || error_exit "Generation receipt is stale, malformed, or does not bind ${epic_id} to this plan.json; FSM init was not attempted." 1
+fi
+
+if [[ "$defer_init" == true ]]; then
+  echo "AID generation stage: run rendered but FSM init deferred until complete-package receipt." >&2
+elif [[ ! -f "$fsm_state_file" ]]; then
   echo "P040 Component E: initializing FSM state at $fsm_state_file" >&2
   # aid-fsm.sh init runs branch enforcement and may auto-checkout
   # task/<epic_id>/main. aid-json-to-run.sh is a GENERATION-phase tool:
