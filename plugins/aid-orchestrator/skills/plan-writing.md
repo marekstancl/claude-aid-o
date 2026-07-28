@@ -288,6 +288,14 @@ how to recover. Include error codes, fallback behavior, retry logic.}
 - Depends on: Step {X} — {what it needs from that step: files, contracts, data}
 - Blocks: Step {Y} — {what it produces that the next step needs}
 
+**Dependency grammar (enforced before EPIC generation).** Put dependencies in
+the `**Dependencies:**` block as `Depends on: Step N`, `Depends on: Step N,
+Step M`, or `Depends on: Steps N-M`. The value may continue on an indented
+line. A missing step, duplicate, self-reference, forward reference, reversed
+range, or unrecognised declaration blocks generation; it is never interpreted
+as “no dependency”. Run `aid-generation-readiness.sh <plan> --total <N>` after
+writing and repair its exact diagnostics before CP1/C0.
+
 **Acceptance Criteria:**
 - [ ] {Testable criterion 1 — specific, measurable}
 - [ ] {Testable criterion 2 — specific, measurable}
@@ -1093,7 +1101,7 @@ Or generate EPIC later: /aid-plan --epic {plan_path}
 
 ---
 
-**Last Updated:** 2026-06-30
+**Last Updated:** 2026-07-28
 
 ## Plan-boundary note
 

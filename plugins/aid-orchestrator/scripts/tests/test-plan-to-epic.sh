@@ -35,6 +35,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The historical complex fixture deliberately contains a reversed range and a
+# self-reference. Those are now fail-closed source-plan errors; retain it for
+# negative tests and use this sanitized copy for table/remap assertions.
+COMPLEX_VALID_PLAN="$TMPDIR_ROOT/complex-valid.md"
+sed -e 's/Step 1, Steps 3-5/Step 1, Steps 3-4/' -e 's/Steps 14-1/Steps 1-5/' \
+  "$FIXTURES_DIR/plan-with-complex-deps.md" > "$COMPLEX_VALID_PLAN"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -374,7 +381,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_t11="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --plan "$COMPLEX_VALID_PLAN" \
   --phase 1 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -424,7 +431,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_t13="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --plan "$COMPLEX_VALID_PLAN" \
   --phase 2 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -469,27 +476,20 @@ else
 fi
 
 # ===========================================================================
-# TEST 15: Reversed range produces warning and empty expansion
+# TEST 15: Reversed range blocks rather than being silently discarded
 # ===========================================================================
-run_test "Reversed range 'Steps 14-1' produces warning and empty depends"
+run_test "Reversed range 'Steps 14-1' blocks generation"
 
-# Reuse EPIC from TEST 13 (phase 2, steps 4-6)
-# Step 6 has "Depends on: Steps 14-1" — reversed range
-if [[ -n "${epic_path_t13:-}" && -f "${epic_path_t13:-}" ]]; then
-  step3_row="$(grep "^| 3 |" "$epic_path_t13" 2>/dev/null || true)"
-  if echo "$step3_row" | grep -qE '\| --- \|'; then
-    pass "reversed range: Step 6 (Steps 14-1) shows '---'"
-  else
-    fail "reversed range: Step 6 (Steps 14-1) shows '---'" "row: $step3_row"
-  fi
+if bash "$SCRIPT_UNDER_TEST" --plan "$FIXTURES_DIR/plan-with-complex-deps.md" --phase 2 --total 3 --epic-template "$TEMPLATES_DIR/epic.md" --output-dir "$TMPDIR_ROOT" --counter-yaml "$TMPDIR_ROOT/counter.yaml" >/dev/null 2>&1; then
+  fail "reversed range blocks generation" "malformed plan was accepted"
 else
-  fail "reversed range check" "skipped — EPIC file not available from TEST 13"
+  pass "reversed range blocks generation"
 fi
 
 # ===========================================================================
-# TEST 16: Reversed range emits warning to stderr
+# TEST 16: Reversed range gives a readiness diagnostic
 # ===========================================================================
-run_test "Reversed range 'Steps 14-1' emits WARNING to stderr"
+run_test "Reversed range emits readiness failure"
 
 env_dir="$(make_test_env "t16")"
 output_dir="$env_dir/output"
@@ -504,10 +504,10 @@ stderr_t16="$("$SCRIPT_UNDER_TEST" \
   --counter-yaml "$counter_yaml" \
   2>&1 >/dev/null)" || true
 
-if echo "$stderr_t16" | grep -q "WARNING.*Reversed range"; then
-  pass "reversed range emits WARNING to stderr"
+if echo "$stderr_t16" | grep -q "READINESS: FAIL"; then
+  pass "reversed range emits readiness failure"
 else
-  fail "reversed range emits WARNING to stderr" "stderr: $stderr_t16"
+  fail "reversed range emits readiness failure" "stderr: $stderr_t16"
 fi
 
 # ===========================================================================
@@ -521,7 +521,7 @@ counter_yaml="$env_dir/epic-counter.yaml"
 
 actual_exit=0
 epic_path_t17="$("$SCRIPT_UNDER_TEST" \
-  --plan "$FIXTURES_DIR/plan-with-complex-deps.md" \
+  --plan "$COMPLEX_VALID_PLAN" \
   --phase 3 \
   --total 3 \
   --epic-template "$TEMPLATES_DIR/epic.md" \
@@ -712,7 +712,7 @@ fi
 # number (e.g. step 6 declaring "Depends on: Steps 4-6") must not produce a
 # self-edge, which downstream cycle detection would reject.
 # ===========================================================================
-run_test "Self-dependency: range including own step drops the self-reference"
+run_test "Self-dependency: range including own step blocks generation"
 
 env_dir="$(make_test_env "t22")"
 output_dir="$env_dir/output"
@@ -780,16 +780,9 @@ epic_path_t22="$("$SCRIPT_UNDER_TEST" \
   2>/dev/null)" || actual_exit=$?
 
 if [[ "$actual_exit" -ne 0 ]]; then
-  fail "self-dep plan phase 2 exits with code 0" "got exit code $actual_exit"
+  pass "self-dependency is rejected before EPIC generation"
 else
-  # Global step 6 (verify) -> local 3, deps "Steps 4-6" -> globals 4,5,6;
-  # self (6) dropped, 4->local 1, 5->local 2 ⇒ Depends On = "1, 2" (never "3").
-  row3="$(grep "^| 3 |" "$epic_path_t22" 2>/dev/null || true)"
-  if echo "$row3" | grep -qE '\| 1, 2 \| --- \|$'; then
-    pass "self-dependency dropped: 'Steps 4-6' on local step 3 -> '1, 2' (no self-edge)"
-  else
-    fail "self-dependency dropped" "row3='$row3'"
-  fi
+  fail "self-dependency is rejected before EPIC generation" "generator accepted malformed plan"
 fi
 
 # ===========================================================================

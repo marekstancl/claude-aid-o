@@ -7,7 +7,7 @@ all in sequence.
 ```
 Plan.md --> EPIC.md --> plan.json --> run.md --> queue.yaml
           (1)         (2)          (3)         (4)
-                  aid-auto-pipeline.sh (5) = 1+2+3+4
+                  aid-auto-pipeline.sh = readiness + 1+2 + finalizer + 3+4
 ```
 
 ## Prerequisites
@@ -60,24 +60,23 @@ All non-zero exits print a JSON object to stderr:
           |                                                 |
           v                                                 |
    +------------+     +----------------+     +-------------+|    +---------------+
-   | Plan.md    |---->| EPIC.md        |---->| plan.json   ||--->| run.md        |
+   | Plan.md    |---->| EPIC.md        |---->| plan.json   |--->| receipt       |
    | (.aid-o/   |  1  | (.aid-o/       |  2  |             ||  3 | (.aid-o/      |
-   |  plans/)   |     |  tasks/)       |     |             ||    |  work/runs/)  |
+   |  plans/)   |     |  tasks/)       |     |             ||    |  work/evidence/|
    +------------+     +----------------+     +-------------+|    +---------------+
                                                             |
-                                                            |    +---------------+
-                                                            +--->| queue.yaml    |
-                                                              4  | (.aid-o/      |
-                                                                 |  config/)     |
-                                                                 +---------------+
+                                                            |                 |
+                                                            v                 v
+                                                     run.md + FSM       queue.yaml
 ```
 
 Where the numbered arrows correspond to:
 
 1. `aid-plan-to-epic.sh` — Plan.md to EPIC.md
 2. `aid-epic-to-json.sh` — EPIC.md to plan.json
-3. `aid-json-to-run.sh` — plan.json to run.md
-4. `aid-queue-add.sh` — EPIC to queue.yaml entry
+3. `aid-generation-finalize.sh` — verifies all phases and writes one receipt
+4. `aid-json-to-run.sh` — plan.json to run.md + FSM init (after receipt)
+5. `aid-queue-add.sh` — EPIC to queue.yaml entry (after receipt)
 
 ---
 
@@ -98,6 +97,7 @@ phase defined in the plan.
 | `--epic-template <path>` | Yes | Path to the EPIC template file (.aid-o/config/templates/epic.md) |
 | `--output-dir <path>` | Yes | Directory where the generated EPIC file is written |
 | `--counter-yaml <path>` | Yes | Path to the EPIC counter YAML file for auto-incrementing EPIC IDs |
+| `--project-root <path>` | No | Authoritative AID workspace for generation evidence when the plan itself lives outside `.aid-o/plans/` |
 
 #### stdin / stdout Contract
 
@@ -375,7 +375,7 @@ queue:
   - epic_id: E-018-1_3
     epic_path: .aid-o/tasks/E-018-1_3.md
     priority: medium
-    status: queued          # queued | running | completed | failed
+    status: pending         # pending | running | completed | failed (`queued` is read-only legacy input)
     depends_on: []
     added_at: 2026-02-28T14:30:00Z
 ```
@@ -412,8 +412,8 @@ queue:
 ### 5. aid-auto-pipeline.sh
 
 **Purpose:** Master orchestration script that runs the full Plan-to-Queue
-pipeline. Takes a Plan.md, generates EPICs for all phases, converts each to
-plan.json and run.md, then enqueues them all.
+pipeline. It generates EPICs and plan.json files for all phases, verifies the
+complete package and writes a receipt, then creates runs and queue entries.
 
 #### Arguments
 
@@ -448,7 +448,7 @@ plan.json and run.md, then enqueues them all.
         "plan_json": ".aid-o/work/runs/R-E018-1/plan.json",
         "run_path": ".aid-o/work/runs/R-E018-1/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-1",
-        "queue_status": "queued"
+        "queue_status": "pending"
       },
       {
         "epic_id": "E-018-2_3",
@@ -456,7 +456,7 @@ plan.json and run.md, then enqueues them all.
         "plan_json": ".aid-o/work/runs/R-E018-2/plan.json",
         "run_path": ".aid-o/work/runs/R-E018-2/2026-02-28-new-feature-pipeline-scripts.md",
         "run_id": "R-E018-2",
-        "queue_status": "queued"
+        "queue_status": "pending"
       }
     ],
     "queue_mode": "chain",
@@ -472,14 +472,15 @@ plan.json and run.md, then enqueues them all.
 2. Counts total phases from the `## High-Level Steps` table.
 3. Locates the AID plugin directory (templates, schemas) from `--plugin-dir`
    or by walking up from the script location.
-4. For each phase (1..N):
+4. For each phase (1..N), generates EPIC.md and plan.json and performs the
+   per-EPIC contract check. It does not initialise FSM or mutate the queue.
    a. Calls `aid-plan-to-epic.sh` to generate the EPIC.
    b. Calls `aid-epic-to-json.sh` to generate plan.json + progress.
-   c. Calls `aid-json-to-run.sh` to generate the run file.
-   d. Calls `aid-queue-add.sh` to enqueue the EPIC.
-5. Constructs dependency chains according to `--queue-mode`.
-6. Measures total wall-clock time.
-7. Prints the JSON manifest to stdout.
+5. Calls `aid-generation-finalize.sh`; missing/duplicate/tampered phases or a
+   graph disagreement abort before any FSM init or queue mutation.
+6. Creates runs, initialises FSM and queues EPICs using the verified receipt.
+7. Constructs dependency chains according to `--queue-mode`.
+8. Measures total wall-clock time and prints the JSON manifest to stdout.
 
 #### Exit Codes
 
@@ -527,7 +528,7 @@ plan.json and run.md, then enqueues them all.
 
 ## Shared Library: lib/common.sh
 
-All 5 scripts source `lib/common.sh` at startup. This file provides 7 shared
+All pipeline scripts source `lib/common.sh` at startup. This file provides 7 shared
 functions and must never be executed directly (it contains a guard that exits
 with an error if run as a standalone script).
 

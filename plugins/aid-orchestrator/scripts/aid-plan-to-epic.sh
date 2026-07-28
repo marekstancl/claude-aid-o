@@ -5,7 +5,8 @@
 # Usage:
 #   ./aid-plan-to-epic.sh \
 #     --plan <path> --phase <N> --total <T> \
-#     --epic-template <path> --output-dir <path> --counter-yaml <path>
+#     --epic-template <path> --output-dir <path> --counter-yaml <path> \
+#     [--project-root <workspace>]
 #
 # Reads the plan, extracts phase-specific steps, fills the EPIC template,
 # and writes the completed EPIC to the output directory.
@@ -35,6 +36,7 @@ total=""
 epic_template=""
 output_dir=""
 counter_yaml=""
+project_root=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --epic-template) epic_template="$2"; shift 2 ;;
     --output-dir)  output_dir="$2";    shift 2 ;;
     --counter-yaml) counter_yaml="$2"; shift 2 ;;
+    --project-root) project_root="$2"; shift 2 ;;
     *)
       error_exit "Unknown argument: $1" 1
       ;;
@@ -64,6 +67,7 @@ done
 [[ ! -f "$plan" ]]          && error_exit "Plan file not found: $plan" 3
 [[ ! -f "$epic_template" ]] && error_exit "EPIC template not found: $epic_template. Run /aid-init to deploy templates." 2
 [[ ! -d "$output_dir" ]]    && error_exit "Output directory not found: $output_dir" 3
+[[ -n "$project_root" && ! -d "$project_root/.aid-o" ]] && error_exit "--project-root must name an AID workspace containing .aid-o: $project_root" 3
 
 # Validate phase/total are positive integers
 [[ ! "$phase" =~ ^[0-9]+$ ]] && error_exit "Phase must be a positive integer, got: $phase" 1
@@ -85,23 +89,48 @@ done <<< "$frontmatter"
 [[ -z "$plan_id" ]] && error_exit "Plan file missing 'id' field in frontmatter. Expected: id: P{NNN}" 1
 
 # ---------------------------------------------------------------------------
-# Step 1a: Files-shape preflight (v2.58.3) — fail FAST on malformed **Files:**
-# entries, listing the WHOLE plan's violations at once, BEFORE any EPIC file is
-# written or the plan counter is bumped. Previously such entries only surfaced
-# phase-by-phase in the generation-time D5 allowed_paths_shape gate (a plan could
-# fail at phase 5 after phases 1-4 were already scaffolded). aid-plan-lint.sh
-# shares the SAME extractor + cleaner + shape predicate as that gate via
-# lib/aid-scoping.sh, so a plan that passes the lint provably passes the gate.
-# ERROR-tier (gate-breaking) always blocks; STRICT-tier blocks only lifecycle_strict
-# plans (legacy plans get one advisory printout on phase 1).
-# set -e-safe capture: a non-zero lint must NOT abort at the assignment itself (that
-# would skip the diagnostics + error_exit below and exit a bare 1 with no output).
-_lint_out="$("${SCRIPT_DIR}/aid-plan-lint.sh" "$plan" 2>&1)" && _lint_rc=0 || _lint_rc=$?
-if [[ "$_lint_rc" -ne 0 ]]; then
-  printf '%s\n' "$_lint_out" >&2
-  error_exit "Plan Files-shape lint failed for $plan (fix the entries above). Caught pre-generation so it never fails mid-split." 7
-elif [[ "$phase" -eq 1 && -n "$_lint_out" ]]; then
-  printf '%s\n' "$_lint_out" >&2
+# Step 1a: generation readiness — the canonical pre-generation contract.
+# It runs Files lint plus the shared SOURCE-plan dependency parser/whole-plan
+# graph before any EPIC exists.  This removes the former circular requirement
+# for plan-graph.json (which used to be produced only after generation), and
+# makes direct script use receive the same concise author guidance as /aid-plan.
+READINESS_SCRIPT="${SCRIPT_DIR}/aid-generation-readiness.sh"
+# Resolve once: the same plan-scoped evidence root is consumed by CP1/C0.
+_project_root=""
+if [[ -n "$project_root" ]]; then
+  # The caller's workspace is authoritative when a plan is deliberately kept
+  # outside `.aid-o/plans/` (fixtures, imports, or a controller-owned plan).
+  # Searching from that external source path can otherwise bind evidence to an
+  # unrelated enclosing checkout.
+  _project_root="$(realpath "$project_root")"
+else
+  _search_dir="$(dirname "$(realpath "$plan")")"
+  while [[ "$_search_dir" != "/" ]]; do
+    if [[ -d "${_search_dir}/.aid-o" ]]; then _project_root="$_search_dir"; break; fi
+    _search_dir="$(dirname "$_search_dir")"
+  done
+  [[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
+fi
+_ready_args=("$plan" --total "$total")
+# Source graph is a real, hashed C0 input when this is an AID project. It is
+# regenerated deterministically from the plan, never hand-authored.  Keep it
+# under generation/: c0/plan-graph.json has a different owner and meaning
+# after an EPIC exists (aid-c0-contract.sh's per-EPIC contract graph).
+# A project may keep a valid plan outside `.aid-o/plans/` (fixtures, imported
+# plans and older workspaces do). Evidence ownership is determined by the
+# discovered project root and frontmatter plan id, not by the source path; do
+# not make those legitimate callers miss the required provisional graph.
+if [[ -d "${_project_root}/.aid-o" ]]; then
+  _ready_args+=(--write-provisional "${_project_root}/.aid-o/work/evidence/${plan_id}/generation/provisional-graph.json")
+fi
+if [[ -x "$READINESS_SCRIPT" || -f "$READINESS_SCRIPT" ]]; then
+  _ready_out="$(bash "$READINESS_SCRIPT" "${_ready_args[@]}" 2>&1)" && _ready_rc=0 || _ready_rc=$?
+  if [[ "$_ready_rc" -ne 0 ]]; then
+    printf '%s\n' "$_ready_out" >&2
+    error_exit "Generation readiness failed for $plan; repair the source-plan diagnostics before creating any EPIC." 7
+  elif [[ "$phase" -eq 1 && -n "$_ready_out" ]]; then
+    printf '%s\n' "$_ready_out" >&2
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -114,21 +143,6 @@ fi
 # ---------------------------------------------------------------------------
 CP1_GATE_SCRIPT="${SCRIPT_DIR}/aid-cp1-gate.sh"
 if [[ -f "$CP1_GATE_SCRIPT" ]]; then
-  # Derive project root: walk up from the plan file until .aid-o/ is found.
-  # If not found, use the plan file's own directory (not cwd) so that an
-  # unrelated .aid-o/ higher in the filesystem (e.g. in the AID plugin repo
-  # when running tests) does not trigger enforcement for unrelated plan files.
-  _project_root=""
-  _search_dir="$(dirname "$(realpath "$plan")")"
-  while [[ "$_search_dir" != "/" ]]; do
-    if [[ -d "${_search_dir}/.aid-o" ]]; then
-      _project_root="$_search_dir"
-      break
-    fi
-    _search_dir="$(dirname "$_search_dir")"
-  done
-  [[ -z "$_project_root" ]] && _project_root="$(dirname "$(realpath "$plan")")"
-
   if ! bash "$CP1_GATE_SCRIPT" --plan "$plan" --project-root "$_project_root"; then
     # Gate script already emitted the human-readable error to stderr.
     exit 1
@@ -737,27 +751,14 @@ for sn in "${phase_steps[@]}"; do
   # exact algorithm directly inside aid-epic-to-json.sh when it derives
   # per-step allowed_paths from the block's RAW files[] values, using
   # _aid_split_path_entry below as the reference spec, not as callable code.
-  step_files="$(echo "$step_content" | awk '
-    BEGIN { in_files = 0 }
-    {
-      gsub(/\r$/, "")
-      if ($0 ~ /^\*\*Files:\*\*/) { in_files = 1; next }
-      if (in_files && $0 ~ /^\*\*/) { in_files = 0 }
-      if (in_files && ($0 ~ /Create:/ || $0 ~ /Modify:/)) {
-        sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
-        sub(/^Create:[[:space:]]*/, "", $0)
-        sub(/^Modify:[[:space:]]*/, "", $0)
-        # Extract just the path (before any description after " — ")
-        sub(/[[:space:]]*--[[:space:]].*/, "", $0)
-        sub(/[[:space:]]*\xe2\x80\x94[[:space:]].*/, "", $0)
-        # Handle backtick-wrapped paths
-        gsub(/`/, "", $0)
-        # Trim whitespace
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-        if ($0 != "") print
-      }
-    }
-  ')"
+  step_files=""
+  while IFS= read -r _raw_file; do
+    _raw_file="${_raw_file#- }"
+    [[ "$_raw_file" =~ ^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$ ]] || continue
+    while IFS= read -r _path; do
+      [[ -n "$_path" ]] && step_files+="${_path}"$'\n'
+    done < <(_aid_split_path_entry "${BASH_REMATCH[2]}")
+  done <<< "$step_artifacts_top_level"
   if [[ -n "$step_files" ]]; then
     all_allowed_paths="${all_allowed_paths}${step_files}"$'\n'
   fi
@@ -1108,6 +1109,8 @@ template_content="$(cat "$epic_template")"
 # and special characters). Instead, we emit the EPIC directly.
 
 plan_filename="$(basename "$plan")"
+source_plan_sha256="sha256:$(sha256sum "$plan" | awk '{print $1}')"
+source_step_ids="$(IFS=,; echo "${phase_steps[*]}")"
 
 # Build the steps table
 steps_table_header="| # | Role | Objective | Depends On | Parallel Group |
@@ -1121,6 +1124,9 @@ cat > "${output_dir}/${epic_id}-${slug}.md" << EPICEOF
 status: active
 plan_ref: ${plan}
 plan_epics_total: ${total}
+source_plan_sha256: ${source_plan_sha256}
+source_phase: ${phase}
+source_step_ids: "${source_step_ids}"
 runs_total: 1
 runs_completed: 0
 ---

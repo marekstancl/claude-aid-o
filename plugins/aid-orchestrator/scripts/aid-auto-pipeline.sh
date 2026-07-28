@@ -77,6 +77,7 @@ fi
 sub_scripts=(
   "aid-plan-to-epic.sh"
   "aid-epic-to-json.sh"
+  "aid-generation-finalize.sh"
   "aid-json-to-run.sh"
   "aid-queue-add.sh"
 )
@@ -249,6 +250,37 @@ prev_epic_id=""
 
 echo "[INFO] Starting pipeline for plan $plan_id ($total_phases phase(s), queue-mode: $queue_mode)" >&2
 
+# P074 generation-integrity: the default path is two-stage.  A complete EPIC
+# package is generated and sealed before any FSM init or queue mutation. The
+# old interleaved behavior remains opt-in solely for legacy recovery; it is not
+# selected by normal callers.
+two_stage=true
+[[ "${AID_PIPELINE_LEGACY_INTERLEAVED:-0}" == "1" ]] && two_stage=false
+
+_generation_depends_for_epic() {
+  local epic_file="$1" previous="$2" result="" raw ext
+  case "$queue_mode" in
+    chain) result="$previous" ;;
+    separate) result="" ;;
+    custom) result="$custom_depends" ;;
+  esac
+  raw="$(awk '
+    BEGIN { in_qi = 0 }
+    { gsub(/\r$/, ""); if ($0 ~ /^### Queue Implications/) { in_qi=1; next }
+      if (in_qi && ($0 ~ /^##/ || $0 ~ /^---/)) exit
+      if (in_qi && $0 ~ /^depends_on:/) { sub(/^depends_on:[[:space:]]*/, "", $0); gsub(/[\[\]]/, "", $0); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if ($0 != "") print; exit } }
+  ' "$epic_file" 2>/dev/null || true)"
+  if [[ -n "$raw" ]]; then
+    IFS=',' read -ra _generation_exts <<< "$raw"
+    for ext in "${_generation_exts[@]}"; do
+      ext="$(echo "$ext" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      [[ -z "$ext" || "$ext" == "$previous" ]] && continue
+      if [[ -z "$result" ]]; then result="$ext"; elif ! echo ",$result," | grep -q ",$ext,"; then result="${result},${ext}"; fi
+    done
+  fi
+  printf '%s\n' "$result"
+}
+
 # IMP-232 v2.58.1: create the plan lifecycle manifest at the official scaffold, as
 # part of the normal commit flow (repo identity + manifest committed together via
 # an isolated index — the user's index is never touched). This is what makes the
@@ -325,10 +357,16 @@ if [[ -f "${SCRIPT_DIR}/lib/aid-lifecycle.sh" ]]; then
       && printf '{"plan_id":"%s","rc":%s,"mode":"lifecycle-migration-pending","migration_mode":"%s"}\n' "$plan_id" "$_lc_rc" "$_lc_mode" >> ".aid-o/work/lifecycle-migration.log" 2>/dev/null || true
   fi
 
-  # P068 Step 7 — plan state for a NEW plan, stamped with the resolved mode.
-  # Only when the plan has none: an existing plan is never migrated mid-run, and
-  # plan-start is a no-op guard rather than a re-initialisation.
-  if [[ ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
+  # The parent-plan state machine belongs exclusively to plan_branch mode.
+  # A legacy plan deliberately retains the pre-P064 EPIC-by-EPIC lifecycle;
+  # attempting plan-start without its durable plan-boundary manifest turns a
+  # compatible ordinary pipeline into a false blocker. Do not "migrate" it as
+  # a side effect of generation. plan_branch remains fail-closed above.
+  #
+  # Only when a plan-branch plan has no state: an existing plan is never
+  # migrated mid-run, and plan-start is a no-op guard rather than a
+  # re-initialisation.
+  if [[ "$_pb_default_mode" == "plan_branch" && ! -f ".aid-o/work/plan-state/${plan_id}/plan-state.yaml" ]]; then
     _ps_rc=0
     bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-start "$plan_id" \
       --mode "$_pb_default_mode" --project-root "." >/dev/null 2>&1 || _ps_rc=$?
@@ -351,7 +389,8 @@ for phase in $(seq 1 "$total_phases"); do
     --total "$total_phases" \
     --epic-template "$epic_template" \
     --output-dir ".aid-o/tasks" \
-    --counter-yaml "$counter_yaml")"
+    --counter-yaml "$counter_yaml" \
+    --project-root "$(pwd)")"
 
   # Extract epic_id from the generated filename
   epic_basename="$(basename "$epic_path")"
@@ -390,7 +429,12 @@ for phase in $(seq 1 "$total_phases"); do
   {
     # Determine plan_id from plan filename
     _c0_plan_id="$(basename "$plan" .md)"
-    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/c0"
+    # Each generated EPIC owns its own C0 contract graph and validation
+    # evidence. A shared plan-level c0/ directory made phase N overwrite phase
+    # N-1, leaving the last graph to masquerade as evidence for the whole plan.
+    # The plan-global source graph and C0 bridge remain at their own named
+    # generation/ and c0/ paths respectively.
+    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0"
     mkdir -p "$_c0_dir"
 
     # -------------------------------------------------------------------------
@@ -401,11 +445,10 @@ for phase in $(seq 1 "$total_phases"); do
     # C0 evidence — malformed = hard-fail před /aid-run") and must stop the
     # pipeline before json-to-run / queue-add / branch creation happen below.
     #
-    # Persist-before-abort: `_c0_dir` is keyed by plan_id, not by phase, so
-    # in a multi-phase plan every phase's hook run writes to the SAME
-    # contract-validate.json. We therefore always overwrite it with THIS
-    # phase's result before inspecting the exit code — otherwise a phase-2
-    # failure after a phase-1 pass would leave a stale pass on disk.
+    # Persist-before-abort: evidence is keyed by plan AND EPIC, so every
+    # generated phase retains its own result. The complete-package finalizer
+    # can therefore reason about all phases rather than a misleading final
+    # overwrite from the last phase.
     # -------------------------------------------------------------------------
     _cv_exit=0
     _cv_json="$("${SCRIPT_DIR}/gates/aid-contract-validate.sh" "$plan_json_path" "$epic_path" \
@@ -471,6 +514,23 @@ for phase in $(seq 1 "$total_phases"); do
 
     # NEVER propagate non-zero from C0 block in observe mode
   }
+
+  # Stage 1 ends here on the normal path: no run/FSM/queue state exists until
+  # the finalizer has verified every generated phase against the source graph.
+  if [[ "$two_stage" == true ]]; then
+    _stage_depends="$(_generation_depends_for_epic "$epic_path" "$prev_epic_id")"
+    _stage_depends_json="[]"
+    if [[ -n "$_stage_depends" ]]; then
+      _stage_depends_json="$(printf '%s' "$_stage_depends" | tr ',' '\n' | jq -R . | jq -s .)"
+    fi
+    epics_json="$(echo "$epics_json" | jq \
+      --argjson phase "$phase" --arg epic_id "$epic_id" --arg epic_path "$epic_path" \
+      --arg plan_json "$plan_json_path" --arg run_id "$run_id" --arg contract_validate "${_c0_dir}/contract-validate.json" --argjson depends_on "$_stage_depends_json" \
+      '. + [{phase:$phase, epic_id:$epic_id, epic_path:$epic_path, plan_json:$plan_json, contract_validate:$contract_validate, run_id:$run_id, queue_status:"pending_receipt", depends_on:$depends_on}]')"
+    prev_epic_id="$epic_id"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${epic_id} generated; waiting for complete-package receipt" >&2
+    continue
+  fi
 
   # -------------------------------------------------------------------------
   # Phase N.c: plan.json -> run.md
@@ -580,14 +640,16 @@ for phase in $(seq 1 "$total_phases"); do
 
   # Append entry to epics manifest
   epics_json="$(echo "$epics_json" | jq \
+    --argjson phase "$phase" \
     --arg epic_id "$epic_id" \
     --arg epic_path "$epic_path" \
     --arg plan_json "$plan_json_path" \
     --arg run_path "$run_path" \
     --arg run_id "$run_id" \
-    --arg queue_status "queued" \
+    --arg queue_status "pending" \
     --argjson depends_on "$depends_on_json" \
     '. + [{
+      phase: $phase,
       epic_id: $epic_id,
       epic_path: $epic_path,
       plan_json: $plan_json,
@@ -600,6 +662,43 @@ for phase in $(seq 1 "$total_phases"); do
   echo "[INFO] Phase ${phase}/${total_phases}: ${epic_id} -- done" >&2
 
 done
+
+# =============================================================================
+# Stage 2 — seal the complete package, then initialise and queue it
+# =============================================================================
+generation_receipt=""
+if [[ "$two_stage" == true ]]; then
+  _generation_dir=".aid-o/work/evidence/${plan_id}/generation"
+  mkdir -p "$_generation_dir"
+  _generation_manifest="$_generation_dir/generated-epics.json"
+  _generation_tmp="${_generation_manifest}.tmp.$$"
+  printf '%s\n' "$epics_json" > "$_generation_tmp"
+  mv "$_generation_tmp" "$_generation_manifest"
+  generation_receipt="$_generation_dir/receipt.json"
+  "${SCRIPT_DIR}/aid-generation-finalize.sh" --plan "$plan" --total "$total_phases" \
+    --epics-json "$_generation_manifest" --output "$generation_receipt" >/dev/null
+
+  for phase in $(seq 1 "$total_phases"); do
+    _entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' <<< "$epics_json")"
+    _epic_id="$(jq -r '.epic_id' <<< "$_entry")"
+    _epic_path="$(jq -r '.epic_path' <<< "$_entry")"
+    _plan_json_path="$(jq -r '.plan_json' <<< "$_entry")"
+    _run_id="$(jq -r '.run_id' <<< "$_entry")"
+    _run_output_dir=".aid-o/work/runs/${_run_id}"
+    mkdir -p "$_run_output_dir"
+    _j2r_args=(--plan-json "$_plan_json_path" --run-template "$run_template" --epic "$_epic_path" --output-dir "$_run_output_dir" --run-id "$_run_id" --generation-receipt "$generation_receipt")
+    [[ "$streamlined" == true ]] && _j2r_args+=(--streamlined)
+    [[ -n "$force_init_reason" ]] && _j2r_args+=(--force-init-reason "$force_init_reason")
+    _run_path="$("${SCRIPT_DIR}/aid-json-to-run.sh" "${_j2r_args[@]}")"
+
+    _queue_args=(--epic-id "$_epic_id" --epic-path "$_epic_path" --priority medium --queue-yaml "$queue_yaml" --plan-ref "$plan")
+    _depends_csv="$(jq -r '.depends_on | join(",")' <<< "$_entry")"
+    [[ -n "$_depends_csv" ]] && _queue_args+=(--depends-on "$_depends_csv")
+    "${SCRIPT_DIR}/aid-queue-add.sh" "${_queue_args[@]}" >/dev/null
+    epics_json="$(jq --argjson p "$phase" --arg rp "$_run_path" 'map(if .phase == $p then . + {run_path:$rp, queue_status:"pending"} else . end)' <<< "$epics_json")"
+    echo "[INFO] Phase ${phase}/${total_phases}: ${_epic_id} initialised and queued after receipt" >&2
+  done
+fi
 
 # =============================================================================
 # Compute duration

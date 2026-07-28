@@ -2,11 +2,10 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064 complete; Phase 1 (1A–1D) complete and
-released locally as v2.62.0, plus a fail-closed hardening batch (IMP-263/269/270/262)
-from the 2026-07-24 PM review. Not pushed; identity corrected to Marek Stancl for
-new commits.
-**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–274
+**Status:** active PM checklist — P064, Phase 1 and P068 are complete and
+released. Current `main` / `origin/main` is v2.63.2. The immediate next work is
+the manual EPIC-generation-integrity maintenance package, then P066.
+**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–280
 
 ## Current checkpoint
 
@@ -18,16 +17,16 @@ new commits.
 | P064 local release | `v2.61.0` at `193fd4a` |
 | **Phase 1 (1A–1D)** | **DONE** — see per-item progress log; 1B + 1C completed 2026-07-24 |
 | **Fail-closed hardening (PM review 2026-07-24)** | **DONE** — IMP-263/269/270/262 made genuinely fail-closed (`cfdaed4`, `d1bf7f0`, `8e94dd4`, `6751157`); one independent adversarial review found no residual bypass |
-| **Current version** | `2.62.1` (local, untagged; source of truth = CHANGELOG header) |
-| **Close commit** | `cee4685` (v2.62.1 bump + both CHANGELOGs + registry + README + this checklist + the IMP-269 wording correction folded into the local release) |
-| **Plugin-cache after refresh** | reset to `cee4685`; version `2.62.1`; scripts-tree `6aea929` (local-only, mirrors unpushed `main`) |
-| Remote | intentionally not pushed; `origin/main` remains `3fc14ae` |
+| **P068** | **DONE** — released v2.63.0; v2.63.1 repaired CI; v2.63.2 records final backlog/checklist repair |
+| P068 delivery proof | P077 clean dogfood reached `release_ready=true` → merge → durable receipt → `CLOSED`; its isolated history is archived on `archive/P068-dogfood-P067-P077-20260727` |
+| **Current version** | `v2.63.2` at `a6cc6f3`, pushed; `main == origin/main` |
+| Remote | pushed and synchronized |
 | Git identity | corrected to `Marek Stancl <stancl.marek@gmail.com>` for all new commits; 38 pre-fix commits keep `Test <test@test.local>` — remedy is a documented push-time decision (`git-identity-remedy-proposal.md`), history NOT rewritten |
 | E-064-2_2 targeted boundary suite | 241/241 at reviewed HEAD, hash-bound receipt |
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
 | IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
-| Next work | **P068 not started** (deferred per brief) — Phase 1 now clear of open PM decisions |
+| Next work | **EPIC-generation integrity maintenance** (manual, isolated branch), then P066 test portfolio/scheduler |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -52,6 +51,7 @@ This order is deliberate:
 P064 close
   → critical maintenance
   → P068 plan-final cutover
+  → EPIC-generation integrity maintenance
   → P066 test audit/scheduler + remediation
   → P061 E4/E5 completion and P061 close
   → P062 re-grounding/preflight
@@ -186,47 +186,90 @@ path.
 **GO to Phase 2:** scoped waivers, job ownership, replay-safe steps and the
 AC/lineage fixes are released and present in the plugin cache.
 
-## Phase 2 — re-ground P068 before execution
+## Phase 2 — re-ground P068 before execution — DONE
 
 P068 is already drafted and EPIC files exist, but it was authored before P064
 finished. Do not execute the existing generated tasks without this pass.
 
-- [ ] Verify every P064 interface and artifact against post-merge main.
-- [ ] Update stale paths, commands, schemas, counts, version assumptions and
+- [x] Verify every P064 interface and artifact against post-merge main.
+- [x] Update stale paths, commands, schemas, counts, version assumptions and
   acceptance commands.
-- [ ] Re-run plan lint, dependency/artifact ownership checks and bounded C0.
-- [ ] Regenerate P068 EPIC files only after the reviewed plan is final.
-- [ ] Carry every unresolved P064 handoff finding explicitly.
-- [ ] Add the following mandatory **full-suite-last** cadence:
+- [x] Re-run plan lint, dependency/artifact ownership checks and bounded C0.
+- [x] Regenerate P068 EPIC files only after the reviewed plan is final.
+- [x] Carry every unresolved P064 handoff finding explicitly.
+- [x] Add the following mandatory **full-suite-last** cadence:
   1. targeted checks and exploratory reviews run first;
   2. fixes converge before candidate freeze;
   3. one frozen candidate receives the plan-final expensive gates;
   4. a production fix invalidates the candidate and may justify one rerun;
   5. further reruns require a gate-scoped PM/Codex decision;
   6. no concurrent gates against one mutable worktree.
-- [ ] While quarantine is active, plan-final evidence must display the waived
+- [x] While quarantine is active, plan-final evidence must display the waived
   `bats_all`/`plan_diff` status and use approved targeted evidence. It must not
   claim a clean full-suite result.
 
 **GO to Phase 3:** P068 is re-grounded against released P064 and its generated
 EPICs match the reviewed plan byte-for-byte.
 
-## Phase 3 — deliver P068
+## Phase 3 — deliver P068 — DONE
 
-- [ ] Deliver candidate synchronization and immutable freeze.
-- [ ] Deliver one plan-final gate/review stack per plan.
-- [ ] Deliver plan-mode C4 and exact-SHA PM/Codex authorization.
-- [ ] Deliver compare-and-swap merge, one tag/push and durable close receipt.
-- [ ] Complete cutover and remove obsolete per-EPIC release instructions.
-- [ ] Dogfood the complete multi-EPIC path on tracked changes.
-- [ ] Demonstrate that intermediate EPICs do not run the release stack.
-- [ ] Demonstrate that a plan normally pays the expensive release boundary
+- [x] Deliver candidate synchronization and immutable freeze.
+- [x] Deliver one plan-final gate/review stack per plan.
+- [x] Deliver plan-mode C4 and exact-SHA PM/Codex authorization.
+- [x] Deliver compare-and-swap merge, one tag/push and durable close receipt.
+- [x] Complete cutover and remove obsolete per-EPIC release instructions.
+- [x] Dogfood the complete multi-EPIC path on tracked changes.
+- [x] Demonstrate that intermediate EPICs do not run the release stack.
+- [x] Demonstrate that a plan normally pays the expensive release boundary
   once, not once per EPIC.
 
 **GO to Phase 4:** `plan_branch` is the proven default for new plans and the
 legacy path remains explicitly available for already in-flight plans.
 
-## Phase 4 — P066 test portfolio audit, scheduler and remediation
+## Phase 4 — EPIC-generation integrity maintenance
+
+This is a manual maintenance package on an isolated branch, not an `/aid-run`
+plan. It removes a false circular precondition which currently blocks ordinary
+plan generation: C0/CP1 request a dependency graph that is only produced after
+EPIC generation.
+
+- [x] Build one shared, fail-closed parser for the source plan's dependency
+  syntax; accept only documented one-line and multi-line forms. (`930fcd7`)
+- [x] Before generation, produce a hash-bound, plan-global provisional graph
+  from the plan and reject missing steps, self dependencies, duplicates,
+  forbidden forward dependencies, cycles and invalid phase/EPIC allocation.
+  (`930fcd7`)
+- [x] Seal that graph into the C0 input, so C0 reviews real graph evidence
+  before EPIC files exist. The whole-plan source graph lives at
+  `generation/provisional-graph.json`; it is deliberately separate from the
+  later per-EPIC C0 contract graph at `c0/plan-graph.json`. (`1bbf119`)
+- [x] Make the generator consume the same parser; reject ambiguous dependency
+  syntax rather than silently producing an empty edge set. (`930fcd7`)
+- [x] Preserve every declared Files path; a comma is not a valid path separator.
+  (`930fcd7`; `+` is the only multi-path separator.)
+- [x] Split auto-pipeline into two truthful stages: generate and validate the
+  complete EPIC package first; only then initialise/queue any EPIC. Do not add
+  a receipt guard to the current per-phase init loop — that would recreate the
+  producer-before-consumer deadlock.
+- [x] After all EPICs are generated, create a plan-global final graph, compare
+  it to the provisional graph, and write a hash-bound receipt owned by the
+  generation stage.
+- [x] Require that receipt before strict/high-risk first-EPIC init; preserve
+  an explicit legacy path rather than retroactively blocking in-flight plans.
+- [x] Add red-green reproductions for P074-style pre-generation review,
+  multi-line dependencies, ambiguity, graph disagreement and multi-path Files.
+  (Source-plan cases and multi-path coverage in `930fcd7`; final-graph
+  disagreement, complete-package receipt and post-receipt FSM/queue E2E are
+  covered by `test-generation-finalize.sh`.)
+
+**Explicitly out of this package:** CP2 orchestration and generic delivery-gate
+policy redesign. Those are separate auto/gate work, not prerequisites for
+making ordinary EPIC generation truthful.
+
+**GO to Phase 5:** a valid plan can generate EPICs without a fake graph or PM
+override, while an invalid or later-divergent graph fails closed.
+
+## Phase 5 — P066 test portfolio audit, scheduler and remediation
 
 P066 is currently an interim specification, not an executable plan.
 
@@ -272,10 +315,10 @@ pass.
   on measured post-remediation data.
 - [ ] PM explicitly removes the quarantine.
 
-**GO to Phase 5:** the quarantine is removed by a reviewed change and full
+**GO to Phase 6:** the quarantine is removed by a reviewed change and full
 suite execution is isolated, diagnosable and materially shorter.
 
-## Phase 5 — finish and close P061
+## Phase 6 — finish and close P061
 
 P061 determines **which** tests run. P068 determines **when** expensive
 validation runs. P066 makes the remaining run efficient.
@@ -292,10 +335,10 @@ validation runs. P066 makes the remaining run efficient.
   lifecycle manifest and plan closure evidence.
 - [ ] Close P061 only after every required EPIC is delivered and accepted.
 
-**GO to Phase 6:** P061 is durably closed and consumer projects can use the
+**GO to Phase 7:** P061 is durably closed and consumer projects can use the
 same risk-based profiles instead of AID self-host-only configuration.
 
-## Phase 6 — re-ground P062/E10
+## Phase 7 — re-ground P062/E10
 
 The current P062 document is stale and must not be executed as written:
 
@@ -323,10 +366,10 @@ Required work:
   review budget.
 - [ ] Regenerate P062 EPICs from the final reviewed plan.
 
-**GO to Phase 7:** every E10 hard precondition is executable and true on
+**GO to Phase 8:** every E10 hard precondition is executable and true on
 current main; no prerequisite depends on stale prose or obsolete bookkeeping.
 
-## Phase 7 — execute P062/E10
+## Phase 8 — execute P062/E10
 
 - [ ] Build the preflight and freshness evidence.
 - [ ] Measure detection, false-DONE, false-positive and unique-detection

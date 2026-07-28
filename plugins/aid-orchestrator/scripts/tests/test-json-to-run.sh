@@ -424,6 +424,27 @@ else
   fi
 fi
 
+# ===========================================================================
+# TEST 13: strict source plan cannot initialise without complete receipt.
+# ===========================================================================
+run_test "strict source plan refuses FSM init without a generation receipt"
+
+strict_plan="$WORK_REPO/strict-plan.md"
+strict_json="$TMPDIR_ROOT/strict-plan.json"
+printf '%s\n' '---' 'id: P777' 'risk: low' 'lifecycle_strict: true' '---' '# Strict plan' > "$strict_plan"
+jq --arg source "$strict_plan" '.source_plan = $source' "$PLAN_JSON" > "$strict_json"
+out_dir="$(make_output_dir "t13")"
+actual_exit=0
+strict_err="$TMPDIR_ROOT/strict.err"
+"$SCRIPT_UNDER_TEST" --plan-json "$strict_json" --run-template "$RUN_TEMPLATE" --epic "$EPIC_FILE" --output-dir "$out_dir" --run-id "R-STRICT-NO-RECEIPT" \
+  >/dev/null 2>"$strict_err" || actual_exit=$?
+git checkout -q main 2>/dev/null || true
+if [[ "$actual_exit" -ne 0 ]] && grep -q 'requires a complete generation receipt' "$strict_err"; then
+  pass "strict plan blocks init without receipt"
+else
+  fail "strict plan blocks init without receipt" "exit=$actual_exit; stderr=$(head -1 "$strict_err")"
+fi
+
 # ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------

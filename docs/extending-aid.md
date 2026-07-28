@@ -492,20 +492,26 @@ See [`plugins/aid-orchestrator/defaults/enforcement-registry.yaml`](../plugins/a
 
 ## C0 Plan Contract Gate (E4)
 
-C0 is an **observe-only gate layer** that runs in `aid-auto-pipeline.sh` after
-`aid-epic-to-json` extracts the plan graph. It produces three artifacts and
-dispatches five semantic lenses (via CP1-deep) — all in observe mode. No FSM
-transition is blocked in E4. Blocking promotion is planned for E10.
+C0 has two graph inputs with distinct ownership. Before EPIC generation,
+`aid-generation-readiness.sh` derives a plan-global provisional graph directly
+from the source plan and binds it to C0. During generation,
+`aid-epic-to-json.sh` derives a separate, per-EPIC contract graph. C0 receives
+both; neither is allowed to overwrite the other. The provisional graph prevents
+the impossible dependency on an EPIC-derived artifact before EPICs exist.
 
 ### Artifacts produced
 
 | Artifact | Location | Description |
 |----------|----------|-------------|
-| `plan-graph.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-graph.json` | Directed acyclic graph of plan steps with dependency edges; produced by `scripts/lib/aid-plan-graph.sh` `build_plan_graph` + `topological_order` |
+| `provisional-graph.json` | `.aid-o/work/evidence/{plan_id}/generation/provisional-graph.json` | Plan-global, source-plan graph used before generation; hash-bound to the reviewed source plan |
+| `plan-graph.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-graph.json` | Per-EPIC contract graph; it is not evidence of the whole multi-phase plan |
 | `contract-manifest.json` | `.aid-o/work/evidence/{plan_id}/c0/contract-manifest.json` | Per-step contract declarations: authority, idempotency class, external calls, reuse candidates |
 | `plan-review.json` | `.aid-o/work/evidence/{plan_id}/c0/plan-review.json` | Aggregated lens findings; `would_block` bool; protocol-v2 envelope |
 
-All artifacts are protocol-v2 envelopes validated by `aid-protocol-validate.sh`.
+The C0 contract-manifest and plan-review artifacts are protocol-v2 envelopes
+validated by `aid-protocol-validate.sh`. The provisional graph is deliberately
+a small, hash-bound generation artifact (`aid-source-plan-graph/v1`), validated
+by the shared source-plan graph parser before it is sealed into C0 input.
 
 ### Implementation
 
@@ -638,15 +644,16 @@ stdout, exit 0 = pass / exit 1 = fail):
 | `allowed_paths_shape` | Any `allowed_paths` entry containing whitespace, `(`, or `)` — real repo paths never contain these; a hit means a verb prefix or trailing prose leaked through. |
 
 It is wired as the one BLOCKING exception inside the otherwise observe-only
-C0 block of `aid-auto-pipeline.sh`, running immediately after
-`aid-epic-to-json.sh` produces `plan.json` and before FSM init / `json-to-run`
-/ queue-add / branch creation. The result is persisted to
-`.aid-o/work/evidence/{plan_id}/c0/contract-validate.json` **before** the
-exit code is inspected (so a later phase's failure can never hide behind an
-earlier phase's stale pass), then `error_exit ... 4` aborts the pipeline on
-`result: "fail"`. `aid-c0-contract.sh`'s `review` subcommand exposes a Check
-6 (`contract_validation`) that reads — never re-runs — that persisted
-result, so the C0 evidence pack always reflects the real gate outcome.
+C0 block of `aid-auto-pipeline.sh`, running for each generated `plan.json`.
+Each result is persisted under
+`.aid-o/work/evidence/{plan_id}/generation/epics/{epic_id}/c0/contract-validate.json`
+**before** its exit code is inspected, so a later phase can never overwrite an
+earlier phase's evidence. After every phase is generated, the pipeline runs
+`aid-generation-finalize.sh`: it checks the complete phase set against the
+source-plan provisional graph and writes a hash-bound receipt. Only that
+receipt unlocks FSM init, run creation and queue mutation. `aid-c0-contract.sh`'s
+`review` subcommand reads — never re-runs — the persisted result, so the C0
+evidence pack always reflects the real gate outcome.
 
 Registered as `contract_validation_gate` (`type: 4`, Structural-check;
 severity `blocking`) in `defaults/enforcement-registry.yaml`.

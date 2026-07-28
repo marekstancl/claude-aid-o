@@ -142,6 +142,10 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 _aid_classify_files_bullet() {
   local bullet="${1#- }"
   local body; body="$(printf '%s' "$bullet" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+  # A comma between backtick paths used to look superficially valid: the
+  # cleaner returned the first path and the generator silently discarded the
+  # rest.  Only the explicit ` + ` separator is part of the grammar.
+  [[ "$body" == *\`,\ \`* ]] && { echo "error:bad-shape"; return; }
   local p count=0 bad_shape=0
   while IFS= read -r p; do
     [[ -z "$p" ]] && continue

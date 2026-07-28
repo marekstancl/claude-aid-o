@@ -116,14 +116,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.63.2** (current) — P068 recorded done in the backlog; test-fsm brought up to IMP-263
-- **v2.63.1** — post-release repair: P064 fixtures under the completion gate, worktree-aware project-root resolution, CI timeout
-- **v2.63.0** — the plan-final release boundary: a plan releases once, at its own boundary, and cannot be declared closed without durable proof
-- **v2.62.1** — fail-closed hardening of the Phase-1 boundaries (PM review): increment-step strict-by-default with partial-binding and forged-ledger rejection, C3 fail-closed checks that the AC source is in a canonical AID location and that a receipt is consistent with its named command, reviewed HEAD, and named log (consistency-checking within the local trust model, not cryptographic provenance against direct evidence tampering), waiver re-validation that never falls back to the current HEAD, and a cancel-before-PID handshake so a job can never start after cancellation.
-- **v2.62.0** — Phase-1 control-plane hardening: controller-owned job supervisor, gate-scoped single-use waivers, idempotent step advancement, one fail-closed mode authority, fail-closed lineage and re-derived attestation, explicit C3 AC/test-evidence binding, and read-time evidence freshness.
-- **v2.61.0** — plan-branch substrate: EPICs integrate into `plan/Pxxx` through an idempotent transaction proven by Git ancestry, the queue becomes a script-written derived view that can never substitute for that proof, gate profiles split by boundary, and the per-EPIC release stack goes structurally silent mid-plan.
-- **v2.58.4** — CI fix: a SIGPIPE flake in `test-regression.sh` (a 36 KB `echo … | grep -q` under `set -o pipefail`) that had failed the `bash-tests` CI job for several releases, resolved by switching those greps to here-strings
-- **v2.58.3** — Plan-time Files-shape lint: malformed `**Files:**` entries are caught when the plan is written (and as a deterministic hard pre-flight in `aid-plan-to-epic.sh` that can't be skipped), instead of blowing up phase-by-phase during EPIC generation. The lint, the generator, the JSON deriver and the D5 gate now share ONE Files extractor + path cleaner + shape predicate in `lib/aid-scoping.sh` (an integration test proves lint-clean ⇒ gate-clean), and `plan-writing.md` documents the canonical Files grammar. Two-tier severity: gate-breaking entries always block; non-canonical-but-cleaner-OK entries block `lifecycle_strict` plans and are advisory for legacy plans
+- **v2.64.0** (current) — source-plan graph validation and a receipt-gated, two-stage EPIC generator eliminate the pre-generation graph deadlock without weakening C0 or CP1.
+- **v2.63.2** — P068 recorded done in the backlog; test-fsm brought up to IMP-263.
+- **v2.63.1** — post-release repair: P064 fixtures under the completion gate, worktree-aware project-root resolution, CI timeout.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
