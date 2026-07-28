@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.64.0] — 2026-07-28
+
+### Added
+- **Plan-global generation receipt** — a hash-bound receipt now proves that every generated EPIC package, its contract evidence and its plan JSON still match the reviewed source plan before strict execution may begin.
+
+### Changed
+- **Two-stage EPIC generation** — the pipeline now generates and validates every phase before it creates any run, FSM state or queue entry, so a normal plan no longer needs a PM override for an artefact that generation itself must create.
+- **Source dependency graph** — C0 now receives a provisional, source-plan graph built by the same fail-closed parser used by the generator, while its per-EPIC graph remains a separate sealed input.
+
+### Fixed
+- **Generation integrity** — ambiguous dependencies, comma-separated multi-path `Files:` entries, drifted generated dependencies and incomplete multi-phase evidence now fail before execution instead of being silently accepted or overwritten.
+
 ## [2.63.2] — 2026-07-27
 
 ### Fixed

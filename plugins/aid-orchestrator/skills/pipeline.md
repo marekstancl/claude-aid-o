@@ -2438,7 +2438,7 @@ When `skip_trivial: true` in config:
 
 ---
 
-**Last Updated:** 2026-07-25
+**Last Updated:** 2026-07-28
 **Replaces:** epic-orchestration.md, epic-state-machine.md, dispatch-protocol.md,
 gate-evaluation.md, first-aid-controller.md, auto-done-state.md, auto-escalation.md,
 parallel-dispatch.md, gates-engine.md, retry-engine.md, analysis-merge.md,

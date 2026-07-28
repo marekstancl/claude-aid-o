@@ -504,4 +504,4 @@ This mapping is passed to plan-writing for per-step `visual_refs` assignment.
 
 ---
 
-**Last Updated:** 2026-06-01
+**Last Updated:** 2026-07-28
