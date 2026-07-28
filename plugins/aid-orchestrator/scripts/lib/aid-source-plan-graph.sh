@@ -22,19 +22,19 @@ _aid_spg_dep_numbers() {
   while IFS= read -r token; do
     token="$(printf '%s' "$token" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
     [[ -z "$token" ]] && continue
-    if [[ "$token" =~ [Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    if [[ "$token" =~ ^[Ss]teps?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
       start="${BASH_REMATCH[1]}"; end="${BASH_REMATCH[2]}"
       if (( start > end )); then _aid_spg_error="reversed dependency range Steps ${start}-${end}"; return 1; fi
       for ((i=start; i<=end; i++)); do printf '%s\n' "$i"; done
       found=1
-    elif [[ "$token" =~ [Ss]tep[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Ss]tep[[:space:]]+([0-9]+) ]]; then
       printf '%s\n' "${BASH_REMATCH[1]}"; found=1
-    elif [[ "$token" =~ [Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]asks?[[:space:]]+([0-9]+)[[:space:]]*-[[:space:]]*([0-9]+) ]]; then
       start="${BASH_REMATCH[1]}"; end="${BASH_REMATCH[2]}"
       if (( start > end )); then _aid_spg_error="reversed dependency range Tasks ${start}-${end}"; return 1; fi
       for ((i=start; i<=end; i++)); do printf '%s\n' "$i"; done
       found=1
-    elif [[ "$token" =~ [Tt]ask[[:space:]]+([0-9]+) ]]; then
+    elif [[ "$token" =~ ^[Tt]ask[[:space:]]+([0-9]+) ]]; then
       printf '%s\n' "${BASH_REMATCH[1]}"; found=1
     fi
   done <<< "$raw"

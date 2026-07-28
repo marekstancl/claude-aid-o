@@ -67,6 +67,27 @@ for phase in $(seq 1 "$total"); do
   [[ "$actual_step_count" == "$expected_step_count" ]] || {
     echo "ERROR: phase $phase plan.json step count disagrees with source graph" >&2; exit 1;
   }
+  # The source graph is global, while plan.json uses phase-local step IDs.
+  # Preserve every edge whose two endpoints belong to this phase, translated
+  # by the generated step order. Cross-phase edges are intentionally handled
+  # by the EPIC/queue dependency layer and therefore do not appear here.
+  actual_ids="$(jq -c '.steps | map(.id)' "$plan_json")"
+  expected_dependencies="$(jq -c --argjson phase "$phase" --argjson actual "$actual_ids" '
+    [.steps[] | select(.epic == $phase) | .step] as $source_steps |
+    [(.edges // [])[]
+      | . as $raw_edge
+      | {before:($raw_edge.before | capture("^step-(?<n>[0-9]+)$").n | tonumber), after:($raw_edge.after | capture("^step-(?<n>[0-9]+)$").n | tonumber)}
+      | . as $edge
+      | ($source_steps | index($edge.before)) as $before_index
+      | ($source_steps | index($edge.after)) as $after_index
+      | select($before_index != null and $after_index != null)
+      | {before:$actual[$before_index], after:$actual[$after_index]}
+    ] | sort_by(.before, .after)
+  ' <<< "$graph")"
+  actual_dependencies="$(jq -c '[.dependencies[] | {before, after}] | sort_by(.before, .after)' "$plan_json")"
+  [[ "$actual_dependencies" == "$expected_dependencies" ]] || {
+    echo "ERROR: phase $phase plan.json dependencies disagree with the source-plan graph" >&2; exit 1;
+  }
   source_plan="$(jq -r '.source_plan // empty' "$plan_json" 2>/dev/null || true)"
   [[ -n "$source_plan" && "$(realpath "$source_plan" 2>/dev/null || true)" == "$plan_abs" ]] || {
     echo "ERROR: phase $phase plan.json is not bound to this source plan" >&2; exit 1;

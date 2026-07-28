@@ -10,6 +10,13 @@ cp "$PLAN" "$tmp/.aid-o/plans/P099.md"
 # Make the E2E path exercise the actual strict receipt consumer, not only the
 # legacy-compatible path. The plan is still low risk; strictness is explicit.
 sed -i '/^author:/a lifecycle_strict: true' "$tmp/.aid-o/plans/P099.md"
+# Also exercise a legitimate phase-local edge (Step 1 -> Step 2), not only an
+# empty dependency graph. The finalizer must translate the global source edge
+# to the generated local step IDs and still accept the package.
+sed -i '/^\*\*AID Role:\*\* domain$/a\
+\
+**Dependencies:**\
+- Depends on: Step 1 (architect contracts)' "$tmp/.aid-o/plans/P099.md"
 printf 'counter: 0\n' > "$tmp/.aid-o/config/counter.yaml"
 git -C "$tmp" init -q
 git -C "$tmp" config user.email aid-test@example.com
@@ -65,3 +72,13 @@ if bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md"
   echo "FAIL: tampered EPIC source binding was accepted" >&2; exit 1
 fi
 echo "PASS: tampered EPIC source binding is rejected"
+
+# A receipt is not merely a phase-count receipt: removing or inventing a
+# phase-local dependency must disagree with the source-plan graph.
+tampered_json="$(jq -r '.[0].plan_json' "$tmp/epics.json")"
+jq '.dependencies += [{before:.steps[0].id, after:.steps[1].id, reason:"tampered"}]' "$tampered_json" > "$tmp/tampered-plan.json"
+mv "$tmp/tampered-plan.json" "$tampered_json"
+if bash "$SCRIPTS/aid-generation-finalize.sh" --plan "$tmp/.aid-o/plans/P099.md" --total 3 --epics-json "$tmp/epics.json" --output "$tmp/tampered-deps.json" >/dev/null 2>&1; then
+  echo "FAIL: tampered plan.json dependencies were accepted" >&2; exit 1
+fi
+echo "PASS: tampered plan.json dependencies are rejected"

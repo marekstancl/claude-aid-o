@@ -34,6 +34,10 @@ cp "$F" "$tmp/forward.md"
 sed -i 's/Depends on: Step 1 (architect contracts)/Depends on: Step 3/' "$tmp/forward.md"
 expect_fail "forward dependency blocks before generation" bash "$READY" "$tmp/forward.md" --total 3
 
+cp "$F" "$tmp/prose-prefix.md"
+sed -i 's/Depends on: Step 1 (architect contracts)/Depends on: use Step 1 somehow/' "$tmp/prose-prefix.md"
+expect_fail "prose before a dependency reference blocks instead of being guessed" bash "$READY" "$tmp/prose-prefix.md" --total 3
+
 # A comma-separated Files list is not a legal multi-path declaration. It must
 # fail instead of silently dropping its second path.
 cp "$F" "$tmp/two-paths.md"
