@@ -247,19 +247,20 @@ EPIC generation.
   syntax rather than silently producing an empty edge set. (`930fcd7`)
 - [x] Preserve every declared Files path; a comma is not a valid path separator.
   (`930fcd7`; `+` is the only multi-path separator.)
-- [ ] Split auto-pipeline into two truthful stages: generate and validate the
+- [x] Split auto-pipeline into two truthful stages: generate and validate the
   complete EPIC package first; only then initialise/queue any EPIC. Do not add
   a receipt guard to the current per-phase init loop — that would recreate the
   producer-before-consumer deadlock.
-- [ ] After all EPICs are generated, create a plan-global final graph, compare
+- [x] After all EPICs are generated, create a plan-global final graph, compare
   it to the provisional graph, and write a hash-bound receipt owned by the
   generation stage.
-- [ ] Require that receipt before strict/high-risk first-EPIC init; preserve
+- [x] Require that receipt before strict/high-risk first-EPIC init; preserve
   an explicit legacy path rather than retroactively blocking in-flight plans.
-- [ ] Add red-green reproductions for P074-style pre-generation review,
+- [x] Add red-green reproductions for P074-style pre-generation review,
   multi-line dependencies, ambiguity, graph disagreement and multi-path Files.
   (Source-plan cases and multi-path coverage in `930fcd7`; final-graph
-  disagreement remains coupled to the pending receipt.)
+  disagreement, complete-package receipt and post-receipt FSM/queue E2E are
+  covered by `test-generation-finalize.sh`.)
 
 **Explicitly out of this package:** CP2 orchestration and generic delivery-gate
 policy redesign. Those are separate auto/gate work, not prerequisites for

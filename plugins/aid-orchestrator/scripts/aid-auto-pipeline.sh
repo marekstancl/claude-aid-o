@@ -77,6 +77,7 @@ fi
 sub_scripts=(
   "aid-plan-to-epic.sh"
   "aid-epic-to-json.sh"
+  "aid-generation-finalize.sh"
   "aid-json-to-run.sh"
   "aid-queue-add.sh"
 )
@@ -421,7 +422,12 @@ for phase in $(seq 1 "$total_phases"); do
   {
     # Determine plan_id from plan filename
     _c0_plan_id="$(basename "$plan" .md)"
-    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/c0"
+    # Each generated EPIC owns its own C0 contract graph and validation
+    # evidence. A shared plan-level c0/ directory made phase N overwrite phase
+    # N-1, leaving the last graph to masquerade as evidence for the whole plan.
+    # The plan-global source graph and C0 bridge remain at their own named
+    # generation/ and c0/ paths respectively.
+    _c0_dir=".aid-o/work/evidence/${_c0_plan_id}/generation/epics/${epic_id}/c0"
     mkdir -p "$_c0_dir"
 
     # -------------------------------------------------------------------------
@@ -432,11 +438,10 @@ for phase in $(seq 1 "$total_phases"); do
     # C0 evidence — malformed = hard-fail před /aid-run") and must stop the
     # pipeline before json-to-run / queue-add / branch creation happen below.
     #
-    # Persist-before-abort: `_c0_dir` is keyed by plan_id, not by phase, so
-    # in a multi-phase plan every phase's hook run writes to the SAME
-    # contract-validate.json. We therefore always overwrite it with THIS
-    # phase's result before inspecting the exit code — otherwise a phase-2
-    # failure after a phase-1 pass would leave a stale pass on disk.
+    # Persist-before-abort: evidence is keyed by plan AND EPIC, so every
+    # generated phase retains its own result. The complete-package finalizer
+    # can therefore reason about all phases rather than a misleading final
+    # overwrite from the last phase.
     # -------------------------------------------------------------------------
     _cv_exit=0
     _cv_json="$("${SCRIPT_DIR}/gates/aid-contract-validate.sh" "$plan_json_path" "$epic_path" \
@@ -513,8 +518,8 @@ for phase in $(seq 1 "$total_phases"); do
     fi
     epics_json="$(echo "$epics_json" | jq \
       --argjson phase "$phase" --arg epic_id "$epic_id" --arg epic_path "$epic_path" \
-      --arg plan_json "$plan_json_path" --arg run_id "$run_id" --argjson depends_on "$_stage_depends_json" \
-      '. + [{phase:$phase, epic_id:$epic_id, epic_path:$epic_path, plan_json:$plan_json, run_id:$run_id, queue_status:"pending_receipt", depends_on:$depends_on}]')"
+      --arg plan_json "$plan_json_path" --arg run_id "$run_id" --arg contract_validate "${_c0_dir}/contract-validate.json" --argjson depends_on "$_stage_depends_json" \
+      '. + [{phase:$phase, epic_id:$epic_id, epic_path:$epic_path, plan_json:$plan_json, contract_validate:$contract_validate, run_id:$run_id, queue_status:"pending_receipt", depends_on:$depends_on}]')"
     prev_epic_id="$epic_id"
     echo "[INFO] Phase ${phase}/${total_phases}: ${epic_id} generated; waiting for complete-package receipt" >&2
     continue

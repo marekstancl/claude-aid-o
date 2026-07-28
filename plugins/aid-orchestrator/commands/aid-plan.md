@@ -355,7 +355,8 @@ Output: plan path, step count, quality gate results, CP1 review verdict.
 
 ## Mode: Generate EPIC
 
-Parse a Plan file, generate EPICs (one per phase), plan.json, run files, and queue entries.
+Parse a Plan file, generate every EPIC and plan.json first, verify one complete
+generation receipt, then create run files/FSM state and queue entries.
 All deterministic operations are bash pipeline scripts — LLM handles only dialog and validation.
 
 1. **Validate** — confirm input is a Plan file (`type: plan` or `# Plan:` header)

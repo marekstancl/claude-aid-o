@@ -318,7 +318,7 @@ PLANMD
   [ "$status" -ne 0 ]
 
   # Contract-validate.json recorded a FAIL before the abort (persist-before-abort)
-  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-nofiles/c0/contract-validate.json"
+  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-nofiles/generation/epics/E-900-1_1/c0/contract-validate.json"
   [ -f "$cv_file" ]
   run jq -e '.result == "fail"' "$cv_file"
   [ "$status" -eq 0 ]
@@ -429,7 +429,7 @@ PLANMD
   run "$PIPELINE" --plan plan-clean.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -eq 0 ]
 
-  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-clean/c0/contract-validate.json"
+  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-clean/generation/epics/E-902-1_1/c0/contract-validate.json"
   [ -f "$cv_file" ]
   run jq -e '.result == "pass"' "$cv_file"
   [ "$status" -eq 0 ]
@@ -440,7 +440,7 @@ PLANMD
   [ -f "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" ]
 }
 
-@test "aid-auto-pipeline.sh: multi-phase phase-2 failure overwrites phase-1 pass in contract-validate.json (no stale pass)" {
+@test "aid-auto-pipeline.sh: multi-phase phase-2 failure retains both phase receipts and creates no partial queue" {
   cat > "$TEST_PROJECT_ROOT/plan-mixed.md" <<'PLANMD'
 ---
 id: P901
@@ -564,20 +564,17 @@ PLANMD
   run "$PIPELINE" --plan plan-mixed.md --queue-mode chain --plugin-dir "$AID_PLUGIN_PATH"
   [ "$status" -ne 0 ]
 
-  # Shared-per-plan-id contract-validate.json must show FAIL (phase 2's
-  # result), not a stale PASS left over from phase 1.
-  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-mixed/c0/contract-validate.json"
+  local cv_file="$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-mixed/generation/epics/E-901-2_2/c0/contract-validate.json"
   [ -f "$cv_file" ]
   run jq -e '.result == "fail"' "$cv_file"
   [ "$status" -eq 0 ]
 
-  # Phase 1 (E-901-1_2) succeeded: queued + run.md exists.
-  run grep -c "E-901-1_2" "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml"
+  # Phase 1's PASS is retained independently; stage 2 never ran, so the
+  # invalid package cannot leave a partially initialised queue or run behind.
+  run jq -e '.result == "pass"' "$TEST_PROJECT_ROOT/.aid-o/work/evidence/plan-mixed/generation/epics/E-901-1_2/c0/contract-validate.json"
   [ "$status" -eq 0 ]
-  [ "$output" -gt 0 ]
-  local phase1_runs
-  phase1_runs="$(find "$TEST_PROJECT_ROOT/.aid-o/work/runs" -type f 2>/dev/null | wc -l | tr -d ' ')"
-  [ "$phase1_runs" -gt 0 ]
+  [ ! -f "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml" ]
+  [ ! -d "$TEST_PROJECT_ROOT/.aid-o/work/runs/R-E901-1" ]
 
   # Phase 2 (E-901-2_2) did NOT reach queue/run stage.
   run grep -c "E-901-2_2" "$TEST_PROJECT_ROOT/.aid-o/config/queue.yaml"

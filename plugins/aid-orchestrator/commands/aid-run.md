@@ -152,9 +152,10 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 4. If still not found → abort with: "Plugin scripts not found. Run `/aid-init` to refresh."
 
 **Bash pipeline** (using resolved `plugin_path`):
-1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — convert plan to EPIC file (if running from plan)
-2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse DAG → plan.json
-3. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init.
+1. `{plugin_path}/scripts/aid-plan-to-epic.sh` — generate every EPIC (if running from a plan)
+2. `{plugin_path}/scripts/aid-epic-to-json.sh` — parse every EPIC → plan.json
+3. `{plugin_path}/scripts/aid-generation-finalize.sh` — verify the complete package and write its receipt.
+4. `{plugin_path}/scripts/aid-json-to-run.sh` — plan.json → execution.yaml + fsm-state.yaml init, only after the receipt.
    When `/aid-run --streamlined` is invoked, the orchestrator MUST pass
    `--streamlined` to this script: `aid-json-to-run.sh … --streamlined`. The
    script forwards it to its Step 18 `aid-fsm.sh init` call, which writes
@@ -169,9 +170,9 @@ PM must fix the underlying issue (missing steps, circular deps, invalid EPIC for
 ```
 PRE-FLIGHT Pipeline
 ====================================
-  [1] aid-plan-to-epic.sh   → EPIC file     ✓
-  [2] aid-epic-to-json.sh   → plan.json     ✓
-  [3] aid-json-to-run.sh    → fsm-state.yaml    ✓
+  [1] all phases: plan-to-epic + epic-to-json    ✓
+  [2] aid-generation-finalize.sh → receipt       ✓
+  [3] aid-json-to-run.sh → fsm-state.yaml        ✓
 
 FSM initialized: READY
 ```

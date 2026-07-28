@@ -36,10 +36,16 @@ normal valid plan; `aid-plan-to-epic.sh` runs the same readiness check itself.
 ## The pipeline (full chain)
 
 ```
-Plan.md ──(aid-plan-to-epic.sh)──► EPIC.md ──(aid-epic-to-json.sh)──► plan.json
+Plan.md ── readiness ──► all EPIC.md + all plan.json ── finalizer/receipt ──► run.md + FSM + queue
    ▲ written per plan-writing.md      ▲ Steps (Role Pipeline) table     ▲ steps/deps/
    │ (### Step N + AID Role + deps)   │                                 │ parallel_groups/gates
 ```
+
+For a normal multi-phase plan, generation is **two-stage**: AID creates every
+EPIC and `plan.json`, validates the whole package against the source graph,
+then writes one generation receipt. Only after that receipt exists does it
+initialise FSM state or write queue entries. Do not call `aid-json-to-run.sh`
+directly for a strict/high-risk plan unless you also provide the receipt.
 
 ### Stage 1 — `aid-plan-to-epic.sh` (Plan.md → EPIC.md)
 

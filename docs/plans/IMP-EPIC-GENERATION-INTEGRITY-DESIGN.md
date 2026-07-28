@@ -1,6 +1,7 @@
 # EPIC-generation integrity — implementation contract
 
-**Status:** active manual maintenance on `fix/epic-generation-integrity`.
+**Status:** implemented on `fix/epic-generation-integrity`; awaiting the final
+whole-system review/release decision.
 
 ## The problem in plain language
 

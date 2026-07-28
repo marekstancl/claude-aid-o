@@ -49,10 +49,24 @@ for phase in $(seq 1 "$total"); do
   [[ "$(printf '%s\n' "$entry" | wc -l | tr -d ' ')" == "1" ]] || { echo "ERROR: duplicate generated phase $phase" >&2; exit 1; }
   epic_path="$(jq -r '.epic_path // empty' <<< "$entry")"
   plan_json="$(jq -r '.plan_json // empty' <<< "$entry")"
-  [[ -f "$epic_path" && -f "$plan_json" ]] || { echo "ERROR: phase $phase has missing EPIC or plan.json" >&2; exit 1; }
+  contract_validate="$(jq -r '.contract_validate // empty' <<< "$entry")"
+  [[ -f "$epic_path" && -f "$plan_json" && -f "$contract_validate" ]] || { echo "ERROR: phase $phase has missing EPIC, plan.json, or contract-validation evidence" >&2; exit 1; }
+  jq -e '.result == "pass"' "$contract_validate" >/dev/null 2>&1 || { echo "ERROR: phase $phase contract validation is not a pass" >&2; exit 1; }
   epic_id="$(jq -r '.epic_id // empty' <<< "$entry")"
   [[ "$epic_id" =~ _${total}$ ]] || { echo "ERROR: phase $phase EPIC id has wrong total: $epic_id" >&2; exit 1; }
   [[ "$epic_id" =~ -${phase}_${total}$ ]] || { echo "ERROR: phase $phase EPIC id does not bind its phase: $epic_id" >&2; exit 1; }
+  expected_steps="$(jq -r --argjson p "$phase" '[.steps[] | select(.epic == $p) | .step] | join(",")' <<< "$graph")"
+  meta_sha="$(awk -F': ' '/^source_plan_sha256:/{print $2; exit}' "$epic_path")"
+  meta_phase="$(awk -F': ' '/^source_phase:/{print $2; exit}' "$epic_path")"
+  meta_steps="$(awk -F': ' '/^source_step_ids:/{gsub(/"/, "", $2); print $2; exit}' "$epic_path")"
+  [[ "$meta_sha" == "$plan_sha" && "$meta_phase" == "$phase" && "$meta_steps" == "$expected_steps" ]] || {
+    echo "ERROR: phase $phase EPIC source binding does not match the reviewed plan graph" >&2; exit 1;
+  }
+  actual_step_count="$(jq '.steps | length' "$plan_json")"
+  expected_step_count="$(jq --arg s "$expected_steps" '$s | split(",") | map(select(length > 0)) | length' -n)"
+  [[ "$actual_step_count" == "$expected_step_count" ]] || {
+    echo "ERROR: phase $phase plan.json step count disagrees with source graph" >&2; exit 1;
+  }
   source_plan="$(jq -r '.source_plan // empty' "$plan_json" 2>/dev/null || true)"
   [[ -n "$source_plan" && "$(realpath "$source_plan" 2>/dev/null || true)" == "$plan_abs" ]] || {
     echo "ERROR: phase $phase plan.json is not bound to this source plan" >&2; exit 1;
@@ -76,8 +90,9 @@ artifact_entries='[]'
 for phase in $(seq 1 "$total"); do
   entry="$(jq -c --argjson p "$phase" '.[] | select(.phase == $p)' "$epics_file")"
   epic_path="$(jq -r '.epic_path' <<< "$entry")"; plan_json="$(jq -r '.plan_json' <<< "$entry")"
-  artifact_entries="$(jq -c --argjson e "$entry" --arg es "sha256:$(sha256sum "$epic_path" | awk '{print $1}')" --arg ps "sha256:$(sha256sum "$plan_json" | awk '{print $1}')" \
-    '. + [$e + {epic_sha256:$es, plan_json_sha256:$ps}]' <<< "$artifact_entries")"
+  contract_validate="$(jq -r '.contract_validate' <<< "$entry")"
+  artifact_entries="$(jq -c --argjson e "$entry" --arg es "sha256:$(sha256sum "$epic_path" | awk '{print $1}')" --arg ps "sha256:$(sha256sum "$plan_json" | awk '{print $1}')" --arg cs "sha256:$(sha256sum "$contract_validate" | awk '{print $1}')" \
+    '. + [$e + {epic_sha256:$es, plan_json_sha256:$ps, contract_validate_sha256:$cs}]' <<< "$artifact_entries")"
 done
 
 mkdir -p "$(dirname "$output")"

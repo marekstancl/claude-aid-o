@@ -104,7 +104,11 @@ _ready_args=("$plan" --total "$total")
 # regenerated deterministically from the plan, never hand-authored.  Keep it
 # under generation/: c0/plan-graph.json has a different owner and meaning
 # after an EPIC exists (aid-c0-contract.sh's per-EPIC contract graph).
-if [[ -d "${_project_root}/.aid-o" && "$(realpath "$plan")" == "${_project_root}/.aid-o/plans/"* ]]; then
+# A project may keep a valid plan outside `.aid-o/plans/` (fixtures, imported
+# plans and older workspaces do). Evidence ownership is determined by the
+# discovered project root and frontmatter plan id, not by the source path; do
+# not make those legitimate callers miss the required provisional graph.
+if [[ -d "${_project_root}/.aid-o" ]]; then
   _ready_args+=(--write-provisional "${_project_root}/.aid-o/work/evidence/${plan_id}/generation/provisional-graph.json")
 fi
 if [[ -x "$READINESS_SCRIPT" || -f "$READINESS_SCRIPT" ]]; then
@@ -1093,6 +1097,8 @@ template_content="$(cat "$epic_template")"
 # and special characters). Instead, we emit the EPIC directly.
 
 plan_filename="$(basename "$plan")"
+source_plan_sha256="sha256:$(sha256sum "$plan" | awk '{print $1}')"
+source_step_ids="$(IFS=,; echo "${phase_steps[*]}")"
 
 # Build the steps table
 steps_table_header="| # | Role | Objective | Depends On | Parallel Group |
@@ -1106,6 +1112,9 @@ cat > "${output_dir}/${epic_id}-${slug}.md" << EPICEOF
 status: active
 plan_ref: ${plan}
 plan_epics_total: ${total}
+source_plan_sha256: ${source_plan_sha256}
+source_phase: ${phase}
+source_step_ids: "${source_step_ids}"
 runs_total: 1
 runs_completed: 0
 ---
