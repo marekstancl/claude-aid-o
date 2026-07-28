@@ -7,6 +7,9 @@ PLAN="$SCRIPTS/tests/fixtures/multi-phase-plan-numeric.md"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/.aid-o/plans" "$tmp/.aid-o/tasks" "$tmp/.aid-o/config" "$tmp/.aid-o/work/evidence/P099/generation"
 cp "$PLAN" "$tmp/.aid-o/plans/P099.md"
+# Make the E2E path exercise the actual strict receipt consumer, not only the
+# legacy-compatible path. The plan is still low risk; strictness is explicit.
+sed -i '/^author:/a lifecycle_strict: true' "$tmp/.aid-o/plans/P099.md"
 printf 'counter: 0\n' > "$tmp/.aid-o/config/counter.yaml"
 git -C "$tmp" init -q
 git -C "$tmp" config user.email aid-test@example.com
