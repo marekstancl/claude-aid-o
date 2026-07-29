@@ -161,6 +161,12 @@
           "type": "string",
           "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
         },
+        "provenance": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["bats", "package-script", "declared-command"] },
+          "minItems": 1,
+          "description": "Optional. Which adapter(s) discovered this run_unit. A run_unit whose command exactly matches across two adapters (e.g. a package-script test command also registered as an execution.yaml gate) is tagged with both provenances, never double-counted as two run_units."
+        },
         "test_cases": {
           "type": "array",
           "items": { "$ref": "#/$defs/test_case" },

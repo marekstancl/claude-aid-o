@@ -39,7 +39,7 @@ bats_adapter_discover() {
     command_json="$(jq -n --arg f "$rel" '{type:"argv", argv:["bats", $f]}')"
     test_cases_json="$(_bats_adapter_test_cases "$file")"
     source_paths_json="$(jq -n --arg f "$rel" '[$f]')"
-    unit_json="$(adapter_run_unit_json "$run_unit_id" "bats" "$command_json" "$test_cases_json" "$source_paths_json" "medium")" || {
+    unit_json="$(adapter_run_unit_json "$run_unit_id" "bats" "$command_json" "$test_cases_json" "$source_paths_json" "medium" '["bats"]')" || {
       echo "bats_adapter_discover: fingerprint computation failed for $rel" >&2
       return 1
     }

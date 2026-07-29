@@ -65,7 +65,7 @@ adapter_slug() {
 #   literals respectively) — callers build these with jq themselves.
 adapter_run_unit_json() {
   local run_unit_id="$1" runner="$2" command_json="$3" test_cases_json="$4"
-  local source_paths_json="${5:-[]}" confidence="${6:-low}"
+  local source_paths_json="${5:-[]}" confidence="${6:-low}" provenance_json="${7:-null}"
 
   local fingerprint
   fingerprint="$(adapter_command_fingerprint "$run_unit_id" "$command_json")" || return 1
@@ -78,6 +78,7 @@ adapter_run_unit_json() {
     --argjson command "$command_json" \
     --arg fingerprint "$fingerprint" \
     --argjson test_cases "$test_cases_json" \
+    --argjson provenance "$provenance_json" \
     '{
       run_unit_id: $run_unit_id,
       runner: $runner,
@@ -94,7 +95,8 @@ adapter_run_unit_json() {
       isolation: { temp_workspace: "unknown", fixed_ports: [], shared_paths: [], lock_usage: [], adapter_confidence: "static_parse" },
       recommendation: "keep",
       test_cases: $test_cases
-    }'
+    }
+    + (if $provenance == null then {} else {provenance: $provenance} end)'
 }
 
 # adapter_command_fingerprint <run_unit_id> <command_json>
