@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-config.schema.json",
+  "title": "AID Test Portfolio Audit — Project Config",
+  "$comment": "producer: PM (hand-edited) or /aid-init copy-if-absent, consumers: [aid-test-audit-config.sh load_test_audit_config, aid-test-audit-dispatch.sh, aid-test-audit-command-allowlist.sh]",
+  "description": "Project-level audit config contract (.aid-o/config/test-audit.yaml). budget_minutes_default/max_read_only_audit_agents/allowed_runners are read by THIS plan. resource_locks/scheduler are reserved for P069 (depends_on_plans:[P066]) so P069 doesn't need a second schema revision — this plan never reads or writes them.",
+  "type": "object",
+  "required": ["budget_minutes_default", "max_read_only_audit_agents", "allowed_runners"],
+  "properties": {
+    "budget_minutes_default": { "type": "integer", "minimum": 1 },
+    "max_read_only_audit_agents": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Wholly distinct from dispatch.max_parallel (defaults/orchestration.yaml) and dispatch.worktrees.max_parallel (.aid-o/config/policies/dispatch-strategy.yaml) — neither existing key is read or written by this schema/loader."
+    },
+    "allowed_runners": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "resource_locks": {
+      "type": "object",
+      "description": "Unused by this plan — reserved for P069."
+    },
+    "scheduler": {
+      "type": "object",
+      "description": "Unused by this plan's own logic — present only so P069 doesn't need a second schema revision. This plan never reads or writes scheduler.*."
+    }
+  },
+  "additionalProperties": false
+}
