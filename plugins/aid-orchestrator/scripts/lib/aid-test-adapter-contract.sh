@@ -99,6 +99,16 @@ adapter_run_unit_json() {
     + (if $provenance == null then {} else {provenance: $provenance} end)'
 }
 
+# adapter_check_run_unit_id_collisions <run_units_json>
+#   Echoes a newline-separated list of run_unit_ids that appear more than
+#   once in the array (empty output = no collision). Two adapters claiming
+#   the same stable run_unit_id is a hard scanner failure (Step 4) — this
+#   helper is the shared detection primitive, never a per-adapter reimpl.
+adapter_check_run_unit_id_collisions() {
+  local units_json="$1"
+  jq -r '[.[].run_unit_id] | group_by(.) | map(select(length > 1) | .[0]) | .[]' <<<"$units_json"
+}
+
 # adapter_command_fingerprint <run_unit_id> <command_json>
 #   Echoes gate_baseline_fingerprint(run_unit_id, canonical_json(command)),
 #   where canonical_json is `jq -cS` (compact, sorted-object-keys)
