@@ -53,9 +53,23 @@ _tas_write_locked() {
 }
 
 # audit_state_init <output_dir> <audit_id> <scope> <mode> <budget_minutes>
+#   Validates mode (must be a real enum value with a known wave count) and
+#   budget_minutes (must be a positive integer) BEFORE writing anything — a
+#   bad CLI/config value must never persist an audit that no later
+#   operation (mark_done in particular) could ever complete.
 audit_state_init() {
   local output_dir="$1" audit_id="$2" scope="$3" mode="$4" budget_minutes="$5"
   local file lockfile new_json
+
+  if [[ "$(_tas_waves_for_mode "$mode")" == "-1" ]]; then
+    echo "aid-test-audit-state: invalid mode '$mode' (must be static|measure|full)" >&2
+    return 1
+  fi
+  if [[ ! "$budget_minutes" =~ ^[1-9][0-9]*$ ]]; then
+    echo "aid-test-audit-state: invalid budget_minutes '$budget_minutes' (must be a positive integer)" >&2
+    return 1
+  fi
+
   file="$(_tas_state_file "$output_dir")"
   lockfile="$(_tas_lock_file "$output_dir")"
   mkdir -p "$output_dir" 2>/dev/null
@@ -84,7 +98,7 @@ audit_state_advance_wave() {
   (
     flock -w 5 200 || { echo "aid-test-audit-state: could not acquire lock on $lockfile" >&2; exit 1; }
 
-    local current current_status idx cur_idx new_idx
+    local current current_status mode waves_completed expected idx cur_idx new_idx
     current="$(jq -e '.' "$file" 2>/dev/null)" || { echo "aid-test-audit-state: no/corrupt state to advance" >&2; exit 1; }
     current_status="$(jq -r '.status' <<<"$current")"
 
@@ -94,6 +108,14 @@ audit_state_advance_wave() {
         exit 1
         ;;
     esac
+
+    mode="$(jq -r '.mode' <<<"$current")"
+    waves_completed="$(jq -r '.waves_completed' <<<"$current")"
+    expected="$(_tas_waves_for_mode "$mode")"
+    if [[ "$waves_completed" -ge "$expected" ]]; then
+      echo "aid-test-audit-state: already at mode '$mode''s fixed wave count ($expected) — no further advance is valid, call mark_done" >&2
+      exit 1
+    fi
 
     cur_idx=-1 new_idx=-1
     for idx in "${!_TAS_ORDER[@]}"; do

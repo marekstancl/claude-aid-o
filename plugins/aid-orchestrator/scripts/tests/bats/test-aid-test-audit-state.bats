@@ -56,6 +56,34 @@ teardown() {
   jq -e '.status == "done" and .waves_completed == 6' "$OUTPUT_DIR/audit-state.json" >/dev/null
 }
 
+@test "audit_state_init rejects an invalid mode before persisting anything" {
+  run audit_state_init "$OUTPUT_DIR" "a1" "repo" "bogus" 30
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUTPUT_DIR/audit-state.json" ]
+}
+
+@test "audit_state_init rejects a non-positive budget_minutes before persisting anything" {
+  run audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 0
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUTPUT_DIR/audit-state.json" ]
+
+  run audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" "not-a-number"
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUTPUT_DIR/audit-state.json" ]
+}
+
+@test "advance_wave refuses once waves_completed already reached the mode's fixed count, even a same-phase repeat" {
+  audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 30 >/dev/null
+  audit_state_advance_wave "$OUTPUT_DIR" "sharding" >/dev/null
+  audit_state_advance_wave "$OUTPUT_DIR" "dispatching" >/dev/null
+  audit_state_advance_wave "$OUTPUT_DIR" "consolidating" >/dev/null
+  audit_state_advance_wave "$OUTPUT_DIR" "reporting" >/dev/null
+  jq -e '.waves_completed == 4' "$OUTPUT_DIR/audit-state.json" >/dev/null
+  run audit_state_advance_wave "$OUTPUT_DIR" "reporting"
+  [ "$status" -ne 0 ]
+  jq -e '.waves_completed == 4 and .status == "reporting"' "$OUTPUT_DIR/audit-state.json" >/dev/null
+}
+
 @test "advance_wave rejects skipping a wave out of order" {
   audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 30 >/dev/null
   run audit_state_advance_wave "$OUTPUT_DIR" "dispatching"

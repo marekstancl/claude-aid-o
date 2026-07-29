@@ -63,6 +63,20 @@ teardown() {
   ! echo "$output" | jq -e 'any(.[]; .run_unit_id == "gate:tests_pass")'
 }
 
+@test "declared_command_adapter_discover: a gate name containing whitespace is not silently omitted" {
+  cat > "$FIXTURE_YAML" <<'YAML'
+gates:
+  "lint pass":
+    command: "echo lint"
+  normal:
+    command: "echo normal"
+YAML
+  run declared_command_adapter_discover "$FIXTURE_YAML"
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq 'length')" -eq 2 ]
+  echo "$output" | jq -e 'any(.[]; .run_unit_id == "gate:lint pass")' >/dev/null
+}
+
 @test "declared_command_adapter_discover: pretty-printed (non-compact) existing JSON does not corrupt the first non-matching gate" {
   # Regression: jq -n's default output is pretty-printed. An earlier bug
   # compared a pretty-printed $existing_json directly against jq -c map()

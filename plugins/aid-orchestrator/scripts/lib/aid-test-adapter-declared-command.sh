@@ -51,7 +51,12 @@ declared_command_adapter_discover() {
   local new_units_json="[]"
   local gate_name gate_command run_unit_id command_json unit_json has_match
 
-  for gate_name in $(jq -r 'keys[]' <<<"$gates_json" 2>/dev/null); do
+  # while-read (not `for x in $(...)`) — a gate name is a valid YAML map key
+  # and may legitimately contain whitespace (e.g. "lint pass"); word-splitting
+  # via `for` would silently truncate it to its first word, and the ensuing
+  # lookup would find no command, silently omitting the gate entirely.
+  while IFS= read -r gate_name; do
+    [[ -n "$gate_name" ]] || continue
     gate_command="$(jq -r --arg g "$gate_name" '.[$g].command // empty' <<<"$gates_json")"
     [[ -n "$gate_command" ]] || continue
     run_unit_id="gate:${gate_name}"
@@ -71,7 +76,7 @@ declared_command_adapter_discover() {
     unit_json="$(adapter_run_unit_json "$run_unit_id" "declared-command" "$command_json" "[]" \
       "$(jq -n --arg f "$config_rel_path" '[$f]')" "high" '["declared-command"]')" || continue
     new_units_json="$(jq -c --argjson u "$unit_json" '. + [$u]' <<<"$new_units_json")"
-  done
+  done < <(jq -r 'keys[]' <<<"$gates_json" 2>/dev/null)
 
   jq -c -s 'add' <(printf '%s' "$result_json") <(printf '%s' "$new_units_json")
 }
