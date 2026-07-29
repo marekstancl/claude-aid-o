@@ -40,9 +40,11 @@ EOF
 _aid_test_inventory_lock_usage_for_file() {
   local file="$1"
   local entries_json="[]"
-  local line target scope
+  local line trimmed target scope
 
   while IFS= read -r line; do
+    trimmed="$(sed -E 's/^[[:space:]]+//' <<<"$line")"
+    [[ "$trimmed" == \#* ]] && continue
     target="$(grep -oE '"[^"]*"' <<<"$line" | head -1 | tr -d '"')"
     [[ -n "$target" ]] || target="$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     if [[ "$target" == *TEST_TMPDIR* || "$target" == *mktemp* ]]; then

@@ -53,18 +53,44 @@ bats_adapter_discover() {
 #   Statically greps every `@test "..."` line and emits a JSON array of
 #   {test_case_id, name, filter_expression} — diagnostic-only, never used to
 #   compute run_unit_id/fingerprint/selection.
+#
+#   Performance note: slugging is done in ONE jq invocation for the whole
+#   file (jq's own ascii_downcase/gsub), not one jq subprocess per @test line
+#   — an earlier per-line-jq-append version took 30s+ against this repo's own
+#   ~1,610 @test declarations (O(n) subprocess spawns, each reserializing a
+#   growing array). A per-line shell-out (adapter_slug's sha256sum fallback)
+#   now only ever runs for the rare all-punctuation title whose normalized
+#   slug is empty.
 _bats_adapter_test_cases() {
   local file="$1"
-  local cases_json="[]"
-  local line name slug
+  local names_file
+  names_file="$(mktemp)"
+  grep -E '^[[:space:]]*@test[[:space:]]*".*"[[:space:]]*\{[[:space:]]*$' "$file" 2>/dev/null \
+    | sed -E 's/^[[:space:]]*@test[[:space:]]*"(.*)"[[:space:]]*\{[[:space:]]*$/\1/' > "$names_file"
 
-  while IFS= read -r line; do
-    name="$(sed -E 's/^[[:space:]]*@test[[:space:]]*"(.*)"[[:space:]]*\{[[:space:]]*$/\1/' <<<"$line")"
-    [[ -n "$name" ]] || continue
-    slug="$(adapter_slug "$name")"
-    cases_json="$(jq -c --arg id "$slug" --arg name "$name" \
-      '. + [{test_case_id: $id, name: $name, filter_expression: $name}]' <<<"$cases_json")"
-  done < <(grep -E '^[[:space:]]*@test[[:space:]]*".*"[[:space:]]*\{[[:space:]]*$' "$file" 2>/dev/null)
+  local cases_json
+  cases_json="$(jq -Rn '
+    [inputs | select(length > 0) | {
+      test_case_id: (ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("^-+|-+$"; "")),
+      name: .,
+      filter_expression: .
+    }]
+  ' "$names_file")"
+  rm -f "$names_file"
+
+  local empty_count
+  empty_count="$(jq '[.[] | select(.test_case_id == "")] | length' <<<"$cases_json")"
+  if [[ "$empty_count" -gt 0 ]]; then
+    local i count name fixed
+    count="$(jq 'length' <<<"$cases_json")"
+    for ((i = 0; i < count; i++)); do
+      if [[ "$(jq -r ".[$i].test_case_id" <<<"$cases_json")" == "" ]]; then
+        name="$(jq -r ".[$i].name" <<<"$cases_json")"
+        fixed="$(adapter_slug "$name")"
+        cases_json="$(jq -c --arg f "$fixed" --argjson i "$i" '.[$i].test_case_id = $f' <<<"$cases_json")"
+      fi
+    done
+  fi
 
   printf '%s\n' "$cases_json"
 }
