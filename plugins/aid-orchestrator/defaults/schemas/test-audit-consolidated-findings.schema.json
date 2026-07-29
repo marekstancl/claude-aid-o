@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-consolidated-findings.schema.json",
+  "title": "AID Test Portfolio Audit — Consolidated Findings",
+  "$comment": "producer: aid-test-audit-consolidate.sh, consumers: [aid-test-audit-chat-summary.sh, aid-test-audit-write-plan-bridge.sh]",
+  "description": "Deterministic merge of all wave artifacts by stable ID (run_unit_id+category+evidence_refs) — never by prose similarity. Exact duplicates collapse; conflicting recommendations remain visible, tagged unresolved_conflict:true.",
+  "type": "object",
+  "required": ["schema_version", "audit_id", "generated_at", "findings"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "audit_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["finding_id", "run_unit_id", "category", "severity", "evidence_refs", "recommendation", "confidence", "falsification_check"],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Hash of run_unit_id+category — the basis for deterministic dedup/ordering."
+        },
+        "run_unit_id": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 },
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "recommendation": {
+          "type": "string",
+          "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
+        },
+        "owner": { "type": "string" },
+        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "falsification_check": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required for remove/quarantine recommendations — the consolidator rejects a removal/quarantine finding lacking this."
+        },
+        "unresolved_conflict": { "type": "boolean" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "recommendation": { "enum": ["remove", "quarantine"] } } },
+          "then": { "properties": { "falsification_check": { "minLength": 1 } } }
+        }
+      ]
+    }
+  }
+}

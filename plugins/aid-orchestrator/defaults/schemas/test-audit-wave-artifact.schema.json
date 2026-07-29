@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-wave-artifact.schema.json",
+  "title": "AID Test Portfolio Audit — Per-Wave Agent Artifact",
+  "$comment": "producer: controller (one file per dispatched shard/specialist agent, per aid-test-audit-dispatch.sh's manifest), consumers: [aid-test-audit-consolidate.sh, aid-test-audit-state.sh advance_wave validation]",
+  "description": "Raw output of one wave-1/2/3 agent, written to .aid-o/work/test-audits/<audit-id>/agents/<wave>-<focus>[-<shard_id>].json before consolidation. advance_wave halts rather than silently advancing if a wave artifact fails this schema.",
+  "type": "object",
+  "required": ["schema_version", "focus", "wave", "shard_id", "findings", "produced_at", "producer_agent_dispatch_id"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "focus": {
+      "type": "string",
+      "enum": ["shard_portfolio", "performance_cost", "flake_isolation", "parallel_safety", "adversarial_review", "consolidator"]
+    },
+    "wave": { "type": "integer", "minimum": 0, "maximum": 5 },
+    "shard_id": {
+      "type": ["string", "null"],
+      "description": "Only shard_portfolio-focus artifacts are sharded; null for all other focuses."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["run_unit_id", "category", "severity", "evidence_refs", "recommendation", "confidence", "falsification_check"],
+        "properties": {
+          "run_unit_id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "evidence_refs": { "type": "array", "items": { "type": "string" } },
+          "recommendation": {
+            "type": "string",
+            "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
+          },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+          "falsification_check": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "produced_at": { "type": "string", "format": "date-time" },
+    "producer_agent_dispatch_id": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "focus": { "const": "shard_portfolio" } } },
+      "then": { "properties": { "shard_id": { "type": "string", "minLength": 1 } } },
+      "else": { "properties": { "shard_id": { "type": "null" } } }
+    }
+  ]
+}

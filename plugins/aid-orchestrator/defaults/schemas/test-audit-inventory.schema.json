@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-inventory.schema.json",
+  "title": "AID Test Portfolio Audit — Wave-0 Scanner Inventory",
+  "$comment": "producer: aid-test-inventory.sh, consumers: [aid-test-audit-dispatch.sh, aid-test-catalog-selector-snapshot.sh]",
+  "description": "Deterministic, zero-LLM-dispatch scanner output. One entry per adapter-discovered run_unit, with provenance. This is a discovery record, not the catalog itself (aid-test-inventory.sh separately emits test-catalog.proposed.yaml from the same scan).",
+  "type": "object",
+  "required": ["schema_version", "generated_at", "runner_families", "entries"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "runner_families": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["run_unit_id", "runner", "adapter", "confidence"],
+        "properties": {
+          "run_unit_id": { "type": "string", "minLength": 1 },
+          "runner": { "type": "string", "minLength": 1 },
+          "adapter": { "type": "string", "enum": ["bats", "package-script", "declared-command"] },
+          "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+          "isolation": {
+            "type": "object",
+            "properties": {
+              "lock_usage": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["lock_target", "resolved_scope"],
+                  "properties": {
+                    "lock_target": { "type": "string" },
+                    "resolved_scope": { "type": "string" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

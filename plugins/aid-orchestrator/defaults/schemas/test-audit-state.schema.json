@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-state.schema.json",
+  "title": "AID Test Portfolio Audit — Resumable State",
+  "$comment": "producer: aid-test-audit-state.sh, consumers: [aid-audit-tests-cli-parse.sh --resume, aid-test-audit-dispatch.sh]",
+  "description": "Interrupt-safe audit progress record. Wave numbering is fixed and mode-dependent: Wave 0 (scanner, always runs) -> Wave 1 (shard portfolio auditors) -> Wave 2 (cross-cutting performance/flake specialists, skipped — not merely empty — in static mode, since it requires measured data) -> Wave 3 (adversarial review) -> Wave 4 (consolidation) -> Wave 5 (full mode only: deep flake/order/isolation probe).",
+  "type": "object",
+  "required": ["schema_version", "audit_id", "scope", "mode", "status", "budget", "waves_completed", "resume_token"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "audit_id": { "type": "string", "minLength": 1 },
+    "scope": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["static", "measure", "full"] },
+    "status": {
+      "type": "string",
+      "enum": ["discovering", "sharding", "dispatching", "consolidating", "reporting", "done", "interrupted", "failed"]
+    },
+    "budget": {
+      "type": "object",
+      "required": ["minutes"],
+      "properties": {
+        "minutes": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "waves_completed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 6
+    },
+    "resume_token": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "done" }, "mode": { "const": "static" } },
+        "required": ["status", "mode"]
+      },
+      "then": { "properties": { "waves_completed": { "const": 4 } } }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "done" }, "mode": { "const": "measure" } },
+        "required": ["status", "mode"]
+      },
+      "then": { "properties": { "waves_completed": { "const": 5 } } }
+    },
+    {
+      "if": {
+        "properties": { "status": { "const": "done" }, "mode": { "const": "full" } },
+        "required": ["status", "mode"]
+      },
+      "then": { "properties": { "waves_completed": { "const": 6 } } }
+    }
+  ]
+}
