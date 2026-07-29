@@ -30,23 +30,36 @@ bats_adapter_discover() {
   search_root="${search_root%/}"
   [[ -d "$search_root" ]] || { echo "[]"; return 0; }
 
-  local units_json="[]"
-  local file rel run_unit_id command_json test_cases_json source_paths_json unit_json
+  # Linear (NDJSON-buffered) accumulation — PM feedback: repeated
+  # `jq '. + [$u]'` re-serializes the WHOLE growing array on every file,
+  # O(n^2) total. adapter_ndjson_append is O(1) per file; the final
+  # adapter_ndjson_finish slurp is a single O(n) pass.
+  local ndjson_file
+  ndjson_file="$(adapter_ndjson_start)"
+  local file rel rel_escaped run_unit_id command_json test_cases_json source_paths_json unit_json
 
   while IFS= read -r -d '' file; do
     rel="${file#"${project_root%/}"/}"
     run_unit_id="bats:${rel%.bats}"
-    command_json="$(jq -n --arg f "$rel" '{type:"argv", argv:["bats", $f]}')"
+    # Hand-built JSON, not `jq -n` — PM feedback (performance): jq's own
+    # process-startup cost dominates wall-clock time at portfolio scale far
+    # more than its actual work, and this shape is fixed/known ({"type":
+    # "argv","argv":["bats",<f>]}, sorted-key-canonical since "argv" < "type"
+    # alphabetically — matching what `jq -cS` would produce, so
+    # adapter_command_fingerprint never needs to re-canonicalize).
+    rel_escaped="$(adapter_json_escape "$rel")"
+    command_json='{"argv":["bats","'"$rel_escaped"'"],"type":"argv"}'
     test_cases_json="$(_bats_adapter_test_cases "$file")"
-    source_paths_json="$(jq -n --arg f "$rel" '[$f]')"
+    source_paths_json='["'"$rel_escaped"'"]'
     unit_json="$(adapter_run_unit_json "$run_unit_id" "bats" "$command_json" "$test_cases_json" "$source_paths_json" "medium" '["bats"]')" || {
       echo "bats_adapter_discover: fingerprint computation failed for $rel" >&2
+      rm -f "$ndjson_file" 2>/dev/null
       return 1
     }
-    units_json="$(jq -c --argjson u "$unit_json" '. + [$u]' <<<"$units_json")"
+    adapter_ndjson_append "$ndjson_file" "$unit_json"
   done < <(find "$search_root" -type f -name '*.bats' -print0 | sort -z)
 
-  printf '%s\n' "$units_json"
+  adapter_ndjson_finish "$ndjson_file"
 }
 
 # _bats_adapter_test_cases <bats_file>
@@ -69,7 +82,7 @@ _bats_adapter_test_cases() {
     | sed -E 's/^[[:space:]]*@test[[:space:]]*"(.*)"[[:space:]]*\{[[:space:]]*$/\1/' > "$names_file"
 
   local cases_json
-  cases_json="$(jq -Rn '
+  cases_json="$(jq -Rnc '
     [inputs | select(length > 0) | {
       test_case_id: (ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("^-+|-+$"; "")),
       name: .,
@@ -78,9 +91,12 @@ _bats_adapter_test_cases() {
   ' "$names_file")"
   rm -f "$names_file"
 
-  local empty_count
-  empty_count="$(jq '[.[] | select(.test_case_id == "")] | length' <<<"$cases_json")"
-  if [[ "$empty_count" -gt 0 ]]; then
+  # Cheap bash string test instead of a jq subprocess (PM feedback,
+  # performance) — jq's own process-startup cost dominates wall-clock time
+  # at portfolio scale, and this check only needs to detect PRESENCE of an
+  # empty test_case_id, a rare all-punctuation-title edge case. cases_json
+  # is compact (-c above), so the exact-substring match is reliable.
+  if [[ "$cases_json" == *'"test_case_id":""'* ]]; then
     local i count name fixed
     count="$(jq 'length' <<<"$cases_json")"
     for ((i = 0; i < count; i++)); do

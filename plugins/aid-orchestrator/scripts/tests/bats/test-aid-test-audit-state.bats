@@ -115,6 +115,32 @@ teardown() {
   jq -e '.status == "done" and .waves_completed == 4' "$OUTPUT_DIR/audit-state.json" >/dev/null
 }
 
+@test "a document with status:\"corrupt\" (unrecognized enum value) is rejected, never silently advanced to discovering" {
+  # PM-confirmed blocker: an unvalidated read let advance_wave's index
+  # arithmetic (cur_idx=-1 for an unrecognized status, new_idx=0 for
+  # "discovering") coincidentally satisfy "new_idx == cur_idx + 1",
+  # silently treating a CORRUPT status as a valid predecessor of the first
+  # real status. Real schema validation on read must reject this outright.
+  audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 30 >/dev/null
+  jq -c '.status = "corrupt"' "$OUTPUT_DIR/audit-state.json" > "$OUTPUT_DIR/audit-state.json.tmp"
+  mv "$OUTPUT_DIR/audit-state.json.tmp" "$OUTPUT_DIR/audit-state.json"
+
+  run audit_state_advance_wave "$OUTPUT_DIR" "discovering"
+  [ "$status" -ne 0 ]
+  jq -e '.status == "corrupt"' "$OUTPUT_DIR/audit-state.json" >/dev/null
+}
+
+@test "_tas_write_locked refuses to persist a schema-invalid document (e.g. a bad enum value), even mid-transition" {
+  audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 30 >/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-test-adapter-contract.sh"
+  local file="$OUTPUT_DIR/audit-state.json"
+  local bad_json
+  bad_json="$(jq -c '.status = "not-a-real-status"' "$file")"
+  run _tas_write_locked "$file" "$bad_json"
+  [ "$status" -ne 0 ]
+  jq -e '.status == "discovering"' "$file" >/dev/null
+}
+
 @test "mark_done rejects an interrupted document even if its wave count matches the mode's fixed total" {
   audit_state_init "$OUTPUT_DIR" "a1" "repo" "static" 30 >/dev/null
   audit_state_advance_wave "$OUTPUT_DIR" "sharding" >/dev/null

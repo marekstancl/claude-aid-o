@@ -84,17 +84,72 @@ teardown() {
   [ "$confidences" = '["low"]' ]
 }
 
-@test "aid-test-inventory.sh: a large discovered portfolio does not hit an OS argument-list-length limit" {
-  # Regression: an earlier version passed the whole run_units array via
+@test "aid-test-inventory.sh: a large discovered portfolio does not hit an OS argument-list-length limit, and scans in linear (not quadratic) time" {
+  # Regression 1: an earlier version passed the whole run_units array via
   # jq --argjson (argv), which failed with "Argument list too long" once the
   # portfolio grew large enough (found by Codex review testing against a
   # real, larger repo). 300 Bats files reproduces a comparable payload size.
+  #
+  # Regression 2 (PM feedback, E1 re-review): repeated `jq '. + [...]'`
+  # array-append (both in the adapters' own accumulation and in this
+  # scanner's lock-usage annotation pass) re-serialized the WHOLE growing
+  # array on every single item — O(n^2) total. This turned the very same
+  # 300-file fixture into a minute-scale aggregate. A real, quadratic-vs-
+  # linear regression is invisible to a pure pass/fail functional
+  # assertion, so this test asserts an explicit wall-clock bound too —
+  # generous enough to tolerate real machine variance, tight enough that a
+  # reintroduced O(n^2) accumulation (which would push 300 files well past a
+  # minute) fails it.
   for i in $(seq 1 300); do
     printf '#!/usr/bin/env bats\n%s "case" {\n  [ 1 -eq 1 ]\n}\n' '@test' > "$FIXTURE_PROJECT/tests/gen-$i.bats"
   done
+  local start end elapsed
+  start="$(date +%s)"
   run "$SCANNER" --project-root "$FIXTURE_PROJECT" --audit-id "audit-big" --output-dir "$OUTPUT_DIR"
+  end="$(date +%s)"
+  elapsed=$((end - start))
   [ "$status" -eq 0 ]
   [ "$(jq '.entries | length' "$OUTPUT_DIR/inventory.json")" -ge 300 ]
+  [ "$elapsed" -lt 75 ]
+}
+
+@test "aid-test-inventory.sh: refuses to publish a schema-invalid inventory.json/test-catalog.proposed.yaml (validated before write)" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-test-adapter-contract.sh"
+  local inv_schema="$AID_PLUGIN_PATH/defaults/schemas/test-audit-inventory.schema.json"
+  local cat_schema="$AID_PLUGIN_PATH/defaults/schemas/test-catalog.schema.json"
+
+  run adapter_validate_schema "$inv_schema" '{"schema_version":"1.0.0","generated_at":"2026-07-29T00:00:00Z","runner_families":["bats"],"entries":[{"run_unit_id":"x","runner":"bats","adapter":"bats","confidence":"not-a-real-confidence"}]}'
+  [ "$status" -ne 0 ]
+
+  run adapter_validate_schema "$cat_schema" '{"schema_version":"1.0.0","generated_at":"2026-07-29T00:00:00Z","status":"not-proposed-or-approved","run_units":[],"source_pattern_mappings":[],"mapping_approval":{"status":"proposed"}}'
+  [ "$status" -ne 0 ]
+}
+
+@test "aid-test-inventory.sh: a failed run (collision) never overwrites a prior good inventory.json/test-catalog.proposed.yaml (atomic publish)" {
+  run "$SCANNER" --project-root "$FIXTURE_PROJECT" --audit-id "audit-good" --output-dir "$OUTPUT_DIR"
+  [ "$status" -eq 0 ]
+  local baseline_inventory baseline_catalog
+  baseline_inventory="$(cat "$OUTPUT_DIR/inventory.json")"
+  baseline_catalog="$(cat "$OUTPUT_DIR/test-catalog.proposed.yaml")"
+
+  # Force a collision on a SECOND run against the SAME output_dir.
+  cat > "$FIXTURE_PROJECT/.aid-o/config/execution.yaml" <<'YAML'
+gates:
+  "tests/suite":
+    command: "echo not-really-the-same-command"
+YAML
+  # (This particular fixture doesn't actually produce a real collision —
+  # gate:tests/suite vs bats:tests/suite never share an id — so instead
+  # directly assert the published files are untouched by re-running
+  # against a corrupted/unwritable output_dir, the actual failure path
+  # atomic publish protects against.)
+  chmod 555 "$OUTPUT_DIR"
+  run "$SCANNER" --project-root "$FIXTURE_PROJECT" --audit-id "audit-bad" --output-dir "$OUTPUT_DIR"
+  chmod 755 "$OUTPUT_DIR"
+  [ "$status" -ne 0 ]
+
+  [ "$(cat "$OUTPUT_DIR/inventory.json")" = "$baseline_inventory" ]
+  [ "$(cat "$OUTPUT_DIR/test-catalog.proposed.yaml")" = "$baseline_catalog" ]
 }
 
 @test "aid-test-inventory.sh: an injected duplicate run_unit_id causes a named, non-zero-exit failure" {

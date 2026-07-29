@@ -16,6 +16,9 @@
 # strict shell.
 
 _TAS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=aid-test-adapter-contract.sh
+source "${_TAS_LIB_DIR}/aid-test-adapter-contract.sh"
+_TAS_SCHEMA="${_TAS_LIB_DIR}/../../defaults/schemas/test-audit-state.schema.json"
 
 # Fixed status order. A single status name can represent more than one wave
 # for measure/full modes (e.g. "dispatching" covers both Wave 1 and Wave 2,
@@ -39,12 +42,30 @@ _tas_waves_for_mode() {
   esac
 }
 
-# _tas_write_locked <file> <new_json> — tmp-then-mv. Caller MUST already
-# hold the flock. Returns non-zero (and never touches the real file) on any
-# failure — the caller must check this and never report success on a failed
-# write.
+# _tas_read_validated <file> — echoes the current state JSON only if it is
+# both syntactically valid JSON AND schema-valid against
+# test-audit-state.schema.json; returns non-zero (no output) otherwise. PM
+# feedback (E1 re-review): a document with e.g. status:"corrupt" used to
+# pass the old bare `jq -e '.'` syntax check, and advance_wave's index
+# arithmetic (cur_idx=-1, new_idx=0 for "discovering") coincidentally
+# treated an UNRECOGNIZED status as a valid predecessor of the first real
+# status — silently "advancing" a corrupt document. Real schema validation
+# closes that: an unrecognized status enum value is rejected outright.
+_tas_read_validated() {
+  local file="$1"
+  local current
+  current="$(jq -e '.' "$file" 2>/dev/null)" || return 1
+  adapter_validate_schema "$_TAS_SCHEMA" "$current" || return 1
+  printf '%s\n' "$current"
+}
+
+# _tas_write_locked <file> <new_json> — schema-validates, then tmp-then-mv.
+# Caller MUST already hold the flock. Returns non-zero (and never touches
+# the real file) on any failure — the caller must check this and never
+# report success on a failed/invalid write.
 _tas_write_locked() {
   local file="$1" new_json="$2"
+  adapter_validate_schema "$_TAS_SCHEMA" "$new_json" || return 1
   local tmp="${file}.tmp.$$"
   printf '%s\n' "$new_json" > "$tmp" || { rm -f "$tmp" 2>/dev/null; return 1; }
   jq -e '.' "$tmp" >/dev/null 2>&1 || { rm -f "$tmp" 2>/dev/null; return 1; }
@@ -99,7 +120,7 @@ audit_state_advance_wave() {
     flock -w 5 200 || { echo "aid-test-audit-state: could not acquire lock on $lockfile" >&2; exit 1; }
 
     local current current_status mode waves_completed expected idx cur_idx new_idx
-    current="$(jq -e '.' "$file" 2>/dev/null)" || { echo "aid-test-audit-state: no/corrupt state to advance" >&2; exit 1; }
+    current="$(_tas_read_validated "$file")" || { echo "aid-test-audit-state: no/corrupt/schema-invalid state to advance" >&2; exit 1; }
     current_status="$(jq -r '.status' <<<"$current")"
 
     case "$current_status" in
@@ -148,7 +169,7 @@ audit_state_mark_interrupted() {
     flock -w 5 200 || { echo "aid-test-audit-state: could not acquire lock on $lockfile" >&2; exit 1; }
 
     local current current_status
-    current="$(jq -e '.' "$file" 2>/dev/null)" || { echo "aid-test-audit-state: no/corrupt state to interrupt" >&2; exit 1; }
+    current="$(_tas_read_validated "$file")" || { echo "aid-test-audit-state: no/corrupt/schema-invalid state to interrupt" >&2; exit 1; }
     current_status="$(jq -r '.status' <<<"$current")"
     case "$current_status" in
       done|failed|interrupted)
@@ -182,7 +203,7 @@ audit_state_resume() {
     flock -n 200 || { echo "aid-test-audit-state: another resume is already in progress for this audit" >&2; exit 1; }
 
     local current schema_version current_status resume_token
-    current="$(jq -e '.' "$file" 2>/dev/null)" || { echo "aid-test-audit-state: no/corrupt state to resume" >&2; exit 1; }
+    current="$(_tas_read_validated "$file")" || { echo "aid-test-audit-state: no/corrupt/schema-invalid state to resume" >&2; exit 1; }
     schema_version="$(jq -r '.schema_version // empty' <<<"$current")"
     [[ "$schema_version" == "1.0.0" ]] || { echo "aid-test-audit-state: unsupported/missing schema_version" >&2; exit 1; }
 
@@ -227,7 +248,7 @@ audit_state_mark_done() {
     flock -w 5 200 || { echo "aid-test-audit-state: could not acquire lock on $lockfile" >&2; exit 1; }
 
     local current current_status mode waves_completed expected
-    current="$(jq -e '.' "$file" 2>/dev/null)" || { echo "aid-test-audit-state: no/corrupt state to complete" >&2; exit 1; }
+    current="$(_tas_read_validated "$file")" || { echo "aid-test-audit-state: no/corrupt/schema-invalid state to complete" >&2; exit 1; }
     current_status="$(jq -r '.status' <<<"$current")"
     if [[ "$current_status" != "reporting" ]]; then
       echo "aid-test-audit-state: cannot mark done from status '$current_status' (must be 'reporting')" >&2

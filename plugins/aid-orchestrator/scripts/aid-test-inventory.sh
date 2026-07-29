@@ -9,6 +9,13 @@
 # .aid-o/work/test-audits/<audit-id>/ (gitignored, evidence-only — never the
 # tracked .aid-o/config/test-catalog.yaml path).
 #
+# Both emitted artifacts are schema-validated (test-audit-inventory.schema.json
+# / test-catalog.schema.json) BEFORE publish, and published atomically
+# (tmp-file-then-mv, same discipline as aid-gate-runtime-baseline.sh) — a
+# crash/kill mid-write, or a document that fails its own schema, must never
+# leave a partial or invalid artifact at the real path (PM feedback, E1
+# re-review).
+#
 # Usage:
 #   aid-test-inventory.sh --project-root <path> --audit-id <id> \
 #                          --output-dir <dir> [--execution-yaml <path>]
@@ -16,6 +23,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=lib/aid-test-adapter-contract.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
 # shellcheck source=lib/aid-test-adapter-bats.sh
@@ -24,6 +32,9 @@ source "${SCRIPT_DIR}/lib/aid-test-adapter-bats.sh"
 source "${SCRIPT_DIR}/lib/aid-test-adapter-package-script.sh"
 # shellcheck source=lib/aid-test-adapter-declared-command.sh
 source "${SCRIPT_DIR}/lib/aid-test-adapter-declared-command.sh"
+
+INVENTORY_SCHEMA="${PLUGIN_ROOT}/defaults/schemas/test-audit-inventory.schema.json"
+CATALOG_SCHEMA="${PLUGIN_ROOT}/defaults/schemas/test-catalog.schema.json"
 
 _usage() {
   cat <<'EOF'
@@ -61,22 +72,42 @@ _aid_test_inventory_lock_usage_for_file() {
 # _aid_test_inventory_annotate_lock_usage <project_root> <units_json>
 #   For every bats-runner run_unit, statically greps flock/.lock usage in
 #   its underlying file into isolation.lock_usage[].
+#
+#   Linear (NDJSON-buffered), not O(n^2): an earlier version re-read AND
+#   re-wrote the WHOLE units array on every single bats run_unit
+#   (`.[$i].isolation.lock_usage = $lk`), so annotating N files cost O(n^2)
+#   total — the 300-file performance-regression test became a minute-scale
+#   aggregate. Now streams one unit object at a time (each read/write is
+#   O(1) in the array's size) and slurps the final array exactly once.
 _aid_test_inventory_annotate_lock_usage() {
   local project_root="$1" units_json="$2"
-  local count idx runner rel_path abs_path lock_json
-  count="$(jq 'length' <<<"$units_json")"
-  for ((idx = 0; idx < count; idx++)); do
-    runner="$(jq -r ".[$idx].runner" <<<"$units_json")"
-    [[ "$runner" == "bats" ]] || continue
-    rel_path="$(jq -r ".[$idx].source_paths[0] // empty" <<<"$units_json")"
-    [[ -n "$rel_path" ]] || continue
-    abs_path="${project_root%/}/${rel_path}"
-    [[ -f "$abs_path" ]] || continue
-    lock_json="$(_aid_test_inventory_lock_usage_for_file "$abs_path")"
-    units_json="$(jq -c --argjson lk "$lock_json" --argjson i "$idx" \
-      '.[$i].isolation.lock_usage = $lk | .' <<<"$units_json")"
-  done
-  printf '%s\n' "$units_json"
+  local ndjson_file
+  ndjson_file="$(adapter_ndjson_start)"
+  local unit runner rel_path abs_path lock_json meta
+
+  while IFS= read -r unit; do
+    # ONE jq call for BOTH runner and source_paths[0] (tab-separated), not
+    # two — jq's own process-startup cost dominates wall-clock time at
+    # portfolio scale far more than its actual work (PM feedback,
+    # performance). Skips the merge-write entirely for non-bats units and
+    # for bats units with no detected lock usage (isolation.lock_usage is
+    # already "[]" from construction — writing "[]" over "[]" is a no-op).
+    meta="$(jq -r '[.runner, (.source_paths[0] // "")] | @tsv' <<<"$unit")"
+    runner="${meta%%$'\t'*}"
+    rel_path="${meta#*$'\t'}"
+    if [[ "$runner" == "bats" && -n "$rel_path" ]]; then
+      abs_path="${project_root%/}/${rel_path}"
+      if [[ -f "$abs_path" ]]; then
+        lock_json="$(_aid_test_inventory_lock_usage_for_file "$abs_path")"
+        if [[ "$lock_json" != "[]" ]]; then
+          unit="$(jq -c --argjson lk "$lock_json" '.isolation.lock_usage = $lk' <<<"$unit")"
+        fi
+      fi
+    fi
+    adapter_ndjson_append "$ndjson_file" "$unit"
+  done < <(jq -c '.[]' <<<"$units_json")
+
+  adapter_ndjson_finish "$ndjson_file"
 }
 
 project_root="" audit_id="" output_dir="" execution_yaml=""
@@ -122,7 +153,7 @@ if [[ -n "$collisions" ]]; then
   exit 1
 fi
 
-# ─── Emit inventory.json ────────────────────────────────────────────────────
+# ─── Build inventory.json + test-catalog.proposed.yaml (not yet published) ─
 # combined_units can be arbitrarily large (a big monorepo's full portfolio) —
 # passed via a temp file + --slurpfile, never --argjson on argv, which would
 # exceed the OS ARG_MAX for a big enough catalog ("Argument list too long").
@@ -142,9 +173,7 @@ inventory_json="$(jq -n \
     runner_families: $families,
     entries: [$units_wrap[0][] | {run_unit_id, runner, adapter: (.provenance[0] // .runner), confidence, isolation: {lock_usage: .isolation.lock_usage}}]
   }')"
-printf '%s\n' "$inventory_json" > "${output_dir%/}/inventory.json"
 
-# ─── Emit test-catalog.proposed.yaml (always status: proposed) ─────────────
 catalog_json="$(jq -n \
   --arg gen "$generated_at" \
   --slurpfile units_wrap "$units_file" \
@@ -156,7 +185,29 @@ catalog_json="$(jq -n \
     source_pattern_mappings: [],
     mapping_approval: {status: "proposed"}
   }')"
-printf '%s' "$catalog_json" | yq -o=yaml -P '.' > "${output_dir%/}/test-catalog.proposed.yaml"
+catalog_yaml="$(printf '%s' "$catalog_json" | yq -o=yaml -P '.')"
+
+# ─── Validate BEFORE publish — never write an invalid artifact to its real
+# path, even transiently. Fails closed (adapter_validate_schema's own
+# contract) if the validator itself is unavailable.
+if ! adapter_validate_schema "$INVENTORY_SCHEMA" "$inventory_json"; then
+  echo "aid-test-inventory.sh: generated inventory.json failed schema validation — refusing to publish" >&2
+  exit 1
+fi
+if ! adapter_validate_schema "$CATALOG_SCHEMA" "$catalog_json"; then
+  echo "aid-test-inventory.sh: generated test-catalog.proposed.yaml failed schema validation — refusing to publish" >&2
+  exit 1
+fi
+
+# ─── Atomic publish: tmp-file-then-mv for BOTH artifacts, same discipline as
+# aid-gate-runtime-baseline.sh — a crash/kill between the tmp write and the
+# mv leaves the real files exactly as they were (never a torn/partial write).
+inventory_tmp="${output_dir%/}/inventory.json.tmp.$$"
+catalog_tmp="${output_dir%/}/test-catalog.proposed.yaml.tmp.$$"
+printf '%s\n' "$inventory_json" > "$inventory_tmp"
+printf '%s' "$catalog_yaml" > "$catalog_tmp"
+mv "$inventory_tmp" "${output_dir%/}/inventory.json"
+mv "$catalog_tmp" "${output_dir%/}/test-catalog.proposed.yaml"
 
 if [[ "$(jq 'length' <<<"$combined_units")" -eq 0 ]]; then
   echo "aid-test-inventory.sh: empty-portfolio (zero discoverable run_units) — inventory/catalog written, this is not a failure" >&2

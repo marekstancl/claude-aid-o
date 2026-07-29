@@ -25,25 +25,25 @@ _PKGSCRIPT_RUNNER_KEYWORDS='vitest|jest|playwright[[:space:]]+test|pytest|go[[:s
 #   shaped script, plus one per recognizable CI workflow `run:` line.
 package_script_adapter_discover() {
   local project_root="$1"
-  local units_json="[]"
+  local ndjson_file
+  ndjson_file="$(adapter_ndjson_start)"
 
-  units_json="$(_pkgscript_from_package_json "$project_root" "$units_json")"
-  units_json="$(_pkgscript_from_ci_workflows "$project_root" "$units_json")"
+  _pkgscript_from_package_json "$project_root" "$ndjson_file"
+  _pkgscript_from_ci_workflows "$project_root" "$ndjson_file"
 
-  printf '%s\n' "$units_json"
+  adapter_ndjson_finish "$ndjson_file"
 }
 
-# _pkgscript_from_package_json <project_root> <units_json_in>
+# _pkgscript_from_package_json <project_root> <ndjson_file>
+#   Appends each discovered run_unit to <ndjson_file> (linear accumulation —
+#   see adapter_ndjson_append's header for why, PM feedback on E1 re-review).
 _pkgscript_from_package_json() {
-  local project_root="$1" units_json="$2"
+  local project_root="$1" ndjson_file="$2"
   local pkg="${project_root%/}/package.json"
-  [[ -f "$pkg" ]] || { printf '%s\n' "$units_json"; return 0; }
+  [[ -f "$pkg" ]] || return 0
 
   local names
-  names="$(jq -r '.scripts // {} | keys[] | select(test("test"; "i"))' "$pkg" 2>/dev/null)" || {
-    printf '%s\n' "$units_json"
-    return 0
-  }
+  names="$(jq -r '.scripts // {} | keys[] | select(test("test"; "i"))' "$pkg" 2>/dev/null)" || return 0
 
   local name script_value run_unit_id command_json unit_json
   while IFS= read -r name; do
@@ -53,10 +53,8 @@ _pkgscript_from_package_json() {
     command_json="$(_pkgscript_command_json "npm" "run" "$name")"
     unit_json="$(adapter_run_unit_json "$run_unit_id" "package-script" "$command_json" "[]" \
       "$(jq -n --arg p "package.json" '[$p]')" "medium" '["package-script"]')" || continue
-    units_json="$(jq -c --argjson u "$unit_json" '. + [$u]' <<<"$units_json")"
+    adapter_ndjson_append "$ndjson_file" "$unit_json"
   done <<<"$names"
-
-  printf '%s\n' "$units_json"
 }
 
 # _pkgscript_command_json <argv...> — always argv-type for npm-run invocations
@@ -121,9 +119,9 @@ _pkgscript_extract_run_entries() {
 #   multiple runner keywords splits into multiple entries (edge case from
 #   Step 3's plan text).
 _pkgscript_from_ci_workflows() {
-  local project_root="$1" units_json="$2"
+  local project_root="$1" ndjson_file="$2"
   local wf_dir="${project_root%/}/.github/workflows"
-  [[ -d "$wf_dir" ]] || { printf '%s\n' "$units_json"; return 0; }
+  [[ -d "$wf_dir" ]] || return 0
 
   local file rel job_index=0 line line_real run_unit_id command_json unit_json rel_json
 
@@ -140,10 +138,8 @@ _pkgscript_from_ci_workflows() {
         rel_json="$(jq -n --arg r "$rel" '[$r]')"
         unit_json="$(adapter_run_unit_json "$run_unit_id" "ci" "$command_json" "[]" \
           "$rel_json" "low" '["package-script"]')" || continue
-        units_json="$(jq -c --argjson u "$unit_json" '. + [$u]' <<<"$units_json")"
+        adapter_ndjson_append "$ndjson_file" "$unit_json"
       done < <(grep -oE "$_PKGSCRIPT_RUNNER_KEYWORDS" <<<"$line" | sort -u)
     done < <(_pkgscript_extract_run_entries "$file")
   done < <(find "$wf_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | sort -z)
-
-  printf '%s\n' "$units_json"
 }

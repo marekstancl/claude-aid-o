@@ -48,7 +48,8 @@ declared_command_adapter_discover() {
   # passed pretty-printed JSON (jq's default -n output).
   local result_json
   result_json="$(jq -c '.' <<<"$existing_json" 2>/dev/null)" || result_json="$existing_json"
-  local new_units_json="[]"
+  local new_units_ndjson
+  new_units_ndjson="$(adapter_ndjson_start)"
   local gate_name gate_command run_unit_id command_json unit_json has_match
 
   # while-read (not `for x in $(...)`) — a gate name is a valid YAML map key
@@ -75,8 +76,10 @@ declared_command_adapter_discover() {
 
     unit_json="$(adapter_run_unit_json "$run_unit_id" "declared-command" "$command_json" "[]" \
       "$(jq -n --arg f "$config_rel_path" '[$f]')" "high" '["declared-command"]')" || continue
-    new_units_json="$(jq -c --argjson u "$unit_json" '. + [$u]' <<<"$new_units_json")"
+    adapter_ndjson_append "$new_units_ndjson" "$unit_json"
   done < <(jq -r 'keys[]' <<<"$gates_json" 2>/dev/null)
 
+  local new_units_json
+  new_units_json="$(adapter_ndjson_finish "$new_units_ndjson")"
   jq -c -s 'add' <(printf '%s' "$result_json") <(printf '%s' "$new_units_json")
 }
