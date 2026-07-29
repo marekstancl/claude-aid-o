@@ -55,6 +55,43 @@ either refuses the run or requires a namespaced target ref or a genuinely
 separate clone. A dogfood that can move the real target branch is not isolated,
 however carefully its commits are kept apart.
 
+### NEW — IMP-281: `docs_updated` must not manufacture a documentation pass
+
+**Status:** idea — reported from WAN; reproduce against the active project
+configuration before implementation
+**Priority:** high
+**Class:** false-green enforcement / documentation contract
+**Area:** gate definition, plan-to-gate reconciliation and final reporting
+
+**Summary:** A WAN execution configuration currently defines the required
+`docs_updated` gate with a literal `true` command. The gate therefore reports
+pass without inspecting documentation, changed surfaces or any documented
+disposition. This is distinct from, and must be fixed together with,
+OBS-20260702-05: that older failure silently dropped a plan-declared
+`docs_updated` gate when no definition existed; this newer variant supplies a
+definition that is a no-op and can fabricate the same green conclusion.
+
+**Why it matters:** `docs_updated: pass` is read by people and downstream
+evidence as a claim that documentation relevance was checked. A literal no-op
+has no such evidence. Renaming it "advisory" while retaining a pass result
+would still be misleading. This is another instance of the AID principle
+"Detector without Enforcement is Decoration": a declared documentation control
+is either silently absent or mechanically incapable of detecting anything.
+
+**Proposed change:** design one explicit documentation-disposition contract,
+for example `updated | verified_no_scope | deferred`, bound to changed surfaces
+and plan/Files evidence. The runner must reject an undefined declared gate and
+must never serialize a no-op `docs_updated` result as verification. Do **not**
+replace it with a naive "a docs diff must exist" grep: legitimate code changes
+may have no documentation scope, while a changed Markdown file alone does not
+prove relevant documentation is complete. Until the contract exists, reports
+must label the current check as unverified/placeholder rather than passed.
+
+**Required reproduction before planning:** capture the exact active
+`execution.yaml` definition, its `gates_report.json` row and the consuming
+final/delivery report from the WAN run; confirm whether the gate is `required`
+or advisory and whether any profile can reinterpret the result.
+
 ---
 
 ## Improvement items

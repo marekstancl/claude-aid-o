@@ -26,7 +26,7 @@ the manual EPIC-generation-integrity maintenance package, then P066.
 | Accepted waivers | `bats_all` quarantine, `plan_diff` quarantine, CP3 revision disagreement |
 | C3 | real plan AC source proven; final result `unverifiable`, zero findings, targeted receipt not consumable by the sealed manifest |
 | IMP-266 | **RESOLVED — PM ratified Option B (2026-07-24)**: `merged_to_plan` stays terminal; wrong entries corrected via the documented recovery ceremony (`IMP-266-merged-to-plan-recovery-CEREMONY.md`), doc-only, no code edge; Option A deferred to P068+ |
-| Next work | **EPIC-generation integrity maintenance** (manual, isolated branch), then P066 test portfolio/scheduler |
+| Next work | Phase 4 (EPIC-generation integrity maintenance) is DONE. P066's first executable draft (audit+scheduler combined) exhausted 3 real Codex C0 rounds (2026-07-28) — the scheduler/gate-integration half never actually wired into `aid-run-gates.sh`/`aid-select-tests.sh`/the real `/aid-init` config path. PM split it: `.aid-o/plans/P066-test-portfolio-audit-capability.md` (audit-only, standalone value) + `.aid-o/plans/P069-scheduler-gate-integration.md` (`depends_on_plans:[P066]`, real gate-runner/config-path integration). **P066: 1 real C0 round, 6 findings, all fixed, clean.** **P069: 4 real C0 rounds (round 4 via explicit PM override after budget exhaustion), 8→7→6→5 findings each fixed; PM stopped after round 4** — lint/dependency-graph clean, but P069 still cites P066 artifacts that don't exist until P066 merges (an inherent, documented risk, not hidden). Both plans await PM review before `/aid-plan epic`; P069 additionally needs re-grounding against P066's real merged contract once P066 closes. |
 
 The E-064-2_2 Curator used provisional labels `IMP-270…IMP-279` from a task
 branch that did not contain the canonical backlog update. Canonical `IMP-270`
@@ -273,9 +273,21 @@ override, while an invalid or later-divergent graph fails closed.
 
 P066 is currently an interim specification, not an executable plan.
 
-- [ ] Convert
-  `.aid-o/work/interim-P066-test-portfolio-audit-and-parallel-execution.md`
-  into a grounded executable plan.
+- [x] Ground the interim brief against current main and produce a reviewable
+  roadmap: `docs/plans/P066-test-portfolio-audit-scheduler-remediation.md`
+  (2026-07-28). Confirms/corrects the interim brief's claims with file:line
+  evidence (test entry point inventory, `bats_all`/`plan_diff` root causes,
+  P061/P063 reuse surfaces, `/aid-init` distribution mechanism), fixes the
+  EPIC decomposition and quarantine exit criteria, and lists open PM
+  decisions (O1-O5: incident root cause, the unverified "34 min" figure, the
+  20-min p95 target, catalog/selector ownership, new-agent-card direction).
+  Independently adversarially reviewed before hand-off (8 findings, all
+  corrected: sample-count/line-count fixes, the `plan_diff`-vs-`bats_all`
+  quarantine-mechanism distinction, a CI-delegated-jobs count fix, a config-
+  key-rename flag). No code changed, no `/aid-run`, no EPICs, no quarantine
+  policy change — this is prerequisite grounding only.
+- [ ] PM reviews the roadmap and O1-O5; on approval, convert it via
+  `/aid-plan write` into a grounded executable plan.
 - [ ] Explicitly include both `bats_all` and `plan_diff` as primary incidents.
 - [ ] Inventory every configured test entry point and stable test identity.
 - [ ] Prove which tests protect real behavior and which are duplicate, stale,
