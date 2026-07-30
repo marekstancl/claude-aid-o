@@ -487,6 +487,22 @@ Config defaults installation:
 
 **What the registry does:** Maps each compliance check to either `severity: blocking` (cmd_done_advance refuses to advance review→release without `--force`) or `severity: advisory` (logged in `compliance.json failures[]` but does not block). See `skills/pipeline.md` §7 and `docs/plans/AID-v3-principles.md` §1 for the tiered-severity rationale.
 
+### test-audit.yaml (test portfolio audit config — P066)
+
+1. **Source template:** `{plugin_path}/defaults/config/test-audit.yaml`
+2. **Target:** `.aid-o/config/test-audit.yaml`
+3. **Logic:**
+   - If target does NOT exist → copy template
+   - If target exists → **skip** (do not overwrite; PM may have customized `budget_minutes_default`, `max_read_only_audit_agents`, or `allowed_runners`)
+
+```
+Config defaults installation:
+  [INSTALLED] .aid-o/config/test-audit.yaml — test portfolio audit config (new)
+  [EXISTS]    .aid-o/config/test-audit.yaml — keeping existing (PM customizations preserved)
+```
+
+**What the config does:** Read by `/aid-audit-tests` (`aid-test-audit-config.sh`'s `load_test_audit_config`) for its budget/agent-concurrency/allowed-runner defaults. The distributed template's values are byte-identical to the loader's own hardcoded defaults, so a project's `/aid-audit-tests` behavior is unchanged whether or not `/aid-init` has run since this plan shipped.
+
 ### Optional: Plan Boundary CI Check
 
 - **Plan boundary CI check** (optional): Copy `defaults/ci/plan-boundary-required-check.yml` to `.github/workflows/` to enforce the boundary manifest check on PRs. Run `/aid-audit` to verify installation status.

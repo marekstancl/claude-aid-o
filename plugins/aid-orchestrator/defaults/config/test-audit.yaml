@@ -1,0 +1,19 @@
+# .aid-o/config/test-audit.yaml — P066 Step 18.
+#
+# Project-level config for /aid-audit-tests. Values below are byte-identical
+# to aid-test-audit-config.sh's own hardcoded defaults (Step 5) — a
+# project's behavior is identical whether or not it has run /aid-init since
+# this plan shipped. Installed copy-if-absent by /aid-init; never
+# overwritten on re-run (PM customizations preserved).
+#
+# resource_locks / scheduler are reserved for P069 (depends_on_plans:[P066])
+# so that plan doesn't need a second schema revision — this plan never
+# reads or writes them.
+
+budget_minutes_default: 30
+max_read_only_audit_agents: 4
+allowed_runners:
+  - bats
+  - package-script
+  - declared-command
+  - ci
