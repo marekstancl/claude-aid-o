@@ -181,6 +181,77 @@ YAML
   [[ "$dispatched_ids" == *"gate:lint"* ]]
 }
 
+@test "--audit-id path traversal ('../escape') is rejected outright — never reaches the manifest" {
+  # PM-confirmed blocker: --audit-id '../escape' previously passed straight
+  # through into artifact_path (".aid-o/work/test-audits/../escape/...").
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id '../escape'
+  [ "$status" -ne 0 ]
+  [ ! -f "$OUTPUT_DIR/dispatch-manifest.json" ]
+}
+
+@test "--audit-id with a slash, whitespace, or empty value is rejected outright" {
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id 'a/b'
+  [ "$status" -ne 0 ]
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id 'has space'
+  [ "$status" -ne 0 ]
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id ''
+  [ "$status" -ne 0 ]
+}
+
+@test "a valid --audit-id still produces a correctly-scoped manifest (no regression)" {
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id 'valid-audit-123'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'any(.entries[]; .artifact_path | startswith(".aid-o/work/test-audits/valid-audit-123/"))' >/dev/null
+}
+
+@test "allowed_runners filtering out the ENTIRE catalog fails closed, naming counts/runners — never a false-green zero-portfolio manifest" {
+  # PM-confirmed blocker: this previously exited 0 and produced a manifest
+  # containing only Wave 3 (adversarial_review) over zero shards — a
+  # false-green 'audit ran successfully' despite analyzing nothing.
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/config"
+  cat > "$TEST_PROJECT_ROOT/.aid-o/config/test-audit.yaml" <<'YAML'
+budget_minutes_default: 30
+max_read_only_audit_agents: 4
+allowed_runners: [npm]
+YAML
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --project-root "$TEST_PROJECT_ROOT" --audit-id a12
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"filtered out the ENTIRE catalog"* ]]
+  [[ "$output" == *"allowed_runners"* ]]
+  [ ! -f "$OUTPUT_DIR/dispatch-manifest.json" ]
+}
+
+@test "a genuinely empty catalog (nothing discovered at all) is NOT treated as the filtered-to-empty failure" {
+  local empty_catalog="$TEST_TMPDIR/empty-catalog.json"
+  jq -n '{schema_version:"1.0.0", generated_at:"2026-07-30T00:00:00Z", status:"proposed", run_units:[], source_pattern_mappings:[], mapping_approval:{status:"proposed"}}' > "$empty_catalog"
+  run "$DISPATCH" --catalog "$empty_catalog" --output-dir "$OUTPUT_DIR" --mode static --audit-id a13
+  [ "$status" -eq 0 ]
+}
+
+@test "every value-taking option fails loudly (exit 2) instead of crashing bash's own unbound-variable check when its value is missing" {
+  # PM-confirmed blocker: `--catalog` as the last argument crashed with
+  # "line N: \$2: unbound variable" under set -u instead of a controlled
+  # exit-2 failure.
+  run "$DISPATCH" --catalog
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--catalog requires a value"* ]]
+
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir
+  [ "$status" -eq 2 ]
+
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode
+  [ "$status" -eq 2 ]
+
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --max-agents
+  [ "$status" -eq 2 ]
+
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --project-root
+  [ "$status" -eq 2 ]
+
+  run "$DISPATCH" --catalog "$CATALOG" --output-dir "$OUTPUT_DIR" --mode static --audit-id
+  [ "$status" -eq 2 ]
+}
+
 @test "max-agents ceiling is independent of dispatch.max_parallel / dispatch.worktrees.max_parallel" {
   ! grep -q "dispatch\.max_parallel\|dispatch\.worktrees\.max_parallel" "$DISPATCH"
 }

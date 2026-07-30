@@ -36,6 +36,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/aid-test-audit-config.sh
 source "${SCRIPT_DIR}/lib/aid-test-audit-config.sh"
+# shellcheck source=lib/aid-test-adapter-contract.sh
+source "${SCRIPT_DIR}/lib/aid-test-adapter-contract.sh"
 
 PROMPTS_DIR="$(cd "${SCRIPT_DIR}/../defaults/prompts" && pwd)"
 SCHEMAS_DIR="$(cd "${SCRIPT_DIR}/../defaults/schemas" && pwd)"
@@ -73,14 +75,20 @@ max_agents=""
 project_root="$(pwd)"
 audit_id="audit"
 
+# Every value-taking option checks `$# -ge 2` before consuming an operand —
+# under `set -u`, reading `$2` past the end of argv is an unbound-variable
+# error that crashes the script with no diagnostic (PM-confirmed blocker:
+# `--catalog` as the last/only argument), not the controlled exit-2 failure
+# this script's own contract requires. Matches aid-audit-tests-cli-parse.sh
+# (Step 8)'s established idiom.
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --catalog) catalog="$2"; shift 2 ;;
-    --output-dir) output_dir="$2"; shift 2 ;;
-    --mode) mode="$2"; shift 2 ;;
-    --max-agents) max_agents="$2"; shift 2 ;;
-    --project-root) project_root="$2"; shift 2 ;;
-    --audit-id) audit_id="$2"; shift 2 ;;
+    --catalog) [[ $# -ge 2 ]] || _die 2 "--catalog requires a value"; catalog="$2"; shift 2 ;;
+    --output-dir) [[ $# -ge 2 ]] || _die 2 "--output-dir requires a value"; output_dir="$2"; shift 2 ;;
+    --mode) [[ $# -ge 2 ]] || _die 2 "--mode requires a value"; mode="$2"; shift 2 ;;
+    --max-agents) [[ $# -ge 2 ]] || _die 2 "--max-agents requires a value"; max_agents="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || _die 2 "--project-root requires a value"; project_root="$2"; shift 2 ;;
+    --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
 done
@@ -88,6 +96,11 @@ done
 [[ -n "$catalog" && -f "$catalog" ]] || _die 2 "--catalog is required and must exist"
 [[ -n "$output_dir" ]] || _die 2 "--output-dir is required"
 case "$mode" in static|measure|full) ;; *) _die 2 "--mode must be one of static|measure|full" ;; esac
+# PM-confirmed blocker: `--audit-id '../escape'` previously passed straight
+# through into a manifest artifact_path, letting a controller be led to
+# write outside the audit root. Validated BEFORE anything else runs.
+adapter_validate_audit_id "$audit_id" \
+  || _die 2 "--audit-id '$audit_id' is invalid (must match ^[A-Za-z0-9_-]+\$ — no '/', '..', or whitespace)"
 
 config_json="$(load_test_audit_config "$project_root")" || _die 1 "could not load audit config"
 if [[ -z "$max_agents" ]]; then
@@ -105,8 +118,24 @@ esac
 # governs which runner families this audit dispatches against at all
 # (Codex review: an earlier version loaded allowed_runners but never used
 # it, making a project's real override ineffective).
+catalog_run_units_json="$(jq -c '.run_units' <<<"$catalog_json")"
 run_units_json="$(jq -c --argjson allowed "$allowed_runners_json" \
-  'map(select(.runner as $r | $allowed | index($r) != null))' <<<"$(jq -c '.run_units' <<<"$catalog_json")")"
+  'map(select(.runner as $r | $allowed | index($r) != null))' <<<"$catalog_run_units_json")"
+
+# Fail closed, never a false-green empty-portfolio audit: PM-confirmed
+# blocker — an earlier version happily produced (and the controller would
+# have dispatched) a Wave 3 adversarial-review manifest over ZERO shards
+# when allowed_runners filtered out every catalog run_unit, looking exactly
+# like a completed, clean audit despite analyzing nothing. Named error
+# instead, citing the exact counts so a PM can immediately see whether the
+# catalog or the config is wrong.
+catalog_unit_count="$(jq 'length' <<<"$catalog_run_units_json")"
+filtered_unit_count="$(jq 'length' <<<"$run_units_json")"
+if [[ "$catalog_unit_count" -gt 0 && "$filtered_unit_count" -eq 0 ]]; then
+  catalog_runners="$(jq -r '[.[].runner] | unique | join(", ")' <<<"$catalog_run_units_json")"
+  allowed_runners_list="$(jq -r 'join(", ")' <<<"$allowed_runners_json")"
+  _die 1 "allowed_runners filtered out the ENTIRE catalog ($catalog_unit_count run_units, runners: [$catalog_runners]) against allowed_runners: [$allowed_runners_list] — refusing to dispatch a false-green, zero-portfolio audit"
+fi
 
 # ─── Wave 1: partition run_units into <= max_agents non-overlapping shards ──
 # Initial grouping: runner + top-level directory of the first source_path.
@@ -199,7 +228,12 @@ entries_json="$(jq -n \
 # point could not actually dispatch a usable prompt. Every entry now carries
 # a real rendered_prompt_path produced here.
 mkdir -p "$output_dir"
-rendered_dir="${output_dir%/}/rendered-prompts"
+# Canonicalize ONCE here and use this form for every downstream path built
+# from output_dir — a relative/symlinked --output-dir would otherwise make
+# the later path-containment check (string prefix match) compare a relative
+# rendered_prompt_path against an absolute canonical root and always fail.
+output_dir="$(cd "$output_dir" && pwd -P)"
+rendered_dir="${output_dir}/rendered-prompts"
 mkdir -p "$rendered_dir"
 
 wave1_and_2_artifact_paths="$(jq -r '[.[] | select(.wave == 1 or .wave == 2) | .artifact_path] | join(",")' <<<"$entries_json")"
@@ -273,6 +307,19 @@ for ((i = 0; i < entry_count; i++)); do
 done
 
 final_entries_json="$(jq -cs '.' "$final_ndjson")"
+
+# ─── Path-containment verification (defense-in-depth beyond audit_id's own
+# regex validation) — PM-required: canonicalize and prove every
+# artifact_path and rendered_prompt_path resolves inside the audit/output
+# root before the manifest is ever published, not merely trust that
+# audit_id validation upstream was sufficient.
+audit_root_prefix=".aid-o/work/test-audits/${audit_id}/"
+bad_path="$(jq -r --arg prefix "$audit_root_prefix" --arg out_root "$output_dir" '
+  .[] | select((.artifact_path | startswith($prefix) | not) or (.rendered_prompt_path | startswith($out_root + "/") | not)) | .artifact_path
+' <<<"$final_entries_json" | head -1)"
+if [[ -n "$bad_path" ]]; then
+  _die 1 "internal error: entry path escapes the audit/output root: $bad_path"
+fi
 
 manifest_json="$(jq -n --argjson max "$max_agents" --argjson entries "$final_entries_json" \
   '{max_concurrent_agents: $max, entries: $entries}')"

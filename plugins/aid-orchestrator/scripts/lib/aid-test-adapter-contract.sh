@@ -35,6 +35,19 @@ adapter_supports_filter() {
   esac
 }
 
+# adapter_validate_audit_id <audit_id> — the ONE canonical, fail-closed
+# audit_id format shared by every script that builds a filesystem path from
+# it (aid-test-audit-state.sh, aid-test-audit-dispatch.sh, ...). Only
+# `[A-Za-z0-9_-]`, non-empty — this already excludes `/`, `..`, and
+# whitespace, so a validated audit_id can never escape
+# `.aid-o/work/test-audits/<audit_id>/` via path traversal. PM-confirmed
+# blocker: `--audit-id '../escape'` previously passed straight through into
+# a manifest's artifact_path.
+adapter_validate_audit_id() {
+  local id="$1"
+  [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]]
+}
+
 # adapter_json_escape <text> — minimal, pure-bash JSON string escaping
 # (backslash, double-quote, newline, tab). PM feedback (performance): avoids
 # a jq subprocess spawn (jq's own process-startup cost dominates wall-clock

@@ -114,6 +114,27 @@ teardown() {
   [ "$status" -eq 3 ]
 }
 
+@test "a nonexistent --project-root fails loudly (exit code 10) even with the default repo scope" {
+  # PM-confirmed blocker: project_root existence was previously checked
+  # only for path:/runner: scopes — the default "repo" scope silently
+  # accepted a nonexistent project root.
+  run "$PARSER" --project-root "$TEST_TMPDIR/no/such/directory"
+  [ "$status" -eq 10 ]
+  [[ "$output" == *"does not exist"* ]]
+}
+
+@test "a valid, existing --project-root is returned canonical in the result JSON" {
+  # PM-confirmed blocker: project_root was never returned in the output at
+  # all, so a downstream controller had no guaranteed value to pass to the
+  # scanner/dispatch/measurement steps.
+  run "$PARSER" --project-root "$FIXTURE_PROJECT"
+  [ "$status" -eq 0 ]
+  local returned_root canonical_root
+  returned_root="$(echo "$output" | jq -r '.project_root')"
+  canonical_root="$(cd "$FIXTURE_PROJECT" && pwd -P)"
+  [ "$returned_root" = "$canonical_root" ]
+}
+
 @test "--write-plan and --resume are parsed correctly" {
   run "$PARSER" --project-root "$FIXTURE_PROJECT" --write-plan --resume "audit-123"
   [ "$status" -eq 0 ]

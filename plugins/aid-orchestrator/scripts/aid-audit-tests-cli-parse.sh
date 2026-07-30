@@ -25,6 +25,9 @@
 #   7  --budget-minutes is not a positive integer
 #   8  --repeat is not a positive integer
 #   9  --mode is not one of static|measure|full
+#   10 --project-root does not exist (or is not a directory) — checked
+#      regardless of scope, since every later step (scanner, dispatch,
+#      measurement) resolves paths against it
 
 set -euo pipefail
 
@@ -125,6 +128,15 @@ if [[ -n "$repeat" ]]; then
   [[ "$repeat" =~ ^[1-9][0-9]*$ ]] || _die 8 "--repeat must be a positive integer, got '$repeat'"
 fi
 
+# PM-confirmed blocker: project_root existence was previously checked only
+# for path:/runner: scopes, so `--project-root /nonexistent` with the
+# DEFAULT "repo" scope silently succeeded — leaving the controller with no
+# guarantee about which (possibly nonexistent) project the scanner/dispatch
+# would then run against. Checked and canonicalized here, unconditionally,
+# regardless of scope.
+resolved_root="$(cd "$project_root" 2>/dev/null && pwd -P)" || _die 10 "--project-root '$project_root' does not exist (or is not a directory)"
+project_root="$resolved_root"
+
 case "$scope" in
   path:*)
     scope_path="${scope#path:}"
@@ -135,9 +147,8 @@ case "$scope" in
     # itself, and never a `path:../sibling` escape outside it (Codex
     # review: a `-e` check alone accepted files, the project root, and
     # sibling directories outside the project).
-    resolved_root="$(cd "$project_root" 2>/dev/null && pwd -P)" || _die 3 "project root '$project_root' does not exist"
     resolved_scope="$(cd "$abs_scope_path" 2>/dev/null && pwd -P)" || _die 3 "scope path '$scope_path' could not be resolved"
-    [[ "$resolved_scope" != "$resolved_root" && "$resolved_scope" == "$resolved_root"/* ]] \
+    [[ "$resolved_scope" != "$project_root" && "$resolved_scope" == "$project_root"/* ]] \
       || _die 3 "scope path '$scope_path' resolves outside project root '$project_root'"
     ;;
   runner:*)
@@ -150,6 +161,9 @@ case "$scope" in
     ;;
 esac
 
+# project_root is returned CANONICAL in every result — the command contract
+# (commands/aid-audit-tests.md) states every later step (scanner, dispatch,
+# measurement) uses exactly this value, never re-resolves its own.
 jq -n \
   --arg scope "$scope" \
   --arg mode "$mode" \
@@ -158,6 +172,7 @@ jq -n \
   --arg repeat "$repeat" \
   --arg write_plan "$write_plan" \
   --arg resume_id "$resume_id" \
+  --arg project_root "$project_root" \
   '{
     scope: $scope,
     mode: $mode,
@@ -165,5 +180,6 @@ jq -n \
     max_agents: (if $max_agents == "" then null else ($max_agents | tonumber) end),
     repeat: (if $repeat == "" then null else ($repeat | tonumber) end),
     write_plan: ($write_plan == "true"),
-    resume_id: (if $resume_id == "" then null else $resume_id end)
+    resume_id: (if $resume_id == "" then null else $resume_id end),
+    project_root: $project_root
   }'

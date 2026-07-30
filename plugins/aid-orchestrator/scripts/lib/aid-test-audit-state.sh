@@ -82,6 +82,10 @@ audit_state_init() {
   local output_dir="$1" audit_id="$2" scope="$3" mode="$4" budget_minutes="$5"
   local file lockfile new_json
 
+  if ! adapter_validate_audit_id "$audit_id"; then
+    echo "aid-test-audit-state: invalid audit_id '$audit_id' (must match ^[A-Za-z0-9_-]+\$ — no '/', '..', or whitespace)" >&2
+    return 1
+  fi
   if [[ "$(_tas_waves_for_mode "$mode")" == "-1" ]]; then
     echo "aid-test-audit-state: invalid mode '$mode' (must be static|measure|full)" >&2
     return 1

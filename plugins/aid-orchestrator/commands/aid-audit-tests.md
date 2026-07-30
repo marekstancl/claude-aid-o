@@ -49,9 +49,13 @@ and ends every run with a mandatory plain-language chat recommendation.
 The command file documents this contract; it performs no validation itself. The
 controller invokes the real, deterministic parser
 (`scripts/aid-audit-tests-cli-parse.sh`) first — every malformed input (unknown
-option, nonexistent scope, missing `--budget-minutes` for `full`, `--max-agents 0`,
-an unrecognized `runner:<id>`) fails loudly with a distinct exit code, never
-silently defaulted.
+option, nonexistent project root, nonexistent scope, missing `--budget-minutes`
+for `full`, `--max-agents 0`, an unrecognized `runner:<id>`) fails loudly with a
+distinct exit code, never silently defaulted. The parser's JSON output includes
+the resolved, canonical `project_root` — **every later step in this command
+(the scanner, the dispatch manifest, the measurement runner) MUST use this
+exact value**, never re-resolve or re-derive their own; this is what makes the
+parser's own project-root validation load-bearing rather than advisory.
 
 ## What it does
 
