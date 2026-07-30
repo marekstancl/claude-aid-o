@@ -118,12 +118,27 @@ _tas_expected_focuses_for_status() {
   esac
 }
 
+# _tas_expected_wave_number_for_status <status> — the fixed NUMERIC `wave`
+# every wave-artifact schema instance carries. Checking focus alone is not
+# enough (Codex review, EPIC 2 whole-diff): a schema-valid artifact with
+# focus:"shard_portfolio" but wave:2 would still pass a focus-only check
+# while advancing "sharding" — the numeric wave must match too.
+_tas_expected_wave_number_for_status() {
+  case "$1" in
+    sharding) echo "1" ;;
+    dispatching) echo "2" ;;
+    consolidating) echo "3" ;;
+    *) echo "" ;;
+  esac
+}
+
 # _tas_validate_wave_artifact_file <path> <new_status>
 #   Validates one wave-artifact JSON file against
-#   test-audit-wave-artifact.schema.json (Step 1) AND that its `focus`
-#   matches what THIS phase transition expects — not merely that it is SOME
-#   valid artifact. Returns non-zero (named error on stderr) if the file is
-#   missing, unparseable, schema-invalid, or focus-mismatched.
+#   test-audit-wave-artifact.schema.json (Step 1) AND that both its `focus`
+#   AND its numeric `wave` match what THIS phase transition expects — not
+#   merely that it is SOME valid artifact for a plausible-looking focus.
+#   Returns non-zero (named error on stderr) if the file is missing,
+#   unparseable, schema-invalid, or focus/wave-mismatched.
 _tas_validate_wave_artifact_file() {
   local path="$1" new_status="$2"
   [[ -f "$path" ]] || { echo "aid-test-audit-state: wave artifact missing: $path" >&2; return 1; }
@@ -142,6 +157,16 @@ _tas_validate_wave_artifact_file() {
     done
     if [[ "$match" -eq 0 ]]; then
       echo "aid-test-audit-state: wave artifact $path has focus '$artifact_focus', but advancing to '$new_status' expects one of: $expected_focuses" >&2
+      return 1
+    fi
+  fi
+
+  local expected_wave artifact_wave
+  expected_wave="$(_tas_expected_wave_number_for_status "$new_status")"
+  if [[ -n "$expected_wave" ]]; then
+    artifact_wave="$(jq -r '.wave' <<<"$artifact")"
+    if [[ "$artifact_wave" != "$expected_wave" ]]; then
+      echo "aid-test-audit-state: wave artifact $path has wave $artifact_wave, but advancing to '$new_status' expects wave $expected_wave" >&2
       return 1
     fi
   fi

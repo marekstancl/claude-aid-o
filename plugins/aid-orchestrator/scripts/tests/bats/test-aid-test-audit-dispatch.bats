@@ -218,6 +218,20 @@ YAML
   jq -e '.status == "discovering"' "$OUTPUT_DIR/audit-state.json" >/dev/null
 }
 
+@test "a schema-valid artifact with the RIGHT focus but WRONG numeric wave is rejected, not silently accepted" {
+  # Regression (Codex review, EPIC 2 whole-diff): checking focus alone let a
+  # schema-valid artifact with focus:"shard_portfolio" but wave:2 pass while
+  # advancing "sharding" (which expects wave 1) — a stale or incorrectly
+  # produced artifact could falsely record completion of the wrong wave.
+  audit_state_init "$OUTPUT_DIR" "a1" "repo" "measure" 30 >/dev/null
+  local wrong_wave_number_artifact="$TEST_TMPDIR/1-shard_portfolio-wrong-wave.json"
+  jq -n '{schema_version:"1.0.0", focus:"shard_portfolio", wave:2, shard_id:"shard-0", findings:[], produced_at:"2026-07-30T00:00:00Z", producer_agent_dispatch_id:"d1"}' > "$wrong_wave_number_artifact"
+  run audit_state_advance_wave "$OUTPUT_DIR" "sharding" "$wrong_wave_number_artifact"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"expects wave 1"* ]]
+  jq -e '.status == "discovering"' "$OUTPUT_DIR/audit-state.json" >/dev/null
+}
+
 @test "a missing wave artifact halts advance_wave, naming the exact path" {
   audit_state_init "$OUTPUT_DIR" "a1" "repo" "measure" 30 >/dev/null
   local missing_artifact="$TEST_TMPDIR/does-not-exist.json"

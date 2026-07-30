@@ -13,6 +13,8 @@
 
 _TAM_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TAM_JOB_SH="${_TAM_LIB_DIR}/../aid-job.sh"
+# shellcheck source=aid-test-audit-command-allowlist.sh
+source "${_TAM_LIB_DIR}/aid-test-audit-command-allowlist.sh"
 
 # _tam_run_one <jobs_dir> <run_unit_id> <command_json> <deadline_seconds>
 #   Runs ONE allowlisted command through aid-job.sh, waits for its terminal
@@ -118,14 +120,23 @@ _tam_run_one() {
     '{run_unit_id:$run_unit_id, job_id:$job_id, state:$state, exit_code:$exit_code, started_at:$started_at, ended_at:$ended_at, duration_ms:$duration_ms, stdout_path:$stdout_path}'
 }
 
-# aid_test_audit_measure_run_all <jobs_dir> <commands_json_array> <output_jsonl>
+# aid_test_audit_measure_run_all <mode> <jobs_dir> <commands_json_array> <output_jsonl> <execution_yaml> <approved_catalog_path>
 #   Runs every {run_unit_id, command, deadline_seconds} entry in
 #   <commands_json_array> STRICTLY SEQUENTIALLY — no concurrency, no
 #   batching, no resource-lock logic (P069's job). The second entry never
 #   starts before the first's terminal receipt is written. Appends one
 #   normalized measurement line per entry to <output_jsonl>.
+#
+#   Every entry's command is checked against Step 13's
+#   aid_test_audit_check_allowed BEFORE it is ever handed to aid-job.sh — a
+#   real Codex review of this plan's whole EPIC 2 diff found an earlier
+#   version executed every entry directly with no allowlist enforcement
+#   anywhere in the production path, letting an arbitrary command from an
+#   audit artifact reach real execution via bash -c. A rejected command is
+#   never run — this function fails loudly instead (visible on stderr, per
+#   the allowlist's own contract), never silently skipped.
 aid_test_audit_measure_run_all() {
-  local jobs_dir="$1" commands_json="$2" output_jsonl="$3"
+  local mode="$1" jobs_dir="$2" commands_json="$3" output_jsonl="$4" execution_yaml="$5" approved_catalog="$6"
   mkdir -p "$jobs_dir"
   mkdir -p "$(dirname "$output_jsonl")"
   : > "$output_jsonl"
@@ -137,6 +148,12 @@ aid_test_audit_measure_run_all() {
     run_unit_id="$(jq -r '.run_unit_id' <<<"$entry")"
     command_json="$(jq -c '.command' <<<"$entry")"
     deadline="$(jq -r '.deadline_seconds // 60' <<<"$entry")"
+
+    if ! aid_test_audit_check_allowed "$mode" "$command_json" "$execution_yaml" "$approved_catalog"; then
+      echo "aid-test-audit-measure: refusing to run disallowed command for $run_unit_id — aborting the whole measurement run" >&2
+      return 1
+    fi
+
     line="$(_tam_run_one "$jobs_dir" "$run_unit_id" "$command_json" "$deadline")" || return 1
     printf '%s\n' "$line" >> "$output_jsonl"
   done

@@ -11,22 +11,48 @@ setup() {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-test-audit-measure.sh"
   JOBS_DIR="$TEST_TMPDIR/jobs"
   MEASUREMENTS="$TEST_TMPDIR/measurements.jsonl"
+  EXECUTION_YAML="$TEST_TMPDIR/no-such-execution.yaml"
+  APPROVED_CATALOG="$TEST_TMPDIR/test-catalog.yaml"
 }
 
 teardown() {
   teardown_test_evidence_dir
 }
 
+# _approve <commands_json_array> — writes an APPROVED catalog whose
+# run_units[].command values are exactly the given commands' .command
+# fields, so aid_test_audit_check_allowed's measure-mode approved-catalog
+# path accepts them. Mirrors real usage: only a command already present in
+# the approved catalog may ever run in measure/full mode — these fixtures
+# ARE that approval, built directly from what each test intends to measure.
+_approve() {
+  local commands_json="$1"
+  jq -n --argjson cmds "$commands_json" '{
+    schema_version: "1.0.0", generated_at: "2026-07-30T00:00:00Z", status: "approved",
+    run_units: [$cmds[] | {
+      run_unit_id: .run_unit_id, runner: "bats", source_paths: [], production_surfaces: [],
+      test_level: "suite", risk_tags: [], profiles: ["default"], behavior_claims: [],
+      confidence: "low", command: .command, runtime: {fingerprint: "sha256:000000000000"},
+      parallel: {status: "unknown", exclusive_resources: [], max_workers: null, internal_parallelism: false},
+      isolation: {temp_workspace: "unknown", fixed_ports: [], shared_paths: [], lock_usage: [], adapter_confidence: "static_parse"},
+      recommendation: "keep", test_cases: []
+    }],
+    source_pattern_mappings: [], mapping_approval: {status: "proposed"}
+  }' | yq -P -o=yaml '.' > "$APPROVED_CATALOG"
+}
+
 @test "a normal argv-type command reaches terminal_pass with exit_code 0" {
   local commands='[{"run_unit_id":"t1","command":{"type":"argv","argv":["echo","hello"]},"deadline_seconds":10}]'
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   jq -e '.run_unit_id == "t1" and .state == "terminal_pass" and .exit_code == 0' "$MEASUREMENTS" >/dev/null
 }
 
 @test "a shell-type command is executed via bash -c" {
   local commands='[{"run_unit_id":"t2","command":{"type":"shell","shell":"echo a && echo b"},"deadline_seconds":10}]'
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   jq -e '.state == "terminal_pass"' "$MEASUREMENTS" >/dev/null
   local stdout_path
@@ -37,7 +63,8 @@ teardown() {
 
 @test "a failing command reaches terminal_fail with the real non-zero exit code" {
   local commands='[{"run_unit_id":"t3","command":{"type":"argv","argv":["bash","-c","exit 7"]},"deadline_seconds":10}]'
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   jq -e '.state == "terminal_fail" and .exit_code == 7' "$MEASUREMENTS" >/dev/null
 }
@@ -46,7 +73,8 @@ teardown() {
   local commands='[{"run_unit_id":"hung","command":{"type":"argv","argv":["sleep","30"]},"deadline_seconds":2}]'
   local start end elapsed
   start="$(date +%s)"
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   end="$(date +%s)"
   elapsed=$((end - start))
   [ "$status" -eq 0 ]
@@ -67,7 +95,8 @@ teardown() {
 
 @test "streamed log content is readable while the job is still running" {
   local commands='[{"run_unit_id":"slow-echo","command":{"type":"argv","argv":["bash","-c","echo starting; sleep 2; echo done"]},"deadline_seconds":10}]'
-  ( aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS" ) &
+  _approve "$commands"
+  ( aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG" ) &
   local runner_pid=$!
 
   # Poll for the stdout.log file itself (created before the job finishes)
@@ -95,7 +124,8 @@ teardown() {
     {run_unit_id:"first", command:{type:"shell", shell:("touch " + $d + "/first-start; sleep 1; touch " + $d + "/first-end")}, deadline_seconds:10},
     {run_unit_id:"second", command:{type:"shell", shell:("touch " + $d + "/second-start")}, deadline_seconds:10}
   ]')"
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   [ -f "$marker_dir/first-end" ]
   [ -f "$marker_dir/second-start" ]
@@ -122,7 +152,8 @@ teardown() {
   # the job dir aid-job.sh itself creates, not via exec'd process output.
   local commands
   commands='[{"run_unit_id":"nl","command":{"type":"argv","argv":["bash","-c","true","_","line-one\nline-two"]},"deadline_seconds":10}]'
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   local job_id job_dir
   job_id="$(jq -r '.job_id' "$MEASUREMENTS")"
@@ -148,7 +179,8 @@ teardown() {
     {"run_unit_id":"q2","command":{"type":"argv","argv":["sleep","0.3"]},"deadline_seconds":10},
     {"run_unit_id":"q3","command":{"type":"argv","argv":["echo","hi"]},"deadline_seconds":10}
   ]'
-  run aid_test_audit_measure_run_all "$JOBS_DIR" "$commands" "$MEASUREMENTS"
+  _approve "$commands"
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
   [ "$status" -eq 0 ]
   local any_non_quantized
   any_non_quantized="$(jq -s '[.[].duration_ms | select(. % 1000 != 0)] | length' "$MEASUREMENTS")"
@@ -184,6 +216,21 @@ teardown() {
   # never abort a real measurement.
   grep -q "consecutive_lost" "$AID_PLUGIN_PATH/scripts/lib/aid-test-audit-measure.sh"
   grep -q 'consecutive_lost.*-ge 3' "$AID_PLUGIN_PATH/scripts/lib/aid-test-audit-measure.sh"
+}
+
+@test "a command NOT in the approved catalog (and not a real gate) is refused — never reaches aid-job.sh at all" {
+  # Regression: an earlier version executed every commands_json entry
+  # directly with no allowlist enforcement anywhere in the production
+  # path — a controller forwarding a command from an audit artifact could
+  # execute arbitrary input via bash -c, bypassing the approved-catalog/
+  # gate boundary Step 13 introduced (Codex review of the whole EPIC 2
+  # diff). This command is deliberately never approved.
+  local commands='[{"run_unit_id":"unapproved","command":{"type":"argv","argv":["echo","should-never-run"]},"deadline_seconds":10}]'
+  # No _approve call — APPROVED_CATALOG stays empty/nonexistent.
+  run aid_test_audit_measure_run_all "measure" "$JOBS_DIR" "$commands" "$MEASUREMENTS" "$EXECUTION_YAML" "$APPROVED_CATALOG"
+  [ "$status" -ne 0 ]
+  [ ! -s "$MEASUREMENTS" ]
+  [ -z "$(find "$JOBS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)" ]
 }
 
 @test "aid-job.sh itself is not modified — only its existing CLI is called" {
