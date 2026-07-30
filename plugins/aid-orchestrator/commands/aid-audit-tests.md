@@ -73,15 +73,30 @@ parser's own project-root validation load-bearing rather than advisory.
    `aid-job.sh` (never batched, never a second process supervisor) —
    `aid-test-audit-measure.sh` checks every command against
    `aid_test_audit_check_allowed` (Step 13) before it ever reaches `aid-job.sh`.
-5. Consolidate all wave artifacts deterministically
-   (`aid-test-audit-consolidate.sh`) and render the mandatory 5-part chat
-   recommendation (`aid-test-audit-chat-summary.sh`) as this command's own
-   final turn — the controller calls the renderer and presents its output
-   directly in chat; the renderer's text is ordinary, deterministic, fully
-   Bats-tested code, but the controller's act of presenting it as the
-   session's actual final turn is a live, session-level behavior verified
-   once at release (Step 24 Part B), never claimed as covered by that
-   script's own test suite.
+5. **Finalize via `aid-audit-tests-finalize.sh` — the ONE mandatory production
+   entrypoint for this closing chain (Step 24, E4 release blocker).** The
+   controller MUST call this script, never the individual consolidator/
+   renderer/bridge functions directly:
+   `aid-audit-tests-finalize.sh --audit-id <id> --wave-artifacts-dir <dir>
+   --dispatch-manifest <path> --output-dir <dir> [--catalog <path>]
+   [--write-plan]`. It chains, in order, with no way to skip a stage:
+   consolidate (`aid-test-audit-consolidate.sh`, Step 14 — fails closed on
+   any wave artifact missing, extra, or mismatched against the dispatch
+   manifest) → render the mandatory 5-part chat summary
+   (`aid-test-audit-chat-summary.sh`, Step 15 — persists the durable record
+   as a side effect; fails closed if that persist fails) → (with
+   `--write-plan`, or on a same-conversation continuation reply) the write-
+   plan bridge check (`aid-test-audit-write-plan-bridge.sh`, Step 16). The
+   script prints the chat text to stdout — the controller presents that
+   text VERBATIM as this command's own final turn; the renderer's text is
+   ordinary, deterministic, fully Bats-tested code, but the controller's
+   act of presenting it as the session's actual final turn is a live,
+   session-level behavior verified once at release (Step 24 Part B), never
+   claimed as covered by that script's own test suite. A missing durable
+   record or an incomplete wave set makes the handoff mechanically
+   unreachable, not merely undocumented — verified directly:
+   `test-integration-e2e-audit-pipeline.sh` (Part A) and a real fail-closed
+   demonstration captured at this plan's own release (Part B).
 
 ## Chat handoff (natural-language continuation)
 
