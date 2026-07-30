@@ -15,11 +15,21 @@ _TAC_SCHEMA="${_TAC_LIB_DIR}/../../defaults/schemas/test-audit-config.schema.jso
 
 # _tac_defaults_json — the exact hardcoded defaults every consumer step gets
 # even before /aid-init (Step 18) has ever distributed test-audit.yaml.
+#
+# allowed_runners corrected during Step 11 (Codex review): these values MUST
+# match the real `.runner` labels the Step 2-4 adapters actually emit into
+# the catalog (`bats`, `package-script`, `declared-command`, `ci`) — the
+# plan's original illustrative default (`bats, npm, vitest, playwright`)
+# named test FRAMEWORKS, not adapter/runner labels, and would have silently
+# excluded every non-Bats project's package-script/CI/declared-command
+# run_units from dispatch by default — directly contradicting this plan's
+# own Success Criteria ("a consumer project with no Bats gets a working
+# static/measure audit from the package-script/generic adapters alone").
 _tac_defaults_json() {
   jq -n '{
     budget_minutes_default: 30,
     max_read_only_audit_agents: 4,
-    allowed_runners: ["bats", "npm", "vitest", "playwright"]
+    allowed_runners: ["bats", "package-script", "declared-command", "ci"]
   }'
 }
 

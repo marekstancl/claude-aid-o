@@ -22,7 +22,7 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.budget_minutes_default == 30' >/dev/null
   echo "$output" | jq -e '.max_read_only_audit_agents == 4' >/dev/null
-  echo "$output" | jq -e '.allowed_runners == ["bats","npm","vitest","playwright"]' >/dev/null
+  echo "$output" | jq -e '.allowed_runners == ["bats","package-script","declared-command","ci"]' >/dev/null
 }
 
 @test "load_test_audit_config: a present, valid config overrides the defaults correctly" {

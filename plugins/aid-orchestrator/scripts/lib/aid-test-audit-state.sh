@@ -103,18 +103,78 @@ audit_state_init() {
   ) 200>"$lockfile"
 }
 
-# audit_state_advance_wave <output_dir> <new_status>
+# _tas_expected_focuses_for_status <status> — which wave-artifact `focus`
+# value(s) are legitimate evidence for completing THIS phase. Codex review:
+# schema validation alone accepts any structurally-valid artifact regardless
+# of which wave/focus it actually documents — a valid Wave 2 performance_cost
+# artifact could otherwise be accepted while advancing the Wave 1 "sharding"
+# phase, silently recording the wrong wave as complete.
+_tas_expected_focuses_for_status() {
+  case "$1" in
+    sharding) echo "shard_portfolio" ;;
+    dispatching) echo "performance_cost flake_isolation parallel_safety" ;;
+    consolidating) echo "adversarial_review" ;;
+    *) echo "" ;;
+  esac
+}
+
+# _tas_validate_wave_artifact_file <path> <new_status>
+#   Validates one wave-artifact JSON file against
+#   test-audit-wave-artifact.schema.json (Step 1) AND that its `focus`
+#   matches what THIS phase transition expects — not merely that it is SOME
+#   valid artifact. Returns non-zero (named error on stderr) if the file is
+#   missing, unparseable, schema-invalid, or focus-mismatched.
+_tas_validate_wave_artifact_file() {
+  local path="$1" new_status="$2"
+  [[ -f "$path" ]] || { echo "aid-test-audit-state: wave artifact missing: $path" >&2; return 1; }
+  local artifact
+  artifact="$(jq -e '.' "$path" 2>/dev/null)" || { echo "aid-test-audit-state: wave artifact is not valid JSON: $path" >&2; return 1; }
+  adapter_validate_schema "${_TAS_LIB_DIR}/../../defaults/schemas/test-audit-wave-artifact.schema.json" "$artifact" \
+    || { echo "aid-test-audit-state: wave artifact failed schema validation: $path" >&2; return 1; }
+
+  local expected_focuses artifact_focus
+  expected_focuses="$(_tas_expected_focuses_for_status "$new_status")"
+  if [[ -n "$expected_focuses" ]]; then
+    artifact_focus="$(jq -r '.focus' <<<"$artifact")"
+    local match=0 f
+    for f in $expected_focuses; do
+      [[ "$f" == "$artifact_focus" ]] && match=1
+    done
+    if [[ "$match" -eq 0 ]]; then
+      echo "aid-test-audit-state: wave artifact $path has focus '$artifact_focus', but advancing to '$new_status' expects one of: $expected_focuses" >&2
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# audit_state_advance_wave <output_dir> <new_status> [artifact_path[,artifact_path...]]
 #   Holds the lock across the ENTIRE read-validate-write — never re-reads a
 #   value another concurrent mutator (mark_interrupted, another advance)
 #   could have changed in between. new_status must be the current status
 #   (one more wave within the same phase) or its immediate successor. Never
 #   advances a status:interrupted/failed/done document — resume first.
+#
+#   If [artifact_path...] (comma-separated) is given, EVERY listed wave
+#   artifact is schema-validated BEFORE the wave is accepted as complete — a
+#   missing or schema-invalid artifact halts the advance (naming the exact
+#   failing path), never silently accepted (Step 11: re-validates this
+#   contract against a real multi-wave dispatch, not just the schema/mock
+#   level Step 6 originally proved it at).
 audit_state_advance_wave() {
-  local output_dir="$1" new_status="$2"
+  local output_dir="$1" new_status="$2" artifact_paths_csv="${3:-}"
   local file lockfile
   file="$(_tas_state_file "$output_dir")"
   lockfile="$(_tas_lock_file "$output_dir")"
   mkdir -p "$output_dir" 2>/dev/null
+
+  if [[ -n "$artifact_paths_csv" ]]; then
+    local IFS=','
+    local artifact_path
+    for artifact_path in $artifact_paths_csv; do
+      _tas_validate_wave_artifact_file "$artifact_path" "$new_status" || return 1
+    done
+  fi
 
   (
     flock -w 5 200 || { echo "aid-test-audit-state: could not acquire lock on $lockfile" >&2; exit 1; }
