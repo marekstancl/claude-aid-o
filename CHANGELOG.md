@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.65.0] — 2026-07-30
+
+### Added
+- **`/aid-audit-tests` — test portfolio audit capability** — deterministically inventories a project's test portfolio (Bats, package-script/CI, and declared-gate run_units), optionally measures a bounded subset safely via the approved-catalog-only command allowlist, and ends every run with a mandatory 5-part plain-language chat recommendation. Static mode never executes tests; measure/full modes run only commands already present in the target project's real `execution.yaml` or an approved test catalog — never free-form output.
+- **Test catalog `proposed`→`approved` lifecycle** — `aid-test-catalog-approve.sh` force-tracks a reviewed catalog into git at the fixed canonical `.aid-o/config/test-catalog.yaml` path; a separate, mandatory `aid-test-catalog-confirm-mapping.sh` gate (with a reviewed-diff hash) is required before `source_pattern_mappings[]` may be treated as authoritative — approving the catalog file never implies approving the routing map.
+- **Chat-first recommendation and sanctioned `/aid-plan write` handoff** — every completed audit's final turn contains a verdict, up to 5 evidenced reasons, what changed, a next action, and residual risk; a same-conversation "vytvoř plán oprav" reply (or `--write-plan`) resolves to one shared, fail-closed validator before the controller ever invokes `/aid-plan write` for real.
+- **`/aid-init` distribution of `test-audit.yaml`** — the new project-level audit config is now installed copy-if-absent, byte-identical to its hardcoded loader defaults.
+- **Self-host dogfood + generated remediation plan** — `/aid-audit-tests` was run against `aid-orchestrator` itself in a disposable clone, producing this repository's first real approved test catalog (83 run_units) and a separate, generated remediation plan (P070) tracing every item to a specific finding.
+- No scheduler, batching, or `aid-run-gates.sh`/`aid-select-tests.sh` execution-path integration ships in this release — that is the dependent P069 plan's job, against this release's own shipped, stable catalog/config contract.
+
 ## [2.64.0] — 2026-07-28
 
 ### Added

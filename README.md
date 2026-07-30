@@ -117,9 +117,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.64.0** (current) — source-plan graph validation and a receipt-gated, two-stage EPIC generator eliminate the pre-generation graph deadlock without weakening C0 or CP1.
+- **v2.65.0** (current) — `/aid-audit-tests` test portfolio audit capability: inventory, safe measurement, chat-first recommendation, and a sanctioned `/aid-plan write` handoff (no scheduler — that's the dependent P069 plan).
+- **v2.64.0** — source-plan graph validation and a receipt-gated, two-stage EPIC generator eliminate the pre-generation graph deadlock without weakening C0 or CP1.
 - **v2.63.2** — P068 recorded done in the backlog; test-fsm brought up to IMP-263.
-- **v2.63.1** — post-release repair: P064 fixtures under the completion gate, worktree-aware project-root resolution, CI timeout.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 
