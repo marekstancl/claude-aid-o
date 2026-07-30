@@ -63,24 +63,34 @@ parser's own project-root validation load-bearing rather than advisory.
 2. Run the Wave-0 scanner (`aid-test-inventory.sh`) to resolve `scope` and produce
    the gitignored `test-catalog.proposed.yaml` — zero LLM dispatch.
 3. Dispatch bounded, read-only shard/specialist waves via the
-   `test-portfolio-analyst` agent card (one dispatch per manifest entry the
-   controller reads from `aid-test-audit-dispatch.sh`'s output — this command's own
-   `audit-state.json` is the complete dispatch-progress record). **Forward
-   dependency, stated explicitly (matches this plan's Step 6→11 precedent):**
-   this step's agent card and dispatch script land in Steps 9-11 of this same
-   EPIC — until then, this command file describes the target contract, not
-   yet a fully wired capability.
+   `test-portfolio-analyst` agent card — one dispatch per manifest entry the
+   controller reads from `aid-test-audit-dispatch.sh`'s output (`{max_concurrent_
+   agents, entries: [...]}`; at most `max_concurrent_agents` entries live at once
+   per `batch` within a wave), writing each result to the entry's
+   `artifact_path`. This command's own `audit-state.json` is the complete
+   dispatch-progress record.
 4. In `measure`/`full` mode, run allowlisted commands sequentially via
-   `aid-job.sh` (never batched, never a second process supervisor).
-5. Consolidate all wave artifacts deterministically and render the mandatory
-   5-part chat recommendation as this command's own final turn.
+   `aid-job.sh` (never batched, never a second process supervisor) —
+   `aid-test-audit-measure.sh` checks every command against
+   `aid_test_audit_check_allowed` (Step 13) before it ever reaches `aid-job.sh`.
+5. Consolidate all wave artifacts deterministically
+   (`aid-test-audit-consolidate.sh`) and render the mandatory 5-part chat
+   recommendation (`aid-test-audit-chat-summary.sh`) as this command's own
+   final turn — the controller calls the renderer and presents its output
+   directly in chat; the renderer's text is ordinary, deterministic, fully
+   Bats-tested code, but the controller's act of presenting it as the
+   session's actual final turn is a live, session-level behavior verified
+   once at release (Step 24 Part B), never claimed as covered by that
+   script's own test suite.
 
 ## Chat handoff (natural-language continuation)
 
 Every completed audit's final turn always contains: (1) a verdict
-(`clean`/`needs measurement`/`remediation recommended`), (2) 3-5 evidenced
-reasons, (3) what changed (nothing, unless a separately-approved step ran),
-(4) one plain-language next action, (5) residual risk / PM-decision-needed.
+(`clean`/`needs measurement`/`remediation recommended`), (2) up to 5 evidenced
+reasons — one per top finding, never fabricated/padded to reach a minimum
+count (a sparse audit with 1 real finding gets exactly 1 real reason), (3) what
+changed (nothing, unless a separately-approved step ran), (4) one
+plain-language next action, (5) residual risk / PM-decision-needed.
 
 **Same-conversation convention, never a global interceptor.** Immediately
 following that turn, in the SAME conversation, a reply like "pokračuj" or "vytvoř
