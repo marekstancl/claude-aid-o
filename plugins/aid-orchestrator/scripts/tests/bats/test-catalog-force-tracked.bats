@@ -90,18 +90,18 @@ teardown() {
   [[ "$output" == *"not a git repository"* ]]
 }
 
-@test "a relative --approved-path resolves against project_root, not the caller's cwd, so it publishes and stages the SAME path (Codex review: previously mismatched)" {
-  cd "$TEST_TMPDIR"
-  run "$APPROVE_SCRIPT" --proposed "$PROPOSED" --project-root "$TEST_PROJECT_ROOT" --approved-path ".aid-o/config/relative-test-catalog.yaml"
-  [ "$status" -eq 0 ]
-  [ -f "$TEST_PROJECT_ROOT/.aid-o/config/relative-test-catalog.yaml" ]
-  git -C "$TEST_PROJECT_ROOT" ls-files --error-unmatch .aid-o/config/relative-test-catalog.yaml
-}
-
-@test "an --approved-path that resolves outside project_root is rejected, never published" {
+@test "--approved-path is no longer accepted at all — the approved catalog target is always the canonical .aid-o/config/test-catalog.yaml (PM whole-EPIC-3 review: removes the traversal/symlink escape surface entirely)" {
   run "$APPROVE_SCRIPT" --proposed "$PROPOSED" --project-root "$TEST_PROJECT_ROOT" --approved-path "/tmp/outside-catalog.yaml"
   [ "$status" -ne 0 ]
   [ ! -f "/tmp/outside-catalog.yaml" ]
+  [[ "$output" == *"unknown option"* ]]
+}
+
+@test "a canonical run always publishes to the fixed target regardless of any attempted override" {
+  run "$APPROVE_SCRIPT" --proposed "$PROPOSED" --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -eq 0 ]
+  [ -f "$TEST_PROJECT_ROOT/.aid-o/config/test-catalog.yaml" ]
+  git -C "$TEST_PROJECT_ROOT" ls-files --error-unmatch .aid-o/config/test-catalog.yaml
 }
 
 @test "--proposed requires a value and rejects a nonexistent path" {

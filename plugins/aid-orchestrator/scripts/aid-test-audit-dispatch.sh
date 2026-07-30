@@ -321,8 +321,8 @@ if [[ -n "$bad_path" ]]; then
   _die 1 "internal error: entry path escapes the audit/output root: $bad_path"
 fi
 
-manifest_json="$(jq -n --argjson max "$max_agents" --argjson entries "$final_entries_json" \
-  '{max_concurrent_agents: $max, entries: $entries}')"
+manifest_json="$(jq -n --argjson max "$max_agents" --argjson entries "$final_entries_json" --arg audit_id "$audit_id" \
+  '{audit_id: $audit_id, max_concurrent_agents: $max, entries: $entries}')"
 
 printf '%s\n' "$manifest_json" > "${output_dir%/}/dispatch-manifest.json"
 printf '%s\n' "$manifest_json"

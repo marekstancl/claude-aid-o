@@ -11,9 +11,28 @@
 # Medium+/actionable finding exists — an all-clean findings set produces
 # NEITHER file (Step 16's validator treats absence as the clean case).
 #
+# Completeness (PM whole-EPIC-3 review, real gap): a schema-valid Wave 1
+# artifact alone previously produced a schema-valid, publishable "clean"
+# consolidated-findings.json/chat verdict with no way to detect a missing
+# shard, missing Wave 2 specialist, or missing (mandatory) Wave 3
+# adversarial review — the consolidator never consulted the dispatch
+# manifest or knew what a COMPLETE dispatch even looked like. --dispatch-
+# manifest is now required: every entry the manifest declares must have a
+# real, schema-valid artifact whose OWN wave/focus/shard_id/
+# producer_agent_dispatch_id fields exactly match what the manifest
+# declared for it (catches a wrong-wave/wrong-producer artifact substituted
+# in, not merely "some file exists"); any artifact file present in
+# --wave-artifacts-dir that no manifest entry declares also fails closed
+# (an artifact outside the manifest is never silently folded in); the
+# manifest's own audit_id must match --audit-id (a manifest from a
+# different audit can never be consulted here by accident). static mode's
+# Wave 2 is correctly optional because the dispatch manifest itself omits
+# Wave 2 entries for static mode (aid-test-audit-dispatch.sh) — this script
+# does not need its own mode-awareness, it trusts the manifest completely.
+#
 # Usage:
 #   aid-test-audit-consolidate.sh --audit-id <id> --wave-artifacts-dir <dir> \
-#     --output-dir <dir>
+#     --dispatch-manifest <path> --output-dir <dir>
 
 set -euo pipefail
 
@@ -28,11 +47,12 @@ BRIEF_SCHEMA="${SCHEMAS_DIR}/test-audit-plan-brief.schema.json"
 
 _die() { echo "aid-test-audit-consolidate.sh: $2" >&2; exit "$1"; }
 
-audit_id="" wave_artifacts_dir="" output_dir=""
+audit_id="" wave_artifacts_dir="" output_dir="" dispatch_manifest=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --audit-id) [[ $# -ge 2 ]] || _die 2 "--audit-id requires a value"; audit_id="$2"; shift 2 ;;
     --wave-artifacts-dir) [[ $# -ge 2 ]] || _die 2 "--wave-artifacts-dir requires a value"; wave_artifacts_dir="$2"; shift 2 ;;
+    --dispatch-manifest) [[ $# -ge 2 ]] || _die 2 "--dispatch-manifest requires a value"; dispatch_manifest="$2"; shift 2 ;;
     --output-dir) [[ $# -ge 2 ]] || _die 2 "--output-dir requires a value"; output_dir="$2"; shift 2 ;;
     *) _die 2 "unknown option '$1'" ;;
   esac
@@ -40,32 +60,69 @@ done
 
 adapter_validate_audit_id "$audit_id" || _die 2 "--audit-id '$audit_id' is invalid (must match ^[A-Za-z0-9_-]+\$)"
 [[ -n "$wave_artifacts_dir" && -d "$wave_artifacts_dir" ]] || _die 2 "--wave-artifacts-dir is required and must exist"
+[[ -n "$dispatch_manifest" && -f "$dispatch_manifest" ]] || _die 2 "--dispatch-manifest is required and must exist"
 [[ -n "$output_dir" ]] || _die 2 "--output-dir is required"
 mkdir -p "$output_dir"
 
-# ─── Read + schema-validate every wave artifact, collect findings[] ─────────
+# ─── Load + validate the dispatch manifest itself ───────────────────────────
+manifest_json="$(jq -e '.' "$dispatch_manifest" 2>/dev/null)" || _die 2 "--dispatch-manifest '$dispatch_manifest' is not valid JSON"
+manifest_audit_id="$(jq -r '.audit_id // empty' <<<"$manifest_json")"
+[[ -n "$manifest_audit_id" ]] || _die 1 "--dispatch-manifest '$dispatch_manifest' has no audit_id field — cannot verify it belongs to this audit"
+[[ "$manifest_audit_id" == "$audit_id" ]] || _die 1 "--dispatch-manifest audit_id '$manifest_audit_id' does not match --audit-id '$audit_id' — refusing to consolidate against a different audit's manifest"
+
+expected_entries_json="$(jq -c '[.entries[] | {wave, focus, shard_id, artifact_path, producer_agent_dispatch_id}]' <<<"$manifest_json")"
+expected_count="$(jq 'length' <<<"$expected_entries_json")"
+if [[ "$expected_count" -eq 0 ]]; then
+  _die 1 "--dispatch-manifest '$dispatch_manifest' declares zero entries — nothing to consolidate"
+fi
+
+# ─── Read + schema-validate exactly the artifacts the manifest declares,
+#     verifying each one's own identity fields match what was declared ────
 all_findings_ndjson="$(mktemp)"
 trap 'rm -f "$all_findings_ndjson"' EXIT
 
-artifact_count=0
+consumed_ndjson="$(mktemp)"
+for ((i = 0; i < expected_count; i++)); do
+  entry="$(jq -c ".[$i]" <<<"$expected_entries_json")"
+  exp_wave="$(jq -r '.wave' <<<"$entry")"
+  exp_focus="$(jq -r '.focus' <<<"$entry")"
+  exp_shard_id="$(jq -r '.shard_id' <<<"$entry")"
+  exp_dispatch_id="$(jq -r '.producer_agent_dispatch_id' <<<"$entry")"
+  basename_f="$(basename "$(jq -r '.artifact_path' <<<"$entry")")"
+  actual_path="${wave_artifacts_dir%/}/${basename_f}"
+
+  [[ -f "$actual_path" ]] \
+    || _die 1 "expected wave artifact missing: '$basename_f' (wave $exp_wave, focus $exp_focus) — the dispatch manifest declares it but it was never produced; refusing to consolidate an incomplete dispatch"
+
+  artifact_json="$(jq -e '.' "$actual_path" 2>/dev/null)" \
+    || _die 1 "wave artifact is not valid JSON: $actual_path"
+  adapter_validate_schema "$WAVE_SCHEMA" "$artifact_json" \
+    || _die 1 "wave artifact failed schema validation: $actual_path"
+
+  act_wave="$(jq -r '.wave' <<<"$artifact_json")"
+  act_focus="$(jq -r '.focus' <<<"$artifact_json")"
+  act_shard_id="$(jq -r '.shard_id' <<<"$artifact_json")"
+  act_dispatch_id="$(jq -r '.producer_agent_dispatch_id' <<<"$artifact_json")"
+  if [[ "$act_wave" != "$exp_wave" || "$act_focus" != "$exp_focus" || "$act_shard_id" != "$exp_shard_id" || "$act_dispatch_id" != "$exp_dispatch_id" ]]; then
+    _die 1 "wave artifact '$basename_f' does not match its dispatch-manifest entry (expected wave=$exp_wave focus=$exp_focus shard_id=$exp_shard_id producer_agent_dispatch_id=$exp_dispatch_id; got wave=$act_wave focus=$act_focus shard_id=$act_shard_id producer_agent_dispatch_id=$act_dispatch_id)"
+  fi
+
+  jq -c '.findings[]' <<<"$artifact_json" >> "$all_findings_ndjson" 2>/dev/null || true
+  printf '%s\n' "$basename_f" >> "$consumed_ndjson"
+done
+
+# ─── Any artifact file the manifest does NOT declare fails closed — never
+#     silently folded into the report ────────────────────────────────────
 shopt -s nullglob
 for artifact_file in "$wave_artifacts_dir"/*.json; do
-  artifact_count=$((artifact_count + 1))
-  artifact_json="$(jq -e '.' "$artifact_file" 2>/dev/null)" \
-    || _die 1 "wave artifact is not valid JSON: $artifact_file"
-  adapter_validate_schema "$WAVE_SCHEMA" "$artifact_json" \
-    || _die 1 "wave artifact failed schema validation: $artifact_file"
-  jq -c '.findings[]' <<<"$artifact_json" >> "$all_findings_ndjson" 2>/dev/null || true
+  bn="$(basename "$artifact_file")"
+  if ! grep -qxF "$bn" "$consumed_ndjson"; then
+    rm -f "$consumed_ndjson"
+    _die 1 "wave artifact '$bn' exists in '$wave_artifacts_dir' but is not declared by any entry in --dispatch-manifest — refusing to consolidate an artifact outside the manifest"
+  fi
 done
 shopt -u nullglob
-
-# Fail closed on zero wave artifacts — Codex review: an empty (or missing-
-# dispatch) --wave-artifacts-dir previously produced a schema-valid, empty
-# findings report that looked exactly like a genuinely clean audit, turning
-# a missing/interrupted dispatch into a false "clean" verdict.
-if [[ "$artifact_count" -eq 0 ]]; then
-  _die 1 "no wave artifacts found in '$wave_artifacts_dir' — refusing to report a clean audit over a missing/interrupted dispatch"
-fi
+rm -f "$consumed_ndjson"
 
 all_findings_json="$(jq -cs '.' "$all_findings_ndjson")"
 

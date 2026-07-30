@@ -122,9 +122,19 @@ aid_test_audit_render_chat_summary() {
   # production caller of aid_test_audit_write_plan_bridge_persist, so a
   # normal completed audit never created durable-record.json and the
   # handoff could never be reached no matter how the audit concluded).
+  #
+  # PM whole-EPIC-3 review, real gap: this call's exit status was
+  # previously discarded — a persist failure (e.g. an unwritable output_dir)
+  # would still let this function print a successful-looking chat verdict
+  # with no durable record behind it, silently breaking the handoff exactly
+  # as badly as if this call never existed. Now fails closed: a persist
+  # failure is a failed audit turn, never a "done" one.
   local audit_id
   audit_id="$(jq -r '.audit_id' <<<"$whole_doc")"
-  aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action"
+  if ! aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action"; then
+    echo "**Audit did not complete cleanly** — failed to persist the durable audit record (durable-record.json) for $findings_path. This is not a clean result; the --write-plan/continuation handoff cannot be reached without it." >&2
+    return 1
+  fi
 
   cat <<EOF
 **Verdict:** ${verdict}

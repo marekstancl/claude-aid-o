@@ -148,6 +148,19 @@ _write_findings() {
   jq -e '.verdict == "clean"' "$TEST_TMPDIR/durable-record.json" >/dev/null
 }
 
+@test "a persist failure fails the whole render, never printing a successful-looking chat verdict with no durable record behind it (PM whole-EPIC-3 review)" {
+  local f="$TEST_TMPDIR/readonly-dir/findings.json"
+  mkdir -p "$TEST_TMPDIR/readonly-dir"
+  _write_findings "$f" '[{"finding_id":"f1","run_unit_id":"bats:a","category":"cost","severity":"high","evidence_refs":["r1"],"recommendation":"fix","confidence":"medium","falsification_check":"n/a"}]'
+  chmod 500 "$TEST_TMPDIR/readonly-dir"
+  run aid_test_audit_render_chat_summary "$f"
+  chmod 700 "$TEST_TMPDIR/readonly-dir"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"did not complete cleanly"* ]]
+  [[ "$output" != *"**Verdict:**"* ]]
+  [ ! -f "$TEST_TMPDIR/readonly-dir/durable-record.json" ]
+}
+
 @test "final chat output contains all 5 parts for every verdict" {
   local f="$TEST_TMPDIR/findings.json"
   _write_findings "$f" '[]'
