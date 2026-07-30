@@ -2,10 +2,11 @@
 
 **Created:** 2026-07-23
 **Purpose:** canonical delivery order after P064, through executable completion of P062/E10
-**Status:** active PM checklist — P064, Phase 1 and P068 are complete and
-released. Current `main` / `origin/main` is v2.63.2. The immediate next work is
-the manual EPIC-generation-integrity maintenance package, then P066.
-**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–280
+**Status:** active PM checklist — P064, Phase 1, P068 and Phase 4 are complete
+and released. Current next work is P066, then the durable plan-final evidence
+maintenance package below.
+**Sources:** P061, P062, P064, P066 interim, P068, IMP-258 and IMP-261–281,
+IMP-464–468
 
 ## Current checkpoint
 
@@ -327,8 +328,32 @@ pass.
   on measured post-remediation data.
 - [ ] PM explicitly removes the quarantine.
 
-**GO to Phase 6:** the quarantine is removed by a reviewed change and full
-suite execution is isolated, diagnosable and materially shorter.
+**GO to Phase 5.5:** P066's remediation is delivered or its remaining scheduler
+work is explicitly split into P069 against P066's merged contract.
+
+## Phase 5.5 — durable plan-final evidence and review integrity
+
+P078 exposed a plan-boundary gap: review correctly leaves the frozen candidate
+unchanged, but its runtime evidence is not durable outside the active checkout.
+Fix it as standalone AID maintenance after P066, before relying on
+plan-boundary closure for subsequent major plans:
+`docs/plans/IMP-PLAN-FINAL-EVIDENCE-DURABILITY-AND-REVIEW-INTEGRITY.md`.
+
+- [ ] Seal plan-final outputs into an immutable, public-safe, candidate- and
+  run-bound Git sidecar receipt without moving candidate or target.
+- [ ] Require and verify that receipt at plan merge and close; recover runtime
+  pointers after a clean/reclone/worktree loss.
+- [ ] Correct C3's missing plan-diff input (IMP-464).
+- [ ] Generate and validate protocol-v2 specialist envelopes (IMP-465).
+- [ ] Make plan-final freshness run/receipt scoped, not a per-report Head
+  annotation loop (IMP-467).
+- [ ] Add the exact, schema-bound Curator adjudication path required for a
+  validated false-positive disposition to affect lifecycle status (IMP-468).
+- [ ] Make raw-Git/evidence-loss guidance consistent everywhere (IMP-466),
+  treating warnings/hooks as defence in depth rather than proof.
+
+**GO to Phase 6:** the P066 quarantine is removed by a reviewed change, and
+plan-final evidence is durable, recoverable and required for a close.
 
 ## Phase 6 — finish and close P061
 

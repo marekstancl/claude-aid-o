@@ -92,6 +92,71 @@ must label the current check as unverified/placeholder rather than passed.
 final/delivery report from the WAN run; confirm whether the gate is `required`
 or advisory and whether any profile can reinterpret the result.
 
+### NEW — IMP-464: C3 must receive required plan-diff evidence
+
+**Status:** ready after P066
+**Priority:** high
+**Class:** review-input integrity / false-positive prevention
+
+**Summary:** C3 seals aggregate `gates_report.json` but can omit
+`plan-diff.json`, the per-acceptance-criterion command/verdict evidence. An
+auditor then cannot distinguish a test that passed from one that never ran.
+
+**Proposed change:** seal plan-diff as a named, hash-bound, profile-aware C3
+input; a required missing/malformed input fails before dispatch. See
+`IMP-PLAN-FINAL-EVIDENCE-DURABILITY-AND-REVIEW-INTEGRITY.md`.
+
+### NEW — IMP-465: protocol-v2 plan-final outputs need generated scaffolds
+
+**Status:** ready after P066
+**Priority:** high
+**Class:** producer contract / liveness
+
+**Summary:** Plan-final specialists must infer mandatory protocol-v2 envelope
+fields from prose, causing avoidable first-output schema failures.
+
+**Proposed change:** AID writes and validates schema-derived envelopes; agents
+fill payload fields only. No new role or agent turn.
+
+### NEW — IMP-466: preserve plan-final evidence beyond the live checkout
+
+**Status:** ready after P066
+**Priority:** critical
+**Class:** durability / plan-boundary integrity
+
+**Summary:** Final review is currently held in ignored runtime state. Checkout
+normally preserves it, but cleanup, reclone, worktree loss and raw-Git
+workflows do not supply a durable, recoverable Git identity for the evidence.
+
+**Proposed change:** create a public-safe, hash-bound sidecar evidence receipt
+in a dedicated Git ref; merge/close verification and recovery consume it.
+Warnings are defence in depth, not proof.
+
+### NEW — IMP-467: grouped plan-final freshness must converge
+
+**Status:** ready after P066
+**Priority:** high
+**Class:** lifecycle liveness / false-stale detection
+
+**Summary:** Independently annotating `Head:` in two committed reports can make
+each report stale because its sibling's annotation commit is visible as drift.
+
+**Proposed change:** in the receipt path validate one candidate-bound report
+group; retain compatible legacy behavior elsewhere.
+
+### NEW — IMP-468: lifecycle needs formal Curator adjudication input
+
+**Status:** ready after P066
+**Priority:** high
+**Class:** review semantics / closure liveness
+
+**Summary:** Lifecycle treats a raw Auditor blocker as rejected forever.
+Curator can add blockers, but cannot formally resolve a proven false positive.
+
+**Proposed change:** schema-bound per-finding adjudication tied to exact audit
+SHA, candidate and run. Partial/stale adjudication remains blocked;
+security/integrity or PM-required findings retain existing escalation.
+
 ---
 
 ## Improvement items
