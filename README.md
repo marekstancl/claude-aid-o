@@ -71,6 +71,7 @@ Or go fully autonomous:
 | `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
 | `/aid-init` | Initialize `.aid-o/` workspace — 10-file structure, stack auto-detection, idempotent |
 | `/aid-audit` | Project health audit — code, docs, tests, dependencies |
+| `/aid-audit-tests` | Test portfolio audit — inventory, safe measurement, and a plain-language recommendation |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
 

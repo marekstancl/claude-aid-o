@@ -122,8 +122,18 @@ merely asserted to.
 
 `safe|constrained|exclusive|unknown` is a descriptive audit finding only — this
 plan ships no scheduler that consumes it (see P069, `depends_on_plans: [P066]`,
-for the dependent scheduler work). `unknown` is the default absent direct, cited
-adapter evidence; this command never promotes a test to `safe` optimistically.
+for the dependent scheduler work). Reading a run_unit's `parallel.status`:
+
+| Value | Meaning |
+|---|---|
+| `safe` | Adapter evidence shows no shared fixed ports, no shared mutable paths, and no lock usage that would conflict with a concurrent peer. |
+| `constrained` | Can run concurrently, but only under a specific limit — see `parallel.exclusive_resources[]`/`max_workers` for what it actually shares (e.g. a fixed port, a lock target) and how many peers it tolerates at once. |
+| `exclusive` | Must run alone — a genuine mutual-exclusion requirement was found (a fixed port, a shared mutable path, or lock usage with no safe concurrency margin). |
+| `unknown` | The default absent direct, cited adapter evidence. This command **never promotes a test to `safe` optimistically** — an unexamined or ambiguous run_unit stays `unknown` rather than being guessed into a more permissive class. |
+
+These are audit findings, nothing more: this plan schedules nothing, batches
+nothing, and enforces no concurrency limit based on this classification —
+that consumption is entirely P069's job.
 
 ## Reads / Writes
 
