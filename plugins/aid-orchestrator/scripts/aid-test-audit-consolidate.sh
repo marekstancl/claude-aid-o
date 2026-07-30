@@ -128,8 +128,15 @@ printf '%s\n' "$consolidated_json" > "$consolidated_tmp"
 mv "$consolidated_tmp" "${output_dir%/}/consolidated-findings.json"
 
 # ─── implementation-plan-brief.{json,md} — only when at least one
-# Medium+/actionable finding exists. "Medium+" = severity != low.
-actionable_json="$(jq -c '[.[] | select(.severity != "low")]' <<<"$with_ids_json")"
+# Medium+/actionable finding exists: severity != low AND recommendation is
+# one of fix/split/merge/remove/quarantine (matches
+# aid-test-audit-chat-summary.sh's _tacs_classify_verdict EXACTLY — Codex
+# whole-EPIC review: a severity-only filter previously let a Medium+
+# finding recommending "keep" or "measure" alone still produce a
+# remediation-recommended brief, even though the chat renderer classified
+# the SAME findings as "clean" or "needs measurement" — a durable record
+# blocking on a verdict with no matching, honest brief on disk).
+actionable_json="$(jq -c '[.[] | select(.severity != "low" and (.recommendation | IN("fix","split","merge","remove","quarantine")))]' <<<"$with_ids_json")"
 actionable_count="$(jq 'length' <<<"$actionable_json")"
 
 if [[ "$actionable_count" -gt 0 ]]; then

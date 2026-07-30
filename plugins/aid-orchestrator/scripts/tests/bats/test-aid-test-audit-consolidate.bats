@@ -108,6 +108,42 @@ _write_artifact() {
   [ ! -f "$OUTPUT_DIR/implementation-plan-brief.md" ]
 }
 
+@test "a Medium+ finding recommending 'measure' (not fix/split/merge/remove/quarantine) produces NO brief — matching the chat renderer's own 'needs measurement' verdict (Codex whole-EPIC review)" {
+  # Regression: a severity-only filter previously still emitted a
+  # remediation-recommended brief for this exact findings set, even though
+  # aid-test-audit-chat-summary.sh's _tacs_classify_verdict classifies it
+  # as "needs measurement" — a contradictory brief on disk the chat verdict
+  # never authorized.
+  _write_artifact "$AGENTS_DIR/1-shard_portfolio-shard-0.json" shard_portfolio 1 shard-0 '[
+    {"run_unit_id":"bats:a","category":"cost","severity":"medium","evidence_refs":["r1"],"recommendation":"measure","confidence":"low","falsification_check":"n/a"}
+  ]'
+  run "$CONSOLIDATE" --audit-id a1 --wave-artifacts-dir "$AGENTS_DIR" --output-dir "$OUTPUT_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -f "$OUTPUT_DIR/implementation-plan-brief.json" ]
+  [ ! -f "$OUTPUT_DIR/implementation-plan-brief.md" ]
+}
+
+@test "a Medium+ finding recommending 'keep' produces NO brief — matching the chat renderer's own 'clean' verdict" {
+  _write_artifact "$AGENTS_DIR/1-shard_portfolio-shard-0.json" shard_portfolio 1 shard-0 '[
+    {"run_unit_id":"bats:a","category":"flake","severity":"high","evidence_refs":["r1"],"recommendation":"keep","confidence":"medium","falsification_check":"n/a"}
+  ]'
+  run "$CONSOLIDATE" --audit-id a1 --wave-artifacts-dir "$AGENTS_DIR" --output-dir "$OUTPUT_DIR"
+  [ "$status" -eq 0 ]
+  [ ! -f "$OUTPUT_DIR/implementation-plan-brief.json" ]
+  [ ! -f "$OUTPUT_DIR/implementation-plan-brief.md" ]
+}
+
+@test "a mix of an actionable Medium+ finding and a non-actionable Medium+ 'measure' finding still produces a brief containing ONLY the actionable item" {
+  _write_artifact "$AGENTS_DIR/1-shard_portfolio-shard-0.json" shard_portfolio 1 shard-0 '[
+    {"run_unit_id":"bats:a","category":"cost","severity":"high","evidence_refs":["r1"],"recommendation":"fix","confidence":"medium","falsification_check":"x"},
+    {"run_unit_id":"bats:b","category":"cost","severity":"medium","evidence_refs":["r2"],"recommendation":"measure","confidence":"low","falsification_check":"n/a"}
+  ]'
+  run "$CONSOLIDATE" --audit-id a1 --wave-artifacts-dir "$AGENTS_DIR" --output-dir "$OUTPUT_DIR"
+  [ "$status" -eq 0 ]
+  [ -f "$OUTPUT_DIR/implementation-plan-brief.json" ]
+  jq -e '(.items | length) == 1 and .items[0].run_unit_id == "bats:a"' "$OUTPUT_DIR/implementation-plan-brief.json" >/dev/null
+}
+
 @test "a wave artifact missing a required schema field halts consolidation, naming the artifact" {
   cat > "$AGENTS_DIR/1-shard_portfolio-shard-0.json" <<'JSON'
 {"schema_version":"1.0.0","focus":"shard_portfolio","wave":1,"shard_id":"shard-0","findings":[],"produced_at":"2026-07-30T00:00:00Z"}
