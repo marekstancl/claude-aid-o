@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aid-orchestrator.aidlab.dev/schemas/test-audit-plan-brief.schema.json",
+  "title": "AID Test Portfolio Audit — Implementation Plan Brief",
+  "$comment": "producer: aid-test-audit-consolidate.sh (Step 14), consumers: [aid-test-audit-write-plan-bridge.sh (Step 16), the generated remediation plan (Step 22)]",
+  "description": "Produced only when at least one Medium+/actionable finding exists in consolidated-findings.json — an all-clean findings set produces NO brief file at all (Step 16's validator treats file absence as the clean case). generated_from_hash lets Step 16 detect a STALE brief (derived from an older consolidated-findings.json than the one currently on disk), separate from its own stale-run_unit_id check against a live catalog.",
+  "type": "object",
+  "required": ["audit_id", "verdict", "items", "generated_from_hash"],
+  "properties": {
+    "audit_id": { "type": "string", "minLength": 1 },
+    "verdict": {
+      "type": "string",
+      "enum": ["clean", "needs measurement", "remediation recommended"],
+      "description": "A brief is only ever produced for the 'remediation recommended' verdict — 'clean' never has actionable items to brief, and 'needs measurement' is about insufficient data, not actionable findings. Step 15 independently (re-)computes the authoritative verdict shown in chat directly from consolidated-findings.json; this field is a consistent restatement, not a second source of truth."
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "run_unit_id", "category", "proposed_action", "evidence_refs", "owner"],
+        "properties": {
+          "finding_id": { "type": "string", "minLength": 1, "description": "References a finding_id in consolidated-findings.json." },
+          "run_unit_id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "minLength": 1 },
+          "proposed_action": {
+            "type": "string",
+            "enum": ["keep", "fix", "split", "merge", "remove", "quarantine", "measure"]
+          },
+          "evidence_refs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "owner": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "generated_from_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the exact consolidated-findings.json bytes this brief was derived from."
+    }
+  },
+  "additionalProperties": false
+}
