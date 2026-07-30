@@ -116,11 +116,22 @@ aid_test_audit_write_plan_bridge_check() {
     jq -nc --arg p "$catalog_path" '{ready:false, reason:("cannot verify run_unit_ids: catalog is not valid/parseable: " + $p)}'
     return 0
   fi
+  # A real, dogfooded catalog (this repo's own 83 run_units) is large enough
+  # that `--argjson catalog "$catalog_json"` on the command line hit an
+  # "Argument list too long" jq failure — which then produced EMPTY stdout,
+  # silently treated as "no stale run_unit_id found" (fail-OPEN on a jq
+  # failure, not merely a cosmetic error). Pass the catalog via a temp file
+  # and --slurpfile instead — no argv size limit, and any real jq failure
+  # here now propagates as a script failure, never a silent pass-through.
+  local catalog_tmp
+  catalog_tmp="$(mktemp)"
+  printf '%s' "$catalog_json" > "$catalog_tmp"
   local stale_id
-  stale_id="$(jq -r --argjson catalog "$catalog_json" '
-    (($catalog.run_units // []) | map(.run_unit_id)) as $live |
+  stale_id="$(jq -r --slurpfile catalog "$catalog_tmp" '
+    (($catalog[0].run_units // []) | map(.run_unit_id)) as $live |
     [.items[] | select(.run_unit_id as $r | $live | index($r) == null) | .run_unit_id] | .[0] // empty
-  ' <<<"$brief_doc")"
+  ' <<<"$brief_doc")" || { rm -f "$catalog_tmp"; jq -nc '{ready:false, reason:"internal error: stale run_unit_id check failed to evaluate"}'; return 0; }
+  rm -f "$catalog_tmp"
   if [[ -n "$stale_id" ]]; then
     jq -nc --arg id "$stale_id" '{ready:false, reason:("stale run_unit_id: " + $id + " no longer resolves in the current catalog")}'
     return 0

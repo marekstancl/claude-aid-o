@@ -153,6 +153,43 @@ _write_valid_findings_and_brief() {
   [[ "$output" == *"cannot verify run_unit_ids"* ]]
 }
 
+@test "a large, realistic catalog (hundreds of run_units) is checked correctly — never a silent argv-size jq failure treated as 'nothing stale' (P066 E4 dogfood finding)" {
+  # Regression: dogfooding this against the real aid-orchestrator repo's own
+  # 83-run_unit catalog previously hit a real "jq: Argument list too long"
+  # failure from `--argjson catalog "$catalog_json"` on the command line —
+  # jq's failure produced EMPTY stdout, which the stale_id check then
+  # silently treated as "no stale id found" (ready:true), never surfacing
+  # the failure at all. This fixture uses 500 run_units (larger than the
+  # real repo's own 83) to prove the fix handles a large catalog for real,
+  # not just avoids the exact failure size seen once.
+  local big_catalog="$TEST_TMPDIR/big-catalog.yaml"
+  jq -n '{
+    schema_version: "1.0.0", generated_at: "2026-07-30T00:00:00Z", status: "approved",
+    run_units: [range(500) | {
+      run_unit_id: ("bats:fixture-\(.)"), runner: "bats", source_paths: [], production_surfaces: [],
+      test_level: "suite", risk_tags: [], profiles: ["default"], behavior_claims: [], confidence: "low",
+      command: {type:"argv", argv:["bats", "fixture-\(.).bats"]}, runtime: {fingerprint: "sha256:000000000000"},
+      parallel: {status:"unknown", exclusive_resources:[], max_workers:null, internal_parallelism:false},
+      isolation: {temp_workspace:"unknown", fixed_ports:[], shared_paths:[], lock_usage:[], adapter_confidence:"static_parse"},
+      recommendation: "keep", test_cases: []
+    }],
+    source_pattern_mappings: [], mapping_approval: {status:"proposed"}
+  }' | yq -P '.' > "$big_catalog"
+
+  _write_valid_findings_and_brief
+  aid_test_audit_write_plan_bridge_persist "$OUTPUT_DIR" "a1" "remediation recommended" "generate a remediation plan"
+
+  # _write_valid_findings_and_brief's brief cites "bats:a", which is NOT in
+  # this 500-entry catalog — so the honest, correct result is ready:false
+  # with a real stale_id (proving the check actually ran against the whole
+  # 500-entry catalog), never a silent ready:true from a failed jq call.
+  run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$big_catalog"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"Argument list too long"* ]]
+  echo "$output" | jq -e '.ready == false' >/dev/null
+  [[ "$output" == *"stale run_unit_id: bats:a"* ]]
+}
+
 @test "a missing durable record returns {ready:false,...} rather than erroring" {
   run aid_test_audit_write_plan_bridge_check "$OUTPUT_DIR" "$CATALOG"
   [ "$status" -eq 0 ]
