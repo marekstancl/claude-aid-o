@@ -129,6 +129,25 @@ _write_findings() {
   [[ "$output" == *"did not complete cleanly"* ]]
 }
 
+@test "a normal completed audit persists a durable-record.json (Codex review: render_chat_summary previously had no production caller of the persist function)" {
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[{"finding_id":"f1","run_unit_id":"bats:a","category":"cost","severity":"high","evidence_refs":["r1"],"recommendation":"fix","confidence":"medium","falsification_check":"n/a"}]'
+  run aid_test_audit_render_chat_summary "$f"
+  [ "$status" -eq 0 ]
+  local record="$TEST_TMPDIR/durable-record.json"
+  [ -f "$record" ]
+  jq -e '.audit_id == "a1"' "$record" >/dev/null
+  jq -e '.verdict == "remediation recommended"' "$record" >/dev/null
+}
+
+@test "a clean-verdict audit also persists a durable-record.json (so a continuation attempt has something to check against)" {
+  local f="$TEST_TMPDIR/findings.json"
+  _write_findings "$f" '[]'
+  run aid_test_audit_render_chat_summary "$f"
+  [ "$status" -eq 0 ]
+  jq -e '.verdict == "clean"' "$TEST_TMPDIR/durable-record.json" >/dev/null
+}
+
 @test "final chat output contains all 5 parts for every verdict" {
   local f="$TEST_TMPDIR/findings.json"
   _write_findings "$f" '[]'

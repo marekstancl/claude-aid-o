@@ -23,6 +23,8 @@
 _TACS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=aid-test-adapter-contract.sh
 source "${_TACS_LIB_DIR}/aid-test-adapter-contract.sh"
+# shellcheck source=aid-test-audit-write-plan-bridge.sh
+source "${_TACS_LIB_DIR}/aid-test-audit-write-plan-bridge.sh"
 _TACS_FINDINGS_SCHEMA="${_TACS_LIB_DIR}/../../defaults/schemas/test-audit-consolidated-findings.schema.json"
 
 # _tacs_classify_verdict <findings_json>
@@ -114,6 +116,15 @@ aid_test_audit_render_chat_summary() {
   else
     residual_risk="No PM decision required."
   fi
+
+  # Persist the durable record for the same-conversation continuation /
+  # --write-plan bridge (Codex review: this renderer previously had no
+  # production caller of aid_test_audit_write_plan_bridge_persist, so a
+  # normal completed audit never created durable-record.json and the
+  # handoff could never be reached no matter how the audit concluded).
+  local audit_id
+  audit_id="$(jq -r '.audit_id' <<<"$whole_doc")"
+  aid_test_audit_write_plan_bridge_persist "$(dirname "$findings_path")" "$audit_id" "$verdict" "$next_action"
 
   cat <<EOF
 **Verdict:** ${verdict}

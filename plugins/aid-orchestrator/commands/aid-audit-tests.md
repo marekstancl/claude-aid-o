@@ -102,6 +102,22 @@ clarification rather than guessing. This mechanism never fires from anywhere
 outside an active `/aid-audit-tests` conversation, and it enforces nothing at any
 FSM/gate/release boundary.
 
+**Controller-side contract.** `/aid-plan write` is a skill the LLM controller
+invokes directly (not a subprocess a shell script can call). Both `--write-plan`
+(CI/scripted use — never required end-user knowledge) and a recognized
+same-conversation continuation reply resolve to the **identical** validator
+call: `aid-test-audit-write-plan-bridge.sh`'s `aid_test_audit_write_plan_bridge_check`.
+The controller (a) runs this validator, and (b) on a `{ready:true}` verdict,
+invokes `/aid-plan write` itself with the validator's `brief_path` as input. The
+validator itself **never invokes `/aid-plan write`** — it only checks: the
+durable record exists and its verdict is `remediation recommended`;
+`consolidated-findings.json`/`implementation-plan-brief.{json,md}` exist, are
+schema-valid, and the brief was derived from the current findings file (not a
+stale one); every cited `run_unit_id` still resolves in the current catalog. A
+`clean`/`needs measurement` verdict, or a stale `run_unit_id`, returns
+`{ready:false, reason:...}` and blocks the handoff — verified to block it, not
+merely asserted to.
+
 ## Parallel-safety findings
 
 `safe|constrained|exclusive|unknown` is a descriptive audit finding only — this
