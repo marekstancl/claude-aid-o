@@ -1565,7 +1565,7 @@ _seed_manifest_from_fixture() {
   _seed_manifest_from_fixture P900 invalid-run-id-without-dir.json
   run plan_manifest_validate P900
   [ "$status" -ne 0 ]
-  [[ "$output" == *"plan_final_run_id"* ]]
+  [[ "$output" == *"runtime run/directory must be paired"* ]]
 }
 
 @test "negative fixture: invalid-merge-commit-wrong-status.json fails validation (merge_commit without merged_to_plan)" {

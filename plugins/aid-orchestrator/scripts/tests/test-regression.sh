@@ -587,14 +587,18 @@ else
 fi
 
 # ===========================================================================
-# TEST D3: All queue entries have a valid status value (queued, running, completed, failed)
+# TEST D3: All queue entries have a valid status value. Full enum (source of
+# truth: aid-queue-write.sh header, mirroring
+# .aid-o/plans/P064-plan-branch-substrate.md "Queue entry — added statuses"):
+# pending, running, merged_to_plan, released_to_main, abandoned, superseded,
+# blocked — plus the read-only legacy synonyms queued/completed.
 # ===========================================================================
-run_test "D3: All queue entry status values are one of: queued, running, completed, failed"
+run_test "D3: All queue entry status values are one of the documented enum values"
 
 if [[ -f "$QUEUE_FILE" ]]; then
   invalid_statuses="$(grep "^\s*status:" "$QUEUE_FILE" 2>/dev/null \
     | sed 's/.*status:[[:space:]]*//' \
-    | grep -Ev '^(queued|running|completed|failed)$' || true)"
+    | grep -Ev '^(pending|running|merged_to_plan|released_to_main|abandoned|superseded|blocked|queued|completed|failed)$' || true)"
 
   if [[ -z "$invalid_statuses" ]]; then
     pass "D3: all queue entry status values are valid"

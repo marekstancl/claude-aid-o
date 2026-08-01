@@ -29,10 +29,27 @@ setup() {
 # _grep_leak_signatures <dir>
 #   Prints any matching line (with filename) across every file in <dir> for a
 #   leak signature; returns 0 (found something) iff at least one match exists.
+#
+#   The bare `\b${LOCAL_USER}\b` alternative is skipped when LOCAL_USER is a
+#   generic CI-assigned account name that collides with ordinary English
+#   vocabulary this project's own dogfood evidence legitimately uses (e.g.
+#   GitHub Actions' default runner account is literally "runner", and this
+#   evidence talks about "gate runner"/"test runner" constantly — a false
+#   positive on every CI run, not a real leak). The path-form check
+#   (`/(home|Users)/${LOCAL_USER}`) still applies unconditionally: an actual
+#   filesystem path is unambiguous regardless of what word the account uses.
 _grep_leak_signatures() {
   local dir="$1"
+  local bare_user_alt=""
+  case "$LOCAL_USER" in
+    runner|runneradmin|root|ci|user|admin|build|builder|actions|github|test|default)
+      ;; # generic/CI account name — omit the bare-word alternative
+    *)
+      bare_user_alt="|\\b${LOCAL_USER}\\b"
+      ;;
+  esac
   grep -rEn \
-    "${HOME:-/nonexistent}|${REPO_ROOT}|/(home|Users)/${LOCAL_USER}|\\b${LOCAL_USER}\\b|sk[-_](live|test)?[A-Za-z0-9_-]{16,}|gh[ps]_[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{16,}|ghu_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+" \
+    "${HOME:-/nonexistent}|${REPO_ROOT}|/(home|Users)/${LOCAL_USER}${bare_user_alt}|sk[-_](live|test)?[A-Za-z0-9_-]{16,}|gh[ps]_[A-Za-z0-9]{16,}|gho_[A-Za-z0-9]{16,}|ghu_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|BEGIN [A-Z ]*PRIVATE KEY|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+" \
     "$dir" 2>/dev/null
 }
 

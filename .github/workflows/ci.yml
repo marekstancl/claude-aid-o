@@ -60,8 +60,12 @@ jobs:
           sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
       - name: Run plan-final boundary suite
+        # 245 tests as of P066/D1-D5 (was ~15 min budget at a smaller count); the
+        # 2026-08-01 CI run measured ~5.4s/test average, i.e. ~22 min for the full
+        # suite — 15 min is no longer enough headroom. 35 min gives real margin
+        # without masking a genuine hang (bats itself has no per-test timeout).
         run: bats plugins/aid-orchestrator/scripts/tests/bats/test-aid-plan-final-boundary.bats
-        timeout-minutes: 15
+        timeout-minutes: 35
 
   vitest:
     runs-on: ubuntu-latest

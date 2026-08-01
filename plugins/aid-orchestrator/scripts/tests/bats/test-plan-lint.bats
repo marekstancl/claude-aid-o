@@ -110,7 +110,7 @@ _plan() { # <file> <strict|legacy> <files-block-lines...>
     --output-dir out --counter-yaml counter.yaml
   [ "$status" -eq 7 ]                                         # documented lint-fail code (NOT a bare set -e exit 1)
   [[ "$output" == *"ERROR"* ]]                                # the violation is actually listed (not silent)
-  [[ "$output" == *"Files-shape lint failed"* ]]             # + the error_exit reason
+  [[ "$output" == *"Generation readiness failed"* ]]         # + the error_exit reason
   [ -z "$(ls out/ 2>/dev/null)" ]                             # NO EPIC file written
   [ ! -f counter.yaml ]                                       # counter not created/bumped
 }

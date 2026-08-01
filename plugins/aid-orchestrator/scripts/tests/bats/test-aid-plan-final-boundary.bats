@@ -3228,7 +3228,7 @@ _seed_plan_final_evidence() {
 @test "D1 fix: --push publishes the close-evidence ref to the remote ALONGSIDE main, not as an afterthought" {
   _seed_merge_project
   local bare="$TEST_TMPDIR/bare-d1.git"
-  git init -q --bare "$bare"
+  git init -q --bare -b main "$bare"
   git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
   git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
   local cand run_id close_ref
@@ -3249,7 +3249,7 @@ _seed_plan_final_evidence() {
 @test "D1 fix: a FRESH CLONE of the pushed remote, after ALL local runtime evidence is gone, recovers close proof and closes" {
   _seed_merge_project
   local bare="$TEST_TMPDIR/bare-d1-fresh.git"
-  git init -q --bare "$bare"
+  git init -q --bare -b main "$bare"
   git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
   git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
   _merge "$(_decision_file)" --push
@@ -3289,7 +3289,7 @@ _seed_plan_final_evidence() {
 @test "D1 fix: a REJECTED close-evidence push (remote already has a DIFFERENT object at that ref) refuses to push main — target unchanged" {
   _seed_merge_project
   local bare="$TEST_TMPDIR/bare-d1-reject.git"
-  git init -q --bare "$bare"
+  git init -q --bare -b main "$bare"
   git -C "$TEST_PROJECT_ROOT" remote add origin "$bare"
   git -C "$TEST_PROJECT_ROOT" config branch.main.remote origin
   # Seed the bare remote's main first so we can observe it staying put.
@@ -4909,6 +4909,15 @@ _inputs() {
   rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
   _inputs
   [ "$status" -eq 0 ]
+  # --stage inputs also regenerates plan-diff.json for real, which no longer
+  # matches the hash _write_review_outputs sealed into audit-input-manifest.json
+  # against its own fabricated plan-diff.json above. Re-seal it against the
+  # producer's real output — the point of this test is round-tripping the
+  # PRODUCER's outputs, not proving a stale manifest is rejected (that is D2's
+  # own coverage elsewhere).
+  local real_pd_hash; real_pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
+  jq --arg h "$real_pd_hash" '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:$h, size:1}]' \
+    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
   # The Reporter is dispatched LAST, after the inputs exist — that is the real
   # cadence, and the review stage enforces it by mtime. Re-emitting the delivery
   # report here reproduces the ordering rather than working around the check.
@@ -4926,6 +4935,14 @@ _inputs() {
   rm -f "${dir}/review-profile.json" "${dir}/delivery-gate.json" "${dir}/acceptance-evidence.json"
   _inputs
   [ "$status" -eq 0 ]
+  # See the sibling AC11 test above: --stage inputs regenerates plan-diff.json
+  # for real, so the manifest _write_review_outputs sealed against its own
+  # fabricated plan-diff.json must be re-sealed against the producer's actual
+  # output before review — this test is about the SECOND _inputs call being
+  # refused, not about a stale manifest.
+  local real_pd_hash; real_pd_hash="sha256:$(sha256sum "${dir}/plan-diff.json" | awk '{print $1}')"
+  jq --arg h "$real_pd_hash" '.audit_input_manifest.evidence_hashes = [{path:"plan-diff.json", sha256:$h, size:1}]' \
+    "${dir}/audit-input-manifest.json" > "${dir}/audit-input-manifest.json.tmp" && mv "${dir}/audit-input-manifest.json.tmp" "${dir}/audit-input-manifest.json"
   command sleep 1
   touch "${dir}/delivery-report.json"
   _review

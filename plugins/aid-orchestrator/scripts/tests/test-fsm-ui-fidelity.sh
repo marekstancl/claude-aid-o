@@ -80,6 +80,13 @@ PEOF
   sed -i "s/plan_json_hash: PLACEHOLDER/plan_json_hash: $hash/" \
     "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/fsm-state.yaml"
 
+  # IMP-263: step-bound evidence binding (deploy-date is well before this
+  # fixture's created_at, so the run is not grandfathered and strict binding
+  # is required). plan_step_hash mirrors _increment_plan_step_hash in aid-fsm.sh:
+  # sha256 of `jq -S -c .steps[0]`.
+  local plan_step_hash
+  plan_step_hash="$(printf '%s' "$(jq -S -c '.steps[0]' "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/plan.json")" | sha256sum | awk '{print $1}')"
+
   # step-0-verify.md with all required sections
   cat > "$dir/.aid-o/work/evidence/E-TEST-E7B/R-TEST-E7B/step-0-verify.md" << VEOF
 # Step 0 Verify
@@ -97,6 +104,11 @@ N/A — test
 ## Memory Written
 
 N/A
+step_index: 0
+step_id: step_1_frontend
+plan_step_hash: ${plan_step_hash}
+reviewed_commit: abc1234abc
+idempotency_token: TOK-${label}
 
 ## Result: PASS
 VEOF

@@ -38,6 +38,19 @@ for dep in jq yq git; do
   command -v "$dep" >/dev/null 2>&1 || { echo "  FAIL: $dep not installed"; echo "Results: 0/1 passed, 1 failed"; exit 1; }
 done
 
+# This suite dogfoods THIS repo's own gitignored .aid-o/config/execution.yaml
+# (the project's live, locally-customized config, incl. the bats_all quarantine
+# entry the cross-checks below verify). A fresh checkout — any CI runner using
+# actions/checkout, or a contributor who never ran /aid-init — has no .aid-o/
+# at all (it's gitignored, never committed), so there is nothing to self-host-
+# audit yet. That is an environment precondition, not a defect: skip cleanly
+# rather than failing a check this checkout was never able to satisfy.
+if [[ ! -f "$REPO_ROOT/.aid-o/config/execution.yaml" ]]; then
+  echo "  SKIP: $REPO_ROOT/.aid-o/config/execution.yaml not found (gitignored, dogfood-only config — run /aid-init locally to enable this suite)"
+  echo "Results: 0/0 passed, 0 failed, 1 skipped"
+  exit 0
+fi
+
 CLONE_DIR="$(mktemp -d)"
 OUT_DIR="$(mktemp -d)"
 FINDINGS_FILE="$(mktemp)"
