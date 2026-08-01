@@ -3259,6 +3259,12 @@ _seed_plan_final_evidence() {
   # close-evidence ref left in existence is the one on origin.
   local clone="$TEST_TMPDIR/fresh-clone-d1"
   git clone -q "$bare" "$clone"
+  # A clone inherits no LOCAL git config from its source (only --global config
+  # would carry over, and CI runners have none) — plan-close commits inside
+  # this clone (the lifecycle-bind receipt), so it needs its own identity or
+  # it fails "Please tell me who you are" the moment it tries.
+  git -C "$clone" config user.email "test@test.local"
+  git -C "$clone" config user.name "Test"
   run git -C "$clone" rev-parse --verify --quiet "refs/heads/aid-evidence-close/${PLAN_ID}"
   [ -z "$output" ]
   run bash "$PLAN_FSM_CLI" plan-state "$PLAN_ID" --repair --project-root "$clone"
