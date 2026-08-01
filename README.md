@@ -117,9 +117,9 @@ Or go fully autonomous:
 
 ## Changelog
 
-- **v2.65.0** (current) — `/aid-audit-tests` test portfolio audit capability: inventory, safe measurement, chat-first recommendation, and a sanctioned `/aid-plan write` handoff (no scheduler — that's the dependent P069 plan).
+- **v2.66.0** (current) — plan-final evidence durability + review integrity (D1-D5): atomic close-evidence publication, plan-final C3 identity/AC-verdict pinning, a review-boundary TOCTOU close, a schema-versioned receipt inventory, and formal Curator adjudication enforced at both the review boundary and the `.aid-lifecycle` classifier.
+- **v2.65.0** — `/aid-audit-tests` test portfolio audit capability: inventory, safe measurement, chat-first recommendation, and a sanctioned `/aid-plan write` handoff (no scheduler — that's the dependent P069 plan).
 - **v2.64.0** — source-plan graph validation and a receipt-gated, two-stage EPIC generator eliminate the pre-generation graph deadlock without weakening C0 or CP1.
-- **v2.63.2** — P068 recorded done in the backlog; test-fsm brought up to IMP-263.
 
 See [CHANGELOG.md](CHANGELOG.md) for full history.
 

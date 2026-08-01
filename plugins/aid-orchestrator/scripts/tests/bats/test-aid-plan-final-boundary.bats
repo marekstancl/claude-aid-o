@@ -3755,13 +3755,18 @@ _lc_seal_receipt() {
   local base="0000000000000000000000000000000000000000"
   local target_head="1111111111111111111111111111111111111111"
   local tmp; tmp="$(mktemp)"
+  local h64="sha256:0000000000000000000000000000000000000000000000000000000000000000"
   jq -n --arg p "$plan_id" --arg c "$cand" --arg r "$run" --arg ref "$ref" \
-        --arg b "$base" --arg th "$target_head" \
+        --arg b "$base" --arg th "$target_head" --arg h "$h64" \
     '{schema_version:"aid-plan-final-evidence-1", artifact_type:"plan_final_evidence_receipt",
       review_verdict:"accepted", plan_id:$p, plan_base_commit:$b, candidate_sha:$c,
       candidate_frozen_at:"2026-01-01T00:00:00Z", target_branch:"main",
       target_head_at_freeze:$th, run_id:$r, evidence_ref:$ref,
-      outputs:{"delivery-report.json":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}}' \
+      outputs:{
+        "semantic-review-final.json":$h, "audit-report.json":$h, "curator-report.json":$h,
+        "simplifier-report.md":$h, "delivery-report.json":$h, "review-profile.json":$h,
+        "plan-diff.json":$h, "audit-input-manifest.json":$h, "delivery-gate.json":$h,
+        "acceptance-evidence.json":$h, "dispatch-record.json":$h}}' \
     > "$tmp"
   local blob; blob="$(git -C "$root" hash-object -w "$tmp")"
   rm -f "$tmp"

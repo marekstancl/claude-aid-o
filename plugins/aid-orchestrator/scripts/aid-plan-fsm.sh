@@ -3263,7 +3263,7 @@ _pfsm_validate_plan_final_close_receipt_json() {
     (.merged_tree | test("^[0-9a-f]{40}$")) and
     (.tag == "none" or (.tag | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))) and
     (.gates_verdict == "pass") and
-    (.c4_decision | type == "object" and (.release_ready == true) and (.blockers_count | type == "number") and (.dual_run_match == true) and ((keys|sort) == (["blockers_count","dual_run_match","release_ready"]|sort))) and
+    (.c4_decision | type == "object" and (.release_ready == true) and (.blockers_count == 0) and (.dual_run_match == true) and ((keys|sort) == (["blockers_count","dual_run_match","release_ready"]|sort))) and
     (.pm_decision | type == "object" and (.decision == "MERGE") and (.sha256 | test("^sha256:[0-9a-f]{64}$")) and ((keys|sort) == (["decision","sha256"]|sort)))
   ' <<< "$json" >/dev/null 2>&1
 }
@@ -3282,7 +3282,12 @@ _pfsm_seal_plan_final_close_evidence() {
   c4_release_ready="$(jq -r '.release_decision.release_ready // false' "$c4_decision_file" 2>/dev/null || echo false)"
   c4_blockers="$(jq -r '.release_decision.blockers | length' "$c4_decision_file" 2>/dev/null || echo -1)"
   c4_dual_match="$(jq -r '.match // false' "$c4_dual_run_file" 2>/dev/null || echo false)"
-  [[ "$c4_release_ready" == "true" && "$c4_blockers" =~ ^[0-9]+$ && "$c4_dual_match" == "true" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — the C4 decision is not an unblocked, matched release_ready=true verdict." >&2; return 1; }
+  # Whole-diff review MEDIUM: "$c4_blockers is a valid number" alone accepted
+  # a contradictory release_ready:true WITH a non-empty blockers[] — must be
+  # EXACTLY 0, not merely numeric, or a replaced/forged release-decision.json
+  # could seal (and later, via recovery, re-authorize) a closure that was
+  # never actually unblocked.
+  [[ "$c4_release_ready" == "true" && "$c4_blockers" == "0" && "$c4_dual_match" == "true" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — the C4 decision is not an unblocked (zero blockers), matched release_ready=true verdict." >&2; return 1; }
   local pm_decision pm_hash
   pm_decision="$(jq -r '.decision // ""' "$pm_decision_file" 2>/dev/null || true)"
   [[ "$pm_decision" == "MERGE" ]] || { echo "PRECONDITION FAIL: refusing to seal close evidence — no MERGE PM decision at ${pm_decision_file}." >&2; return 1; }

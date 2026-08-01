@@ -189,6 +189,17 @@ _aid_lc_plan_final_trusted_candidate() {
       (.outputs | type == "object" and length > 0) and
       ([.outputs | to_entries[] | (.key | type == "string" and test("^[A-Za-z0-9._/-]+$") and (contains("..") | not) and (startswith("/") | not)) and (.value | type == "string" and test("^sha256:[0-9a-f]{64}$"))] | all)
     ' <<< "$receipt" >/dev/null 2>&1 || continue
+    # Whole-diff review MEDIUM: D4's schema-frozen EXACT inventory (not just
+    # "some non-empty object of well-formed entries") applies here too — a
+    # receipt with only one arbitrary valid output entry passed the generic
+    # shape check above but must still be refused, exactly as
+    # _pfsm_verify_plan_final_receipt/_pfsm_recover_plan_final_receipt/
+    # close-check's D4 fix all require. Literal list frozen for schema
+    # version "aid-plan-final-evidence-1" (see aid-plan-fsm.sh's
+    # _pfsm_receipt_has_exact_review_inventory — kept in sync deliberately).
+    jq -e '
+      (.outputs | keys | sort) == (["acceptance-evidence.json","audit-input-manifest.json","audit-report.json","curator-report.json","delivery-gate.json","delivery-report.json","dispatch-record.json","plan-diff.json","review-profile.json","semantic-review-final.json","simplifier-report.md"] | sort)
+    ' <<< "$receipt" >/dev/null 2>&1 || continue
     [[ "$(jq -r '.plan_id' <<< "$receipt")" == "$plan_id" ]] || continue
     local cand run expected
     cand="$(jq -r '.candidate_sha' <<< "$receipt")"

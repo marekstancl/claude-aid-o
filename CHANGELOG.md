@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [2.66.0] — 2026-08-01
+
+### Added
+- **Formal Curator adjudication of Auditor findings (D5, IMP-468)** — a raw Auditor blocker (severity critical/high) can no longer be waved off by a bare `curator.blocking_findings: false`; the Curator must record a schema-bound `curator.adjudications[]` entry per finding, exactly bound to the audit report hash, candidate and run. Enforced at both the plan-final review boundary and, for the first time, the `.aid-lifecycle` classifier (previously blind to adjudications, permanently misclassifying a legitimately adjudicated plan as rejected) — via a new shared resolver, `lib/aid-adjudication.sh`.
+- **Plan-final C3 dispatch identity + AC-verdict pinning (D2, IMP-464)** — the shared C3 bridge now carries a plan-shaped identity (`AID_C3_PLAN_ID`) instead of misreading the plan-final run directory as an EPIC id, and pins `plan-diff.json`'s hash (`AID_PLAN_DIFF_SHA256`) so C3 cannot dispatch over evidence that drifted from what `--stage inputs` sealed. `audit-input-manifest.json` is now a required `--stage review` output, chained to `audit-report.json`'s claimed input hash.
+
+### Fixed
+- **Durable close-evidence receipt published atomically (D1, IMP-466)** — the plan-final close-evidence receipt is now sealed and pushed to the remote alongside `main` in one atomic transaction, not as an afterthought after `main` is already public; a fresh clone that has lost its local runtime evidence can recover and close a plan using only what was pushed. Two related recovery-path gaps (repair/recovery incorrectly requiring the never-pushed `plan/<id>` branch to exist) were also closed.
+- **Plan-final review TOCTOU closed (D3, IMP-465)** — `--stage review` now snapshots every required output once, before validating any of them, so a file cannot be swapped between being validated and being sealed into the durable receipt.
+- **Receipt inventory frozen per schema version (D4, IMP-467)** — the plan-final receipt's required-output inventory check no longer re-derives its expected list from the live plugin code (which would retroactively invalidate receipts sealed by an older version); it is now a literal, versioned list, restored at every verification and recovery site including one that had been missed.
+- **C3 dispatch false-negative on a missing jq binding** — a missing `jq --arg` binding in the shared C3 bridge's report writer made every C3 dispatch (not only plan-final) silently fall back to an `outcome: "invalid_output"` unverifiable report instead of a clean pass/fail one; found via full-suite regression while validating the above.
+
 ## [2.65.0] — 2026-07-30
 
 ### Added
